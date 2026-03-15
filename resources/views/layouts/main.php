@@ -102,7 +102,7 @@
         <a href="/logs" class="<?= ($pageTitle ?? '') === 'Activity Log' ? 'active' : '' ?>">
             <i class="bi bi-journal-text"></i> Activity Log
         </a>
-        <a href="/settings/services" class="<?= str_contains($pageTitle ?? '', 'Servicio') || str_contains($pageTitle ?? '', 'Cron') || str_contains($pageTitle ?? '', 'Caddy') ? 'active' : '' ?>">
+        <a href="/settings/services" class="<?= str_starts_with($_SERVER['REQUEST_URI'] ?? '', '/settings') ? 'active' : '' ?>">
             <i class="bi bi-gear"></i> Settings
         </a>
     </nav>

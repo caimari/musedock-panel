@@ -6,6 +6,12 @@ Gestiona cuentas de hosting Linux con aprovisionamiento automatico de usuarios d
 
 > **Nota:** MuseDock Panel es un **panel de administracion de sistemas** — no tiene relacion con MuseDock CMS (el sistema de gestion de contenidos multi-tenant). Sin embargo, ambos productos estan diseñados para convivir en el mismo servidor: MuseDock Panel puede ver y gestionar las rutas de Caddy creadas por los tenants de MuseDock CMS, y ambos pueden funcionar juntos sin conflictos.
 
+## Capturas de pantalla
+
+| Dashboard | Setup |
+|-----------|-------|
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Setup](docs/screenshots/setup.png) |
+
 ## Caracteristicas
 
 - **Cuentas de Hosting** — Crear, suspender, activar y eliminar cuentas de hosting Linux

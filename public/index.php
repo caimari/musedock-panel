@@ -138,6 +138,13 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/crons/delete', 'SettingsController@cronDelete');
 \MuseDockPanel\Router::get('/settings/caddy', 'SettingsController@caddy');
 \MuseDockPanel\Router::post('/settings/caddy/delete-route', 'SettingsController@caddyDeleteRoute');
+\MuseDockPanel\Router::get('/settings/server', 'SettingsController@server');
+\MuseDockPanel\Router::post('/settings/server/save', 'SettingsController@serverSave');
+\MuseDockPanel\Router::get('/settings/php', 'SettingsController@php');
+\MuseDockPanel\Router::post('/settings/php/ini-save', 'SettingsController@phpIniSave');
+\MuseDockPanel\Router::get('/settings/security', 'SettingsController@security');
+\MuseDockPanel\Router::post('/settings/security/save', 'SettingsController@securitySave');
+\MuseDockPanel\Router::get('/settings/ssl', 'SettingsController@ssl');
 
 // Profile
 \MuseDockPanel\Router::get('/profile', 'ProfileController@index');

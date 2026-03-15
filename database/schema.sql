@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS hosting_accounts (
     description TEXT,
     caddy_route_id VARCHAR(255),
     shell VARCHAR(50) NOT NULL DEFAULT '/usr/sbin/nologin',
+    server_id INTEGER REFERENCES servers(id) ON DELETE SET NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -84,6 +85,40 @@ CREATE TABLE IF NOT EXISTS panel_log (
     ip_address VARCHAR(45),
     created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
+
+-- Panel settings (key-value store)
+CREATE TABLE IF NOT EXISTS panel_settings (
+    key VARCHAR(100) PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Servers (localhost by default, clustering later)
+CREATE TABLE IF NOT EXISTS servers (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    hostname VARCHAR(255),
+    ip_address VARCHAR(45),
+    role VARCHAR(20) NOT NULL DEFAULT 'standalone',
+    is_local BOOLEAN NOT NULL DEFAULT true,
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    metadata JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Insert localhost server
+INSERT INTO servers (name, hostname, ip_address, role, is_local, status)
+SELECT 'localhost', '', '', 'standalone', true, 'active'
+WHERE NOT EXISTS (SELECT 1 FROM servers WHERE is_local = true);
+
+-- Default settings
+INSERT INTO panel_settings (key, value) VALUES
+    ('panel_hostname', ''),
+    ('panel_protocol', 'http'),
+    ('panel_timezone', 'UTC'),
+    ('server_ip', '')
+ON CONFLICT (key) DO NOTHING;
 
 -- =====================================================
 -- Cluster (Phase 2 — tables ready for future use)

@@ -456,6 +456,296 @@ class SettingsController
         Router::redirect('/settings/caddy');
     }
 
+    // ================================================================
+    // Server Info & Panel URL
+    // ================================================================
+
+    public function server(): void
+    {
+        $settings = \MuseDockPanel\Settings::getAll();
+
+        // Detect server info
+        $hostname = trim(shell_exec('hostname') ?? '');
+        $os = trim(shell_exec('uname -r') ?? '');
+        $distro = trim(shell_exec('lsb_release -ds 2>/dev/null') ?? '');
+        $uptime = trim(shell_exec("uptime -p 2>/dev/null | sed 's/up //'") ?? '');
+        $currentTz = trim(shell_exec('timedatectl show --property=Timezone --value 2>/dev/null') ?? date_default_timezone_get());
+        $serverIp = trim(shell_exec("hostname -I | awk '{print \$1}'") ?? '');
+
+        // Get all timezones
+        $timezones = \DateTimeZone::listIdentifiers();
+
+        // Panel access info
+        $panelPort = \MuseDockPanel\Env::get('PANEL_PORT', '8444');
+
+        View::render('settings/server', [
+            'layout' => 'main',
+            'pageTitle' => 'Servidor',
+            'settings' => $settings,
+            'hostname' => $hostname,
+            'os' => $os,
+            'distro' => $distro,
+            'uptime' => $uptime,
+            'currentTz' => $currentTz,
+            'serverIp' => $serverIp,
+            'panelPort' => $panelPort,
+            'timezones' => $timezones,
+        ]);
+    }
+
+    public function serverSave(): void
+    {
+        $timezone = trim($_POST['timezone'] ?? '');
+        $panelHostname = trim($_POST['panel_hostname'] ?? '');
+        $panelProtocol = trim($_POST['panel_protocol'] ?? 'http');
+
+        // Validate timezone
+        if (!empty($timezone) && in_array($timezone, \DateTimeZone::listIdentifiers())) {
+            \MuseDockPanel\Settings::set('panel_timezone', $timezone);
+            // Apply system timezone
+            shell_exec(sprintf('timedatectl set-timezone %s 2>/dev/null', escapeshellarg($timezone)));
+        }
+
+        // Panel hostname (optional — for HTTPS with domain)
+        \MuseDockPanel\Settings::set('panel_hostname', $panelHostname);
+        \MuseDockPanel\Settings::set('panel_protocol', in_array($panelProtocol, ['http', 'https']) ? $panelProtocol : 'http');
+
+        // Detect and store server IP
+        $serverIp = trim(shell_exec("hostname -I | awk '{print \$1}'") ?? '');
+        \MuseDockPanel\Settings::set('server_ip', $serverIp);
+
+        LogService::log('settings.server', 'server', "Updated server settings: tz={$timezone}, hostname={$panelHostname}, protocol={$panelProtocol}");
+        Flash::set('success', 'Configuracion del servidor guardada.');
+        Router::redirect('/settings/server');
+    }
+
+    // ================================================================
+    // PHP Settings
+    // ================================================================
+
+    public function php(): void
+    {
+        $versions = [];
+        foreach (glob('/etc/php/*/fpm') as $fpmDir) {
+            $ver = basename(dirname($fpmDir));
+            $phpBin = "/usr/bin/php{$ver}";
+            $iniFile = "/etc/php/{$ver}/fpm/php.ini";
+            $cliIniFile = "/etc/php/{$ver}/cli/php.ini";
+
+            // Read key php.ini values
+            $ini = [];
+            if (file_exists($iniFile)) {
+                $iniContent = file_get_contents($iniFile);
+                $iniKeys = ['memory_limit', 'upload_max_filesize', 'post_max_size', 'max_execution_time', 'max_input_time', 'max_input_vars', 'date.timezone', 'display_errors', 'error_reporting'];
+                foreach ($iniKeys as $key) {
+                    if (preg_match('/^\s*' . preg_quote($key, '/') . '\s*=\s*(.+)$/m', $iniContent, $m)) {
+                        $ini[$key] = trim($m[1]);
+                    }
+                }
+            }
+
+            // Count FPM pools
+            $poolCount = count(glob("/etc/php/{$ver}/fpm/pool.d/*.conf"));
+
+            // Service status
+            $svcName = "php{$ver}-fpm";
+            $status = trim(shell_exec(sprintf('systemctl is-active %s 2>/dev/null', escapeshellarg($svcName))) ?? 'unknown');
+
+            // Extensions
+            $extList = [];
+            $extOutput = trim(shell_exec("{$phpBin} -m 2>/dev/null") ?? '');
+            if (!empty($extOutput)) {
+                $extList = array_filter(explode("\n", $extOutput), fn($l) => !empty(trim($l)) && $l[0] !== '[');
+            }
+
+            $versions[$ver] = [
+                'version' => $ver,
+                'binary' => $phpBin,
+                'ini_file' => $iniFile,
+                'ini' => $ini,
+                'pools' => $poolCount,
+                'status' => $status,
+                'extensions' => $extList,
+            ];
+        }
+
+        // Sort by version
+        uksort($versions, 'version_compare');
+
+        View::render('settings/php', [
+            'layout' => 'main',
+            'pageTitle' => 'PHP Settings',
+            'versions' => $versions,
+        ]);
+    }
+
+    public function phpIniSave(): void
+    {
+        $ver = trim($_POST['version'] ?? '');
+        $allowedVersions = ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4'];
+        if (!in_array($ver, $allowedVersions)) {
+            Flash::set('error', 'Version de PHP no valida.');
+            Router::redirect('/settings/php');
+            return;
+        }
+
+        $iniFile = "/etc/php/{$ver}/fpm/php.ini";
+        if (!file_exists($iniFile)) {
+            Flash::set('error', "php.ini no encontrado para PHP {$ver}.");
+            Router::redirect('/settings/php');
+            return;
+        }
+
+        $content = file_get_contents($iniFile);
+        $changes = [];
+
+        $editableKeys = [
+            'memory_limit' => '/^\d+[MmGg]?$/',
+            'upload_max_filesize' => '/^\d+[MmGg]?$/',
+            'post_max_size' => '/^\d+[MmGg]?$/',
+            'max_execution_time' => '/^\d+$/',
+            'max_input_time' => '/^-?\d+$/',
+            'max_input_vars' => '/^\d+$/',
+            'display_errors' => '/^(On|Off)$/i',
+        ];
+
+        foreach ($editableKeys as $key => $pattern) {
+            if (isset($_POST[$key])) {
+                $value = trim($_POST[$key]);
+                if (!preg_match($pattern, $value)) continue;
+
+                // Replace in php.ini
+                $escaped = preg_quote($key, '/');
+                if (preg_match('/^\s*' . $escaped . '\s*=/m', $content)) {
+                    $content = preg_replace('/^\s*' . $escaped . '\s*=.*/m', "{$key} = {$value}", $content);
+                } else {
+                    $content .= "\n{$key} = {$value}\n";
+                }
+                $changes[] = "{$key}={$value}";
+            }
+        }
+
+        if (!empty($changes)) {
+            file_put_contents($iniFile, $content);
+            // Restart FPM to apply
+            $svcName = "php{$ver}-fpm";
+            shell_exec(sprintf('systemctl restart %s 2>&1', escapeshellarg($svcName)));
+            LogService::log('settings.php', "php{$ver}", "Updated php.ini: " . implode(', ', $changes));
+            Flash::set('success', "php.ini de PHP {$ver} actualizado. FPM reiniciado.");
+        } else {
+            Flash::set('warning', 'No se realizaron cambios.');
+        }
+
+        Router::redirect('/settings/php');
+    }
+
+    // ================================================================
+    // Security
+    // ================================================================
+
+    public function security(): void
+    {
+        $envFile = dirname(__DIR__, 2) . '/.env';
+        $allowedIps = \MuseDockPanel\Env::get('ALLOWED_IPS', '');
+
+        // Active sessions
+        $sessionPath = dirname(__DIR__, 2) . '/storage/sessions';
+        $sessionCount = count(glob("{$sessionPath}/sess_*"));
+
+        View::render('settings/security', [
+            'layout' => 'main',
+            'pageTitle' => 'Seguridad',
+            'allowedIps' => $allowedIps,
+            'sessionCount' => $sessionCount,
+        ]);
+    }
+
+    public function securitySave(): void
+    {
+        $allowedIps = trim($_POST['allowed_ips'] ?? '');
+
+        // Validate IPs format
+        if (!empty($allowedIps)) {
+            $ips = array_map('trim', explode(',', $allowedIps));
+            foreach ($ips as $ip) {
+                // Allow IP or CIDR
+                if (!filter_var($ip, FILTER_VALIDATE_IP) && !preg_match('#^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}$#', $ip)) {
+                    Flash::set('error', "IP invalida: {$ip}");
+                    Router::redirect('/settings/security');
+                    return;
+                }
+            }
+        }
+
+        // Update .env
+        $envFile = dirname(__DIR__, 2) . '/.env';
+        if (file_exists($envFile)) {
+            $envContent = file_get_contents($envFile);
+            if (preg_match('/^ALLOWED_IPS=.*/m', $envContent)) {
+                $envContent = preg_replace('/^ALLOWED_IPS=.*/m', "ALLOWED_IPS={$allowedIps}", $envContent);
+            } else {
+                $envContent .= "\nALLOWED_IPS={$allowedIps}\n";
+            }
+            file_put_contents($envFile, $envContent);
+        }
+
+        LogService::log('settings.security', 'allowed_ips', "Updated ALLOWED_IPS: {$allowedIps}");
+        Flash::set('success', 'Configuracion de seguridad guardada.');
+        Router::redirect('/settings/security');
+    }
+
+    // ================================================================
+    // SSL/TLS Certificates
+    // ================================================================
+
+    public function ssl(): void
+    {
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = $config['caddy']['api_url'];
+
+        $certificates = [];
+        $apiAvailable = false;
+
+        // Get certificates from Caddy API
+        $ch = curl_init("{$caddyApi}/config/");
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 3]);
+        $configJson = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode >= 200 && $httpCode < 400 && $configJson) {
+            $apiAvailable = true;
+            $fullConfig = json_decode($configJson, true) ?: [];
+
+            // Extract domains from routes
+            $servers = $fullConfig['apps']['http']['servers'] ?? [];
+            foreach ($servers as $srvName => $server) {
+                foreach ($server['routes'] ?? [] as $route) {
+                    foreach ($route['match'] ?? [] as $match) {
+                        foreach ($match['host'] ?? [] as $host) {
+                            $certificates[] = [
+                                'domain' => $host,
+                                'server' => $srvName,
+                                'type' => 'auto',
+                            ];
+                        }
+                    }
+                }
+            }
+
+            // TLS policies
+            $tlsPolicies = $fullConfig['apps']['tls']['automation']['policies'] ?? [];
+        }
+
+        View::render('settings/ssl', [
+            'layout' => 'main',
+            'pageTitle' => 'SSL/TLS',
+            'apiAvailable' => $apiAvailable,
+            'certificates' => $certificates,
+            'tlsPolicies' => $tlsPolicies ?? [],
+        ]);
+    }
+
     private function extractCaddyRouteInfo(array $handlers, ?string &$docRoot, ?string &$upstream): void
     {
         foreach ($handlers as $handler) {

@@ -1,10 +1,6 @@
 <?php use MuseDockPanel\View; ?>
 
-<div class="mb-3 d-flex gap-2">
-    <a href="/settings/services" class="btn btn-outline-light btn-sm"><i class="bi bi-hdd-rack me-1"></i>Servicios</a>
-    <a href="/settings/crons" class="btn btn-outline-light btn-sm active"><i class="bi bi-clock-history me-1"></i>Cron Jobs</a>
-    <a href="/settings/caddy" class="btn btn-outline-light btn-sm"><i class="bi bi-globe me-1"></i>Caddy</a>
-</div>
+<?php include __DIR__ . '/_tabs.php'; ?>
 
 <!-- Existing crons -->
 <div class="card mb-3">
