@@ -252,6 +252,7 @@ t() {
                 firewall_iptables_active) text="iptables esta activo en este servidor (sin UFW)." ;;
                 firewall_port_open) text="El puerto $1 esta ABIERTO — puedes acceder al panel." ;;
                 firewall_port_closed) text="El puerto $1 esta BLOQUEADO por el firewall." ;;
+                firewall_port_open_ip) text="El puerto $1 esta accesible desde IPs autorizadas (reglas ACCEPT all)." ;;
                 firewall_open_cmd) text="Para abrir el acceso desde tu IP:" ;;
                 firewall_no_detected) text="No se detecto firewall activo (UFW/iptables)." ;;
                 firewall_consider) text="Considera activar un firewall para proteger el puerto $1." ;;
@@ -474,6 +475,7 @@ t() {
                 firewall_iptables_active) text="iptables is active on this server (no UFW)." ;;
                 firewall_port_open) text="Port $1 is OPEN — you can access the panel." ;;
                 firewall_port_closed) text="Port $1 is BLOCKED by the firewall." ;;
+                firewall_port_open_ip) text="Port $1 is accessible from authorized IPs (ACCEPT all rules)." ;;
                 firewall_open_cmd) text="To open access from your IP:" ;;
                 firewall_no_detected) text="No active firewall detected (UFW/iptables)." ;;
                 firewall_consider) text="Consider enabling a firewall to protect port $1." ;;
@@ -1538,17 +1540,19 @@ fi
 
 # 2. Panel HTTP responding?
 sleep 2
-# Try HTTPS first (Caddy reverse proxy with self-signed cert), then HTTP fallback
-PANEL_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 "https://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000")
-if [ "$PANEL_HTTP" = "000" ]; then
-    # HTTPS failed — try direct HTTP on internal port
-    PANEL_INTERNAL_PORT_HC=$((PANEL_PORT + 1))
-    PANEL_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:${PANEL_INTERNAL_PORT_HC}/" 2>/dev/null || echo "000")
-    if [ "$PANEL_HTTP" = "000" ]; then
-        # Also try HTTP on main port (fallback mode without Caddy)
-        PANEL_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000")
-    fi
-fi
+# Try all possible configurations: HTTPS (Caddy proxy), HTTP internal port, HTTP main port
+PANEL_HTTP="000"
+for TEST_URL in \
+    "https://127.0.0.1:${PANEL_PORT}/" \
+    "http://127.0.0.1:$((PANEL_PORT + 1))/" \
+    "http://127.0.0.1:${PANEL_PORT}/" \
+    "http://0.0.0.0:${PANEL_PORT}/" \
+; do
+    PANEL_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 3 "$TEST_URL" 2>/dev/null)
+    PANEL_HTTP=$(echo "$PANEL_HTTP" | tr -d '[:space:]')
+    [ -n "$PANEL_HTTP" ] && [ "$PANEL_HTTP" != "000" ] && break
+    PANEL_HTTP="000"
+done
 if [ "$PANEL_HTTP" = "200" ] || [ "$PANEL_HTTP" = "302" ] || [ "$PANEL_HTTP" = "301" ]; then
     ok "$(t health_http_ok "$PANEL_HTTP" "$PANEL_PORT")"
 elif [ "$PANEL_HTTP" = "403" ]; then
@@ -1663,12 +1667,20 @@ if command -v ufw &> /dev/null && ufw status 2>/dev/null | grep -q "Status: acti
     else
         FIREWALL_PORT_STATUS="closed"
     fi
-elif iptables -L -n 2>/dev/null | grep -qE "ACCEPT.*dpt:${PANEL_PORT}"; then
+elif iptables -L INPUT -n 2>/dev/null | head -1 | grep -qE "policy (DROP|REJECT)" 2>/dev/null; then
     FIREWALL_TYPE="iptables"
-    FIREWALL_PORT_STATUS="open"
-elif iptables -L -n 2>/dev/null | grep -qE "(DROP|REJECT)" 2>/dev/null; then
-    FIREWALL_TYPE="iptables"
-    FIREWALL_PORT_STATUS="closed"
+    # Check if port is explicitly allowed OR if there are broad ACCEPT rules (ACCEPT all -- source)
+    if iptables -L INPUT -n 2>/dev/null | grep -qE "ACCEPT.*dpt:${PANEL_PORT}"; then
+        FIREWALL_PORT_STATUS="open"
+    elif iptables -L INPUT -n 2>/dev/null | grep -qE "ACCEPT\s+all\s+--\s+[0-9]"; then
+        # There are IP-based ACCEPT ALL rules — port is likely accessible from those IPs
+        FIREWALL_PORT_STATUS="open_by_ip"
+    elif iptables -L INPUT -n 2>/dev/null | head -1 | grep -q "DROP"; then
+        FIREWALL_PORT_STATUS="closed"
+    else
+        # Default policy is ACCEPT or there are broad rules
+        FIREWALL_PORT_STATUS="open"
+    fi
 fi
 
 echo ""
@@ -1760,8 +1772,12 @@ if [ "$FIREWALL_TYPE" = "ufw" ]; then
     fi
 elif [ "$FIREWALL_TYPE" = "iptables" ]; then
     echo -e "  ${YELLOW}$(t firewall_iptables_active)${NC}"
-    if [ "$FIREWALL_PORT_STATUS" = "open" ]; then
-        echo -e "  ${GREEN}✓ $(t firewall_port_open "$PANEL_PORT")${NC}"
+    if [ "$FIREWALL_PORT_STATUS" = "open" ] || [ "$FIREWALL_PORT_STATUS" = "open_by_ip" ]; then
+        if [ "$FIREWALL_PORT_STATUS" = "open_by_ip" ]; then
+            echo -e "  ${GREEN}✓ $(t firewall_port_open_ip "$PANEL_PORT")${NC}"
+        else
+            echo -e "  ${GREEN}✓ $(t firewall_port_open "$PANEL_PORT")${NC}"
+        fi
     else
         echo -e "  ${RED}${BOLD}✗ $(t firewall_port_closed "$PANEL_PORT")${NC}"
         echo ""
