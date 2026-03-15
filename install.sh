@@ -1736,8 +1736,22 @@ for i in 1 2 3 4 5; do
 done
 
 if [ "$CADDY_API_STATUS" = "200" ]; then
+    # Disable auto_https to prevent Caddy from trying to listen on :80/:443
+    # This avoids conflicts with nginx/Apache on port 80
+    curl -s -X PUT "${CADDY_API}/config/apps/http/auto_https" \
+        -H "Content-Type: application/json" \
+        -d '"disable_redirects"' > /dev/null 2>&1 || true
+
+    # Ensure TLS has internal issuer for self-signed certs
+    curl -s -X PUT "${CADDY_API}/config/apps/tls" \
+        -H "Content-Type: application/json" \
+        -d '{"automation":{"policies":[{"issuers":[{"module":"internal"}]}]}}' > /dev/null 2>&1 || true
+
+    # Remove existing panel server if present (safe for reinstall)
+    curl -s -X DELETE "${CADDY_API}/config/apps/http/servers/musedock-panel" > /dev/null 2>&1 || true
+
     # Add panel reverse proxy route via Caddy API
-    # This creates: https://0.0.0.0:PANEL_PORT { tls internal; reverse_proxy localhost:INTERNAL_PORT }
+    # HTTPS with self-signed cert + redirect HTTP→HTTPS on same port
     PANEL_ROUTE=$(cat <<ROUTEEOF
 {
   "@id": "musedock-panel",
@@ -1760,29 +1774,14 @@ if [ "$CADDY_API_STATUS" = "200" ]; then
       ]
     }
   ],
-  "tls_connection_policies": [{}]
+  "tls_connection_policies": [{}],
+  "automatic_https": {
+    "disable": true
+  }
 }
 ROUTEEOF
 )
 
-    # Remove existing panel server if present (safe for reinstall)
-    curl -s -X DELETE "${CADDY_API}/config/apps/http/servers/musedock-panel" > /dev/null 2>&1 || true
-
-    # Ensure TLS has internal issuer for self-signed certs (append, don't replace)
-    # First check if TLS app exists; if not, create it with internal issuer
-    TLS_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" "${CADDY_API}/config/apps/tls/" 2>/dev/null || echo "000")
-    if [ "$TLS_EXISTS" != "200" ]; then
-        curl -s -X PUT "${CADDY_API}/config/apps/tls" \
-            -H "Content-Type: application/json" \
-            -d '{"automation":{"policies":[{"issuers":[{"module":"internal"}]}]}}' > /dev/null 2>&1 || true
-    else
-        # TLS app exists — add internal issuer policy without clobbering existing ones
-        curl -s -X POST "${CADDY_API}/config/apps/tls/automation/policies" \
-            -H "Content-Type: application/json" \
-            -d '{"issuers":[{"module":"internal"}]}' > /dev/null 2>&1 || true
-    fi
-
-    # Add the panel server
     HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
         "${CADDY_API}/config/apps/http/servers/musedock-panel" \
         -H "Content-Type: application/json" \
@@ -1792,13 +1791,24 @@ ROUTEEOF
         ok "$(t caddy_proxy_ok "$PANEL_PORT" "$PANEL_INTERNAL_PORT")"
         ok "$(t caddy_tls_internal)"
     else
-        warn "$(t caddy_proxy_fail "$HTTP_CODE")"
-        warn "$(t caddy_proxy_fallback "$PANEL_INTERNAL_PORT")"
-        # Rebind PHP to 0.0.0.0 as fallback
-        sed -i "s|127.0.0.1:${PANEL_INTERNAL_PORT}|0.0.0.0:${PANEL_PORT}|g" /etc/systemd/system/musedock-panel.service
-        PANEL_INTERNAL_PORT=${PANEL_PORT}
-        systemctl daemon-reload
-        systemctl restart musedock-panel
+        # Retry: if port 80 conflict, try with explicit auto_https off at http app level
+        curl -s -X PUT "${CADDY_API}/config/apps/http" \
+            -H "Content-Type: application/json" \
+            -d "{\"auto_https\":\"disable_redirects\",\"servers\":{\"musedock-panel\":$(echo "$PANEL_ROUTE")}}" > /dev/null 2>&1
+        HTTP_CODE2=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "${CADDY_API}/config/apps/http/servers/musedock-panel" 2>/dev/null || echo "000")
+
+        if [ "$HTTP_CODE2" = "200" ]; then
+            ok "$(t caddy_proxy_ok "$PANEL_PORT" "$PANEL_INTERNAL_PORT")"
+            ok "$(t caddy_tls_internal)"
+        else
+            warn "$(t caddy_proxy_fail "$HTTP_CODE")"
+            warn "$(t caddy_proxy_fallback "$PANEL_INTERNAL_PORT")"
+            # Rebind PHP to 0.0.0.0 as fallback
+            sed -i "s|127.0.0.1:${PANEL_INTERNAL_PORT}|0.0.0.0:${PANEL_PORT}|g" /etc/systemd/system/musedock-panel.service
+            PANEL_INTERNAL_PORT=${PANEL_PORT}
+            systemctl daemon-reload
+            systemctl restart musedock-panel
+        fi
     fi
 else
     warn "$(t caddy_api_unavailable "$PANEL_PORT")"
@@ -1843,9 +1853,12 @@ systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
 ok "Cron jobs instalados"
 
 # ============================================================
-# Post-installation health check (also used by verify mode)
+# Post-installation health check
 # ============================================================
 fi # end of "if VERIFY_ONLY=false" block that wraps the install flow
+
+# Disable set -e for health checks (checks may fail without killing the script)
+set +e
 
 header "$(t health_header)"
 
