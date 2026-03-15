@@ -4,9 +4,11 @@ Todas las versiones notables de MuseDock Panel se documentan aqui.
 
 ## [0.4.0] — Pendiente
 
+### Anadido
+- **Replicacion** — Configurar PostgreSQL streaming replication y MySQL replication desde el panel, monitor en tiempo real con auto-refresh cada 5s, promover/degradar servidores (switchover), test de conexion AJAX, cifrado de passwords, backup automatico de archivos de configuracion
+
 ### Por hacer
 - **Multi-idioma panel** — Soporte ES/EN en toda la interfaz del panel
-- **Clustering** — Replicacion PostgreSQL streaming, promover/degradar servidores
 
 ---
 

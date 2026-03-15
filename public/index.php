@@ -156,6 +156,16 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/fail2ban/unban', 'SettingsController@fail2banUnban');
 \MuseDockPanel\Router::get('/settings/logs', 'SettingsController@logs');
 
+// Replication
+\MuseDockPanel\Router::get('/settings/replication', 'ReplicationController@index');
+\MuseDockPanel\Router::post('/settings/replication/save', 'ReplicationController@saveConfig');
+\MuseDockPanel\Router::post('/settings/replication/setup-master', 'ReplicationController@setupMaster');
+\MuseDockPanel\Router::post('/settings/replication/setup-slave', 'ReplicationController@setupSlave');
+\MuseDockPanel\Router::post('/settings/replication/promote', 'ReplicationController@promote');
+\MuseDockPanel\Router::post('/settings/replication/demote', 'ReplicationController@demote');
+\MuseDockPanel\Router::get('/settings/replication/status', 'ReplicationController@status');
+\MuseDockPanel\Router::post('/settings/replication/test-connection', 'ReplicationController@testConnection');
+
 // Backups
 \MuseDockPanel\Router::get('/backups', 'BackupController@index');
 \MuseDockPanel\Router::get('/backups/create', 'BackupController@create');

@@ -8,4 +8,5 @@
     <a href="/settings/crons" class="btn btn-outline-light btn-sm <?= str_contains($pageTitle ?? '', 'Cron') ? 'active' : '' ?>"><i class="bi bi-clock-history me-1"></i>Cron</a>
     <a href="/settings/caddy" class="btn btn-outline-light btn-sm <?= str_contains($pageTitle ?? '', 'Caddy') ? 'active' : '' ?>"><i class="bi bi-globe me-1"></i>Caddy</a>
     <a href="/settings/logs" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Visor de Logs' ? 'active' : '' ?>"><i class="bi bi-terminal me-1"></i>Logs</a>
+    <a href="/settings/replication" class="btn btn-outline-light btn-sm <?= str_contains($pageTitle ?? '', 'Replicaci') ? 'active' : '' ?>"><i class="bi bi-arrow-repeat me-1"></i>Replicacion</a>
 </div>
