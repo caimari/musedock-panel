@@ -1,0 +1,95 @@
+MuseDock Panel — Source Available License
+Copyright (c) 2026 MuseDock. All rights reserved.
+
+1. DEFINITIONS
+
+"Software" means the MuseDock Panel source code, documentation, and
+associated files in this repository.
+
+"Personal Use" means use by an individual for personal projects,
+home servers, learning, experimentation, or educational purposes,
+where no revenue is generated from the Software itself or from
+hosting services powered by the Software.
+
+"Commercial Use" means any use of the Software that directly or
+indirectly generates revenue, including but not limited to:
+  (a) offering hosting services to paying customers;
+  (b) selling, licensing, or sublicensing the Software;
+  (c) bundling the Software with commercial products or services;
+  (d) using the Software as part of a managed service or SaaS offering.
+
+"Community Edition" means the core features of the Software available
+under this license for Personal Use.
+
+"Pro Features" means advanced functionality (including but not limited
+to cluster mode, commercial support, and features explicitly marked as
+"Pro" or "Enterprise") that require a separate paid license.
+
+2. GRANT OF RIGHTS — PERSONAL USE
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of the Software, to use, copy, modify, and run the Software
+for Personal Use, subject to the following conditions:
+
+  (a) This license notice and copyright shall be included in all
+      copies or substantial portions of the Software.
+  (b) You may not remove, alter, or obscure any license notices,
+      copyright notices, or branding in the Software.
+  (c) You may contribute modifications back to the project (pull
+      requests, patches, etc.) and such contributions will be
+      licensed under the same terms as this license.
+
+3. COMMERCIAL USE — SEPARATE LICENSE REQUIRED
+
+Commercial Use of the Software requires a separate commercial license
+obtained from MuseDock. Contact: info@musedock.com
+
+Using the Software commercially without a valid commercial license is
+a violation of this license and applicable copyright law.
+
+4. PRO FEATURES
+
+Pro Features are included in the source code for transparency and
+reference but may only be used with a valid Pro or Enterprise license.
+Using Pro Features without the appropriate license is prohibited.
+
+5. RESTRICTIONS
+
+You may NOT:
+  (a) Sell, sublicense, or distribute the Software for a fee.
+  (b) Offer the Software as a hosted or managed service to third
+      parties without a commercial license.
+  (c) Remove or circumvent any license-checking mechanisms.
+  (d) Use the Software in any way that competes with MuseDock's
+      commercial offerings without a commercial license.
+  (e) Represent the Software as your own product.
+
+6. CONTRIBUTIONS
+
+By submitting contributions (code, documentation, translations, etc.)
+to this project, you agree that your contributions are licensed under
+the same terms as this license and you grant MuseDock a perpetual,
+worldwide, non-exclusive, royalty-free license to use, modify, and
+distribute your contributions as part of the Software.
+
+7. DISCLAIMER OF WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+8. TERMINATION
+
+This license is automatically terminated if you violate any of its
+terms. Upon termination, you must destroy all copies of the Software
+in your possession.
+
+9. GOVERNING LAW
+
+This license shall be governed by and construed in accordance with
+the laws of Spain, without regard to conflict of law principles.

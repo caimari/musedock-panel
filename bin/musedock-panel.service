@@ -1,0 +1,20 @@
+[Unit]
+Description=MuseDock Panel - Hosting Management
+After=network.target postgresql.service caddy.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=__PANEL_DIR__
+ExecStart=/usr/bin/php -S 127.0.0.1:__PANEL_PORT__ -t __PANEL_DIR__/public __PANEL_DIR__/public/router.php
+Restart=always
+RestartSec=5
+StandardOutput=append:__PANEL_DIR__/storage/logs/panel.log
+StandardError=append:__PANEL_DIR__/storage/logs/panel-error.log
+
+Environment=HOME=/root
+
+[Install]
+WantedBy=multi-user.target

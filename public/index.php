@@ -1,0 +1,150 @@
+<?php
+/**
+ * MuseDock Panel - Entry Point
+ * Independent hosting panel on port 8444
+ */
+
+define('PANEL_ROOT', dirname(__DIR__));
+define('PANEL_VERSION', '0.1.0');
+
+// Autoloader
+spl_autoload_register(function ($class) {
+    $prefix = 'MuseDockPanel\\';
+    if (strncmp($prefix, $class, strlen($prefix)) !== 0) {
+        return;
+    }
+    $relative = substr($class, strlen($prefix));
+    $file = PANEL_ROOT . '/app/' . str_replace('\\', '/', $relative) . '.php';
+    if (file_exists($file)) {
+        require $file;
+    }
+});
+
+// Config
+$config = require PANEL_ROOT . '/config/panel.php';
+
+// Session (hardened)
+ini_set('session.save_path', $config['session']['path']);
+ini_set('session.cookie_secure', '1');
+ini_set('session.cookie_httponly', '1');
+ini_set('session.cookie_samesite', 'Strict');
+ini_set('session.use_strict_mode', '1');
+ini_set('session.use_only_cookies', '1');
+session_name($config['session']['name']);
+session_start();
+
+// Security headers
+header('X-Frame-Options: DENY');
+header('X-Content-Type-Options: nosniff');
+header('X-XSS-Protection: 1; mode=block');
+header('Referrer-Policy: strict-origin-when-cross-origin');
+header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+
+// Auto-run pending migrations (safe — uses transactions + IF NOT EXISTS)
+try {
+    $pendingMigrations = \MuseDockPanel\Services\MigrationService::getPending();
+    if (!empty($pendingMigrations)) {
+        \MuseDockPanel\Services\MigrationService::runPending();
+    }
+} catch (\Throwable) {
+    // Database may not be ready yet (first-run) — skip silently
+}
+
+// Share config with views
+\MuseDockPanel\View::share('panelVersion', PANEL_VERSION);
+\MuseDockPanel\View::share('panelName', $config['name']);
+\MuseDockPanel\View::share('currentUser', \MuseDockPanel\Auth::user());
+
+// ===============================
+// First-run setup (no admin exists)
+// ===============================
+if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
+    \MuseDockPanel\Router::get('/setup', 'SetupController@index');
+    \MuseDockPanel\Router::post('/setup/install', 'SetupController@install');
+    // Redirect everything else to setup
+    $setupUri = strtok($_SERVER['REQUEST_URI'], '?');
+    $setupUri = rtrim($setupUri, '/') ?: '/';
+    if (!in_array($setupUri, ['/setup', '/setup/install']) && !preg_match('/\.(css|js|png|svg|ico)$/', $setupUri)) {
+        header('Location: /setup');
+        exit;
+    }
+    \MuseDockPanel\Router::dispatch();
+    return;
+}
+
+// Middleware
+\MuseDockPanel\Router::middleware('AuthMiddleware');
+
+// ===============================
+// Routes
+// ===============================
+
+// Auth
+\MuseDockPanel\Router::get('/login', 'AuthController@loginForm');
+\MuseDockPanel\Router::post('/login/submit', 'AuthController@login');
+\MuseDockPanel\Router::get('/logout', 'AuthController@logout');
+
+// Dashboard
+\MuseDockPanel\Router::get('/', 'DashboardController@index');
+
+// Hosting Accounts
+\MuseDockPanel\Router::get('/accounts', 'AccountController@index');
+\MuseDockPanel\Router::get('/accounts/create', 'AccountController@create');
+\MuseDockPanel\Router::post('/accounts/store', 'AccountController@store');
+\MuseDockPanel\Router::get('/accounts/import', 'AccountController@importList');
+\MuseDockPanel\Router::post('/accounts/import', 'AccountController@importStore');
+\MuseDockPanel\Router::get('/accounts/{id}', 'AccountController@show');
+\MuseDockPanel\Router::get('/accounts/{id}/edit', 'AccountController@edit');
+\MuseDockPanel\Router::post('/accounts/{id}/update', 'AccountController@update');
+\MuseDockPanel\Router::post('/accounts/{id}/delete', 'AccountController@delete');
+\MuseDockPanel\Router::post('/accounts/{id}/suspend', 'AccountController@suspend');
+\MuseDockPanel\Router::post('/accounts/{id}/activate', 'AccountController@activate');
+\MuseDockPanel\Router::post('/accounts/{id}/change-password', 'AccountController@changePassword');
+\MuseDockPanel\Router::post('/accounts/{id}/renew-ssl', 'AccountController@renewSsl');
+\MuseDockPanel\Router::post('/accounts/{id}/rename-user', 'AccountController@renameUser');
+
+// Migration
+\MuseDockPanel\Router::get('/accounts/{id}/migrate', 'MigrationController@index');
+\MuseDockPanel\Router::post('/accounts/{id}/migrate/url', 'MigrationController@fromUrl');
+\MuseDockPanel\Router::post('/accounts/{id}/migrate/ssh', 'MigrationController@fromSsh');
+\MuseDockPanel\Router::post('/accounts/{id}/migrate/db', 'MigrationController@migrateDb');
+\MuseDockPanel\Router::post('/accounts/{id}/migrate/test-ssh', 'MigrationController@testSsh');
+\MuseDockPanel\Router::post('/accounts/{id}/migrate/check-local', 'MigrationController@checkLocal');
+\MuseDockPanel\Router::post('/accounts/{id}/migrate/ssh-prepare', 'MigrationController@sshPrepare');
+\MuseDockPanel\Router::get('/accounts/{id}/migrate/ssh-stream', 'MigrationController@sshStream');
+\MuseDockPanel\Router::get('/accounts/{id}/migrate/ssh-status', 'MigrationController@sshStatus');
+
+// Domains
+\MuseDockPanel\Router::get('/domains', 'DomainController@index');
+\MuseDockPanel\Router::post('/domains/check-dns', 'DomainController@checkDns');
+
+// Customers
+\MuseDockPanel\Router::get('/customers', 'CustomerController@index');
+\MuseDockPanel\Router::get('/customers/create', 'CustomerController@create');
+\MuseDockPanel\Router::post('/customers/store', 'CustomerController@store');
+\MuseDockPanel\Router::get('/customers/{id}', 'CustomerController@show');
+\MuseDockPanel\Router::get('/customers/{id}/edit', 'CustomerController@edit');
+\MuseDockPanel\Router::post('/customers/{id}/update', 'CustomerController@update');
+\MuseDockPanel\Router::post('/customers/{id}/delete', 'CustomerController@delete');
+
+// Settings
+\MuseDockPanel\Router::get('/settings/services', 'SettingsController@services');
+\MuseDockPanel\Router::post('/settings/services/action', 'SettingsController@serviceAction');
+\MuseDockPanel\Router::get('/settings/crons', 'SettingsController@crons');
+\MuseDockPanel\Router::post('/settings/crons/save', 'SettingsController@cronSave');
+\MuseDockPanel\Router::post('/settings/crons/update', 'SettingsController@cronUpdate');
+\MuseDockPanel\Router::post('/settings/crons/delete', 'SettingsController@cronDelete');
+\MuseDockPanel\Router::get('/settings/caddy', 'SettingsController@caddy');
+\MuseDockPanel\Router::post('/settings/caddy/delete-route', 'SettingsController@caddyDeleteRoute');
+
+// Profile
+\MuseDockPanel\Router::get('/profile', 'ProfileController@index');
+\MuseDockPanel\Router::post('/profile/username', 'ProfileController@updateUsername');
+\MuseDockPanel\Router::post('/profile/email', 'ProfileController@updateEmail');
+\MuseDockPanel\Router::post('/profile/password', 'ProfileController@updatePassword');
+
+// Activity Log
+\MuseDockPanel\Router::get('/logs', 'LogController@index');
+
+// Dispatch
+\MuseDockPanel\Router::dispatch();
