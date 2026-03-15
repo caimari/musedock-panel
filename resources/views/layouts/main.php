@@ -84,7 +84,7 @@
 <div class="sidebar">
     <div class="sidebar-brand">
         <h5><i class="bi bi-hdd-rack"></i> MuseDock Panel</h5>
-        <small>v<?= View::e($panelVersion) ?></small>
+        <a href="/changelog" style="text-decoration:none;"><small style="color:#64748b;">v<?= View::e($panelVersion) ?></small></a>
     </div>
     <nav class="sidebar-nav">
         <a href="/" class="<?= ($pageTitle ?? '') === 'Dashboard' ? 'active' : '' ?>">
@@ -95,6 +95,9 @@
         </a>
         <a href="/domains" class="<?= str_contains($pageTitle ?? '', 'Domain') ? 'active' : '' ?>">
             <i class="bi bi-globe2"></i> Domains
+        </a>
+        <a href="/databases" class="<?= str_contains($pageTitle ?? '', 'Base') || str_contains($pageTitle ?? '', 'Crear Base') ? 'active' : '' ?>">
+            <i class="bi bi-database"></i> Databases
         </a>
         <a href="/customers" class="<?= str_contains($pageTitle ?? '', 'Customer') ? 'active' : '' ?>">
             <i class="bi bi-people"></i> Customers

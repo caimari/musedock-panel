@@ -165,10 +165,39 @@ class AccountController
             return;
         }
 
+        // Parse PHP settings from pool conf file
+        $phpSettings = [
+            'memory_limit' => '128M',
+            'upload_max_filesize' => '2M',
+            'post_max_size' => '8M',
+            'max_execution_time' => '30',
+            'max_input_vars' => '1000',
+            'open_basedir' => '',
+        ];
+
+        $poolFile = "/etc/php/{$account['php_version']}/fpm/pool.d/{$account['username']}.conf";
+        if (file_exists($poolFile)) {
+            $poolContent = file_get_contents($poolFile);
+            if ($poolContent !== false) {
+                // Match php_admin_value[key] = value and php_value[key] = value
+                if (preg_match_all('/^php(?:_admin)?_value\[([^\]]+)\]\s*=\s*(.+)$/m', $poolContent, $matches, PREG_SET_ORDER)) {
+                    foreach ($matches as $match) {
+                        $key = trim($match[1]);
+                        $val = trim($match[2]);
+                        if (array_key_exists($key, $phpSettings)) {
+                            $phpSettings[$key] = $val;
+                        }
+                    }
+                }
+            }
+        }
+
         View::render('accounts/edit', [
             'layout' => 'main',
             'pageTitle' => 'Editar: ' . $account['domain'],
             'account' => $account,
+            'phpSettings' => $phpSettings,
+            'poolFileExists' => file_exists($poolFile),
         ]);
     }
 
@@ -684,6 +713,110 @@ class AccountController
         }
 
         return $orphans;
+    }
+
+    public function updatePhp(array $params): void
+    {
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) {
+            Flash::set('error', 'Cuenta no encontrada.');
+            Router::redirect('/accounts');
+            return;
+        }
+
+        $poolFile = "/etc/php/{$account['php_version']}/fpm/pool.d/{$account['username']}.conf";
+        if (!file_exists($poolFile)) {
+            Flash::set('error', 'No se encontró el archivo de pool FPM.');
+            Router::redirect('/accounts/' . $params['id'] . '/edit');
+            return;
+        }
+
+        $poolContent = file_get_contents($poolFile);
+        if ($poolContent === false) {
+            Flash::set('error', 'No se pudo leer el archivo de pool FPM.');
+            Router::redirect('/accounts/' . $params['id'] . '/edit');
+            return;
+        }
+
+        // Allowed settings with validation patterns
+        $allowedSettings = [
+            'memory_limit' => '/^\d+[MmGgKk]?$/',
+            'upload_max_filesize' => '/^\d+[MmGgKk]?$/',
+            'post_max_size' => '/^\d+[MmGgKk]?$/',
+            'max_execution_time' => '/^\d+$/',
+            'max_input_vars' => '/^\d+$/',
+        ];
+
+        $changes = [];
+        foreach ($allowedSettings as $key => $pattern) {
+            $value = trim($_POST[$key] ?? '');
+            if (empty($value)) continue;
+
+            if (!preg_match($pattern, $value)) {
+                Flash::set('error', "Valor no válido para {$key}: {$value}");
+                Router::redirect('/accounts/' . $params['id'] . '/edit');
+                return;
+            }
+
+            $changes[$key] = $value;
+        }
+
+        if (empty($changes)) {
+            Flash::set('error', 'No se especificaron valores para actualizar.');
+            Router::redirect('/accounts/' . $params['id'] . '/edit');
+            return;
+        }
+
+        // Update or add each setting in the pool conf
+        foreach ($changes as $key => $value) {
+            // Try to replace existing php_admin_value[key] or php_value[key] line
+            $replaced = false;
+
+            // Replace php_admin_value[key] = ...
+            $pattern = '/^(php_admin_value\[' . preg_quote($key, '/') . '\])\s*=\s*.+$/m';
+            if (preg_match($pattern, $poolContent)) {
+                $poolContent = preg_replace($pattern, "php_admin_value[{$key}] = {$value}", $poolContent);
+                $replaced = true;
+            }
+
+            // Replace php_value[key] = ...
+            if (!$replaced) {
+                $pattern = '/^(php_value\[' . preg_quote($key, '/') . '\])\s*=\s*.+$/m';
+                if (preg_match($pattern, $poolContent)) {
+                    $poolContent = preg_replace($pattern, "php_value[{$key}] = {$value}", $poolContent);
+                    $replaced = true;
+                }
+            }
+
+            // If not found, add as php_admin_value before security.limit_extensions or at end
+            if (!$replaced) {
+                $newLine = "php_admin_value[{$key}] = {$value}";
+                if (strpos($poolContent, 'security.limit_extensions') !== false) {
+                    $poolContent = preg_replace(
+                        '/^(security\.limit_extensions\s*=)/m',
+                        $newLine . "\n\n$1",
+                        $poolContent
+                    );
+                } else {
+                    $poolContent = rtrim($poolContent) . "\n{$newLine}\n";
+                }
+            }
+        }
+
+        // Write the updated pool conf
+        if (file_put_contents($poolFile, $poolContent) === false) {
+            Flash::set('error', 'No se pudo escribir el archivo de pool FPM.');
+            Router::redirect('/accounts/' . $params['id'] . '/edit');
+            return;
+        }
+
+        // Restart PHP-FPM
+        shell_exec("systemctl reload php{$account['php_version']}-fpm 2>&1");
+
+        $changesLog = implode(', ', array_map(fn($k, $v) => "{$k}={$v}", array_keys($changes), array_values($changes)));
+        LogService::log('account.php_settings', $account['domain'], "PHP settings updated: {$changesLog}");
+        Flash::set('success', 'Ajustes PHP actualizados y FPM recargado.');
+        Router::redirect('/accounts/' . $params['id'] . '/edit');
     }
 
     public function delete(array $params): void

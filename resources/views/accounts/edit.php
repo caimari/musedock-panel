@@ -107,6 +107,62 @@
             </div>
         </div>
 
+        <!-- Ajustes PHP por cuenta -->
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-filetype-php me-2"></i>Ajustes PHP</div>
+            <div class="card-body">
+                <?php if (!empty($poolFileExists)): ?>
+                <form method="POST" action="/accounts/<?= $account['id'] ?>/php">
+                    <?= \MuseDockPanel\View::csrf() ?>
+                    <p class="text-muted small mb-3">Configuración PHP-FPM individual para <code><?= View::e($account['username']) ?></code> (PHP <?= View::e($account['php_version']) ?>)</p>
+                    <div class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label">memory_limit</label>
+                            <input type="text" name="memory_limit" class="form-control" value="<?= View::e($phpSettings['memory_limit'] ?? '128M') ?>" placeholder="128M">
+                            <small class="text-muted">Ej: 128M, 256M, 512M</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">upload_max_filesize</label>
+                            <input type="text" name="upload_max_filesize" class="form-control" value="<?= View::e($phpSettings['upload_max_filesize'] ?? '2M') ?>" placeholder="2M">
+                            <small class="text-muted">Ej: 2M, 64M, 128M</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">post_max_size</label>
+                            <input type="text" name="post_max_size" class="form-control" value="<?= View::e($phpSettings['post_max_size'] ?? '8M') ?>" placeholder="8M">
+                            <small class="text-muted">Ej: 8M, 64M, 128M</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">max_execution_time</label>
+                            <div class="input-group">
+                                <input type="number" name="max_execution_time" class="form-control" value="<?= View::e($phpSettings['max_execution_time'] ?? '30') ?>" min="0" max="3600" placeholder="30">
+                                <span class="input-group-text" style="background:#0f172a;border-color:#334155;color:#64748b;">seg</span>
+                            </div>
+                            <small class="text-muted">Ej: 30, 60, 300</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">max_input_vars</label>
+                            <input type="number" name="max_input_vars" class="form-control" value="<?= View::e($phpSettings['max_input_vars'] ?? '1000') ?>" min="100" max="100000" placeholder="1000">
+                            <small class="text-muted">Ej: 1000, 3000, 5000</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">open_basedir <span class="badge bg-secondary">solo lectura</span></label>
+                            <input type="text" class="form-control" value="<?= View::e($phpSettings['open_basedir'] ?? '') ?>" disabled style="opacity: 0.6; font-size: 0.8rem;">
+                            <small class="text-muted">Se configura automáticamente</small>
+                        </div>
+                    </div>
+                    <div class="mt-4">
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i> Guardar ajustes PHP</button>
+                    </div>
+                </form>
+                <?php else: ?>
+                <div class="alert alert-warning mb-0 py-2 small">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    No se encontró el archivo de pool FPM para esta cuenta. Los ajustes PHP no están disponibles.
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <!-- Renombrar usuario del sistema -->
         <div class="card mb-3">
             <div class="card-header"><i class="bi bi-person-gear me-2"></i>Usuario del sistema</div>

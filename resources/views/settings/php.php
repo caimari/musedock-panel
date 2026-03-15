@@ -2,6 +2,12 @@
 
 <?php include __DIR__ . '/_tabs.php'; ?>
 
+<div class="alert py-2 px-3 mb-3" style="background:rgba(56,189,248,0.1);border:1px solid rgba(56,189,248,0.2);color:#94a3b8;font-size:0.85rem;">
+    <i class="bi bi-info-circle text-info me-1"></i>
+    <strong>Configuracion global</strong> — estos valores afectan a <strong>todas las cuentas</strong> que usen esta version de PHP.
+    Cada cuenta de hosting puede sobreescribir estos valores desde su ficha individual (pool FPM propio).
+</div>
+
 <?php if (empty($versions)): ?>
 <div class="card">
     <div class="card-body text-center text-muted py-4">

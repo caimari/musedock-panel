@@ -104,6 +104,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/change-password', 'AccountController@changePassword');
 \MuseDockPanel\Router::post('/accounts/{id}/renew-ssl', 'AccountController@renewSsl');
 \MuseDockPanel\Router::post('/accounts/{id}/rename-user', 'AccountController@renameUser');
+\MuseDockPanel\Router::post('/accounts/{id}/php', 'AccountController@updatePhp');
 
 // Migration
 \MuseDockPanel\Router::get('/accounts/{id}/migrate', 'MigrationController@index');
@@ -119,6 +120,12 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // Domains
 \MuseDockPanel\Router::get('/domains', 'DomainController@index');
 \MuseDockPanel\Router::post('/domains/check-dns', 'DomainController@checkDns');
+
+// Databases
+\MuseDockPanel\Router::get('/databases', 'DatabaseController@index');
+\MuseDockPanel\Router::get('/databases/create', 'DatabaseController@create');
+\MuseDockPanel\Router::post('/databases/store', 'DatabaseController@store');
+\MuseDockPanel\Router::post('/databases/{id}/delete', 'DatabaseController@delete');
 
 // Customers
 \MuseDockPanel\Router::get('/customers', 'CustomerController@index');
@@ -145,6 +152,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/security', 'SettingsController@security');
 \MuseDockPanel\Router::post('/settings/security/save', 'SettingsController@securitySave');
 \MuseDockPanel\Router::get('/settings/ssl', 'SettingsController@ssl');
+
+// Changelog
+\MuseDockPanel\Router::get('/changelog', 'ChangelogController@index');
 
 // Profile
 \MuseDockPanel\Router::get('/profile', 'ProfileController@index');
