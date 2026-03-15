@@ -22,13 +22,462 @@ fail()   { echo -e "  ${RED}✗ $1${NC}"; exit 1; }
 ask()    { read -rp "  $1: " "$2"; }
 
 # ============================================================
+# Language selection (before anything else)
+# ============================================================
+LANG_CODE="en"
+
+# Must be root (check before language prompt)
+if [ "$EUID" -ne 0 ]; then
+    echo -e "  \033[0;31m✗ This installer must be run as root (sudo bash install.sh)\033[0m"
+    exit 1
+fi
+
+# Resolve PANEL_DIR early (needed for .env check)
+PANEL_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+echo ""
+echo "  Select language / Selecciona idioma:"
+echo ""
+echo "    1) English"
+echo "    2) Español"
+echo ""
+read -rp "  Choose / Elige [1/2] (default: 2): " LANG_CHOICE
+LANG_CHOICE=${LANG_CHOICE:-2}
+case "$LANG_CHOICE" in
+    1) LANG_CODE="en" ;;
+    *) LANG_CODE="es" ;;
+esac
+
+# ============================================================
+# Translation system
+# ============================================================
+t() {
+    local key="$1"; shift
+    local text=""
+    case "$LANG_CODE" in
+        es)
+            case "$key" in
+                must_be_root) text="Este instalador debe ejecutarse como root (sudo bash install.sh)" ;;
+                cannot_detect_os) text="No se detecta el sistema operativo. Solo Ubuntu 22.04+ y Debian 12+ soportados." ;;
+                os_not_supported) text="$1 $2 no soportado. Minimo: $3" ;;
+                os_unknown) text="OS '$1' no soportado. Solo Ubuntu 22.04+ y Debian 12+ soportados." ;;
+                existing_detected) text="Se ha detectado una instalacion existente." ;;
+                existing_found) text="Encontrado: $1" ;;
+                existing_options) text="Opciones:" ;;
+                existing_opt_reinstall) text="Reinstalar (no borra la base de datos)" ;;
+                existing_opt_verify) text="Solo verificar — ejecuta el health check sin tocar nada" ;;
+                existing_opt_cancel) text="Cancelar" ;;
+                existing_choose) text="Elige [1/2/3] (por defecto: 3): " ;;
+                install_cancelled) text="Instalacion cancelada. Instalacion existente preservada." ;;
+                reinstall_mode) text="Modo reinstalacion — se hara backup del .env existente" ;;
+                verify_mode) text="Modo verificacion — comprobando estado del sistema..." ;;
+                checking_conflicts) text="Comprobando servicios en conflicto" ;;
+                plesk_warning) text="AVISO: Plesk detectado en este servidor!" ;;
+                plesk_version) text="Version de Plesk: $1" ;;
+                plesk_desc) text="Plesk gestiona su propio servidor web (nginx/Apache), bases de datos y PHP. Instalar MuseDock Panel junto a Plesk puede causar conflictos de puertos e interferencia de servicios." ;;
+                plesk_opt_abort) text="Abortar instalacion (recomendado)" ;;
+                plesk_opt_continue) text="Continuar igualmente (solo usuarios avanzados — debes resolver conflictos manualmente)" ;;
+                plesk_aborted) text="Instalacion abortada. Plesk y MuseDock Panel no son compatibles en el mismo servidor." ;;
+                plesk_continuing) text="Continuando con Plesk presente — resolucion manual de conflictos requerida" ;;
+                nginx_detected) text="Nginx detectado: $1" ;;
+                nginx_plesk_managed) text="Este nginx esta gestionado por Plesk — NO lo desactives sin Plesk" ;;
+                listening_ports) text="Escuchando en puertos: $1" ;;
+                caddy_port_conflict) text="Caddy necesita puertos 80/443 — esto causara conflicto." ;;
+                no_port_conflict) text="$1 esta instalado pero NO escucha en puertos 80/443" ;;
+                no_conflict_caddy) text="Sin conflicto con Caddy." ;;
+                opt_stop_disable) text="Parar y desactivar $1 permanentemente (recomendado — libera puertos para Caddy)" ;;
+                opt_keep_running) text="Mantener $1 corriendo (debes reconfigurar puertos manualmente)" ;;
+                opt_abort) text="Abortar instalacion" ;;
+                config_backed_up) text="Config de $1 guardada en $2" ;;
+                stopped_disabled) text="$1 parado y desactivado (no arrancara en reboot)" ;;
+                to_reenable) text="Para reactivar: systemctl enable --now $1" ;;
+                keep_running_warn) text="$1 sigue corriendo — DEBES moverlo de puertos 80/443 antes de que Caddy arranque" ;;
+                caddy_fail_bind) text="Si no, Caddy no podra bindear y los sitios no funcionaran" ;;
+                plesk_managed_warn) text="$1 esta gestionado por Plesk — no se puede desactivar automaticamente" ;;
+                plesk_resolve_manual) text="Debes resolver el conflicto de puertos manualmente o quitar Plesk primero" ;;
+                continue_anyway) text="Continuar igualmente? [s/N] " ;;
+                installation_aborted) text="Instalacion abortada." ;;
+                apache_detected) text="Apache detectado: $1" ;;
+                apache_plesk_managed) text="Este Apache esta gestionado por Plesk — NO lo desactives sin Plesk" ;;
+                no_conflicts) text="No se detectaron servicios en conflicto (no nginx, no Apache, no Plesk)" ;;
+                configuration) text="Configuracion" ;;
+                panel_port_prompt) text="Puerto del panel (por defecto: 8444)" ;;
+                php_version) text="Version de PHP" ;;
+                php_available) text="Disponibles: 8.1, 8.2, 8.3, 8.4" ;;
+                php_version_prompt) text="Version de PHP (por defecto: 8.3)" ;;
+                php_invalid) text="Version de PHP invalida. Usando 8.3" ;;
+                summary) text="Resumen:" ;;
+                summary_port) text="Puerto panel:  $1" ;;
+                summary_php) text="Version PHP:   $1" ;;
+                summary_dir) text="Directorio:    $1" ;;
+                summary_admin) text="Admin setup:   via asistente web en primer acceso" ;;
+                proceed_install) text="Proceder con la instalacion? [S/n] " ;;
+                snapshot_header) text="Creando snapshot pre-instalacion" ;;
+                snapshot_services) text="Servicios activos guardados" ;;
+                snapshot_ports) text="Puertos escuchando guardados" ;;
+                snapshot_caddyfile) text="Caddyfile guardado" ;;
+                snapshot_autosave) text="Caddy autosave.json guardado" ;;
+                snapshot_nginx) text="Config de nginx guardada" ;;
+                snapshot_apache) text="Config de Apache guardada" ;;
+                snapshot_pghba) text="pg_hba.conf guardado" ;;
+                snapshot_env) text=".env existente guardado" ;;
+                snapshot_packages) text="Lista de paquetes guardada" ;;
+                snapshot_saved) text="Snapshot guardado en $1" ;;
+                step_packages) text="Paso 1/7 — Instalando paquetes del sistema" ;;
+                pkg_updated) text="Listas de paquetes actualizadas" ;;
+                pkg_installed) text="Paquetes esenciales instalados" ;;
+                step_php) text="Paso 2/7 — Instalando PHP $1" ;;
+                php_repo_added) text="Repositorio PHP añadido" ;;
+                php_repo_exists) text="Repositorio PHP ya configurado" ;;
+                php_installed) text="PHP $1 + extensiones instaladas" ;;
+                php_fpm_started) text="PHP-FPM $1 iniciado" ;;
+                step_pgsql) text="Paso 3/7 — Instalando PostgreSQL" ;;
+                pgsql_installed) text="PostgreSQL instalado" ;;
+                pgsql_exists) text="PostgreSQL ya instalado" ;;
+                pgsql_running) text="PostgreSQL en ejecucion" ;;
+                pgsql_reusing) text="Reutilizando credenciales de base de datos existentes" ;;
+                pgsql_no_pass) text="No se pudo leer la contraseña de BD existente — generando nueva" ;;
+                pgsql_peer_fail) text="La autenticacion peer de PostgreSQL no esta disponible." ;;
+                pgsql_peer_desc) text="Esto puede ocurrir si pg_hba.conf usa md5/scram-sha-256 para conexiones locales, o si el usuario del sistema 'postgres' no tiene acceso directo." ;;
+                pgsql_empty_pass) text="Conectado a PostgreSQL con contraseña por defecto (vacia)" ;;
+                pgsql_enter_pass) text="Introduce la contraseña del superusuario PostgreSQL (postgres):" ;;
+                pgsql_pass_verified) text="Contraseña de PostgreSQL verificada" ;;
+                pgsql_cannot_connect) text="No se puede conectar a PostgreSQL. Revisa la contraseña y la configuracion de pg_hba.conf." ;;
+                pgsql_hba_updated) text="pg_hba.conf actualizado para acceso del usuario del panel" ;;
+                pgsql_db_created) text="Base de datos '$1' creada (usuario: $2)" ;;
+                step_caddy) text="Paso 4/7 — Instalando y configurando Caddy" ;;
+                caddy_exists) text="Caddy ya instalado" ;;
+                caddy_config_detected) text="Configuracion de Caddy existente detectada:" ;;
+                caddy_api_routes) text="$1 rutas API activas" ;;
+                caddy_caddyfile_domains) text="Caddyfile tiene bloques de dominio ($1 entradas)" ;;
+                caddy_autosave_found) text="autosave.json encontrado (rutas persistidas por API)" ;;
+                caddy_may_be_cms) text="Puede ser MuseDock CMS u otra aplicacion." ;;
+                caddy_opt_integrate) text="Integrar — usar Caddy existente, preservar TODA la config (recomendado)" ;;
+                caddy_opt_reconfigure) text="Reconfigurar — sobreescribir Caddyfile (ATENCION: puede romper sitios existentes)" ;;
+                caddy_integrated) text="Integrado con Caddy existente (toda la config preservada)" ;;
+                caddy_admin_added) text="API admin añadida al Caddyfile existente (backup creado)" ;;
+                caddy_resume_added) text="Flag --resume añadido (las rutas persisten entre reinicios)" ;;
+                caddy_resume_exists) text="Flag --resume ya configurado" ;;
+                caddy_reconfiguring) text="Reconfigurando Caddy — creando backups" ;;
+                caddy_backed_up) text="Caddyfile guardado en $1" ;;
+                caddy_autosave_backed) text="autosave.json guardado en $1" ;;
+                caddy_reconfigured) text="Caddyfile reconfigurado" ;;
+                caddy_restarted) text="Caddy reiniciado con nueva configuracion" ;;
+                caddy_configured) text="Caddyfile configurado con API admin" ;;
+                caddy_admin_exists) text="Caddyfile ya tiene API admin habilitada" ;;
+                caddy_running_resume) text="Caddy en ejecucion con --resume" ;;
+                caddy_installed) text="Caddy instalado" ;;
+                caddy_running_persist) text="Caddy en ejecucion con --resume (rutas persisten entre reinicios)" ;;
+                caddy_api_ok) text="API de Caddy accesible en localhost:2019" ;;
+                caddy_api_wait) text="API de Caddy no responde aun (HTTP $1) — puede necesitar un momento" ;;
+                step_mysql) text="Paso 5/7 — Instalando MySQL" ;;
+                mysql_installed) text="MySQL/MariaDB instalado" ;;
+                mysql_exists) text="MySQL/MariaDB ya instalado" ;;
+                mysql_running) text="MySQL en ejecucion" ;;
+                mysql_socket_ok) text="MySQL root usa autenticacion por socket (no necesita contraseña)" ;;
+                mysql_socket_access) text="MySQL root accesible via autenticacion por socket" ;;
+                mysql_pass_recovered) text="Contraseña de MySQL root recuperada del .env existente" ;;
+                mysql_needs_pass) text="El acceso root a MySQL requiere contraseña." ;;
+                mysql_needs_pass_desc) text="El panel necesita acceso root a MySQL para crear bases de datos de clientes." ;;
+                mysql_opt_enter) text="Introducir la contraseña de root de MySQL ahora" ;;
+                mysql_opt_skip) text="Saltar — puedes configurarlo despues en .env (MYSQL_ROOT_PASS)" ;;
+                mysql_attempt) text="Contraseña root MySQL (intento $1/$2): " ;;
+                mysql_pass_verified) text="Contraseña de MySQL root verificada" ;;
+                mysql_invalid_pass) text="Contraseña incorrecta" ;;
+                mysql_auth_failed) text="No se pudo autenticar en MySQL — puedes poner MYSQL_ROOT_PASS en .env despues" ;;
+                mysql_skipped) text="Contraseña de MySQL root omitida — pon MYSQL_ROOT_PASS en .env para crear BDs de clientes" ;;
+                step_panel) text="Paso 6/7 — Configurando MuseDock Panel" ;;
+                dirs_created) text="Directorios creados" ;;
+                env_backed_up) text=".env existente guardado" ;;
+                env_created) text=".env creado (permisos: 600 — solo root)" ;;
+                schema_applied) text="Esquema de base de datos aplicado (tablas existentes preservadas)" ;;
+                permissions_set) text="Permisos establecidos" ;;
+                step_service) text="Paso 7/7 — Configurando servicio systemd" ;;
+                service_started) text="Servicio MuseDock Panel iniciado en puerto $1" ;;
+                health_header) text="Health Check" ;;
+                health_panel_running) text="Servicio panel: en ejecucion" ;;
+                health_panel_down) text="Servicio panel: NO esta en ejecucion" ;;
+                health_panel_fix) text="Fix: systemctl start musedock-panel" ;;
+                health_panel_logs) text="Logs: journalctl -u musedock-panel --no-pager -n 20" ;;
+                health_http_ok) text="Panel HTTP: respondiendo (HTTP $1) en puerto $2" ;;
+                health_http_ip) text="Panel HTTP: respondiendo (HTTP 403 — restriccion IP activa) en puerto $1" ;;
+                health_http_fail) text="Panel HTTP: NO responde (HTTP $1) en puerto $2" ;;
+                health_http_fix) text="Fix: Comprueba que el servicio esta corriendo y el puerto no esta bloqueado" ;;
+                health_pgsql_ok) text="PostgreSQL: conectado a $1 como $2" ;;
+                health_pgsql_fail) text="PostgreSQL: no se puede conectar a $1 como $2" ;;
+                health_pgsql_fix) text="Fix: Verifica que PostgreSQL esta corriendo y las credenciales son correctas" ;;
+                health_mysql_ok) text="MySQL: conectado via autenticacion por $1" ;;
+                health_mysql_fail) text="MySQL: fallo de autenticacion por $1" ;;
+                health_mysql_skip) text="MySQL: omitido (autenticacion no configurada — pon MYSQL_ROOT_PASS en .env)" ;;
+                health_caddy_ok) text="API Caddy: respondiendo en localhost:2019" ;;
+                health_caddy_fail) text="API Caddy: NO responde (HTTP $1)" ;;
+                health_caddy_fix) text="Fix: Verifica que Caddy esta corriendo" ;;
+                health_caddy_ports) text="Puertos Caddy: escuchando en 80/443" ;;
+                health_caddy_no_ports) text="Caddy: no escucha en 80/443 — los sitios pueden no ser accesibles" ;;
+                health_fpm_ok) text="PHP-FPM $1: en ejecucion" ;;
+                health_fpm_fail) text="PHP-FPM $1: NO esta en ejecucion" ;;
+                health_all_ok) text="Todos los checks pasaron! ($1 errores)" ;;
+                health_errors) text="Health check completado con $1 error(es)" ;;
+                health_review) text="Revisa los errores arriba y corrigelos antes de usar el panel." ;;
+                install_complete) text="Instalacion completada!" ;;
+                next_step) text=">>> SIGUIENTE PASO: Crea tu cuenta de administrador <<<" ;;
+                open_browser) text="Abre tu navegador y ve a:" ;;
+                setup_wizard) text="El asistente de configuracion te guiara para crear el usuario y contraseña de admin." ;;
+                save_credentials) text="GUARDA ESTAS CREDENCIALES (se muestran una sola vez):" ;;
+                mysql_auth_label) text="MySQL auth: " ;;
+                mysql_pass_stored) text="MySQL pass: (guardada en .env)" ;;
+                mysql_pass_socket) text="MySQL pass: (no necesaria — auth por socket)" ;;
+                mysql_pass_notset) text="MySQL pass: NO CONFIGURADA — edita .env despues" ;;
+                stored_in_env) text="Tambien guardadas en .env (solo root)." ;;
+                detection_summary) text="RESUMEN DE DETECCION DE SERVICIOS:" ;;
+                plesk_detected_sum) text="Plesk: detectado (resolucion manual de conflictos)" ;;
+                nginx_detected_sum) text="Nginx: detectado — $1" ;;
+                apache_detected_sum) text="Apache: detectado — $1" ;;
+                security_header) text="SEGURIDAD — IMPORTANTE:" ;;
+                security_firewall) text="Protege el puerto del panel con un firewall." ;;
+                security_root) text="El panel se ejecuta como root y tiene acceso total al sistema." ;;
+                security_trusted) text="Solo IPs de administradores de confianza deben alcanzar el puerto $1." ;;
+                security_ufw) text="# Ejemplo UFW — permitir solo tu IP:" ;;
+                security_restrict) text="Restringe IPs en .env (capa adicional):" ;;
+                security_admin_only) text="El puerto del panel es solo para administradores." ;;
+                security_no_public) text="Nunca lo expongas a internet sin un firewall." ;;
+                security_client_sites) text="Los sitios de clientes se sirven por Caddy en puertos 80/443." ;;
+                service_mgmt) text="Gestion del servicio:" ;;
+                snapshot_label) text="Snapshot pre-instalacion:" ;;
+                snapshot_desc) text="(servicios, puertos, configs guardados antes de la instalacion)" ;;
+                uninstall_label) text="Desinstalar:" ;;
+                enjoy) text="Disfruta MuseDock Panel!" ;;
+                firewall_header) text="ACCESO AL PANEL:" ;;
+                firewall_ufw_active) text="UFW esta activo en este servidor." ;;
+                firewall_iptables_active) text="iptables esta activo en este servidor (sin UFW)." ;;
+                firewall_port_open) text="El puerto $1 esta ABIERTO — puedes acceder al panel." ;;
+                firewall_port_closed) text="El puerto $1 esta BLOQUEADO por el firewall." ;;
+                firewall_open_cmd) text="Para abrir el acceso desde tu IP:" ;;
+                firewall_no_detected) text="No se detecto firewall activo (UFW/iptables)." ;;
+                firewall_consider) text="Considera activar un firewall para proteger el puerto $1." ;;
+                firewall_access_url) text="Accede al panel en:" ;;
+                firewall_make_sure) text="Asegurate de que el puerto $1 esta abierto para tu IP de administracion." ;;
+                verify_complete) text="Verificacion completada" ;;
+                verify_all_ok) text="Todo correcto! El panel esta funcionando correctamente." ;;
+                verify_has_errors) text="Se encontraron $1 problema(s). Revisa arriba." ;;
+                *) text="[$key]" ;;
+            esac
+            ;;
+        *)
+            case "$key" in
+                must_be_root) text="This installer must be run as root (sudo bash install.sh)" ;;
+                cannot_detect_os) text="Cannot detect OS. Only Ubuntu 22.04+ and Debian 12+ are supported." ;;
+                os_not_supported) text="$1 $2 not supported. Minimum: $3" ;;
+                os_unknown) text="OS '$1' not supported. Only Ubuntu 22.04+ and Debian 12+ are supported." ;;
+                existing_detected) text="An existing installation has been detected." ;;
+                existing_found) text="Found: $1" ;;
+                existing_options) text="Options:" ;;
+                existing_opt_reinstall) text="Reinstall (will NOT delete the database)" ;;
+                existing_opt_verify) text="Verify only — run health check without changing anything" ;;
+                existing_opt_cancel) text="Cancel" ;;
+                existing_choose) text="Choose [1/2/3] (default: 3): " ;;
+                install_cancelled) text="Installation cancelled. Existing installation preserved." ;;
+                reinstall_mode) text="Reinstall mode — existing .env will be backed up" ;;
+                verify_mode) text="Verify mode — checking system status..." ;;
+                checking_conflicts) text="Checking for conflicting services" ;;
+                plesk_warning) text="WARNING: Plesk detected on this server!" ;;
+                plesk_version) text="Plesk version: $1" ;;
+                plesk_desc) text="Plesk manages its own web server (nginx/Apache), databases, and PHP. Installing MuseDock Panel alongside Plesk may cause port conflicts and service interference." ;;
+                plesk_opt_abort) text="Abort installation (recommended)" ;;
+                plesk_opt_continue) text="Continue anyway (advanced users only — you must resolve conflicts manually)" ;;
+                plesk_aborted) text="Installation aborted. Plesk and MuseDock Panel are not compatible on the same server." ;;
+                plesk_continuing) text="Continuing with Plesk present — manual conflict resolution required" ;;
+                nginx_detected) text="Nginx detected: $1" ;;
+                nginx_plesk_managed) text="This nginx is managed by Plesk — do NOT disable it without Plesk" ;;
+                listening_ports) text="Listening on ports: $1" ;;
+                caddy_port_conflict) text="Caddy needs ports 80/443 — this will cause a conflict." ;;
+                no_port_conflict) text="$1 is installed but NOT listening on ports 80/443" ;;
+                no_conflict_caddy) text="No conflict with Caddy." ;;
+                opt_stop_disable) text="Stop & disable $1 permanently (recommended — frees ports for Caddy)" ;;
+                opt_keep_running) text="Keep $1 running (you must reconfigure ports manually)" ;;
+                opt_abort) text="Abort installation" ;;
+                config_backed_up) text="$1 config backed up to $2" ;;
+                stopped_disabled) text="$1 stopped and disabled (will not start on reboot)" ;;
+                to_reenable) text="To re-enable: systemctl enable --now $1" ;;
+                keep_running_warn) text="$1 kept running — you MUST move it off ports 80/443 before Caddy starts" ;;
+                caddy_fail_bind) text="Otherwise Caddy will fail to bind and websites will not work" ;;
+                plesk_managed_warn) text="$1 is managed by Plesk — cannot disable automatically" ;;
+                plesk_resolve_manual) text="You must resolve the port conflict manually or remove Plesk first" ;;
+                continue_anyway) text="Continue anyway? [y/N] " ;;
+                installation_aborted) text="Installation aborted." ;;
+                apache_detected) text="Apache detected: $1" ;;
+                apache_plesk_managed) text="This Apache is managed by Plesk — do NOT disable it without Plesk" ;;
+                no_conflicts) text="No conflicting services detected (no nginx, no Apache, no Plesk)" ;;
+                configuration) text="Configuration" ;;
+                panel_port_prompt) text="Panel port (default: 8444)" ;;
+                php_version) text="PHP Version" ;;
+                php_available) text="Available: 8.1, 8.2, 8.3, 8.4" ;;
+                php_version_prompt) text="PHP version (default: 8.3)" ;;
+                php_invalid) text="Invalid PHP version. Using 8.3" ;;
+                summary) text="Summary:" ;;
+                summary_port) text="Panel port:   $1" ;;
+                summary_php) text="PHP version:  $1" ;;
+                summary_dir) text="Install dir:  $1" ;;
+                summary_admin) text="Admin setup:  via web wizard on first access" ;;
+                proceed_install) text="Proceed with installation? [Y/n] " ;;
+                snapshot_header) text="Creating pre-installation snapshot" ;;
+                snapshot_services) text="Running services saved" ;;
+                snapshot_ports) text="Listening ports saved" ;;
+                snapshot_caddyfile) text="Caddyfile backed up" ;;
+                snapshot_autosave) text="Caddy autosave.json backed up" ;;
+                snapshot_nginx) text="Nginx config backed up" ;;
+                snapshot_apache) text="Apache config backed up" ;;
+                snapshot_pghba) text="pg_hba.conf backed up" ;;
+                snapshot_env) text="Existing .env backed up" ;;
+                snapshot_packages) text="Package list saved" ;;
+                snapshot_saved) text="Snapshot saved to $1" ;;
+                step_packages) text="Step 1/7 — Installing system packages" ;;
+                pkg_updated) text="Package lists updated" ;;
+                pkg_installed) text="Essential packages installed" ;;
+                step_php) text="Step 2/7 — Installing PHP $1" ;;
+                php_repo_added) text="PHP repository added" ;;
+                php_repo_exists) text="PHP repository already configured" ;;
+                php_installed) text="PHP $1 + extensions installed" ;;
+                php_fpm_started) text="PHP-FPM $1 started" ;;
+                step_pgsql) text="Step 3/7 — Installing PostgreSQL" ;;
+                pgsql_installed) text="PostgreSQL installed" ;;
+                pgsql_exists) text="PostgreSQL already installed" ;;
+                pgsql_running) text="PostgreSQL running" ;;
+                pgsql_reusing) text="Reusing existing database credentials" ;;
+                pgsql_no_pass) text="Could not read existing DB password — generating new one" ;;
+                pgsql_peer_fail) text="PostgreSQL peer authentication is not available." ;;
+                pgsql_peer_desc) text="This may happen if pg_hba.conf uses md5/scram-sha-256 for local connections, or if the 'postgres' system user is not configured for direct access." ;;
+                pgsql_empty_pass) text="Connected to PostgreSQL with default (empty) password" ;;
+                pgsql_enter_pass) text="Enter the PostgreSQL superuser (postgres) password:" ;;
+                pgsql_pass_verified) text="PostgreSQL password verified" ;;
+                pgsql_cannot_connect) text="Cannot connect to PostgreSQL. Check the password and pg_hba.conf settings." ;;
+                pgsql_hba_updated) text="pg_hba.conf updated for panel user access" ;;
+                pgsql_db_created) text="Database '$1' created (user: $2)" ;;
+                step_caddy) text="Step 4/7 — Installing & configuring Caddy" ;;
+                caddy_exists) text="Caddy already installed" ;;
+                caddy_config_detected) text="Existing Caddy configuration detected:" ;;
+                caddy_api_routes) text="$1 active API routes" ;;
+                caddy_caddyfile_domains) text="Caddyfile has domain blocks ($1 entries)" ;;
+                caddy_autosave_found) text="autosave.json found (API-persisted routes)" ;;
+                caddy_may_be_cms) text="This may be MuseDock CMS or another application." ;;
+                caddy_opt_integrate) text="Integrate — use existing Caddy, preserve ALL config (recommended)" ;;
+                caddy_opt_reconfigure) text="Reconfigure — overwrite Caddyfile (WARNING: may break existing sites)" ;;
+                caddy_integrated) text="Integrating with existing Caddy (all existing config preserved)" ;;
+                caddy_admin_added) text="Added admin API to existing Caddyfile (backup created)" ;;
+                caddy_resume_added) text="Added --resume flag (routes will persist across restarts)" ;;
+                caddy_resume_exists) text="--resume flag already configured" ;;
+                caddy_reconfiguring) text="Reconfiguring Caddy — creating backups" ;;
+                caddy_backed_up) text="Caddyfile backed up to $1" ;;
+                caddy_autosave_backed) text="autosave.json backed up to $1" ;;
+                caddy_reconfigured) text="Caddyfile reconfigured" ;;
+                caddy_restarted) text="Caddy restarted with new configuration" ;;
+                caddy_configured) text="Caddyfile configured with admin API" ;;
+                caddy_admin_exists) text="Caddyfile already has admin API enabled" ;;
+                caddy_running_resume) text="Caddy running with --resume" ;;
+                caddy_installed) text="Caddy installed" ;;
+                caddy_running_persist) text="Caddy running with --resume (routes persist across restarts)" ;;
+                caddy_api_ok) text="Caddy API accessible on localhost:2019" ;;
+                caddy_api_wait) text="Caddy API not responding yet (HTTP $1) — may need a moment to start" ;;
+                step_mysql) text="Step 5/7 — Installing MySQL" ;;
+                mysql_installed) text="MySQL/MariaDB installed" ;;
+                mysql_exists) text="MySQL/MariaDB already installed" ;;
+                mysql_running) text="MySQL running" ;;
+                mysql_socket_ok) text="MySQL root uses socket authentication (no password needed)" ;;
+                mysql_socket_access) text="MySQL root access via socket authentication" ;;
+                mysql_pass_recovered) text="MySQL root password recovered from existing .env" ;;
+                mysql_needs_pass) text="MySQL root access requires a password." ;;
+                mysql_needs_pass_desc) text="The panel needs MySQL root access to create client databases." ;;
+                mysql_opt_enter) text="Enter the MySQL root password now" ;;
+                mysql_opt_skip) text="Skip — you can configure this later in .env (MYSQL_ROOT_PASS)" ;;
+                mysql_attempt) text="MySQL root password (attempt $1/$2): " ;;
+                mysql_pass_verified) text="MySQL root password verified" ;;
+                mysql_invalid_pass) text="Invalid password" ;;
+                mysql_auth_failed) text="Could not authenticate to MySQL — you can set MYSQL_ROOT_PASS in .env later" ;;
+                mysql_skipped) text="MySQL root password skipped — set MYSQL_ROOT_PASS in .env to enable client DB creation" ;;
+                step_panel) text="Step 6/7 — Setting up MuseDock Panel" ;;
+                dirs_created) text="Directories created" ;;
+                env_backed_up) text="Existing .env backed up" ;;
+                env_created) text=".env created (permissions: 600 — root only)" ;;
+                schema_applied) text="Database schema applied (existing tables preserved)" ;;
+                permissions_set) text="Permissions set" ;;
+                step_service) text="Step 7/7 — Configuring systemd service" ;;
+                service_started) text="MuseDock Panel service started on port $1" ;;
+                health_header) text="Health Check" ;;
+                health_panel_running) text="Panel service: running" ;;
+                health_panel_down) text="Panel service: NOT running" ;;
+                health_panel_fix) text="Fix: systemctl start musedock-panel" ;;
+                health_panel_logs) text="Logs: journalctl -u musedock-panel --no-pager -n 20" ;;
+                health_http_ok) text="Panel HTTP: responding (HTTP $1) on port $2" ;;
+                health_http_ip) text="Panel HTTP: responding (HTTP 403 — IP restriction active) on port $1" ;;
+                health_http_fail) text="Panel HTTP: NOT responding (HTTP $1) on port $2" ;;
+                health_http_fix) text="Fix: Check if the service is running and the port is not blocked" ;;
+                health_pgsql_ok) text="PostgreSQL: connected to $1 as $2" ;;
+                health_pgsql_fail) text="PostgreSQL: cannot connect to $1 as $2" ;;
+                health_pgsql_fix) text="Fix: Check PostgreSQL is running and credentials are correct" ;;
+                health_mysql_ok) text="MySQL: connected via $1 authentication" ;;
+                health_mysql_fail) text="MySQL: $1 auth failed" ;;
+                health_mysql_skip) text="MySQL: skipped (authentication not configured — set MYSQL_ROOT_PASS in .env)" ;;
+                health_caddy_ok) text="Caddy API: responding on localhost:2019" ;;
+                health_caddy_fail) text="Caddy API: NOT responding (HTTP $1)" ;;
+                health_caddy_fix) text="Fix: Check Caddy is running" ;;
+                health_caddy_ports) text="Caddy ports: listening on 80/443" ;;
+                health_caddy_no_ports) text="Caddy: not listening on 80/443 — sites may not be reachable" ;;
+                health_fpm_ok) text="PHP-FPM $1: running" ;;
+                health_fpm_fail) text="PHP-FPM $1: NOT running" ;;
+                health_all_ok) text="All health checks passed! ($1 errors)" ;;
+                health_errors) text="Health check completed with $1 error(s)" ;;
+                health_review) text="Review the errors above and fix them before using the panel." ;;
+                install_complete) text="Installation completed!" ;;
+                next_step) text=">>> NEXT STEP: Create your admin account <<<" ;;
+                open_browser) text="Open your browser and go to:" ;;
+                setup_wizard) text="The setup wizard will guide you through creating the admin username and password." ;;
+                save_credentials) text="SAVE THESE CREDENTIALS (shown only once):" ;;
+                mysql_auth_label) text="MySQL auth: " ;;
+                mysql_pass_stored) text="MySQL pass: (stored in .env)" ;;
+                mysql_pass_socket) text="MySQL pass: (not needed — socket auth)" ;;
+                mysql_pass_notset) text="MySQL pass: NOT SET — edit .env later" ;;
+                stored_in_env) text="These are also stored in .env (root only)." ;;
+                detection_summary) text="SERVICE DETECTION SUMMARY:" ;;
+                plesk_detected_sum) text="Plesk: detected (manual conflict resolution)" ;;
+                nginx_detected_sum) text="Nginx: detected — $1" ;;
+                apache_detected_sum) text="Apache: detected — $1" ;;
+                security_header) text="SECURITY — IMPORTANT:" ;;
+                security_firewall) text="Protect the panel port with a firewall." ;;
+                security_root) text="The panel runs as root and has full system access." ;;
+                security_trusted) text="Only trusted administrator IPs should reach port $1." ;;
+                security_ufw) text="# UFW example — allow only your IP:" ;;
+                security_restrict) text="Restrict IPs in .env (additional layer):" ;;
+                security_admin_only) text="The panel port is for administrators only." ;;
+                security_no_public) text="Never expose it to the public internet without a firewall." ;;
+                security_client_sites) text="Hosting client sites are served by Caddy on ports 80/443." ;;
+                service_mgmt) text="Service management:" ;;
+                snapshot_label) text="Pre-install snapshot:" ;;
+                snapshot_desc) text="(services, ports, configs saved before installation)" ;;
+                uninstall_label) text="Uninstall:" ;;
+                enjoy) text="Enjoy MuseDock Panel!" ;;
+                firewall_header) text="PANEL ACCESS:" ;;
+                firewall_ufw_active) text="UFW is active on this server." ;;
+                firewall_iptables_active) text="iptables is active on this server (no UFW)." ;;
+                firewall_port_open) text="Port $1 is OPEN — you can access the panel." ;;
+                firewall_port_closed) text="Port $1 is BLOCKED by the firewall." ;;
+                firewall_open_cmd) text="To open access from your IP:" ;;
+                firewall_no_detected) text="No active firewall detected (UFW/iptables)." ;;
+                firewall_consider) text="Consider enabling a firewall to protect port $1." ;;
+                firewall_access_url) text="Access the panel at:" ;;
+                firewall_make_sure) text="Make sure port $1 is open for your admin IP." ;;
+                verify_complete) text="Verification complete" ;;
+                verify_all_ok) text="Everything OK! The panel is running correctly." ;;
+                verify_has_errors) text="Found $1 issue(s). Review above." ;;
+                *) text="[$key]" ;;
+            esac
+            ;;
+    esac
+    echo "$text"
+}
+
+# ============================================================
 # Pre-flight checks
 # ============================================================
-
-# 1. Must be root
-if [ "$EUID" -ne 0 ]; then
-    fail "This installer must be run as root (sudo bash install.sh)"
-fi
 
 # 2. Detect OS
 if [ -f /etc/os-release ]; then
@@ -36,27 +485,24 @@ if [ -f /etc/os-release ]; then
     OS_ID="$ID"
     OS_VERSION="$VERSION_ID"
 else
-    fail "Cannot detect OS. Only Ubuntu 22.04+ and Debian 12+ are supported."
+    fail "$(t cannot_detect_os)"
 fi
 
 case "$OS_ID" in
     ubuntu)
         if [[ "$OS_VERSION" < "22.04" ]]; then
-            fail "Ubuntu $OS_VERSION not supported. Minimum: 22.04"
+            fail "$(t os_not_supported Ubuntu "$OS_VERSION" 22.04)"
         fi
         ;;
     debian)
         if [[ "$OS_VERSION" < "12" ]]; then
-            fail "Debian $OS_VERSION not supported. Minimum: 12"
+            fail "$(t os_not_supported Debian "$OS_VERSION" 12)"
         fi
         ;;
     *)
-        fail "OS '$OS_ID' not supported. Only Ubuntu 22.04+ and Debian 12+ are supported."
+        fail "$(t os_unknown "$OS_ID")"
         ;;
 esac
-
-# Resolve PANEL_DIR (directory where this script lives)
-PANEL_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 echo ""
 echo -e "${CYAN}${BOLD}"
@@ -71,25 +517,55 @@ echo ""
 
 # 3. Check for existing installation
 REINSTALL=false
+VERIFY_ONLY=false
 if [ -f "${PANEL_DIR}/.env" ]; then
-    echo -e "  ${YELLOW}${BOLD}An existing installation has been detected.${NC}"
-    echo -e "  ${YELLOW}Found: ${PANEL_DIR}/.env${NC}"
+    echo -e "  ${YELLOW}${BOLD}$(t existing_detected)${NC}"
+    echo -e "  ${YELLOW}$(t existing_found "${PANEL_DIR}/.env")${NC}"
     echo ""
-    read -rp "  Reinstall? This will NOT delete the existing database. [y/N] " REINSTALL_CONFIRM
-    if [[ ! "$REINSTALL_CONFIRM" =~ ^[Yy]$ ]]; then
-        echo ""
-        echo -e "  Installation cancelled. Existing installation preserved."
-        exit 0
-    fi
-    REINSTALL=true
+    echo "  $(t existing_options)"
+    echo "    1) $(t existing_opt_reinstall)"
+    echo "    2) $(t existing_opt_verify)"
+    echo "    3) $(t existing_opt_cancel)"
     echo ""
-    ok "Reinstall mode — existing .env will be backed up"
+    read -rp "  $(t existing_choose)" EXISTING_CHOICE
+    EXISTING_CHOICE=${EXISTING_CHOICE:-3}
+
+    case "$EXISTING_CHOICE" in
+        1)
+            REINSTALL=true
+            echo ""
+            ok "$(t reinstall_mode)"
+            ;;
+        2)
+            VERIFY_ONLY=true
+            echo ""
+            ok "$(t verify_mode)"
+            # Read existing .env for health check
+            PANEL_PORT=$(grep -E '^PANEL_PORT=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "8444")
+            DB_NAME=$(grep -E '^DB_NAME=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "musedock_panel")
+            DB_USER=$(grep -E '^DB_USER=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "musedock_panel")
+            DB_PASS=$(grep -E '^DB_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "")
+            PHP_VER=$(grep -E '^FPM_PHP_VERSION=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "8.3")
+            MYSQL_AUTH_METHOD=$(grep -E '^MYSQL_AUTH_METHOD=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "unknown")
+            MYSQL_ROOT_PASS=$(grep -E '^MYSQL_ROOT_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "")
+            ;;
+        *)
+            echo ""
+            echo -e "  $(t install_cancelled)"
+            exit 0
+            ;;
+    esac
 fi
 
 # ============================================================
 # Detect conflicting services (nginx, Apache, Plesk)
 # ============================================================
-header "Checking for conflicting services"
+if [ "$VERIFY_ONLY" = true ]; then
+    # Skip to health check section
+    header "$(t health_header)"
+else
+# Begin install flow
+header "$(t checking_conflicts)"
 
 PLESK_DETECTED=false
 NGINX_DETECTED=false
@@ -103,27 +579,25 @@ if [ -d /usr/local/psa ] || command -v psa &> /dev/null || [ -f /etc/init.d/psa 
     PLESK_VERSION=$(plesk version 2>/dev/null | head -1 || echo "unknown version")
     echo ""
     echo -e "  ${RED}${BOLD}╔══════════════════════════════════════════════════╗${NC}"
-    echo -e "  ${RED}${BOLD}║  WARNING: Plesk detected on this server!         ║${NC}"
+    echo -e "  ${RED}${BOLD}║  $(t plesk_warning)${NC}"
     echo -e "  ${RED}${BOLD}╚══════════════════════════════════════════════════╝${NC}"
     echo ""
-    echo -e "  ${YELLOW}Plesk version: ${PLESK_VERSION}${NC}"
-    echo -e "  ${YELLOW}Plesk manages its own web server (nginx/Apache), databases,${NC}"
-    echo -e "  ${YELLOW}and PHP. Installing MuseDock Panel alongside Plesk may${NC}"
-    echo -e "  ${YELLOW}cause port conflicts and service interference.${NC}"
+    echo -e "  ${YELLOW}$(t plesk_version "$PLESK_VERSION")${NC}"
+    echo -e "  ${YELLOW}$(t plesk_desc)${NC}"
     echo ""
-    echo "  Options:"
-    echo "    1) Abort installation (recommended)"
-    echo "    2) Continue anyway (advanced users only — you must resolve conflicts manually)"
+    echo "  $(t existing_options)"
+    echo "    1) $(t plesk_opt_abort)"
+    echo "    2) $(t plesk_opt_continue)"
     echo ""
     read -rp "  Choose [1/2] (default: 1): " PLESK_CHOICE
     PLESK_CHOICE=${PLESK_CHOICE:-1}
 
     if [ "$PLESK_CHOICE" = "1" ]; then
         echo ""
-        echo -e "  Installation aborted. Plesk and MuseDock Panel are not compatible on the same server."
+        echo -e "  $(t plesk_aborted)"
         exit 0
     else
-        warn "Continuing with Plesk present — manual conflict resolution required"
+        warn "$(t plesk_continuing)"
     fi
 fi
 
@@ -152,24 +626,24 @@ if command -v nginx &> /dev/null; then
     fi
 
     echo ""
-    echo -e "  ${YELLOW}${BOLD}Nginx detected: ${NGINX_VERSION}${NC}"
+    echo -e "  ${YELLOW}${BOLD}$(t nginx_detected "$NGINX_VERSION")${NC}"
     if [ "$NGINX_IS_PLESK" = true ]; then
-        echo -e "  ${YELLOW}  ⚠ This nginx is managed by Plesk — do NOT disable it without Plesk${NC}"
+        echo -e "  ${YELLOW}  $(t nginx_plesk_managed)${NC}"
     fi
     if [ -n "$NGINX_PORTS" ]; then
-        echo -e "  ${YELLOW}  Listening on ports: ${NGINX_PORTS}${NC}"
-        echo -e "  ${YELLOW}  Caddy needs ports 80/443 — this will cause a conflict.${NC}"
+        echo -e "  ${YELLOW}  $(t listening_ports "$NGINX_PORTS")${NC}"
+        echo -e "  ${YELLOW}  $(t caddy_port_conflict)${NC}"
     else
-        echo -e "  ${GREEN}  Nginx is installed but NOT listening on ports 80/443${NC}"
-        echo -e "  ${GREEN}  No conflict with Caddy.${NC}"
+        echo -e "  ${GREEN}  $(t no_port_conflict Nginx)${NC}"
+        echo -e "  ${GREEN}  $(t no_conflict_caddy)${NC}"
     fi
 
     if [ "$NGINX_ON_HTTP" = true ] && [ "$NGINX_IS_PLESK" = false ]; then
         echo ""
-        echo "  Options:"
-        echo "    1) Stop & disable nginx permanently (recommended — frees ports for Caddy)"
-        echo "    2) Keep nginx running (you must reconfigure ports manually)"
-        echo "    3) Abort installation"
+        echo "  $(t existing_options)"
+        echo "    1) $(t opt_stop_disable nginx)"
+        echo "    2) $(t opt_keep_running nginx)"
+        echo "    3) $(t opt_abort)"
         echo ""
         read -rp "  Choose [1/2/3] (default: 1): " NGINX_CHOICE
         NGINX_CHOICE=${NGINX_CHOICE:-1}
@@ -180,30 +654,30 @@ if command -v nginx &> /dev/null; then
                 BACKUP_TS=$(date +%Y%m%d%H%M%S)
                 if [ -d /etc/nginx ]; then
                     tar czf "/etc/nginx.backup.${BACKUP_TS}.tar.gz" /etc/nginx 2>/dev/null || true
-                    ok "Nginx config backed up to /etc/nginx.backup.${BACKUP_TS}.tar.gz"
+                    ok "$(t config_backed_up Nginx "/etc/nginx.backup.${BACKUP_TS}.tar.gz")"
                 fi
                 systemctl stop nginx 2>/dev/null || true
                 systemctl disable nginx 2>/dev/null || true
-                ok "Nginx stopped and disabled (will not start on reboot)"
-                echo -e "  ${CYAN}  To re-enable: systemctl enable --now nginx${NC}"
+                ok "$(t stopped_disabled Nginx)"
+                echo -e "  ${CYAN}  $(t to_reenable nginx)${NC}"
                 echo -e "  ${CYAN}  Config backup: /etc/nginx.backup.${BACKUP_TS}.tar.gz${NC}"
                 ;;
             2)
-                warn "Nginx kept running — you MUST move nginx off ports 80/443 before Caddy starts"
-                warn "Otherwise Caddy will fail to bind and websites will not work"
+                warn "$(t keep_running_warn Nginx)"
+                warn "$(t caddy_fail_bind)"
                 ;;
             3)
                 echo ""
-                echo -e "  Installation aborted."
+                echo -e "  $(t installation_aborted)"
                 exit 0
                 ;;
         esac
     elif [ "$NGINX_ON_HTTP" = true ] && [ "$NGINX_IS_PLESK" = true ]; then
-        warn "Nginx is managed by Plesk — cannot disable automatically"
-        warn "You must resolve the port conflict manually or remove Plesk first"
-        read -rp "  Continue anyway? [y/N] " NGINX_PLESK_CONTINUE
-        if [[ ! "$NGINX_PLESK_CONTINUE" =~ ^[Yy]$ ]]; then
-            echo "  Installation aborted."
+        warn "$(t plesk_managed_warn Nginx)"
+        warn "$(t plesk_resolve_manual)"
+        read -rp "  $(t continue_anyway)" NGINX_PLESK_CONTINUE
+        if [[ ! "$NGINX_PLESK_CONTINUE" =~ ^[YySs]$ ]]; then
+            echo "  $(t installation_aborted)"
             exit 0
         fi
     fi
@@ -236,24 +710,24 @@ if command -v apache2 &> /dev/null || command -v httpd &> /dev/null; then
     fi
 
     echo ""
-    echo -e "  ${YELLOW}${BOLD}Apache detected: ${APACHE_VERSION}${NC}"
+    echo -e "  ${YELLOW}${BOLD}$(t apache_detected "$APACHE_VERSION")${NC}"
     if [ "$APACHE_IS_PLESK" = true ]; then
-        echo -e "  ${YELLOW}  ⚠ This Apache is managed by Plesk — do NOT disable it without Plesk${NC}"
+        echo -e "  ${YELLOW}  $(t apache_plesk_managed)${NC}"
     fi
     if [ -n "$APACHE_PORTS" ]; then
-        echo -e "  ${YELLOW}  Listening on ports: ${APACHE_PORTS}${NC}"
-        echo -e "  ${YELLOW}  Caddy needs ports 80/443 — this will cause a conflict.${NC}"
+        echo -e "  ${YELLOW}  $(t listening_ports "$APACHE_PORTS")${NC}"
+        echo -e "  ${YELLOW}  $(t caddy_port_conflict)${NC}"
     else
-        echo -e "  ${GREEN}  Apache is installed but NOT listening on ports 80/443${NC}"
-        echo -e "  ${GREEN}  No conflict with Caddy.${NC}"
+        echo -e "  ${GREEN}  $(t no_port_conflict Apache)${NC}"
+        echo -e "  ${GREEN}  $(t no_conflict_caddy)${NC}"
     fi
 
     if [ "$APACHE_ON_HTTP" = true ] && [ "$APACHE_IS_PLESK" = false ]; then
         echo ""
-        echo "  Options:"
-        echo "    1) Stop & disable Apache permanently (recommended — frees ports for Caddy)"
-        echo "    2) Keep Apache running (you must reconfigure ports manually)"
-        echo "    3) Abort installation"
+        echo "  $(t existing_options)"
+        echo "    1) $(t opt_stop_disable Apache)"
+        echo "    2) $(t opt_keep_running Apache)"
+        echo "    3) $(t opt_abort)"
         echo ""
         read -rp "  Choose [1/2/3] (default: 1): " APACHE_CHOICE
         APACHE_CHOICE=${APACHE_CHOICE:-1}
@@ -265,30 +739,30 @@ if command -v apache2 &> /dev/null || command -v httpd &> /dev/null; then
                 APACHE_CONF_DIR="/etc/${APACHE_SVC}"
                 if [ -d "$APACHE_CONF_DIR" ]; then
                     tar czf "${APACHE_CONF_DIR}.backup.${BACKUP_TS}.tar.gz" "$APACHE_CONF_DIR" 2>/dev/null || true
-                    ok "Apache config backed up to ${APACHE_CONF_DIR}.backup.${BACKUP_TS}.tar.gz"
+                    ok "$(t config_backed_up Apache "${APACHE_CONF_DIR}.backup.${BACKUP_TS}.tar.gz")"
                 fi
                 systemctl stop "$APACHE_SVC" 2>/dev/null || true
                 systemctl disable "$APACHE_SVC" 2>/dev/null || true
-                ok "Apache stopped and disabled (will not start on reboot)"
-                echo -e "  ${CYAN}  To re-enable: systemctl enable --now ${APACHE_SVC}${NC}"
+                ok "$(t stopped_disabled Apache)"
+                echo -e "  ${CYAN}  $(t to_reenable "$APACHE_SVC")${NC}"
                 echo -e "  ${CYAN}  Config backup: ${APACHE_CONF_DIR}.backup.${BACKUP_TS}.tar.gz${NC}"
                 ;;
             2)
-                warn "Apache kept running — you MUST move Apache off ports 80/443 before Caddy starts"
-                warn "Otherwise Caddy will fail to bind and websites will not work"
+                warn "$(t keep_running_warn Apache)"
+                warn "$(t caddy_fail_bind)"
                 ;;
             3)
                 echo ""
-                echo -e "  Installation aborted."
+                echo -e "  $(t installation_aborted)"
                 exit 0
                 ;;
         esac
     elif [ "$APACHE_ON_HTTP" = true ] && [ "$APACHE_IS_PLESK" = true ]; then
-        warn "Apache is managed by Plesk — cannot disable automatically"
-        warn "You must resolve the port conflict manually or remove Plesk first"
-        read -rp "  Continue anyway? [y/N] " APACHE_PLESK_CONTINUE
-        if [[ ! "$APACHE_PLESK_CONTINUE" =~ ^[Yy]$ ]]; then
-            echo "  Installation aborted."
+        warn "$(t plesk_managed_warn Apache)"
+        warn "$(t plesk_resolve_manual)"
+        read -rp "  $(t continue_anyway)" APACHE_PLESK_CONTINUE
+        if [[ ! "$APACHE_PLESK_CONTINUE" =~ ^[YySs]$ ]]; then
+            echo "  $(t installation_aborted)"
             exit 0
         fi
     fi
@@ -296,52 +770,52 @@ fi
 
 # Summary of detections
 if [ "$NGINX_DETECTED" = false ] && [ "$APACHE_DETECTED" = false ] && [ "$PLESK_DETECTED" = false ]; then
-    ok "No conflicting services detected (no nginx, no Apache, no Plesk)"
+    ok "$(t no_conflicts)"
 fi
 
 # ============================================================
 # Configuration prompts
 # ============================================================
-header "Configuration"
+header "$(t configuration)"
 
 PANEL_PORT=8444
 
 # Panel port
-ask "Panel port (default: 8444)" USER_PORT
+ask "$(t panel_port_prompt)" USER_PORT
 PANEL_PORT=${USER_PORT:-8444}
 
 # PHP version
 echo ""
-echo -e "  ${BOLD}PHP Version${NC}"
-echo "  Available: 8.1, 8.2, 8.3, 8.4"
-ask "PHP version (default: 8.3)" PHP_VER
+echo -e "  ${BOLD}$(t php_version)${NC}"
+echo "  $(t php_available)"
+ask "$(t php_version_prompt)" PHP_VER
 PHP_VER=${PHP_VER:-8.3}
 
 # Validate PHP version
 case "$PHP_VER" in
     8.1|8.2|8.3|8.4) ;;
-    *) warn "Invalid PHP version. Using 8.3"; PHP_VER="8.3" ;;
+    *) warn "$(t php_invalid)"; PHP_VER="8.3" ;;
 esac
 
 echo ""
-echo -e "  ${BOLD}Summary:${NC}"
-echo "  - Panel port:   $PANEL_PORT"
-echo "  - PHP version:  $PHP_VER"
-echo "  - Install dir:  $PANEL_DIR"
-echo -e "  - Admin setup:  ${CYAN}via web wizard on first access${NC}"
+echo -e "  ${BOLD}$(t summary)${NC}"
+echo "  - $(t summary_port "$PANEL_PORT")"
+echo "  - $(t summary_php "$PHP_VER")"
+echo "  - $(t summary_dir "$PANEL_DIR")"
+echo -e "  - ${CYAN}$(t summary_admin)${NC}"
 echo ""
 
-read -rp "  Proceed with installation? [Y/n] " CONFIRM
+read -rp "  $(t proceed_install)" CONFIRM
 CONFIRM=${CONFIRM:-Y}
-if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
-    echo "  Installation cancelled."
+if [[ ! "$CONFIRM" =~ ^[YySs]$ ]]; then
+    echo "  $(t install_cancelled)"
     exit 0
 fi
 
 # ============================================================
 # Pre-installation snapshot
 # ============================================================
-header "Creating pre-installation snapshot"
+header "$(t snapshot_header)"
 
 SNAPSHOT_DIR="${PANEL_DIR}/install-backup"
 SNAPSHOT_TS=$(date +%Y%m%d%H%M%S)
@@ -350,16 +824,16 @@ mkdir -p "${SNAPSHOT_DIR}/${SNAPSHOT_TS}"
 # Running services
 systemctl list-units --type=service --state=running --no-pager --no-legend \
     > "${SNAPSHOT_DIR}/${SNAPSHOT_TS}/services-running.txt" 2>/dev/null
-ok "Running services saved"
+ok "$(t snapshot_services)"
 
 # Listening ports
 ss -tlnp > "${SNAPSHOT_DIR}/${SNAPSHOT_TS}/ports-listening.txt" 2>/dev/null
-ok "Listening ports saved"
+ok "$(t snapshot_ports)"
 
 # Caddy config
 if [ -f /etc/caddy/Caddyfile ]; then
     cp /etc/caddy/Caddyfile "${SNAPSHOT_DIR}/${SNAPSHOT_TS}/Caddyfile.bak"
-    ok "Caddyfile backed up"
+    ok "$(t snapshot_caddyfile)"
 fi
 # Caddy autosave.json
 SNAP_CADDY_HOME=$(caddy environ 2>/dev/null | grep 'caddy.AppConfigDir=' | cut -d= -f2 || echo "")
@@ -370,20 +844,20 @@ if [ -z "$SNAP_CADDY_HOME" ]; then
 fi
 if [ -n "$SNAP_CADDY_HOME" ] && [ -f "${SNAP_CADDY_HOME}/autosave.json" ]; then
     cp "${SNAP_CADDY_HOME}/autosave.json" "${SNAPSHOT_DIR}/${SNAPSHOT_TS}/autosave.json.bak"
-    ok "Caddy autosave.json backed up"
+    ok "$(t snapshot_autosave)"
 fi
 
 # Nginx config
 if [ -d /etc/nginx ]; then
     tar czf "${SNAPSHOT_DIR}/${SNAPSHOT_TS}/nginx-config.tar.gz" /etc/nginx 2>/dev/null && \
-        ok "Nginx config backed up" || true
+        ok "$(t snapshot_nginx)" || true
 fi
 
 # Apache config
 for apache_dir in /etc/apache2 /etc/httpd; do
     if [ -d "$apache_dir" ]; then
         tar czf "${SNAPSHOT_DIR}/${SNAPSHOT_TS}/apache-config.tar.gz" "$apache_dir" 2>/dev/null && \
-            ok "Apache config backed up" || true
+            ok "$(t snapshot_apache)" || true
         break
     fi
 done
@@ -392,23 +866,23 @@ done
 PG_HBA_SNAP=$(find /etc/postgresql -name pg_hba.conf 2>/dev/null | head -1)
 if [ -n "$PG_HBA_SNAP" ] && [ -f "$PG_HBA_SNAP" ]; then
     cp "$PG_HBA_SNAP" "${SNAPSHOT_DIR}/${SNAPSHOT_TS}/pg_hba.conf.bak"
-    ok "pg_hba.conf backed up"
+    ok "$(t snapshot_pghba)"
 fi
 
 # Existing .env
 if [ -f "${PANEL_DIR}/.env" ]; then
     cp "${PANEL_DIR}/.env" "${SNAPSHOT_DIR}/${SNAPSHOT_TS}/env.bak"
-    ok "Existing .env backed up"
+    ok "$(t snapshot_env)"
 fi
 
 # Installed packages relevant to us
 dpkg -l | grep -E '(caddy|nginx|apache2|postgresql|mysql|mariadb|php)' \
     > "${SNAPSHOT_DIR}/${SNAPSHOT_TS}/packages-installed.txt" 2>/dev/null || true
-ok "Package list saved"
+ok "$(t snapshot_packages)"
 
 # Symlink latest snapshot for easy access
 ln -sfn "${SNAPSHOT_DIR}/${SNAPSHOT_TS}" "${SNAPSHOT_DIR}/latest"
-ok "Snapshot saved to ${SNAPSHOT_DIR}/${SNAPSHOT_TS}/"
+ok "$(t snapshot_saved "${SNAPSHOT_DIR}/${SNAPSHOT_TS}/")"
 
 # ============================================================
 # Generate database password
@@ -420,21 +894,21 @@ DB_USER="musedock_panel"
 # ============================================================
 # Step 1: System packages
 # ============================================================
-header "Step 1/7 — Installing system packages"
+header "$(t step_packages)"
 
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update -qq
-ok "Package lists updated"
+ok "$(t pkg_updated)"
 
 apt-get install -y -qq curl wget gnupg2 lsb-release apt-transport-https ca-certificates \
     software-properties-common unzip git acl > /dev/null 2>&1
-ok "Essential packages installed"
+ok "$(t pkg_installed)"
 
 # ============================================================
 # Step 2: PHP
 # ============================================================
-header "Step 2/7 — Installing PHP $PHP_VER"
+header "$(t step_php "$PHP_VER")"
 
 # Add Ondrej PPA for PHP (check multiple possible filenames)
 PHP_REPO_EXISTS=false
@@ -455,36 +929,36 @@ if [ "$PHP_REPO_EXISTS" = false ]; then
         rm -f /tmp/debsuryorg-archive-keyring.deb
     fi
     apt-get update -qq
-    ok "PHP repository added"
+    ok "$(t php_repo_added)"
 else
-    ok "PHP repository already configured"
+    ok "$(t php_repo_exists)"
 fi
 
 apt-get install -y -qq \
     php${PHP_VER}-cli php${PHP_VER}-fpm php${PHP_VER}-pgsql php${PHP_VER}-curl \
     php${PHP_VER}-mbstring php${PHP_VER}-xml php${PHP_VER}-zip php${PHP_VER}-gd \
     php${PHP_VER}-intl php${PHP_VER}-bcmath php${PHP_VER}-mysql > /dev/null 2>&1
-ok "PHP $PHP_VER + extensions installed"
+ok "$(t php_installed "$PHP_VER")"
 
 systemctl enable php${PHP_VER}-fpm > /dev/null 2>&1
 systemctl start php${PHP_VER}-fpm
-ok "PHP-FPM $PHP_VER started"
+ok "$(t php_fpm_started "$PHP_VER")"
 
 # ============================================================
 # Step 3: PostgreSQL
 # ============================================================
-header "Step 3/7 — Installing PostgreSQL"
+header "$(t step_pgsql)"
 
 if ! command -v psql &> /dev/null; then
     apt-get install -y -qq postgresql postgresql-client > /dev/null 2>&1
-    ok "PostgreSQL installed"
+    ok "$(t pgsql_installed)"
 else
-    ok "PostgreSQL already installed"
+    ok "$(t pgsql_exists)"
 fi
 
 systemctl enable postgresql > /dev/null 2>&1
 systemctl start postgresql
-ok "PostgreSQL running"
+ok "$(t pgsql_running)"
 
 # Create database and user (skip if reinstalling — preserve existing data)
 if [ "$REINSTALL" = true ]; then
@@ -492,9 +966,9 @@ if [ "$REINSTALL" = true ]; then
     EXISTING_DB_PASS=$(grep -E '^DB_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'')
     if [ -n "$EXISTING_DB_PASS" ]; then
         DB_PASS="$EXISTING_DB_PASS"
-        ok "Reusing existing database credentials"
+        ok "$(t pgsql_reusing)"
     else
-        warn "Could not read existing DB password — generating new one"
+        warn "$(t pgsql_no_pass)"
     fi
 else
     # Fresh install — create user and database
@@ -506,26 +980,25 @@ else
     if ! sudo -u postgres psql -c "SELECT 1;" > /dev/null 2>&1; then
         PG_AUTH_METHOD="password"
         echo ""
-        echo -e "  ${YELLOW}${BOLD}PostgreSQL peer authentication is not available.${NC}"
-        echo -e "  ${YELLOW}This may happen if pg_hba.conf uses md5/scram-sha-256 for local connections,${NC}"
-        echo -e "  ${YELLOW}or if the 'postgres' system user is not configured for direct access.${NC}"
+        echo -e "  ${YELLOW}${BOLD}$(t pgsql_peer_fail)${NC}"
+        echo -e "  ${YELLOW}$(t pgsql_peer_desc)${NC}"
         echo ""
 
         # Try with empty password first (some default installs)
         if PGPASSWORD="" psql -U postgres -h 127.0.0.1 -c "SELECT 1;" > /dev/null 2>&1; then
-            ok "Connected to PostgreSQL with default (empty) password"
+            ok "$(t pgsql_empty_pass)"
             PG_PASS_ENV=""
         else
-            echo -e "  ${BOLD}Enter the PostgreSQL superuser (postgres) password:${NC}"
+            echo -e "  ${BOLD}$(t pgsql_enter_pass)${NC}"
             read -rsp "  Password: " PG_SUPERUSER_PASS
             echo ""
 
             # Validate the password
             if PGPASSWORD="$PG_SUPERUSER_PASS" psql -U postgres -h 127.0.0.1 -c "SELECT 1;" > /dev/null 2>&1; then
-                ok "PostgreSQL password verified"
+                ok "$(t pgsql_pass_verified)"
                 PG_PASS_ENV="$PG_SUPERUSER_PASS"
             else
-                fail "Cannot connect to PostgreSQL. Check the password and pg_hba.conf settings."
+                fail "$(t pgsql_cannot_connect)"
             fi
         fi
     fi
@@ -572,17 +1045,17 @@ else
                 echo "host    ${DB_NAME}    ${DB_USER}    127.0.0.1/32    md5" >> "$PG_HBA"
             # Reload PostgreSQL to apply pg_hba changes
             systemctl reload postgresql 2>/dev/null || sudo -u postgres pg_ctl reload 2>/dev/null || true
-            ok "pg_hba.conf updated for panel user access"
+            ok "$(t pgsql_hba_updated)"
         fi
     fi
 
-    ok "Database '${DB_NAME}' created (user: ${DB_USER})"
+    ok "$(t pgsql_db_created "$DB_NAME" "$DB_USER")"
 fi
 
 # ============================================================
 # Step 4: Caddy
 # ============================================================
-header "Step 4/7 — Installing & configuring Caddy"
+header "$(t step_caddy)"
 
 CADDY_FILE="/etc/caddy/Caddyfile"
 CADDY_WAS_RUNNING=false
@@ -591,7 +1064,7 @@ CADDY_EXISTING=false
 # Detect existing Caddy
 if command -v caddy &> /dev/null; then
     CADDY_EXISTING=true
-    ok "Caddy already installed"
+    ok "$(t caddy_exists)"
 
     # Check if Caddy is running
     if systemctl is-active --quiet caddy 2>/dev/null; then
@@ -910,6 +1383,9 @@ ALLOWED_IPS=
 # MySQL — for client database management
 MYSQL_AUTH_METHOD=${MYSQL_AUTH_METHOD}
 MYSQL_ROOT_PASS=${MYSQL_ROOT_PASS}
+
+# Internal port for PHP (Caddy proxies PANEL_PORT → PANEL_INTERNAL_PORT)
+PANEL_INTERNAL_PORT=$((PANEL_PORT + 1))
 ENVEOF
 
 chmod 600 "${PANEL_DIR}/.env"
@@ -924,120 +1400,213 @@ chmod -R 750 "${PANEL_DIR}/storage"
 ok "Permissions set"
 
 # ============================================================
-# Step 7: Systemd service
+# Step 7: Systemd service + Caddy HTTPS reverse proxy
 # ============================================================
-header "Step 7/7 — Configuring systemd service"
+header "$(t step_service)"
+
+# PHP listens internally on PANEL_PORT+1, Caddy handles HTTPS on PANEL_PORT
+PANEL_INTERNAL_PORT=$((PANEL_PORT + 1))
 
 # Generate service file from template
 sed -e "s|__PANEL_DIR__|${PANEL_DIR}|g" \
     -e "s|__PANEL_PORT__|${PANEL_PORT}|g" \
+    -e "s|__PANEL_INTERNAL_PORT__|${PANEL_INTERNAL_PORT}|g" \
     "${PANEL_DIR}/bin/musedock-panel.service" > /etc/systemd/system/musedock-panel.service
 
 systemctl daemon-reload
 systemctl enable musedock-panel > /dev/null 2>&1
 systemctl restart musedock-panel
-ok "MuseDock Panel service started on port ${PANEL_PORT}"
+ok "$(t service_started "$PANEL_INTERNAL_PORT") (internal)"
+
+# Configure Caddy as HTTPS reverse proxy for the panel
+# This gives us: https://IP:PANEL_PORT with self-signed cert (tls internal)
+CADDY_API="http://localhost:2019"
+
+# Wait for Caddy API
+for i in 1 2 3 4 5; do
+    CADDY_API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "${CADDY_API}/config/" 2>/dev/null || echo "000")
+    [ "$CADDY_API_STATUS" = "200" ] && break
+    sleep 1
+done
+
+if [ "$CADDY_API_STATUS" = "200" ]; then
+    # Add panel reverse proxy route via Caddy API
+    # This creates: https://0.0.0.0:PANEL_PORT { tls internal; reverse_proxy localhost:INTERNAL_PORT }
+    PANEL_ROUTE=$(cat <<ROUTEEOF
+{
+  "@id": "musedock-panel",
+  "listen": [":${PANEL_PORT}"],
+  "routes": [
+    {
+      "handle": [
+        {
+          "handler": "reverse_proxy",
+          "upstreams": [{"dial": "127.0.0.1:${PANEL_INTERNAL_PORT}"}],
+          "headers": {
+            "request": {
+              "set": {
+                "X-Forwarded-Proto": ["https"],
+                "X-Real-Ip": ["{http.request.remote.host}"]
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "tls_connection_policies": [{}]
+}
+ROUTEEOF
+)
+
+    # Remove existing panel server if present (safe for reinstall)
+    curl -s -X DELETE "${CADDY_API}/config/apps/http/servers/musedock-panel" > /dev/null 2>&1 || true
+
+    # Ensure TLS has internal issuer for self-signed certs (append, don't replace)
+    # First check if TLS app exists; if not, create it with internal issuer
+    TLS_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" "${CADDY_API}/config/apps/tls/" 2>/dev/null || echo "000")
+    if [ "$TLS_EXISTS" != "200" ]; then
+        curl -s -X PUT "${CADDY_API}/config/apps/tls" \
+            -H "Content-Type: application/json" \
+            -d '{"automation":{"policies":[{"issuers":[{"module":"internal"}]}]}}' > /dev/null 2>&1 || true
+    else
+        # TLS app exists — add internal issuer policy without clobbering existing ones
+        curl -s -X POST "${CADDY_API}/config/apps/tls/automation/policies" \
+            -H "Content-Type: application/json" \
+            -d '{"issuers":[{"module":"internal"}]}' > /dev/null 2>&1 || true
+    fi
+
+    # Add the panel server
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
+        "${CADDY_API}/config/apps/http/servers/musedock-panel" \
+        -H "Content-Type: application/json" \
+        -d "$PANEL_ROUTE" 2>/dev/null || echo "000")
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        ok "Caddy HTTPS reverse proxy → https://0.0.0.0:${PANEL_PORT} → 127.0.0.1:${PANEL_INTERNAL_PORT}"
+        ok "TLS internal (self-signed certificate for IP access)"
+    else
+        warn "Caddy API route creation failed (HTTP ${HTTP_CODE}) — falling back to direct PHP access"
+        warn "Panel accessible via http://IP:${PANEL_INTERNAL_PORT} (no HTTPS)"
+        # Rebind PHP to 0.0.0.0 as fallback
+        sed -i "s|127.0.0.1:${PANEL_INTERNAL_PORT}|0.0.0.0:${PANEL_PORT}|g" /etc/systemd/system/musedock-panel.service
+        PANEL_INTERNAL_PORT=${PANEL_PORT}
+        systemctl daemon-reload
+        systemctl restart musedock-panel
+    fi
+else
+    warn "Caddy API not available — panel running on http://0.0.0.0:${PANEL_PORT} (no HTTPS)"
+    # Bind PHP directly to 0.0.0.0
+    sed -i "s|127.0.0.1:${PANEL_INTERNAL_PORT}|0.0.0.0:${PANEL_PORT}|g" /etc/systemd/system/musedock-panel.service
+    PANEL_INTERNAL_PORT=${PANEL_PORT}
+    systemctl daemon-reload
+    systemctl restart musedock-panel
+fi
 
 # ============================================================
-# Post-installation health check
+# Post-installation health check (also used by verify mode)
 # ============================================================
-header "Health Check"
+fi # end of "if VERIFY_ONLY=false" block that wraps the install flow
+
+header "$(t health_header)"
 
 HEALTH_ERRORS=0
 
 # 1. Panel service running?
 if systemctl is-active --quiet musedock-panel 2>/dev/null; then
-    ok "Panel service: running"
+    ok "$(t health_panel_running)"
 else
-    echo -e "  ${RED}✗ Panel service: NOT running${NC}"
-    echo -e "    ${YELLOW}Fix: systemctl start musedock-panel${NC}"
-    echo -e "    ${YELLOW}Logs: journalctl -u musedock-panel --no-pager -n 20${NC}"
+    echo -e "  ${RED}✗ $(t health_panel_down)${NC}"
+    echo -e "    ${YELLOW}$(t health_panel_fix)${NC}"
+    echo -e "    ${YELLOW}$(t health_panel_logs)${NC}"
     HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
 fi
 
 # 2. Panel HTTP responding?
 sleep 2
-PANEL_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000")
+# Try HTTPS first (Caddy reverse proxy with self-signed cert), then HTTP fallback
+PANEL_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 "https://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000")
+if [ "$PANEL_HTTP" = "000" ]; then
+    # HTTPS failed — try direct HTTP on internal port
+    PANEL_INTERNAL_PORT_HC=$((PANEL_PORT + 1))
+    PANEL_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:${PANEL_INTERNAL_PORT_HC}/" 2>/dev/null || echo "000")
+    if [ "$PANEL_HTTP" = "000" ]; then
+        # Also try HTTP on main port (fallback mode without Caddy)
+        PANEL_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000")
+    fi
+fi
 if [ "$PANEL_HTTP" = "200" ] || [ "$PANEL_HTTP" = "302" ] || [ "$PANEL_HTTP" = "301" ]; then
-    ok "Panel HTTP: responding (HTTP ${PANEL_HTTP}) on port ${PANEL_PORT}"
+    ok "$(t health_http_ok "$PANEL_HTTP" "$PANEL_PORT")"
 elif [ "$PANEL_HTTP" = "403" ]; then
-    ok "Panel HTTP: responding (HTTP 403 — IP restriction active) on port ${PANEL_PORT}"
+    ok "$(t health_http_ip "$PANEL_PORT")"
 else
-    echo -e "  ${RED}✗ Panel HTTP: NOT responding (HTTP ${PANEL_HTTP}) on port ${PANEL_PORT}${NC}"
-    echo -e "    ${YELLOW}Fix: Check if the service is running and the port is not blocked${NC}"
+    echo -e "  ${RED}✗ $(t health_http_fail "$PANEL_HTTP" "$PANEL_PORT")${NC}"
+    echo -e "    ${YELLOW}$(t health_http_fix)${NC}"
     echo -e "    ${YELLOW}  systemctl status musedock-panel${NC}"
     echo -e "    ${YELLOW}  ss -tlnp | grep ${PANEL_PORT}${NC}"
-    echo -e "    ${YELLOW}  journalctl -u musedock-panel --no-pager -n 20${NC}"
     HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
 fi
 
 # 3. PostgreSQL connection?
 if PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -d "${DB_NAME}" -c "SELECT 1;" > /dev/null 2>&1; then
-    ok "PostgreSQL: connected to ${DB_NAME} as ${DB_USER}"
+    ok "$(t health_pgsql_ok "$DB_NAME" "$DB_USER")"
 else
-    echo -e "  ${RED}✗ PostgreSQL: cannot connect to ${DB_NAME} as ${DB_USER}${NC}"
-    echo -e "    ${YELLOW}Fix: Check PostgreSQL is running and credentials are correct${NC}"
+    echo -e "  ${RED}✗ $(t health_pgsql_fail "$DB_NAME" "$DB_USER")${NC}"
+    echo -e "    ${YELLOW}$(t health_pgsql_fix)${NC}"
     echo -e "    ${YELLOW}  systemctl status postgresql${NC}"
-    echo -e "    ${YELLOW}  PGPASSWORD='...' psql -U ${DB_USER} -h 127.0.0.1 -d ${DB_NAME}${NC}"
-    echo -e "    ${YELLOW}  Check pg_hba.conf allows md5 auth for ${DB_USER} on 127.0.0.1${NC}"
     HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
 fi
 
 # 4. MySQL accessible?
 if [ "$MYSQL_AUTH_METHOD" = "socket" ]; then
     if mysql -u root -e "SELECT 1;" > /dev/null 2>&1; then
-        ok "MySQL: connected via socket authentication"
+        ok "$(t health_mysql_ok socket)"
     else
-        echo -e "  ${RED}✗ MySQL: socket auth failed${NC}"
-        echo -e "    ${YELLOW}Fix: systemctl status mysql (or mariadb)${NC}"
+        echo -e "  ${RED}✗ $(t health_mysql_fail socket)${NC}"
+        echo -e "    ${YELLOW}Fix: systemctl status mysql${NC}"
         HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
     fi
 elif [ "$MYSQL_AUTH_METHOD" = "password" ]; then
     if mysql -u root -p"${MYSQL_ROOT_PASS}" -e "SELECT 1;" > /dev/null 2>&1; then
-        ok "MySQL: connected via password authentication"
+        ok "$(t health_mysql_ok password)"
     else
-        echo -e "  ${RED}✗ MySQL: password auth failed${NC}"
+        echo -e "  ${RED}✗ $(t health_mysql_fail password)${NC}"
         echo -e "    ${YELLOW}Fix: Check MYSQL_ROOT_PASS in .env${NC}"
         HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
     fi
 else
-    warn "MySQL: skipped (authentication not configured — set MYSQL_ROOT_PASS in .env)"
+    warn "$(t health_mysql_skip)"
 fi
 
 # 5. Caddy API?
 CADDY_HC=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:2019/config/ 2>/dev/null || echo "000")
 if [ "$CADDY_HC" = "200" ]; then
-    ok "Caddy API: responding on localhost:2019"
+    ok "$(t health_caddy_ok)"
 else
-    echo -e "  ${RED}✗ Caddy API: NOT responding (HTTP ${CADDY_HC})${NC}"
-    echo -e "    ${YELLOW}Fix: Check Caddy is running${NC}"
+    echo -e "  ${RED}✗ $(t health_caddy_fail "$CADDY_HC")${NC}"
+    echo -e "    ${YELLOW}$(t health_caddy_fix)${NC}"
     echo -e "    ${YELLOW}  systemctl status caddy${NC}"
-    echo -e "    ${YELLOW}  journalctl -u caddy --no-pager -n 20${NC}"
-    echo -e "    ${YELLOW}  Ensure Caddyfile has: admin localhost:2019${NC}"
     HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
 fi
 
-# 6. Caddy ports 80/443 bindable? (only if no conflict services kept running)
+# 6. Caddy ports 80/443
 if systemctl is-active --quiet caddy 2>/dev/null; then
-    CADDY_ON_80=$(ss -tlnp 2>/dev/null | grep -c ':80\b.*caddy' || echo "0")
-    CADDY_ON_443=$(ss -tlnp 2>/dev/null | grep -c ':443\b.*caddy' || echo "0")
+    CADDY_ON_80=$(ss -tlnp 2>/dev/null | grep ':80\b.*caddy' | wc -l)
+    CADDY_ON_443=$(ss -tlnp 2>/dev/null | grep ':443\b.*caddy' | wc -l)
     if [ "$CADDY_ON_80" -gt 0 ] || [ "$CADDY_ON_443" -gt 0 ]; then
-        ok "Caddy ports: listening on 80/443"
+        ok "$(t health_caddy_ports)"
     else
-        # Only warn if Caddy has sites configured
         if [ "${CADDY_HAS_CADDYFILE_DOMAINS:-false}" = true ] || [ "${CADDY_HAS_AUTOSAVE:-false}" = true ]; then
-            warn "Caddy: not listening on 80/443 — sites may not be reachable"
-            echo -e "    ${YELLOW}Check: ss -tlnp | grep -E ':80|:443'${NC}"
-            echo -e "    ${YELLOW}Another service may be blocking these ports${NC}"
+            warn "$(t health_caddy_no_ports)"
         fi
     fi
 fi
 
 # 7. PHP-FPM running?
 if systemctl is-active --quiet "php${PHP_VER}-fpm" 2>/dev/null; then
-    ok "PHP-FPM ${PHP_VER}: running"
+    ok "$(t health_fpm_ok "$PHP_VER")"
 else
-    echo -e "  ${RED}✗ PHP-FPM ${PHP_VER}: NOT running${NC}"
+    echo -e "  ${RED}✗ $(t health_fpm_fail "$PHP_VER")${NC}"
     echo -e "    ${YELLOW}Fix: systemctl start php${PHP_VER}-fpm${NC}"
     HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
 fi
@@ -1045,11 +1614,23 @@ fi
 # Health check summary
 echo ""
 if [ "$HEALTH_ERRORS" -eq 0 ]; then
-    echo -e "  ${GREEN}${BOLD}All health checks passed! (${HEALTH_ERRORS} errors)${NC}"
+    echo -e "  ${GREEN}${BOLD}$(t health_all_ok "$HEALTH_ERRORS")${NC}"
 else
-    echo -e "  ${RED}${BOLD}Health check completed with ${HEALTH_ERRORS} error(s)${NC}"
-    echo -e "  ${YELLOW}Review the errors above and fix them before using the panel.${NC}"
-    echo -e "  ${YELLOW}Pre-install snapshot: ${SNAPSHOT_DIR}/${SNAPSHOT_TS}/${NC}"
+    echo -e "  ${RED}${BOLD}$(t health_errors "$HEALTH_ERRORS")${NC}"
+    echo -e "  ${YELLOW}$(t health_review)${NC}"
+fi
+
+# If verify-only mode, show summary and exit
+if [ "$VERIFY_ONLY" = true ]; then
+    echo ""
+    header "$(t verify_complete)"
+    if [ "$HEALTH_ERRORS" -eq 0 ]; then
+        echo -e "  ${GREEN}${BOLD}$(t verify_all_ok)${NC}"
+    else
+        echo -e "  ${RED}${BOLD}$(t verify_has_errors "$HEALTH_ERRORS")${NC}"
+    fi
+    echo ""
+    exit 0
 fi
 
 # ============================================================
@@ -1057,81 +1638,123 @@ fi
 # ============================================================
 SERVER_IP=$(hostname -I | awk '{print $1}')
 
+# Detect firewall status
+FIREWALL_TYPE="none"
+FIREWALL_PORT_STATUS="unknown"
+
+if command -v ufw &> /dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+    FIREWALL_TYPE="ufw"
+    if ufw status 2>/dev/null | grep -qE "${PANEL_PORT}.*(ALLOW)"; then
+        FIREWALL_PORT_STATUS="open"
+    else
+        FIREWALL_PORT_STATUS="closed"
+    fi
+elif iptables -L -n 2>/dev/null | grep -qE "ACCEPT.*dpt:${PANEL_PORT}"; then
+    FIREWALL_TYPE="iptables"
+    FIREWALL_PORT_STATUS="open"
+elif iptables -L -n 2>/dev/null | grep -qE "(DROP|REJECT)" 2>/dev/null; then
+    FIREWALL_TYPE="iptables"
+    FIREWALL_PORT_STATUS="closed"
+fi
+
 echo ""
 echo -e "${GREEN}${BOLD}"
 echo "  ╔══════════════════════════════════════════════════╗"
-echo "  ║         Installation completed!                  ║"
+echo "  ║         $(t install_complete)                  ║"
 echo "  ╚══════════════════════════════════════════════════╝"
 echo -e "${NC}"
+
+# Firewall and access info
 echo ""
-echo -e "  ${CYAN}${BOLD}>>> NEXT STEP: Create your admin account <<<${NC}"
+echo -e "  ${CYAN}${BOLD}$(t firewall_header)${NC}"
 echo ""
-echo -e "  Open your browser and go to:"
+if [ "$FIREWALL_TYPE" = "ufw" ]; then
+    echo -e "  ${YELLOW}$(t firewall_ufw_active)${NC}"
+    if [ "$FIREWALL_PORT_STATUS" = "open" ]; then
+        echo -e "  ${GREEN}$(t firewall_port_open "$PANEL_PORT")${NC}"
+    else
+        echo -e "  ${RED}${BOLD}$(t firewall_port_closed "$PANEL_PORT")${NC}"
+        echo ""
+        echo -e "  ${BOLD}$(t firewall_open_cmd)${NC}"
+        echo -e "  ${CYAN}  ufw allow from TU_IP to any port ${PANEL_PORT}${NC}"
+    fi
+elif [ "$FIREWALL_TYPE" = "iptables" ]; then
+    echo -e "  ${YELLOW}$(t firewall_iptables_active)${NC}"
+    if [ "$FIREWALL_PORT_STATUS" = "open" ]; then
+        echo -e "  ${GREEN}$(t firewall_port_open "$PANEL_PORT")${NC}"
+    else
+        echo -e "  ${RED}${BOLD}$(t firewall_port_closed "$PANEL_PORT")${NC}"
+        echo ""
+        echo -e "  ${BOLD}$(t firewall_open_cmd)${NC}"
+        echo -e "  ${CYAN}  iptables -A INPUT -p tcp --dport ${PANEL_PORT} -s TU_IP -j ACCEPT${NC}"
+    fi
+else
+    echo -e "  ${YELLOW}$(t firewall_no_detected)${NC}"
+    echo -e "  ${YELLOW}$(t firewall_consider "$PANEL_PORT")${NC}"
+fi
 echo ""
-echo -e "  ${BOLD}  http://${SERVER_IP}:${PANEL_PORT}/setup${NC}"
+echo -e "  $(t firewall_access_url)"
+echo -e "  ${BOLD}  https://${SERVER_IP}:${PANEL_PORT}/setup${NC}"
 echo ""
-echo -e "  The setup wizard will guide you through creating"
-echo -e "  the admin username and password."
+echo -e "  ${YELLOW}$(t firewall_make_sure "$PANEL_PORT")${NC}"
+echo ""
+
+echo -e "  $(t setup_wizard)"
 echo ""
 echo -e "  ┌──────────────────────────────────────────────┐"
-echo -e "  │  ${BOLD}SAVE THESE CREDENTIALS${NC} (shown only once):     │"
+echo -e "  │  ${BOLD}$(t save_credentials)${NC}"
 echo -e "  │                                              │"
 echo -e "  │  Database:   ${BOLD}${DB_NAME}${NC}"
 echo -e "  │  DB User:    ${BOLD}${DB_USER}${NC}"
 echo -e "  │  DB Password: ${BOLD}${DB_PASS}${NC}"
 echo -e "  │  .env file:  ${BOLD}${PANEL_DIR}/.env${NC}"
 echo -e "  │                                              │"
-echo -e "  │                                              │"
-echo -e "  │  MySQL auth: ${BOLD}${MYSQL_AUTH_METHOD}${NC}"
+echo -e "  │  $(t mysql_auth_label)${BOLD}${MYSQL_AUTH_METHOD}${NC}"
 if [ "$MYSQL_AUTH_METHOD" = "password" ]; then
-echo -e "  │  MySQL pass: ${BOLD}(stored in .env)${NC}"
+echo -e "  │  $(t mysql_pass_stored)"
 elif [ "$MYSQL_AUTH_METHOD" = "socket" ]; then
-echo -e "  │  MySQL pass: ${BOLD}(not needed — socket auth)${NC}"
+echo -e "  │  $(t mysql_pass_socket)"
 elif [ "$MYSQL_AUTH_METHOD" = "unconfigured" ]; then
-echo -e "  │  MySQL pass: ${BOLD}${YELLOW}NOT SET — edit .env later${NC}"
+echo -e "  │  ${YELLOW}$(t mysql_pass_notset)${NC}"
 fi
 echo -e "  │                                              │"
-echo -e "  │  These are also stored in .env (root only).  │"
+echo -e "  │  $(t stored_in_env)"
 echo -e "  └──────────────────────────────────────────────┘"
 echo ""
 
 # Detection summary
-if [ "$NGINX_DETECTED" = true ] || [ "$APACHE_DETECTED" = true ] || [ "$PLESK_DETECTED" = true ]; then
-    echo -e "  ${YELLOW}${BOLD}SERVICE DETECTION SUMMARY:${NC}"
-    [ "$PLESK_DETECTED" = true ] && echo -e "  ${YELLOW}  ⚠ Plesk: detected (manual conflict resolution)${NC}"
-    [ "$NGINX_DETECTED" = true ] && echo -e "  ${YELLOW}  ⚠ Nginx: detected — $(systemctl is-active nginx 2>/dev/null || echo 'unknown status')${NC}"
-    [ "$APACHE_DETECTED" = true ] && echo -e "  ${YELLOW}  ⚠ Apache: detected — $(systemctl is-active ${APACHE_SVC:-apache2} 2>/dev/null || echo 'unknown status')${NC}"
+if [ "${NGINX_DETECTED:-false}" = true ] || [ "${APACHE_DETECTED:-false}" = true ] || [ "${PLESK_DETECTED:-false}" = true ]; then
+    echo -e "  ${YELLOW}${BOLD}$(t detection_summary)${NC}"
+    [ "${PLESK_DETECTED:-false}" = true ] && echo -e "  ${YELLOW}  $(t plesk_detected_sum)${NC}"
+    [ "${NGINX_DETECTED:-false}" = true ] && echo -e "  ${YELLOW}  $(t nginx_detected_sum "$(systemctl is-active nginx 2>/dev/null || echo 'unknown')")${NC}"
+    [ "${APACHE_DETECTED:-false}" = true ] && echo -e "  ${YELLOW}  $(t apache_detected_sum "$(systemctl is-active ${APACHE_SVC:-apache2} 2>/dev/null || echo 'unknown')")${NC}"
     echo ""
 fi
 
-echo -e "  ${YELLOW}${BOLD}SECURITY — IMPORTANT:${NC}"
+echo -e "  ${YELLOW}${BOLD}$(t security_header)${NC}"
 echo ""
-echo -e "  ${YELLOW}1.${NC} ${BOLD}Protect the panel port with a firewall.${NC}"
-echo -e "     The panel runs as root and has full system access."
-echo -e "     Only trusted administrator IPs should reach port ${PANEL_PORT}."
+echo -e "  ${YELLOW}1.${NC} ${BOLD}$(t security_firewall)${NC}"
+echo -e "     $(t security_root)"
+echo -e "     $(t security_trusted "$PANEL_PORT")"
 echo ""
-echo -e "     ${CYAN}# UFW example — allow only your IP:${NC}"
-echo -e "     ${CYAN}ufw allow from YOUR_ADMIN_IP to any port ${PANEL_PORT}${NC}"
-echo -e "     ${CYAN}ufw deny ${PANEL_PORT}${NC}"
-echo ""
-echo -e "  ${YELLOW}2.${NC} ${BOLD}Restrict IPs in .env${NC} (additional layer):"
+echo -e "  ${YELLOW}2.${NC} ${BOLD}$(t security_restrict)${NC}"
 echo -e "     ${CYAN}ALLOWED_IPS=1.2.3.4,5.6.7.8${NC}"
 echo ""
-echo -e "  ${YELLOW}3.${NC} ${BOLD}The panel port is for administrators only.${NC}"
-echo -e "     Never expose it to the public internet without a firewall."
-echo -e "     Hosting client sites are served by Caddy on ports 80/443."
+echo -e "  ${YELLOW}3.${NC} ${BOLD}$(t security_admin_only)${NC}"
+echo -e "     $(t security_no_public)"
+echo -e "     $(t security_client_sites)"
 echo ""
-echo -e "  ${BOLD}Service management:${NC}"
+echo -e "  ${BOLD}$(t service_mgmt)${NC}"
 echo -e "     systemctl status musedock-panel"
 echo -e "     systemctl restart musedock-panel"
 echo -e "     journalctl -u musedock-panel -f"
 echo ""
-echo -e "  ${BOLD}Pre-install snapshot:${NC}"
+echo -e "  ${BOLD}$(t snapshot_label)${NC}"
 echo -e "     ${SNAPSHOT_DIR}/${SNAPSHOT_TS}/"
-echo -e "     (services, ports, configs saved before installation)"
+echo -e "     $(t snapshot_desc)"
 echo ""
-echo -e "  ${BOLD}Uninstall:${NC}"
+echo -e "  ${BOLD}$(t uninstall_label)${NC}"
 echo -e "     sudo bash ${PANEL_DIR}/bin/uninstall.sh"
 echo ""
-echo -e "  ${GREEN}${BOLD}Enjoy MuseDock Panel!${NC}"
+echo -e "  ${GREEN}${BOLD}$(t enjoy)${NC}"
 echo ""

@@ -20,7 +20,9 @@ start() {
     fi
 
     echo "Starting MuseDock Panel on port ${PORT}..."
-    nohup $PHP_BIN -S 127.0.0.1:${PORT} -t "${PANEL_DIR}/public" "${PANEL_DIR}/public/router.php" >> "$LOG_FILE" 2>&1 &
+    # PHP listens internally; Caddy handles external HTTPS
+    INTERNAL_PORT=$((PORT + 1))
+    nohup $PHP_BIN -S 127.0.0.1:${INTERNAL_PORT} -t "${PANEL_DIR}/public" "${PANEL_DIR}/public/router.php" >> "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
     echo "Started (PID: $(cat $PID_FILE))"
 }
