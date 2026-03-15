@@ -603,7 +603,9 @@ fi
 if [ "$VERIFY_ONLY" = true ]; then
     # ============================================================
     # Verify mode — comprehensive system diagnosis
+    # Disable set -e so checks don't kill the script
     # ============================================================
+    set +e
 
     # Detect PG version
     PG_VER=$(pg_lsclusters -h 2>/dev/null | head -1 | awk '{print $1}')
@@ -631,7 +633,7 @@ if [ "$VERIFY_ONLY" = true ]; then
         "http://127.0.0.1:$((PANEL_PORT + 1))/" \
         "http://127.0.0.1:${PANEL_PORT}/" \
     ; do
-        PANEL_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 3 "$TEST_URL" 2>/dev/null)
+        PANEL_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 3 "$TEST_URL" 2>/dev/null || echo "000")
         PANEL_HTTP=$(echo "$PANEL_HTTP" | tr -d '[:space:]')
         [ -n "$PANEL_HTTP" ] && [ "$PANEL_HTTP" != "000" ] && break
         PANEL_HTTP="000"
@@ -648,7 +650,7 @@ if [ "$VERIFY_ONLY" = true ]; then
     # --- 3. PostgreSQL clusters ---
     echo ""
     echo -e "  ${BOLD}PostgreSQL Clusters:${NC}"
-    PG_CLUSTERS=$(pg_lsclusters -h 2>/dev/null)
+    PG_CLUSTERS=$(pg_lsclusters -h 2>/dev/null || true)
     if [ -n "$PG_CLUSTERS" ]; then
         while IFS= read -r line; do
             CL_VER=$(echo "$line" | awk '{print $1}')
@@ -656,7 +658,7 @@ if [ "$VERIFY_ONLY" = true ]; then
             CL_PORT=$(echo "$line" | awk '{print $3}')
             CL_STATUS=$(echo "$line" | awk '{print $4}')
             if [ "$CL_STATUS" = "online" ]; then
-                ok "Cluster ${CL_VER}/${CL_NAME} — puerto ${CL_PORT} (${GREEN}online${NC})"
+                ok "Cluster ${CL_VER}/${CL_NAME} — puerto ${CL_PORT} (online)"
             else
                 echo -e "  ${RED}✗ Cluster ${CL_VER}/${CL_NAME} — puerto ${CL_PORT} (${CL_STATUS})${NC}"
                 HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
@@ -672,7 +674,6 @@ if [ "$VERIFY_ONLY" = true ]; then
     echo -e "  ${BOLD}Panel DB (puerto ${DB_PORT}):${NC}"
     if PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p "${DB_PORT}" -d "${DB_NAME}" -c "SELECT 1;" > /dev/null 2>&1; then
         ok "Conexion OK — ${DB_NAME}@${DB_USER} en puerto ${DB_PORT}"
-        # Count tables
         TABLE_COUNT=$(PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p "${DB_PORT}" -d "${DB_NAME}" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null || echo "?")
         ok "Tablas en BD: ${TABLE_COUNT}"
     else
@@ -697,9 +698,9 @@ if [ "$VERIFY_ONLY" = true ]; then
         echo -e "  ${YELLOW}  Para migrar, ejecuta: sudo bash install.sh (opcion 1 — Reinstalar)${NC}"
         HEALTH_WARNINGS=$((HEALTH_WARNINGS + 1))
         if [ "$PANEL_CLUSTER_EXISTS" -gt 0 ]; then
-            echo -e "  ${CYAN}  ✓ Cluster 'panel' (5433) ya existe — solo falta migrar datos${NC}"
+            echo -e "  ${CYAN}  Cluster 'panel' (5433) ya existe — solo falta migrar datos${NC}"
         else
-            echo -e "  ${CYAN}  ✗ Cluster 'panel' (5433) no existe — se creara al reinstalar${NC}"
+            echo -e "  ${CYAN}  Cluster 'panel' (5433) no existe — se creara al reinstalar${NC}"
         fi
     fi
 
