@@ -580,12 +580,14 @@ if [ -f "${PANEL_DIR}/.env" ]; then
             ok "$(t verify_mode)"
             # Read existing .env for health check
             PANEL_PORT=$(grep -E '^PANEL_PORT=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "8444")
+            DB_PORT=$(grep -E '^DB_PORT=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "5432")
             DB_NAME=$(grep -E '^DB_NAME=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "musedock_panel")
             DB_USER=$(grep -E '^DB_USER=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "musedock_panel")
             DB_PASS=$(grep -E '^DB_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "")
             PHP_VER=$(grep -E '^FPM_PHP_VERSION=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "8.3")
             MYSQL_AUTH_METHOD=$(grep -E '^MYSQL_AUTH_METHOD=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "unknown")
             MYSQL_ROOT_PASS=$(grep -E '^MYSQL_ROOT_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "")
+            PANEL_ROLE=$(grep -E '^PANEL_ROLE=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "standalone")
             ;;
         *)
             echo ""
@@ -599,8 +601,200 @@ fi
 # Detect conflicting services (nginx, Apache, Plesk)
 # ============================================================
 if [ "$VERIFY_ONLY" = true ]; then
-    # Skip to health check section
+    # ============================================================
+    # Verify mode — comprehensive system diagnosis
+    # ============================================================
+
+    # Detect PG version
+    PG_VER=$(pg_lsclusters -h 2>/dev/null | head -1 | awk '{print $1}')
+    [ -z "$PG_VER" ] && PG_VER="16"
+
     header "$(t health_header)"
+
+    HEALTH_ERRORS=0
+    HEALTH_WARNINGS=0
+
+    # --- 1. Panel service ---
+    if systemctl is-active --quiet musedock-panel 2>/dev/null; then
+        ok "$(t health_panel_running)"
+    else
+        echo -e "  ${RED}✗ $(t health_panel_down)${NC}"
+        echo -e "    ${YELLOW}$(t health_panel_fix)${NC}"
+        HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
+    fi
+
+    # --- 2. Panel HTTP ---
+    sleep 1
+    PANEL_HTTP="000"
+    for TEST_URL in \
+        "https://127.0.0.1:${PANEL_PORT}/" \
+        "http://127.0.0.1:$((PANEL_PORT + 1))/" \
+        "http://127.0.0.1:${PANEL_PORT}/" \
+    ; do
+        PANEL_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 3 "$TEST_URL" 2>/dev/null)
+        PANEL_HTTP=$(echo "$PANEL_HTTP" | tr -d '[:space:]')
+        [ -n "$PANEL_HTTP" ] && [ "$PANEL_HTTP" != "000" ] && break
+        PANEL_HTTP="000"
+    done
+    if [ "$PANEL_HTTP" = "200" ] || [ "$PANEL_HTTP" = "302" ] || [ "$PANEL_HTTP" = "301" ]; then
+        ok "$(t health_http_ok "$PANEL_HTTP" "$PANEL_PORT")"
+    elif [ "$PANEL_HTTP" = "403" ]; then
+        ok "$(t health_http_ip "$PANEL_PORT")"
+    else
+        echo -e "  ${RED}✗ $(t health_http_fail "$PANEL_HTTP" "$PANEL_PORT")${NC}"
+        HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
+    fi
+
+    # --- 3. PostgreSQL clusters ---
+    echo ""
+    echo -e "  ${BOLD}PostgreSQL Clusters:${NC}"
+    PG_CLUSTERS=$(pg_lsclusters -h 2>/dev/null)
+    if [ -n "$PG_CLUSTERS" ]; then
+        while IFS= read -r line; do
+            CL_VER=$(echo "$line" | awk '{print $1}')
+            CL_NAME=$(echo "$line" | awk '{print $2}')
+            CL_PORT=$(echo "$line" | awk '{print $3}')
+            CL_STATUS=$(echo "$line" | awk '{print $4}')
+            if [ "$CL_STATUS" = "online" ]; then
+                ok "Cluster ${CL_VER}/${CL_NAME} — puerto ${CL_PORT} (${GREEN}online${NC})"
+            else
+                echo -e "  ${RED}✗ Cluster ${CL_VER}/${CL_NAME} — puerto ${CL_PORT} (${CL_STATUS})${NC}"
+                HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
+            fi
+        done <<< "$PG_CLUSTERS"
+    else
+        echo -e "  ${RED}✗ No se encontraron clusters PostgreSQL${NC}"
+        HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
+    fi
+
+    # --- 4. Panel DB connection (with current DB_PORT) ---
+    echo ""
+    echo -e "  ${BOLD}Panel DB (puerto ${DB_PORT}):${NC}"
+    if PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p "${DB_PORT}" -d "${DB_NAME}" -c "SELECT 1;" > /dev/null 2>&1; then
+        ok "Conexion OK — ${DB_NAME}@${DB_USER} en puerto ${DB_PORT}"
+        # Count tables
+        TABLE_COUNT=$(PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p "${DB_PORT}" -d "${DB_NAME}" -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public';" 2>/dev/null || echo "?")
+        ok "Tablas en BD: ${TABLE_COUNT}"
+    else
+        echo -e "  ${RED}✗ No se puede conectar a ${DB_NAME} en puerto ${DB_PORT}${NC}"
+        HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
+    fi
+
+    # --- 5. Migration check: panel on 5432 needs migration to 5433 ---
+    echo ""
+    echo -e "  ${BOLD}Migracion PostgreSQL:${NC}"
+    PANEL_CLUSTER_EXISTS=$(pg_lsclusters -h 2>/dev/null | awk '$2=="panel"' | wc -l)
+
+    if [ "$DB_PORT" = "5433" ] && [ "$PANEL_CLUSTER_EXISTS" -gt 0 ]; then
+        ok "Panel ya usa cluster dedicado en puerto 5433 — no necesita migracion"
+    elif [ "$DB_PORT" = "5433" ] && [ "$PANEL_CLUSTER_EXISTS" -eq 0 ]; then
+        echo -e "  ${RED}✗ .env dice DB_PORT=5433 pero no existe cluster 'panel'${NC}"
+        echo -e "    ${YELLOW}Ejecuta: sudo pg_createcluster ${PG_VER} panel --port 5433 --start${NC}"
+        HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
+    elif [ "$DB_PORT" = "5432" ]; then
+        echo -e "  ${YELLOW}⚠ Panel usa puerto 5432 (cluster de produccion)${NC}"
+        echo -e "  ${YELLOW}  Se recomienda migrar a cluster dedicado en puerto 5433${NC}"
+        echo -e "  ${YELLOW}  Para migrar, ejecuta: sudo bash install.sh (opcion 1 — Reinstalar)${NC}"
+        HEALTH_WARNINGS=$((HEALTH_WARNINGS + 1))
+        if [ "$PANEL_CLUSTER_EXISTS" -gt 0 ]; then
+            echo -e "  ${CYAN}  ✓ Cluster 'panel' (5433) ya existe — solo falta migrar datos${NC}"
+        else
+            echo -e "  ${CYAN}  ✗ Cluster 'panel' (5433) no existe — se creara al reinstalar${NC}"
+        fi
+    fi
+
+    # --- 6. MySQL ---
+    echo ""
+    echo -e "  ${BOLD}MySQL:${NC}"
+    if [ "$MYSQL_AUTH_METHOD" = "socket" ]; then
+        if mysql -u root -e "SELECT 1;" > /dev/null 2>&1; then
+            ok "$(t health_mysql_ok socket)"
+        else
+            echo -e "  ${RED}✗ $(t health_mysql_fail socket)${NC}"
+            HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
+        fi
+    elif [ "$MYSQL_AUTH_METHOD" = "password" ]; then
+        if mysql -u root -p"${MYSQL_ROOT_PASS}" -e "SELECT 1;" > /dev/null 2>&1; then
+            ok "$(t health_mysql_ok password)"
+        else
+            echo -e "  ${RED}✗ $(t health_mysql_fail password)${NC}"
+            HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
+        fi
+    else
+        if mysql -u root -e "SELECT 1;" > /dev/null 2>&1; then
+            ok "MySQL: OK (socket)"
+        elif [ -n "$MYSQL_ROOT_PASS" ] && mysql -u root -p"${MYSQL_ROOT_PASS}" -e "SELECT 1;" > /dev/null 2>&1; then
+            ok "MySQL: OK (password)"
+        else
+            warn "MySQL: no se pudo verificar (auth method: ${MYSQL_AUTH_METHOD})"
+        fi
+    fi
+
+    # --- 7. Caddy ---
+    echo ""
+    echo -e "  ${BOLD}Caddy:${NC}"
+    CADDY_HC=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:2019/config/ 2>/dev/null || echo "000")
+    if [ "$CADDY_HC" = "200" ]; then
+        ok "$(t health_caddy_ok)"
+    else
+        echo -e "  ${RED}✗ $(t health_caddy_fail "$CADDY_HC")${NC}"
+        HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
+    fi
+
+    if systemctl is-active --quiet caddy 2>/dev/null; then
+        CADDY_ON_80=$(ss -tlnp 2>/dev/null | grep ':80\b.*caddy' | wc -l)
+        CADDY_ON_443=$(ss -tlnp 2>/dev/null | grep ':443\b.*caddy' | wc -l)
+        if [ "$CADDY_ON_80" -gt 0 ] || [ "$CADDY_ON_443" -gt 0 ]; then
+            ok "$(t health_caddy_ports)"
+        fi
+    fi
+
+    # --- 8. PHP-FPM ---
+    echo ""
+    echo -e "  ${BOLD}PHP-FPM:${NC}"
+    if systemctl is-active --quiet "php${PHP_VER}-fpm" 2>/dev/null; then
+        ok "$(t health_fpm_ok "$PHP_VER")"
+    else
+        echo -e "  ${RED}✗ $(t health_fpm_fail "$PHP_VER")${NC}"
+        HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
+    fi
+
+    # --- 9. Cron jobs ---
+    echo ""
+    echo -e "  ${BOLD}Cron Jobs:${NC}"
+    if [ -f /etc/cron.d/musedock-cluster ]; then
+        ok "Cluster worker: instalado (/etc/cron.d/musedock-cluster)"
+    else
+        echo -e "  ${YELLOW}⚠ Cluster worker no instalado${NC}"
+        echo -e "    ${YELLOW}Se instalara al reinstalar o ejecuta manualmente:${NC}"
+        echo -e "    ${CYAN}echo '* * * * * root /usr/bin/php ${PANEL_DIR}/bin/cluster-worker.php >> ${PANEL_DIR}/storage/logs/cluster-worker.log 2>&1' > /etc/cron.d/musedock-cluster${NC}"
+        HEALTH_WARNINGS=$((HEALTH_WARNINGS + 1))
+    fi
+    if [ -f /etc/cron.d/musedock-backup ]; then
+        ok "Panel DB backup: instalado (/etc/cron.d/musedock-backup)"
+    else
+        echo -e "  ${YELLOW}⚠ Backup periodico del panel no instalado${NC}"
+        HEALTH_WARNINGS=$((HEALTH_WARNINGS + 1))
+    fi
+
+    # --- 10. Panel role & .env ---
+    echo ""
+    echo -e "  ${BOLD}Configuracion:${NC}"
+    ok "PANEL_ROLE: ${PANEL_ROLE:-standalone}"
+    ok "DB_PORT: ${DB_PORT}"
+    ok "PANEL_PORT: ${PANEL_PORT}"
+
+    # --- Summary ---
+    echo ""
+    if [ "$HEALTH_ERRORS" -eq 0 ] && [ "$HEALTH_WARNINGS" -eq 0 ]; then
+        echo -e "  ${GREEN}${BOLD}$(t verify_all_ok)${NC}"
+    elif [ "$HEALTH_ERRORS" -eq 0 ]; then
+        echo -e "  ${YELLOW}${BOLD}OK con ${HEALTH_WARNINGS} advertencia(s). Revisa arriba.${NC}"
+    else
+        echo -e "  ${RED}${BOLD}$(t verify_has_errors "$HEALTH_ERRORS")${NC}"
+    fi
+    echo ""
+    exit 0
 else
 # Begin install flow
 header "$(t checking_conflicts)"
@@ -1499,6 +1693,7 @@ PANEL_ROLE=standalone
 ENVEOF
 
 chmod 600 "${PANEL_DIR}/.env"
+DB_PORT=5433  # Keep in bash scope for health check
 ok "$(t env_created)"
 
 # Run database schema (safe — uses IF NOT EXISTS)
@@ -1614,6 +1809,39 @@ else
 fi
 
 # ============================================================
+# Step 7b: Cron jobs (cluster worker + panel DB backup)
+# ============================================================
+header "Configurando cron jobs del panel..."
+
+# Create backups directory
+mkdir -p "${PANEL_DIR}/storage/backups"
+chown www-data:www-data "${PANEL_DIR}/storage/backups"
+
+# Cluster worker — processes sync queue, heartbeats, alerts (every minute)
+CRON_WORKER="/etc/cron.d/musedock-cluster"
+cat > "$CRON_WORKER" << CRONEOF
+# MuseDock Panel — Cluster worker (queue, heartbeat, alerts)
+* * * * * root /usr/bin/php ${PANEL_DIR}/bin/cluster-worker.php >> ${PANEL_DIR}/storage/logs/cluster-worker.log 2>&1
+CRONEOF
+chmod 644 "$CRON_WORKER"
+ok "Cron: cluster-worker.php (cada minuto)"
+
+# Panel DB backup — hourly pg_dump to storage/backups (keeps last 48h)
+CRON_BACKUP="/etc/cron.d/musedock-backup"
+cat > "$CRON_BACKUP" << CRONEOF
+# MuseDock Panel — Hourly panel DB backup
+0 * * * * postgres pg_dump -p 5433 musedock_panel | gzip > ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz 2>/dev/null
+# Cleanup backups older than 48 hours
+5 * * * * root find ${PANEL_DIR}/storage/backups/ -name "panel-*.sql.gz" -mmin +2880 -delete 2>/dev/null
+CRONEOF
+chmod 644 "$CRON_BACKUP"
+ok "Cron: backup panel DB cada hora (retiene 48h)"
+
+# Reload cron daemon
+systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
+ok "Cron jobs instalados"
+
+# ============================================================
 # Post-installation health check (also used by verify mode)
 # ============================================================
 fi # end of "if VERIFY_ONLY=false" block that wraps the install flow
@@ -1660,7 +1888,7 @@ else
 fi
 
 # 3. PostgreSQL connection?
-if PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -d "${DB_NAME}" -c "SELECT 1;" > /dev/null 2>&1; then
+if PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p "${DB_PORT:-5433}" -d "${DB_NAME}" -c "SELECT 1;" > /dev/null 2>&1; then
     ok "$(t health_pgsql_ok "$DB_NAME" "$DB_USER")"
 else
     echo -e "  ${RED}✗ $(t health_pgsql_fail "$DB_NAME" "$DB_USER")${NC}"
