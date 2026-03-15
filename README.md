@@ -145,6 +145,7 @@ ALLOWED_IPS=1.2.3.4,5.6.7.8
 ├── bin/
 │   ├── migrate.php              # Ejecutor de migraciones
 │   ├── update.sh                # Actualizador con un comando
+│   ├── uninstall.sh             # Desinstalador seguro
 │   ├── musedock-panel.service   # Unidad systemd
 │   └── musedock-panel.sh        # Script de inicio/parada
 ├── config/
@@ -209,6 +210,39 @@ php bin/migrate.php
 ```
 
 Las migraciones tambien se ejecutan automaticamente en cada peticion al panel, asi que en la mayoria de los casos no necesitas ejecutarlas manualmente.
+
+## Desinstalacion
+
+Un solo comando para desinstalar el panel de forma segura:
+
+```bash
+sudo bash /opt/musedock-panel/bin/uninstall.sh
+```
+
+El desinstalador es interactivo y **no borra nada sin preguntar**. Paso a paso:
+
+1. **Comprueba hosting activo** — Si hay cuentas de hosting con sitios en produccion, avisa cuantas hay, lista los dominios y pregunta si continuar. Los sitios seguiran funcionando (Caddy y PHP-FPM no se tocan), pero ya no podras gestionarlos desde el panel.
+2. **Para el servicio** — Detiene y deshabilita `musedock-panel` de systemd.
+3. **Limpia Caddy** — Pregunta si quieres eliminar las rutas API del panel y/o el override `--resume`. Por defecto no toca nada.
+4. **Base de datos** — Pregunta si quieres conservar o eliminar la base de datos `musedock_panel`. Eliminar requiere escribir `DELETE` como confirmacion.
+5. **Elimina configuracion** — Borra `.env` (con backup automatico), limpia sesiones y cache.
+6. **Limpia sistema** — Elimina entradas de sudoers y logrotate si existen.
+
+### Que se conserva siempre
+
+- Caddy, PostgreSQL, MySQL, PHP (servicios compartidos)
+- Sitios de clientes en `/var/www/vhosts/`
+- Logs del panel en `storage/logs/`
+- Snapshots de instalacion en `install-backup/`
+- Codigo fuente del panel (para poder reinstalar)
+
+### Reinstalar despues de desinstalar
+
+```bash
+sudo bash /opt/musedock-panel/install.sh
+```
+
+Si conservaste la base de datos, el panel recuperara toda la configuracion anterior.
 
 ## Gestion del servicio
 
