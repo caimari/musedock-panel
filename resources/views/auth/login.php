@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login - MuseDock Panel</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <style>
@@ -14,8 +15,9 @@
                       padding: 2.5rem; width: 100%; max-width: 400px; }
         .login-card h3 { color: #38bdf8; font-weight: 700; margin-bottom: 0.25rem; }
         .login-card p { color: #64748b; font-size: 0.9rem; margin-bottom: 1.5rem; }
-        .form-control { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; padding: 0.75rem 1rem; }
-        .form-control:focus { background: #0f172a; border-color: #38bdf8; color: #e2e8f0; box-shadow: 0 0 0 2px rgba(56,189,248,0.2); }
+        .form-control { background: #0f172a; border: 1px solid #334155; color: #f1f5f9 !important; padding: 0.75rem 1rem; }
+        .form-control:focus { background: #0f172a; border-color: #38bdf8; color: #f1f5f9 !important; box-shadow: 0 0 0 2px rgba(56,189,248,0.2); }
+        .form-control::placeholder { color: #64748b; }
         .form-label { color: #94a3b8; font-size: 0.85rem; font-weight: 500; }
         .btn-login { background: #0ea5e9; border: none; padding: 0.75rem; font-weight: 600; width: 100%; }
         .btn-login:hover { background: #0284c7; }
@@ -43,7 +45,7 @@
                 <input type="text" name="username" class="form-control" placeholder="admin" required autofocus>
             </div>
             <div class="mb-3">
-                <label class="form-label">Password</label>
+                <label class="form-label">Contraseña</label>
                 <input type="password" name="password" class="form-control" required>
             </div>
             <button type="submit" class="btn btn-login btn-primary">
