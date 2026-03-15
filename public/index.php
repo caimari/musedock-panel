@@ -25,7 +25,7 @@ $config = require PANEL_ROOT . '/config/panel.php';
 
 // Session (hardened)
 ini_set('session.save_path', $config['session']['path']);
-ini_set('session.cookie_secure', '1');
+ini_set('session.cookie_secure', (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? '1' : '0');
 ini_set('session.cookie_httponly', '1');
 ini_set('session.cookie_samesite', 'Strict');
 ini_set('session.use_strict_mode', '1');
@@ -38,7 +38,9 @@ header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 header('X-XSS-Protection: 1; mode=block');
 header('Referrer-Policy: strict-origin-when-cross-origin');
-header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+    header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
+}
 
 // Auto-run pending migrations (safe — uses transactions + IF NOT EXISTS)
 try {
