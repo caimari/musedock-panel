@@ -4,6 +4,8 @@
     <a href="/settings/php" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'PHP Settings' ? 'active' : '' ?>"><i class="bi bi-filetype-php me-1"></i>PHP</a>
     <a href="/settings/ssl" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'SSL/TLS' ? 'active' : '' ?>"><i class="bi bi-shield-lock me-1"></i>SSL/TLS</a>
     <a href="/settings/security" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Seguridad' ? 'active' : '' ?>"><i class="bi bi-lock me-1"></i>Seguridad</a>
+    <a href="/settings/fail2ban" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Fail2Ban' ? 'active' : '' ?>"><i class="bi bi-shield-exclamation me-1"></i>Fail2Ban</a>
     <a href="/settings/crons" class="btn btn-outline-light btn-sm <?= str_contains($pageTitle ?? '', 'Cron') ? 'active' : '' ?>"><i class="bi bi-clock-history me-1"></i>Cron</a>
     <a href="/settings/caddy" class="btn btn-outline-light btn-sm <?= str_contains($pageTitle ?? '', 'Caddy') ? 'active' : '' ?>"><i class="bi bi-globe me-1"></i>Caddy</a>
+    <a href="/settings/logs" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Visor de Logs' ? 'active' : '' ?>"><i class="bi bi-terminal me-1"></i>Logs</a>
 </div>

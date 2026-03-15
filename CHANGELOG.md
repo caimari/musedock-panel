@@ -2,15 +2,24 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aqui.
 
-## [0.3.0] — Pendiente
+## [0.4.0] — Pendiente
 
 ### Por hacer
-- **Backups** — Backup/restore por cuenta (archivos + BD)
-- **PHP por cuenta** — memory_limit, upload_max, etc. por hosting account (pool FPM individual)
-- **Database management** — Crear/borrar BD MySQL/PostgreSQL por cuenta desde el panel
-- **Fail2Ban** — Ver bans activos, desbloquear IPs, configurar jails
-- **Logs browser** — Ver logs de Caddy/FPM por cuenta desde el panel
-- **Multi-idioma panel** — El instalador ya es ES/EN, el panel necesita soporte i18n
+- **Multi-idioma panel** — Soporte ES/EN en toda la interfaz del panel
+- **Clustering** — Replicacion PostgreSQL streaming, promover/degradar servidores
+
+---
+
+## [0.3.0] — 2026-03-15
+
+### Anadido
+- **Backups** — Backup/restore por cuenta (archivos + BD MySQL/PostgreSQL), descarga directa, eliminacion con confirmacion de password
+- **Fail2Ban** — Ver jails activos, IPs baneadas, desbloquear IPs desde el panel
+- **Visor de logs** — Logs de Caddy, FPM, cuentas y sistema con navegacion por archivo
+- **Base de datos PostgreSQL** — Crear/eliminar BD PostgreSQL por cuenta desde el panel
+- **Base de datos protegida** — La BD del sistema (musedock_panel) se muestra como protegida y no se puede borrar
+- **Confirmacion con password** — Borrar BD y backups requiere password del admin
+- **Changelog** — Pagina de versiones dentro del panel con toggle ES/EN, version clickeable en sidebar
 
 ---
 
@@ -22,6 +31,8 @@ Todas las versiones notables de MuseDock Panel se documentan aqui.
 - **Settings > SSL/TLS** — Certificados activos de Caddy, politicas TLS, info Let's Encrypt
 - **Settings > Seguridad** — IPs permitidas (edita .env en vivo), sesiones activas, info cookies
 - **Tabs compartidos** — Navegacion unificada entre todas las secciones de Settings
+- **PHP por cuenta** — memory_limit, upload_max, post_max, max_execution_time por hosting account via pool FPM
+- **Gestion de bases de datos MySQL** — Crear/eliminar BD MySQL por cuenta, usuarios con prefijo
 - **Tabla `panel_settings`** — Almacen clave-valor en BD para configuracion del panel
 - **Tabla `servers`** — Preparacion para clustering (localhost por defecto)
 - **Campo `server_id`** en `hosting_accounts` — Preparacion para multi-servidor

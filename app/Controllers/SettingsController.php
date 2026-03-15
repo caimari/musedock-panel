@@ -695,6 +695,136 @@ class SettingsController
     }
 
     // ================================================================
+    // Fail2Ban
+    // ================================================================
+
+    public function fail2ban(): void
+    {
+        $installed = !empty(trim(shell_exec('command -v fail2ban-client 2>/dev/null') ?? ''));
+
+        if (!$installed) {
+            View::render('settings/fail2ban', [
+                'layout' => 'main',
+                'pageTitle' => 'Fail2Ban',
+                'installed' => false,
+                'serviceStatus' => null,
+                'serviceUptime' => '',
+                'jails' => [],
+            ]);
+            return;
+        }
+
+        // Service status
+        $serviceStatus = trim(shell_exec('systemctl is-active fail2ban 2>/dev/null') ?? 'unknown');
+        $serviceUptime = '';
+        if ($serviceStatus === 'active') {
+            $uptimeRaw = trim(shell_exec('systemctl show fail2ban --property=ActiveEnterTimestamp --value 2>/dev/null') ?? '');
+            if (!empty($uptimeRaw)) {
+                $since = strtotime($uptimeRaw);
+                if ($since) {
+                    $diff = time() - $since;
+                    if ($diff < 3600) $serviceUptime = round($diff / 60) . ' min';
+                    elseif ($diff < 86400) $serviceUptime = round($diff / 3600, 1) . ' horas';
+                    else $serviceUptime = round($diff / 86400, 1) . ' dias';
+                }
+            }
+        }
+
+        // Get jail list
+        $jails = [];
+        $statusOutput = trim(shell_exec('fail2ban-client status 2>/dev/null') ?? '');
+        $jailNames = [];
+        if (preg_match('/Jail list:\s*(.+)$/mi', $statusOutput, $m)) {
+            $jailNames = array_map('trim', explode(',', $m[1]));
+            $jailNames = array_filter($jailNames, fn($j) => !empty($j));
+        }
+
+        foreach ($jailNames as $jailName) {
+            $jailOutput = trim(shell_exec(sprintf('fail2ban-client status %s 2>/dev/null', escapeshellarg($jailName))) ?? '');
+
+            $currentlyBanned = 0;
+            $totalBanned = 0;
+            $totalFailed = 0;
+            $bannedIps = [];
+
+            // Parse "Currently banned" count
+            if (preg_match('/Currently banned:\s*(\d+)/i', $jailOutput, $m)) {
+                $currentlyBanned = (int) $m[1];
+            }
+            // Parse "Total banned" count
+            if (preg_match('/Total banned:\s*(\d+)/i', $jailOutput, $m)) {
+                $totalBanned = (int) $m[1];
+            }
+            // Parse "Total failed" count (Currently failed also exists but Total is more useful)
+            if (preg_match('/Total failed:\s*(\d+)/i', $jailOutput, $m)) {
+                $totalFailed = (int) $m[1];
+            }
+            // Parse banned IP list
+            if (preg_match('/Banned IP list:\s*(.*)$/mi', $jailOutput, $m)) {
+                $ipList = trim($m[1]);
+                if (!empty($ipList)) {
+                    $bannedIps = preg_split('/\s+/', $ipList);
+                    $bannedIps = array_filter($bannedIps, fn($ip) => !empty($ip));
+                }
+            }
+
+            $jails[] = [
+                'name' => $jailName,
+                'currently_banned' => $currentlyBanned,
+                'total_banned' => $totalBanned,
+                'total_failed' => $totalFailed,
+                'banned_ips' => array_values($bannedIps),
+            ];
+        }
+
+        View::render('settings/fail2ban', [
+            'layout' => 'main',
+            'pageTitle' => 'Fail2Ban',
+            'installed' => true,
+            'serviceStatus' => $serviceStatus,
+            'serviceUptime' => $serviceUptime,
+            'jails' => $jails,
+        ]);
+    }
+
+    public function fail2banUnban(): void
+    {
+        $jail = trim($_POST['jail'] ?? '');
+        $ip = trim($_POST['ip'] ?? '');
+
+        // Validate jail name
+        if (empty($jail) || !preg_match('/^[a-zA-Z0-9_-]+$/', $jail)) {
+            Flash::set('error', 'Nombre de jail invalido.');
+            Router::redirect('/settings/fail2ban');
+            return;
+        }
+
+        // Validate IP
+        if (empty($ip) || !filter_var($ip, FILTER_VALIDATE_IP)) {
+            Flash::set('error', 'Direccion IP invalida.');
+            Router::redirect('/settings/fail2ban');
+            return;
+        }
+
+        $output = trim(shell_exec(sprintf(
+            'fail2ban-client set %s unbanip %s 2>&1',
+            escapeshellarg($jail),
+            escapeshellarg($ip)
+        )) ?? '');
+
+        LogService::log('fail2ban.unban', $jail, "Unban IP {$ip} from jail {$jail}: {$output}");
+
+        // fail2ban-client returns the IP on success, or an error message
+        if (str_contains($output, 'is not banned') || str_contains($output, 'ERROR') || str_contains($output, 'NOK')) {
+            Flash::set('error', "Error al desbanear {$ip} de {$jail}: {$output}");
+        } else {
+            Flash::set('success', "IP {$ip} desbaneada del jail {$jail}.");
+        }
+
+        Router::redirect('/settings/fail2ban');
+    }
+
+    // ================================================================
     // SSL/TLS Certificates
     // ================================================================
 
@@ -743,6 +873,142 @@ class SettingsController
             'apiAvailable' => $apiAvailable,
             'certificates' => $certificates,
             'tlsPolicies' => $tlsPolicies ?? [],
+        ]);
+    }
+
+    // ================================================================
+    // Log Browser
+    // ================================================================
+
+    public function logs(): void
+    {
+        // Allowed base directories for log files
+        $allowedPrefixes = [
+            PANEL_ROOT . '/storage/logs',
+            '/var/log',
+            '/var/www/vhosts',
+        ];
+
+        // Build list of available log files grouped by category
+        $logFiles = [];
+
+        // Panel logs
+        $panelLogDir = PANEL_ROOT . '/storage/logs';
+        foreach (['panel.log', 'panel-error.log'] as $f) {
+            $path = $panelLogDir . '/' . $f;
+            if (file_exists($path)) {
+                $logFiles['Panel'][] = [
+                    'path' => $path,
+                    'label' => $f,
+                    'size' => filesize($path),
+                ];
+            }
+        }
+
+        // Caddy logs
+        if (is_dir('/var/log/caddy')) {
+            foreach (glob('/var/log/caddy/*.log') as $f) {
+                $logFiles['Caddy'][] = [
+                    'path' => $f,
+                    'label' => basename($f),
+                    'size' => filesize($f),
+                ];
+            }
+        }
+
+        // Per-account logs
+        $accounts = \MuseDockPanel\Database::fetchAll("SELECT username, php_version FROM hosting_accounts ORDER BY username");
+        foreach ($accounts as $acc) {
+            $logsDir = '/var/www/vhosts/' . $acc['username'] . '/logs';
+            foreach (['access.log', 'error.log'] as $f) {
+                $path = $logsDir . '/' . $f;
+                if (file_exists($path)) {
+                    $logFiles['Cuentas'][] = [
+                        'path' => $path,
+                        'label' => $acc['username'] . '/' . $f,
+                        'size' => filesize($path),
+                    ];
+                }
+            }
+        }
+
+        // PHP-FPM logs
+        foreach (glob('/etc/php/*/fpm') as $fpmDir) {
+            $ver = basename(dirname($fpmDir));
+            $path = "/var/log/php{$ver}-fpm.log";
+            if (file_exists($path)) {
+                $logFiles['PHP-FPM'][] = [
+                    'path' => $path,
+                    'label' => "php{$ver}-fpm.log",
+                    'size' => filesize($path),
+                ];
+            }
+        }
+
+        // System log
+        if (file_exists('/var/log/syslog')) {
+            $logFiles['Sistema'][] = [
+                'path' => '/var/log/syslog',
+                'label' => 'syslog',
+                'size' => filesize('/var/log/syslog'),
+            ];
+        }
+
+        // Read query params
+        $defaultFile = '';
+        foreach ($logFiles as $group) {
+            if (!empty($group[0]['path'])) {
+                $defaultFile = $group[0]['path'];
+                break;
+            }
+        }
+        $selectedFile = $_GET['file'] ?? $defaultFile;
+        $lines = (int) ($_GET['lines'] ?? 100);
+        $lines = max(10, min(1000, $lines));
+
+        // Validate file path against directory traversal
+        $logContent = '';
+        $fileExists = false;
+        $fileSize = 0;
+        $displayPath = '';
+
+        if (!empty($selectedFile)) {
+            $realPath = realpath($selectedFile);
+            if ($realPath === false) {
+                $logContent = 'Archivo no encontrado';
+            } else {
+                $allowed = false;
+                foreach ($allowedPrefixes as $prefix) {
+                    $realPrefix = realpath($prefix);
+                    if ($realPrefix !== false && str_starts_with($realPath, $realPrefix . '/')) {
+                        $allowed = true;
+                        break;
+                    }
+                }
+
+                if (!$allowed) {
+                    $logContent = 'Acceso denegado: ruta no permitida';
+                } elseif (!is_file($realPath) || !is_readable($realPath)) {
+                    $logContent = 'Archivo no encontrado';
+                } else {
+                    $fileExists = true;
+                    $fileSize = filesize($realPath);
+                    $displayPath = $realPath;
+                    $logContent = shell_exec(sprintf('tail -n %d %s 2>&1', $lines, escapeshellarg($realPath))) ?? '';
+                }
+            }
+        }
+
+        View::render('settings/logs', [
+            'layout' => 'main',
+            'pageTitle' => 'Visor de Logs',
+            'logFiles' => $logFiles,
+            'selectedFile' => $selectedFile,
+            'lines' => $lines,
+            'logContent' => $logContent,
+            'fileExists' => $fileExists,
+            'fileSize' => $fileSize,
+            'displayPath' => $displayPath,
         ]);
     }
 

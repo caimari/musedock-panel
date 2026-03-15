@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.1.0');
+define('PANEL_VERSION', '0.3.0');
 
 // Autoloader
 spl_autoload_register(function ($class) {
@@ -152,6 +152,18 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/security', 'SettingsController@security');
 \MuseDockPanel\Router::post('/settings/security/save', 'SettingsController@securitySave');
 \MuseDockPanel\Router::get('/settings/ssl', 'SettingsController@ssl');
+\MuseDockPanel\Router::get('/settings/fail2ban', 'SettingsController@fail2ban');
+\MuseDockPanel\Router::post('/settings/fail2ban/unban', 'SettingsController@fail2banUnban');
+\MuseDockPanel\Router::get('/settings/logs', 'SettingsController@logs');
+
+// Backups
+\MuseDockPanel\Router::get('/backups', 'BackupController@index');
+\MuseDockPanel\Router::get('/backups/create', 'BackupController@create');
+\MuseDockPanel\Router::post('/backups/store', 'BackupController@store');
+\MuseDockPanel\Router::get('/backups/download', 'BackupController@download');
+\MuseDockPanel\Router::get('/backups/{id}/restore', 'BackupController@restore');
+\MuseDockPanel\Router::post('/backups/{id}/restore', 'BackupController@restoreExecute');
+\MuseDockPanel\Router::post('/backups/{id}/delete', 'BackupController@delete');
 
 // Changelog
 \MuseDockPanel\Router::get('/changelog', 'ChangelogController@index');

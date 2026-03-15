@@ -17,7 +17,11 @@ if ($creds) {
     <div class="card-body">
         <p class="mb-2" style="color: #fbbf24;"><i class="bi bi-exclamation-triangle me-1"></i> Guarda estas credenciales. La contrasena no se mostrara de nuevo.</p>
         <div class="row g-3">
-            <div class="col-md-3">
+            <div class="col-md-2">
+                <label class="form-label">Tipo</label>
+                <input type="text" class="form-control" value="<?= View::e(strtoupper($creds['db_type'] ?? 'mysql')) ?>" readonly>
+            </div>
+            <div class="col-md-2">
                 <label class="form-label">Host</label>
                 <input type="text" class="form-control" value="<?= View::e($creds['db_host']) ?>" readonly onclick="this.select()">
             </div>
@@ -25,7 +29,7 @@ if ($creds) {
                 <label class="form-label">Base de datos</label>
                 <input type="text" class="form-control" value="<?= View::e($creds['db_name']) ?>" readonly onclick="this.select()">
             </div>
-            <div class="col-md-3">
+            <div class="col-md-2">
                 <label class="form-label">Usuario</label>
                 <input type="text" class="form-control" value="<?= View::e($creds['db_user']) ?>" readonly onclick="this.select()">
             </div>
@@ -52,9 +56,53 @@ if ($creds) {
     </a>
 </div>
 
+<!-- System Database -->
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-shield-lock me-2"></i>Base de Datos del Sistema
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th class="ps-3">Base de Datos</th>
+                    <th>Usuario DB</th>
+                    <th>Tipo</th>
+                    <th>Estado</th>
+                    <th class="text-end pe-3">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="ps-3">
+                        <code><?= View::e($systemDb['db_name']) ?></code>
+                    </td>
+                    <td>
+                        <code><?= View::e($systemDb['db_user']) ?></code>
+                    </td>
+                    <td>
+                        <span class="badge" style="background: rgba(34,197,94,0.15); color: #22c55e;">
+                            PGSQL
+                        </span>
+                    </td>
+                    <td>
+                        <span class="badge" style="background: rgba(251,191,36,0.15); color: #fbbf24;">
+                            <i class="bi bi-lock me-1"></i>Sistema
+                        </span>
+                    </td>
+                    <td class="text-end pe-3">
+                        <span class="text-muted"><small>Protegida</small></span>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- User Databases -->
 <div class="card">
     <div class="card-header">
-        <i class="bi bi-database me-2"></i>Bases de Datos MySQL
+        <i class="bi bi-database me-2"></i>Bases de Datos de Cuentas
     </div>
     <div class="card-body p-0">
         <?php if (empty($grouped)): ?>
@@ -96,21 +144,34 @@ if ($creds) {
                             <code><?= View::e($db['db_user']) ?></code>
                         </td>
                         <td>
-                            <span class="badge" style="background: rgba(56,189,248,0.15); color: #38bdf8;">
-                                <?= View::e(strtoupper($db['db_type'])) ?>
-                            </span>
+                            <?php if (($db['db_type'] ?? 'mysql') === 'pgsql'): ?>
+                                <span class="badge" style="background: rgba(34,197,94,0.15); color: #22c55e;">
+                                    PGSQL
+                                </span>
+                            <?php else: ?>
+                                <span class="badge" style="background: rgba(56,189,248,0.15); color: #38bdf8;">
+                                    MYSQL
+                                </span>
+                            <?php endif; ?>
                         </td>
                         <td>
                             <small class="text-muted"><?= date('d/m/Y H:i', strtotime($db['created_at'])) ?></small>
                         </td>
                         <td class="text-end pe-3">
-                            <form method="POST" action="/databases/<?= $db['id'] ?>/delete" class="d-inline"
-                                  onsubmit="event.preventDefault(); confirmAction(this, {title:'Eliminar base de datos?', html:'Se eliminara <strong><?= View::e($db['db_name']) ?></strong> y el usuario <strong><?= View::e($db['db_user']) ?></strong> de MySQL.<br><br><span style=color:#ef4444>Esta accion es irreversible.</span>', icon:'warning', confirmText:'Si, eliminar'})">
-                                <?= View::csrf() ?>
-                                <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar">
-                                    <i class="bi bi-trash"></i>
-                                </button>
-                            </form>
+                            <?php if (empty($db['is_system'])): ?>
+                                <form method="POST" action="/databases/<?= $db['id'] ?>/delete" class="d-inline delete-db-form">
+                                    <?= View::csrf() ?>
+                                    <input type="hidden" name="password" class="delete-password-field" value="">
+                                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar"
+                                            data-db-name="<?= View::e($db['db_name']) ?>"
+                                            data-db-user="<?= View::e($db['db_user']) ?>"
+                                            data-db-type="<?= View::e(strtoupper($db['db_type'] ?? 'mysql')) ?>">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            <?php else: ?>
+                                <span class="text-muted"><small>Protegida</small></span>
+                            <?php endif; ?>
                         </td>
                     </tr>
                     <?php endforeach; ?>
@@ -120,3 +181,44 @@ if ($creds) {
         <?php endif; ?>
     </div>
 </div>
+
+<script>
+(function() {
+    document.querySelectorAll('.delete-db-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var btn = form.querySelector('button[type="submit"]');
+            var dbName = btn.dataset.dbName;
+            var dbUser = btn.dataset.dbUser;
+            var dbType = btn.dataset.dbType;
+            var passwordField = form.querySelector('.delete-password-field');
+
+            SwalDark.fire({
+                title: 'Confirmar eliminacion',
+                html: '<p>Se eliminara <strong>' + dbName + '</strong> (' + dbType + ') y el usuario <strong>' + dbUser + '</strong>.</p>' +
+                      '<p style="color:#ef4444;">Esta accion es irreversible.</p>' +
+                      '<p>Escribe tu contrasena de admin para confirmar:</p>' +
+                      '<input type="password" id="swal-password" class="swal2-input" style="background:#0f172a;color:#e2e8f0;border:1px solid #334155;" placeholder="Contrasena">',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Eliminar',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#ef4444',
+                preConfirm: function() {
+                    var pwd = document.getElementById('swal-password').value;
+                    if (!pwd) {
+                        Swal.showValidationMessage('Debes ingresar tu contrasena');
+                        return false;
+                    }
+                    return pwd;
+                }
+            }).then(function(result) {
+                if (result.isConfirmed && result.value) {
+                    passwordField.value = result.value;
+                    form.submit();
+                }
+            });
+        });
+    });
+})();
+</script>

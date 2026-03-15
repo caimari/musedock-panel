@@ -105,6 +105,9 @@
         <a href="/logs" class="<?= ($pageTitle ?? '') === 'Activity Log' ? 'active' : '' ?>">
             <i class="bi bi-journal-text"></i> Activity Log
         </a>
+        <a href="/backups" class="<?= str_contains($pageTitle ?? '', 'Backup') ? 'active' : '' ?>">
+            <i class="bi bi-cloud-arrow-down"></i> Backups
+        </a>
         <a href="/settings/services" class="<?= str_starts_with($_SERVER['REQUEST_URI'] ?? '', '/settings') ? 'active' : '' ?>">
             <i class="bi bi-gear"></i> Settings
         </a>

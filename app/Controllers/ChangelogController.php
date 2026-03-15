@@ -20,22 +20,45 @@ class ChangelogController
     {
         return [
             [
-                'version' => '0.3.0',
+                'version' => '0.4.0',
                 'date' => 'Pendiente / Upcoming',
                 'badge' => 'warning',
                 'changes' => [
                     'planned' => [
                         'es' => [
-                            'Backups — Backup/restore por cuenta (archivos + BD)',
-                            'Fail2Ban — Ver bans activos, desbloquear IPs, configurar jails',
-                            'Visor de logs — Logs de Caddy/FPM por cuenta desde el panel',
                             'Multi-idioma panel — Soporte ES/EN en toda la interfaz',
+                            'Clustering — Replicacion PostgreSQL, promover/degradar servidores',
                         ],
                         'en' => [
-                            'Backups — Per-account backup/restore (files + DB)',
-                            'Fail2Ban — View active bans, unblock IPs, configure jails',
-                            'Log browser — Caddy/FPM logs per account from the panel',
                             'Multi-language panel — ES/EN support across the entire interface',
+                            'Clustering — PostgreSQL replication, promote/demote servers',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '0.3.0',
+                'date' => '2026-03-15',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Backups — Backup/restore por cuenta (archivos + BD MySQL/PostgreSQL), descarga, eliminacion con confirmacion',
+                            'Fail2Ban — Ver jails activos, IPs baneadas, desbloquear IPs desde el panel',
+                            'Visor de logs — Logs de Caddy, FPM, cuentas y sistema con navegacion por archivo',
+                            'Base de datos PostgreSQL — Crear/eliminar BD PostgreSQL por cuenta desde el panel',
+                            'Base de datos protegida — La BD del sistema (musedock_panel) se muestra como protegida y no se puede borrar',
+                            'Confirmacion con password — Borrar BD y backups requiere password del admin',
+                            'Changelog — Pagina de versiones con toggle ES/EN, version clickeable en sidebar',
+                        ],
+                        'en' => [
+                            'Backups — Per-account backup/restore (files + MySQL/PostgreSQL DB), download, deletion with confirmation',
+                            'Fail2Ban — View active jails, banned IPs, unblock IPs from the panel',
+                            'Log browser — Caddy, FPM, account and system logs with file navigation',
+                            'PostgreSQL databases — Create/delete PostgreSQL databases per account from the panel',
+                            'Protected database — System DB (musedock_panel) shown as protected and cannot be deleted',
+                            'Password confirmation — Deleting databases and backups requires admin password',
+                            'Changelog — Version history page with ES/EN toggle, clickable version in sidebar',
                         ],
                     ],
                 ],
@@ -43,7 +66,7 @@ class ChangelogController
             [
                 'version' => '0.2.0',
                 'date' => '2026-03-15',
-                'badge' => 'success',
+                'badge' => 'info',
                 'changes' => [
                     'added' => [
                         'es' => [
@@ -52,7 +75,7 @@ class ChangelogController
                             'Settings > SSL/TLS — Certificados activos de Caddy, politicas TLS, info Let\'s Encrypt',
                             'Settings > Seguridad — IPs permitidas en vivo, sesiones activas, info de cookies',
                             'PHP por cuenta — memory_limit, upload_max, post_max, max_execution_time por hosting account',
-                            'Gestion de bases de datos — Crear/eliminar BD MySQL por cuenta, usuarios con prefijo',
+                            'Gestion de bases de datos MySQL — Crear/eliminar BD MySQL por cuenta, usuarios con prefijo',
                             'Tabla panel_settings — Almacen clave-valor para configuracion del panel',
                             'Tabla servers — Preparacion para clustering (localhost por defecto)',
                             'Campo server_id en hosting_accounts — Preparacion para multi-servidor',
@@ -61,7 +84,6 @@ class ChangelogController
                             'Instalador firewall — Deteccion UFW/iptables, estado del puerto',
                             'Modo verificacion — Health check sin tocar nada',
                             'Desinstalador — bin/uninstall.sh con confirmaciones paso a paso',
-                            'Changelog — Pagina de versiones dentro del panel',
                         ],
                         'en' => [
                             'Settings > Server — Server info, configurable timezone, panel domain, HTTP/HTTPS selector',
@@ -69,7 +91,7 @@ class ChangelogController
                             'Settings > SSL/TLS — Active Caddy certificates, TLS policies, Let\'s Encrypt info',
                             'Settings > Security — Live allowed IPs, active sessions, cookie info',
                             'Per-account PHP — memory_limit, upload_max, post_max, max_execution_time per hosting account',
-                            'Database management — Create/delete MySQL databases per account, prefixed users',
+                            'MySQL database management — Create/delete MySQL databases per account, prefixed users',
                             'panel_settings table — Key-value store for panel configuration',
                             'servers table — Clustering preparation (localhost default)',
                             'server_id field in hosting_accounts — Multi-server preparation',
@@ -78,7 +100,6 @@ class ChangelogController
                             'Installer firewall — UFW/iptables detection, port status',
                             'Verify mode — Health check without changing anything',
                             'Uninstaller — bin/uninstall.sh with step-by-step confirmations',
-                            'Changelog — Version history page inside the panel',
                         ],
                     ],
                     'fixed' => [
@@ -102,7 +123,7 @@ class ChangelogController
             [
                 'version' => '0.1.0',
                 'date' => '2026-03-14',
-                'badge' => 'info',
+                'badge' => 'secondary',
                 'changes' => [
                     'added' => [
                         'es' => [
