@@ -20,18 +20,70 @@ class ChangelogController
     {
         return [
             [
-                'version' => '0.4.0',
+                'version' => '0.6.0',
                 'date' => 'Pendiente / Upcoming',
                 'badge' => 'warning',
                 'changes' => [
                     'planned' => [
                         'es' => [
                             'Multi-idioma panel — Soporte ES/EN en toda la interfaz',
-                            'Clustering — Replicacion PostgreSQL, promover/degradar servidores',
                         ],
                         'en' => [
                             'Multi-language panel — ES/EN support across the entire interface',
-                            'Clustering — PostgreSQL replication, promote/demote servers',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '0.5.0',
+                'date' => '2026-03-16',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Cluster multi-servidor — Arquitectura master/slave entre paneles con API bidireccional y token Bearer',
+                            'API de Cluster — Endpoints /api/cluster/status, heartbeat y action para comunicacion entre nodos',
+                            'Sincronizacion de hostings — Cola cluster_queue para propagar creacion/eliminacion/suspension entre nodos',
+                            'Heartbeat y monitoreo — Deteccion automatica de nodos caidos, alertas por email SMTP y Telegram',
+                            'Failover — Promover slave a master y degradar master a slave desde el panel',
+                            'Worker cron — bin/cluster-worker.php para procesar cola, heartbeats y alertas automaticas',
+                            'Instalador dual PostgreSQL — Cluster dedicado en puerto 5433, migracion automatica desde 5432',
+                        ],
+                        'en' => [
+                            'Multi-server cluster — Master/slave architecture between panels with bidirectional API and Bearer token',
+                            'Cluster API — /api/cluster/status, heartbeat and action endpoints for inter-node communication',
+                            'Hosting sync — cluster_queue for propagating account creation/deletion/suspension across nodes',
+                            'Heartbeat and monitoring — Automatic detection of unreachable nodes, email SMTP and Telegram alerts',
+                            'Failover — Promote slave to master and demote master to slave from the panel',
+                            'Cron worker — bin/cluster-worker.php for queue processing, heartbeats and automatic alerts',
+                            'Dual PostgreSQL installer — Dedicated cluster on port 5433, automatic migration from 5432',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '0.4.0',
+                'date' => '2026-03-15',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Replicacion avanzada — Multiples slaves por master, IPs dual (primaria + fallback WireGuard)',
+                            'Replicacion sincrona/asincrona — Modo configurable por slave en PostgreSQL',
+                            'Replicacion logica PostgreSQL — Seleccionar bases de datos a replicar en vez de todo el cluster',
+                            'GTID MySQL — Soporte GTID-based replication, mostrar GTID position en monitor',
+                            'Monitor multi-slave — Estado individual por slave con lag, bytes pendientes, conexion activa',
+                            'WireGuard VPN — Instalar, configurar wg0, CRUD de peers, generar claves y config remota, ping/latencia',
+                            'Firewall — Auto-deteccion UFW/iptables, ver/añadir/eliminar reglas, boton de emergencia, sugerencias',
+                        ],
+                        'en' => [
+                            'Advanced replication — Multiple slaves per master, dual IPs (primary + WireGuard fallback)',
+                            'Sync/async replication — Configurable mode per slave in PostgreSQL',
+                            'PostgreSQL logical replication — Select specific databases to replicate instead of full cluster',
+                            'MySQL GTID — GTID-based replication support, show GTID position in monitor',
+                            'Multi-slave monitor — Individual slave status with lag, pending bytes, active connection',
+                            'WireGuard VPN — Install, configure wg0, peer CRUD, generate keys and remote config, ping/latency',
+                            'Firewall — Auto-detect UFW/iptables, view/add/delete rules, emergency button, suggestions',
                         ],
                     ],
                 ],

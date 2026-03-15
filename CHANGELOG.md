@@ -2,13 +2,30 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aqui.
 
-## [0.4.0] — Pendiente
+## [0.5.0] — 2026-03-16
 
 ### Anadido
-- **Replicacion** — Configurar PostgreSQL streaming replication y MySQL replication desde el panel, monitor en tiempo real con auto-refresh cada 5s, promover/degradar servidores (switchover), test de conexion AJAX, cifrado de passwords, backup automatico de archivos de configuracion
+- **Cluster multi-servidor** — Arquitectura master/slave entre paneles, API bidireccional con autenticacion por token Bearer
+- **Cluster API** — Endpoints `/api/cluster/status`, `/api/cluster/heartbeat`, `/api/cluster/action` para comunicacion entre nodos
+- **Sincronizacion de hostings** — Cola de sincronizacion (cluster_queue) para propagar creacion/eliminacion/suspension de cuentas entre nodos
+- **Heartbeat y monitoreo** — Polling automatico de nodos, deteccion de nodos caidos, alertas por email (SMTP) y Telegram
+- **Failover** — Promover slave a master y degradar master a slave desde el panel, actualiza PANEL_ROLE en .env
+- **Worker cron** — `bin/cluster-worker.php` para procesar cola, heartbeats, alertas y limpieza automatica
+- **ApiAuthMiddleware** — Autenticacion por token para rutas /api/*, separada de la autenticacion por sesion
+- **Instalador dual PostgreSQL** — Deteccion automatica de cluster existente, 3 escenarios (instalacion limpia en 5433, migracion de 5432 a 5433, ya migrado)
+- **PANEL_ROLE en .env** — Rol del servidor (standalone/master/slave) almacenado en .env para evitar sobreescritura durante sincronizacion
 
 ### Por hacer
 - **Multi-idioma panel** — Soporte ES/EN en toda la interfaz del panel
+
+---
+
+## [0.4.0] — 2026-03-15
+
+### Anadido
+- **Replicacion avanzada** — Multiples slaves por master, IPs dual (primaria + fallback WireGuard), modo sincrono/asincrono por slave, replicacion logica PostgreSQL (seleccionar BDs), GTID MySQL, monitor multi-slave en tiempo real
+- **WireGuard VPN** — Instalar, configurar interfaz wg0, CRUD de peers, generar claves, generar config remota, ping/latencia, aplicar sin reiniciar (wg syncconf)
+- **Firewall** — Auto-deteccion UFW/iptables, ver/añadir/eliminar reglas, enable/disable UFW, guardar iptables, boton de emergencia "permitir mi IP", sugerencias automaticas para replicacion y hosting
 
 ---
 

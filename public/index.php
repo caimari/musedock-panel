@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.3.0');
+define('PANEL_VERSION', '0.5.0');
 
 // Autoloader
 spl_autoload_register(function ($class) {
@@ -75,7 +75,15 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 }
 
 // Middleware
+\MuseDockPanel\Router::middleware('ApiAuthMiddleware');
 \MuseDockPanel\Router::middleware('AuthMiddleware');
+
+// ===============================
+// API Routes (token auth via ApiAuthMiddleware)
+// ===============================
+\MuseDockPanel\Router::get('/api/cluster/status', 'ClusterApiController@status');
+\MuseDockPanel\Router::get('/api/cluster/heartbeat', 'ClusterApiController@heartbeat');
+\MuseDockPanel\Router::post('/api/cluster/action', 'ClusterApiController@action');
 
 // ===============================
 // Routes
@@ -165,6 +173,50 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/replication/demote', 'ReplicationController@demote');
 \MuseDockPanel\Router::get('/settings/replication/status', 'ReplicationController@status');
 \MuseDockPanel\Router::post('/settings/replication/test-connection', 'ReplicationController@testConnection');
+\MuseDockPanel\Router::post('/settings/replication/add-slave', 'ReplicationController@addSlave');
+\MuseDockPanel\Router::post('/settings/replication/update-slave', 'ReplicationController@updateSlave');
+\MuseDockPanel\Router::post('/settings/replication/remove-slave', 'ReplicationController@removeSlave');
+\MuseDockPanel\Router::post('/settings/replication/apply-master', 'ReplicationController@applyMaster');
+\MuseDockPanel\Router::get('/settings/replication/slave-status', 'ReplicationController@slaveStatus');
+\MuseDockPanel\Router::post('/settings/replication/test-slave-connection', 'ReplicationController@testSlaveConnection');
+\MuseDockPanel\Router::post('/settings/replication/save-advanced', 'ReplicationController@saveAdvanced');
+
+// Cluster
+\MuseDockPanel\Router::get('/settings/cluster', 'ClusterController@index');
+\MuseDockPanel\Router::post('/settings/cluster/add-node', 'ClusterController@addNode');
+\MuseDockPanel\Router::post('/settings/cluster/update-node', 'ClusterController@updateNode');
+\MuseDockPanel\Router::post('/settings/cluster/remove-node/{id}', 'ClusterController@removeNode');
+\MuseDockPanel\Router::post('/settings/cluster/test-node', 'ClusterController@testNode');
+\MuseDockPanel\Router::get('/settings/cluster/node-status', 'ClusterController@nodeStatus');
+\MuseDockPanel\Router::post('/settings/cluster/process-queue', 'ClusterController@processQueue');
+\MuseDockPanel\Router::post('/settings/cluster/promote', 'ClusterController@promoteLocal');
+\MuseDockPanel\Router::post('/settings/cluster/demote', 'ClusterController@demoteLocal');
+\MuseDockPanel\Router::post('/settings/cluster/generate-token', 'ClusterController@generateToken');
+\MuseDockPanel\Router::post('/settings/cluster/save-settings', 'ClusterController@saveSettings');
+\MuseDockPanel\Router::post('/settings/cluster/clean-queue', 'ClusterController@cleanQueue');
+
+// WireGuard
+\MuseDockPanel\Router::get('/settings/wireguard', 'WireGuardController@index');
+\MuseDockPanel\Router::post('/settings/wireguard/install', 'WireGuardController@install');
+\MuseDockPanel\Router::post('/settings/wireguard/start', 'WireGuardController@start');
+\MuseDockPanel\Router::post('/settings/wireguard/restart', 'WireGuardController@restart');
+\MuseDockPanel\Router::post('/settings/wireguard/add-peer', 'WireGuardController@addPeer');
+\MuseDockPanel\Router::post('/settings/wireguard/remove-peer', 'WireGuardController@removePeer');
+\MuseDockPanel\Router::post('/settings/wireguard/update-peer', 'WireGuardController@updatePeer');
+\MuseDockPanel\Router::post('/settings/wireguard/generate-keys', 'WireGuardController@generateKeys');
+\MuseDockPanel\Router::post('/settings/wireguard/generate-config', 'WireGuardController@generateConfig');
+\MuseDockPanel\Router::post('/settings/wireguard/ping', 'WireGuardController@pingPeer');
+\MuseDockPanel\Router::get('/settings/wireguard/status', 'WireGuardController@status');
+
+// Firewall
+\MuseDockPanel\Router::get('/settings/firewall', 'FirewallController@index');
+\MuseDockPanel\Router::post('/settings/firewall/add-rule', 'FirewallController@addRule');
+\MuseDockPanel\Router::post('/settings/firewall/delete-rule', 'FirewallController@deleteRule');
+\MuseDockPanel\Router::post('/settings/firewall/enable', 'FirewallController@enableFirewall');
+\MuseDockPanel\Router::post('/settings/firewall/disable', 'FirewallController@disableFirewall');
+\MuseDockPanel\Router::post('/settings/firewall/emergency', 'FirewallController@emergencyAllow');
+\MuseDockPanel\Router::post('/settings/firewall/save', 'FirewallController@saveRules');
+\MuseDockPanel\Router::get('/settings/firewall/suggest', 'FirewallController@suggestRules');
 
 // Backups
 \MuseDockPanel\Router::get('/backups', 'BackupController@index');

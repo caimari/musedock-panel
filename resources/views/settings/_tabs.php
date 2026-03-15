@@ -9,4 +9,7 @@
     <a href="/settings/caddy" class="btn btn-outline-light btn-sm <?= str_contains($pageTitle ?? '', 'Caddy') ? 'active' : '' ?>"><i class="bi bi-globe me-1"></i>Caddy</a>
     <a href="/settings/logs" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Visor de Logs' ? 'active' : '' ?>"><i class="bi bi-terminal me-1"></i>Logs</a>
     <a href="/settings/replication" class="btn btn-outline-light btn-sm <?= str_contains($pageTitle ?? '', 'Replicaci') ? 'active' : '' ?>"><i class="bi bi-arrow-repeat me-1"></i>Replicacion</a>
+    <a href="/settings/firewall" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Firewall' ? 'active' : '' ?>"><i class="bi bi-shield-fill me-1"></i>Firewall</a>
+    <a href="/settings/wireguard" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'WireGuard' ? 'active' : '' ?>"><i class="bi bi-hdd-network me-1"></i>WireGuard</a>
+    <a href="/settings/cluster" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Cluster' ? 'active' : '' ?>"><i class="bi bi-diagram-3 me-1"></i>Cluster</a>
 </div>

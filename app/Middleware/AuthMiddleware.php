@@ -9,6 +9,7 @@ use MuseDockPanel\View;
 class AuthMiddleware
 {
     private static array $publicPaths = ['/login', '/login/submit'];
+    private static array $apiPrefixes = ['/api/'];
 
     public static function handle(): bool
     {
@@ -23,6 +24,13 @@ class AuthMiddleware
         // Allow public paths
         if (in_array($uri, self::$publicPaths)) {
             return true;
+        }
+
+        // Allow API routes (handled by ApiAuthMiddleware)
+        foreach (self::$apiPrefixes as $prefix) {
+            if (str_starts_with($uri, $prefix)) {
+                return true;
+            }
         }
 
         // Check auth

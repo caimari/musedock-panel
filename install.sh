@@ -268,6 +268,17 @@ t() {
                 verify_complete) text="Verificacion completada" ;;
                 verify_all_ok) text="Todo correcto! El panel esta funcionando correctamente." ;;
                 verify_has_errors) text="Se encontraron $1 problema(s). Revisa arriba." ;;
+                pgsql_detect_version) text="Detectando version de PostgreSQL..." ;;
+                pgsql_version_found) text="PostgreSQL version $1 detectada" ;;
+                pgsql_dual_header) text="Configurando doble cluster PostgreSQL..." ;;
+                pgsql_cluster_exists) text="Cluster '$1' ya existe en puerto $2" ;;
+                pgsql_cluster_created) text="Cluster '$1' creado en puerto $2" ;;
+                pgsql_migrating) text="Migrando BD del panel de 5432 a 5433..." ;;
+                pgsql_migration_backup) text="Backup de seguridad: $1" ;;
+                pgsql_migration_done) text="BD del panel migrada exitosamente a puerto 5433" ;;
+                pgsql_already_5433) text="El panel ya usa puerto 5433 — no hay que migrar" ;;
+                pgsql_5432_free) text="Puerto 5432 disponible para proyectos y replica" ;;
+                pgsql_panel_cluster) text="Cluster del panel: $1/$2 en puerto $3" ;;
                 *) text="[$key]" ;;
             esac
             ;;
@@ -484,6 +495,17 @@ t() {
                 verify_complete) text="Verification complete" ;;
                 verify_all_ok) text="Everything OK! The panel is running correctly." ;;
                 verify_has_errors) text="Found $1 issue(s). Review above." ;;
+                pgsql_detect_version) text="Detecting PostgreSQL version..." ;;
+                pgsql_version_found) text="PostgreSQL version $1 detected" ;;
+                pgsql_dual_header) text="Configuring dual PostgreSQL cluster..." ;;
+                pgsql_cluster_exists) text="Cluster '$1' already exists on port $2" ;;
+                pgsql_cluster_created) text="Cluster '$1' created on port $2" ;;
+                pgsql_migrating) text="Migrating panel DB from 5432 to 5433..." ;;
+                pgsql_migration_backup) text="Safety backup: $1" ;;
+                pgsql_migration_done) text="Panel DB successfully migrated to port 5433" ;;
+                pgsql_already_5433) text="Panel already uses port 5433 — no migration needed" ;;
+                pgsql_5432_free) text="Port 5432 available for projects and replication" ;;
+                pgsql_panel_cluster) text="Panel cluster: $1/$2 on port $3" ;;
                 *) text="[$key]" ;;
             esac
             ;;
@@ -961,7 +983,7 @@ systemctl start php${PHP_VER}-fpm
 ok "$(t php_fpm_started "$PHP_VER")"
 
 # ============================================================
-# Step 3: PostgreSQL
+# Step 3: PostgreSQL (dual cluster: main on 5432, panel on 5433)
 # ============================================================
 header "$(t step_pgsql)"
 
@@ -976,96 +998,165 @@ systemctl enable postgresql > /dev/null 2>&1
 systemctl start postgresql
 ok "$(t pgsql_running)"
 
-# Create database and user (skip if reinstalling — preserve existing data)
+# Detect PostgreSQL major version
+ok "$(t pgsql_detect_version)"
+PG_VER=$(pg_lsclusters -h 2>/dev/null | head -1 | awk '{print $1}')
+if [ -z "$PG_VER" ]; then
+    fail "Could not detect PostgreSQL version from pg_lsclusters"
+fi
+ok "$(t pgsql_version_found "$PG_VER")"
+
+# Show current clusters
+header "$(t pgsql_dual_header)"
+
+# Function to ensure the panel cluster exists on port 5433
+ensure_panel_cluster() {
+    if pg_lsclusters -h 2>/dev/null | awk '{print $2}' | grep -qw "panel"; then
+        local PANEL_PORT_ACTUAL
+        PANEL_PORT_ACTUAL=$(pg_lsclusters -h 2>/dev/null | awk '$2=="panel" {print $3}')
+        ok "$(t pgsql_cluster_exists "panel" "$PANEL_PORT_ACTUAL")"
+        # Ensure it is running
+        local PANEL_STATUS
+        PANEL_STATUS=$(pg_lsclusters -h 2>/dev/null | awk '$2=="panel" {print $4}')
+        if [ "$PANEL_STATUS" != "online" ]; then
+            pg_ctlcluster "$PG_VER" panel start 2>/dev/null || true
+        fi
+    else
+        pg_createcluster "$PG_VER" panel --port 5433 --start 2>/dev/null
+        ok "$(t pgsql_cluster_created "panel" "5433")"
+    fi
+}
+
+# Function to add pg_hba.conf entry for the panel cluster
+update_panel_pg_hba() {
+    local PG_HBA="/etc/postgresql/${PG_VER}/panel/pg_hba.conf"
+    if [ -f "$PG_HBA" ]; then
+        if ! grep -q "${DB_USER}" "$PG_HBA" 2>/dev/null; then
+            cp "$PG_HBA" "${PG_HBA}.bak.$(date +%Y%m%d%H%M%S)"
+            sed -i "/^# IPv4 local connections/a host    ${DB_NAME}    ${DB_USER}    127.0.0.1/32    md5" "$PG_HBA" 2>/dev/null || \
+                echo "host    ${DB_NAME}    ${DB_USER}    127.0.0.1/32    md5" >> "$PG_HBA"
+            # Reload only the panel cluster — never restart port 5432
+            pg_ctlcluster "$PG_VER" panel reload 2>/dev/null || true
+            ok "$(t pgsql_hba_updated)"
+        fi
+    fi
+}
+
+# Try peer auth first (sudo -u postgres), fallback to password auth
+PG_AUTH_METHOD="peer"
+PG_PASS_ENV=""
+
+if ! sudo -u postgres psql -c "SELECT 1;" > /dev/null 2>&1; then
+    PG_AUTH_METHOD="password"
+    echo ""
+    echo -e "  ${YELLOW}${BOLD}$(t pgsql_peer_fail)${NC}"
+    echo -e "  ${YELLOW}$(t pgsql_peer_desc)${NC}"
+    echo ""
+
+    if PGPASSWORD="" psql -U postgres -h 127.0.0.1 -c "SELECT 1;" > /dev/null 2>&1; then
+        ok "$(t pgsql_empty_pass)"
+        PG_PASS_ENV=""
+    else
+        echo -e "  ${BOLD}$(t pgsql_enter_pass)${NC}"
+        read -rsp "  Password: " PG_SUPERUSER_PASS
+        echo ""
+
+        if PGPASSWORD="$PG_SUPERUSER_PASS" psql -U postgres -h 127.0.0.1 -c "SELECT 1;" > /dev/null 2>&1; then
+            ok "$(t pgsql_pass_verified)"
+            PG_PASS_ENV="$PG_SUPERUSER_PASS"
+        else
+            fail "$(t pgsql_cannot_connect)"
+        fi
+    fi
+fi
+
+# Function to run psql commands with the right auth method (on a given port)
+pg_exec() {
+    local SQL="$1"
+    local PORT="${2:-5433}"
+    if [ "$PG_AUTH_METHOD" = "peer" ]; then
+        sudo -u postgres psql -p "$PORT" -c "$SQL" 2>/dev/null
+    else
+        PGPASSWORD="$PG_PASS_ENV" psql -U postgres -h 127.0.0.1 -p "$PORT" -c "$SQL" 2>/dev/null
+    fi
+}
+
+pg_exec_quiet() {
+    local PORT="${1:-5433}"
+    if [ "$PG_AUTH_METHOD" = "peer" ]; then
+        sudo -u postgres psql -p "$PORT" -lqt 2>/dev/null
+    else
+        PGPASSWORD="$PG_PASS_ENV" psql -U postgres -h 127.0.0.1 -p "$PORT" -lqt 2>/dev/null
+    fi
+}
+
 if [ "$REINSTALL" = true ]; then
-    # Read existing DB credentials from .env backup
+    # Read existing DB credentials from .env
     EXISTING_DB_PASS=$(grep -E '^DB_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'')
+    EXISTING_DB_USER=$(grep -E '^DB_USER=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'')
+    EXISTING_DB_NAME=$(grep -E '^DB_NAME=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'')
+    EXISTING_DB_PORT=$(grep -E '^DB_PORT=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'')
+
     if [ -n "$EXISTING_DB_PASS" ]; then
         DB_PASS="$EXISTING_DB_PASS"
         ok "$(t pgsql_reusing)"
     else
         warn "$(t pgsql_no_pass)"
     fi
-else
-    # Fresh install — create user and database
-    # Try peer auth first (sudo -u postgres), fallback to password auth
-    PG_AUTH_METHOD="peer"
-    PG_PASS_ENV=""
+    [ -n "$EXISTING_DB_USER" ] && DB_USER="$EXISTING_DB_USER"
+    [ -n "$EXISTING_DB_NAME" ] && DB_NAME="$EXISTING_DB_NAME"
 
-    # Test if peer auth works
-    if ! sudo -u postgres psql -c "SELECT 1;" > /dev/null 2>&1; then
-        PG_AUTH_METHOD="password"
-        echo ""
-        echo -e "  ${YELLOW}${BOLD}$(t pgsql_peer_fail)${NC}"
-        echo -e "  ${YELLOW}$(t pgsql_peer_desc)${NC}"
-        echo ""
-
-        # Try with empty password first (some default installs)
-        if PGPASSWORD="" psql -U postgres -h 127.0.0.1 -c "SELECT 1;" > /dev/null 2>&1; then
-            ok "$(t pgsql_empty_pass)"
-            PG_PASS_ENV=""
-        else
-            echo -e "  ${BOLD}$(t pgsql_enter_pass)${NC}"
-            read -rsp "  Password: " PG_SUPERUSER_PASS
-            echo ""
-
-            # Validate the password
-            if PGPASSWORD="$PG_SUPERUSER_PASS" psql -U postgres -h 127.0.0.1 -c "SELECT 1;" > /dev/null 2>&1; then
-                ok "$(t pgsql_pass_verified)"
-                PG_PASS_ENV="$PG_SUPERUSER_PASS"
-            else
-                fail "$(t pgsql_cannot_connect)"
-            fi
-        fi
-    fi
-
-    # Function to run psql commands with the right auth method
-    pg_exec() {
-        if [ "$PG_AUTH_METHOD" = "peer" ]; then
-            sudo -u postgres psql -c "$1" 2>/dev/null
-        else
-            PGPASSWORD="$PG_PASS_ENV" psql -U postgres -h 127.0.0.1 -c "$1" 2>/dev/null
-        fi
-    }
-
-    pg_exec_quiet() {
-        if [ "$PG_AUTH_METHOD" = "peer" ]; then
-            sudo -u postgres psql -lqt 2>/dev/null
-        else
-            PGPASSWORD="$PG_PASS_ENV" psql -U postgres -h 127.0.0.1 -lqt 2>/dev/null
-        fi
-    }
-
-    # Create user if not exists
-    pg_exec "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1 || \
-        pg_exec "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';" > /dev/null 2>&1
-
-    # Create database if not exists
-    pg_exec_quiet | cut -d \| -f 1 | grep -qw "${DB_NAME}" || \
-        pg_exec "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" > /dev/null 2>&1
-
-    pg_exec "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" > /dev/null 2>&1
-
-    # Ensure pg_hba.conf allows password auth for the panel user on 127.0.0.1
-    if [ "$PG_AUTH_METHOD" = "peer" ]; then
-        PG_HBA=$(sudo -u postgres psql -t -c "SHOW hba_file;" 2>/dev/null || find /etc/postgresql -name pg_hba.conf 2>/dev/null | head -1)
+    if [ "$EXISTING_DB_PORT" = "5433" ]; then
+        # Scenario C — already migrated to 5433
+        ok "$(t pgsql_already_5433)"
+        ensure_panel_cluster
+        ok "$(t pgsql_panel_cluster "$PG_VER" "panel" "5433")"
     else
-        PG_HBA=$(PGPASSWORD="$PG_PASS_ENV" psql -U postgres -h 127.0.0.1 -t -c "SHOW hba_file;" 2>/dev/null || find /etc/postgresql -name pg_hba.conf 2>/dev/null | head -1)
+        # Scenario B — needs migration from 5432 to 5433
+        ok "$(t pgsql_migrating)"
+        ensure_panel_cluster
+        update_panel_pg_hba
+
+        # Safety backup from old port
+        MIGRATION_BACKUP="/tmp/backup-panel-pre-migration-$(date +%Y%m%d_%H%M%S).sql"
+        sudo -u postgres pg_dump -p 5432 "${DB_NAME}" > "$MIGRATION_BACKUP" 2>/dev/null || true
+        ok "$(t pgsql_migration_backup "$MIGRATION_BACKUP")"
+
+        # Create role in new cluster if not exists
+        pg_exec "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" 5433 | grep -q 1 || \
+            pg_exec "CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}';" 5433 > /dev/null 2>&1
+
+        # Create database in new cluster if not exists
+        pg_exec_quiet 5433 | cut -d \| -f 1 | grep -qw "${DB_NAME}" || \
+            pg_exec "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" 5433 > /dev/null 2>&1
+
+        pg_exec "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" 5433 > /dev/null 2>&1
+
+        # Copy data from 5432 to 5433
+        sudo -u postgres pg_dump -p 5432 "${DB_NAME}" 2>/dev/null | sudo -u postgres psql -p 5433 "${DB_NAME}" > /dev/null 2>&1 || true
+
+        ok "$(t pgsql_migration_done)"
+        ok "$(t pgsql_5432_free)"
+        ok "$(t pgsql_panel_cluster "$PG_VER" "panel" "5433")"
     fi
-    PG_HBA=$(echo "$PG_HBA" | xargs)  # trim whitespace
-    if [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ]; then
-        if ! grep -q "${DB_USER}" "$PG_HBA" 2>/dev/null; then
-            # Add rule for the panel user BEFORE the first existing rule
-            cp "$PG_HBA" "${PG_HBA}.bak.$(date +%Y%m%d%H%M%S)"
-            sed -i "/^# IPv4 local connections/a host    ${DB_NAME}    ${DB_USER}    127.0.0.1/32    md5" "$PG_HBA" 2>/dev/null || \
-                echo "host    ${DB_NAME}    ${DB_USER}    127.0.0.1/32    md5" >> "$PG_HBA"
-            # Reload PostgreSQL to apply pg_hba changes
-            systemctl reload postgresql 2>/dev/null || sudo -u postgres pg_ctl reload 2>/dev/null || true
-            ok "$(t pgsql_hba_updated)"
-        fi
-    fi
+else
+    # Scenario A — fresh install
+    ensure_panel_cluster
+    update_panel_pg_hba
+
+    # Create user if not exists (on port 5433 — panel cluster)
+    pg_exec "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" 5433 | grep -q 1 || \
+        pg_exec "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';" 5433 > /dev/null 2>&1
+
+    # Create database if not exists (on port 5433 — panel cluster)
+    pg_exec_quiet 5433 | cut -d \| -f 1 | grep -qw "${DB_NAME}" || \
+        pg_exec "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" 5433 > /dev/null 2>&1
+
+    pg_exec "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" 5433 > /dev/null 2>&1
 
     ok "$(t pgsql_db_created "$DB_NAME" "$DB_USER")"
+    ok "$(t pgsql_5432_free)"
+    ok "$(t pgsql_panel_cluster "$PG_VER" "panel" "5433")"
 fi
 
 # ============================================================
@@ -1380,7 +1471,7 @@ PANEL_PORT=${PANEL_PORT}
 PANEL_DEBUG=false
 
 DB_HOST=127.0.0.1
-DB_PORT=5432
+DB_PORT=5433
 DB_NAME=${DB_NAME}
 DB_USER=${DB_USER}
 DB_PASS=${DB_PASS}
@@ -1402,13 +1493,16 @@ MYSQL_ROOT_PASS=${MYSQL_ROOT_PASS}
 
 # Internal port for PHP (Caddy proxies PANEL_PORT → PANEL_INTERNAL_PORT)
 PANEL_INTERNAL_PORT=$((PANEL_PORT + 1))
+
+# Cluster role (standalone/master/slave)
+PANEL_ROLE=standalone
 ENVEOF
 
 chmod 600 "${PANEL_DIR}/.env"
 ok "$(t env_created)"
 
 # Run database schema (safe — uses IF NOT EXISTS)
-PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > /dev/null 2>&1
+PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > /dev/null 2>&1
 ok "$(t schema_applied)"
 
 # Set permissions
