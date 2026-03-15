@@ -257,6 +257,13 @@ t() {
                 firewall_consider) text="Considera activar un firewall para proteger el puerto $1." ;;
                 firewall_access_url) text="Accede al panel en:" ;;
                 firewall_make_sure) text="Asegurate de que el puerto $1 esta abierto para tu IP de administracion." ;;
+                caddy_choose) text="Elige [1/2] (por defecto: 1): " ;;
+                caddy_proxy_ok) text="Caddy HTTPS reverse proxy → https://0.0.0.0:$1 → 127.0.0.1:$2" ;;
+                caddy_tls_internal) text="TLS interno (certificado autofirmado para acceso por IP)" ;;
+                caddy_proxy_fail) text="Fallo al crear ruta Caddy API (HTTP $1) — usando acceso PHP directo" ;;
+                caddy_proxy_fallback) text="Panel accesible en http://IP:$1 (sin HTTPS)" ;;
+                caddy_api_unavailable) text="API Caddy no disponible — panel en http://0.0.0.0:$1 (sin HTTPS)" ;;
+                mysql_choose) text="Elige [1/2] (por defecto: 1): " ;;
                 verify_complete) text="Verificacion completada" ;;
                 verify_all_ok) text="Todo correcto! El panel esta funcionando correctamente." ;;
                 verify_has_errors) text="Se encontraron $1 problema(s). Revisa arriba." ;;
@@ -446,6 +453,13 @@ t() {
                 security_root) text="The panel runs as root and has full system access." ;;
                 security_trusted) text="Only trusted administrator IPs should reach port $1." ;;
                 security_ufw) text="# UFW example — allow only your IP:" ;;
+                caddy_choose) text="Choose [1/2] (default: 1): " ;;
+                caddy_proxy_ok) text="Caddy HTTPS reverse proxy → https://0.0.0.0:$1 → 127.0.0.1:$2" ;;
+                caddy_tls_internal) text="TLS internal (self-signed certificate for IP access)" ;;
+                caddy_proxy_fail) text="Caddy API route creation failed (HTTP $1) — falling back to direct PHP access" ;;
+                caddy_proxy_fallback) text="Panel accessible via http://IP:$1 (no HTTPS)" ;;
+                caddy_api_unavailable) text="Caddy API not available — panel running on http://0.0.0.0:$1 (no HTTPS)" ;;
+                mysql_choose) text="Choose [1/2] (default: 1): " ;;
                 security_restrict) text="Restrict IPs in .env (additional layer):" ;;
                 security_admin_only) text="The panel port is for administrators only." ;;
                 security_no_public) text="Never expose it to the public internet without a firewall." ;;
@@ -1115,21 +1129,21 @@ if command -v caddy &> /dev/null; then
 
     if [ "$CADDY_HAS_EXISTING_CONFIG" = true ]; then
         echo ""
-        echo -e "  ${YELLOW}${BOLD}Existing Caddy configuration detected:${NC}"
-        [ "$CADDY_ROUTES" -gt 0 ] 2>/dev/null && echo -e "  ${YELLOW}  - ${CADDY_ROUTES} active API routes${NC}"
-        [ "$CADDY_HAS_CADDYFILE_DOMAINS" = true ] && echo -e "  ${YELLOW}  - Caddyfile has domain blocks (${CADDYFILE_DOMAINS} entries)${NC}"
-        [ "$CADDY_HAS_AUTOSAVE" = true ] && echo -e "  ${YELLOW}  - autosave.json found (API-persisted routes)${NC}"
-        echo -e "  ${YELLOW}This may be MuseDock CMS or another application.${NC}"
+        echo -e "  ${YELLOW}${BOLD}$(t caddy_config_detected)${NC}"
+        [ "$CADDY_ROUTES" -gt 0 ] 2>/dev/null && echo -e "  ${YELLOW}  - $(t caddy_api_routes "$CADDY_ROUTES")${NC}"
+        [ "$CADDY_HAS_CADDYFILE_DOMAINS" = true ] && echo -e "  ${YELLOW}  - $(t caddy_caddyfile_domains "$CADDYFILE_DOMAINS")${NC}"
+        [ "$CADDY_HAS_AUTOSAVE" = true ] && echo -e "  ${YELLOW}  - $(t caddy_autosave_found)${NC}"
+        echo -e "  ${YELLOW}$(t caddy_may_be_cms)${NC}"
         echo ""
-        echo "  Options:"
-        echo "    1) Integrate — use existing Caddy, preserve ALL config (recommended)"
-        echo "    2) Reconfigure — overwrite Caddyfile (WARNING: may break existing sites)"
+        echo "  $(t existing_options)"
+        echo "    1) $(t caddy_opt_integrate)"
+        echo "    2) $(t caddy_opt_reconfigure)"
         echo ""
-        read -rp "  Choose [1/2] (default: 1): " CADDY_CHOICE
+        read -rp "  $(t caddy_choose)" CADDY_CHOICE
         CADDY_CHOICE=${CADDY_CHOICE:-1}
 
         if [ "$CADDY_CHOICE" = "1" ]; then
-            ok "Integrating with existing Caddy (all existing config preserved)"
+            ok "$(t caddy_integrated)"
             # Ensure Caddyfile has admin API enabled (add if missing, don't overwrite)
             if ! grep -q "admin" "$CADDY_FILE" 2>/dev/null; then
                 # Prepend admin block to existing Caddyfile
@@ -1143,7 +1157,7 @@ if command -v caddy &> /dev/null; then
 ADMINEOF
                 cat "$CADDY_FILE" >> "$TEMP_CADDY"
                 mv "$TEMP_CADDY" "$CADDY_FILE"
-                ok "Added admin API to existing Caddyfile (backup created)"
+                ok "$(t caddy_admin_added)"
             fi
             # Ensure --resume is enabled
             mkdir -p /etc/systemd/system/caddy.service.d
@@ -1154,20 +1168,20 @@ ExecStart=
 ExecStart=/usr/bin/caddy run --environ --resume --config /etc/caddy/Caddyfile
 SVCEOF
                 systemctl daemon-reload
-                ok "Added --resume flag (routes will persist across restarts)"
+                ok "$(t caddy_resume_added)"
             else
-                ok "--resume flag already configured"
+                ok "$(t caddy_resume_exists)"
             fi
         else
             # Reconfigure Caddy — backup EVERYTHING first
-            warn "Reconfiguring Caddy — creating backups"
+            warn "$(t caddy_reconfiguring)"
             BACKUP_TS=$(date +%Y%m%d%H%M%S)
             cp "$CADDY_FILE" "${CADDY_FILE}.bak.${BACKUP_TS}" 2>/dev/null || true
-            ok "Caddyfile backed up to ${CADDY_FILE}.bak.${BACKUP_TS}"
+            ok "$(t caddy_backed_up "${CADDY_FILE}.bak.${BACKUP_TS}")"
             # Also backup autosave.json if it exists
             if [ "$CADDY_HAS_AUTOSAVE" = true ] && [ -n "$CADDY_HOME" ]; then
                 cp "${CADDY_HOME}/autosave.json" "${CADDY_HOME}/autosave.json.bak.${BACKUP_TS}" 2>/dev/null || true
-                ok "autosave.json backed up to ${CADDY_HOME}/autosave.json.bak.${BACKUP_TS}"
+                ok "$(t caddy_autosave_backed "${CADDY_HOME}/autosave.json.bak.${BACKUP_TS}")"
             fi
 
             cat > "$CADDY_FILE" << 'CADDYEOF'
@@ -1176,7 +1190,7 @@ SVCEOF
     auto_https disable_redirects
 }
 CADDYEOF
-            ok "Caddyfile reconfigured"
+            ok "$(t caddy_reconfigured)"
 
             mkdir -p /etc/systemd/system/caddy.service.d
             cat > /etc/systemd/system/caddy.service.d/override-resume.conf << 'SVCEOF'
@@ -1186,7 +1200,7 @@ ExecStart=/usr/bin/caddy run --environ --resume --config /etc/caddy/Caddyfile
 SVCEOF
             systemctl daemon-reload
             systemctl restart caddy
-            ok "Caddy restarted with new configuration"
+            ok "$(t caddy_restarted)"
         fi
     else
         # Caddy exists but no config at all — safe to configure
@@ -1197,9 +1211,9 @@ SVCEOF
     auto_https disable_redirects
 }
 CADDYEOF
-            ok "Caddyfile configured with admin API"
+            ok "$(t caddy_configured)"
         else
-            ok "Caddyfile already has admin API enabled"
+            ok "$(t caddy_admin_exists)"
         fi
 
         mkdir -p /etc/systemd/system/caddy.service.d
@@ -1213,7 +1227,7 @@ SVCEOF
         fi
         systemctl enable caddy > /dev/null 2>&1
         systemctl restart caddy
-        ok "Caddy running with --resume"
+        ok "$(t caddy_running_resume)"
     fi
 else
     # Fresh Caddy install
@@ -1222,7 +1236,7 @@ else
     curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' 2>/dev/null | tee /etc/apt/sources.list.d/caddy-stable.list > /dev/null 2>&1
     apt-get update -qq
     apt-get install -y -qq caddy > /dev/null 2>&1
-    ok "Caddy installed"
+    ok "$(t caddy_installed)"
 
     cat > "$CADDY_FILE" << 'CADDYEOF'
 {
@@ -1230,7 +1244,7 @@ else
     auto_https disable_redirects
 }
 CADDYEOF
-    ok "Caddyfile configured with admin API"
+    ok "$(t caddy_configured)"
 
     mkdir -p /etc/systemd/system/caddy.service.d
     cat > /etc/systemd/system/caddy.service.d/override-resume.conf << 'SVCEOF'
@@ -1242,36 +1256,36 @@ SVCEOF
     systemctl daemon-reload
     systemctl enable caddy > /dev/null 2>&1
     systemctl restart caddy
-    ok "Caddy running with --resume (routes persist across restarts)"
+    ok "$(t caddy_running_persist)"
 fi
 
 # Verify Caddy API is accessible
 sleep 1
 CADDY_API_OK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:2019/config/ 2>/dev/null || echo "000")
 if [ "$CADDY_API_OK" = "200" ]; then
-    ok "Caddy API accessible on localhost:2019"
+    ok "$(t caddy_api_ok)"
 else
-    warn "Caddy API not responding yet (HTTP $CADDY_API_OK) — may need a moment to start"
+    warn "$(t caddy_api_wait "$CADDY_API_OK")"
 fi
 
 # ============================================================
 # Step 5: MySQL (for hosting client databases)
 # ============================================================
-header "Step 5/7 — Installing MySQL"
+header "$(t step_mysql)"
 
 MYSQL_FRESH_INSTALL=false
 if ! command -v mysql &> /dev/null; then
     apt-get install -y -qq mysql-server > /dev/null 2>&1 || \
     apt-get install -y -qq mariadb-server > /dev/null 2>&1
     MYSQL_FRESH_INSTALL=true
-    ok "MySQL/MariaDB installed"
+    ok "$(t mysql_installed)"
 else
-    ok "MySQL/MariaDB already installed"
+    ok "$(t mysql_exists)"
 fi
 
 systemctl enable mysql > /dev/null 2>&1 || systemctl enable mariadb > /dev/null 2>&1
 systemctl start mysql > /dev/null 2>&1 || systemctl start mariadb > /dev/null 2>&1
-ok "MySQL running"
+ok "$(t mysql_running)"
 
 # Determine MySQL root access method and store credentials for client DB management
 MYSQL_ROOT_PASS=""
@@ -1281,14 +1295,14 @@ if [ "$MYSQL_FRESH_INSTALL" = true ]; then
     # Fresh install — root uses unix_socket/auth_socket (no password needed from root)
     if mysql -u root -e "SELECT 1;" > /dev/null 2>&1; then
         MYSQL_AUTH_METHOD="socket"
-        ok "MySQL root uses socket authentication (no password needed)"
+        ok "$(t mysql_socket_ok)"
     fi
 else
     # Existing install — test access methods
     if mysql -u root -e "SELECT 1;" > /dev/null 2>&1; then
         # Socket auth works from root
         MYSQL_AUTH_METHOD="socket"
-        ok "MySQL root access via socket authentication"
+        ok "$(t mysql_socket_access)"
     elif [ "$REINSTALL" = true ]; then
         # Try reading from existing .env
         EXISTING_MYSQL_PASS=$(grep -E '^MYSQL_ROOT_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'')
@@ -1296,43 +1310,43 @@ else
             if mysql -u root -p"${EXISTING_MYSQL_PASS}" -e "SELECT 1;" > /dev/null 2>&1; then
                 MYSQL_ROOT_PASS="$EXISTING_MYSQL_PASS"
                 MYSQL_AUTH_METHOD="password"
-                ok "MySQL root password recovered from existing .env"
+                ok "$(t mysql_pass_recovered)"
             fi
         fi
     fi
 
     if [ "$MYSQL_AUTH_METHOD" = "unknown" ]; then
         echo ""
-        echo -e "  ${YELLOW}${BOLD}MySQL root access requires a password.${NC}"
-        echo -e "  ${YELLOW}The panel needs MySQL root access to create client databases.${NC}"
+        echo -e "  ${YELLOW}${BOLD}$(t mysql_needs_pass)${NC}"
+        echo -e "  ${YELLOW}$(t mysql_needs_pass_desc)${NC}"
         echo ""
-        echo "  Options:"
-        echo "    1) Enter the MySQL root password now"
-        echo "    2) Skip — you can configure this later in .env (MYSQL_ROOT_PASS)"
+        echo "  $(t existing_options)"
+        echo "    1) $(t mysql_opt_enter)"
+        echo "    2) $(t mysql_opt_skip)"
         echo ""
-        read -rp "  Choose [1/2] (default: 1): " MYSQL_PASS_CHOICE
+        read -rp "  $(t mysql_choose)" MYSQL_PASS_CHOICE
         MYSQL_PASS_CHOICE=${MYSQL_PASS_CHOICE:-1}
 
         if [ "$MYSQL_PASS_CHOICE" = "1" ]; then
             MAX_ATTEMPTS=3
             for attempt in $(seq 1 $MAX_ATTEMPTS); do
-                read -rsp "  MySQL root password (attempt ${attempt}/${MAX_ATTEMPTS}): " MYSQL_INPUT_PASS
+                read -rsp "  $(t mysql_attempt "$attempt" "$MAX_ATTEMPTS")" MYSQL_INPUT_PASS
                 echo ""
                 if mysql -u root -p"${MYSQL_INPUT_PASS}" -e "SELECT 1;" > /dev/null 2>&1; then
                     MYSQL_ROOT_PASS="$MYSQL_INPUT_PASS"
                     MYSQL_AUTH_METHOD="password"
-                    ok "MySQL root password verified"
+                    ok "$(t mysql_pass_verified)"
                     break
                 else
-                    warn "Invalid password"
+                    warn "$(t mysql_invalid_pass)"
                 fi
             done
             if [ "$MYSQL_AUTH_METHOD" = "unknown" ]; then
-                warn "Could not authenticate to MySQL — you can set MYSQL_ROOT_PASS in .env later"
+                warn "$(t mysql_auth_failed)"
                 MYSQL_AUTH_METHOD="unconfigured"
             fi
         else
-            warn "MySQL root password skipped — set MYSQL_ROOT_PASS in .env to enable client DB creation"
+            warn "$(t mysql_skipped)"
             MYSQL_AUTH_METHOD="unconfigured"
         fi
     fi
@@ -1341,19 +1355,19 @@ fi
 # ============================================================
 # Step 6: Panel setup
 # ============================================================
-header "Step 6/7 — Setting up MuseDock Panel"
+header "$(t step_panel)"
 
 # Create directories
 mkdir -p "${PANEL_DIR}/storage/sessions"
 mkdir -p "${PANEL_DIR}/storage/logs"
 mkdir -p "${PANEL_DIR}/storage/cache"
 mkdir -p /var/www/vhosts
-ok "Directories created"
+ok "$(t dirs_created)"
 
 # Backup existing .env if reinstalling
 if [ "$REINSTALL" = true ] && [ -f "${PANEL_DIR}/.env" ]; then
     cp "${PANEL_DIR}/.env" "${PANEL_DIR}/.env.bak.$(date +%Y%m%d%H%M%S)"
-    ok "Existing .env backed up"
+    ok "$(t env_backed_up)"
 fi
 
 # Generate .env
@@ -1389,15 +1403,15 @@ PANEL_INTERNAL_PORT=$((PANEL_PORT + 1))
 ENVEOF
 
 chmod 600 "${PANEL_DIR}/.env"
-ok ".env created (permissions: 600 — root only)"
+ok "$(t env_created)"
 
 # Run database schema (safe — uses IF NOT EXISTS)
 PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > /dev/null 2>&1
-ok "Database schema applied (existing tables preserved)"
+ok "$(t schema_applied)"
 
 # Set permissions
 chmod -R 750 "${PANEL_DIR}/storage"
-ok "Permissions set"
+ok "$(t permissions_set)"
 
 # ============================================================
 # Step 7: Systemd service + Caddy HTTPS reverse proxy
@@ -1483,11 +1497,11 @@ ROUTEEOF
         -d "$PANEL_ROUTE" 2>/dev/null || echo "000")
 
     if [ "$HTTP_CODE" = "200" ]; then
-        ok "Caddy HTTPS reverse proxy → https://0.0.0.0:${PANEL_PORT} → 127.0.0.1:${PANEL_INTERNAL_PORT}"
-        ok "TLS internal (self-signed certificate for IP access)"
+        ok "$(t caddy_proxy_ok "$PANEL_PORT" "$PANEL_INTERNAL_PORT")"
+        ok "$(t caddy_tls_internal)"
     else
-        warn "Caddy API route creation failed (HTTP ${HTTP_CODE}) — falling back to direct PHP access"
-        warn "Panel accessible via http://IP:${PANEL_INTERNAL_PORT} (no HTTPS)"
+        warn "$(t caddy_proxy_fail "$HTTP_CODE")"
+        warn "$(t caddy_proxy_fallback "$PANEL_INTERNAL_PORT")"
         # Rebind PHP to 0.0.0.0 as fallback
         sed -i "s|127.0.0.1:${PANEL_INTERNAL_PORT}|0.0.0.0:${PANEL_PORT}|g" /etc/systemd/system/musedock-panel.service
         PANEL_INTERNAL_PORT=${PANEL_PORT}
@@ -1495,7 +1509,7 @@ ROUTEEOF
         systemctl restart musedock-panel
     fi
 else
-    warn "Caddy API not available — panel running on http://0.0.0.0:${PANEL_PORT} (no HTTPS)"
+    warn "$(t caddy_api_unavailable "$PANEL_PORT")"
     # Bind PHP directly to 0.0.0.0
     sed -i "s|127.0.0.1:${PANEL_INTERNAL_PORT}|0.0.0.0:${PANEL_PORT}|g" /etc/systemd/system/musedock-panel.service
     PANEL_INTERNAL_PORT=${PANEL_PORT}
@@ -1664,42 +1678,6 @@ echo "  ║         $(t install_complete)                  ║"
 echo "  ╚══════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
-# Firewall and access info
-echo ""
-echo -e "  ${CYAN}${BOLD}$(t firewall_header)${NC}"
-echo ""
-if [ "$FIREWALL_TYPE" = "ufw" ]; then
-    echo -e "  ${YELLOW}$(t firewall_ufw_active)${NC}"
-    if [ "$FIREWALL_PORT_STATUS" = "open" ]; then
-        echo -e "  ${GREEN}$(t firewall_port_open "$PANEL_PORT")${NC}"
-    else
-        echo -e "  ${RED}${BOLD}$(t firewall_port_closed "$PANEL_PORT")${NC}"
-        echo ""
-        echo -e "  ${BOLD}$(t firewall_open_cmd)${NC}"
-        echo -e "  ${CYAN}  ufw allow from TU_IP to any port ${PANEL_PORT}${NC}"
-    fi
-elif [ "$FIREWALL_TYPE" = "iptables" ]; then
-    echo -e "  ${YELLOW}$(t firewall_iptables_active)${NC}"
-    if [ "$FIREWALL_PORT_STATUS" = "open" ]; then
-        echo -e "  ${GREEN}$(t firewall_port_open "$PANEL_PORT")${NC}"
-    else
-        echo -e "  ${RED}${BOLD}$(t firewall_port_closed "$PANEL_PORT")${NC}"
-        echo ""
-        echo -e "  ${BOLD}$(t firewall_open_cmd)${NC}"
-        echo -e "  ${CYAN}  iptables -A INPUT -p tcp --dport ${PANEL_PORT} -s TU_IP -j ACCEPT${NC}"
-    fi
-else
-    echo -e "  ${YELLOW}$(t firewall_no_detected)${NC}"
-    echo -e "  ${YELLOW}$(t firewall_consider "$PANEL_PORT")${NC}"
-fi
-echo ""
-echo -e "  $(t firewall_access_url)"
-echo -e "  ${BOLD}  https://${SERVER_IP}:${PANEL_PORT}/setup${NC}"
-echo ""
-echo -e "  ${YELLOW}$(t firewall_make_sure "$PANEL_PORT")${NC}"
-echo ""
-
-echo -e "  $(t setup_wizard)"
 echo ""
 echo -e "  ┌──────────────────────────────────────────────┐"
 echo -e "  │  ${BOLD}$(t save_credentials)${NC}"
@@ -1755,6 +1733,58 @@ echo -e "     $(t snapshot_desc)"
 echo ""
 echo -e "  ${BOLD}$(t uninstall_label)${NC}"
 echo -e "     sudo bash ${PANEL_DIR}/bin/uninstall.sh"
+echo ""
+
+# ============================================================
+# Final prominent access panel — ALWAYS at the very end
+# ============================================================
+echo ""
+echo -e "${CYAN}${BOLD}"
+echo "  ╔══════════════════════════════════════════════════════════╗"
+echo "  ║                                                          ║"
+echo "  ║   $(t firewall_header)                                   ║"
+echo "  ║                                                          ║"
+echo "  ╚══════════════════════════════════════════════════════════╝"
+echo -e "${NC}"
+
+# Firewall status
+if [ "$FIREWALL_TYPE" = "ufw" ]; then
+    echo -e "  ${YELLOW}$(t firewall_ufw_active)${NC}"
+    if [ "$FIREWALL_PORT_STATUS" = "open" ]; then
+        echo -e "  ${GREEN}✓ $(t firewall_port_open "$PANEL_PORT")${NC}"
+    else
+        echo -e "  ${RED}${BOLD}✗ $(t firewall_port_closed "$PANEL_PORT")${NC}"
+        echo ""
+        echo -e "  ${BOLD}$(t firewall_open_cmd)${NC}"
+        echo -e "  ${CYAN}  ufw allow from TU_IP to any port ${PANEL_PORT}${NC}"
+    fi
+elif [ "$FIREWALL_TYPE" = "iptables" ]; then
+    echo -e "  ${YELLOW}$(t firewall_iptables_active)${NC}"
+    if [ "$FIREWALL_PORT_STATUS" = "open" ]; then
+        echo -e "  ${GREEN}✓ $(t firewall_port_open "$PANEL_PORT")${NC}"
+    else
+        echo -e "  ${RED}${BOLD}✗ $(t firewall_port_closed "$PANEL_PORT")${NC}"
+        echo ""
+        echo -e "  ${BOLD}$(t firewall_open_cmd)${NC}"
+        echo -e "  ${CYAN}  iptables -A INPUT -p tcp --dport ${PANEL_PORT} -s TU_IP -j ACCEPT${NC}"
+    fi
+else
+    echo -e "  ${YELLOW}$(t firewall_no_detected)${NC}"
+    echo -e "  ${YELLOW}$(t firewall_consider "$PANEL_PORT")${NC}"
+fi
+
+echo ""
+echo -e "  $(t setup_wizard)"
+echo ""
+echo -e "  ${GREEN}${BOLD}┌──────────────────────────────────────────────────────────┐${NC}"
+echo -e "  ${GREEN}${BOLD}│                                                          │${NC}"
+echo -e "  ${GREEN}${BOLD}│   $(t firewall_access_url)                               │${NC}"
+echo -e "  ${GREEN}${BOLD}│                                                          │${NC}"
+echo -e "  ${GREEN}${BOLD}│   >>> https://${SERVER_IP}:${PANEL_PORT}/setup              │${NC}"
+echo -e "  ${GREEN}${BOLD}│                                                          │${NC}"
+echo -e "  ${GREEN}${BOLD}│   $(t firewall_make_sure "$PANEL_PORT")  │${NC}"
+echo -e "  ${GREEN}${BOLD}│                                                          │${NC}"
+echo -e "  ${GREEN}${BOLD}└──────────────────────────────────────────────────────────┘${NC}"
 echo ""
 echo -e "  ${GREEN}${BOLD}$(t enjoy)${NC}"
 echo ""
