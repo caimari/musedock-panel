@@ -794,45 +794,73 @@ if [ "$REPAIR_MODE" = true ]; then
     # --- 4. Check database connection ---
     echo ""
     echo -e "  ${CYAN}$(t repair_check_db)${NC}"
-    DB_CHECK=$(PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p "${DB_PORT}" -d "${DB_NAME}" -tAc "SELECT 1;" 2>&1)
-    if [ "$DB_CHECK" = "1" ]; then
-        ok "$(t repair_db_ok) (puerto ${DB_PORT})"
-    else
-        # Try alternate port 5433
-        DB_CHECK2=$(PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -tAc "SELECT 1;" 2>&1)
-        if [ "$DB_CHECK2" = "1" ]; then
-            ok "$(t repair_db_ok) (puerto 5433)"
+    DB_WORKING_PORT=""
+    # Try configured port first, then 5433, then 5432
+    for TRY_PORT in "${DB_PORT}" 5433 5432; do
+        DB_CHECK=$(timeout 5 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${TRY_PORT} -d '${DB_NAME}' -tAc 'SELECT 1;'" 2>&1)
+        if [ "$DB_CHECK" = "1" ]; then
+            DB_WORKING_PORT="$TRY_PORT"
+            ok "$(t repair_db_ok) (puerto ${TRY_PORT})"
+            break
+        fi
+    done
+    if [ -z "$DB_WORKING_PORT" ]; then
+        echo -e "  ${RED}✗ $(t repair_db_fail)${NC}"
+        echo -e "    ${RED}Probados puertos: ${DB_PORT}, 5433, 5432${NC}"
+        # Check if PostgreSQL is running at all
+        PG_RUNNING=$(ss -tlnp 2>/dev/null | grep postgres | head -3)
+        if [ -n "$PG_RUNNING" ]; then
+            echo -e "    ${YELLOW}PostgreSQL escucha en:${NC}"
+            echo "$PG_RUNNING" | while read -r pgline; do
+                PG_PORT=$(echo "$pgline" | grep -oP ':\K\d+' | head -1)
+                echo -e "    ${YELLOW}  puerto $PG_PORT${NC}"
+            done
         else
-            echo -e "  ${RED}✗ $(t repair_db_fail)${NC}"
-            echo -e "    ${RED}${DB_CHECK}${NC}"
-            REPAIR_FAILED=$((REPAIR_FAILED + 1))
+            echo -e "    ${YELLOW}PostgreSQL no esta corriendo. Intentando iniciar...${NC}"
+            systemctl start postgresql 2>/dev/null
+            sleep 2
+            if systemctl is-active --quiet postgresql 2>/dev/null; then
+                ok "PostgreSQL iniciado — reintentando conexion"
+                for TRY_PORT in "${DB_PORT}" 5433 5432; do
+                    DB_CHECK=$(timeout 5 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${TRY_PORT} -d '${DB_NAME}' -tAc 'SELECT 1;'" 2>&1)
+                    if [ "$DB_CHECK" = "1" ]; then
+                        DB_WORKING_PORT="$TRY_PORT"
+                        ok "$(t repair_db_ok) (puerto ${TRY_PORT}) — $(t repair_fixed)"
+                        REPAIR_FIXED=$((REPAIR_FIXED + 1))
+                        break
+                    fi
+                done
+            fi
+            if [ -z "$DB_WORKING_PORT" ]; then
+                REPAIR_FAILED=$((REPAIR_FAILED + 1))
+            fi
         fi
     fi
 
-    # --- 5. Run schema + migrations (safe) ---
-    echo ""
-    echo -e "  ${CYAN}$(t update_schema)${NC}"
-    SCHEMA_PORT="${DB_PORT}"
-    # Try configured port, fallback to 5433
-    PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p "${SCHEMA_PORT}" -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > /dev/null 2>&1 || \
-    PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > /dev/null 2>&1
-    ok "$(t update_schema)"
+    # --- 5. Run schema + migrations (safe, only if DB is accessible) ---
+    if [ -n "$DB_WORKING_PORT" ]; then
+        echo ""
+        echo -e "  ${CYAN}$(t update_schema)${NC}"
+        timeout 15 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${DB_WORKING_PORT} -d '${DB_NAME}' -f '${PANEL_DIR}/database/schema.sql'" > /dev/null 2>&1
+        ok "$(t update_schema)"
 
-    # Migrations
-    MIGRATION_DIR="${PANEL_DIR}/database/migrations"
-    if [ -d "$MIGRATION_DIR" ]; then
-        MIGRATION_COUNT=0
-        EXISTING_MIGRATIONS=$(PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p "${SCHEMA_PORT}" -d "${DB_NAME}" -tAc "SELECT migration FROM panel_migrations;" 2>/dev/null || \
-                              PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -tAc "SELECT migration FROM panel_migrations;" 2>/dev/null || echo "")
-        for mig_file in "$MIGRATION_DIR"/*.php; do
-            [ -f "$mig_file" ] || continue
-            mig_name=$(basename "$mig_file")
-            if echo "$EXISTING_MIGRATIONS" | grep -q "$mig_name" 2>/dev/null; then
-                continue
-            fi
-            php "$mig_file" 2>/dev/null && MIGRATION_COUNT=$((MIGRATION_COUNT + 1)) && ok "  + $mig_name"
-        done
-        ok "$(t update_migrations) ($MIGRATION_COUNT pendientes)"
+        # Migrations
+        MIGRATION_DIR="${PANEL_DIR}/database/migrations"
+        if [ -d "$MIGRATION_DIR" ]; then
+            MIGRATION_COUNT=0
+            EXISTING_MIGRATIONS=$(timeout 5 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${DB_WORKING_PORT} -d '${DB_NAME}' -tAc 'SELECT migration FROM panel_migrations;'" 2>/dev/null || echo "")
+            for mig_file in "$MIGRATION_DIR"/*.php; do
+                [ -f "$mig_file" ] || continue
+                mig_name=$(basename "$mig_file")
+                if echo "$EXISTING_MIGRATIONS" | grep -q "$mig_name" 2>/dev/null; then
+                    continue
+                fi
+                php "$mig_file" 2>/dev/null && MIGRATION_COUNT=$((MIGRATION_COUNT + 1)) && ok "  + $mig_name"
+            done
+            ok "$(t update_migrations) ($MIGRATION_COUNT pendientes)"
+        fi
+    else
+        warn "Saltando schema/migraciones — base de datos no accesible"
     fi
 
     # --- 6. Check Caddy ---
@@ -1254,15 +1282,28 @@ elif [ "$UPDATE_ONLY" = true ]; then
     fi
 
     # --- 3. Run database schema (safe — IF NOT EXISTS) ---
-    PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > /dev/null 2>&1
-    ok "$(t update_schema)"
+    # Try configured port, then 5433, then 5432
+    UPDATE_DB_PORT=""
+    for TRY_PORT in "${DB_PORT}" 5433 5432; do
+        DB_TEST=$(timeout 5 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${TRY_PORT} -d '${DB_NAME}' -tAc 'SELECT 1;'" 2>&1)
+        if [ "$DB_TEST" = "1" ]; then
+            UPDATE_DB_PORT="$TRY_PORT"
+            break
+        fi
+    done
+    if [ -n "$UPDATE_DB_PORT" ]; then
+        timeout 15 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${UPDATE_DB_PORT} -d '${DB_NAME}' -f '${PANEL_DIR}/database/schema.sql'" > /dev/null 2>&1
+        ok "$(t update_schema) (puerto ${UPDATE_DB_PORT})"
+    else
+        warn "$(t update_schema) — no se pudo conectar a la BD (probados: ${DB_PORT}, 5433, 5432)"
+    fi
 
     # --- 4. Run pending migrations ---
     MIGRATION_DIR="${PANEL_DIR}/database/migrations"
-    if [ -d "$MIGRATION_DIR" ]; then
+    if [ -d "$MIGRATION_DIR" ] && [ -n "$UPDATE_DB_PORT" ]; then
         MIGRATION_COUNT=0
         # Check which migrations have already been run
-        EXISTING_MIGRATIONS=$(PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -tAc "SELECT migration FROM panel_migrations;" 2>/dev/null || echo "")
+        EXISTING_MIGRATIONS=$(timeout 5 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${UPDATE_DB_PORT} -d '${DB_NAME}' -tAc 'SELECT migration FROM panel_migrations;'" 2>/dev/null || echo "")
 
         for mig_file in "$MIGRATION_DIR"/*.php; do
             [ -f "$mig_file" ] || continue
