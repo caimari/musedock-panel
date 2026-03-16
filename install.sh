@@ -68,7 +68,7 @@ t() {
                 existing_opt_verify) text="Solo verificar — ejecuta el health check sin tocar nada" ;;
                 existing_opt_update) text="Actualizar — aplica cambios nuevos sin reinstalar (crons, BD, permisos)" ;;
                 existing_opt_cancel) text="Cancelar" ;;
-                existing_choose) text="Elige [1/2/3/4] (por defecto: 4): " ;;
+                existing_choose) text="Elige [1/2/3/4/5] (por defecto: 4): " ;;
                 install_cancelled) text="Instalacion cancelada. Instalacion existente preservada." ;;
                 reinstall_mode) text="Modo reinstalacion — se hara backup del .env existente" ;;
                 update_mode) text="Modo actualizacion — aplicando cambios sin reinstalar..." ;;
@@ -81,6 +81,39 @@ t() {
                 update_env_new_keys) text="Nuevas claves añadidas al .env" ;;
                 update_complete) text="Actualizacion completada!" ;;
                 update_no_new_keys) text=".env ya tiene todas las claves" ;;
+                existing_opt_repair) text="Reparar — diagnostica y corrige problemas del panel" ;;
+                repair_mode) text="Modo reparacion — diagnosticando y reparando..." ;;
+                repair_complete) text="Reparacion completada!" ;;
+                repair_check_php) text="Verificando sintaxis PHP" ;;
+                repair_php_ok) text="Todos los archivos PHP sin errores" ;;
+                repair_php_error) text="Error de sintaxis en: $1" ;;
+                repair_check_service) text="Verificando servicio del panel" ;;
+                repair_service_not_found) text="Servicio musedock-panel no encontrado — reinstalando" ;;
+                repair_service_dead) text="Servicio muerto — reiniciando" ;;
+                repair_service_ok) text="Servicio activo" ;;
+                repair_check_db) text="Verificando conexion a base de datos" ;;
+                repair_db_ok) text="Base de datos accesible" ;;
+                repair_db_fail) text="No se puede conectar a la base de datos" ;;
+                repair_check_caddy) text="Verificando Caddy" ;;
+                repair_caddy_ok) text="Caddy activo y respondiendo" ;;
+                repair_caddy_dead) text="Caddy no esta corriendo — reiniciando" ;;
+                repair_check_perms) text="Verificando permisos" ;;
+                repair_perms_fixed) text="Permisos corregidos" ;;
+                repair_check_dirs) text="Verificando directorios" ;;
+                repair_dirs_ok) text="Directorios verificados" ;;
+                repair_check_env) text="Verificando .env" ;;
+                repair_env_ok) text=".env presente y legible" ;;
+                repair_env_missing) text=".env no encontrado — no se puede reparar sin el" ;;
+                repair_check_port) text="Verificando puerto del panel" ;;
+                repair_port_ok) text="Panel respondiendo en puerto $1" ;;
+                repair_port_fail) text="Panel NO responde en puerto $1" ;;
+                repair_check_crons) text="Verificando crons" ;;
+                repair_crons_ok) text="Crons del sistema presentes" ;;
+                repair_crons_missing) text="Crons faltantes — reinstalando" ;;
+                repair_fixed) text="Reparado" ;;
+                repair_summary_ok) text="Sin problemas detectados" ;;
+                repair_summary_fixed) text="$1 problema(s) reparado(s)" ;;
+                repair_summary_fail) text="$1 problema(s) no reparables — revisa manualmente" ;;
                 verify_mode) text="Modo verificacion — comprobando estado del sistema..." ;;
                 checking_conflicts) text="Comprobando servicios en conflicto" ;;
                 plesk_warning) text="AVISO: Plesk detectado en este servidor!" ;;
@@ -306,7 +339,7 @@ t() {
                 existing_opt_verify) text="Verify only — run health check without changing anything" ;;
                 existing_opt_update) text="Update — apply new changes without reinstalling (crons, DB, permissions)" ;;
                 existing_opt_cancel) text="Cancel" ;;
-                existing_choose) text="Choose [1/2/3/4] (default: 4): " ;;
+                existing_choose) text="Choose [1/2/3/4/5] (default: 4): " ;;
                 install_cancelled) text="Installation cancelled. Existing installation preserved." ;;
                 reinstall_mode) text="Reinstall mode — existing .env will be backed up" ;;
                 update_mode) text="Update mode — applying changes without reinstalling..." ;;
@@ -319,6 +352,39 @@ t() {
                 update_env_new_keys) text="New keys added to .env" ;;
                 update_complete) text="Update completed!" ;;
                 update_no_new_keys) text=".env already has all keys" ;;
+                existing_opt_repair) text="Repair — diagnose and fix panel issues" ;;
+                repair_mode) text="Repair mode — diagnosing and fixing..." ;;
+                repair_complete) text="Repair completed!" ;;
+                repair_check_php) text="Checking PHP syntax" ;;
+                repair_php_ok) text="All PHP files have no errors" ;;
+                repair_php_error) text="Syntax error in: $1" ;;
+                repair_check_service) text="Checking panel service" ;;
+                repair_service_not_found) text="musedock-panel service not found — reinstalling" ;;
+                repair_service_dead) text="Service dead — restarting" ;;
+                repair_service_ok) text="Service active" ;;
+                repair_check_db) text="Checking database connection" ;;
+                repair_db_ok) text="Database accessible" ;;
+                repair_db_fail) text="Cannot connect to database" ;;
+                repair_check_caddy) text="Checking Caddy" ;;
+                repair_caddy_ok) text="Caddy active and responding" ;;
+                repair_caddy_dead) text="Caddy not running — restarting" ;;
+                repair_check_perms) text="Checking permissions" ;;
+                repair_perms_fixed) text="Permissions fixed" ;;
+                repair_check_dirs) text="Checking directories" ;;
+                repair_dirs_ok) text="Directories verified" ;;
+                repair_check_env) text="Checking .env" ;;
+                repair_env_ok) text=".env present and readable" ;;
+                repair_env_missing) text=".env not found — cannot repair without it" ;;
+                repair_check_port) text="Checking panel port" ;;
+                repair_port_ok) text="Panel responding on port $1" ;;
+                repair_port_fail) text="Panel NOT responding on port $1" ;;
+                repair_check_crons) text="Checking crons" ;;
+                repair_crons_ok) text="System crons present" ;;
+                repair_crons_missing) text="Missing crons — reinstalling" ;;
+                repair_fixed) text="Fixed" ;;
+                repair_summary_ok) text="No issues detected" ;;
+                repair_summary_fixed) text="$1 issue(s) fixed" ;;
+                repair_summary_fail) text="$1 issue(s) not fixable — check manually" ;;
                 verify_mode) text="Verify mode — checking system status..." ;;
                 checking_conflicts) text="Checking for conflicting services" ;;
                 plesk_warning) text="WARNING: Plesk detected on this server!" ;;
@@ -579,6 +645,7 @@ echo ""
 REINSTALL=false
 VERIFY_ONLY=false
 UPDATE_ONLY=false
+REPAIR_MODE=false
 if [ -f "${PANEL_DIR}/.env" ]; then
     echo -e "  ${YELLOW}${BOLD}$(t existing_detected)${NC}"
     echo -e "  ${YELLOW}$(t existing_found "${PANEL_DIR}/.env")${NC}"
@@ -588,6 +655,7 @@ if [ -f "${PANEL_DIR}/.env" ]; then
     echo "    2) $(t existing_opt_verify)"
     echo "    3) $(t existing_opt_cancel)"
     echo "    4) $(t existing_opt_update)"
+    echo "    5) $(t existing_opt_repair)"
     echo ""
     read -rp "  $(t existing_choose)" EXISTING_CHOICE
     EXISTING_CHOICE=${EXISTING_CHOICE:-4}
@@ -628,6 +696,18 @@ if [ -f "${PANEL_DIR}/.env" ]; then
             MYSQL_ROOT_PASS=$(grep -E '^MYSQL_ROOT_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "")
             PANEL_ROLE=$(grep -E '^PANEL_ROLE=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "standalone")
             ;;
+        5)
+            REPAIR_MODE=true
+            echo ""
+            ok "$(t repair_mode)"
+            PANEL_PORT=$(grep -E '^PANEL_PORT=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "8444")
+            DB_PORT=$(grep -E '^DB_PORT=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "5432")
+            DB_NAME=$(grep -E '^DB_NAME=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "musedock_panel")
+            DB_USER=$(grep -E '^DB_USER=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "musedock_panel")
+            DB_PASS=$(grep -E '^DB_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "")
+            PHP_VER=$(grep -E '^FPM_PHP_VERSION=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "8.3")
+            PANEL_ROLE=$(grep -E '^PANEL_ROLE=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "standalone")
+            ;;
         3)
             echo ""
             echo -e "  $(t install_cancelled)"
@@ -654,7 +734,274 @@ fi
 # ============================================================
 # Detect conflicting services (nginx, Apache, Plesk)
 # ============================================================
-if [ "$VERIFY_ONLY" = true ]; then
+if [ "$REPAIR_MODE" = true ]; then
+    # ============================================================
+    # Repair mode — diagnose and fix common issues
+    # ============================================================
+    set +e
+
+    PANEL_INTERNAL_PORT=$((PANEL_PORT + 1))
+    REPAIR_FIXED=0
+    REPAIR_FAILED=0
+
+    header "$(t repair_mode)"
+
+    # --- 1. Check .env ---
+    echo ""
+    echo -e "  ${CYAN}$(t repair_check_env)${NC}"
+    if [ -f "${PANEL_DIR}/.env" ]; then
+        ok "$(t repair_env_ok)"
+    else
+        fail "$(t repair_env_missing)"
+    fi
+
+    # --- 2. Check directories ---
+    echo ""
+    echo -e "  ${CYAN}$(t repair_check_dirs)${NC}"
+    for dir in storage/sessions storage/logs storage/cache storage/backups; do
+        if [ ! -d "${PANEL_DIR}/${dir}" ]; then
+            mkdir -p "${PANEL_DIR}/${dir}"
+            warn "  ${dir} — $(t repair_fixed)"
+            REPAIR_FIXED=$((REPAIR_FIXED + 1))
+        fi
+    done
+    if [ ! -d /var/www/vhosts ]; then
+        mkdir -p /var/www/vhosts
+        warn "  /var/www/vhosts — $(t repair_fixed)"
+        REPAIR_FIXED=$((REPAIR_FIXED + 1))
+    fi
+    ok "$(t repair_dirs_ok)"
+
+    # --- 3. Check PHP syntax of all panel files ---
+    echo ""
+    echo -e "  ${CYAN}$(t repair_check_php)${NC}"
+    PHP_ERRORS=0
+    while IFS= read -r phpfile; do
+        ERR=$(php -l "$phpfile" 2>&1)
+        if [ $? -ne 0 ]; then
+            echo -e "  ${RED}✗ $(t repair_php_error "$phpfile")${NC}"
+            echo -e "    ${RED}${ERR}${NC}"
+            PHP_ERRORS=$((PHP_ERRORS + 1))
+            REPAIR_FAILED=$((REPAIR_FAILED + 1))
+        fi
+    done < <(find "${PANEL_DIR}/app" "${PANEL_DIR}/config" "${PANEL_DIR}/public" -name "*.php" 2>/dev/null)
+    if [ "$PHP_ERRORS" -eq 0 ]; then
+        ok "$(t repair_php_ok)"
+    else
+        echo -e "  ${RED}  $PHP_ERRORS archivo(s) con errores de sintaxis${NC}"
+    fi
+
+    # --- 4. Check database connection ---
+    echo ""
+    echo -e "  ${CYAN}$(t repair_check_db)${NC}"
+    DB_CHECK=$(PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p "${DB_PORT}" -d "${DB_NAME}" -tAc "SELECT 1;" 2>&1)
+    if [ "$DB_CHECK" = "1" ]; then
+        ok "$(t repair_db_ok) (puerto ${DB_PORT})"
+    else
+        # Try alternate port 5433
+        DB_CHECK2=$(PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -tAc "SELECT 1;" 2>&1)
+        if [ "$DB_CHECK2" = "1" ]; then
+            ok "$(t repair_db_ok) (puerto 5433)"
+        else
+            echo -e "  ${RED}✗ $(t repair_db_fail)${NC}"
+            echo -e "    ${RED}${DB_CHECK}${NC}"
+            REPAIR_FAILED=$((REPAIR_FAILED + 1))
+        fi
+    fi
+
+    # --- 5. Run schema + migrations (safe) ---
+    echo ""
+    echo -e "  ${CYAN}$(t update_schema)${NC}"
+    SCHEMA_PORT="${DB_PORT}"
+    # Try configured port, fallback to 5433
+    PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p "${SCHEMA_PORT}" -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > /dev/null 2>&1 || \
+    PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > /dev/null 2>&1
+    ok "$(t update_schema)"
+
+    # Migrations
+    MIGRATION_DIR="${PANEL_DIR}/database/migrations"
+    if [ -d "$MIGRATION_DIR" ]; then
+        MIGRATION_COUNT=0
+        EXISTING_MIGRATIONS=$(PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p "${SCHEMA_PORT}" -d "${DB_NAME}" -tAc "SELECT migration FROM panel_migrations;" 2>/dev/null || \
+                              PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -tAc "SELECT migration FROM panel_migrations;" 2>/dev/null || echo "")
+        for mig_file in "$MIGRATION_DIR"/*.php; do
+            [ -f "$mig_file" ] || continue
+            mig_name=$(basename "$mig_file")
+            if echo "$EXISTING_MIGRATIONS" | grep -q "$mig_name" 2>/dev/null; then
+                continue
+            fi
+            php "$mig_file" 2>/dev/null && MIGRATION_COUNT=$((MIGRATION_COUNT + 1)) && ok "  + $mig_name"
+        done
+        ok "$(t update_migrations) ($MIGRATION_COUNT pendientes)"
+    fi
+
+    # --- 6. Check Caddy ---
+    echo ""
+    echo -e "  ${CYAN}$(t repair_check_caddy)${NC}"
+    if systemctl is-active --quiet caddy 2>/dev/null; then
+        CADDY_API=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:2019/config/ 2>/dev/null)
+        if [ "$CADDY_API" = "200" ]; then
+            ok "$(t repair_caddy_ok)"
+        else
+            warn "Caddy activo pero API no responde (puerto 2019)"
+        fi
+    else
+        warn "$(t repair_caddy_dead)"
+        systemctl start caddy 2>/dev/null
+        if systemctl is-active --quiet caddy 2>/dev/null; then
+            ok "$(t repair_fixed)"
+            REPAIR_FIXED=$((REPAIR_FIXED + 1))
+        else
+            echo -e "  ${RED}✗ No se pudo iniciar Caddy${NC}"
+            REPAIR_FAILED=$((REPAIR_FAILED + 1))
+        fi
+    fi
+
+    # --- 7. Check permissions ---
+    echo ""
+    echo -e "  ${CYAN}$(t repair_check_perms)${NC}"
+    chmod 600 "${PANEL_DIR}/.env" 2>/dev/null
+    chmod -R 750 "${PANEL_DIR}/storage" 2>/dev/null
+    ok "$(t repair_perms_fixed)"
+
+    # --- 8. Check crons ---
+    echo ""
+    echo -e "  ${CYAN}$(t repair_check_crons)${NC}"
+    CRONS_FIXED=0
+    for cronfile in musedock-cluster musedock-backup musedock-filesync; do
+        if [ ! -f "/etc/cron.d/${cronfile}" ]; then
+            warn "  /etc/cron.d/${cronfile} — faltante"
+            CRONS_FIXED=$((CRONS_FIXED + 1))
+        fi
+    done
+    if [ "$CRONS_FIXED" -gt 0 ]; then
+        warn "$(t repair_crons_missing)"
+        # Reinstall crons
+        cat > /etc/cron.d/musedock-cluster << CRONEOF
+# MuseDock Panel — Cluster worker (queue, heartbeat, alerts)
+* * * * * root /usr/bin/php ${PANEL_DIR}/bin/cluster-worker.php >> ${PANEL_DIR}/storage/logs/cluster-worker.log 2>&1
+CRONEOF
+        chmod 644 /etc/cron.d/musedock-cluster
+
+        cat > /etc/cron.d/musedock-backup << CRONEOF
+# MuseDock Panel — Hourly panel DB backup
+0 * * * * postgres pg_dump -p 5433 musedock_panel | gzip > ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz 2>/dev/null
+# Cleanup backups older than 48 hours
+5 * * * * root find ${PANEL_DIR}/storage/backups/ -name "panel-*.sql.gz" -mmin +2880 -delete 2>/dev/null
+CRONEOF
+        chmod 644 /etc/cron.d/musedock-backup
+
+        cat > /etc/cron.d/musedock-filesync << CRONEOF
+# MuseDock Panel — File sync worker (master -> slave file replication)
+* * * * * root /usr/bin/php ${PANEL_DIR}/bin/filesync-worker.php >> ${PANEL_DIR}/storage/logs/filesync-worker.log 2>&1
+CRONEOF
+        chmod 644 /etc/cron.d/musedock-filesync
+
+        systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
+        ok "$(t repair_fixed)"
+        REPAIR_FIXED=$((REPAIR_FIXED + $CRONS_FIXED))
+    else
+        ok "$(t repair_crons_ok)"
+    fi
+
+    # --- 9. Check/reinstall systemd service ---
+    echo ""
+    echo -e "  ${CYAN}$(t repair_check_service)${NC}"
+    if [ ! -f /etc/systemd/system/musedock-panel.service ]; then
+        warn "$(t repair_service_not_found)"
+        if [ -f "${PANEL_DIR}/bin/musedock-panel.service" ]; then
+            sed -e "s|__PANEL_DIR__|${PANEL_DIR}|g" \
+                -e "s|__PANEL_PORT__|${PANEL_PORT}|g" \
+                -e "s|__PANEL_INTERNAL_PORT__|${PANEL_INTERNAL_PORT}|g" \
+                "${PANEL_DIR}/bin/musedock-panel.service" > /etc/systemd/system/musedock-panel.service
+            systemctl daemon-reload
+            systemctl enable musedock-panel 2>/dev/null
+            ok "$(t repair_fixed)"
+            REPAIR_FIXED=$((REPAIR_FIXED + 1))
+        else
+            echo -e "  ${RED}✗ Plantilla de servicio no encontrada en bin/${NC}"
+            REPAIR_FAILED=$((REPAIR_FAILED + 1))
+        fi
+    fi
+
+    # Check if service is running
+    if systemctl is-active --quiet musedock-panel 2>/dev/null; then
+        ok "$(t repair_service_ok)"
+    else
+        warn "$(t repair_service_dead)"
+        systemctl restart musedock-panel 2>/dev/null
+        sleep 2
+        if systemctl is-active --quiet musedock-panel 2>/dev/null; then
+            ok "$(t repair_fixed)"
+            REPAIR_FIXED=$((REPAIR_FIXED + 1))
+        else
+            echo -e "  ${RED}✗ No se pudo reiniciar el servicio${NC}"
+            # Try to show the error
+            echo -e "  ${RED}  $(systemctl status musedock-panel 2>&1 | grep -i 'error\|fail\|exit' | head -3)${NC}"
+            REPAIR_FAILED=$((REPAIR_FAILED + 1))
+        fi
+    fi
+
+    # --- 10. Check panel port responds ---
+    echo ""
+    echo -e "  ${CYAN}$(t repair_check_port)${NC}"
+    sleep 1
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:${PANEL_INTERNAL_PORT}/" 2>/dev/null)
+    if [ "$HTTP_CODE" = "302" ] || [ "$HTTP_CODE" = "200" ]; then
+        ok "$(t repair_port_ok "${PANEL_PORT}") (HTTP ${HTTP_CODE})"
+    else
+        echo -e "  ${RED}✗ $(t repair_port_fail "${PANEL_PORT}") (HTTP ${HTTP_CODE})${NC}"
+        # Try to diagnose
+        if ! ss -tlnp 2>/dev/null | grep -q ":${PANEL_INTERNAL_PORT}\b"; then
+            echo -e "  ${RED}  El puerto ${PANEL_INTERNAL_PORT} no esta en escucha${NC}"
+            echo -e "  ${YELLOW}  Intentando reiniciar el servicio...${NC}"
+            systemctl restart musedock-panel 2>/dev/null
+            sleep 3
+            HTTP_CODE2=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 "http://127.0.0.1:${PANEL_INTERNAL_PORT}/" 2>/dev/null)
+            if [ "$HTTP_CODE2" = "302" ] || [ "$HTTP_CODE2" = "200" ]; then
+                ok "$(t repair_port_ok "${PANEL_PORT}") — $(t repair_fixed)"
+                REPAIR_FIXED=$((REPAIR_FIXED + 1))
+            else
+                echo -e "  ${RED}✗ Sigue sin responder despues del reinicio${NC}"
+                echo -e "  ${YELLOW}  Revisa: journalctl -u musedock-panel -n 20${NC}"
+                REPAIR_FAILED=$((REPAIR_FAILED + 1))
+            fi
+        else
+            echo -e "  ${YELLOW}  Puerto en escucha pero no responde — posible error PHP${NC}"
+            REPAIR_FAILED=$((REPAIR_FAILED + 1))
+        fi
+    fi
+
+    # --- 11. Check HTTPS via Caddy ---
+    echo ""
+    echo -e "  ${CYAN}Verificando acceso HTTPS${NC}"
+    HTTPS_CODE=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 "https://127.0.0.1:${PANEL_PORT}/" 2>/dev/null)
+    if [ "$HTTPS_CODE" = "302" ] || [ "$HTTPS_CODE" = "200" ]; then
+        ok "HTTPS respondiendo en puerto ${PANEL_PORT} (HTTP ${HTTPS_CODE})"
+    else
+        echo -e "  ${RED}✗ HTTPS no responde en puerto ${PANEL_PORT} (HTTP ${HTTPS_CODE})${NC}"
+        echo -e "  ${YELLOW}  Revisa la configuracion de Caddy: caddy reverse-proxy al puerto ${PANEL_INTERNAL_PORT}${NC}"
+        REPAIR_FAILED=$((REPAIR_FAILED + 1))
+    fi
+
+    # --- Summary ---
+    echo ""
+    echo -e "  ${CYAN}${BOLD}════════════════════════════════════════${NC}"
+    if [ "$REPAIR_FAILED" -eq 0 ] && [ "$REPAIR_FIXED" -eq 0 ]; then
+        echo -e "  ${GREEN}${BOLD}$(t repair_summary_ok)${NC}"
+    else
+        if [ "$REPAIR_FIXED" -gt 0 ]; then
+            echo -e "  ${GREEN}${BOLD}$(t repair_summary_fixed "$REPAIR_FIXED")${NC}"
+        fi
+        if [ "$REPAIR_FAILED" -gt 0 ]; then
+            echo -e "  ${RED}${BOLD}$(t repair_summary_fail "$REPAIR_FAILED")${NC}"
+        fi
+    fi
+    echo -e "  ${CYAN}${BOLD}════════════════════════════════════════${NC}"
+    echo ""
+    exit 0
+
+elif [ "$VERIFY_ONLY" = true ]; then
     # ============================================================
     # Verify mode — comprehensive system diagnosis
     # Disable set -e so checks don't kill the script
