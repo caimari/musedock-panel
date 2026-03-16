@@ -390,6 +390,108 @@ class FirewallService
         return ['ok' => false, 'output' => 'No se detecto firewall'];
     }
 
+    // ─── Security Audit ────────────────────────────────────
+
+    /**
+     * Audit firewall rules for security issues
+     * Returns array of warnings with severity (danger, warning, info)
+     */
+    public static function auditRules(array $rules, string $policy): array
+    {
+        $warnings = [];
+        $type = self::getType();
+        $policyUpper = strtoupper($policy);
+
+        // 1. Policy ACCEPT = everything open
+        if (str_contains($policyUpper, 'ACCEPT')) {
+            $warnings[] = [
+                'severity' => 'danger',
+                'icon'     => 'bi-shield-fill-x',
+                'title'    => 'Politica por defecto ACCEPT',
+                'message'  => 'La politica por defecto permite todo el trafico. Cualquier IP puede acceder a todos los puertos del servidor. Se recomienda cambiar a DROP y crear reglas ACCEPT solo para las IPs y puertos necesarios.',
+            ];
+        }
+
+        if ($type === 'iptables') {
+            foreach ($rules as $rule) {
+                // 2. ACCEPT all from 0.0.0.0/0 without ctstate = open to everyone
+                if ($rule['target'] === 'ACCEPT'
+                    && $rule['source'] === '0.0.0.0/0'
+                    && $rule['protocol'] === 'all'
+                    && empty($rule['state'])
+                    && empty($rule['port'])) {
+                    $warnings[] = [
+                        'severity' => 'danger',
+                        'icon'     => 'bi-exclamation-octagon-fill',
+                        'title'    => "Regla #{$rule['num']}: Acceso total desde cualquier IP",
+                        'message'  => "La regla #{$rule['num']} permite TODO el trafico desde CUALQUIER IP (0.0.0.0/0) sin restriccion de puerto ni protocolo. Esto anula la politica DROP y deja el servidor completamente abierto.",
+                        'rule_num' => $rule['num'],
+                        'fix'      => 'delete',
+                    ];
+                }
+
+                // 3. ACCEPT with port 0
+                if ($rule['target'] === 'ACCEPT' && $rule['port'] === '0') {
+                    $warnings[] = [
+                        'severity' => 'warning',
+                        'icon'     => 'bi-exclamation-triangle-fill',
+                        'title'    => "Regla #{$rule['num']}: Puerto 0 (invalido)",
+                        'message'  => "La regla #{$rule['num']} tiene puerto 0, que no es un puerto valido. Esto puede ser un error de configuracion.",
+                        'rule_num' => $rule['num'],
+                        'fix'      => 'delete',
+                    ];
+                }
+
+                // 4. Duplicate rules (same source, protocol, port, target)
+                foreach ($rules as $other) {
+                    if ($other['num'] <= $rule['num']) continue;
+                    if ($other['target'] === $rule['target']
+                        && $other['source'] === $rule['source']
+                        && $other['protocol'] === $rule['protocol']
+                        && $other['port'] === $rule['port']
+                        && $other['state'] === $rule['state']) {
+                        $warnings[] = [
+                            'severity' => 'warning',
+                            'icon'     => 'bi-files',
+                            'title'    => "Reglas #{$rule['num']} y #{$other['num']}: Duplicadas",
+                            'message'  => "Las reglas #{$rule['num']} y #{$other['num']} son identicas. La regla #{$other['num']} es redundante y se puede eliminar.",
+                            'rule_num' => $other['num'],
+                            'fix'      => 'delete',
+                        ];
+                    }
+                }
+            }
+        } elseif ($type === 'ufw') {
+            foreach ($rules as $rule) {
+                // UFW: ALLOW from Anywhere (full access)
+                if (stripos($rule['action'], 'ALLOW') !== false
+                    && ($rule['from'] === 'Anywhere' || $rule['from'] === 'Anywhere (v6)')
+                    && ($rule['to'] === 'Anywhere' || $rule['to'] === 'Anywhere (v6)')) {
+                    $warnings[] = [
+                        'severity' => 'danger',
+                        'icon'     => 'bi-exclamation-octagon-fill',
+                        'title'    => "Regla #{$rule['num']}: Acceso total desde cualquier IP",
+                        'message'  => "La regla #{$rule['num']} permite TODO el trafico desde cualquier IP sin restriccion. Esto deja el servidor completamente abierto.",
+                        'rule_num' => $rule['num'],
+                        'fix'      => 'delete',
+                    ];
+                }
+            }
+        }
+
+        // 5. No rules at all
+        if (empty($rules) && str_contains($policyUpper, 'DROP')) {
+            $warnings[] = [
+                'severity' => 'danger',
+                'icon'     => 'bi-lock-fill',
+                'title'    => 'Sin reglas con politica DROP',
+                'message'  => 'No hay ninguna regla ACCEPT pero la politica es DROP. Todo el trafico esta bloqueado, incluido tu acceso. Usa el boton de emergencia para permitir tu IP.',
+            ];
+        }
+
+        return $warnings;
+    }
+
     public static function suggestRulesForReplication(string $slaveIp): array
     {
         $suggestions = [];

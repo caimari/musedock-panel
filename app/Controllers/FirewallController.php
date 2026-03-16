@@ -31,6 +31,9 @@ class FirewallController
         $replSuggestions  = FirewallService::suggestRulesForReplication($slaveIp);
         $hostSuggestions  = FirewallService::suggestRulesForHosting();
 
+        // Security audit
+        $securityWarnings = FirewallService::auditRules($rules, $policy);
+
         View::render('settings/firewall', [
             'layout'            => 'main',
             'pageTitle'         => 'Firewall',
@@ -42,6 +45,7 @@ class FirewallController
             'policy'            => $policy,
             'replSuggestions'   => $replSuggestions,
             'hostSuggestions'   => $hostSuggestions,
+            'securityWarnings'  => $securityWarnings,
         ]);
     }
 

@@ -36,6 +36,39 @@
     </div>
 <?php else: ?>
 
+    <!-- Security Audit Warnings -->
+    <?php if (!empty($securityWarnings)): ?>
+        <div class="card mb-3 border-danger">
+            <div class="card-header bg-danger bg-opacity-10 text-danger d-flex align-items-center">
+                <i class="bi bi-shield-exclamation me-2 fs-5"></i>
+                <strong>Auditoria de Seguridad</strong>
+                <span class="badge bg-danger ms-2"><?= count($securityWarnings) ?> <?= count($securityWarnings) === 1 ? 'problema' : 'problemas' ?></span>
+            </div>
+            <div class="card-body p-0">
+                <?php foreach ($securityWarnings as $i => $warn): ?>
+                    <div class="d-flex align-items-start p-3 <?= $i > 0 ? 'border-top border-secondary' : '' ?>">
+                        <i class="bi <?= View::e($warn['icon']) ?> me-3 fs-5 <?= $warn['severity'] === 'danger' ? 'text-danger' : ($warn['severity'] === 'warning' ? 'text-warning' : 'text-info') ?>"></i>
+                        <div class="flex-grow-1">
+                            <strong class="<?= $warn['severity'] === 'danger' ? 'text-danger' : ($warn['severity'] === 'warning' ? 'text-warning' : 'text-info') ?>">
+                                <?= View::e($warn['title']) ?>
+                            </strong>
+                            <p class="mb-0 mt-1 small text-muted"><?= View::e($warn['message']) ?></p>
+                        </div>
+                        <?php if (!empty($warn['fix']) && $warn['fix'] === 'delete' && !empty($warn['rule_num'])): ?>
+                            <form method="POST" action="/settings/firewall/delete-rule" class="ms-3" onsubmit="return confirmFixDelete(this, <?= (int)$warn['rule_num'] ?>)">
+                                <?= View::csrf() ?>
+                                <input type="hidden" name="rule_number" value="<?= (int)$warn['rule_num'] ?>">
+                                <button type="submit" class="btn btn-outline-danger btn-sm text-nowrap">
+                                    <i class="bi bi-wrench me-1"></i>Corregir
+                                </button>
+                            </form>
+                        <?php endif; ?>
+                    </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    <?php endif; ?>
+
     <!-- Card 1: Estado del Firewall -->
     <div class="card mb-3">
         <div class="card-header"><i class="bi bi-shield-check me-1"></i> Estado del Firewall</div>
@@ -612,6 +645,30 @@ function toggleEditPortField() {
 }
 
 // ─── SwalDark Confirmations ─────────────────────────────
+function confirmFixDelete(form, ruleNum) {
+    if (typeof Swal !== 'undefined') {
+        Swal.fire({
+            title: 'Corregir problema de seguridad',
+            html: 'Se eliminara la regla <strong>#' + ruleNum + '</strong> que representa un riesgo de seguridad.<br><small class="text-muted">Las reglas se renumeraran automaticamente.</small>',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Si, corregir',
+            cancelButtonText: 'Cancelar',
+            background: '#1e1e2e',
+            color: '#cdd6f4',
+            confirmButtonColor: '#dc3545',
+            cancelButtonColor: '#585b70',
+        }).then(function(result) {
+            if (result.isConfirmed) {
+                form.onsubmit = null;
+                form.submit();
+            }
+        });
+        return false;
+    }
+    return confirm('¿Eliminar la regla #' + ruleNum + ' para corregir el problema de seguridad?');
+}
+
 function confirmDelete(form, ruleNum) {
     if (typeof Swal !== 'undefined') {
         Swal.fire({
