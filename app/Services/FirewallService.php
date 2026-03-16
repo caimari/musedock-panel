@@ -229,7 +229,7 @@ class FirewallService
             // Extract port from extra info
             $port = '';
             if (preg_match('/dpt:(\d+)/', $extra, $pm)) {
-                $port = $pm[1];
+                $port = (int)$pm[1] > 0 ? $pm[1] : '';
             } elseif (preg_match('/dpts:(\d+:\d+)/', $extra, $pm)) {
                 $port = $pm[1];
             }

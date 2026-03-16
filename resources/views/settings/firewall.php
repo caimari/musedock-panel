@@ -58,8 +58,25 @@
                     </td>
                 </tr>
                 <tr>
-                    <td class="text-muted">Politica por defecto</td>
-                    <td><code><?= View::e($policy) ?></code></td>
+                    <td class="text-muted">Politica por defecto (INPUT)</td>
+                    <td>
+                        <?php
+                            $policyUpper = strtoupper($policy);
+                            $policyClass = 'bg-secondary';
+                            $policyNote  = '';
+                            if (str_contains($policyUpper, 'DROP')) {
+                                $policyClass = 'bg-danger';
+                                $policyNote  = 'Todo el trafico no permitido explicitamente sera bloqueado';
+                            } elseif (str_contains($policyUpper, 'ACCEPT')) {
+                                $policyClass = 'bg-success';
+                                $policyNote  = 'Todo el trafico es permitido por defecto';
+                            }
+                        ?>
+                        <span class="badge <?= $policyClass ?>"><?= View::e($policy) ?></span>
+                        <?php if ($policyNote): ?>
+                            <small class="text-muted ms-2"><?= $policyNote ?></small>
+                        <?php endif; ?>
+                    </td>
                 </tr>
                 <tr>
                     <td class="text-muted">IP del admin (conectado)</td>
@@ -204,8 +221,6 @@
                                         <td class="text-muted small">
                                             <?php if (!empty($rule['state'])): ?>
                                                 <span class="badge bg-info bg-opacity-25 text-info"><?= View::e($rule['state']) ?></span>
-                                            <?php elseif (!empty($rule['extra'])): ?>
-                                                <?= View::e($rule['extra']) ?>
                                             <?php else: ?>
                                                 -
                                             <?php endif; ?>
@@ -228,6 +243,14 @@
                             <?php endforeach; ?>
                         </tbody>
                     </table>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($type === 'iptables' && strtoupper($policy) === 'DROP'): ?>
+                <div class="alert alert-warning py-2 mt-3 mb-0 small" style="background:rgba(255,193,7,0.1);border-color:rgba(255,193,7,0.3);">
+                    <i class="bi bi-shield-fill-exclamation me-1"></i>
+                    <strong>Politica DROP activa:</strong> Todo el trafico que no coincida con las reglas ACCEPT de arriba sera <strong>bloqueado automaticamente</strong>.
+                    No necesitas reglas DENY explicitas — solo aparecen las reglas que permiten trafico.
                 </div>
             <?php endif; ?>
         </div>
