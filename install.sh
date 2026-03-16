@@ -797,7 +797,7 @@ if [ "$REPAIR_MODE" = true ]; then
     DB_WORKING_PORT=""
     # Try configured port first, then 5433, then 5432
     for TRY_PORT in "${DB_PORT}" 5433 5432; do
-        DB_CHECK=$(timeout 5 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${TRY_PORT} -d '${DB_NAME}' -tAc 'SELECT 1;'" 2>&1)
+        DB_CHECK=$(PGPASSWORD="${DB_PASS}" timeout 5 psql -U "${DB_USER}" -h 127.0.0.1 -p "${TRY_PORT}" -d "${DB_NAME}" -tAc "SELECT 1;" 2>&1)
         if [ "$DB_CHECK" = "1" ]; then
             DB_WORKING_PORT="$TRY_PORT"
             ok "$(t repair_db_ok) (puerto ${TRY_PORT})"
@@ -807,6 +807,7 @@ if [ "$REPAIR_MODE" = true ]; then
     if [ -z "$DB_WORKING_PORT" ]; then
         echo -e "  ${RED}✗ $(t repair_db_fail)${NC}"
         echo -e "    ${RED}Probados puertos: ${DB_PORT}, 5433, 5432${NC}"
+        echo -e "    ${RED}Ultimo error: ${DB_CHECK}${NC}"
         # Check if PostgreSQL is running at all
         PG_RUNNING=$(ss -tlnp 2>/dev/null | grep postgres | head -3)
         if [ -n "$PG_RUNNING" ]; then
@@ -822,7 +823,7 @@ if [ "$REPAIR_MODE" = true ]; then
             if systemctl is-active --quiet postgresql 2>/dev/null; then
                 ok "PostgreSQL iniciado — reintentando conexion"
                 for TRY_PORT in "${DB_PORT}" 5433 5432; do
-                    DB_CHECK=$(timeout 5 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${TRY_PORT} -d '${DB_NAME}' -tAc 'SELECT 1;'" 2>&1)
+                    DB_CHECK=$(PGPASSWORD="${DB_PASS}" timeout 5 psql -U "${DB_USER}" -h 127.0.0.1 -p "${TRY_PORT}" -d "${DB_NAME}" -tAc "SELECT 1;" 2>&1)
                     if [ "$DB_CHECK" = "1" ]; then
                         DB_WORKING_PORT="$TRY_PORT"
                         ok "$(t repair_db_ok) (puerto ${TRY_PORT}) — $(t repair_fixed)"
@@ -841,14 +842,14 @@ if [ "$REPAIR_MODE" = true ]; then
     if [ -n "$DB_WORKING_PORT" ]; then
         echo ""
         echo -e "  ${CYAN}$(t update_schema)${NC}"
-        timeout 15 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${DB_WORKING_PORT} -d '${DB_NAME}' -f '${PANEL_DIR}/database/schema.sql'" > /dev/null 2>&1
+        PGPASSWORD="${DB_PASS}" timeout 15 psql -U "${DB_USER}" -h 127.0.0.1 -p "${DB_WORKING_PORT}" -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > /dev/null 2>&1
         ok "$(t update_schema)"
 
         # Migrations
         MIGRATION_DIR="${PANEL_DIR}/database/migrations"
         if [ -d "$MIGRATION_DIR" ]; then
             MIGRATION_COUNT=0
-            EXISTING_MIGRATIONS=$(timeout 5 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${DB_WORKING_PORT} -d '${DB_NAME}' -tAc 'SELECT migration FROM panel_migrations;'" 2>/dev/null || echo "")
+            EXISTING_MIGRATIONS=$(PGPASSWORD="${DB_PASS}" timeout 5 psql -U "${DB_USER}" -h 127.0.0.1 -p "${DB_WORKING_PORT}" -d "${DB_NAME}" -tAc "SELECT migration FROM panel_migrations;" 2>/dev/null || echo "")
             for mig_file in "$MIGRATION_DIR"/*.php; do
                 [ -f "$mig_file" ] || continue
                 mig_name=$(basename "$mig_file")
@@ -866,8 +867,9 @@ if [ "$REPAIR_MODE" = true ]; then
     # --- 6. Check Caddy ---
     echo ""
     echo -e "  ${CYAN}$(t repair_check_caddy)${NC}"
-    if systemctl is-active --quiet caddy 2>/dev/null; then
-        CADDY_API=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:2019/config/ 2>/dev/null)
+    CADDY_ACTIVE=$(timeout 5 systemctl is-active caddy 2>/dev/null)
+    if [ "$CADDY_ACTIVE" = "active" ]; then
+        CADDY_API=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://localhost:2019/config/ 2>/dev/null)
         if [ "$CADDY_API" = "200" ]; then
             ok "$(t repair_caddy_ok)"
         else
@@ -875,8 +877,10 @@ if [ "$REPAIR_MODE" = true ]; then
         fi
     else
         warn "$(t repair_caddy_dead)"
-        systemctl start caddy 2>/dev/null
-        if systemctl is-active --quiet caddy 2>/dev/null; then
+        timeout 10 systemctl start caddy 2>/dev/null
+        sleep 2
+        CADDY_ACTIVE2=$(timeout 5 systemctl is-active caddy 2>/dev/null)
+        if [ "$CADDY_ACTIVE2" = "active" ]; then
             ok "$(t repair_fixed)"
             REPAIR_FIXED=$((REPAIR_FIXED + 1))
         else
@@ -1285,14 +1289,14 @@ elif [ "$UPDATE_ONLY" = true ]; then
     # Try configured port, then 5433, then 5432
     UPDATE_DB_PORT=""
     for TRY_PORT in "${DB_PORT}" 5433 5432; do
-        DB_TEST=$(timeout 5 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${TRY_PORT} -d '${DB_NAME}' -tAc 'SELECT 1;'" 2>&1)
+        DB_TEST=$(PGPASSWORD="${DB_PASS}" timeout 5 psql -U "${DB_USER}" -h 127.0.0.1 -p "${TRY_PORT}" -d "${DB_NAME}" -tAc "SELECT 1;" 2>&1)
         if [ "$DB_TEST" = "1" ]; then
             UPDATE_DB_PORT="$TRY_PORT"
             break
         fi
     done
     if [ -n "$UPDATE_DB_PORT" ]; then
-        timeout 15 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${UPDATE_DB_PORT} -d '${DB_NAME}' -f '${PANEL_DIR}/database/schema.sql'" > /dev/null 2>&1
+        PGPASSWORD="${DB_PASS}" timeout 15 psql -U "${DB_USER}" -h 127.0.0.1 -p "${UPDATE_DB_PORT}" -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > /dev/null 2>&1
         ok "$(t update_schema) (puerto ${UPDATE_DB_PORT})"
     else
         warn "$(t update_schema) — no se pudo conectar a la BD (probados: ${DB_PORT}, 5433, 5432)"
@@ -1303,7 +1307,7 @@ elif [ "$UPDATE_ONLY" = true ]; then
     if [ -d "$MIGRATION_DIR" ] && [ -n "$UPDATE_DB_PORT" ]; then
         MIGRATION_COUNT=0
         # Check which migrations have already been run
-        EXISTING_MIGRATIONS=$(timeout 5 bash -c "PGPASSWORD='${DB_PASS}' psql -U '${DB_USER}' -h 127.0.0.1 -p ${UPDATE_DB_PORT} -d '${DB_NAME}' -tAc 'SELECT migration FROM panel_migrations;'" 2>/dev/null || echo "")
+        EXISTING_MIGRATIONS=$(PGPASSWORD="${DB_PASS}" timeout 5 psql -U "${DB_USER}" -h 127.0.0.1 -p "${UPDATE_DB_PORT}" -d "${DB_NAME}" -tAc "SELECT migration FROM panel_migrations;" 2>/dev/null || echo "")
 
         for mig_file in "$MIGRATION_DIR"/*.php; do
             [ -f "$mig_file" ] || continue
