@@ -2,6 +2,34 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aqui.
 
+## [0.5.2] — 2026-03-16
+
+### Anadido
+- **Notificaciones** — Nueva pestaña Settings > Notificaciones con Email (SMTP/PHP mail) y Telegram unificados
+- **Email SMTP avanzado** — Selector de cifrado STARTTLS/SSL/Ninguno, test de envio inline con AJAX
+- **Email destinatario inteligente** — Por defecto usa el email del perfil del admin, con override manual opcional
+- **Firewall editable** — Las reglas del firewall ahora se pueden editar (antes solo eliminar), modal de edicion
+- **Firewall interfaces de red** — Muestra todas las interfaces del servidor con IP real (ya no 127.0.0.1)
+- **Firewall direccion** — Columna IN/OUT visible en el listado de reglas
+- **Databases multi-instancia** — Vista muestra PostgreSQL Hosting (5432, replicable), PostgreSQL Panel (5433) y MySQL agrupados
+- **Databases reales** — Lista todas las bases de datos reales del sistema, no solo las gestionadas por el panel
+- **Activity Log filtros** — Busqueda por texto, filtro por accion y por admin, paginacion de 50 registros
+- **Activity Log limpieza** — Boton para limpiar logs antiguos (7/30/90/180 dias) y vaciar todo con verificacion de password
+- **Visor de logs limpieza** — Boton para vaciar archivos de log individuales con confirmacion SweetAlert
+- **Caddy access logs** — Los logs de acceso de Caddy por dominio ahora aparecen en el visor de logs
+
+### Corregido
+- **Firewall reglas DENY** — Las reglas DENY/REJECT ahora aparecen correctamente en el listado (regex corregido)
+- **Firewall borde blanco** — Eliminado borde blanco de la tabla de interfaces de red
+- **Email remitente** — El From por defecto ahora usa el email del admin (antes usaba panel@hostname)
+- **Email destinatario** — Corregido "No hay email configurado" (query filtraba role=admin en vez de superadmin)
+- **PHP mail() error claro** — Muestra mensaje especifico cuando sendmail/postfix no esta instalado
+- **Session key password** — Corregido `$_SESSION['admin_id']` inexistente por `$_SESSION['panel_user']['id']` en verificacion de password (Vaciar todo logs y Eliminar BD)
+- **Icono busqueda invisible** — Añadido color blanco al icono de lupa en Activity Log
+- **Notificaciones migradas** — Config SMTP/Telegram movida de Cluster a nueva pestaña Notificaciones con migracion automatica
+
+---
+
 ## [0.5.0] — 2026-03-16
 
 ### Anadido

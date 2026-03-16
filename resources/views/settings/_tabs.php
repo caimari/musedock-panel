@@ -11,5 +11,6 @@
     <a href="/settings/replication" class="btn btn-outline-light btn-sm <?= str_contains($pageTitle ?? '', 'Replicaci') ? 'active' : '' ?>"><i class="bi bi-arrow-repeat me-1"></i>Replicacion</a>
     <a href="/settings/firewall" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Firewall' ? 'active' : '' ?>"><i class="bi bi-shield-fill me-1"></i>Firewall</a>
     <a href="/settings/wireguard" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'WireGuard' ? 'active' : '' ?>"><i class="bi bi-hdd-network me-1"></i>WireGuard</a>
+    <a href="/settings/notifications" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Notificaciones' ? 'active' : '' ?>"><i class="bi bi-bell me-1"></i>Notificaciones</a>
     <a href="/settings/cluster" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Cluster' ? 'active' : '' ?>"><i class="bi bi-diagram-3 me-1"></i>Cluster</a>
 </div>

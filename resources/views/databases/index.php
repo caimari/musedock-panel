@@ -1,14 +1,16 @@
-<?php use MuseDockPanel\View; use MuseDockPanel\Flash; ?>
+<?php use MuseDockPanel\View; ?>
 
 <?php
-// Check for credentials flash (show copyable block)
-$creds = Flash::get('db_credentials');
-if ($creds) {
-    $creds = json_decode($creds, true);
+function formatDbSize(int $bytes): string {
+    if ($bytes <= 0) return '0 B';
+    if ($bytes < 1024) return $bytes . ' B';
+    if ($bytes < 1048576) return round($bytes / 1024, 1) . ' KB';
+    if ($bytes < 1073741824) return round($bytes / 1048576, 1) . ' MB';
+    return round($bytes / 1073741824, 2) . ' GB';
 }
 ?>
 
-<?php if ($creds): ?>
+<?php if (!empty($creds)): ?>
 <div class="card mb-4" style="border-color: #22c55e;">
     <div class="card-header" style="background: rgba(34,197,94,0.1); border-bottom-color: #22c55e;">
         <i class="bi bi-key me-2" style="color: #22c55e;"></i>
@@ -49,135 +51,332 @@ if ($creds) {
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
-        <span class="text-muted"><?= $totalDbs ?> base(s) de datos en total</span>
+        <span class="text-muted">
+            <?= $totalPgMain ?> PostgreSQL (hosting)
+            &middot; <?= $totalPgPanel ?> PostgreSQL (panel)
+            <?php if ($mysqlAvailable): ?>
+                &middot; <?= $totalMysql ?> MySQL
+            <?php endif; ?>
+        </span>
     </div>
     <a href="/databases/create" class="btn btn-primary">
         <i class="bi bi-plus-lg me-1"></i> Nueva Base de Datos
     </a>
 </div>
 
-<!-- System Database -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- PostgreSQL Main (port 5432) — Hosting, replicable          -->
+<!-- ═══════════════════════════════════════════════════════════ -->
 <div class="card mb-4">
-    <div class="card-header">
-        <i class="bi bi-shield-lock me-2"></i>Base de Datos del Sistema
+    <div class="card-header d-flex align-items-center justify-content-between">
+        <span>
+            <i class="bi bi-database me-2" style="color:#22c55e;"></i>PostgreSQL — Hosting
+            <span class="badge bg-secondary ms-1"><?= $totalPgMain ?></span>
+            <small class="text-muted ms-2">Puerto 5432 &middot; Cluster <code>main</code></small>
+        </span>
+        <span>
+            <?php if (!empty($pgMainReplication)): ?>
+                <?php if ($pgMainReplication['role'] === 'master'): ?>
+                    <span class="badge bg-success"><i class="bi bi-arrow-up-circle me-1"></i>Master</span>
+                    <?php if ($pgMainReplication['slaves'] > 0): ?>
+                        <span class="badge bg-info ms-1"><?= $pgMainReplication['slaves'] ?> slave(s)</span>
+                    <?php else: ?>
+                        <span class="badge bg-warning text-dark ms-1">Sin slaves</span>
+                    <?php endif; ?>
+                <?php elseif ($pgMainReplication['role'] === 'slave'): ?>
+                    <span class="badge bg-info"><i class="bi bi-arrow-down-circle me-1"></i>Slave</span>
+                    <?php if (($pgMainReplication['state'] ?? '') === 'streaming'): ?>
+                        <span class="badge bg-success ms-1">Streaming</span>
+                    <?php else: ?>
+                        <span class="badge bg-warning text-dark ms-1"><?= View::e($pgMainReplication['state'] ?? 'unknown') ?></span>
+                    <?php endif; ?>
+                <?php endif; ?>
+            <?php else: ?>
+                <span class="badge bg-secondary">Standalone</span>
+                <span class="badge bg-success ms-1"><i class="bi bi-arrow-repeat me-1"></i>Replicable</span>
+            <?php endif; ?>
+        </span>
     </div>
     <div class="card-body p-0">
-        <table class="table table-hover mb-0">
-            <thead>
-                <tr>
-                    <th class="ps-3">Base de Datos</th>
-                    <th>Usuario DB</th>
-                    <th>Tipo</th>
-                    <th>Estado</th>
-                    <th class="text-end pe-3">Acciones</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td class="ps-3">
-                        <code><?= View::e($systemDb['db_name']) ?></code>
-                    </td>
-                    <td>
-                        <code><?= View::e($systemDb['db_user']) ?></code>
-                    </td>
-                    <td>
-                        <span class="badge" style="background: rgba(34,197,94,0.15); color: #22c55e;">
-                            PGSQL
-                        </span>
-                    </td>
-                    <td>
-                        <span class="badge" style="background: rgba(251,191,36,0.15); color: #fbbf24;">
-                            <i class="bi bi-lock me-1"></i>Sistema
-                        </span>
-                    </td>
-                    <td class="text-end pe-3">
-                        <span class="text-muted"><small>Protegida</small></span>
-                    </td>
-                </tr>
-            </tbody>
-        </table>
+        <?php if (empty($pgMainDatabases)): ?>
+            <div class="p-4 text-center text-muted">
+                <i class="bi bi-database-x" style="font-size: 2rem;"></i>
+                <p class="mt-2">No se pudo conectar a PostgreSQL en puerto 5432 o no hay bases de datos.</p>
+            </div>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th class="ps-3">Base de Datos</th>
+                            <th>Owner</th>
+                            <th>Tamano</th>
+                            <th>Estado</th>
+                            <?php if (!empty($pgMainReplication)): ?>
+                                <th>Replicacion</th>
+                            <?php endif; ?>
+                            <th class="text-end pe-3">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($pgMainDatabases as $db): ?>
+                            <?php
+                                $dbName = $db['db_name'];
+                                $isSystem = in_array($dbName, $pgMainSystemDbs);
+                                $isManaged = isset($panelDbMap[$dbName]);
+                                $managedInfo = $isManaged ? $panelDbMap[$dbName] : null;
+                            ?>
+                            <tr>
+                                <td class="ps-3">
+                                    <code><?= View::e($dbName) ?></code>
+                                    <?php if ($dbName === 'postgres'): ?>
+                                        <span class="badge bg-secondary ms-1">Default</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td><small class="text-muted"><?= View::e($db['owner'] ?? '-') ?></small></td>
+                                <td><small><?= formatDbSize((int)($db['size_bytes'] ?? 0)) ?></small></td>
+                                <td>
+                                    <?php if ($isManaged): ?>
+                                        <span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;">
+                                            <i class="bi bi-server me-1"></i><?= View::e($managedInfo['username']) ?>
+                                        </span>
+                                    <?php elseif ($isSystem): ?>
+                                        <span class="badge bg-secondary">Sistema</span>
+                                    <?php else: ?>
+                                        <span class="badge" style="background:rgba(107,114,128,0.15);color:#9ca3af;">Externa</span>
+                                    <?php endif; ?>
+                                </td>
+                                <?php if (!empty($pgMainReplication)): ?>
+                                    <td>
+                                        <?php if ($pgMainReplication['role'] === 'master' && $pgMainReplication['slaves'] > 0): ?>
+                                            <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Replicada</span>
+                                        <?php elseif ($pgMainReplication['role'] === 'slave'): ?>
+                                            <span class="badge bg-info"><i class="bi bi-arrow-down me-1"></i>Replica</span>
+                                        <?php elseif ($pgMainReplication['role'] === 'master'): ?>
+                                            <span class="badge bg-warning text-dark"><i class="bi bi-dash-circle me-1"></i>Sin replica</span>
+                                        <?php endif; ?>
+                                    </td>
+                                <?php endif; ?>
+                                <td class="text-end pe-3">
+                                    <?php if ($isManaged && !$isSystem): ?>
+                                        <form method="POST" action="/databases/<?= $managedInfo['id'] ?>/delete" class="d-inline delete-db-form">
+                                            <?= View::csrf() ?>
+                                            <input type="hidden" name="password" class="delete-password-field" value="">
+                                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar"
+                                                    data-db-name="<?= View::e($dbName) ?>"
+                                                    data-db-user="<?= View::e($managedInfo['db_user']) ?>"
+                                                    data-db-type="PGSQL">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    <?php elseif ($isSystem): ?>
+                                        <span class="text-muted"><small>Protegida</small></span>
+                                    <?php else: ?>
+                                        <span class="text-muted"><small>No gestionada</small></span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
     </div>
 </div>
 
-<!-- User Databases -->
-<div class="card">
-    <div class="card-header">
-        <i class="bi bi-database me-2"></i>Bases de Datos de Cuentas
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- PostgreSQL Panel (port 5433) — Panel only, no replication   -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="card mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between">
+        <span>
+            <i class="bi bi-database me-2" style="color:#fbbf24;"></i>PostgreSQL — Panel
+            <span class="badge bg-secondary ms-1"><?= $totalPgPanel ?></span>
+            <small class="text-muted ms-2">Puerto 5433 &middot; Cluster <code>panel</code></small>
+        </span>
+        <span>
+            <span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;">
+                <i class="bi bi-lock me-1"></i>Instancia dedicada
+            </span>
+            <span class="badge bg-secondary ms-1">No replicable</span>
+        </span>
     </div>
     <div class="card-body p-0">
-        <?php if (empty($grouped)): ?>
+        <?php if (empty($pgPanelDatabases)): ?>
             <div class="p-4 text-center text-muted">
-                <i class="bi bi-database" style="font-size: 2rem;"></i>
-                <p class="mt-2">No hay bases de datos. Crea una para comenzar.</p>
-                <a href="/databases/create" class="btn btn-outline-light btn-sm"><i class="bi bi-plus-lg me-1"></i> Crear Base de Datos</a>
+                <i class="bi bi-database-x" style="font-size: 2rem;"></i>
+                <p class="mt-2">No se pudo conectar a PostgreSQL en puerto 5433.</p>
             </div>
         <?php else: ?>
-            <table class="table table-hover mb-0">
-                <thead>
-                    <tr>
-                        <th class="ps-3">Base de Datos</th>
-                        <th>Usuario DB</th>
-                        <th>Tipo</th>
-                        <th>Creada</th>
-                        <th class="text-end pe-3">Acciones</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <?php foreach ($grouped as $group): ?>
-                    <!-- Account group header -->
-                    <tr style="background: rgba(56,189,248,0.05);">
-                        <td colspan="5" class="ps-3 py-2">
-                            <i class="bi bi-server me-1" style="color: #38bdf8;"></i>
-                            <a href="/accounts/<?= $group['account_id'] ?>" class="text-info text-decoration-none fw-semibold">
-                                <?= View::e($group['username']) ?>
-                            </a>
-                            <small class="text-muted ms-2"><?= View::e($group['domain']) ?></small>
-                            <span class="badge bg-dark ms-2"><?= count($group['databases']) ?> DB</span>
-                        </td>
-                    </tr>
-                    <?php foreach ($group['databases'] as $db): ?>
-                    <tr>
-                        <td class="ps-4">
-                            <code><?= View::e($db['db_name']) ?></code>
-                        </td>
-                        <td>
-                            <code><?= View::e($db['db_user']) ?></code>
-                        </td>
-                        <td>
-                            <?php if (($db['db_type'] ?? 'mysql') === 'pgsql'): ?>
-                                <span class="badge" style="background: rgba(34,197,94,0.15); color: #22c55e;">
-                                    PGSQL
-                                </span>
-                            <?php else: ?>
-                                <span class="badge" style="background: rgba(56,189,248,0.15); color: #38bdf8;">
-                                    MYSQL
-                                </span>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th class="ps-3">Base de Datos</th>
+                            <th>Owner</th>
+                            <th>Tamano</th>
+                            <th>Estado</th>
+                            <th class="text-end pe-3">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($pgPanelDatabases as $db): ?>
+                            <?php
+                                $dbName = $db['db_name'];
+                                $isSystem = in_array($dbName, $pgPanelSystemDbs);
+                            ?>
+                            <tr>
+                                <td class="ps-3">
+                                    <code><?= View::e($dbName) ?></code>
+                                    <?php if ($dbName === 'musedock_panel'): ?>
+                                        <span class="badge ms-1" style="background:rgba(251,191,36,0.15);color:#fbbf24;">
+                                            <i class="bi bi-lock me-1"></i>Panel
+                                        </span>
+                                    <?php elseif ($dbName === 'postgres'): ?>
+                                        <span class="badge bg-secondary ms-1">Default</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td><small class="text-muted"><?= View::e($db['owner'] ?? '-') ?></small></td>
+                                <td><small><?= formatDbSize((int)($db['size_bytes'] ?? 0)) ?></small></td>
+                                <td>
+                                    <?php if ($isSystem): ?>
+                                        <span class="badge bg-secondary">Sistema</span>
+                                    <?php else: ?>
+                                        <span class="badge" style="background:rgba(107,114,128,0.15);color:#9ca3af;">Externa</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-end pe-3">
+                                    <span class="text-muted"><small>Protegida</small></span>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- MySQL Databases                                             -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="card mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between">
+        <span>
+            <i class="bi bi-database me-2" style="color:#38bdf8;"></i>MySQL
+            <?php if ($mysqlAvailable): ?>
+                <span class="badge bg-secondary ms-1"><?= $totalMysql ?></span>
+            <?php endif; ?>
+        </span>
+        <span>
+            <?php if (!$mysqlAvailable): ?>
+                <span class="badge bg-secondary">No disponible</span>
+            <?php elseif (!empty($mysqlReplication)): ?>
+                <?php if ($mysqlReplication['role'] === 'master'): ?>
+                    <span class="badge bg-success"><i class="bi bi-arrow-up-circle me-1"></i>Master</span>
+                <?php elseif ($mysqlReplication['role'] === 'slave'): ?>
+                    <span class="badge bg-info"><i class="bi bi-arrow-down-circle me-1"></i>Slave</span>
+                    <?php
+                        $ioOk = ($mysqlReplication['io_running'] ?? 'No') === 'Yes';
+                        $sqlOk = ($mysqlReplication['sql_running'] ?? 'No') === 'Yes';
+                    ?>
+                    <?php if ($ioOk && $sqlOk): ?>
+                        <span class="badge bg-success ms-1">Sincronizado</span>
+                    <?php else: ?>
+                        <span class="badge bg-danger ms-1">Error</span>
+                    <?php endif; ?>
+                <?php endif; ?>
+            <?php else: ?>
+                <span class="badge bg-secondary">Standalone</span>
+                <span class="badge bg-success ms-1"><i class="bi bi-arrow-repeat me-1"></i>Replicable</span>
+            <?php endif; ?>
+        </span>
+    </div>
+    <div class="card-body p-0">
+        <?php if (!$mysqlAvailable): ?>
+            <div class="p-4 text-center text-muted">
+                <i class="bi bi-database-x" style="font-size: 2rem;"></i>
+                <p class="mt-2">MySQL no esta disponible o no se pudo conectar.</p>
+            </div>
+        <?php elseif (empty($mysqlDatabases)): ?>
+            <div class="p-4 text-center text-muted">
+                <p class="mt-2">No hay bases de datos MySQL.</p>
+            </div>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th class="ps-3">Base de Datos</th>
+                            <th>Tamano</th>
+                            <th>Estado</th>
+                            <?php if (!empty($mysqlReplication)): ?>
+                                <th>Replicacion</th>
                             <?php endif; ?>
-                        </td>
-                        <td>
-                            <small class="text-muted"><?= date('d/m/Y H:i', strtotime($db['created_at'])) ?></small>
-                        </td>
-                        <td class="text-end pe-3">
-                            <?php if (empty($db['is_system'])): ?>
-                                <form method="POST" action="/databases/<?= $db['id'] ?>/delete" class="d-inline delete-db-form">
-                                    <?= View::csrf() ?>
-                                    <input type="hidden" name="password" class="delete-password-field" value="">
-                                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar"
-                                            data-db-name="<?= View::e($db['db_name']) ?>"
-                                            data-db-user="<?= View::e($db['db_user']) ?>"
-                                            data-db-type="<?= View::e(strtoupper($db['db_type'] ?? 'mysql')) ?>">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
-                                </form>
-                            <?php else: ?>
-                                <span class="text-muted"><small>Protegida</small></span>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                    <?php endforeach; ?>
-                    <?php endforeach; ?>
-                </tbody>
-            </table>
+                            <th class="text-end pe-3">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($mysqlDatabases as $db): ?>
+                            <?php
+                                $dbName = $db['db_name'];
+                                $isSystem = in_array($dbName, $mysqlSystemDbs);
+                                $isManaged = isset($panelDbMap[$dbName]);
+                                $managedInfo = $isManaged ? $panelDbMap[$dbName] : null;
+                            ?>
+                            <tr>
+                                <td class="ps-3">
+                                    <code><?= View::e($dbName) ?></code>
+                                    <?php if ($isSystem): ?>
+                                        <span class="badge bg-secondary ms-1">Sistema</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td><small><?= formatDbSize((int)($db['size_bytes'] ?? 0)) ?></small></td>
+                                <td>
+                                    <?php if ($isManaged): ?>
+                                        <span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;">
+                                            <i class="bi bi-server me-1"></i><?= View::e($managedInfo['username']) ?>
+                                        </span>
+                                    <?php elseif ($isSystem): ?>
+                                        <span class="badge bg-secondary">Sistema</span>
+                                    <?php else: ?>
+                                        <span class="badge" style="background:rgba(107,114,128,0.15);color:#9ca3af;">Externa</span>
+                                    <?php endif; ?>
+                                </td>
+                                <?php if (!empty($mysqlReplication)): ?>
+                                    <td>
+                                        <?php if ($isSystem): ?>
+                                            <span class="badge bg-secondary"><i class="bi bi-dash me-1"></i>N/A</span>
+                                        <?php elseif ($mysqlReplication['role'] === 'master'): ?>
+                                            <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Replicada</span>
+                                        <?php elseif ($mysqlReplication['role'] === 'slave'): ?>
+                                            <span class="badge bg-info"><i class="bi bi-arrow-down me-1"></i>Replica</span>
+                                        <?php endif; ?>
+                                    </td>
+                                <?php endif; ?>
+                                <td class="text-end pe-3">
+                                    <?php if ($isManaged && !$isSystem): ?>
+                                        <form method="POST" action="/databases/<?= $managedInfo['id'] ?>/delete" class="d-inline delete-db-form">
+                                            <?= View::csrf() ?>
+                                            <input type="hidden" name="password" class="delete-password-field" value="">
+                                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar"
+                                                    data-db-name="<?= View::e($dbName) ?>"
+                                                    data-db-user="<?= View::e($managedInfo['db_user']) ?>"
+                                                    data-db-type="MYSQL">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    <?php elseif ($isSystem): ?>
+                                        <span class="text-muted"><small>Protegida</small></span>
+                                    <?php else: ?>
+                                        <span class="text-muted"><small>No gestionada</small></span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
         <?php endif; ?>
     </div>
 </div>

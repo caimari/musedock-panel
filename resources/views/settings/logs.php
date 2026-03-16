@@ -96,6 +96,17 @@
                     <button type="button" class="btn btn-outline-light btn-sm" id="btnScrollBottom" title="Ir al final">
                         <i class="bi bi-arrow-down-circle"></i>
                     </button>
+
+                    <!-- Clear log file -->
+                    <?php if ($fileExists && $fileSize > 0): ?>
+                        <form method="POST" action="/settings/logs/clear" class="d-inline" onsubmit="return confirmClearLog(this)">
+                            <?= View::csrf() ?>
+                            <input type="hidden" name="file" value="<?= View::e($selectedFile) ?>">
+                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Vaciar archivo">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    <?php endif; ?>
                 </div>
             </div>
             <div class="card-body p-0">
@@ -121,6 +132,30 @@
 </style>
 
 <script>
+function confirmClearLog(form) {
+    if (typeof Swal !== 'undefined') {
+        Swal.fire({
+            title: 'Vaciar archivo de log',
+            html: 'Se vaciara el contenido del archivo:<br><code><?= View::e(basename($selectedFile)) ?></code><br><br><small class="text-muted">El archivo no se eliminara, solo se vaciara su contenido.</small>',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Vaciar',
+            cancelButtonText: 'Cancelar',
+            background: '#1e1e2e',
+            color: '#cdd6f4',
+            confirmButtonColor: '#dc3545',
+            cancelButtonColor: '#585b70',
+        }).then(function(result) {
+            if (result.isConfirmed) {
+                form.onsubmit = null;
+                form.submit();
+            }
+        });
+        return false;
+    }
+    return confirm('¿Vaciar el archivo de log?');
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     var viewer = document.getElementById('logViewer');
     var btnScroll = document.getElementById('btnScrollBottom');

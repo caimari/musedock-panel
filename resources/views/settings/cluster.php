@@ -368,60 +368,16 @@
 
             <hr class="border-secondary">
 
-            <!-- Notificaciones Email -->
-            <h6 class="text-muted mb-2">Notificaciones por Email (SMTP)</h6>
-            <div class="row mb-3">
-                <div class="col-md-4">
-                    <label class="form-label">Host SMTP</label>
-                    <input type="text" name="cluster_smtp_host" class="form-control"
-                           value="<?= View::e($settings['cluster_smtp_host'] ?? '') ?>" placeholder="smtp.ejemplo.com">
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label">Puerto</label>
-                    <input type="number" name="cluster_smtp_port" class="form-control"
-                           value="<?= (int)($settings['cluster_smtp_port'] ?? 587) ?>">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Usuario SMTP</label>
-                    <input type="text" name="cluster_smtp_user" class="form-control"
-                           value="<?= View::e($settings['cluster_smtp_user'] ?? '') ?>">
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Password SMTP</label>
-                    <input type="password" name="cluster_smtp_pass" class="form-control"
-                           placeholder="<?= !empty($settings['cluster_smtp_pass']) ? '********' : '' ?>">
-                </div>
-            </div>
-            <div class="row mb-3">
-                <div class="col-md-4">
-                    <label class="form-label">Email remitente (From)</label>
-                    <input type="email" name="cluster_smtp_from" class="form-control"
-                           value="<?= View::e($settings['cluster_smtp_from'] ?? '') ?>" placeholder="panel@ejemplo.com">
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Email destinatario (To)</label>
-                    <input type="email" name="cluster_smtp_to" class="form-control"
-                           value="<?= View::e($settings['cluster_smtp_to'] ?? '') ?>" placeholder="admin@ejemplo.com">
-                </div>
-            </div>
+            <!-- Notificaciones — enlace a la nueva pagina -->
+            <h6 class="text-muted mb-2">Notificaciones</h6>
+            <p class="small text-muted mb-2">
+                Las alertas del cluster (nodos caidos, failover, etc.) se envian a traves de los canales configurados en Notificaciones.
+            </p>
+            <a href="/settings/notifications" class="btn btn-outline-info btn-sm mb-3">
+                <i class="bi bi-bell me-1"></i>Configurar Notificaciones (Email / Telegram)
+            </a>
 
-            <hr class="border-secondary">
-
-            <!-- Notificaciones Telegram -->
-            <h6 class="text-muted mb-2">Notificaciones por Telegram</h6>
-            <div class="row mb-3">
-                <div class="col-md-5">
-                    <label class="form-label">Bot Token</label>
-                    <input type="text" name="cluster_telegram_token" class="form-control"
-                           value="<?= View::e($settings['cluster_telegram_token'] ?? '') ?>" placeholder="123456:ABC-DEF...">
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Chat ID</label>
-                    <input type="text" name="cluster_telegram_chat_id" class="form-control"
-                           value="<?= View::e($settings['cluster_telegram_chat_id'] ?? '') ?>" placeholder="-1001234567890">
-                </div>
-            </div>
-
+            <br>
             <button type="submit" class="btn btn-success">
                 <i class="bi bi-check-circle me-1"></i>Guardar Configuracion
             </button>

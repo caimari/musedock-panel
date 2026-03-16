@@ -712,68 +712,12 @@ class ClusterService
     // ─── Notifications ───────────────────────────────────────
     // ═══════════════════════════════════════════════════════════
 
+    /**
+     * Send alert via all configured notification channels.
+     * Delegates to the unified NotificationService.
+     */
     public static function sendAlert(string $subject, string $message): void
     {
-        // Try email
-        self::sendEmailAlert($subject, $message);
-
-        // Try Telegram
-        self::sendTelegramAlert("{$subject}\n\n{$message}");
-    }
-
-    private static function sendEmailAlert(string $subject, string $body): void
-    {
-        $host = Settings::get('cluster_smtp_host', '');
-        $port = (int)Settings::get('cluster_smtp_port', '587');
-        $user = Settings::get('cluster_smtp_user', '');
-        $pass = Settings::get('cluster_smtp_pass', '');
-        $from = Settings::get('cluster_smtp_from', '');
-        $to   = Settings::get('cluster_smtp_to', '');
-
-        if (!$host || !$to || !$from) return;
-
-        if ($pass) {
-            $pass = ReplicationService::decryptPassword($pass);
-        }
-
-        try {
-            $socket = @fsockopen("ssl://{$host}", $port, $errno, $errstr, 10);
-            if (!$socket) return;
-
-            fgets($socket); // Read greeting
-            fwrite($socket, "EHLO musedock-panel\r\n"); fgets($socket);
-            fwrite($socket, "AUTH LOGIN\r\n"); fgets($socket);
-            fwrite($socket, base64_encode($user) . "\r\n"); fgets($socket);
-            fwrite($socket, base64_encode($pass) . "\r\n"); fgets($socket);
-            fwrite($socket, "MAIL FROM:<{$from}>\r\n"); fgets($socket);
-            fwrite($socket, "RCPT TO:<{$to}>\r\n"); fgets($socket);
-            fwrite($socket, "DATA\r\n"); fgets($socket);
-            fwrite($socket, "From: {$from}\r\nTo: {$to}\r\nSubject: {$subject}\r\n\r\n{$body}\r\n.\r\n");
-            fgets($socket);
-            fwrite($socket, "QUIT\r\n");
-            fclose($socket);
-        } catch (\Throwable) {}
-    }
-
-    private static function sendTelegramAlert(string $message): void
-    {
-        $botToken = Settings::get('cluster_telegram_token', '');
-        $chatId   = Settings::get('cluster_telegram_chat_id', '');
-
-        if (!$botToken || !$chatId) return;
-
-        $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
-            CURLOPT_POST           => true,
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 10,
-            CURLOPT_POSTFIELDS     => http_build_query([
-                'chat_id' => $chatId,
-                'text'    => $message,
-            ]),
-        ]);
-        curl_exec($ch);
-        curl_close($ch);
+        NotificationService::send($subject, $message);
     }
 }

@@ -905,7 +905,7 @@ class SettingsController
             }
         }
 
-        // Caddy logs
+        // Caddy logs (system dir)
         if (is_dir('/var/log/caddy')) {
             foreach (glob('/var/log/caddy/*.log') as $f) {
                 $logFiles['Caddy'][] = [
@@ -914,6 +914,23 @@ class SettingsController
                     'size' => filesize($f),
                 ];
             }
+        }
+
+        // Caddy per-domain access logs (from vhosts)
+        $accountUsernames = array_column(
+            \MuseDockPanel\Database::fetchAll("SELECT username FROM hosting_accounts"),
+            'username'
+        );
+        foreach (glob('/var/www/vhosts/*/logs/access.log') as $f) {
+            $vhostDir = basename(dirname(dirname($f)));
+            // Skip hosting accounts — they appear under "Cuentas" already
+            if (in_array($vhostDir, $accountUsernames)) continue;
+            if (filesize($f) === 0) continue;
+            $logFiles['Caddy'][] = [
+                'path' => $f,
+                'label' => $vhostDir . '/access.log',
+                'size' => filesize($f),
+            ];
         }
 
         // Per-account logs
@@ -1010,6 +1027,68 @@ class SettingsController
             'fileSize' => $fileSize,
             'displayPath' => $displayPath,
         ]);
+    }
+
+    /**
+     * POST /settings/logs/clear — Truncate a log file
+     */
+    public function logClear(): void
+    {
+        View::verifyCsrf();
+
+        $filePath = $_POST['file'] ?? '';
+        if (empty($filePath)) {
+            Flash::set('error', 'No se especifico archivo.');
+            header('Location: /settings/logs');
+            exit;
+        }
+
+        // Validate path against allowed prefixes
+        $allowedPrefixes = [
+            PANEL_ROOT . '/storage/logs',
+            '/var/log',
+            '/var/www/vhosts',
+        ];
+
+        $realPath = realpath($filePath);
+        if ($realPath === false) {
+            Flash::set('error', 'Archivo no encontrado.');
+            header('Location: /settings/logs');
+            exit;
+        }
+
+        $allowed = false;
+        foreach ($allowedPrefixes as $prefix) {
+            $realPrefix = realpath($prefix);
+            if ($realPrefix !== false && str_starts_with($realPath, $realPrefix . '/')) {
+                $allowed = true;
+                break;
+            }
+        }
+
+        if (!$allowed) {
+            Flash::set('error', 'No tienes permiso para modificar este archivo.');
+            header('Location: /settings/logs');
+            exit;
+        }
+
+        // Truncate the file (don't delete — services expect it to exist)
+        $result = @file_put_contents($realPath, '');
+        if ($result === false) {
+            // Try with shell for files owned by root
+            $cmd = sprintf('truncate -s 0 %s 2>&1', escapeshellarg($realPath));
+            $output = trim((string)shell_exec($cmd));
+            if ($output !== '') {
+                Flash::set('error', 'Error al vaciar archivo: ' . $output);
+                header('Location: /settings/logs?' . http_build_query(['file' => $filePath]));
+                exit;
+            }
+        }
+
+        LogService::log('logs.truncate', basename($realPath), "Archivo vaciado: {$realPath}");
+        Flash::set('success', 'Archivo de log vaciado: ' . basename($realPath));
+        header('Location: /settings/logs?' . http_build_query(['file' => $filePath]));
+        exit;
     }
 
     private function extractCaddyRouteInfo(array $handlers, ?string &$docRoot, ?string &$upstream): void

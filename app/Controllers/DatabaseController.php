@@ -5,58 +5,168 @@ use MuseDockPanel\Database;
 use MuseDockPanel\Env;
 use MuseDockPanel\Flash;
 use MuseDockPanel\Router;
+use MuseDockPanel\Settings;
 use MuseDockPanel\View;
 use MuseDockPanel\Services\LogService;
+use MuseDockPanel\Services\ReplicationService;
 
 class DatabaseController
 {
     /**
-     * List all databases grouped by account, including system DB
+     * List all databases: PG main (5432) + PG panel (5433) + MySQL
      */
     public function index(): void
     {
-        $databases = Database::fetchAll("
+        // Panel-managed databases (for cross-referencing)
+        $panelDbs = Database::fetchAll("
             SELECT d.*, a.username, a.domain
             FROM hosting_databases d
             JOIN hosting_accounts a ON a.id = d.account_id
             ORDER BY a.username, d.db_name
         ");
 
-        // Group by account
-        $grouped = [];
-        foreach ($databases as $db) {
-            $key = $db['account_id'];
-            if (!isset($grouped[$key])) {
-                $grouped[$key] = [
-                    'account_id' => $db['account_id'],
-                    'username' => $db['username'],
-                    'domain' => $db['domain'],
-                    'databases' => [],
-                ];
-            }
-            $db['is_system'] = false;
-            $grouped[$key]['databases'][] = $db;
+        $panelDbMap = [];
+        foreach ($panelDbs as $db) {
+            $panelDbMap[$db['db_name']] = $db;
         }
 
-        // Add system database (musedock_panel) as a read-only entry
-        $systemDbName = Env::get('DB_NAME', 'musedock_panel');
-        $systemDbUser = Env::get('DB_USER', 'musedock_panel');
-        $systemDb = [
-            'id' => null,
-            'db_name' => $systemDbName,
-            'db_user' => $systemDbUser,
-            'db_type' => 'pgsql',
-            'created_at' => null,
-            'is_system' => true,
-        ];
+        // ─── PostgreSQL Main (port 5432) — hosting databases, replicable ─────
+        $pgMainDatabases = $this->getPgDatabasesViaShell(5432);
+        $pgMainReplication = [];
+        $replRole = Settings::get('repl_pg_role', 'standalone');
+        if ($replRole === 'master') {
+            $replOutput = trim((string)shell_exec("sudo -u postgres psql -p 5432 -t -A -c \"SELECT count(*) FROM pg_stat_replication\" 2>/dev/null"));
+            $slaveCount = is_numeric($replOutput) ? (int)$replOutput : 0;
+            $pgMainReplication = ['role' => 'master', 'slaves' => $slaveCount, 'state' => $slaveCount > 0 ? 'streaming' : 'no_slaves'];
+        } elseif ($replRole === 'slave') {
+            $walStatus = trim((string)shell_exec("sudo -u postgres psql -p 5432 -t -A -c \"SELECT status FROM pg_stat_wal_receiver LIMIT 1\" 2>/dev/null"));
+            $pgMainReplication = ['role' => 'slave', 'state' => $walStatus ?: 'disconnected'];
+        }
+
+        // ─── PostgreSQL Panel (port 5433) — panel database, not replicable ───
+        $pgPanelDatabases = [];
+        try {
+            $pgPanelDatabases = Database::fetchAll("
+                SELECT d.datname AS db_name,
+                       pg_catalog.pg_get_userbyid(d.datdba) AS owner,
+                       pg_catalog.pg_database_size(d.datname) AS size_bytes
+                FROM pg_catalog.pg_database d
+                WHERE d.datistemplate = false
+                ORDER BY d.datname
+            ");
+        } catch (\Throwable) {}
+
+        // ─── MySQL: real databases ──────────────────────────
+        $mysqlDatabases = [];
+        $mysqlReplication = [];
+        $mysqlAvailable = false;
+        try {
+            $mysqlPdo = ReplicationService::getMysqlPdo();
+            if ($mysqlPdo) {
+                $mysqlAvailable = true;
+                $rows = $mysqlPdo->query("SHOW DATABASES")->fetchAll(\PDO::FETCH_COLUMN);
+                foreach ($rows as $dbName) {
+                    $sizeBytes = 0;
+                    try {
+                        $sizeRow = $mysqlPdo->query(
+                            "SELECT SUM(data_length + index_length) AS size_bytes
+                             FROM information_schema.TABLES
+                             WHERE table_schema = " . $mysqlPdo->quote($dbName)
+                        )->fetch(\PDO::FETCH_ASSOC);
+                        $sizeBytes = (int)($sizeRow['size_bytes'] ?? 0);
+                    } catch (\Throwable) {}
+
+                    $mysqlDatabases[] = [
+                        'db_name' => $dbName,
+                        'size_bytes' => $sizeBytes,
+                    ];
+                }
+
+                // Check MySQL replication
+                $replMysqlRole = Settings::get('repl_mysql_role', 'standalone');
+                if ($replMysqlRole === 'master') {
+                    try {
+                        $masterStatus = $mysqlPdo->query("SHOW MASTER STATUS")->fetch(\PDO::FETCH_ASSOC);
+                        $mysqlReplication = ['role' => 'master', 'file' => $masterStatus['File'] ?? '', 'position' => $masterStatus['Position'] ?? ''];
+                    } catch (\Throwable) {
+                        $mysqlReplication = ['role' => 'master'];
+                    }
+                } elseif ($replMysqlRole === 'slave') {
+                    try {
+                        $slaveStatus = $mysqlPdo->query("SHOW SLAVE STATUS")->fetch(\PDO::FETCH_ASSOC);
+                        if (!$slaveStatus) {
+                            $slaveStatus = $mysqlPdo->query("SHOW REPLICA STATUS")->fetch(\PDO::FETCH_ASSOC);
+                        }
+                        $mysqlReplication = [
+                            'role' => 'slave',
+                            'io_running' => $slaveStatus['Slave_IO_Running'] ?? $slaveStatus['Replica_IO_Running'] ?? 'No',
+                            'sql_running' => $slaveStatus['Slave_SQL_Running'] ?? $slaveStatus['Replica_SQL_Running'] ?? 'No',
+                        ];
+                    } catch (\Throwable) {
+                        $mysqlReplication = ['role' => 'slave'];
+                    }
+                }
+            }
+        } catch (\Throwable) {}
+
+        // System databases
+        $pgMainSystemDbs = ['postgres'];
+        $pgPanelSystemDbs = ['postgres', 'musedock_panel'];
+        $mysqlSystemDbs = ['mysql', 'information_schema', 'performance_schema', 'sys'];
+
+        // Credentials flash
+        $creds = Flash::get('db_credentials');
+        if ($creds) {
+            $creds = json_decode($creds, true);
+        }
 
         View::render('databases/index', [
-            'layout' => 'main',
-            'pageTitle' => 'Bases de Datos',
-            'grouped' => $grouped,
-            'systemDb' => $systemDb,
-            'totalDbs' => count($databases) + 1, // +1 for system DB
+            'layout'              => 'main',
+            'pageTitle'           => 'Bases de Datos',
+            'pgMainDatabases'     => $pgMainDatabases,
+            'pgPanelDatabases'    => $pgPanelDatabases,
+            'mysqlDatabases'      => $mysqlDatabases,
+            'mysqlAvailable'      => $mysqlAvailable,
+            'pgMainReplication'   => $pgMainReplication,
+            'mysqlReplication'    => $mysqlReplication,
+            'panelDbMap'          => $panelDbMap,
+            'pgMainSystemDbs'     => $pgMainSystemDbs,
+            'pgPanelSystemDbs'    => $pgPanelSystemDbs,
+            'mysqlSystemDbs'      => $mysqlSystemDbs,
+            'totalPgMain'         => count($pgMainDatabases),
+            'totalPgPanel'        => count($pgPanelDatabases),
+            'totalMysql'          => count($mysqlDatabases),
+            'creds'               => $creds,
         ]);
+    }
+
+    /**
+     * Query PostgreSQL databases via shell (sudo -u postgres psql)
+     * Used for the main instance on a specific port.
+     */
+    private function getPgDatabasesViaShell(int $port): array
+    {
+        $query = "SELECT datname, pg_get_userbyid(datdba) AS owner, pg_database_size(datname) AS size_bytes FROM pg_database WHERE datistemplate = false ORDER BY datname";
+        $cmd = sprintf(
+            "sudo -u postgres psql -p %d -t -A -F '|' -c %s 2>/dev/null",
+            $port,
+            escapeshellarg($query)
+        );
+        $output = trim((string)shell_exec($cmd));
+        if ($output === '') return [];
+
+        $databases = [];
+        foreach (explode("\n", $output) as $line) {
+            $parts = explode('|', trim($line));
+            if (count($parts) >= 3) {
+                $databases[] = [
+                    'db_name'    => $parts[0],
+                    'owner'      => $parts[1],
+                    'size_bytes' => (int)$parts[2],
+                ];
+            }
+        }
+        return $databases;
     }
 
     /**
@@ -87,7 +197,6 @@ class DatabaseController
         $dbSuffix = trim($_POST['db_name'] ?? '');
         $dbType = trim($_POST['db_type'] ?? 'mysql');
 
-        // Validate db_type
         if (!in_array($dbType, ['mysql', 'pgsql'], true)) {
             $dbType = 'mysql';
         }
@@ -98,14 +207,12 @@ class DatabaseController
             return;
         }
 
-        // Validate db name: alphanumeric + underscore only
         if (!preg_match('/^[a-zA-Z0-9_]+$/', $dbSuffix)) {
             Flash::set('error', 'El nombre de la base de datos solo puede contener letras, numeros y guion bajo.');
             Router::redirect('/databases/create');
             return;
         }
 
-        // Get account
         $account = Database::fetchOne("SELECT id, username, domain FROM hosting_accounts WHERE id = :id", ['id' => $accountId]);
         if (!$account) {
             Flash::set('error', 'Cuenta de hosting no encontrada.');
@@ -117,7 +224,6 @@ class DatabaseController
         $fullDbName = $username . '_' . $dbSuffix;
         $fullDbUser = $username . '_' . $dbSuffix;
 
-        // Validate max length
         if (strlen($fullDbName) > 64) {
             Flash::set('error', 'El nombre completo de la base de datos no puede exceder 64 caracteres. Actual: ' . strlen($fullDbName));
             Router::redirect('/databases/create');
@@ -130,7 +236,6 @@ class DatabaseController
             return;
         }
 
-        // Check if database already exists in panel
         $existing = Database::fetchOne("SELECT id FROM hosting_databases WHERE db_name = :name", ['name' => $fullDbName]);
         if ($existing) {
             Flash::set('error', "La base de datos '{$fullDbName}' ya existe.");
@@ -138,16 +243,10 @@ class DatabaseController
             return;
         }
 
-        // Generate random password
         $dbPassword = bin2hex(random_bytes(12));
 
         if ($dbType === 'pgsql') {
-            // Create PostgreSQL database + user via shell
-            $sqlUser = sprintf(
-                "CREATE USER %s WITH PASSWORD %s;",
-                escapeshellarg($fullDbUser),
-                escapeshellarg($dbPassword)
-            );
+            $sqlUser = sprintf("CREATE USER %s WITH PASSWORD %s;", escapeshellarg($fullDbUser), escapeshellarg($dbPassword));
             $cmdUser = 'sudo -u postgres psql -c ' . escapeshellarg($sqlUser) . ' 2>&1';
             $outputUser = shell_exec($cmdUser);
 
@@ -158,11 +257,7 @@ class DatabaseController
                 return;
             }
 
-            $sqlDb = sprintf(
-                "CREATE DATABASE %s OWNER %s;",
-                escapeshellarg($fullDbName),
-                escapeshellarg($fullDbUser)
-            );
+            $sqlDb = sprintf("CREATE DATABASE %s OWNER %s;", escapeshellarg($fullDbName), escapeshellarg($fullDbUser));
             $cmdDb = 'sudo -u postgres psql -c ' . escapeshellarg($sqlDb) . ' 2>&1';
             $outputDb = shell_exec($cmdDb);
 
@@ -173,11 +268,7 @@ class DatabaseController
                 return;
             }
 
-            $sqlGrant = sprintf(
-                "GRANT ALL PRIVILEGES ON DATABASE %s TO %s;",
-                escapeshellarg($fullDbName),
-                escapeshellarg($fullDbUser)
-            );
+            $sqlGrant = sprintf("GRANT ALL PRIVILEGES ON DATABASE %s TO %s;", escapeshellarg($fullDbName), escapeshellarg($fullDbUser));
             $cmdGrant = 'sudo -u postgres psql -c ' . escapeshellarg($sqlGrant) . ' 2>&1';
             $outputGrant = shell_exec($cmdGrant);
 
@@ -191,7 +282,6 @@ class DatabaseController
             $dbHost = 'localhost';
             $logType = 'PostgreSQL';
         } else {
-            // Create MySQL database + user via shell
             $mysqlCmd = $this->buildMysqlCommand();
             if ($mysqlCmd === null) {
                 Flash::set('error', 'No se pudo determinar el metodo de autenticacion de MySQL. Verifica MYSQL_AUTH_METHOD en .env');
@@ -199,20 +289,9 @@ class DatabaseController
                 return;
             }
 
-            $sqlCreate = sprintf(
-                "CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;",
-                $this->quoteIdentifier($fullDbName)
-            );
-            $sqlUser = sprintf(
-                "CREATE USER IF NOT EXISTS %s@'localhost' IDENTIFIED BY %s;",
-                $this->quoteLiteral($fullDbUser),
-                $this->quoteLiteral($dbPassword)
-            );
-            $sqlGrant = sprintf(
-                "GRANT ALL PRIVILEGES ON %s.* TO %s@'localhost';",
-                $this->quoteIdentifier($fullDbName),
-                $this->quoteLiteral($fullDbUser)
-            );
+            $sqlCreate = sprintf("CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", $this->quoteIdentifier($fullDbName));
+            $sqlUser = sprintf("CREATE USER IF NOT EXISTS %s@'localhost' IDENTIFIED BY %s;", $this->quoteLiteral($fullDbUser), $this->quoteLiteral($dbPassword));
+            $sqlGrant = sprintf("GRANT ALL PRIVILEGES ON %s.* TO %s@'localhost';", $this->quoteIdentifier($fullDbName), $this->quoteLiteral($fullDbUser));
             $sqlFlush = "FLUSH PRIVILEGES;";
 
             $fullSql = $sqlCreate . ' ' . $sqlUser . ' ' . $sqlGrant . ' ' . $sqlFlush;
@@ -230,7 +309,6 @@ class DatabaseController
             $logType = 'MySQL';
         }
 
-        // Save to panel database
         Database::insert('hosting_databases', [
             'account_id' => $accountId,
             'db_name' => $fullDbName,
@@ -273,7 +351,6 @@ class DatabaseController
             return;
         }
 
-        // Password verification
         $password = $_POST['password'] ?? '';
         if (empty($password)) {
             Flash::set('error', 'Debes ingresar tu contrasena de administrador para confirmar la eliminacion.');
@@ -281,7 +358,7 @@ class DatabaseController
             return;
         }
 
-        $admin = Database::fetchOne("SELECT password_hash FROM panel_admins WHERE id = :id", ['id' => $_SESSION['admin_id']]);
+        $admin = Database::fetchOne("SELECT password_hash FROM panel_admins WHERE id = :id", ['id' => $_SESSION['panel_user']['id'] ?? 0]);
         if (!$admin || !password_verify($password, $admin['password_hash'])) {
             Flash::set('error', 'Contrasena incorrecta. La base de datos no fue eliminada.');
             Router::redirect('/databases');
@@ -291,7 +368,6 @@ class DatabaseController
         $dbType = $db['db_type'] ?? 'mysql';
 
         if ($dbType === 'pgsql') {
-            // Drop PostgreSQL database and user
             $sqlDropDb = sprintf("DROP DATABASE IF EXISTS %s;", escapeshellarg($db['db_name']));
             $cmdDropDb = 'sudo -u postgres psql -c ' . escapeshellarg($sqlDropDb) . ' 2>&1';
             $outputDropDb = shell_exec($cmdDropDb);
@@ -316,7 +392,6 @@ class DatabaseController
 
             $logType = 'PostgreSQL';
         } else {
-            // Drop MySQL database and user
             $mysqlCmd = $this->buildMysqlCommand();
             if ($mysqlCmd === null) {
                 Flash::set('error', 'No se pudo determinar el metodo de autenticacion de MySQL.');
@@ -342,7 +417,6 @@ class DatabaseController
             $logType = 'MySQL';
         }
 
-        // Remove from panel database
         Database::delete('hosting_databases', 'id = :id', ['id' => $id]);
 
         LogService::log('database.delete', $db['db_name'], "Deleted {$logType} database: {$db['db_name']}, user: {$db['db_user']} from account {$db['username']}");
@@ -350,39 +424,25 @@ class DatabaseController
         Router::redirect('/databases');
     }
 
-    /**
-     * Build the mysql command prefix based on auth method
-     */
     private function buildMysqlCommand(): ?string
     {
         $authMethod = Env::get('MYSQL_AUTH_METHOD', 'socket');
-
         if ($authMethod === 'socket') {
             return 'mysql -u root';
         }
-
         if ($authMethod === 'password') {
             $pass = Env::get('MYSQL_ROOT_PASS', '');
-            if (empty($pass)) {
-                return null;
-            }
+            if (empty($pass)) return null;
             return 'mysql -u root -p' . escapeshellarg($pass);
         }
-
         return null;
     }
 
-    /**
-     * Quote a MySQL identifier (backtick-escaped)
-     */
     private function quoteIdentifier(string $name): string
     {
         return '`' . str_replace('`', '``', $name) . '`';
     }
 
-    /**
-     * Quote a MySQL string literal (single-quote-escaped)
-     */
     private function quoteLiteral(string $value): string
     {
         return "'" . str_replace("'", "\\'", $value) . "'";

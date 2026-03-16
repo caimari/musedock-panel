@@ -14,6 +14,7 @@ class FirewallController
         $type     = FirewallService::getType();
         $active   = FirewallService::isActive();
         $adminIp  = FirewallService::getAdminIp();
+        $networkInterfaces = FirewallService::getNetworkInterfaces();
         $rules    = [];
         $policy   = 'desconocida';
 
@@ -31,15 +32,16 @@ class FirewallController
         $hostSuggestions  = FirewallService::suggestRulesForHosting();
 
         View::render('settings/firewall', [
-            'layout'          => 'main',
-            'pageTitle'       => 'Firewall',
-            'type'            => $type,
-            'active'          => $active,
-            'adminIp'         => $adminIp,
-            'rules'           => $rules,
-            'policy'          => $policy,
-            'replSuggestions' => $replSuggestions,
-            'hostSuggestions' => $hostSuggestions,
+            'layout'            => 'main',
+            'pageTitle'         => 'Firewall',
+            'type'              => $type,
+            'active'            => $active,
+            'adminIp'           => $adminIp,
+            'networkInterfaces' => $networkInterfaces,
+            'rules'             => $rules,
+            'policy'            => $policy,
+            'replSuggestions'   => $replSuggestions,
+            'hostSuggestions'   => $hostSuggestions,
         ]);
     }
 
@@ -135,6 +137,73 @@ class FirewallController
             Flash::set('success', 'Regla eliminada correctamente.');
         } else {
             Flash::set('error', 'Error al eliminar regla: ' . ($result['output'] ?? 'desconocido'));
+        }
+
+        header('Location: /settings/firewall');
+        exit;
+    }
+
+    public function editRule(): void
+    {
+        View::verifyCsrf();
+
+        $type     = FirewallService::getType();
+        $number   = (int)($_POST['rule_number'] ?? 0);
+        $action   = strtolower(trim($_POST['action'] ?? ''));
+        $from     = trim($_POST['from'] ?? '');
+        $port     = trim($_POST['port'] ?? '');
+        $protocol = strtolower(trim($_POST['protocol'] ?? 'tcp'));
+        $comment  = trim($_POST['comment'] ?? '');
+        $anyIp    = isset($_POST['any_ip']);
+
+        if ($number < 1) {
+            Flash::set('error', 'Numero de regla no valido.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        if (!in_array($action, ['allow', 'deny'])) {
+            Flash::set('error', 'Accion no valida.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        if ($anyIp) {
+            $from = '0.0.0.0/0';
+        } elseif ($from !== '' && !filter_var($from, FILTER_VALIDATE_IP) && !preg_match('#^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}$#', $from)) {
+            Flash::set('error', 'Direccion IP no valida.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $portNum = (int)$port;
+        if ($port !== '' && ($portNum < 1 || $portNum > 65535)) {
+            Flash::set('error', 'Puerto fuera de rango (1-65535).');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        if (!in_array($protocol, ['tcp', 'udp', 'both'])) {
+            Flash::set('error', 'Protocolo no valido.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        if ($type === 'ufw') {
+            $result = FirewallService::ufwEditRule($number, $action, $from, $port, $protocol, $comment);
+        } elseif ($type === 'iptables') {
+            $result = FirewallService::iptablesEditRule($number, $action, $from, $portNum, $protocol);
+        } else {
+            Flash::set('error', 'No se detecto un firewall activo.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        if ($result['ok']) {
+            LogService::log('firewall.edit_rule', (string)$number, "Regla #{$number} editada: {$action} from {$from} port {$port} proto {$protocol}");
+            Flash::set('success', 'Regla editada correctamente.');
+        } else {
+            Flash::set('error', 'Error al editar regla: ' . ($result['output'] ?? 'desconocido'));
         }
 
         header('Location: /settings/firewall');

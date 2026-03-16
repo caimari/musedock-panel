@@ -1,32 +1,6 @@
-# Environment (contains secrets)
+storage/backups/
+storage/sessions/
+storage/cache/
+storage/logs/
+storage/*.lock
 .env
-
-# Storage (runtime data)
-storage/sessions/*
-storage/logs/*
-storage/cache/*
-storage/panel.pid
-!storage/.gitkeep
-!storage/sessions/.gitkeep
-!storage/logs/.gitkeep
-!storage/cache/.gitkeep
-
-# OS
-.DS_Store
-Thumbs.db
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# Claude
-.claude/
-CLAUDE.md
-
-# Misc
-*.log
-*.bak
-*.tmp

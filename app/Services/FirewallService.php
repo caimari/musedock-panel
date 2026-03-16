@@ -62,20 +62,24 @@ class FirewallService
         foreach ($lines as $line) {
             $line = trim($line);
             // Match lines like: [ 1] 80/tcp ALLOW IN Anywhere
-            if (preg_match('/^\[\s*(\d+)\]\s+(.+?)\s+(ALLOW|DENY|REJECT|LIMIT)\s+(?:IN|OUT|FWD)?\s*(.*)/i', $line, $m)) {
+            // Also matches: [ 2] 443 DENY IN 192.168.1.0/24  # comment
+            // Also matches: [ 3] Anywhere DENY IN 10.0.0.1
+            if (preg_match('/^\[\s*(\d+)\]\s+(.+?)\s+(ALLOW|DENY|REJECT|LIMIT)\s+(IN|OUT|FWD)?\s*(.*)/i', $line, $m)) {
                 $comment = '';
-                $from = trim($m[4]);
-                // Check for comment in parentheses
+                $direction = trim($m[4] ?? '');
+                $from = trim($m[5]);
+                // Check for comment after #
                 if (preg_match('/^(.*?)\s*#\s*(.+)$/', $from, $cm)) {
                     $from = trim($cm[1]);
                     $comment = trim($cm[2]);
                 }
                 $rules[] = [
-                    'num'     => (int)$m[1],
-                    'to'      => trim($m[2]),
-                    'action'  => trim($m[3]),
-                    'from'    => $from ?: 'Anywhere',
-                    'comment' => $comment,
+                    'num'       => (int)$m[1],
+                    'to'        => trim($m[2]),
+                    'action'    => trim($m[3]),
+                    'direction' => $direction ?: 'IN',
+                    'from'      => $from ?: 'Anywhere',
+                    'comment'   => $comment,
                 ];
             }
         }
@@ -120,6 +124,46 @@ class FirewallService
         $ok = stripos($output, 'deleted') !== false || stripos($output, 'Rule') !== false;
 
         return ['ok' => $ok, 'output' => $output];
+    }
+
+    /**
+     * Edit a UFW rule: delete old + add new (UFW doesn't support in-place edit)
+     */
+    public static function ufwEditRule(int $ruleNumber, string $action, string $from, string $to, string $protocol, string $comment = ''): array
+    {
+        // First delete the old rule
+        $deleteResult = self::ufwDeleteRule($ruleNumber);
+        if (!$deleteResult['ok']) {
+            return ['ok' => false, 'output' => 'Error al eliminar regla original: ' . $deleteResult['output']];
+        }
+
+        // Then add the new rule
+        $addResult = self::ufwAddRule($action, $from, $to, $protocol, $comment);
+        if (!$addResult['ok']) {
+            return ['ok' => false, 'output' => 'Regla eliminada pero error al crear nueva: ' . $addResult['output']];
+        }
+
+        return ['ok' => true, 'output' => 'Regla editada correctamente'];
+    }
+
+    /**
+     * Edit an iptables rule: delete old + add new
+     */
+    public static function iptablesEditRule(int $ruleNumber, string $action, string $source, int $port, string $protocol): array
+    {
+        // First delete
+        $deleteResult = self::iptablesDeleteRule($ruleNumber);
+        if (!$deleteResult['ok']) {
+            return ['ok' => false, 'output' => 'Error al eliminar regla original: ' . $deleteResult['output']];
+        }
+
+        // Then add
+        $addResult = self::iptablesAddRule($action, $source, $port, $protocol);
+        if (!$addResult['ok']) {
+            return ['ok' => false, 'output' => 'Regla eliminada pero error al crear nueva: ' . $addResult['output']];
+        }
+
+        return ['ok' => true, 'output' => 'Regla editada correctamente'];
     }
 
     public static function ufwEnable(): array
@@ -258,7 +302,45 @@ class FirewallService
 
     public static function getAdminIp(): string
     {
+        // Try to get real IP behind reverse proxy
+        if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            $ips = array_map('trim', explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']));
+            return $ips[0];
+        }
+        if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+            return $_SERVER['HTTP_X_REAL_IP'];
+        }
         return $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+    }
+
+    /**
+     * Get all network interfaces with their IPs
+     */
+    public static function getNetworkInterfaces(): array
+    {
+        $output = trim((string)shell_exec("ip -o addr show 2>/dev/null"));
+        if ($output === '') return [];
+
+        $interfaces = [];
+        foreach (explode("\n", $output) as $line) {
+            // Format: 1: lo    inet 127.0.0.1/8 ...
+            if (preg_match('/^\d+:\s+(\S+)\s+(inet6?)\s+(\S+)/', $line, $m)) {
+                $iface = $m[1];
+                $family = $m[2];
+                $addr = $m[3]; // includes CIDR like 10.10.70.1/24
+
+                // Skip link-local IPv6
+                if ($family === 'inet6' && str_starts_with($addr, 'fe80:')) continue;
+
+                $interfaces[] = [
+                    'interface' => $iface,
+                    'family'    => $family === 'inet' ? 'IPv4' : 'IPv6',
+                    'address'   => $addr,
+                ];
+            }
+        }
+
+        return $interfaces;
     }
 
     public static function emergencyAllowIp(string $ip): array

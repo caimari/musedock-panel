@@ -3,7 +3,7 @@
 <!-- System Stats -->
 <div class="row g-3 mb-4">
     <div class="col-md-3">
-        <div class="stat-card">
+        <div class="stat-card" role="button" onclick="openProcessModal('cpu')" title="Ver procesos por CPU" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value"><?= $stats['cpu']['percent'] ?>%</div>
@@ -13,10 +13,11 @@
             </div>
             <div class="progress mt-2"><div class="progress-bar bg-info" style="width: <?= $stats['cpu']['percent'] ?>%"></div></div>
             <small class="text-muted">Load: <?= $stats['cpu']['load_1'] ?> / <?= $stats['cpu']['load_5'] ?> / <?= $stats['cpu']['load_15'] ?></small>
+            <div class="text-end"><small class="text-muted"><i class="bi bi-eye"></i> Click para ver procesos</small></div>
         </div>
     </div>
     <div class="col-md-3">
-        <div class="stat-card">
+        <div class="stat-card" role="button" onclick="openProcessModal('ram')" title="Ver procesos por RAM" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value"><?= $stats['memory']['percent'] ?>%</div>
@@ -25,6 +26,7 @@
                 <i class="bi bi-memory stat-icon"></i>
             </div>
             <div class="progress mt-2"><div class="progress-bar bg-warning" style="width: <?= $stats['memory']['percent'] ?>%"></div></div>
+            <div class="text-end"><small class="text-muted"><i class="bi bi-eye"></i> Click para ver procesos</small></div>
         </div>
     </div>
     <div class="col-md-3">
@@ -54,6 +56,91 @@
                 <?php if (($accounts['suspended'] ?? 0) > 0): ?>
                     <span class="badge badge-suspended"><?= $accounts['suspended'] ?> suspended</span>
                 <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Process Modal -->
+<div class="modal fade" id="processModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header border-secondary d-flex align-items-center">
+                <h5 class="modal-title me-auto" id="processModalTitle">
+                    <i class="bi bi-cpu me-2"></i>Procesos
+                </h5>
+                <span id="processSummary" class="text-muted small me-3"></span>
+                <div class="form-check form-switch mb-0 me-3">
+                    <input class="form-check-input" type="checkbox" id="processAutoRefresh" checked>
+                    <label class="form-check-label small text-muted" for="processAutoRefresh">
+                        Auto <span id="processCountdown">3s</span>
+                    </label>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <!-- Tab toggle: CPU / RAM -->
+                <div class="d-flex border-bottom border-secondary">
+                    <button class="btn btn-sm rounded-0 flex-fill process-tab active" data-sort="cpu" onclick="switchProcessTab('cpu')">
+                        <i class="bi bi-cpu me-1"></i> Por CPU %
+                    </button>
+                    <button class="btn btn-sm rounded-0 flex-fill process-tab" data-sort="ram" onclick="switchProcessTab('ram')">
+                        <i class="bi bi-memory me-1"></i> Por RAM %
+                    </button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover table-sm mb-0" id="processTable">
+                        <thead>
+                            <tr>
+                                <th class="ps-3" style="width:50px">PID</th>
+                                <th style="width:90px">Usuario</th>
+                                <th style="width:70px" class="text-end">CPU %</th>
+                                <th style="width:70px" class="text-end">RAM %</th>
+                                <th style="width:80px" class="text-end">RSS</th>
+                                <th style="width:70px">Estado</th>
+                                <th style="width:70px">Tiempo</th>
+                                <th>Comando</th>
+                            </tr>
+                        </thead>
+                        <tbody id="processTableBody">
+                            <tr><td colspan="8" class="text-center text-muted py-4"><i class="bi bi-hourglass-split"></i> Cargando...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary py-1">
+                <small class="text-muted" id="processTimestamp"></small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Process Detail Modal -->
+<div class="modal fade" id="processDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title">
+                    <i class="bi bi-terminal me-2"></i>Proceso <span id="detailPid" class="text-info"></span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="processDetailBody">
+                <div class="text-center text-muted py-4"><i class="bi bi-hourglass-split"></i> Cargando...</div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <div class="d-flex gap-2 w-100">
+                    <button class="btn btn-warning btn-sm" onclick="killProcess(currentDetailPid, 'TERM')">
+                        <i class="bi bi-exclamation-triangle me-1"></i>SIGTERM (graceful)
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="killProcess(currentDetailPid, 'KILL')">
+                        <i class="bi bi-x-octagon me-1"></i>SIGKILL (forzar)
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="killProcess(currentDetailPid, 'HUP')">
+                        <i class="bi bi-arrow-repeat me-1"></i>SIGHUP (reload)
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm ms-auto" data-bs-dismiss="modal">Cerrar</button>
+                </div>
             </div>
         </div>
     </div>
@@ -95,3 +182,331 @@
         </div>
     </div>
 </div>
+
+<style>
+    .stat-card[role="button"]:hover {
+        border-color: rgba(255,255,255,0.3) !important;
+        box-shadow: 0 0 10px rgba(255,255,255,0.05);
+        transition: all 0.2s;
+    }
+    .process-tab {
+        background: transparent;
+        color: #adb5bd;
+        border: none;
+        border-bottom: 2px solid transparent;
+        padding: 8px 16px;
+    }
+    .process-tab:hover {
+        color: #fff;
+        background: rgba(255,255,255,0.05);
+    }
+    .process-tab.active {
+        color: #0dcaf0;
+        border-bottom-color: #0dcaf0;
+        background: rgba(13,202,240,0.05);
+    }
+    #processTable tbody tr {
+        cursor: pointer;
+    }
+    #processTable tbody tr:hover {
+        background: rgba(255,255,255,0.08);
+    }
+    .cpu-bar, .mem-bar {
+        display: inline-block;
+        height: 4px;
+        border-radius: 2px;
+        min-width: 2px;
+        vertical-align: middle;
+        margin-left: 6px;
+    }
+    .cpu-bar { background: #0dcaf0; }
+    .mem-bar { background: #ffc107; }
+</style>
+
+<script>
+(function() {
+    let currentSort = 'cpu';
+    let refreshTimer = null;
+    let countdownTimer = null;
+    let countdown = 3;
+    const REFRESH_INTERVAL = 3; // seconds
+
+    const modal = document.getElementById('processModal');
+    let bsModal = null;
+
+    // Format KB to human-readable
+    function formatKB(kb) {
+        if (kb >= 1048576) return (kb / 1048576).toFixed(1) + ' GB';
+        if (kb >= 1024) return (kb / 1024).toFixed(0) + ' MB';
+        return kb + ' KB';
+    }
+
+    // Color for percentage
+    function cpuColor(val) {
+        if (val >= 50) return '#dc3545';
+        if (val >= 20) return '#ffc107';
+        if (val > 1) return '#0dcaf0';
+        return '#6c757d';
+    }
+    function memColor(val) {
+        if (val >= 30) return '#dc3545';
+        if (val >= 10) return '#ffc107';
+        if (val > 1) return '#ffc107';
+        return '#6c757d';
+    }
+
+    // Escape HTML
+    function esc(str) {
+        const d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML;
+    }
+
+    // Truncate command
+    function truncCmd(cmd, max) {
+        if (!cmd) return '';
+        return cmd.length > max ? cmd.substring(0, max) + '...' : cmd;
+    }
+
+    // Fetch and render processes
+    async function fetchProcesses() {
+        try {
+            const resp = await fetch(`/dashboard/processes?sort=${currentSort}&limit=25`);
+            const data = await resp.json();
+            if (!data.ok) return;
+
+            const tbody = document.getElementById('processTableBody');
+            const s = data.summary;
+
+            // Update summary
+            document.getElementById('processSummary').innerHTML =
+                `CPU: <b>${s.cpu_percent}%</b> (${s.cpu_load} load, ${s.cores} cores) | RAM: <b>${s.mem_percent}%</b> (${s.mem_used_gb}/${s.mem_total_gb} GB)`;
+
+            // Update timestamp
+            const now = new Date();
+            document.getElementById('processTimestamp').textContent =
+                'Actualizado: ' + now.toLocaleTimeString('es-ES');
+
+            // Render rows
+            if (!data.processes || data.processes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Sin procesos</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = data.processes.map(p => {
+                const cpuW = Math.min(60, p.cpu * 2);
+                const memW = Math.min(60, p.mem * 3);
+                return `<tr onclick="openProcessDetail(${p.pid})" title="Click para ver detalle del proceso ${p.pid}">
+                    <td class="ps-3 text-muted">${p.pid}</td>
+                    <td><small>${esc(p.user)}</small></td>
+                    <td class="text-end">
+                        <span style="color:${cpuColor(p.cpu)}">${p.cpu.toFixed(1)}</span>
+                        <span class="cpu-bar" style="width:${cpuW}px"></span>
+                    </td>
+                    <td class="text-end">
+                        <span style="color:${memColor(p.mem)}">${p.mem.toFixed(1)}</span>
+                        <span class="mem-bar" style="width:${memW}px"></span>
+                    </td>
+                    <td class="text-end"><small class="text-muted">${formatKB(p.rss)}</small></td>
+                    <td><small class="text-muted">${esc(p.stat)}</small></td>
+                    <td><small class="text-muted">${esc(p.time)}</small></td>
+                    <td><small>${esc(truncCmd(p.command, 80))}</small></td>
+                </tr>`;
+            }).join('');
+
+        } catch (e) {
+            console.error('Error fetching processes:', e);
+        }
+    }
+
+    // Start auto-refresh countdown
+    function startRefresh() {
+        stopRefresh();
+        countdown = REFRESH_INTERVAL;
+        updateCountdownDisplay();
+
+        countdownTimer = setInterval(() => {
+            countdown--;
+            if (countdown <= 0) {
+                fetchProcesses();
+                countdown = REFRESH_INTERVAL;
+            }
+            updateCountdownDisplay();
+        }, 1000);
+    }
+
+    function stopRefresh() {
+        if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+    }
+
+    function updateCountdownDisplay() {
+        const el = document.getElementById('processCountdown');
+        if (el) el.textContent = countdown + 's';
+    }
+
+    // Tab switch
+    window.switchProcessTab = function(sort) {
+        currentSort = sort;
+        document.querySelectorAll('.process-tab').forEach(t => {
+            t.classList.toggle('active', t.dataset.sort === sort);
+        });
+        // Update title icon
+        const icon = sort === 'cpu' ? 'bi-cpu' : 'bi-memory';
+        const label = sort === 'cpu' ? 'Procesos por CPU' : 'Procesos por RAM';
+        document.getElementById('processModalTitle').innerHTML = `<i class="bi ${icon} me-2"></i>${label}`;
+        fetchProcesses();
+    };
+
+    // Open modal
+    window.openProcessModal = function(sort) {
+        currentSort = sort || 'cpu';
+
+        // Set active tab
+        document.querySelectorAll('.process-tab').forEach(t => {
+            t.classList.toggle('active', t.dataset.sort === currentSort);
+        });
+
+        const icon = currentSort === 'cpu' ? 'bi-cpu' : 'bi-memory';
+        const label = currentSort === 'cpu' ? 'Procesos por CPU' : 'Procesos por RAM';
+        document.getElementById('processModalTitle').innerHTML = `<i class="bi ${icon} me-2"></i>${label}`;
+
+        if (!bsModal) {
+            bsModal = new bootstrap.Modal(modal);
+        }
+        bsModal.show();
+        fetchProcesses();
+
+        // Start auto-refresh if checkbox is checked
+        if (document.getElementById('processAutoRefresh').checked) {
+            startRefresh();
+        }
+    };
+
+    // Auto-refresh toggle
+    document.getElementById('processAutoRefresh')?.addEventListener('change', function() {
+        if (this.checked) {
+            startRefresh();
+        } else {
+            stopRefresh();
+            document.getElementById('processCountdown').textContent = 'off';
+        }
+    });
+
+    // Stop refresh when modal closes
+    modal?.addEventListener('hidden.bs.modal', function() {
+        stopRefresh();
+    });
+
+    // ─── Process Detail ─────────────────────────────────────
+
+    let currentDetailPid = 0;
+    let detailModal = null;
+
+    window.openProcessDetail = async function(pid) {
+        currentDetailPid = pid;
+        document.getElementById('detailPid').textContent = '#' + pid;
+        document.getElementById('processDetailBody').innerHTML =
+            '<div class="text-center text-muted py-4"><i class="bi bi-hourglass-split"></i> Cargando...</div>';
+
+        if (!detailModal) {
+            detailModal = new bootstrap.Modal(document.getElementById('processDetailModal'));
+        }
+        detailModal.show();
+
+        try {
+            const resp = await fetch(`/dashboard/process-detail?pid=${pid}`);
+            const data = await resp.json();
+
+            if (!data.ok) {
+                document.getElementById('processDetailBody').innerHTML =
+                    `<div class="alert alert-warning mb-0"><i class="bi bi-exclamation-triangle me-2"></i>${esc(data.error)}</div>`;
+                return;
+            }
+
+            const d = data;
+            document.getElementById('processDetailBody').innerHTML = `
+                <div class="table-responsive">
+                    <table class="table table-dark table-sm mb-0">
+                        <tr><td class="ps-3 text-muted" style="width:140px">PID</td><td><code>${d.pid}</code></td></tr>
+                        <tr><td class="ps-3 text-muted">PPID</td><td><code>${d.ppid}</code></td></tr>
+                        <tr><td class="ps-3 text-muted">Usuario</td><td>${esc(d.user)}</td></tr>
+                        <tr><td class="ps-3 text-muted">CPU %</td><td><span style="color:${cpuColor(d.cpu)}">${d.cpu.toFixed(1)}%</span></td></tr>
+                        <tr><td class="ps-3 text-muted">RAM %</td><td><span style="color:${memColor(d.mem)}">${d.mem.toFixed(1)}%</span></td></tr>
+                        <tr><td class="ps-3 text-muted">RSS</td><td>${formatKB(d.rss)}</td></tr>
+                        <tr><td class="ps-3 text-muted">VSZ</td><td>${formatKB(d.vsz)}</td></tr>
+                        <tr><td class="ps-3 text-muted">Estado</td><td><code>${esc(d.stat)}</code></td></tr>
+                        <tr><td class="ps-3 text-muted">Iniciado</td><td>${esc(d.started)}</td></tr>
+                        <tr><td class="ps-3 text-muted">Tiempo CPU</td><td>${esc(d.time)}</td></tr>
+                        <tr><td class="ps-3 text-muted">Threads</td><td>${d.threads}</td></tr>
+                        <tr><td class="ps-3 text-muted">File Descriptors</td><td>${d.fd_count}</td></tr>
+                        ${d.exe ? `<tr><td class="ps-3 text-muted">Ejecutable</td><td><code class="text-info small">${esc(d.exe)}</code></td></tr>` : ''}
+                        ${d.cwd ? `<tr><td class="ps-3 text-muted">Directorio</td><td><code class="small">${esc(d.cwd)}</code></td></tr>` : ''}
+                    </table>
+                </div>
+                <div class="mt-3">
+                    <label class="text-muted small mb-1 d-block">Comando completo:</label>
+                    <pre class="bg-black text-light p-3 rounded small mb-0" style="white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto">${esc(d.cmdline || d.command)}</pre>
+                </div>
+            `;
+        } catch (e) {
+            document.getElementById('processDetailBody').innerHTML =
+                `<div class="alert alert-danger mb-0">Error: ${esc(e.message)}</div>`;
+        }
+    };
+
+    // ─── Kill Process ───────────────────────────────────────
+
+    const csrfToken = document.querySelector('input[name=_csrf_token]')?.value || '<?= $_SESSION['csrf_token'] ?? '' ?>';
+
+    window.killProcess = async function(pid, signal) {
+        if (!pid || pid < 2) return;
+
+        const signalLabels = { TERM: 'SIGTERM (terminacion graceful)', KILL: 'SIGKILL (forzar terminacion)', HUP: 'SIGHUP (reload)' };
+        const label = signalLabels[signal] || signal;
+
+        const confirmed = await (typeof SwalDark !== 'undefined' ? SwalDark : Swal).fire({
+            title: 'Confirmar Kill',
+            html: `<p>Enviar <b>${label}</b> al proceso <code>${pid}</code>?</p>
+                   ${signal === 'KILL' ? '<p class="text-danger"><small>SIGKILL termina el proceso inmediatamente sin dar oportunidad de limpieza.</small></p>' : ''}`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: `Enviar ${signal}`,
+            confirmButtonColor: signal === 'KILL' ? '#dc3545' : '#ffc107',
+            cancelButtonText: 'Cancelar',
+        });
+
+        if (!confirmed.isConfirmed) return;
+
+        try {
+            const form = new FormData();
+            form.append('pid', pid);
+            form.append('signal', signal);
+            form.append('_csrf_token', csrfToken);
+
+            const resp = await fetch('/dashboard/process-kill', { method: 'POST', body: form });
+            const data = await resp.json();
+
+            (typeof SwalDark !== 'undefined' ? SwalDark : Swal).fire({
+                title: data.killed ? 'Proceso Terminado' : 'Signal Enviada',
+                text: data.message || (data.ok ? 'OK' : data.error),
+                icon: data.killed ? 'success' : (data.ok ? 'info' : 'error'),
+                timer: 3000,
+            });
+
+            if (data.killed && detailModal) {
+                detailModal.hide();
+            }
+
+            // Refresh process list
+            fetchProcesses();
+        } catch (e) {
+            (typeof SwalDark !== 'undefined' ? SwalDark : Swal).fire({
+                title: 'Error',
+                text: e.message,
+                icon: 'error',
+            });
+        }
+    };
+
+})();
+</script>

@@ -52,13 +52,20 @@
                         <label class="form-label">Protocolo</label>
                         <div class="d-flex gap-3">
                             <div class="form-check">
+                                <?php
+                                    // Auto-detect protocol from real connection (X-Forwarded-Proto from Caddy, or HTTPS flag)
+                                    $detectedProto = (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
+                                        || (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+                                        ? 'https' : 'http';
+                                    $currentProto = $detectedProto;
+                                ?>
                                 <input class="form-check-input" type="radio" name="panel_protocol" value="http" id="proto_http"
-                                    <?= ($settings['panel_protocol'] ?? 'http') === 'http' ? 'checked' : '' ?>>
+                                    <?= $currentProto === 'http' ? 'checked' : '' ?>>
                                 <label class="form-check-label" for="proto_http">HTTP</label>
                             </div>
                             <div class="form-check">
                                 <input class="form-check-input" type="radio" name="panel_protocol" value="https" id="proto_https"
-                                    <?= ($settings['panel_protocol'] ?? 'http') === 'https' ? 'checked' : '' ?>>
+                                    <?= $currentProto === 'https' ? 'checked' : '' ?>>
                                 <label class="form-check-label" for="proto_https">HTTPS</label>
                             </div>
                         </div>
@@ -68,7 +75,7 @@
                     <div class="mb-3">
                         <label class="form-label">URL de acceso actual</label>
                         <?php
-                        $proto = $settings['panel_protocol'] ?? 'http';
+                        $proto = $detectedProto;
                         $host = !empty($settings['panel_hostname']) ? $settings['panel_hostname'] : $serverIp;
                         $panelUrl = "{$proto}://{$host}:{$panelPort}";
                         ?>

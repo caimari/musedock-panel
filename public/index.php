@@ -5,7 +5,9 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.5.0');
+define('PANEL_VERSION', '0.5.2');
+
+
 
 // Autoloader
 spl_autoload_register(function ($class) {
@@ -96,6 +98,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 
 // Dashboard
 \MuseDockPanel\Router::get('/', 'DashboardController@index');
+\MuseDockPanel\Router::get('/dashboard/processes', 'DashboardController@processes');
+\MuseDockPanel\Router::get('/dashboard/process-detail', 'DashboardController@processDetail');
+\MuseDockPanel\Router::post('/dashboard/process-kill', 'DashboardController@processKill');
 
 // Hosting Accounts
 \MuseDockPanel\Router::get('/accounts', 'AccountController@index');
@@ -163,6 +168,13 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/fail2ban', 'SettingsController@fail2ban');
 \MuseDockPanel\Router::post('/settings/fail2ban/unban', 'SettingsController@fail2banUnban');
 \MuseDockPanel\Router::get('/settings/logs', 'SettingsController@logs');
+\MuseDockPanel\Router::post('/settings/logs/clear', 'SettingsController@logClear');
+
+// Notifications
+\MuseDockPanel\Router::get('/settings/notifications', 'NotificationController@index');
+\MuseDockPanel\Router::post('/settings/notifications/save', 'NotificationController@save');
+\MuseDockPanel\Router::post('/settings/notifications/test-email', 'NotificationController@testEmail');
+\MuseDockPanel\Router::post('/settings/notifications/test-telegram', 'NotificationController@testTelegram');
 
 // Replication
 \MuseDockPanel\Router::get('/settings/replication', 'ReplicationController@index');
@@ -217,6 +229,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/firewall', 'FirewallController@index');
 \MuseDockPanel\Router::post('/settings/firewall/add-rule', 'FirewallController@addRule');
 \MuseDockPanel\Router::post('/settings/firewall/delete-rule', 'FirewallController@deleteRule');
+\MuseDockPanel\Router::post('/settings/firewall/edit-rule', 'FirewallController@editRule');
 \MuseDockPanel\Router::post('/settings/firewall/enable', 'FirewallController@enableFirewall');
 \MuseDockPanel\Router::post('/settings/firewall/disable', 'FirewallController@disableFirewall');
 \MuseDockPanel\Router::post('/settings/firewall/emergency', 'FirewallController@emergencyAllow');
@@ -243,6 +256,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 
 // Activity Log
 \MuseDockPanel\Router::get('/logs', 'LogController@index');
+\MuseDockPanel\Router::post('/logs/clear', 'LogController@clear');
+\MuseDockPanel\Router::post('/logs/clear-all', 'LogController@clearAll');
 
 // Dispatch
 \MuseDockPanel\Router::dispatch();

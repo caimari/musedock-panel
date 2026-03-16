@@ -62,13 +62,47 @@
                     <td><code><?= View::e($policy) ?></code></td>
                 </tr>
                 <tr>
-                    <td class="text-muted">Tu IP actual</td>
+                    <td class="text-muted">IP del admin (conectado)</td>
                     <td>
                         <code><?= View::e($adminIp) ?></code>
-                        <span class="badge bg-info ms-1">Admin</span>
+                        <span class="badge bg-info ms-1">Tu conexion</span>
                     </td>
                 </tr>
             </table>
+
+            <!-- Network Interfaces -->
+            <?php if (!empty($networkInterfaces)): ?>
+                <h6 class="mb-2"><i class="bi bi-hdd-network me-1"></i>Interfaces de red del servidor</h6>
+                <div class="table-responsive mb-3">
+                    <table class="table table-sm mb-0" style="max-width:500px;">
+                        <thead>
+                            <tr class="text-muted">
+                                <th>Interfaz</th>
+                                <th>Tipo</th>
+                                <th>Direccion</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($networkInterfaces as $iface): ?>
+                                <tr>
+                                    <td>
+                                        <code><?= View::e($iface['interface']) ?></code>
+                                        <?php if ($iface['interface'] === 'lo'): ?>
+                                            <span class="badge bg-secondary ms-1">loopback</span>
+                                        <?php elseif (str_starts_with($iface['interface'], 'wg')): ?>
+                                            <span class="badge bg-info ms-1">VPN</span>
+                                        <?php elseif (str_starts_with($iface['interface'], 'docker')): ?>
+                                            <span class="badge bg-warning text-dark ms-1">Docker</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><span class="badge bg-secondary"><?= View::e($iface['family']) ?></span></td>
+                                    <td><code><?= View::e($iface['address']) ?></code></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
 
             <div class="d-flex gap-2 flex-wrap">
                 <?php if ($type === 'ufw'): ?>
@@ -125,6 +159,7 @@
                                 <?php if ($type === 'ufw'): ?>
                                     <th>Destino</th>
                                     <th>Accion</th>
+                                    <th>Direccion</th>
                                     <th>Origen</th>
                                     <th>Comentario</th>
                                 <?php else: ?>
@@ -133,7 +168,7 @@
                                     <th>Origen</th>
                                     <th>Puerto</th>
                                 <?php endif; ?>
-                                <th class="text-end" style="width:100px;">Acciones</th>
+                                <th class="text-end" style="width:120px;">Acciones</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -152,6 +187,7 @@
                                             ?>
                                             <span class="badge <?= $actionClass ?>"><?= View::e($rule['action']) ?></span>
                                         </td>
+                                        <td><span class="badge bg-secondary"><?= View::e($rule['direction'] ?? 'IN') ?></span></td>
                                         <td><?= View::e($rule['from']) ?></td>
                                         <td class="text-muted"><?= View::e($rule['comment']) ?></td>
                                     <?php else: ?>
@@ -165,7 +201,11 @@
                                         <td><code><?= View::e($rule['source']) ?></code></td>
                                         <td><?= View::e($rule['port'] ?: '-') ?></td>
                                     <?php endif; ?>
-                                    <td class="text-end">
+                                    <td class="text-end text-nowrap">
+                                        <button type="button" class="btn btn-outline-primary btn-sm" title="Editar regla"
+                                            onclick="openEditModal(<?= (int)$rule['num'] ?>, <?= htmlspecialchars(json_encode($rule), ENT_QUOTES, 'UTF-8') ?>)">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
                                         <form method="POST" action="/settings/firewall/delete-rule" class="d-inline" onsubmit="return confirmDelete(this, <?= (int)$rule['num'] ?>)">
                                             <?= View::csrf() ?>
                                             <input type="hidden" name="rule_number" value="<?= (int)$rule['num'] ?>">
@@ -183,7 +223,74 @@
         </div>
     </div>
 
-    <!-- Card 3: Añadir Regla -->
+    <!-- Modal: Editar Regla -->
+    <div class="modal fade" id="editRuleModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light">
+                <form method="POST" action="/settings/firewall/edit-rule" id="editRuleForm">
+                    <?= View::csrf() ?>
+                    <input type="hidden" name="rule_number" id="editRuleNumber">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Editar Regla #<span id="editRuleNumLabel"></span></h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info py-2 small" style="background:rgba(13,202,240,0.1);border-color:rgba(13,202,240,0.3);">
+                            <i class="bi bi-info-circle me-1"></i>
+                            <?php if ($type === 'ufw'): ?>
+                                UFW no soporta edicion in-place. Se eliminara la regla original y se creara una nueva.
+                            <?php else: ?>
+                                Se eliminara la regla original y se creara una nueva al final de la cadena.
+                            <?php endif; ?>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Accion</label>
+                                <select name="action" class="form-select" id="editAction">
+                                    <option value="allow">Permitir (ALLOW)</option>
+                                    <option value="deny">Denegar (DENY)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Protocolo</label>
+                                <select name="protocol" class="form-select" id="editProtocol">
+                                    <option value="tcp">TCP</option>
+                                    <option value="udp">UDP</option>
+                                    <option value="both">Ambos</option>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">IP Origen</label>
+                                <input type="text" name="from" class="form-control" id="editFrom" placeholder="Ej: 192.168.1.0/24">
+                                <div class="form-check mt-1">
+                                    <input class="form-check-input" type="checkbox" id="editAnyIp" name="any_ip" onchange="toggleEditAnyIp(this)">
+                                    <label class="form-check-label small text-muted" for="editAnyIp">Cualquiera</label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Puerto</label>
+                                <input type="text" name="port" class="form-control" id="editPort" placeholder="Ej: 80">
+                            </div>
+                            <?php if ($type === 'ufw'): ?>
+                                <div class="col-12">
+                                    <label class="form-label">Comentario</label>
+                                    <input type="text" name="comment" class="form-control" id="editComment" placeholder="Opcional">
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-lg me-1"></i>Guardar Cambios
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card 3: Anadir Regla -->
     <div class="card mb-3">
         <div class="card-header"><i class="bi bi-plus-circle me-1"></i> Anadir Regla</div>
         <div class="card-body">
@@ -315,7 +422,88 @@
 <?php endif; ?>
 
 <script>
-// Auto-fill form from suggestions
+var firewallType = '<?= View::e($type) ?>';
+
+// ─── Edit Modal ─────────────────────────────────────────
+function openEditModal(ruleNum, ruleData) {
+    document.getElementById('editRuleNumber').value = ruleNum;
+    document.getElementById('editRuleNumLabel').textContent = ruleNum;
+
+    var editAnyIp = document.getElementById('editAnyIp');
+    var editFrom = document.getElementById('editFrom');
+
+    if (firewallType === 'ufw') {
+        // UFW rule: {num, to, action, direction, from, comment}
+        var action = ruleData.action.toLowerCase();
+        document.getElementById('editAction').value = (action.indexOf('allow') !== -1) ? 'allow' : 'deny';
+
+        // Parse port and protocol from "to" field (e.g. "80/tcp", "443", "Anywhere")
+        var to = ruleData.to || '';
+        var port = '';
+        var proto = 'both';
+        if (to.match(/\/tcp/i)) {
+            port = to.replace(/\/tcp.*/i, '');
+            proto = 'tcp';
+        } else if (to.match(/\/udp/i)) {
+            port = to.replace(/\/udp.*/i, '');
+            proto = 'udp';
+        } else if (to.match(/^\d+$/)) {
+            port = to;
+        }
+        document.getElementById('editPort').value = port;
+        document.getElementById('editProtocol').value = proto;
+
+        // From
+        var from = ruleData.from || '';
+        if (from === 'Anywhere' || from === 'Anywhere (v6)' || from === '') {
+            editAnyIp.checked = true;
+            editFrom.value = '';
+            editFrom.disabled = true;
+        } else {
+            editAnyIp.checked = false;
+            editFrom.disabled = false;
+            editFrom.value = from;
+        }
+
+        // Comment
+        var commentEl = document.getElementById('editComment');
+        if (commentEl) commentEl.value = ruleData.comment || '';
+
+    } else {
+        // iptables rule: {num, target, protocol, source, port}
+        document.getElementById('editAction').value = (ruleData.target === 'ACCEPT') ? 'allow' : 'deny';
+        document.getElementById('editProtocol').value = ruleData.protocol || 'tcp';
+        document.getElementById('editPort').value = ruleData.port || '';
+
+        var source = ruleData.source || '';
+        if (source === '0.0.0.0/0' || source === '') {
+            editAnyIp.checked = true;
+            editFrom.value = '';
+            editFrom.disabled = true;
+        } else {
+            editAnyIp.checked = false;
+            editFrom.disabled = false;
+            editFrom.value = source;
+        }
+    }
+
+    var modal = new bootstrap.Modal(document.getElementById('editRuleModal'));
+    modal.show();
+}
+
+function toggleEditAnyIp(cb) {
+    var fromEl = document.getElementById('editFrom');
+    if (cb.checked) {
+        fromEl.value = '';
+        fromEl.disabled = true;
+        fromEl.placeholder = 'Cualquiera (0.0.0.0/0)';
+    } else {
+        fromEl.disabled = false;
+        fromEl.placeholder = 'Ej: 192.168.1.0/24';
+    }
+}
+
+// ─── Add Rule Form ──────────────────────────────────────
 function fillRule(action, from, port, protocol, comment) {
     var actionEl = document.getElementById('ruleAction');
     var fromEl = document.getElementById('ruleFrom');
@@ -342,11 +530,9 @@ function fillRule(action, from, port, protocol, comment) {
         if (fromEl) fromEl.value = from;
     }
 
-    // Scroll to form
     document.getElementById('addRuleForm').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-// Toggle any IP checkbox
 function toggleAnyIp(cb) {
     var fromEl = document.getElementById('ruleFrom');
     if (cb.checked) {
@@ -359,7 +545,7 @@ function toggleAnyIp(cb) {
     }
 }
 
-// SwalDark confirmation for delete
+// ─── SwalDark Confirmations ─────────────────────────────
 function confirmDelete(form, ruleNum) {
     if (typeof Swal !== 'undefined') {
         Swal.fire({
@@ -384,7 +570,6 @@ function confirmDelete(form, ruleNum) {
     return confirm('¿Eliminar la regla #' + ruleNum + '?');
 }
 
-// SwalDark confirmation for enable
 function confirmEnable(form) {
     if (typeof Swal !== 'undefined') {
         Swal.fire({
@@ -409,7 +594,6 @@ function confirmEnable(form) {
     return confirm('¿Activar el firewall UFW?');
 }
 
-// SwalDark confirmation for disable
 function confirmDisable(form) {
     if (typeof Swal !== 'undefined') {
         Swal.fire({
@@ -434,7 +618,6 @@ function confirmDisable(form) {
     return confirm('¿Desactivar el firewall UFW? El servidor quedara sin proteccion.');
 }
 
-// SwalDark confirmation for emergency
 function confirmEmergency(form) {
     if (typeof Swal !== 'undefined') {
         Swal.fire({

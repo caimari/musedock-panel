@@ -340,22 +340,6 @@ class ClusterController
         Settings::set('cluster_heartbeat_interval', (string)(int)($_POST['cluster_heartbeat_interval'] ?? 30));
         Settings::set('cluster_unreachable_timeout', (string)(int)($_POST['cluster_unreachable_timeout'] ?? 300));
 
-        // SMTP
-        Settings::set('cluster_smtp_host', trim($_POST['cluster_smtp_host'] ?? ''));
-        Settings::set('cluster_smtp_port', (string)(int)($_POST['cluster_smtp_port'] ?? 587));
-        Settings::set('cluster_smtp_user', trim($_POST['cluster_smtp_user'] ?? ''));
-        Settings::set('cluster_smtp_from', trim($_POST['cluster_smtp_from'] ?? ''));
-        Settings::set('cluster_smtp_to', trim($_POST['cluster_smtp_to'] ?? ''));
-
-        $smtpPass = $_POST['cluster_smtp_pass'] ?? '';
-        if ($smtpPass !== '') {
-            Settings::set('cluster_smtp_pass', ReplicationService::encryptPassword($smtpPass));
-        }
-
-        // Telegram
-        Settings::set('cluster_telegram_token', trim($_POST['cluster_telegram_token'] ?? ''));
-        Settings::set('cluster_telegram_chat_id', trim($_POST['cluster_telegram_chat_id'] ?? ''));
-
         LogService::log('cluster.settings', 'save', 'Configuracion del cluster guardada');
         Flash::set('success', 'Configuracion del cluster guardada');
         header('Location: /settings/cluster');
