@@ -946,6 +946,27 @@ if [ "$REPAIR_MODE" = true ]; then
         ok "Firewall: sin problemas detectados"
     fi
 
+    # --- 4f. Retry DB connection if firewall was fixed ---
+    if [ -z "$DB_WORKING_PORT" ] && [ "$FW_ISSUES" -gt 0 ]; then
+        echo ""
+        echo -e "  ${CYAN}Reintentando conexion a base de datos (firewall corregido)${NC}"
+        for TRY_PORT in ${ALL_PORTS}; do
+            [ -z "$TRY_PORT" ] && continue
+            DB_CHECK=$(PGPASSWORD="${DB_PASS}" timeout 5 psql -U "${DB_USER}" -h 127.0.0.1 -p "${TRY_PORT}" -d "${DB_NAME}" -tAc "SELECT 1;" 2>&1)
+            if [ "$DB_CHECK" = "1" ]; then
+                DB_WORKING_PORT="$TRY_PORT"
+                ok "$(t repair_db_ok) (puerto ${TRY_PORT}) — $(t repair_fixed)"
+                REPAIR_FIXED=$((REPAIR_FIXED + 1))
+                # Reduce failed count since we fixed this
+                REPAIR_FAILED=$((REPAIR_FAILED > 0 ? REPAIR_FAILED - 1 : 0))
+                break
+            fi
+        done
+        if [ -z "$DB_WORKING_PORT" ]; then
+            warn "Sigue sin conectar a la BD — revisa credenciales en .env"
+        fi
+    fi
+
     # --- 5. Run schema + migrations (safe, only if DB is accessible) ---
     if [ -n "$DB_WORKING_PORT" ]; then
         echo ""

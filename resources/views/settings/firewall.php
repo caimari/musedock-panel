@@ -215,6 +215,7 @@
                                 <?php else: ?>
                                     <th>Target</th>
                                     <th>Protocolo</th>
+                                    <th>Interfaz</th>
                                     <th>Origen</th>
                                     <th>Puerto</th>
                                     <th>Descripcion</th>
@@ -249,6 +250,16 @@
                                             <span class="badge <?= $targetClass ?>"><?= View::e($rule['target']) ?></span>
                                         </td>
                                         <td><span class="badge bg-secondary"><?= View::e(strtoupper($rule['protocol'])) ?></span></td>
+                                        <td>
+                                            <?php if (!empty($rule['in'])): ?>
+                                                <code><?= View::e($rule['in']) ?></code>
+                                                <?php if ($rule['in'] === 'lo'): ?>
+                                                    <span class="badge bg-secondary ms-1">loopback</span>
+                                                <?php endif; ?>
+                                            <?php else: ?>
+                                                <span class="text-muted">*</span>
+                                            <?php endif; ?>
+                                        </td>
                                         <td><code><?= View::e($rule['source']) ?></code></td>
                                         <td><?= $rule['port'] ? '<code>' . View::e($rule['port']) . '</code>' : '-' ?></td>
                                         <td class="text-muted small">

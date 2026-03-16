@@ -200,7 +200,8 @@ class FirewallService
 
     public static function iptablesGetRules(): array
     {
-        $output = (string)shell_exec('iptables -L INPUT -n --line-numbers 2>/dev/null');
+        // Use -v to get interface info (in/out columns)
+        $output = (string)shell_exec('iptables -L INPUT -nv --line-numbers 2>/dev/null');
         $lines = explode("\n", $output);
         $rules = [];
 
@@ -211,17 +212,20 @@ class FirewallService
                 continue;
             }
 
+            // -v format: num pkts bytes target prot opt in out source destination [extra]
             $parts = preg_split('/\s+/', $line);
-            if (count($parts) < 5) continue;
+            if (count($parts) < 9) continue;
 
             $num = (int)$parts[0];
             if ($num <= 0) continue;
 
-            $target      = $parts[1] ?? '';
-            $protocolRaw = $parts[2] ?? '';
-            $source      = $parts[4] ?? '';
-            $destination = $parts[5] ?? '';
-            $extra       = implode(' ', array_slice($parts, 6));
+            $target      = $parts[3] ?? '';
+            $protocolRaw = $parts[4] ?? '';
+            $inIface     = $parts[6] ?? '*';
+            $outIface    = $parts[7] ?? '*';
+            $source      = $parts[8] ?? '';
+            $destination = $parts[9] ?? '';
+            $extra       = implode(' ', array_slice($parts, 10));
 
             // Translate protocol numbers to names
             $protocol = self::$protocolNames[$protocolRaw] ?? $protocolRaw;
@@ -251,6 +255,8 @@ class FirewallService
                 'port'        => $port,
                 'extra'       => $extra,
                 'state'       => $state,
+                'in'          => $inIface !== '*' ? $inIface : '',
+                'out'         => $outIface !== '*' ? $outIface : '',
             ];
         }
 
@@ -415,11 +421,13 @@ class FirewallService
         if ($type === 'iptables') {
             foreach ($rules as $rule) {
                 // 2. ACCEPT all from 0.0.0.0/0 without ctstate = open to everyone
+                // BUT skip loopback rules (interface = lo) — those are safe
                 if ($rule['target'] === 'ACCEPT'
                     && $rule['source'] === '0.0.0.0/0'
                     && $rule['protocol'] === 'all'
                     && empty($rule['state'])
-                    && empty($rule['port'])) {
+                    && empty($rule['port'])
+                    && ($rule['in'] ?? '') !== 'lo') {
                     $warnings[] = [
                         'severity' => 'danger',
                         'icon'     => 'bi-exclamation-octagon-fill',
