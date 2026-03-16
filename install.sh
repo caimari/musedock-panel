@@ -66,10 +66,21 @@ t() {
                 existing_options) text="Opciones:" ;;
                 existing_opt_reinstall) text="Reinstalar (no borra la base de datos)" ;;
                 existing_opt_verify) text="Solo verificar — ejecuta el health check sin tocar nada" ;;
+                existing_opt_update) text="Actualizar — aplica cambios nuevos sin reinstalar (crons, BD, permisos)" ;;
                 existing_opt_cancel) text="Cancelar" ;;
-                existing_choose) text="Elige [1/2/3] (por defecto: 3): " ;;
+                existing_choose) text="Elige [1/2/3/4] (por defecto: 4): " ;;
                 install_cancelled) text="Instalacion cancelada. Instalacion existente preservada." ;;
                 reinstall_mode) text="Modo reinstalacion — se hara backup del .env existente" ;;
+                update_mode) text="Modo actualizacion — aplicando cambios sin reinstalar..." ;;
+                update_dirs) text="Directorios verificados" ;;
+                update_schema) text="Esquema de BD actualizado" ;;
+                update_migrations) text="Migraciones ejecutadas" ;;
+                update_crons) text="Crons del sistema actualizados" ;;
+                update_perms) text="Permisos corregidos" ;;
+                update_service) text="Servicio reiniciado" ;;
+                update_env_new_keys) text="Nuevas claves añadidas al .env" ;;
+                update_complete) text="Actualizacion completada!" ;;
+                update_no_new_keys) text=".env ya tiene todas las claves" ;;
                 verify_mode) text="Modo verificacion — comprobando estado del sistema..." ;;
                 checking_conflicts) text="Comprobando servicios en conflicto" ;;
                 plesk_warning) text="AVISO: Plesk detectado en este servidor!" ;;
@@ -293,10 +304,21 @@ t() {
                 existing_options) text="Options:" ;;
                 existing_opt_reinstall) text="Reinstall (will NOT delete the database)" ;;
                 existing_opt_verify) text="Verify only — run health check without changing anything" ;;
+                existing_opt_update) text="Update — apply new changes without reinstalling (crons, DB, permissions)" ;;
                 existing_opt_cancel) text="Cancel" ;;
-                existing_choose) text="Choose [1/2/3] (default: 3): " ;;
+                existing_choose) text="Choose [1/2/3/4] (default: 4): " ;;
                 install_cancelled) text="Installation cancelled. Existing installation preserved." ;;
                 reinstall_mode) text="Reinstall mode — existing .env will be backed up" ;;
+                update_mode) text="Update mode — applying changes without reinstalling..." ;;
+                update_dirs) text="Directories verified" ;;
+                update_schema) text="Database schema updated" ;;
+                update_migrations) text="Migrations executed" ;;
+                update_crons) text="System crons updated" ;;
+                update_perms) text="Permissions fixed" ;;
+                update_service) text="Service restarted" ;;
+                update_env_new_keys) text="New keys added to .env" ;;
+                update_complete) text="Update completed!" ;;
+                update_no_new_keys) text=".env already has all keys" ;;
                 verify_mode) text="Verify mode — checking system status..." ;;
                 checking_conflicts) text="Checking for conflicting services" ;;
                 plesk_warning) text="WARNING: Plesk detected on this server!" ;;
@@ -556,6 +578,7 @@ echo ""
 # 3. Check for existing installation
 REINSTALL=false
 VERIFY_ONLY=false
+UPDATE_ONLY=false
 if [ -f "${PANEL_DIR}/.env" ]; then
     echo -e "  ${YELLOW}${BOLD}$(t existing_detected)${NC}"
     echo -e "  ${YELLOW}$(t existing_found "${PANEL_DIR}/.env")${NC}"
@@ -564,9 +587,10 @@ if [ -f "${PANEL_DIR}/.env" ]; then
     echo "    1) $(t existing_opt_reinstall)"
     echo "    2) $(t existing_opt_verify)"
     echo "    3) $(t existing_opt_cancel)"
+    echo "    4) $(t existing_opt_update)"
     echo ""
     read -rp "  $(t existing_choose)" EXISTING_CHOICE
-    EXISTING_CHOICE=${EXISTING_CHOICE:-3}
+    EXISTING_CHOICE=${EXISTING_CHOICE:-4}
 
     case "$EXISTING_CHOICE" in
         1)
@@ -589,10 +613,40 @@ if [ -f "${PANEL_DIR}/.env" ]; then
             MYSQL_ROOT_PASS=$(grep -E '^MYSQL_ROOT_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "")
             PANEL_ROLE=$(grep -E '^PANEL_ROLE=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "standalone")
             ;;
-        *)
+        4)
+            UPDATE_ONLY=true
+            echo ""
+            ok "$(t update_mode)"
+            # Read existing .env
+            PANEL_PORT=$(grep -E '^PANEL_PORT=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "8444")
+            DB_PORT=$(grep -E '^DB_PORT=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "5432")
+            DB_NAME=$(grep -E '^DB_NAME=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "musedock_panel")
+            DB_USER=$(grep -E '^DB_USER=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "musedock_panel")
+            DB_PASS=$(grep -E '^DB_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "")
+            PHP_VER=$(grep -E '^FPM_PHP_VERSION=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "8.3")
+            MYSQL_AUTH_METHOD=$(grep -E '^MYSQL_AUTH_METHOD=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "unknown")
+            MYSQL_ROOT_PASS=$(grep -E '^MYSQL_ROOT_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "")
+            PANEL_ROLE=$(grep -E '^PANEL_ROLE=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "standalone")
+            ;;
+        3)
             echo ""
             echo -e "  $(t install_cancelled)"
             exit 0
+            ;;
+        *)
+            # Default = update (option 4)
+            UPDATE_ONLY=true
+            echo ""
+            ok "$(t update_mode)"
+            PANEL_PORT=$(grep -E '^PANEL_PORT=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "8444")
+            DB_PORT=$(grep -E '^DB_PORT=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "5432")
+            DB_NAME=$(grep -E '^DB_NAME=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "musedock_panel")
+            DB_USER=$(grep -E '^DB_USER=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "musedock_panel")
+            DB_PASS=$(grep -E '^DB_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "")
+            PHP_VER=$(grep -E '^FPM_PHP_VERSION=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "8.3")
+            MYSQL_AUTH_METHOD=$(grep -E '^MYSQL_AUTH_METHOD=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "unknown")
+            MYSQL_ROOT_PASS=$(grep -E '^MYSQL_ROOT_PASS=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "")
+            PANEL_ROLE=$(grep -E '^PANEL_ROLE=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'' || echo "standalone")
             ;;
     esac
 fi
@@ -777,6 +831,14 @@ if [ "$VERIFY_ONLY" = true ]; then
         echo -e "  ${YELLOW}⚠ Backup periodico del panel no instalado${NC}"
         HEALTH_WARNINGS=$((HEALTH_WARNINGS + 1))
     fi
+    if [ -f /etc/cron.d/musedock-filesync ]; then
+        ok "File sync worker: instalado (/etc/cron.d/musedock-filesync)"
+    else
+        echo -e "  ${YELLOW}⚠ File sync worker no instalado${NC}"
+        echo -e "    ${YELLOW}Se instalara al reinstalar o ejecuta manualmente:${NC}"
+        echo -e "    ${CYAN}echo '* * * * * root /usr/bin/php ${PANEL_DIR}/bin/filesync-worker.php >> ${PANEL_DIR}/storage/logs/filesync-worker.log 2>&1' > /etc/cron.d/musedock-filesync${NC}"
+        HEALTH_WARNINGS=$((HEALTH_WARNINGS + 1))
+    fi
 
     # --- 10. Panel role & .env ---
     echo ""
@@ -796,6 +858,131 @@ if [ "$VERIFY_ONLY" = true ]; then
     fi
     echo ""
     exit 0
+
+elif [ "$UPDATE_ONLY" = true ]; then
+    # ============================================================
+    # Update mode — apply new changes without reinstalling
+    # Safe: does NOT touch .env values, does NOT reinstall packages,
+    # does NOT reconfigure PostgreSQL/MySQL/Caddy/PHP
+    # ============================================================
+    set +e
+
+    PANEL_INTERNAL_PORT=$((PANEL_PORT + 1))
+
+    header "$(t update_mode)"
+
+    # --- 1. Ensure directories exist ---
+    mkdir -p "${PANEL_DIR}/storage/sessions"
+    mkdir -p "${PANEL_DIR}/storage/logs"
+    mkdir -p "${PANEL_DIR}/storage/cache"
+    mkdir -p "${PANEL_DIR}/storage/backups"
+    mkdir -p /var/www/vhosts
+    ok "$(t update_dirs)"
+
+    # --- 2. Add new .env keys if missing (never overwrites existing values) ---
+    ENV_KEYS_ADDED=0
+    add_env_key() {
+        local key="$1" default_value="$2"
+        if ! grep -qE "^${key}=" "${PANEL_DIR}/.env" 2>/dev/null; then
+            echo "" >> "${PANEL_DIR}/.env"
+            echo "${key}=${default_value}" >> "${PANEL_DIR}/.env"
+            ok "  + ${key}=${default_value}"
+            ENV_KEYS_ADDED=$((ENV_KEYS_ADDED + 1))
+        fi
+    }
+
+    # Keys added in various versions — add new ones here as the panel evolves
+    add_env_key "PANEL_INTERNAL_PORT" "$PANEL_INTERNAL_PORT"
+    add_env_key "PANEL_ROLE" "standalone"
+    add_env_key "VHOSTS_DIR" "/var/www/vhosts"
+    add_env_key "CADDY_API_URL" "http://localhost:2019"
+    add_env_key "FPM_SOCKET_DIR" "/run/php"
+    add_env_key "SESSION_LIFETIME" "7200"
+    add_env_key "ALLOWED_IPS" ""
+
+    if [ "$ENV_KEYS_ADDED" -gt 0 ]; then
+        ok "$(t update_env_new_keys) ($ENV_KEYS_ADDED)"
+    else
+        ok "$(t update_no_new_keys)"
+    fi
+
+    # --- 3. Run database schema (safe — IF NOT EXISTS) ---
+    PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > /dev/null 2>&1
+    ok "$(t update_schema)"
+
+    # --- 4. Run pending migrations ---
+    MIGRATION_DIR="${PANEL_DIR}/database/migrations"
+    if [ -d "$MIGRATION_DIR" ]; then
+        MIGRATION_COUNT=0
+        # Check which migrations have already been run
+        EXISTING_MIGRATIONS=$(PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -tAc "SELECT migration FROM panel_migrations;" 2>/dev/null || echo "")
+
+        for mig_file in "$MIGRATION_DIR"/*.php; do
+            [ -f "$mig_file" ] || continue
+            mig_name=$(basename "$mig_file")
+            if echo "$EXISTING_MIGRATIONS" | grep -q "$mig_name" 2>/dev/null; then
+                continue  # Already executed
+            fi
+            # Run migration via PHP
+            php "$mig_file" 2>/dev/null && MIGRATION_COUNT=$((MIGRATION_COUNT + 1)) && ok "  + $mig_name"
+        done
+
+        if [ "$MIGRATION_COUNT" -gt 0 ]; then
+            ok "$(t update_migrations) ($MIGRATION_COUNT)"
+        else
+            ok "$(t update_migrations) (0 pendientes)"
+        fi
+    fi
+
+    # --- 5. Install/update cron jobs ---
+    # Cluster worker
+    cat > /etc/cron.d/musedock-cluster << CRONEOF
+# MuseDock Panel — Cluster worker (queue, heartbeat, alerts)
+* * * * * root /usr/bin/php ${PANEL_DIR}/bin/cluster-worker.php >> ${PANEL_DIR}/storage/logs/cluster-worker.log 2>&1
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-cluster
+
+    # Panel DB backup
+    cat > /etc/cron.d/musedock-backup << CRONEOF
+# MuseDock Panel — Hourly panel DB backup
+0 * * * * postgres pg_dump -p 5433 musedock_panel | gzip > ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz 2>/dev/null
+# Cleanup backups older than 48 hours
+5 * * * * root find ${PANEL_DIR}/storage/backups/ -name "panel-*.sql.gz" -mmin +2880 -delete 2>/dev/null
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-backup
+
+    # File sync worker
+    cat > /etc/cron.d/musedock-filesync << CRONEOF
+# MuseDock Panel — File sync worker (master -> slave file replication)
+* * * * * root /usr/bin/php ${PANEL_DIR}/bin/filesync-worker.php >> ${PANEL_DIR}/storage/logs/filesync-worker.log 2>&1
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-filesync
+
+    systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
+    ok "$(t update_crons)"
+
+    # --- 6. Fix permissions ---
+    chmod 600 "${PANEL_DIR}/.env"
+    chmod -R 750 "${PANEL_DIR}/storage"
+    ok "$(t update_perms)"
+
+    # --- 7. Update systemd service file and restart ---
+    if [ -f "${PANEL_DIR}/bin/musedock-panel.service" ]; then
+        sed -e "s|__PANEL_DIR__|${PANEL_DIR}|g" \
+            -e "s|__PANEL_PORT__|${PANEL_PORT}|g" \
+            -e "s|__PANEL_INTERNAL_PORT__|${PANEL_INTERNAL_PORT}|g" \
+            "${PANEL_DIR}/bin/musedock-panel.service" > /etc/systemd/system/musedock-panel.service
+        systemctl daemon-reload
+    fi
+    systemctl restart musedock-panel 2>/dev/null
+    ok "$(t update_service)"
+
+    echo ""
+    echo -e "  ${GREEN}${BOLD}$(t update_complete)${NC}"
+    echo ""
+
+    # Fall through to health check below
+
 else
 # Begin install flow
 header "$(t checking_conflicts)"
@@ -1872,6 +2059,15 @@ CRONEOF
 chmod 644 "$CRON_BACKUP"
 ok "Cron: backup panel DB cada hora (retiene 48h)"
 
+# File sync worker — syncs hosting files from master to slave nodes (every minute, respects interval setting)
+CRON_FILESYNC="/etc/cron.d/musedock-filesync"
+cat > "$CRON_FILESYNC" << CRONEOF
+# MuseDock Panel — File sync worker (master → slave file replication)
+* * * * * root /usr/bin/php ${PANEL_DIR}/bin/filesync-worker.php >> ${PANEL_DIR}/storage/logs/filesync-worker.log 2>&1
+CRONEOF
+chmod 644 "$CRON_FILESYNC"
+ok "Cron: filesync-worker.php (cada minuto, respeta intervalo configurado)"
+
 # Reload cron daemon
 systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
 ok "Cron jobs instalados"
@@ -2006,6 +2202,28 @@ if [ "$VERIFY_ONLY" = true ]; then
         echo -e "  ${GREEN}${BOLD}$(t verify_all_ok)${NC}"
     else
         echo -e "  ${RED}${BOLD}$(t verify_has_errors "$HEALTH_ERRORS")${NC}"
+    fi
+    echo ""
+    exit 0
+fi
+
+if [ "$UPDATE_ONLY" = true ]; then
+    echo ""
+    SERVER_IP=$(hostname -I | awk '{print $1}')
+    echo -e "${GREEN}${BOLD}"
+    echo "  ╔══════════════════════════════════════════════════╗"
+    echo "  ║         $(t update_complete)                    ║"
+    echo "  ╚══════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    echo ""
+    echo -e "  ${BOLD}Panel:${NC} https://${SERVER_IP}:${PANEL_PORT}/"
+    echo -e "  ${BOLD}Estado:${NC} systemctl status musedock-panel"
+    echo ""
+    if [ "$HEALTH_ERRORS" -gt 0 ]; then
+        echo -e "  ${RED}${BOLD}$(t health_errors "$HEALTH_ERRORS")${NC}"
+        echo -e "  ${YELLOW}$(t health_review)${NC}"
+    else
+        echo -e "  ${GREEN}${BOLD}$(t health_all_ok "$HEALTH_ERRORS")${NC}"
     fi
     echo ""
     exit 0

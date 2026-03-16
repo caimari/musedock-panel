@@ -1,5 +1,14 @@
 <?php use MuseDockPanel\View; ?>
 
+<!-- Running backup banner (hidden by default) -->
+<div class="alert alert-info d-flex align-items-center mb-3" id="runningBackupBanner" style="display:none !important">
+    <div class="spinner-border spinner-border-sm me-2" role="status"></div>
+    <span id="runningBackupText">Backup en curso...</span>
+    <a href="/backups/create" class="btn btn-sm btn-outline-light ms-auto">
+        <i class="bi bi-eye me-1"></i> Ver progreso
+    </a>
+</div>
+
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
         <span class="text-muted"><?= count($backups) ?> backup(s) en total</span>
@@ -98,6 +107,22 @@
 </div>
 
 <script>
+// Check for running backup on page load
+(async function() {
+    try {
+        const resp = await fetch('/backups/status');
+        const data = await resp.json();
+        if (data.ok && data.status === 'running') {
+            const banner = document.getElementById('runningBackupBanner');
+            const text = document.getElementById('runningBackupText');
+            text.textContent = `Backup en curso: ${data.domain || data.username || ''} — ${data.current_task || ''}`;
+            banner.style.display = 'flex !important';
+            banner.removeAttribute('style');
+            banner.style.display = 'flex';
+        }
+    } catch (e) {}
+})();
+
 function deleteBackup(dirName, username, date) {
     SwalDark.fire({
         title: 'Eliminar backup?',

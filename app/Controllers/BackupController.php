@@ -71,150 +71,158 @@ class BackupController
     }
 
     /**
-     * Create backup for an account
+     * Launch backup in background (AJAX)
      */
     public function store(): void
     {
+        header('Content-Type: application/json');
+
         $accountId = (int) ($_POST['account_id'] ?? 0);
-        $includeFiles = isset($_POST['include_files']);
-        $includeDatabases = isset($_POST['include_databases']);
+        $includeFiles = isset($_POST['include_files']) || ($_POST['include_files'] ?? '') === '1';
+        $includeDatabases = isset($_POST['include_databases']) || ($_POST['include_databases'] ?? '') === '1';
 
         if (empty($accountId)) {
-            Flash::set('error', 'Debes seleccionar una cuenta.');
-            Router::redirect('/backups/create');
-            return;
+            echo json_encode(['ok' => false, 'error' => 'Debes seleccionar una cuenta.']);
+            exit;
         }
 
         if (!$includeFiles && !$includeDatabases) {
-            Flash::set('error', 'Debes seleccionar al menos archivos o bases de datos.');
-            Router::redirect('/backups/create');
-            return;
+            echo json_encode(['ok' => false, 'error' => 'Debes seleccionar al menos archivos o bases de datos.']);
+            exit;
+        }
+
+        // Check if a backup is already running
+        $statusFile = self::BACKUP_DIR . '/.backup_status.json';
+        if (file_exists($statusFile)) {
+            $existing = @json_decode(file_get_contents($statusFile), true);
+            if ($existing && ($existing['status'] ?? '') === 'running') {
+                // Check if the process is actually still running
+                $pid = $existing['pid'] ?? 0;
+                if ($pid > 0 && file_exists("/proc/{$pid}")) {
+                    echo json_encode(['ok' => false, 'error' => 'Ya hay un backup en curso. Espera a que termine.']);
+                    exit;
+                }
+                // Process died, clean up stale status
+            }
         }
 
         $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $accountId]);
         if (!$account) {
-            Flash::set('error', 'Cuenta no encontrada.');
-            Router::redirect('/backups/create');
-            return;
+            echo json_encode(['ok' => false, 'error' => 'Cuenta no encontrada.']);
+            exit;
         }
 
         $username = $account['username'];
         $domain = $account['domain'];
-        $homeDir = $account['home_dir'];
         $timestamp = date('Y-m-d_His');
         $backupName = "{$username}_{$timestamp}";
-        $backupPath = self::BACKUP_DIR . "/{$backupName}";
 
-        // Create backup directory
-        if (!@mkdir($backupPath, 0750, true)) {
-            Flash::set('error', 'No se pudo crear el directorio de backup.');
-            Router::redirect('/backups/create');
-            return;
-        }
-
-        $totalSize = 0;
-        $dbList = [];
-        $errors = [];
-
-        // Archive files
-        if ($includeFiles) {
-            $vhostDir = dirname($homeDir); // /var/www/vhosts
-            $dirName = basename($homeDir); // domain.com
-            if (is_dir($homeDir . '/httpdocs')) {
-                $tarFile = $backupPath . '/files.tar.gz';
-                $cmd = sprintf(
-                    'tar czf %s -C %s %s 2>&1',
-                    escapeshellarg($tarFile),
-                    escapeshellarg($homeDir),
-                    'httpdocs/'
-                );
-                $output = shell_exec($cmd);
-                if (file_exists($tarFile)) {
-                    $totalSize += filesize($tarFile);
-                } else {
-                    $errors[] = "Error al crear archivos tar.gz: {$output}";
-                }
-            } else {
-                $errors[] = "Directorio httpdocs no encontrado en {$homeDir}";
-            }
-        }
-
-        // Dump databases
+        // Count total steps for progress
+        $totalSteps = 0;
+        if ($includeFiles) $totalSteps++;
         if ($includeDatabases) {
-            $databases = Database::fetchAll(
-                "SELECT * FROM hosting_databases WHERE account_id = :id",
+            $dbCount = Database::fetchOne(
+                "SELECT COUNT(*) as cnt FROM hosting_databases WHERE account_id = :id",
                 ['id' => $accountId]
             );
-
-            if (!empty($databases)) {
-                $dbDir = $backupPath . '/databases';
-                @mkdir($dbDir, 0750, true);
-
-                foreach ($databases as $db) {
-                    $dbName = $db['db_name'];
-                    $dbType = $db['db_type'] ?? 'mysql';
-                    $dumpFile = $dbDir . '/' . $dbName . '.sql';
-
-                    if ($dbType === 'mysql') {
-                        $mysqlCmd = $this->buildMysqlDumpCommand();
-                        if ($mysqlCmd) {
-                            $cmd = sprintf(
-                                '%s %s > %s 2>&1',
-                                $mysqlCmd,
-                                escapeshellarg($dbName),
-                                escapeshellarg($dumpFile)
-                            );
-                            shell_exec($cmd);
-                        } else {
-                            $errors[] = "No se pudo determinar autenticacion MySQL para {$dbName}";
-                        }
-                    } elseif ($dbType === 'pgsql') {
-                        $cmd = sprintf(
-                            'sudo -u postgres pg_dump %s > %s 2>&1',
-                            escapeshellarg($dbName),
-                            escapeshellarg($dumpFile)
-                        );
-                        shell_exec($cmd);
-                    }
-
-                    if (file_exists($dumpFile) && filesize($dumpFile) > 0) {
-                        $totalSize += filesize($dumpFile);
-                        $dbList[] = [
-                            'name' => $dbName,
-                            'type' => $dbType,
-                            'size' => filesize($dumpFile),
-                        ];
-                    } else {
-                        $errors[] = "Error al hacer dump de {$dbName}";
-                        @unlink($dumpFile);
-                    }
-                }
-            }
+            $totalSteps += max(1, (int)($dbCount['cnt'] ?? 0));
         }
+        $totalSteps++; // metadata step
 
-        // Write metadata
-        $metadata = [
+        // Write initial status
+        $status = [
+            'status' => 'running',
+            'backup_name' => $backupName,
             'username' => $username,
             'domain' => $domain,
             'account_id' => $accountId,
-            'date' => date('Y-m-d H:i:s'),
-            'timestamp' => $timestamp,
             'include_files' => $includeFiles,
             'include_databases' => $includeDatabases,
-            'file_size' => $totalSize,
-            'databases' => $dbList,
+            'started_at' => date('Y-m-d H:i:s'),
+            'step' => 0,
+            'total_steps' => $totalSteps,
+            'current_task' => 'Iniciando backup...',
+            'pid' => 0,
+            'errors' => [],
         ];
-        file_put_contents($backupPath . '/metadata.json', json_encode($metadata, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        file_put_contents($statusFile, json_encode($status, JSON_PRETTY_PRINT));
 
-        LogService::log('backup.create', $domain, "Backup creado: {$backupName} ({$this->formatSize($totalSize)})");
+        // Build the worker command
+        $workerScript = PANEL_ROOT . '/bin/backup-worker.php';
+        $args = sprintf(
+            '%d %s %s %s',
+            $accountId,
+            $includeFiles ? '1' : '0',
+            $includeDatabases ? '1' : '0',
+            escapeshellarg($backupName)
+        );
+        $cmd = sprintf(
+            'php %s %s > /dev/null 2>&1 & echo $!',
+            escapeshellarg($workerScript),
+            $args
+        );
 
-        if (!empty($errors)) {
-            Flash::set('warning', 'Backup creado con advertencias: ' . implode('; ', $errors));
-        } else {
-            Flash::set('success', "Backup creado exitosamente: {$backupName} — Tamano total: {$this->formatSize($totalSize)}");
+        $pid = trim((string)shell_exec($cmd));
+
+        // Update status with PID
+        $status['pid'] = (int)$pid;
+        file_put_contents($statusFile, json_encode($status, JSON_PRETTY_PRINT));
+
+        echo json_encode([
+            'ok' => true,
+            'backup_name' => $backupName,
+            'pid' => (int)$pid,
+            'message' => "Backup iniciado para {$domain}",
+        ]);
+        exit;
+    }
+
+    /**
+     * GET /backups/status (JSON) — Poll backup progress
+     */
+    public function status(): void
+    {
+        header('Content-Type: application/json');
+
+        $statusFile = self::BACKUP_DIR . '/.backup_status.json';
+        if (!file_exists($statusFile)) {
+            echo json_encode(['ok' => true, 'status' => 'idle']);
+            exit;
         }
 
-        Router::redirect('/backups');
+        $data = @json_decode(file_get_contents($statusFile), true);
+        if (!$data) {
+            echo json_encode(['ok' => true, 'status' => 'idle']);
+            exit;
+        }
+
+        // If running, verify process is alive
+        if (($data['status'] ?? '') === 'running') {
+            $pid = $data['pid'] ?? 0;
+            if ($pid > 0 && !file_exists("/proc/{$pid}")) {
+                // Process died unexpectedly
+                $data['status'] = 'error';
+                $data['current_task'] = 'El proceso de backup termino inesperadamente';
+                file_put_contents($statusFile, json_encode($data, JSON_PRETTY_PRINT));
+            }
+        }
+
+        echo json_encode(array_merge(['ok' => true], $data));
+        exit;
+    }
+
+    /**
+     * POST /backups/status/clear — Clear finished backup status
+     */
+    public function statusClear(): void
+    {
+        header('Content-Type: application/json');
+        $statusFile = self::BACKUP_DIR . '/.backup_status.json';
+        if (file_exists($statusFile)) {
+            @unlink($statusFile);
+        }
+        echo json_encode(['ok' => true]);
+        exit;
     }
 
     /**

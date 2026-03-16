@@ -116,6 +116,7 @@ class ClusterService
         return [
             'role'              => $role,
             'repl_role'         => $replRole,
+            'cluster_role'      => Settings::get('cluster_role', 'standalone'),
             'uptime'            => $uptime,
             'pg_5432_status'    => $pg5432,
             'pg_5433_status'    => $pg5433,

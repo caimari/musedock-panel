@@ -211,6 +211,13 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/generate-token', 'ClusterController@generateToken');
 \MuseDockPanel\Router::post('/settings/cluster/save-settings', 'ClusterController@saveSettings');
 \MuseDockPanel\Router::post('/settings/cluster/clean-queue', 'ClusterController@cleanQueue');
+\MuseDockPanel\Router::post('/settings/cluster/sync-all-hostings', 'ClusterController@syncAllHostings');
+\MuseDockPanel\Router::post('/settings/cluster/filesync-settings', 'ClusterController@saveFileSyncSettings');
+\MuseDockPanel\Router::post('/settings/cluster/generate-ssh-key', 'ClusterController@generateSshKey');
+\MuseDockPanel\Router::post('/settings/cluster/install-ssh-key', 'ClusterController@installSshKey');
+\MuseDockPanel\Router::post('/settings/cluster/test-ssh', 'ClusterController@testSshConnection');
+\MuseDockPanel\Router::post('/settings/cluster/sync-files-now', 'ClusterController@syncFilesNow');
+\MuseDockPanel\Router::post('/settings/cluster/check-dbhost', 'ClusterController@checkDbHost');
 
 // WireGuard
 \MuseDockPanel\Router::get('/settings/wireguard', 'WireGuardController@index');
@@ -240,6 +247,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/backups', 'BackupController@index');
 \MuseDockPanel\Router::get('/backups/create', 'BackupController@create');
 \MuseDockPanel\Router::post('/backups/store', 'BackupController@store');
+\MuseDockPanel\Router::get('/backups/status', 'BackupController@status');
+\MuseDockPanel\Router::post('/backups/status/clear', 'BackupController@statusClear');
 \MuseDockPanel\Router::get('/backups/download', 'BackupController@download');
 \MuseDockPanel\Router::get('/backups/{id}/restore', 'BackupController@restore');
 \MuseDockPanel\Router::post('/backups/{id}/restore', 'BackupController@restoreExecute');

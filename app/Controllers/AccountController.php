@@ -5,7 +5,9 @@ use MuseDockPanel\Auth;
 use MuseDockPanel\Database;
 use MuseDockPanel\Flash;
 use MuseDockPanel\Router;
+use MuseDockPanel\Settings;
 use MuseDockPanel\View;
+use MuseDockPanel\Services\ClusterService;
 use MuseDockPanel\Services\SystemService;
 use MuseDockPanel\Services\LogService;
 
@@ -45,6 +47,13 @@ class AccountController
 
     public function store(): void
     {
+        // Block hosting creation on slave nodes
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es Slave. La creacion de hostings solo esta permitida en el Master.');
+            Router::redirect('/accounts');
+            return;
+        }
+
         $domain = trim($_POST['domain'] ?? '');
         $username = trim($_POST['username'] ?? '');
         $password = $_POST['password'] ?? '';
@@ -125,6 +134,26 @@ class AccountController
             ]);
 
             LogService::log('account.create', $domain, "Created hosting account: {$username}@{$domain}");
+
+            // Sync to cluster nodes if master
+            if (Settings::get('cluster_role', 'standalone') === 'master') {
+                $nodes = ClusterService::getNodes();
+                foreach ($nodes as $node) {
+                    ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                        'hosting_action' => 'create_hosting',
+                        'hosting_data' => [
+                            'username' => $username,
+                            'domain' => $domain,
+                            'home_dir' => $homeDir,
+                            'document_root' => $documentRoot,
+                            'php_version' => $phpVersion,
+                            'password' => $password,
+                            'shell' => $shell,
+                        ],
+                    ]);
+                }
+            }
+
             Flash::set('success', "Cuenta creada: {$domain}");
             Router::redirect('/accounts');
 
@@ -453,6 +482,20 @@ class AccountController
         Database::update('hosting_accounts', ['status' => 'suspended', 'updated_at' => date('Y-m-d H:i:s')], 'id = :id', ['id' => $params['id']]);
 
         LogService::log('account.suspend', $account['domain'], "Suspended account");
+
+        // Sync suspension to cluster nodes
+        if (Settings::get('cluster_role', 'standalone') === 'master') {
+            foreach (ClusterService::getNodes() as $node) {
+                ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                    'hosting_action' => 'suspend_hosting',
+                    'hosting_data' => [
+                        'username' => $account['username'],
+                        'domain' => $account['domain'],
+                    ],
+                ]);
+            }
+        }
+
         Flash::set('warning', "Cuenta {$account['domain']} suspendida. Se muestra pagina de mantenimiento.");
         Router::redirect('/accounts/' . $params['id']);
     }
@@ -470,6 +513,22 @@ class AccountController
         Database::update('hosting_accounts', ['status' => 'active', 'updated_at' => date('Y-m-d H:i:s')], 'id = :id', ['id' => $params['id']]);
 
         LogService::log('account.activate', $account['domain'], "Activated account");
+
+        // Sync activation to cluster nodes
+        if (Settings::get('cluster_role', 'standalone') === 'master') {
+            foreach (ClusterService::getNodes() as $node) {
+                ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                    'hosting_action' => 'activate_hosting',
+                    'hosting_data' => [
+                        'username' => $account['username'],
+                        'domain' => $account['domain'],
+                        'document_root' => $account['document_root'],
+                        'php_version' => $account['php_version'] ?? '8.3',
+                    ],
+                ]);
+            }
+        }
+
         Flash::set('success', "Cuenta {$account['domain']} activada. Ruta Caddy restaurada.");
         Router::redirect('/accounts/' . $params['id']);
     }
@@ -839,6 +898,21 @@ class AccountController
         Database::delete('hosting_accounts', 'id = :id', ['id' => $params['id']]);
 
         LogService::log('account.delete', $account['domain'], "Deleted account and system user: {$account['username']}");
+
+        // Sync deletion to cluster nodes
+        if (Settings::get('cluster_role', 'standalone') === 'master') {
+            foreach (ClusterService::getNodes() as $node) {
+                ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                    'hosting_action' => 'delete_hosting',
+                    'hosting_data' => [
+                        'username' => $account['username'],
+                        'domain' => $account['domain'],
+                        'home_dir' => $account['home_dir'],
+                    ],
+                ]);
+            }
+        }
+
         Flash::set('success', "Cuenta {$account['domain']} eliminada.");
         Router::redirect('/accounts');
     }

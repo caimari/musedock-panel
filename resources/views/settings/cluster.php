@@ -5,12 +5,23 @@
 <?php
     $role = $localStatus['role'] ?? 'standalone';
     $replRole = $localStatus['repl_role'] ?? 'standalone';
+    $clusterRole = $settings['cluster_role'] ?? 'standalone';
     $roleBadge = match($replRole) {
         'master' => 'bg-success',
         'slave'  => 'bg-info',
         default  => 'bg-secondary',
     };
     $roleLabel = match($replRole) {
+        'master' => 'Master',
+        'slave'  => 'Slave',
+        default  => 'Standalone',
+    };
+    $clusterBadge = match($clusterRole) {
+        'master' => 'bg-success',
+        'slave'  => 'bg-info',
+        default  => 'bg-secondary',
+    };
+    $clusterLabel = match($clusterRole) {
         'master' => 'Master',
         'slave'  => 'Slave',
         default  => 'Standalone',
@@ -33,7 +44,18 @@
                 <h6 class="text-muted mb-3">Servidor Local</h6>
                 <table class="table table-sm">
                     <tr>
-                        <td class="text-muted" style="width:40%">Rol</td>
+                        <td class="text-muted" style="width:40%">Rol Cluster</td>
+                        <td>
+                            <span class="badge <?= $clusterBadge ?>" id="local-cluster-role"><?= $clusterLabel ?></span>
+                            <?php if ($clusterRole === 'master'): ?>
+                                <small class="text-muted ms-1">(gestiona hostings)</small>
+                            <?php elseif ($clusterRole === 'slave'): ?>
+                                <small class="text-muted ms-1">(recibe hostings, solo lectura)</small>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted">Rol Replicacion</td>
                         <td><span class="badge <?= $roleBadge ?>" id="local-role"><?= $roleLabel ?></span></td>
                     </tr>
                     <tr>
@@ -176,6 +198,13 @@
                                 </span>
                             </td>
                             <td class="text-end">
+                                <?php if ($clusterRole === 'master'): ?>
+                                <button type="button" class="btn btn-outline-success btn-sm"
+                                        onclick="confirmSyncAll(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')"
+                                        title="Sincronizar todos los hostings existentes a este nodo">
+                                    <i class="bi bi-arrow-repeat me-1"></i>Sync Todo
+                                </button>
+                                <?php endif; ?>
                                 <button type="button" class="btn btn-outline-info btn-sm"
                                         onclick="viewNodeStatus(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
                                     <i class="bi bi-eye me-1"></i>Ver Estado
@@ -334,6 +363,32 @@
         <form method="post" action="/settings/cluster/save-settings">
             <?= View::csrf() ?>
 
+            <!-- Cluster Role -->
+            <h6 class="text-muted mb-2">Rol del Cluster</h6>
+            <p class="small text-muted">Define el rol de este servidor en la sincronizacion de hostings.</p>
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <select name="cluster_role" class="form-select">
+                        <option value="standalone" <?= ($clusterRole === 'standalone') ? 'selected' : '' ?>>Standalone (sin cluster)</option>
+                        <option value="master" <?= ($clusterRole === 'master') ? 'selected' : '' ?>>Master (crea y envia hostings)</option>
+                        <option value="slave" <?= ($clusterRole === 'slave') ? 'selected' : '' ?>>Slave (recibe hostings, solo lectura)</option>
+                    </select>
+                </div>
+                <div class="col-md-8">
+                    <div class="small mt-2">
+                        <?php if ($clusterRole === 'master'): ?>
+                            <span class="text-success"><i class="bi bi-check-circle me-1"></i>Los hostings creados aqui se replicaran a los nodos slave vinculados.</span>
+                        <?php elseif ($clusterRole === 'slave'): ?>
+                            <span class="text-info"><i class="bi bi-info-circle me-1"></i>La creacion de hostings esta bloqueada. Solo se reciben hostings del master.</span>
+                        <?php else: ?>
+                            <span class="text-muted"><i class="bi bi-dash-circle me-1"></i>No se sincronizan hostings. Cada servidor trabaja de forma independiente.</span>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="border-secondary">
+
             <!-- Token Local -->
             <h6 class="text-muted mb-2">Token Local</h6>
             <p class="small text-muted">Este token se usa para que otros nodos se conecten a este servidor.</p>
@@ -380,6 +435,198 @@
             <br>
             <button type="submit" class="btn btn-success">
                 <i class="bi bi-check-circle me-1"></i>Guardar Configuracion
+            </button>
+        </form>
+    </div>
+</div>
+
+<?php $fsConfig = \MuseDockPanel\Services\FileSyncService::getConfig(); ?>
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- CARD 6 — Sincronizacion de Archivos                         -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-arrow-repeat me-2"></i>Sincronizacion de Archivos</div>
+    <div class="card-body">
+        <form method="post" action="/settings/cluster/filesync-settings">
+            <?= View::csrf() ?>
+
+            <!-- Enable toggle -->
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" name="filesync_enabled" id="filesyncEnabled"
+                       <?= $fsConfig['enabled'] ? 'checked' : '' ?>>
+                <label class="form-check-label" for="filesyncEnabled">Activar sincronizacion automatica de archivos</label>
+            </div>
+
+            <!-- Method selector -->
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <label class="form-label">Metodo de sincronizacion</label>
+                    <select name="filesync_method" class="form-select" id="filesyncMethod">
+                        <option value="ssh" <?= $fsConfig['method'] === 'ssh' ? 'selected' : '' ?>>SSH (rsync)</option>
+                        <option value="https" <?= $fsConfig['method'] === 'https' ? 'selected' : '' ?>>HTTPS (API del panel)</option>
+                    </select>
+                </div>
+                <div class="col-md-8">
+                    <div class="small mt-4">
+                        <span class="text-muted" id="filesyncMethodDesc">
+                            <?php if ($fsConfig['method'] === 'ssh'): ?>
+                                rsync por SSH. Ideal para WireGuard (~5 MB/s). Requiere clave SSH.
+                            <?php else: ?>
+                                Archivos via API HTTPS. Mas rapido entre VPS (~24 MB/s). No requiere SSH.
+                            <?php endif; ?>
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <hr class="border-secondary">
+
+            <!-- SSH Settings (shown when method=ssh) -->
+            <div id="sshSettings" style="<?= $fsConfig['method'] !== 'ssh' ? 'display:none' : '' ?>">
+                <h6 class="text-muted mb-2">Configuracion SSH</h6>
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Puerto SSH</label>
+                        <input type="number" name="filesync_ssh_port" class="form-control"
+                               value="<?= $fsConfig['ssh_port'] ?>" min="1" max="65535">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Usuario SSH</label>
+                        <input type="text" name="filesync_ssh_user" class="form-control"
+                               value="<?= View::e($fsConfig['ssh_user']) ?>">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Ruta clave SSH</label>
+                        <div class="input-group">
+                            <input type="text" name="filesync_ssh_key_path" class="form-control font-monospace"
+                                   id="sshKeyPath" value="<?= View::e($fsConfig['ssh_key_path']) ?>">
+                            <button type="button" class="btn btn-outline-warning" onclick="generateSshKey()">
+                                <i class="bi bi-key me-1"></i>Generar
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Public key display -->
+                <div class="mb-3" id="sshPubKeyArea" style="display:none">
+                    <label class="form-label small text-muted">Clave publica (para copiar al slave):</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control font-monospace small" id="sshPubKeyDisplay" readonly>
+                        <button type="button" class="btn btn-outline-light" onclick="navigator.clipboard.writeText(document.getElementById('sshPubKeyDisplay').value)">
+                            <i class="bi bi-clipboard"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Per-node SSH actions -->
+                <?php if (!empty($nodes)): ?>
+                <div class="mb-3">
+                    <label class="form-label small text-muted">Acciones SSH por nodo:</label>
+                    <div class="d-flex flex-wrap gap-2">
+                        <?php foreach ($nodes as $node): ?>
+                        <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn btn-outline-info" onclick="installSshKeyOnNode(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                                <i class="bi bi-key me-1"></i><?= View::e($node['name']) ?>: Instalar clave
+                            </button>
+                            <button type="button" class="btn btn-outline-success" onclick="testSshNode(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                                <i class="bi bi-plug me-1"></i>Test SSH
+                            </button>
+                        </div>
+                        <?php endforeach; ?>
+                    </div>
+                    <div id="sshActionResult" class="mt-2 small"></div>
+                </div>
+                <?php endif; ?>
+
+                <hr class="border-secondary">
+            </div>
+
+            <!-- Common settings -->
+            <div class="row mb-3">
+                <div class="col-md-3">
+                    <label class="form-label">Intervalo (minutos)</label>
+                    <input type="number" name="filesync_interval" class="form-control"
+                           value="<?= $fsConfig['interval_minutes'] ?>" min="1" max="1440">
+                    <small class="text-muted">Cada cuantos minutos sincronizar</small>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Limite ancho de banda (KB/s)</label>
+                    <input type="number" name="filesync_bwlimit" class="form-control"
+                           value="<?= $fsConfig['bandwidth_limit'] ?>" min="0">
+                    <small class="text-muted">0 = sin limite</small>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Patrones a excluir</label>
+                    <input type="text" name="filesync_exclude" class="form-control"
+                           value="<?= View::e($fsConfig['exclude_patterns']) ?>">
+                    <small class="text-muted">Separados por coma</small>
+                </div>
+            </div>
+
+            <hr class="border-secondary">
+
+            <!-- SSL Certificates -->
+            <h6 class="text-muted mb-2">Certificados SSL</h6>
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" name="filesync_ssl_certs" id="filesyncSslCerts"
+                       <?= $fsConfig['sync_ssl_certs'] ? 'checked' : '' ?>>
+                <label class="form-check-label" for="filesyncSslCerts">Copiar certificados SSL del master al slave</label>
+            </div>
+            <div class="row mb-3">
+                <div class="col-md-6">
+                    <label class="form-label small text-muted">Ruta certificados Caddy (auto-detectada si vacio)</label>
+                    <input type="text" name="filesync_ssl_cert_path" class="form-control font-monospace"
+                           value="<?= View::e($fsConfig['ssl_cert_path']) ?>"
+                           placeholder="<?= View::e(\MuseDockPanel\Services\FileSyncService::findCaddyCertDir() ?: 'No detectado') ?>">
+                </div>
+            </div>
+            <p class="small text-muted mb-3">
+                <i class="bi bi-info-circle me-1"></i>
+                Opciones SSL para el slave: <strong>Copiar del master</strong> (recomendado),
+                <strong>Cloudflare DNS challenge</strong> (requiere token),
+                o <strong>certificados autofirmados</strong> de Caddy (temporal, warning en navegadores).
+            </p>
+
+            <hr class="border-secondary">
+
+            <!-- DB_HOST rewrite -->
+            <h6 class="text-muted mb-2">Proteccion de credenciales</h6>
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" name="filesync_rewrite_dbhost" id="filesyncRewriteDb"
+                       <?= $fsConfig['rewrite_db_host'] ? 'checked' : '' ?>>
+                <label class="form-check-label" for="filesyncRewriteDb">
+                    Reescribir DB_HOST a <code>localhost</code> en .env y wp-config.php del slave
+                </label>
+            </div>
+            <p class="small text-muted mb-3">
+                <i class="bi bi-shield-check me-1"></i>
+                Evita que las apps del slave intenten conectar a la BD del master. Cambia automaticamente DB_HOST a localhost
+                en archivos .env (Laravel) y wp-config.php (WordPress) al recibir archivos.
+            </p>
+
+            <!-- Check DB_HOST button -->
+            <button type="button" class="btn btn-outline-warning btn-sm mb-3" onclick="checkDbHost()">
+                <i class="bi bi-search me-1"></i>Verificar DB_HOST en todos los hostings
+            </button>
+            <div id="dbhostCheckResult" class="mb-3"></div>
+
+            <hr class="border-secondary">
+
+            <!-- Manual sync buttons -->
+            <?php if (!empty($nodes) && $clusterRole === 'master'): ?>
+            <h6 class="text-muted mb-2">Sincronizacion manual de archivos</h6>
+            <div class="d-flex flex-wrap gap-2 mb-3">
+                <?php foreach ($nodes as $node): ?>
+                <button type="button" class="btn btn-outline-success btn-sm" onclick="syncFilesNow(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                    <i class="bi bi-arrow-repeat me-1"></i>Sync archivos a <?= View::e($node['name']) ?>
+                </button>
+                <?php endforeach; ?>
+            </div>
+            <div id="syncFilesResult" class="mb-3"></div>
+            <?php endif; ?>
+
+            <button type="submit" class="btn btn-success">
+                <i class="bi bi-check-circle me-1"></i>Guardar Configuracion de Archivos
             </button>
         </form>
     </div>
@@ -466,6 +713,12 @@
 <form method="post" id="form-remove-node" style="display:none;">
     <?= View::csrf() ?>
     <input type="hidden" name="node_id" id="remove-node-id">
+</form>
+
+<!-- Hidden form for sync-all-hostings -->
+<form method="post" action="/settings/cluster/sync-all-hostings" id="form-sync-all" style="display:none;">
+    <?= View::csrf() ?>
+    <input type="hidden" name="node_id" id="sync-all-node-id">
 </form>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
@@ -688,6 +941,27 @@ function confirmDemoteCluster() {
     });
 }
 
+function confirmSyncAll(nodeId, nodeName) {
+    Swal.fire({
+        title: 'Sincronizar todos los hostings',
+        html: 'Se encolaran <strong>todos los hostings existentes</strong> para ser creados en el nodo <strong>' + nodeName + '</strong>.<br><br>' +
+              'Esto creara la estructura (usuario Linux, pool FPM, ruta Caddy) en el nodo remoto.<br><br>' +
+              '<span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Si los hostings ya existen en el nodo, se intentaran crear de nuevo (pueden dar error).</span>',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Si, sincronizar todo',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#22c55e',
+        background: '#1e1e2e',
+        color: '#fff',
+    }).then(function(result) {
+        if (result.isConfirmed) {
+            document.getElementById('sync-all-node-id').value = nodeId;
+            document.getElementById('form-sync-all').submit();
+        }
+    });
+}
+
 function confirmCleanQueue(form) {
     Swal.fire({
         title: 'Limpiar cola',
@@ -714,6 +988,236 @@ function copyLocalToken() {
             title: 'Token copiado', showConfirmButton: false, timer: 1500,
             background: '#1e1e2e', color: '#fff'
         });
+    });
+}
+
+// ─── File Sync Functions ─────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', function() {
+    const methodSelect = document.getElementById('filesyncMethod');
+    const descEl = document.getElementById('filesyncMethodDesc');
+    if (methodSelect) {
+        methodSelect.addEventListener('change', function() {
+            const sshSection = document.getElementById('sshSettings');
+            if (sshSection) {
+                sshSection.style.display = this.value === 'ssh' ? '' : 'none';
+            }
+            if (descEl) {
+                descEl.textContent = this.value === 'ssh'
+                    ? 'Usa rsync sobre SSH. Mas rapido para sincronizaciones incrementales.'
+                    : 'Usa la API HTTPS del panel. No requiere SSH, funciona a traves de NAT.';
+            }
+        });
+    }
+});
+
+function generateSshKey() {
+    const csrf = document.querySelector('[name=_csrf_token]').value;
+    Swal.fire({
+        title: 'Generar clave SSH',
+        text: 'Se generara un nuevo par de claves SSH ed25519. Si ya existe una, sera reemplazada.',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Generar',
+        cancelButtonText: 'Cancelar',
+        background: '#1e1e2e',
+        color: '#fff',
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+
+        fetch('/settings/cluster/generate-ssh-key', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: '_csrf_token=' + encodeURIComponent(csrf)
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                const keyArea = document.getElementById('sshPubKeyArea');
+                const keyEl = document.getElementById('sshPubKeyDisplay');
+                if (keyEl) keyEl.value = data.public_key || '';
+                if (keyArea) keyArea.style.display = '';
+                Swal.fire({
+                    toast: true, position: 'top-end', icon: 'success',
+                    title: 'Clave SSH generada correctamente',
+                    showConfirmButton: false, timer: 2000,
+                    background: '#1e1e2e', color: '#fff'
+                });
+            } else {
+                Swal.fire({ title: 'Error', text: data.error || 'Error al generar la clave', icon: 'error', background: '#1e1e2e', color: '#fff' });
+            }
+        })
+        .catch(function() {
+            Swal.fire({ title: 'Error', text: 'Error de conexion', icon: 'error', background: '#1e1e2e', color: '#fff' });
+        });
+    });
+}
+
+function installSshKeyOnNode(nodeId, nodeName) {
+    const csrf = document.querySelector('[name=_csrf_token]').value;
+    Swal.fire({
+        title: 'Instalar clave SSH',
+        html: 'Se instalara la clave publica de este servidor en <strong>' + nodeName + '</strong> para permitir conexiones rsync.',
+        icon: 'info',
+        showCancelButton: true,
+        confirmButtonText: 'Instalar',
+        cancelButtonText: 'Cancelar',
+        background: '#1e1e2e',
+        color: '#fff',
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+
+        Swal.fire({
+            title: 'Instalando clave SSH...',
+            allowOutsideClick: false, allowEscapeKey: false,
+            didOpen: () => Swal.showLoading(),
+            background: '#1e1e2e', color: '#fff'
+        });
+
+        const formData = new FormData();
+        formData.append('node_id', nodeId);
+        formData.append('_csrf_token', csrf);
+
+        fetch('/settings/cluster/install-ssh-key', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                Swal.fire({ title: 'OK', text: data.message || 'Clave instalada en ' + nodeName, icon: 'success', background: '#1e1e2e', color: '#fff' });
+            } else {
+                Swal.fire({ title: 'Error', text: data.error || 'Error al instalar la clave', icon: 'error', background: '#1e1e2e', color: '#fff' });
+            }
+        })
+        .catch(function() {
+            Swal.fire({ title: 'Error', text: 'Error de conexion', icon: 'error', background: '#1e1e2e', color: '#fff' });
+        });
+    });
+}
+
+function testSshNode(nodeId, nodeName) {
+    const csrf = document.querySelector('[name=_csrf_token]').value;
+
+    Swal.fire({
+        title: 'Probando SSH a ' + nodeName + '...',
+        allowOutsideClick: false, allowEscapeKey: false,
+        didOpen: () => Swal.showLoading(),
+        background: '#1e1e2e', color: '#fff'
+    });
+
+    const formData = new FormData();
+    formData.append('node_id', nodeId);
+    formData.append('_csrf_token', csrf);
+
+    fetch('/settings/cluster/test-ssh', { method: 'POST', body: formData })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            Swal.fire({ title: 'Conexion SSH OK', html: '<pre class="text-start">' + (data.output || 'OK') + '</pre>', icon: 'success', background: '#1e1e2e', color: '#fff' });
+        } else {
+            Swal.fire({ title: 'Fallo SSH', html: '<pre class="text-start text-danger">' + (data.error || 'Error desconocido') + '</pre>', icon: 'error', background: '#1e1e2e', color: '#fff' });
+        }
+    })
+    .catch(function() {
+        Swal.fire({ title: 'Error', text: 'Error de conexion', icon: 'error', background: '#1e1e2e', color: '#fff' });
+    });
+}
+
+function syncFilesNow(nodeId, nodeName) {
+    const csrf = document.querySelector('[name=_csrf_token]').value;
+
+    Swal.fire({
+        title: 'Sincronizar archivos a ' + nodeName,
+        html: 'Se sincronizaran los archivos de <strong>todos los hostings activos</strong> al nodo seleccionado.<br><br>' +
+              '<span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Esto puede tardar varios minutos dependiendo del volumen de datos.</span>',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Sincronizar ahora',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#22c55e',
+        background: '#1e1e2e',
+        color: '#fff',
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+
+        Swal.fire({
+            title: 'Sincronizando archivos...',
+            html: 'Enviando archivos a <strong>' + nodeName + '</strong>. Por favor espere...',
+            allowOutsideClick: false, allowEscapeKey: false,
+            didOpen: () => Swal.showLoading(),
+            background: '#1e1e2e', color: '#fff'
+        });
+
+        const formData = new FormData();
+        formData.append('node_id', nodeId);
+        formData.append('_csrf_token', csrf);
+
+        fetch('/settings/cluster/sync-files-now', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                let html = '<strong>Resultado:</strong><br>';
+                html += 'OK: ' + (data.ok_count || 0) + ' | Fallidos: ' + (data.fail_count || 0);
+                if (data.details && data.details.length) {
+                    html += '<br><br><div class="text-start" style="max-height:200px;overflow-y:auto;font-size:0.85rem;">';
+                    data.details.forEach(function(d) {
+                        const icon = d.ok ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-x-circle text-danger"></i>';
+                        html += icon + ' ' + d.domain + (d.error ? ' — ' + d.error : '') + '<br>';
+                    });
+                    html += '</div>';
+                }
+                Swal.fire({ title: 'Sincronizacion completada', html: html, icon: 'success', background: '#1e1e2e', color: '#fff' });
+            } else {
+                Swal.fire({ title: 'Error', text: data.error || 'Error al sincronizar', icon: 'error', background: '#1e1e2e', color: '#fff' });
+            }
+        })
+        .catch(function() {
+            Swal.fire({ title: 'Error', text: 'Error de conexion', icon: 'error', background: '#1e1e2e', color: '#fff' });
+        });
+    });
+}
+
+function checkDbHost() {
+    const csrf = document.querySelector('[name=_csrf_token]').value;
+
+    Swal.fire({
+        title: 'Verificando DB_HOST...',
+        html: 'Escaneando archivos .env y wp-config.php de todos los hostings...',
+        allowOutsideClick: false, allowEscapeKey: false,
+        didOpen: () => Swal.showLoading(),
+        background: '#1e1e2e', color: '#fff'
+    });
+
+    fetch('/settings/cluster/check-dbhost', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: '_csrf_token=' + encodeURIComponent(csrf)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.ok) {
+            const results = data.results || [];
+            let html = '';
+            if (results.length === 0) {
+                html = '<div class="text-success"><i class="bi bi-check-circle me-1"></i>Todos los hostings usan localhost como DB_HOST.</div>';
+            } else {
+                html = '<div class="text-warning mb-2"><i class="bi bi-exclamation-triangle me-1"></i>' + results.length + ' hosting(s) con DB_HOST remoto:</div>';
+                html += '<div class="text-start" style="max-height:300px;overflow-y:auto;font-size:0.85rem;">';
+                results.forEach(function(r) {
+                    html += '<div class="mb-2 p-2" style="background:#2a2a3e;border-radius:4px;">';
+                    html += '<strong>' + r.domain + '</strong><br>';
+                    (r.files || []).forEach(function(f) {
+                        html += '<code>' + f.file + '</code>: <span class="text-warning">' + f.db_host + '</span><br>';
+                    });
+                    html += '</div>';
+                });
+                html += '</div>';
+            }
+            Swal.fire({ title: 'Resultado DB_HOST', html: html, icon: results.length ? 'warning' : 'success', background: '#1e1e2e', color: '#fff', width: 600 });
+        } else {
+            Swal.fire({ title: 'Error', text: data.error || 'Error al verificar', icon: 'error', background: '#1e1e2e', color: '#fff' });
+        }
+    })
+    .catch(function() {
+        Swal.fire({ title: 'Error', text: 'Error de conexion', icon: 'error', background: '#1e1e2e', color: '#fff' });
     });
 }
 

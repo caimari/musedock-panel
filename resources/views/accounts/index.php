@@ -1,10 +1,22 @@
-<?php use MuseDockPanel\View; ?>
+<?php
+use MuseDockPanel\View;
+$clusterRole = \MuseDockPanel\Settings::get('cluster_role', 'standalone');
+?>
+
+<?php if ($clusterRole === 'slave'): ?>
+<div class="alert alert-info d-flex align-items-center mb-3">
+    <i class="bi bi-info-circle me-2"></i>
+    Este servidor es <strong class="ms-1">Slave</strong>. La creacion de hostings esta deshabilitada. Los hostings se reciben del servidor Master.
+</div>
+<?php endif; ?>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div></div>
     <div class="d-flex gap-2">
+        <?php if ($clusterRole !== 'slave'): ?>
         <a href="/accounts/import" class="btn btn-outline-light btn-sm"><i class="bi bi-box-arrow-in-down me-1"></i>Importar Existente</a>
         <a href="/accounts/create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i> New Account</a>
+        <?php endif; ?>
     </div>
 </div>
 
