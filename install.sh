@@ -795,47 +795,155 @@ if [ "$REPAIR_MODE" = true ]; then
     echo ""
     echo -e "  ${CYAN}$(t repair_check_db)${NC}"
     DB_WORKING_PORT=""
-    # Try configured port first, then 5433, then 5432
-    for TRY_PORT in "${DB_PORT}" 5433 5432; do
+
+    # 4a. Check if PostgreSQL service is running
+    PG_SERVICE_ACTIVE=$(timeout 3 systemctl is-active postgresql 2>/dev/null || echo "inactive")
+    if [ "$PG_SERVICE_ACTIVE" != "active" ]; then
+        warn "PostgreSQL no esta corriendo — intentando iniciar..."
+        systemctl start postgresql 2>/dev/null
+        sleep 3
+        PG_SERVICE_ACTIVE=$(timeout 3 systemctl is-active postgresql 2>/dev/null || echo "inactive")
+        if [ "$PG_SERVICE_ACTIVE" = "active" ]; then
+            ok "PostgreSQL iniciado — $(t repair_fixed)"
+            REPAIR_FIXED=$((REPAIR_FIXED + 1))
+        else
+            echo -e "  ${RED}✗ No se pudo iniciar PostgreSQL${NC}"
+            echo -e "    ${YELLOW}Revisa: systemctl status postgresql${NC}"
+        fi
+    else
+        ok "PostgreSQL servicio activo"
+    fi
+
+    # 4b. Detect actual listening ports
+    PG_PORTS=$(ss -tlnp 2>/dev/null | grep postgres | grep -oP ':\K\d+' | sort -u)
+    if [ -n "$PG_PORTS" ]; then
+        echo -e "    PostgreSQL escucha en puertos: $(echo $PG_PORTS | tr '\n' ' ')"
+    fi
+
+    # 4c. Try to connect — configured port first, then detected ports, then defaults
+    ALL_PORTS=$(echo -e "${DB_PORT}\n${PG_PORTS}\n5433\n5432" | sort -u)
+    LAST_DB_ERROR=""
+    for TRY_PORT in $ALL_PORTS; do
+        [ -z "$TRY_PORT" ] && continue
         DB_CHECK=$(PGPASSWORD="${DB_PASS}" timeout 5 psql -U "${DB_USER}" -h 127.0.0.1 -p "${TRY_PORT}" -d "${DB_NAME}" -tAc "SELECT 1;" 2>&1)
         if [ "$DB_CHECK" = "1" ]; then
             DB_WORKING_PORT="$TRY_PORT"
             ok "$(t repair_db_ok) (puerto ${TRY_PORT})"
             break
+        else
+            LAST_DB_ERROR="$DB_CHECK"
         fi
     done
+
     if [ -z "$DB_WORKING_PORT" ]; then
         echo -e "  ${RED}✗ $(t repair_db_fail)${NC}"
-        echo -e "    ${RED}Probados puertos: ${DB_PORT}, 5433, 5432${NC}"
-        echo -e "    ${RED}Ultimo error: ${DB_CHECK}${NC}"
-        # Check if PostgreSQL is running at all
-        PG_RUNNING=$(ss -tlnp 2>/dev/null | grep postgres | head -3)
-        if [ -n "$PG_RUNNING" ]; then
-            echo -e "    ${YELLOW}PostgreSQL escucha en:${NC}"
-            echo "$PG_RUNNING" | while read -r pgline; do
-                PG_PORT=$(echo "$pgline" | grep -oP ':\K\d+' | head -1)
-                echo -e "    ${YELLOW}  puerto $PG_PORT${NC}"
-            done
-        else
-            echo -e "    ${YELLOW}PostgreSQL no esta corriendo. Intentando iniciar...${NC}"
-            systemctl start postgresql 2>/dev/null
-            sleep 2
-            if systemctl is-active --quiet postgresql 2>/dev/null; then
-                ok "PostgreSQL iniciado — reintentando conexion"
-                for TRY_PORT in "${DB_PORT}" 5433 5432; do
-                    DB_CHECK=$(PGPASSWORD="${DB_PASS}" timeout 5 psql -U "${DB_USER}" -h 127.0.0.1 -p "${TRY_PORT}" -d "${DB_NAME}" -tAc "SELECT 1;" 2>&1)
-                    if [ "$DB_CHECK" = "1" ]; then
-                        DB_WORKING_PORT="$TRY_PORT"
-                        ok "$(t repair_db_ok) (puerto ${TRY_PORT}) — $(t repair_fixed)"
-                        REPAIR_FIXED=$((REPAIR_FIXED + 1))
-                        break
-                    fi
-                done
-            fi
-            if [ -z "$DB_WORKING_PORT" ]; then
-                REPAIR_FAILED=$((REPAIR_FAILED + 1))
+        echo -e "    ${RED}Error: ${LAST_DB_ERROR}${NC}"
+
+        # 4d. Diagnose: check pg_hba.conf for md5/scram auth on localhost
+        PG_VERSION=$(ls /etc/postgresql/ 2>/dev/null | sort -V | tail -1)
+        if [ -n "$PG_VERSION" ]; then
+            PG_HBA="/etc/postgresql/${PG_VERSION}/main/pg_hba.conf"
+            if [ -f "$PG_HBA" ]; then
+                HBA_LOCAL=$(grep -v '^#' "$PG_HBA" | grep -E '127\.0\.0\.1|localhost' | head -3)
+                if [ -n "$HBA_LOCAL" ]; then
+                    echo -e "    ${YELLOW}pg_hba.conf (localhost):${NC}"
+                    echo "$HBA_LOCAL" | while read -r hbaline; do
+                        echo -e "    ${YELLOW}  $hbaline${NC}"
+                    done
+                fi
+                # Check if panel user has access
+                if ! grep -v '^#' "$PG_HBA" | grep -qE "${DB_USER}|all.*all.*127"; then
+                    echo -e "    ${YELLOW}El usuario '${DB_USER}' puede no tener acceso en pg_hba.conf${NC}"
+                    echo -e "    ${YELLOW}Añadiendo regla de acceso...${NC}"
+                    # Add access rule before the first line
+                    sed -i "1i host    ${DB_NAME}    ${DB_USER}    127.0.0.1/32    md5" "$PG_HBA"
+                    # Reload PostgreSQL
+                    systemctl reload postgresql 2>/dev/null
+                    sleep 2
+                    # Retry connection
+                    for TRY_PORT in $ALL_PORTS; do
+                        [ -z "$TRY_PORT" ] && continue
+                        DB_CHECK=$(PGPASSWORD="${DB_PASS}" timeout 5 psql -U "${DB_USER}" -h 127.0.0.1 -p "${TRY_PORT}" -d "${DB_NAME}" -tAc "SELECT 1;" 2>&1)
+                        if [ "$DB_CHECK" = "1" ]; then
+                            DB_WORKING_PORT="$TRY_PORT"
+                            ok "$(t repair_db_ok) (puerto ${TRY_PORT}) — pg_hba.conf $(t repair_fixed)"
+                            REPAIR_FIXED=$((REPAIR_FIXED + 1))
+                            break
+                        fi
+                    done
+                fi
             fi
         fi
+
+        if [ -z "$DB_WORKING_PORT" ]; then
+            echo -e "    ${YELLOW}Credenciales en .env: usuario=${DB_USER}, bd=${DB_NAME}, puerto=${DB_PORT}${NC}"
+            REPAIR_FAILED=$((REPAIR_FAILED + 1))
+        fi
+    fi
+
+    # --- 4e. Check firewall doesn't block localhost ---
+    echo ""
+    echo -e "  ${CYAN}Verificando firewall (acceso localhost)${NC}"
+    FW_ISSUES=0
+
+    # Check iptables
+    if command -v iptables &>/dev/null; then
+        IPT_POLICY=$(iptables -L INPUT -n 2>/dev/null | head -1 | grep -oP 'policy \K\w+' || echo "ACCEPT")
+        if [ "$IPT_POLICY" = "DROP" ]; then
+            # Check if loopback (lo) is accepted
+            LO_ACCEPT=$(iptables -L INPUT -n -v 2>/dev/null | grep -E 'ACCEPT.*lo\b' | head -1)
+            if [ -z "$LO_ACCEPT" ]; then
+                warn "iptables: politica DROP sin regla para loopback (lo)"
+                echo -e "    ${YELLOW}Añadiendo: iptables -I INPUT 1 -i lo -j ACCEPT${NC}"
+                iptables -I INPUT 1 -i lo -j ACCEPT 2>/dev/null
+                ok "$(t repair_fixed) — loopback permitido"
+                REPAIR_FIXED=$((REPAIR_FIXED + 1))
+                FW_ISSUES=$((FW_ISSUES + 1))
+            else
+                ok "iptables: loopback (lo) permitido"
+            fi
+
+            # Check if panel port 8444 is accessible (from anywhere or specific IPs)
+            PANEL_RULE=$(iptables -L INPUT -n 2>/dev/null | grep -E "ACCEPT.*(dpt:${PANEL_PORT}|dpt:${PANEL_INTERNAL_PORT})" | head -1)
+            PANEL_ALL=$(iptables -L INPUT -n 2>/dev/null | grep -E "ACCEPT.*0\.0\.0\.0/0.*0\.0\.0\.0/0" | grep -v ctstate | head -1)
+            if [ -z "$PANEL_RULE" ] && [ -z "$PANEL_ALL" ]; then
+                # Check if any IP-specific rule could cover it
+                PANEL_COVERED=$(iptables -L INPUT -n 2>/dev/null | grep "ACCEPT" | grep -v ctstate | grep -v "dpt:" | head -1)
+                if [ -z "$PANEL_COVERED" ]; then
+                    warn "iptables: puerto ${PANEL_PORT} del panel podria estar bloqueado"
+                    echo -e "    ${YELLOW}Las IPs que necesiten acceso al panel deben tener reglas ACCEPT${NC}"
+                    FW_ISSUES=$((FW_ISSUES + 1))
+                fi
+            fi
+
+            # Check critical ports: PostgreSQL
+            for CHECK_PORT in 5432 5433; do
+                PG_LISTEN=$(ss -tlnp 2>/dev/null | grep ":${CHECK_PORT}\b" | head -1)
+                if [ -n "$PG_LISTEN" ]; then
+                    # PG listens on this port — check it's not blocked for localhost via lo
+                    # If loopback is allowed (which we ensured above), localhost is fine
+                    ok "Puerto ${CHECK_PORT} (PostgreSQL) — accesible via loopback"
+                fi
+            done
+        else
+            ok "iptables: politica ${IPT_POLICY} — sin restricciones"
+        fi
+    fi
+
+    # Check UFW
+    UFW_STATUS=$(timeout 3 ufw status 2>/dev/null | head -1 || echo "")
+    if echo "$UFW_STATUS" | grep -qi "active"; then
+        ok "UFW: activo"
+        # Check if panel port is allowed
+        UFW_PANEL=$(ufw status 2>/dev/null | grep -E "${PANEL_PORT}" | head -1)
+        if [ -z "$UFW_PANEL" ]; then
+            warn "UFW: puerto ${PANEL_PORT} del panel no tiene regla explicita"
+            FW_ISSUES=$((FW_ISSUES + 1))
+        fi
+    fi
+
+    if [ "$FW_ISSUES" -eq 0 ]; then
+        ok "Firewall: sin problemas detectados"
     fi
 
     # --- 5. Run schema + migrations (safe, only if DB is accessible) ---
