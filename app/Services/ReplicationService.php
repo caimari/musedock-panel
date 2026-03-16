@@ -2,6 +2,7 @@
 namespace MuseDockPanel\Services;
 
 use MuseDockPanel\Settings;
+use MuseDockPanel\Database;
 use MuseDockPanel\Env;
 
 class ReplicationService
@@ -35,7 +36,6 @@ class ReplicationService
     {
         $out = trim((string)shell_exec('psql --version 2>/dev/null'));
         if (preg_match('/(\d+)\./', $out, $m)) return $m[1];
-        // Try pg_lsclusters
         $clusters = trim((string)shell_exec('pg_lsclusters -h 2>/dev/null'));
         if ($clusters && preg_match('/^(\d+)\s/', $clusters, $m)) return $m[1];
         return null;
@@ -109,10 +109,51 @@ class ReplicationService
         }
     }
 
+    // ─── Dual IP / Fallback Connection Test ──────────────────
+    public static function testConnectionWithFallback(string $engine, string $primaryIp, string $fallbackIp, int $port, string $user, string $pass): array
+    {
+        $testFn = $engine === 'pg' ? 'testPgConnection' : 'testMysqlConnection';
+
+        // Try primary first
+        $result = static::$testFn($primaryIp, $port, $user, $pass);
+        if ($result['ok']) {
+            return [
+                'ok' => true,
+                'connected_via' => 'primary',
+                'ip' => $primaryIp,
+                'version' => $result['version'],
+                'error' => '',
+            ];
+        }
+
+        $primaryError = $result['error'];
+
+        // Try fallback if available
+        if ($fallbackIp !== '') {
+            $result = static::$testFn($fallbackIp, $port, $user, $pass);
+            if ($result['ok']) {
+                return [
+                    'ok' => true,
+                    'connected_via' => 'fallback',
+                    'ip' => $fallbackIp,
+                    'version' => $result['version'],
+                    'error' => '',
+                ];
+            }
+        }
+
+        return [
+            'ok' => false,
+            'connected_via' => 'none',
+            'ip' => '',
+            'version' => '',
+            'error' => "Primaria: {$primaryError}" . ($fallbackIp ? " | Fallback: {$result['error']}" : ''),
+        ];
+    }
+
     // ─── Local MySQL PDO ─────────────────────────────────────
     public static function getMysqlPdo(): ?\PDO
     {
-        // Try socket auth first
         $socketPaths = ['/var/run/mysqld/mysqld.sock', '/tmp/mysql.sock'];
         foreach ($socketPaths as $sock) {
             if (file_exists($sock)) {
@@ -123,7 +164,6 @@ class ReplicationService
                 } catch (\Throwable) {}
             }
         }
-        // Fallback: read from debian.cnf
         if (file_exists('/etc/mysql/debian.cnf')) {
             $conf = parse_ini_file('/etc/mysql/debian.cnf', true);
             $section = $conf['client'] ?? [];
@@ -135,7 +175,6 @@ class ReplicationService
                 ]);
             } catch (\Throwable) {}
         }
-        // Fallback: env vars
         $mysqlUser = Env::get('MYSQL_ROOT_USER', 'root');
         $mysqlPass = Env::get('MYSQL_ROOT_PASS', '');
         try {
@@ -173,9 +212,7 @@ class ReplicationService
         foreach ($lines as $line) {
             $trimmed = trim($line);
 
-            // Track [section] headers
             if (preg_match('/^\[(.+)]$/', $trimmed, $m)) {
-                // Append remaining keys before leaving current section
                 if ($inSection && !empty($remaining)) {
                     foreach ($remaining as $k => $v) {
                         $modified[] = "{$k} = {$v}";
@@ -187,7 +224,6 @@ class ReplicationService
 
             if ($inSection) {
                 foreach ($remaining as $key => $value) {
-                    // Match: key = ..., #key = ..., # key = ...
                     if (preg_match('/^[#;\s]*' . preg_quote($key, '/') . '\s*[=:]/', $trimmed)) {
                         $line = "{$key} = {$value}";
                         unset($remaining[$key]);
@@ -199,7 +235,6 @@ class ReplicationService
             $modified[] = $line;
         }
 
-        // Append remaining at end of file (or section)
         foreach ($remaining as $k => $v) {
             $modified[] = "{$k} = {$v}";
         }
@@ -207,7 +242,130 @@ class ReplicationService
         return file_put_contents($path, implode("\n", $modified) . "\n") !== false;
     }
 
-    // ─── Setup Master ────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════
+    // ─── Multi-Slave CRUD ─────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    public static function getSlaves(): array
+    {
+        try {
+            return Database::fetchAll("SELECT * FROM replication_slaves ORDER BY name ASC");
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    public static function getSlave(int $id): ?array
+    {
+        try {
+            return Database::fetchOne("SELECT * FROM replication_slaves WHERE id = :id", ['id' => $id]);
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    public static function addSlave(array $data): int
+    {
+        $insert = [
+            'name'                => $data['name'] ?? '',
+            'primary_ip'          => $data['primary_ip'] ?? '',
+            'fallback_ip'         => $data['fallback_ip'] ?? '',
+            'pg_port'             => (int)($data['pg_port'] ?? 5432),
+            'pg_user'             => $data['pg_user'] ?? 'replicator',
+            'pg_pass'             => !empty($data['pg_pass']) ? static::encryptPassword($data['pg_pass']) : '',
+            'mysql_port'          => (int)($data['mysql_port'] ?? 3306),
+            'mysql_user'          => $data['mysql_user'] ?? 'repl_user',
+            'mysql_pass'          => !empty($data['mysql_pass']) ? static::encryptPassword($data['mysql_pass']) : '',
+            'pg_enabled'          => !empty($data['pg_enabled']) ? true : false,
+            'mysql_enabled'       => !empty($data['mysql_enabled']) ? true : false,
+            'pg_sync_mode'        => $data['pg_sync_mode'] ?? 'async',
+            'pg_repl_type'        => $data['pg_repl_type'] ?? 'physical',
+            'pg_logical_databases'=> $data['pg_logical_databases'] ?? '',
+            'mysql_gtid_enabled'  => !empty($data['mysql_gtid_enabled']) ? true : false,
+            'status'              => 'pending',
+            'active_connection'   => 'primary',
+        ];
+
+        return Database::insert('replication_slaves', $insert);
+    }
+
+    public static function updateSlave(int $id, array $data): void
+    {
+        $update = [
+            'name'                => $data['name'] ?? '',
+            'primary_ip'          => $data['primary_ip'] ?? '',
+            'fallback_ip'         => $data['fallback_ip'] ?? '',
+            'pg_port'             => (int)($data['pg_port'] ?? 5432),
+            'pg_user'             => $data['pg_user'] ?? 'replicator',
+            'mysql_port'          => (int)($data['mysql_port'] ?? 3306),
+            'mysql_user'          => $data['mysql_user'] ?? 'repl_user',
+            'pg_enabled'          => !empty($data['pg_enabled']) ? true : false,
+            'mysql_enabled'       => !empty($data['mysql_enabled']) ? true : false,
+            'pg_sync_mode'        => $data['pg_sync_mode'] ?? 'async',
+            'pg_repl_type'        => $data['pg_repl_type'] ?? 'physical',
+            'pg_logical_databases'=> $data['pg_logical_databases'] ?? '',
+            'mysql_gtid_enabled'  => !empty($data['mysql_gtid_enabled']) ? true : false,
+            'updated_at'          => date('Y-m-d H:i:s'),
+        ];
+
+        // Only update passwords if provided
+        if (!empty($data['pg_pass'])) {
+            $update['pg_pass'] = static::encryptPassword($data['pg_pass']);
+        }
+        if (!empty($data['mysql_pass'])) {
+            $update['mysql_pass'] = static::encryptPassword($data['mysql_pass']);
+        }
+
+        Database::update('replication_slaves', $update, 'id = :id', ['id' => $id]);
+    }
+
+    public static function removeSlave(int $id): void
+    {
+        $slave = static::getSlave($id);
+        if (!$slave) return;
+
+        // Remove pg_hba entries for this slave
+        $configDir = static::getPgConfigDir();
+        $hbaConf = "{$configDir}/pg_hba.conf";
+        if (file_exists($hbaConf)) {
+            $content = file_get_contents($hbaConf);
+            $ips = array_filter([$slave['primary_ip'], $slave['fallback_ip'] ?? '']);
+            foreach ($ips as $ip) {
+                $content = preg_replace('/^.*' . preg_quote($ip, '/') . '\/32.*$/m', '', $content);
+            }
+            $content = preg_replace('/\n{3,}/', "\n\n", $content);
+            file_put_contents($hbaConf, $content);
+        }
+
+        // Drop MySQL replication users for this slave
+        try {
+            $pdo = static::getMysqlPdo();
+            if ($pdo) {
+                $safeUser = preg_replace('/[^a-zA-Z0-9_]/', '', $slave['mysql_user'] ?? 'repl_user');
+                $ips = array_filter([$slave['primary_ip'], $slave['fallback_ip'] ?? '']);
+                foreach ($ips as $ip) {
+                    $pdo->exec("DROP USER IF EXISTS '{$safeUser}'@'{$ip}'");
+                }
+                $pdo->exec("FLUSH PRIVILEGES");
+            }
+        } catch (\Throwable) {}
+
+        Database::delete('replication_slaves', 'id = :id', ['id' => $id]);
+    }
+
+    public static function updateSlaveStatus(int $id, string $status, string $activeConnection = ''): void
+    {
+        $update = ['status' => $status, 'updated_at' => date('Y-m-d H:i:s')];
+        if ($activeConnection !== '') {
+            $update['active_connection'] = $activeConnection;
+        }
+        Database::update('replication_slaves', $update, 'id = :id', ['id' => $id]);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Setup Master (single slave — legacy) ────────────────
+    // ═══════════════════════════════════════════════════════════
+
     public static function setupPgMaster(string $slaveIp, string $replUser, string $replPass): array
     {
         $steps = [];
@@ -219,20 +377,19 @@ class ReplicationService
             return ['ok' => false, 'steps' => [], 'error' => "postgresql.conf no encontrado en {$configDir}"];
         }
 
-        // Backup
         static::backupFile($pgConf);
         static::backupFile($hbaConf);
         $steps[] = ['name' => 'Backup configuracion', 'ok' => true, 'output' => 'OK'];
 
-        // Detect PG version for wal_keep param
         $pgVer = (int)(static::detectPgVersion() ?? '16');
         $walKeepParam = $pgVer >= 13 ? 'wal_keep_size' : 'wal_keep_segments';
         $walKeepValue = $pgVer >= 13 ? '512MB' : '64';
 
-        // Modify postgresql.conf
+        $walLevel = Settings::get('repl_pg_wal_level', 'replica');
+
         $ok = static::modifyConfigFile($pgConf, [
-            'wal_level'         => 'replica',
-            'max_wal_senders'   => '5',
+            'wal_level'         => $walLevel,
+            'max_wal_senders'   => '10',
             $walKeepParam       => $walKeepValue,
             'hot_standby'       => 'on',
             'listen_addresses'  => "'*'",
@@ -240,23 +397,19 @@ class ReplicationService
         $steps[] = ['name' => 'Modificar postgresql.conf', 'ok' => $ok, 'output' => $ok ? 'OK' : 'Error escribiendo'];
         if (!$ok) return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo modificar postgresql.conf'];
 
-        // Add pg_hba.conf entry
-        $escapedIp = escapeshellarg($slaveIp);
         $hbaLine = "host    replication     {$replUser}     {$slaveIp}/32     md5";
         $existing = file_get_contents($hbaConf);
         if (!str_contains($existing, $hbaLine)) {
             file_put_contents($hbaConf, $existing . "\n{$hbaLine}\n");
         }
-        $steps[] = ['name' => 'Añadir entrada pg_hba.conf', 'ok' => true, 'output' => $hbaLine];
+        $steps[] = ['name' => 'Anadir entrada pg_hba.conf', 'ok' => true, 'output' => $hbaLine];
 
-        // Create replication user
         $safeUser = preg_replace('/[^a-zA-Z0-9_]/', '', $replUser);
         $safePass = escapeshellarg($replPass);
         $sql = "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{$safeUser}') THEN CREATE ROLE {$safeUser} WITH REPLICATION LOGIN PASSWORD {$safePass}; END IF; END \$\$;";
         $output = shell_exec("sudo -u postgres psql -c " . escapeshellarg($sql) . " 2>&1");
         $steps[] = ['name' => 'Crear usuario replicacion', 'ok' => true, 'output' => trim($output ?? 'OK')];
 
-        // Restart PostgreSQL
         $output = shell_exec("systemctl restart postgresql 2>&1");
         $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
         $steps[] = ['name' => 'Reiniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
@@ -270,27 +423,23 @@ class ReplicationService
         $configPath = static::getMysqlConfigPath();
         $service = static::detectMysqlServiceName();
 
-        // Backup
         static::backupFile($configPath);
         $steps[] = ['name' => 'Backup configuracion MySQL', 'ok' => true, 'output' => 'OK'];
 
-        // Generate server-id from IP
         $localIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
         $parts = explode('.', $localIp);
         $serverId = (int)($parts[3] ?? 1);
         if ($serverId < 1) $serverId = 1;
 
-        // Modify config
         $ok = static::modifyConfigFile($configPath, [
             'server-id'      => (string)$serverId,
             'log-bin'        => 'mysql-bin',
             'bind-address'   => '0.0.0.0',
-            'binlog_format'  => 'ROW',
+            'binlog_format'  => Settings::get('repl_mysql_binlog_format', 'ROW'),
         ], 'mysqld');
         $steps[] = ['name' => 'Modificar configuracion MySQL', 'ok' => $ok, 'output' => $ok ? "server-id={$serverId}" : 'Error'];
         if (!$ok) return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo modificar configuracion MySQL'];
 
-        // Create replication user
         $pdo = static::getMysqlPdo();
         if (!$pdo) {
             $steps[] = ['name' => 'Crear usuario replicacion', 'ok' => false, 'output' => 'No se pudo conectar a MySQL'];
@@ -308,7 +457,6 @@ class ReplicationService
             return ['ok' => false, 'steps' => $steps, 'error' => $e->getMessage()];
         }
 
-        // Restart MySQL
         $output = shell_exec("systemctl restart {$service} 2>&1");
         $running = trim((string)shell_exec("systemctl is-active {$service} 2>/dev/null")) === 'active';
         $steps[] = ['name' => "Reiniciar {$service}", 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
@@ -316,22 +464,424 @@ class ReplicationService
         return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : "{$service} no arranco"];
     }
 
-    // ─── Setup Slave ─────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════
+    // ─── Setup Master Multi-Slave ─────────────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Configure PostgreSQL master for multiple slaves.
+     * Adds ALL slave IPs (primary+fallback) to pg_hba.conf,
+     * creates replication users, configures postgresql.conf.
+     */
+    public static function setupPgMasterMulti(array $slaves): array
+    {
+        $steps = [];
+        $configDir = static::getPgConfigDir();
+        $pgConf = "{$configDir}/postgresql.conf";
+        $hbaConf = "{$configDir}/pg_hba.conf";
+
+        if (!file_exists($pgConf)) {
+            return ['ok' => false, 'steps' => [], 'error' => "postgresql.conf no encontrado en {$configDir}"];
+        }
+
+        static::backupFile($pgConf);
+        static::backupFile($hbaConf);
+        $steps[] = ['name' => 'Backup configuracion PG', 'ok' => true, 'output' => 'OK'];
+
+        $pgVer = (int)(static::detectPgVersion() ?? '16');
+        $walKeepParam = $pgVer >= 13 ? 'wal_keep_size' : 'wal_keep_segments';
+        $walKeepValue = $pgVer >= 13 ? '512MB' : '64';
+        $walLevel = Settings::get('repl_pg_wal_level', 'replica');
+        $maxSenders = max(10, count($slaves) * 2 + 3);
+
+        $pgConfSettings = [
+            'wal_level'         => $walLevel,
+            'max_wal_senders'   => (string)$maxSenders,
+            $walKeepParam       => $walKeepValue,
+            'hot_standby'       => 'on',
+            'listen_addresses'  => "'*'",
+        ];
+
+        // Add synchronous_standby_names if any sync slaves
+        $syncNames = Settings::get('repl_pg_sync_names', '');
+        if ($syncNames !== '') {
+            $pgConfSettings['synchronous_standby_names'] = "'{$syncNames}'";
+        }
+
+        $ok = static::modifyConfigFile($pgConf, $pgConfSettings);
+        $steps[] = ['name' => 'Modificar postgresql.conf', 'ok' => $ok, 'output' => $ok ? "wal_level={$walLevel}, max_wal_senders={$maxSenders}" : 'Error'];
+        if (!$ok) return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo modificar postgresql.conf'];
+
+        // Add pg_hba entries for ALL slave IPs
+        $existing = file_get_contents($hbaConf);
+        $newEntries = [];
+        foreach ($slaves as $slave) {
+            if (!$slave['pg_enabled']) continue;
+            $replUser = $slave['pg_user'] ?? 'replicator';
+            $ips = array_filter([$slave['primary_ip'], $slave['fallback_ip'] ?? '']);
+            foreach ($ips as $ip) {
+                $hbaLine = "host    replication     {$replUser}     {$ip}/32     md5";
+                if (!str_contains($existing, $hbaLine) && !in_array($hbaLine, $newEntries)) {
+                    $newEntries[] = $hbaLine;
+                }
+                // Also allow normal connections for logical replication
+                if (($slave['pg_repl_type'] ?? 'physical') === 'logical') {
+                    $hbaLineAll = "host    all     {$replUser}     {$ip}/32     md5";
+                    if (!str_contains($existing, $hbaLineAll) && !in_array($hbaLineAll, $newEntries)) {
+                        $newEntries[] = $hbaLineAll;
+                    }
+                }
+            }
+        }
+        if (!empty($newEntries)) {
+            file_put_contents($hbaConf, $existing . "\n" . implode("\n", $newEntries) . "\n");
+        }
+        $steps[] = ['name' => 'Anadir entradas pg_hba.conf', 'ok' => true, 'output' => count($newEntries) . ' entradas anadidas'];
+
+        // Create replication users
+        $createdUsers = [];
+        foreach ($slaves as $slave) {
+            if (!$slave['pg_enabled']) continue;
+            $replUser = preg_replace('/[^a-zA-Z0-9_]/', '', $slave['pg_user'] ?? 'replicator');
+            if (in_array($replUser, $createdUsers)) continue;
+
+            $replPass = static::decryptPassword($slave['pg_pass'] ?? '');
+            if ($replPass === '') continue;
+
+            $safePass = escapeshellarg($replPass);
+            $sql = "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{$replUser}') THEN CREATE ROLE {$replUser} WITH REPLICATION LOGIN PASSWORD {$safePass}; END IF; END \$\$;";
+            $output = shell_exec("sudo -u postgres psql -c " . escapeshellarg($sql) . " 2>&1");
+            $steps[] = ['name' => "Crear usuario PG: {$replUser}", 'ok' => true, 'output' => trim($output ?? 'OK')];
+            $createdUsers[] = $replUser;
+        }
+
+        // Restart PostgreSQL
+        $output = shell_exec("systemctl restart postgresql 2>&1");
+        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $steps[] = ['name' => 'Reiniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
+
+        return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : 'PostgreSQL no arranco correctamente'];
+    }
+
+    /**
+     * Configure MySQL master for multiple slaves.
+     * Creates replication users for ALL slave IPs (primary+fallback).
+     */
+    public static function setupMysqlMasterMulti(array $slaves): array
+    {
+        $steps = [];
+        $configPath = static::getMysqlConfigPath();
+        $service = static::detectMysqlServiceName();
+
+        static::backupFile($configPath);
+        $steps[] = ['name' => 'Backup configuracion MySQL', 'ok' => true, 'output' => 'OK'];
+
+        $localIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
+        $parts = explode('.', $localIp);
+        $serverId = (int)($parts[3] ?? 1);
+        if ($serverId < 1) $serverId = 1;
+
+        $mysqlConf = [
+            'server-id'      => (string)$serverId,
+            'log-bin'        => 'mysql-bin',
+            'bind-address'   => '0.0.0.0',
+            'binlog_format'  => Settings::get('repl_mysql_binlog_format', 'ROW'),
+        ];
+
+        // Check if any slave wants GTID
+        $anyGtid = false;
+        foreach ($slaves as $slave) {
+            if ($slave['mysql_enabled'] && !empty($slave['mysql_gtid_enabled'])) {
+                $anyGtid = true;
+                break;
+            }
+        }
+        if ($anyGtid || Settings::get('repl_mysql_gtid_mode', '0') === '1') {
+            $mysqlConf['gtid_mode'] = 'ON';
+            $mysqlConf['enforce-gtid-consistency'] = 'ON';
+        }
+
+        $ok = static::modifyConfigFile($configPath, $mysqlConf, 'mysqld');
+        $steps[] = ['name' => 'Modificar configuracion MySQL', 'ok' => $ok, 'output' => $ok ? "server-id={$serverId}" . ($anyGtid ? ', GTID=ON' : '') : 'Error'];
+        if (!$ok) return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo modificar configuracion MySQL'];
+
+        $pdo = static::getMysqlPdo();
+        if (!$pdo) {
+            $steps[] = ['name' => 'Crear usuarios replicacion', 'ok' => false, 'output' => 'No se pudo conectar a MySQL'];
+            return ['ok' => false, 'steps' => $steps, 'error' => 'Conexion MySQL fallida'];
+        }
+
+        // Create users for ALL slave IPs
+        foreach ($slaves as $slave) {
+            if (!$slave['mysql_enabled']) continue;
+            $safeUser = preg_replace('/[^a-zA-Z0-9_]/', '', $slave['mysql_user'] ?? 'repl_user');
+            $replPass = static::decryptPassword($slave['mysql_pass'] ?? '');
+            if ($replPass === '') continue;
+
+            $ips = array_filter([$slave['primary_ip'], $slave['fallback_ip'] ?? '']);
+            foreach ($ips as $ip) {
+                try {
+                    $pdo->exec("CREATE USER IF NOT EXISTS '{$safeUser}'@'{$ip}' IDENTIFIED BY " . $pdo->quote($replPass));
+                    $pdo->exec("GRANT REPLICATION SLAVE ON *.* TO '{$safeUser}'@'{$ip}'");
+                    $steps[] = ['name' => "Usuario MySQL: {$safeUser}@{$ip}", 'ok' => true, 'output' => 'OK'];
+                } catch (\Throwable $e) {
+                    $steps[] = ['name' => "Usuario MySQL: {$safeUser}@{$ip}", 'ok' => false, 'output' => $e->getMessage()];
+                }
+            }
+        }
+
+        try {
+            $pdo->exec("FLUSH PRIVILEGES");
+        } catch (\Throwable) {}
+
+        $output = shell_exec("systemctl restart {$service} 2>&1");
+        $running = trim((string)shell_exec("systemctl is-active {$service} 2>/dev/null")) === 'active';
+        $steps[] = ['name' => "Reiniciar {$service}", 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
+
+        return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : "{$service} no arranco"];
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Sync / Async Mode (PostgreSQL) ───────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Set PostgreSQL synchronous replication mode.
+     * @param string $mode 'async', 'sync', 'remote_apply'
+     * @param array $syncSlaveNames Names of slaves to include in synchronous_standby_names
+     */
+    public static function setPgSyncMode(string $mode, array $syncSlaveNames = []): array
+    {
+        $steps = [];
+        $configDir = static::getPgConfigDir();
+        $pgConf = "{$configDir}/postgresql.conf";
+
+        if (!file_exists($pgConf)) {
+            return ['ok' => false, 'steps' => [], 'error' => "postgresql.conf no encontrado"];
+        }
+
+        static::backupFile($pgConf);
+
+        $settings = [];
+        if ($mode === 'async') {
+            $settings['synchronous_commit'] = 'off';
+            $settings['synchronous_standby_names'] = "''";
+            Settings::set('repl_pg_sync_names', '');
+        } elseif ($mode === 'sync') {
+            $settings['synchronous_commit'] = 'on';
+            if (!empty($syncSlaveNames)) {
+                $nameList = implode(', ', $syncSlaveNames);
+                $standbyNames = "FIRST 1 ({$nameList})";
+                $settings['synchronous_standby_names'] = "'{$standbyNames}'";
+                Settings::set('repl_pg_sync_names', $standbyNames);
+            }
+        } elseif ($mode === 'remote_apply') {
+            $settings['synchronous_commit'] = 'remote_apply';
+            if (!empty($syncSlaveNames)) {
+                $nameList = implode(', ', $syncSlaveNames);
+                $standbyNames = "FIRST 1 ({$nameList})";
+                $settings['synchronous_standby_names'] = "'{$standbyNames}'";
+                Settings::set('repl_pg_sync_names', $standbyNames);
+            }
+        }
+
+        $ok = static::modifyConfigFile($pgConf, $settings);
+        $steps[] = ['name' => 'Modificar synchronous_commit', 'ok' => $ok, 'output' => "mode={$mode}"];
+
+        // Reload PostgreSQL (no restart needed for these params)
+        $output = shell_exec("systemctl reload postgresql 2>&1");
+        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $steps[] = ['name' => 'Recargar PostgreSQL', 'ok' => $running, 'output' => $running ? 'OK' : trim($output ?? 'Error')];
+
+        return ['ok' => $ok && $running, 'steps' => $steps, 'error' => null];
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Logical Replication (PostgreSQL) ─────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Setup this server as a logical replication publisher.
+     * Sets wal_level=logical and creates publications for specified databases.
+     */
+    public static function setupPgLogicalPublisher(array $databases): array
+    {
+        $steps = [];
+        $configDir = static::getPgConfigDir();
+        $pgConf = "{$configDir}/postgresql.conf";
+
+        // Ensure wal_level=logical
+        static::backupFile($pgConf);
+        $ok = static::modifyConfigFile($pgConf, [
+            'wal_level' => 'logical',
+            'max_replication_slots' => (string)max(10, count($databases) * 2),
+            'max_wal_senders' => (string)max(10, count($databases) * 2 + 3),
+        ]);
+        Settings::set('repl_pg_wal_level', 'logical');
+        $steps[] = ['name' => 'Configurar wal_level=logical', 'ok' => $ok, 'output' => $ok ? 'OK' : 'Error'];
+
+        // Restart required for wal_level change
+        $output = shell_exec("systemctl restart postgresql 2>&1");
+        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $steps[] = ['name' => 'Reiniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
+
+        if (!$running) {
+            return ['ok' => false, 'steps' => $steps, 'error' => 'PostgreSQL no arranco'];
+        }
+
+        // Create publications in each database
+        foreach ($databases as $db) {
+            $safeDb = preg_replace('/[^a-zA-Z0-9_]/', '', $db);
+            $pubName = "pub_{$safeDb}";
+            $sql = "CREATE PUBLICATION {$pubName} FOR ALL TABLES IN SCHEMA public";
+            $cmd = "sudo -u postgres psql -d " . escapeshellarg($safeDb) . " -c " . escapeshellarg($sql) . " 2>&1";
+            $output = trim((string)shell_exec($cmd));
+            $pubOk = !str_contains(strtolower($output), 'error') || str_contains($output, 'already exists');
+            $steps[] = ['name' => "Publicacion: {$pubName}", 'ok' => $pubOk, 'output' => $output ?: 'OK'];
+        }
+
+        return ['ok' => true, 'steps' => $steps, 'error' => null];
+    }
+
+    /**
+     * Setup logical replication subscriber (run on slave).
+     * Creates subscriptions to the master's publications.
+     */
+    public static function setupPgLogicalSubscriber(string $masterIp, int $port, string $user, string $pass, array $databases): array
+    {
+        $steps = [];
+
+        foreach ($databases as $db) {
+            $safeDb = preg_replace('/[^a-zA-Z0-9_]/', '', $db);
+            $subName = "sub_{$safeDb}";
+            $pubName = "pub_{$safeDb}";
+            $connInfo = "host={$masterIp} port={$port} user={$user} password={$pass} dbname={$safeDb}";
+            $sql = "CREATE SUBSCRIPTION {$subName} CONNECTION " . escapeshellarg($connInfo) . " PUBLICATION {$pubName}";
+            $cmd = "sudo -u postgres psql -d " . escapeshellarg($safeDb) . " -c " . escapeshellarg($sql) . " 2>&1";
+            $output = trim((string)shell_exec($cmd));
+            $subOk = !str_contains(strtolower($output), 'error') || str_contains($output, 'already exists');
+            $steps[] = ['name' => "Suscripcion: {$subName}", 'ok' => $subOk, 'output' => $output ?: 'OK'];
+        }
+
+        return ['ok' => true, 'steps' => $steps, 'error' => null];
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── GTID (MySQL) ─────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Configure MySQL master for GTID-based replication.
+     */
+    public static function setupMysqlGtidMaster(): array
+    {
+        $steps = [];
+        $configPath = static::getMysqlConfigPath();
+        $service = static::detectMysqlServiceName();
+
+        static::backupFile($configPath);
+
+        $ok = static::modifyConfigFile($configPath, [
+            'gtid_mode'                 => 'ON',
+            'enforce-gtid-consistency'  => 'ON',
+            'log-bin'                   => 'mysql-bin',
+            'binlog_format'             => Settings::get('repl_mysql_binlog_format', 'ROW'),
+        ], 'mysqld');
+        $steps[] = ['name' => 'Configurar GTID master', 'ok' => $ok, 'output' => $ok ? 'gtid_mode=ON' : 'Error'];
+
+        Settings::set('repl_mysql_gtid_mode', '1');
+
+        $output = shell_exec("systemctl restart {$service} 2>&1");
+        $running = trim((string)shell_exec("systemctl is-active {$service} 2>/dev/null")) === 'active';
+        $steps[] = ['name' => "Reiniciar {$service}", 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
+
+        return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : "{$service} no arranco"];
+    }
+
+    /**
+     * Configure MySQL slave with GTID auto-positioning.
+     */
+    public static function setupMysqlGtidSlave(string $masterIp, int $port, string $user, string $pass): array
+    {
+        $steps = [];
+        $configPath = static::getMysqlConfigPath();
+        $service = static::detectMysqlServiceName();
+
+        static::backupFile($configPath);
+
+        $localIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
+        $parts = explode('.', $localIp);
+        $serverId = ((int)($parts[3] ?? 2)) + 100;
+
+        $ok = static::modifyConfigFile($configPath, [
+            'server-id'                 => (string)$serverId,
+            'gtid_mode'                 => 'ON',
+            'enforce-gtid-consistency'  => 'ON',
+            'relay-log'                 => 'relay-bin',
+            'read_only'                 => '1',
+            'log-bin'                   => 'mysql-bin',
+        ], 'mysqld');
+        $steps[] = ['name' => 'Configurar GTID slave', 'ok' => $ok, 'output' => "server-id={$serverId}, GTID=ON"];
+
+        $output = shell_exec("systemctl restart {$service} 2>&1");
+        $running = trim((string)shell_exec("systemctl is-active {$service} 2>/dev/null")) === 'active';
+        $steps[] = ['name' => "Reiniciar {$service}", 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
+
+        if (!$running) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "{$service} no arranco"];
+        }
+
+        // Configure replication with MASTER_AUTO_POSITION
+        $pdo = static::getMysqlPdo();
+        if (!$pdo) {
+            return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo conectar a MySQL local'];
+        }
+
+        try {
+            $mysqlVer = static::detectMysqlVersion();
+            $isNew = $mysqlVer && version_compare($mysqlVer, '8.0.23', '>=');
+
+            $pdo->exec("STOP SLAVE");
+            if ($isNew) {
+                $pdo->exec("CHANGE REPLICATION SOURCE TO SOURCE_HOST=" . $pdo->quote($masterIp) .
+                    ", SOURCE_PORT={$port}" .
+                    ", SOURCE_USER=" . $pdo->quote($user) .
+                    ", SOURCE_PASSWORD=" . $pdo->quote($pass) .
+                    ", SOURCE_AUTO_POSITION=1");
+                $pdo->exec("START REPLICA");
+            } else {
+                $pdo->exec("CHANGE MASTER TO MASTER_HOST=" . $pdo->quote($masterIp) .
+                    ", MASTER_PORT={$port}" .
+                    ", MASTER_USER=" . $pdo->quote($user) .
+                    ", MASTER_PASSWORD=" . $pdo->quote($pass) .
+                    ", MASTER_AUTO_POSITION=1");
+                $pdo->exec("START SLAVE");
+            }
+            $steps[] = ['name' => 'Configurar replicacion GTID', 'ok' => true, 'output' => 'MASTER_AUTO_POSITION=1'];
+        } catch (\Throwable $e) {
+            $steps[] = ['name' => 'Configurar replicacion GTID', 'ok' => false, 'output' => $e->getMessage()];
+            return ['ok' => false, 'steps' => $steps, 'error' => $e->getMessage()];
+        }
+
+        return ['ok' => true, 'steps' => $steps, 'error' => null];
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Setup Slave (single — legacy) ───────────────────────
+    // ═══════════════════════════════════════════════════════════
+
     public static function setupPgSlave(string $masterIp, int $port, string $replUser, string $replPass): array
     {
         $steps = [];
         $pgVer = static::detectPgVersion() ?? '16';
         $dataDir = static::getPgDataDir();
 
-        // Stop PostgreSQL
         shell_exec("systemctl stop postgresql 2>&1");
         $steps[] = ['name' => 'Detener PostgreSQL', 'ok' => true, 'output' => 'OK'];
 
-        // Clear data directory
         shell_exec("rm -rf " . escapeshellarg($dataDir) . "/*");
         $steps[] = ['name' => 'Limpiar directorio de datos', 'ok' => true, 'output' => $dataDir];
 
-        // pg_basebackup (the -R flag creates standby.signal on PG >= 12)
         $safeMaster = escapeshellarg($masterIp);
         $safeUser = escapeshellarg($replUser);
         $safeDir = escapeshellarg($dataDir);
@@ -341,7 +891,6 @@ class ReplicationService
         $steps[] = ['name' => 'pg_basebackup', 'ok' => $hasSignal, 'output' => $hasSignal ? 'Completado' : trim($output ?? 'Error')];
 
         if (!$hasSignal) {
-            // For PG < 12, create recovery.conf manually
             if ((int)$pgVer < 12) {
                 $recoveryConf = "standby_mode = 'on'\nprimary_conninfo = 'host={$masterIp} port={$port} user={$replUser} password={$replPass}'\n";
                 file_put_contents("{$dataDir}/recovery.conf", $recoveryConf);
@@ -351,11 +900,9 @@ class ReplicationService
             }
         }
 
-        // Fix permissions
         shell_exec("chown -R postgres:postgres " . escapeshellarg($dataDir));
         $steps[] = ['name' => 'Corregir permisos', 'ok' => true, 'output' => 'OK'];
 
-        // Start PostgreSQL
         shell_exec("systemctl start postgresql 2>&1");
         sleep(2);
         $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
@@ -370,10 +917,8 @@ class ReplicationService
         $configPath = static::getMysqlConfigPath();
         $service = static::detectMysqlServiceName();
 
-        // Backup & modify config
         static::backupFile($configPath);
 
-        // Server-id must be different from master
         $localIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
         $parts = explode('.', $localIp);
         $serverId = ((int)($parts[3] ?? 2)) + 100;
@@ -385,11 +930,9 @@ class ReplicationService
         ], 'mysqld');
         $steps[] = ['name' => 'Configurar MySQL slave', 'ok' => $ok, 'output' => "server-id={$serverId}"];
 
-        // Restart to apply config
         shell_exec("systemctl restart {$service} 2>&1");
         $steps[] = ['name' => "Reiniciar {$service}", 'ok' => true, 'output' => 'OK'];
 
-        // Configure replication
         $pdo = static::getMysqlPdo();
         if (!$pdo) {
             return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo conectar a MySQL local'];
@@ -424,19 +967,21 @@ class ReplicationService
         return ['ok' => true, 'steps' => $steps, 'error' => null];
     }
 
+    // ═══════════════════════════════════════════════════════════
     // ─── Monitoring ──────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════
+
     public static function getPgMasterStatus(): ?array
     {
         try {
-            $rows = \MuseDockPanel\Database::fetchAll("SELECT client_addr, state, sent_lsn, write_lsn, flush_lsn, replay_lsn, sync_state FROM pg_stat_replication");
+            $rows = Database::fetchAll("SELECT client_addr, state, sent_lsn, write_lsn, flush_lsn, replay_lsn, sync_state FROM pg_stat_replication");
             if (empty($rows)) return null;
             $row = $rows[0];
-            // Calculate lag in bytes
             $sentLsn = $row['sent_lsn'] ?? '';
             $replayLsn = $row['replay_lsn'] ?? '';
             $lagBytes = 0;
             if ($sentLsn && $replayLsn) {
-                $sent = \MuseDockPanel\Database::fetchOne("SELECT pg_wal_lsn_diff(:sent::pg_lsn, :replay::pg_lsn) as diff", ['sent' => $sentLsn, 'replay' => $replayLsn]);
+                $sent = Database::fetchOne("SELECT pg_wal_lsn_diff(:sent::pg_lsn, :replay::pg_lsn) as diff", ['sent' => $sentLsn, 'replay' => $replayLsn]);
                 $lagBytes = (int)($sent['diff'] ?? 0);
             }
             $row['lag_bytes'] = $lagBytes;
@@ -447,16 +992,42 @@ class ReplicationService
         }
     }
 
+    /**
+     * Enhanced: return ALL rows from pg_stat_replication with lag per slave.
+     */
+    public static function getPgMasterStatusMulti(): array
+    {
+        try {
+            $rows = Database::fetchAll("SELECT client_addr, state, sent_lsn, write_lsn, flush_lsn, replay_lsn, sync_state, application_name FROM pg_stat_replication");
+            $result = [];
+            foreach ($rows as $row) {
+                $sentLsn = $row['sent_lsn'] ?? '';
+                $replayLsn = $row['replay_lsn'] ?? '';
+                $lagBytes = 0;
+                if ($sentLsn && $replayLsn) {
+                    try {
+                        $lag = Database::fetchOne("SELECT pg_wal_lsn_diff(:sent::pg_lsn, :replay::pg_lsn) as diff", ['sent' => $sentLsn, 'replay' => $replayLsn]);
+                        $lagBytes = (int)($lag['diff'] ?? 0);
+                    } catch (\Throwable) {}
+                }
+                $row['lag_bytes'] = $lagBytes;
+                $result[] = $row;
+            }
+            return $result;
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
     public static function getPgSlaveStatus(): ?array
     {
         try {
-            // Check if this is actually a standby
-            $isRecovery = \MuseDockPanel\Database::fetchOne("SELECT pg_is_in_recovery() as recovery");
+            $isRecovery = Database::fetchOne("SELECT pg_is_in_recovery() as recovery");
             if (!$isRecovery || $isRecovery['recovery'] !== true) return null;
 
-            $receiver = \MuseDockPanel\Database::fetchOne("SELECT status, sender_host, sender_port, last_msg_send_time, last_msg_receipt_time FROM pg_stat_wal_receiver");
+            $receiver = Database::fetchOne("SELECT status, sender_host, sender_port, last_msg_send_time, last_msg_receipt_time FROM pg_stat_wal_receiver");
 
-            $lsn = \MuseDockPanel\Database::fetchOne("
+            $lsn = Database::fetchOne("
                 SELECT pg_last_wal_receive_lsn() as receive_lsn,
                        pg_last_wal_replay_lsn() as replay_lsn,
                        pg_last_xact_replay_timestamp() as replay_time
@@ -464,7 +1035,7 @@ class ReplicationService
 
             $lagSeconds = 0;
             if (!empty($lsn['replay_time'])) {
-                $lagRow = \MuseDockPanel\Database::fetchOne("SELECT EXTRACT(EPOCH FROM (NOW() - :ts::timestamptz))::int as lag", ['ts' => $lsn['replay_time']]);
+                $lagRow = Database::fetchOne("SELECT EXTRACT(EPOCH FROM (NOW() - :ts::timestamptz))::int as lag", ['ts' => $lsn['replay_time']]);
                 $lagSeconds = (int)($lagRow['lag'] ?? 0);
             }
 
@@ -501,7 +1072,6 @@ class ReplicationService
         try {
             $pdo = static::getMysqlPdo();
             if (!$pdo) return null;
-            // Try new syntax first
             try {
                 $row = $pdo->query("SHOW REPLICA STATUS")->fetch(\PDO::FETCH_ASSOC);
             } catch (\Throwable) {
@@ -513,13 +1083,66 @@ class ReplicationService
         }
     }
 
+    /**
+     * Enhanced MySQL slave status with GTID information.
+     */
+    public static function getMysqlSlaveStatusWithGtid(): ?array
+    {
+        $status = static::getMysqlSlaveStatus();
+        if (!$status) return null;
+
+        // Add GTID fields
+        try {
+            $pdo = static::getMysqlPdo();
+            if ($pdo) {
+                $gtid = $pdo->query("SELECT @@gtid_mode as gtid_mode, @@global.gtid_executed as gtid_executed")->fetch(\PDO::FETCH_ASSOC);
+                if ($gtid) {
+                    $status['Gtid_Mode'] = $gtid['gtid_mode'] ?? 'OFF';
+                    $status['Gtid_Executed'] = $gtid['gtid_executed'] ?? '';
+                }
+            }
+        } catch (\Throwable) {}
+
+        // These fields come from SHOW SLAVE STATUS if GTID is enabled
+        $status['Executed_Gtid_Set'] = $status['Executed_Gtid_Set'] ?? '';
+        $status['Retrieved_Gtid_Set'] = $status['Retrieved_Gtid_Set'] ?? '';
+
+        return $status;
+    }
+
+    /**
+     * Get MySQL master GTID status.
+     */
+    public static function getMysqlMasterGtidStatus(): ?array
+    {
+        try {
+            $pdo = static::getMysqlPdo();
+            if (!$pdo) return null;
+
+            $master = $pdo->query("SHOW MASTER STATUS")->fetch(\PDO::FETCH_ASSOC);
+            if (!$master) return null;
+
+            $gtid = $pdo->query("SELECT @@gtid_mode as gtid_mode, @@global.gtid_executed as gtid_executed")->fetch(\PDO::FETCH_ASSOC);
+            if ($gtid) {
+                $master['Gtid_Mode'] = $gtid['gtid_mode'] ?? 'OFF';
+                $master['Gtid_Executed'] = $gtid['gtid_executed'] ?? '';
+            }
+
+            return $master;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // ─── Switchover ──────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════
+
     public static function promotePgSlave(): array
     {
         $steps = [];
         $pgVer = static::detectPgVersion() ?? '16';
 
-        // Try pg_ctlcluster first, then pg_ctl
         $output = shell_exec("pg_ctlcluster {$pgVer} main promote 2>&1");
         if ($output === null || str_contains($output, 'error')) {
             $dataDir = static::getPgDataDir();
@@ -528,9 +1151,8 @@ class ReplicationService
         $steps[] = ['name' => 'Promover PostgreSQL', 'ok' => true, 'output' => trim($output ?? 'OK')];
 
         sleep(2);
-        // Verify no longer in recovery
         try {
-            $check = \MuseDockPanel\Database::fetchOne("SELECT pg_is_in_recovery() as recovery");
+            $check = Database::fetchOne("SELECT pg_is_in_recovery() as recovery");
             $promoted = !$check || $check['recovery'] === false;
             $steps[] = ['name' => 'Verificar promocion', 'ok' => $promoted, 'output' => $promoted ? 'Master activo' : 'Aun en recovery'];
         } catch (\Throwable $e) {
@@ -556,11 +1178,9 @@ class ReplicationService
                 $pdo->exec("RESET SLAVE ALL");
             }
 
-            // Remove read_only
             $pdo->exec("SET GLOBAL read_only = 0");
             $steps[] = ['name' => 'Promover MySQL', 'ok' => true, 'output' => 'SLAVE detenido, read_only desactivado'];
 
-            // Update config file
             $configPath = static::getMysqlConfigPath();
             static::modifyConfigFile($configPath, ['read_only' => '0'], 'mysqld');
             $steps[] = ['name' => 'Actualizar configuracion', 'ok' => true, 'output' => 'OK'];
@@ -574,7 +1194,6 @@ class ReplicationService
 
     public static function demotePgMaster(string $newMasterIp, int $port, string $replUser, string $replPass): array
     {
-        // Reconfigure as slave pointing to the new master
         return static::setupPgSlave($newMasterIp, $port, $replUser, $replPass);
     }
 

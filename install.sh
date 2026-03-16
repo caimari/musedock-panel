@@ -1735,84 +1735,108 @@ for i in 1 2 3 4 5; do
     sleep 1
 done
 
-if [ "$CADDY_API_STATUS" = "200" ]; then
-    # Disable auto_https to prevent Caddy from trying to listen on :80/:443
-    # This avoids conflicts with nginx/Apache on port 80
-    curl -s -X PUT "${CADDY_API}/config/apps/http/auto_https" \
-        -H "Content-Type: application/json" \
-        -d '"disable_redirects"' > /dev/null 2>&1 || true
-
-    # Ensure TLS has internal issuer for self-signed certs
-    curl -s -X PUT "${CADDY_API}/config/apps/tls" \
-        -H "Content-Type: application/json" \
-        -d '{"automation":{"policies":[{"issuers":[{"module":"internal"}]}]}}' > /dev/null 2>&1 || true
-
-    # Remove existing panel server if present (safe for reinstall)
-    curl -s -X DELETE "${CADDY_API}/config/apps/http/servers/musedock-panel" > /dev/null 2>&1 || true
-
-    # Add panel reverse proxy route via Caddy API
-    # HTTPS with self-signed cert + redirect HTTP→HTTPS on same port
-    PANEL_ROUTE=$(cat <<ROUTEEOF
-{
-  "@id": "musedock-panel",
-  "listen": [":${PANEL_PORT}"],
-  "routes": [
-    {
-      "handle": [
-        {
-          "handler": "reverse_proxy",
-          "upstreams": [{"dial": "127.0.0.1:${PANEL_INTERNAL_PORT}"}],
-          "headers": {
-            "request": {
-              "set": {
-                "X-Forwarded-Proto": ["https"],
-                "X-Real-Ip": ["{http.request.remote.host}"]
-              }
-            }
-          }
-        }
-      ]
+# Write Caddyfile with panel reverse proxy (more reliable than API for TLS internal)
+# Preserve existing site blocks if Caddyfile has them
+CADDY_FILE="/etc/caddy/Caddyfile"
+CADDY_PANEL_BLOCK="
+https://:${PANEL_PORT} {
+    tls internal {
+        on_demand
     }
-  ],
-  "tls_connection_policies": [{}],
-  "automatic_https": {
-    "disable": true
-  }
+    reverse_proxy 127.0.0.1:${PANEL_INTERNAL_PORT} {
+        header_up X-Forwarded-Proto https
+        header_up X-Real-Ip {remote_host}
+    }
 }
-ROUTEEOF
-)
+"
 
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
-        "${CADDY_API}/config/apps/http/servers/musedock-panel" \
-        -H "Content-Type: application/json" \
-        -d "$PANEL_ROUTE" 2>/dev/null || echo "000")
+# Check if Caddyfile already has a panel block
+if grep -q ":${PANEL_PORT}" "$CADDY_FILE" 2>/dev/null; then
+    # Remove old panel block and rewrite
+    ok "Actualizando bloque del panel en Caddyfile"
+fi
 
-    if [ "$HTTP_CODE" = "200" ]; then
+# Build new Caddyfile: global options + panel block + existing site blocks
+EXISTING_SITES=""
+if [ -f "$CADDY_FILE" ]; then
+    # Extract site blocks that are NOT the panel and NOT global options
+    EXISTING_SITES=$(awk '
+        /^{$/ && NR<=3 { in_global=1; next }
+        in_global && /^}$/ { in_global=0; next }
+        in_global { next }
+        /^https?:\/\/:'"${PANEL_PORT}"'/ { in_panel=1; depth=0; next }
+        /^:'"${PANEL_PORT}"'/ { in_panel=1; depth=0; next }
+        in_panel && /{/ { depth++ }
+        in_panel && /}/ { depth--; if(depth<=0) { in_panel=0 }; next }
+        in_panel { next }
+        { print }
+    ' "$CADDY_FILE" 2>/dev/null)
+fi
+
+# Backup existing Caddyfile
+cp "$CADDY_FILE" "${CADDY_FILE}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+
+cat > "$CADDY_FILE" << CADDYEOF
+{
+    auto_https disable_redirects
+    admin localhost:2019
+}
+
+https://:${PANEL_PORT} {
+    tls internal {
+        on_demand
+    }
+    reverse_proxy 127.0.0.1:${PANEL_INTERNAL_PORT} {
+        header_up X-Forwarded-Proto https
+        header_up X-Real-Ip {remote_host}
+    }
+}
+CADDYEOF
+
+# Append existing non-panel site blocks if any
+if [ -n "$(echo "$EXISTING_SITES" | tr -d '[:space:]')" ]; then
+    echo "" >> "$CADDY_FILE"
+    echo "$EXISTING_SITES" >> "$CADDY_FILE"
+fi
+
+# Remove --resume override (use Caddyfile directly)
+rm -f /etc/systemd/system/caddy.service.d/override-resume.conf
+systemctl daemon-reload
+
+# Install libnss3-tools for cert management (silent)
+apt install -y libnss3-tools > /dev/null 2>&1 || true
+
+# Install Caddy root cert to system trust store (so TLS internal works)
+CADDY_ROOT_CERT="/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt"
+if [ -f "$CADDY_ROOT_CERT" ]; then
+    cp "$CADDY_ROOT_CERT" /usr/local/share/ca-certificates/caddy-root.crt
+    update-ca-certificates > /dev/null 2>&1 || true
+fi
+
+# Validate and reload Caddy
+if caddy validate --config "$CADDY_FILE" > /dev/null 2>&1; then
+    systemctl restart caddy
+    sleep 2
+
+    # Verify HTTPS works
+    HTTPS_CHECK=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 "https://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000")
+    if [ "$HTTPS_CHECK" = "200" ] || [ "$HTTPS_CHECK" = "302" ] || [ "$HTTPS_CHECK" = "301" ]; then
         ok "$(t caddy_proxy_ok "$PANEL_PORT" "$PANEL_INTERNAL_PORT")"
         ok "$(t caddy_tls_internal)"
     else
-        # Retry: if port 80 conflict, try with explicit auto_https off at http app level
-        curl -s -X PUT "${CADDY_API}/config/apps/http" \
-            -H "Content-Type: application/json" \
-            -d "{\"auto_https\":\"disable_redirects\",\"servers\":{\"musedock-panel\":$(echo "$PANEL_ROUTE")}}" > /dev/null 2>&1
-        HTTP_CODE2=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "${CADDY_API}/config/apps/http/servers/musedock-panel" 2>/dev/null || echo "000")
-
-        if [ "$HTTP_CODE2" = "200" ]; then
+        # Caddy may need a moment to generate certs on first run
+        sleep 3
+        HTTPS_CHECK2=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 "https://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000")
+        if [ "$HTTPS_CHECK2" = "200" ] || [ "$HTTPS_CHECK2" = "302" ] || [ "$HTTPS_CHECK2" = "301" ]; then
             ok "$(t caddy_proxy_ok "$PANEL_PORT" "$PANEL_INTERNAL_PORT")"
             ok "$(t caddy_tls_internal)"
         else
-            warn "$(t caddy_proxy_fail "$HTTP_CODE")"
-            warn "$(t caddy_proxy_fallback "$PANEL_INTERNAL_PORT")"
-            # Rebind PHP to 0.0.0.0 as fallback
-            sed -i "s|127.0.0.1:${PANEL_INTERNAL_PORT}|0.0.0.0:${PANEL_PORT}|g" /etc/systemd/system/musedock-panel.service
-            PANEL_INTERNAL_PORT=${PANEL_PORT}
-            systemctl daemon-reload
-            systemctl restart musedock-panel
+            warn "$(t caddy_proxy_fail "$HTTPS_CHECK2")"
+            warn "HTTPS en puerto ${PANEL_PORT} puede necesitar reiniciar Caddy manualmente"
         fi
     fi
 else
-    warn "$(t caddy_api_unavailable "$PANEL_PORT")"
-    # Bind PHP directly to 0.0.0.0
+    warn "Caddyfile invalido — usando acceso PHP directo"
     sed -i "s|127.0.0.1:${PANEL_INTERNAL_PORT}|0.0.0.0:${PANEL_PORT}|g" /etc/systemd/system/musedock-panel.service
     PANEL_INTERNAL_PORT=${PANEL_PORT}
     systemctl daemon-reload
