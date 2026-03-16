@@ -167,6 +167,7 @@
                                     <th>Protocolo</th>
                                     <th>Origen</th>
                                     <th>Puerto</th>
+                                    <th>Descripcion</th>
                                 <?php endif; ?>
                                 <th class="text-end" style="width:120px;">Acciones</th>
                             </tr>
@@ -193,13 +194,22 @@
                                     <?php else: ?>
                                         <td>
                                             <?php
-                                                $targetClass = $rule['target'] === 'ACCEPT' ? 'bg-success' : ($rule['target'] === 'DROP' ? 'bg-danger' : 'bg-secondary');
+                                                $targetClass = $rule['target'] === 'ACCEPT' ? 'bg-success' : ($rule['target'] === 'DROP' ? 'bg-danger' : ($rule['target'] === 'REJECT' ? 'bg-warning text-dark' : 'bg-secondary'));
                                             ?>
                                             <span class="badge <?= $targetClass ?>"><?= View::e($rule['target']) ?></span>
                                         </td>
-                                        <td><?= View::e($rule['protocol']) ?></td>
+                                        <td><span class="badge bg-secondary"><?= View::e(strtoupper($rule['protocol'])) ?></span></td>
                                         <td><code><?= View::e($rule['source']) ?></code></td>
-                                        <td><?= View::e($rule['port'] ?: '-') ?></td>
+                                        <td><?= $rule['port'] ? '<code>' . View::e($rule['port']) . '</code>' : '-' ?></td>
+                                        <td class="text-muted small">
+                                            <?php if (!empty($rule['state'])): ?>
+                                                <span class="badge bg-info bg-opacity-25 text-info"><?= View::e($rule['state']) ?></span>
+                                            <?php elseif (!empty($rule['extra'])): ?>
+                                                <?= View::e($rule['extra']) ?>
+                                            <?php else: ?>
+                                                -
+                                            <?php endif; ?>
+                                        </td>
                                     <?php endif; ?>
                                     <td class="text-end text-nowrap">
                                         <button type="button" class="btn btn-outline-primary btn-sm" title="Editar regla"
@@ -253,10 +263,13 @@
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Protocolo</label>
-                                <select name="protocol" class="form-select" id="editProtocol">
+                                <select name="protocol" class="form-select" id="editProtocol" onchange="toggleEditPortField()">
                                     <option value="tcp">TCP</option>
                                     <option value="udp">UDP</option>
-                                    <option value="both">Ambos</option>
+                                    <?php if ($type === 'ufw'): ?>
+                                        <option value="both">Ambos</option>
+                                    <?php endif; ?>
+                                    <option value="all">Todos</option>
                                 </select>
                             </div>
                             <div class="col-md-6">
@@ -320,10 +333,13 @@
                     </div>
                     <div class="col-md-2">
                         <label class="form-label">Protocolo</label>
-                        <select name="protocol" class="form-select" id="ruleProtocol">
+                        <select name="protocol" class="form-select" id="ruleProtocol" onchange="togglePortField()">
                             <option value="tcp">TCP</option>
                             <option value="udp">UDP</option>
-                            <option value="both">Ambos</option>
+                            <?php if ($type === 'ufw'): ?>
+                                <option value="both">Ambos</option>
+                            <?php endif; ?>
+                            <option value="all">Todos</option>
                         </select>
                     </div>
                     <?php if ($type === 'ufw'): ?>
@@ -542,6 +558,33 @@ function toggleAnyIp(cb) {
     } else {
         fromEl.disabled = false;
         fromEl.placeholder = 'Ej: 192.168.1.0/24';
+    }
+}
+
+// ─── Port field toggle ──────────────────────────────────
+function togglePortField() {
+    var proto = document.getElementById('ruleProtocol').value;
+    var portEl = document.getElementById('rulePort');
+    if (proto === 'all') {
+        portEl.value = '';
+        portEl.disabled = true;
+        portEl.placeholder = 'No aplica';
+    } else {
+        portEl.disabled = false;
+        portEl.placeholder = 'Ej: 80';
+    }
+}
+
+function toggleEditPortField() {
+    var proto = document.getElementById('editProtocol').value;
+    var portEl = document.getElementById('editPort');
+    if (proto === 'all') {
+        portEl.value = '';
+        portEl.disabled = true;
+        portEl.placeholder = 'No aplica';
+    } else {
+        portEl.disabled = false;
+        portEl.placeholder = 'Ej: 80';
     }
 }
 

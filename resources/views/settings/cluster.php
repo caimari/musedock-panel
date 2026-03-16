@@ -484,6 +484,17 @@
             <!-- SSH Settings (shown when method=ssh) -->
             <div id="sshSettings" style="<?= $fsConfig['method'] !== 'ssh' ? 'display:none' : '' ?>">
                 <h6 class="text-muted mb-2">Configuracion SSH</h6>
+                <div class="alert alert-info small py-2 mb-3" style="background:#1a3a4a;border-color:#2a5a6a;color:#a8d8ea;">
+                    <i class="bi bi-info-circle me-1"></i>
+                    <strong>Como funciona:</strong> Este servidor (master) se conecta por SSH al slave para copiar archivos con rsync.
+                    La clave privada se queda aqui, la clave publica se instala en los slaves.
+                    <br>
+                    <strong>1.</strong> Pulsa "Generar" para crear el par de claves en este servidor &rarr;
+                    <strong>2.</strong> Pulsa "Instalar clave" en cada nodo slave &rarr;
+                    <strong>3.</strong> Pulsa "Test SSH" para verificar la conexion.
+                    <br>
+                    <span class="text-warning"><i class="bi bi-shield-check me-1"></i>Debe ser <code>root</code> para poder leer/escribir archivos de todos los hostings y mantener permisos.</span>
+                </div>
                 <div class="row mb-3">
                     <div class="col-md-3">
                         <label class="form-label">Puerto SSH</label>
@@ -494,9 +505,10 @@
                         <label class="form-label">Usuario SSH</label>
                         <input type="text" name="filesync_ssh_user" class="form-control"
                                value="<?= View::e($fsConfig['ssh_user']) ?>">
+                        <small class="text-muted">Debe ser root</small>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Ruta clave SSH</label>
+                        <label class="form-label">Ruta clave SSH privada (de este servidor)</label>
                         <div class="input-group">
                             <input type="text" name="filesync_ssh_key_path" class="form-control font-monospace"
                                    id="sshKeyPath" value="<?= View::e($fsConfig['ssh_key_path']) ?>">
@@ -504,6 +516,7 @@
                                 <i class="bi bi-key me-1"></i>Generar
                             </button>
                         </div>
+                        <small class="text-muted">Se genera aqui. La publica se envia a los slaves.</small>
                     </div>
                 </div>
 
@@ -535,6 +548,11 @@
                         <?php endforeach; ?>
                     </div>
                     <div id="sshActionResult" class="mt-2 small"></div>
+                </div>
+                <?php else: ?>
+                <div class="alert alert-warning small py-2 mb-3" style="background:#3a3000;border-color:#5a5000;color:#e8d44d;">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    No hay nodos configurados. Primero añade un nodo en la seccion "Nodos del Cluster" (arriba) para poder instalar la clave SSH y hacer test de conexion.
                 </div>
                 <?php endif; ?>
 
@@ -575,9 +593,10 @@
             <div class="row mb-3">
                 <div class="col-md-6">
                     <label class="form-label small text-muted">Ruta certificados Caddy (auto-detectada si vacio)</label>
+                    <?php $detectedCertDir = $fsConfig['ssl_cert_path'] ?: \MuseDockPanel\Services\FileSyncService::findCaddyCertDir(); ?>
                     <input type="text" name="filesync_ssl_cert_path" class="form-control font-monospace"
-                           value="<?= View::e($fsConfig['ssl_cert_path']) ?>"
-                           placeholder="<?= View::e(\MuseDockPanel\Services\FileSyncService::findCaddyCertDir() ?: 'No detectado') ?>">
+                           value="<?= View::e($detectedCertDir) ?>"
+                           placeholder="No detectado">
                 </div>
             </div>
             <p class="small text-muted mb-3">

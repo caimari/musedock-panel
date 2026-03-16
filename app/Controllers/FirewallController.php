@@ -73,7 +73,7 @@ class FirewallController
             exit;
         }
 
-        // Validate port
+        // Validate port (not required for 'all' protocol)
         $portNum = (int)$port;
         if ($port !== '' && ($portNum < 1 || $portNum > 65535)) {
             Flash::set('error', 'Puerto fuera de rango (1-65535).');
@@ -82,7 +82,7 @@ class FirewallController
         }
 
         // Validate protocol
-        if (!in_array($protocol, ['tcp', 'udp', 'both'])) {
+        if (!in_array($protocol, ['tcp', 'udp', 'both', 'all'])) {
             Flash::set('error', 'Protocolo no valido.');
             header('Location: /settings/firewall');
             exit;
@@ -183,7 +183,7 @@ class FirewallController
             exit;
         }
 
-        if (!in_array($protocol, ['tcp', 'udp', 'both'])) {
+        if (!in_array($protocol, ['tcp', 'udp', 'both', 'all'])) {
             Flash::set('error', 'Protocolo no valido.');
             header('Location: /settings/firewall');
             exit;

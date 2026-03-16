@@ -2,6 +2,32 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aqui.
 
+## [0.5.3] — 2026-03-16
+
+### Anadido
+- **File Sync** — Sincronizacion de archivos entre master y slaves via SSH (rsync) o HTTPS (API), con cron worker automatico (`musedock-filesync`)
+- **File Sync SSL certs** — Sincronizacion de certificados SSL de Caddy entre nodos con propiedad correcta (`caddy:caddy`)
+- **File Sync ownership** — rsync con `--chown` y HTTPS con `owner_user` para corregir UIDs entre servidores
+- **File Sync UI** — Botones funcionales en Cluster: generar clave SSH, instalar en nodo, test SSH, sincronizar ahora, verificar DB host
+- **SSH info banner** — Nota explicativa en la pagina de Cluster con el flujo de 3 pasos para configurar claves SSH
+- **Firewall protocolos** — Los protocolos ahora se muestran como texto (TCP, UDP, ICMP, ALL) en vez de numeros (6, 17, 1, 0)
+- **Firewall descripcion** — Nueva columna "Descripcion" en iptables mostrando estado (RELATED,ESTABLISHED, etc.)
+- **Firewall protocolo ALL** — Opcion "Todos" en el selector de protocolo para reglas sin puerto especifico
+- **Cifrado Telegram** — Token de Telegram cifrado con AES-256-CBC en panel_settings
+- **Cifrado SMTP** — Password SMTP cifrado con AES-256-CBC en panel_settings
+- **Instalador Update** — Nuevo modo "Actualizar" (opcion 4) que aplica cambios incrementales sin reinstalar (crons, migraciones, permisos, .env)
+- **Instalador filesync cron** — El cron `musedock-filesync` se instala automaticamente con el instalador
+- **SSL cert auto-fill** — La ruta de certificados SSL se auto-rellena si se detecta Caddy (antes solo placeholder)
+
+### Corregido
+- **SMTP cifrado** — Corregido tipo de cifrado (SSL→TLS/STARTTLS) y typo en direccion From
+- **Firewall IPs** — Las reglas muestran IPs numericas en vez de hostnames (flag `-n`)
+- **File Sync permisos** — Los archivos sincronizados mantienen el propietario correcto en el slave
+- **JS funciones faltantes** — Añadidas 7 funciones JavaScript que faltaban en la UI de File Sync/Cluster
+- **JS IDs inconsistentes** — Corregidos IDs de HTML que no coincidian con los selectores de JavaScript
+
+---
+
 ## [0.5.2] — 2026-03-16
 
 ### Anadido

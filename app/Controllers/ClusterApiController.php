@@ -108,7 +108,8 @@ class ClusterApiController
             return ['ok' => false, 'error' => 'Faltan parametros: remote_path o archive'];
         }
 
-        $result = \MuseDockPanel\Services\FileSyncService::receiveFiles($remotePath, $uploadedFile);
+        $ownerUser = $payload['owner_user'] ?? '';
+        $result = \MuseDockPanel\Services\FileSyncService::receiveFiles($remotePath, $uploadedFile, $ownerUser);
 
         // Rewrite DB_HOST if configured
         if (($result['ok'] ?? false) && Settings::get('filesync_rewrite_dbhost', '1') === '1') {

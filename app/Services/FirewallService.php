@@ -193,6 +193,11 @@ class FirewallService
 
     // ─── iptables Methods ─────────────────────────────────────
 
+    private static array $protocolNames = [
+        '0' => 'all', '1' => 'icmp', '6' => 'tcp', '17' => 'udp',
+        '47' => 'gre', '50' => 'esp', '51' => 'ah', '58' => 'icmpv6',
+    ];
+
     public static function iptablesGetRules(): array
     {
         $output = (string)shell_exec('iptables -L INPUT -n --line-numbers 2>/dev/null');
@@ -213,10 +218,13 @@ class FirewallService
             if ($num <= 0) continue;
 
             $target      = $parts[1] ?? '';
-            $protocol    = $parts[2] ?? '';
+            $protocolRaw = $parts[2] ?? '';
             $source      = $parts[4] ?? '';
             $destination = $parts[5] ?? '';
             $extra       = implode(' ', array_slice($parts, 6));
+
+            // Translate protocol numbers to names
+            $protocol = self::$protocolNames[$protocolRaw] ?? $protocolRaw;
 
             // Extract port from extra info
             $port = '';
@@ -224,6 +232,14 @@ class FirewallService
                 $port = $pm[1];
             } elseif (preg_match('/dpts:(\d+:\d+)/', $extra, $pm)) {
                 $port = $pm[1];
+            }
+
+            // Extract state/ctstate info
+            $state = '';
+            if (preg_match('/ctstate\s+(\S+)/i', $extra, $sm)) {
+                $state = $sm[1];
+            } elseif (preg_match('/state\s+(\S+)/i', $extra, $sm)) {
+                $state = $sm[1];
             }
 
             $rules[] = [
@@ -234,6 +250,7 @@ class FirewallService
                 'destination' => $destination,
                 'port'        => $port,
                 'extra'       => $extra,
+                'state'       => $state,
             ];
         }
 
@@ -243,14 +260,24 @@ class FirewallService
     public static function iptablesAddRule(string $action, string $source, int $port, string $protocol): array
     {
         $target = strtolower($action) === 'allow' ? 'ACCEPT' : 'DROP';
-        $proto  = in_array(strtolower($protocol), ['tcp', 'udp']) ? strtolower($protocol) : 'tcp';
+        $proto  = strtolower($protocol);
 
         $cmd = 'iptables -A INPUT';
         if ($source !== '' && $source !== '0.0.0.0/0') {
             $cmd .= ' -s ' . escapeshellarg($source);
         }
-        $cmd .= ' -p ' . escapeshellarg($proto);
-        $cmd .= ' --dport ' . escapeshellarg((string)$port);
+
+        if ($proto === 'all' || $port <= 0) {
+            // Allow/deny all traffic (no protocol/port filter)
+            if ($proto !== 'all' && in_array($proto, ['tcp', 'udp'])) {
+                $cmd .= ' -p ' . escapeshellarg($proto);
+            }
+        } else {
+            if (!in_array($proto, ['tcp', 'udp'])) $proto = 'tcp';
+            $cmd .= ' -p ' . escapeshellarg($proto);
+            $cmd .= ' --dport ' . escapeshellarg((string)$port);
+        }
+
         $cmd .= ' -j ' . escapeshellarg($target);
 
         $output = trim((string)shell_exec($cmd . ' 2>&1'));

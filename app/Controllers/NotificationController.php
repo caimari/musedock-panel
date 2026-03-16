@@ -21,6 +21,14 @@ class NotificationController
         $settings = Settings::getAll();
         $recipientEmail = NotificationService::getRecipientEmail();
 
+        // Decrypt sensitive fields for display
+        if (!empty($settings['notify_telegram_token'])) {
+            $settings['notify_telegram_token'] = ReplicationService::decryptPassword($settings['notify_telegram_token']);
+        }
+        if (!empty($settings['notify_smtp_pass'])) {
+            $settings['notify_smtp_pass'] = ReplicationService::decryptPassword($settings['notify_smtp_pass']);
+        }
+
         View::render('settings/notifications', [
             'layout'         => 'main',
             'pageTitle'      => 'Notificaciones',
@@ -58,8 +66,11 @@ class NotificationController
         // Recipient email (manual override)
         Settings::set('notify_email_to', trim($_POST['notify_email_to'] ?? ''));
 
-        // Telegram
-        Settings::set('notify_telegram_token', trim($_POST['notify_telegram_token'] ?? ''));
+        // Telegram (encrypt token)
+        $telegramToken = trim($_POST['notify_telegram_token'] ?? '');
+        if ($telegramToken !== '') {
+            Settings::set('notify_telegram_token', ReplicationService::encryptPassword($telegramToken));
+        }
         Settings::set('notify_telegram_chat_id', trim($_POST['notify_telegram_chat_id'] ?? ''));
 
         // Also update old cluster_* keys for backwards compatibility
@@ -71,7 +82,9 @@ class NotificationController
         if ($smtpPass !== '') {
             Settings::set('cluster_smtp_pass', ReplicationService::encryptPassword($smtpPass));
         }
-        Settings::set('cluster_telegram_token', trim($_POST['notify_telegram_token'] ?? ''));
+        if ($telegramToken !== '') {
+            Settings::set('cluster_telegram_token', ReplicationService::encryptPassword($telegramToken));
+        }
         Settings::set('cluster_telegram_chat_id', trim($_POST['notify_telegram_chat_id'] ?? ''));
 
         LogService::log('notifications.save', 'settings', 'Configuracion de notificaciones guardada');

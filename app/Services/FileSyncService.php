@@ -157,7 +157,9 @@ class FileSyncService
     // ═══════════════════════════════════════════════════════════════
 
     /**
-     * Sync a single hosting's httpdocs via rsync.
+     * Sync a single hosting's home directory via rsync.
+     * Syncs the entire home_dir (not just httpdocs) to preserve structure.
+     * Uses --chown to fix ownership by username on the remote (handles UID mismatches).
      */
     public static function rsyncHosting(string $localPath, string $remoteHost, string $remotePath, array $options = []): array
     {
@@ -167,13 +169,23 @@ class FileSyncService
         $user = $options['ssh_user'] ?? $config['ssh_user'];
         $bwLimit = $options['bandwidth_limit'] ?? $config['bandwidth_limit'];
         $excludes = array_filter(array_map('trim', explode(',', $options['excludes'] ?? $config['exclude_patterns'])));
+        $ownerUser = $options['owner_user'] ?? '';
 
         if (!is_dir($localPath)) {
             return ['ok' => false, 'error' => "Directorio local no existe: {$localPath}"];
         }
 
         // Build rsync command
+        // -a: archive (preserves permissions, symlinks, times)
+        // -v: verbose
+        // -z: compress during transfer
+        // --delete: remove files on slave that don't exist on master
         $cmd = 'rsync -avz --delete';
+
+        // Fix ownership on remote by username (solves UID mismatch between servers)
+        if ($ownerUser) {
+            $cmd .= ' --chown=' . escapeshellarg($ownerUser . ':' . $ownerUser);
+        }
 
         // Bandwidth limit
         if ($bwLimit > 0) {
@@ -248,7 +260,7 @@ class FileSyncService
      * Sync a hosting's files via HTTPS API (tar + POST).
      * Master packs files, sends to slave's API endpoint.
      */
-    public static function httpsSyncHosting(string $localPath, string $apiUrl, string $token, string $remotePath): array
+    public static function httpsSyncHosting(string $localPath, string $apiUrl, string $token, string $remotePath, string $ownerUser = ''): array
     {
         if (!is_dir($localPath)) {
             return ['ok' => false, 'error' => "Directorio local no existe: {$localPath}"];
@@ -297,6 +309,7 @@ class FileSyncService
             CURLOPT_POSTFIELDS => [
                 'action' => 'receive-files',
                 'remote_path' => $remotePath,
+                'owner_user' => $ownerUser,
                 'archive' => new \CURLFile($tmpFile, 'application/gzip', 'files.tar.gz'),
             ],
         ]);
@@ -334,15 +347,22 @@ class FileSyncService
      * Receive files on the slave side (called by API).
      * Extracts uploaded tar.gz to the target directory.
      */
-    public static function receiveFiles(string $remotePath, array $uploadedFile): array
+    public static function receiveFiles(string $remotePath, array $uploadedFile, string $ownerUser = ''): array
     {
         if (empty($uploadedFile['tmp_name']) || !file_exists($uploadedFile['tmp_name'])) {
             return ['ok' => false, 'error' => 'No se recibio ningun archivo'];
         }
 
-        // Security: validate remote_path is under /var/www/vhosts/
-        $realPath = $remotePath;
-        if (!str_starts_with($realPath, '/var/www/vhosts/')) {
+        // Security: validate remote_path is under allowed directories
+        $allowedPrefixes = ['/var/www/vhosts/', '/var/lib/caddy/'];
+        $pathAllowed = false;
+        foreach ($allowedPrefixes as $prefix) {
+            if (str_starts_with($remotePath, $prefix)) {
+                $pathAllowed = true;
+                break;
+            }
+        }
+        if (!$pathAllowed) {
             return ['ok' => false, 'error' => 'Ruta destino no permitida'];
         }
 
@@ -359,17 +379,28 @@ class FileSyncService
         );
         $output = shell_exec($cmd);
 
-        // Fix ownership based on the hosting account
-        $parts = explode('/', trim($remotePath, '/'));
-        // Path: /var/www/vhosts/domain.com/httpdocs
-        if (count($parts) >= 4) {
-            $domain = $parts[3]; // domain.com
-            $account = Database::fetchOne(
-                "SELECT username FROM hosting_accounts WHERE domain = :d",
-                ['d' => $domain]
-            );
-            if ($account) {
-                $username = $account['username'];
+        // Fix ownership: use owner_user from master if provided, else guess from DB
+        $username = '';
+        if ($ownerUser) {
+            $username = $ownerUser;
+        } else {
+            $parts = explode('/', trim($remotePath, '/'));
+            if (count($parts) >= 4) {
+                $domain = $parts[3];
+                $account = Database::fetchOne(
+                    "SELECT username FROM hosting_accounts WHERE domain = :d",
+                    ['d' => $domain]
+                );
+                if ($account) {
+                    $username = $account['username'];
+                }
+            }
+        }
+
+        if ($username) {
+            // Verify the user exists on this system before chown
+            $userExists = shell_exec(sprintf('id %s 2>/dev/null', escapeshellarg($username)));
+            if ($userExists) {
                 shell_exec(sprintf(
                     'chown -R %s:%s %s 2>&1',
                     escapeshellarg($username),
@@ -379,7 +410,7 @@ class FileSyncService
             }
         }
 
-        return ['ok' => true, 'message' => 'Archivos extraidos correctamente'];
+        return ['ok' => true, 'message' => 'Archivos extraidos correctamente', 'owner' => $username];
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -392,18 +423,20 @@ class FileSyncService
     public static function syncHostingToNode(array $account, array $node): array
     {
         $config = self::getConfig();
-        $localPath = ($account['home_dir'] ?? '') . '/httpdocs';
+        $homeDir = $account['home_dir'] ?? '';
+        $username = $account['username'] ?? '';
+        $localPath = $homeDir . '/httpdocs';
         $remotePath = $localPath;
 
         if ($config['method'] === 'https') {
             // Decrypt token
             $token = ReplicationService::decryptPassword($node['auth_token'] ?? '');
-            return self::httpsSyncHosting($localPath, $node['api_url'], $token, $remotePath);
+            return self::httpsSyncHosting($localPath, $node['api_url'], $token, $remotePath, $username);
         }
 
-        // SSH method — extract host from API URL
+        // SSH method — extract host from API URL, pass owner for --chown
         $host = self::extractHostFromUrl($node['api_url']);
-        return self::rsyncHosting($localPath, $host, $remotePath);
+        return self::rsyncHosting($localPath, $host, $remotePath, ['owner_user' => $username]);
     }
 
     /**
@@ -459,11 +492,29 @@ class FileSyncService
             '/home/caddy/.local/share/caddy/certificates',
         ];
 
+        // Try getting caddy home from /etc/passwd
+        $caddyPasswd = shell_exec("getent passwd caddy 2>/dev/null");
+        if ($caddyPasswd) {
+            $parts = explode(':', $caddyPasswd);
+            $caddyHome = $parts[5] ?? '';
+            if ($caddyHome) {
+                array_unshift($paths, $caddyHome . '/.local/share/caddy/certificates');
+            }
+        }
+
         // Try caddy environ
         $environ = shell_exec('caddy environ 2>/dev/null');
         if ($environ && preg_match('/caddy\.AppDataDir=(.+)/m', $environ, $m)) {
             $paths[] = trim($m[1]) . '/certificates';
         }
+
+        // Also try find as fallback (fast, only checks one level)
+        $found = trim((string)shell_exec('find /var/lib/caddy -name certificates -type d 2>/dev/null | head -1'));
+        if ($found) {
+            array_unshift($paths, $found);
+        }
+
+        $paths = array_unique($paths);
 
         foreach ($paths as $path) {
             if (is_dir($path)) {
@@ -489,10 +540,12 @@ class FileSyncService
 
         if ($config['method'] === 'https') {
             $token = ReplicationService::decryptPassword($node['auth_token'] ?? '');
-            return self::httpsSyncHosting($certDir, $node['api_url'], $token, $certDir);
+            // Send certs, slave will fix ownership to caddy:caddy
+            return self::httpsSyncHosting($certDir, $node['api_url'], $token, $certDir, 'caddy');
         }
 
-        return self::rsyncHosting($certDir, $host, $certDir);
+        // rsync with --chown=caddy:caddy to fix ownership on slave
+        return self::rsyncHosting($certDir, $host, $certDir, ['owner_user' => 'caddy']);
     }
 
     // ═══════════════════════════════════════════════════════════════

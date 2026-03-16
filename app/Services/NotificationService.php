@@ -172,10 +172,13 @@ class NotificationService
 
     public static function sendTelegram(string $message): bool
     {
-        $botToken = Settings::get('notify_telegram_token', '');
-        $chatId   = Settings::get('notify_telegram_chat_id', '');
+        $botTokenEnc = Settings::get('notify_telegram_token', '');
+        $chatId      = Settings::get('notify_telegram_chat_id', '');
 
-        if (!$botToken || !$chatId) return false;
+        if (!$botTokenEnc || !$chatId) return false;
+
+        $botToken = ReplicationService::decryptPassword($botTokenEnc);
+        if (!$botToken) return false;
 
         $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
         $ch = curl_init($url);
