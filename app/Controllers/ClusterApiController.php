@@ -68,6 +68,10 @@ class ClusterApiController
                 'promote'         => ClusterService::promoteToMaster(),
                 'demote'          => ClusterService::demoteToSlave($payload['new_master_ip'] ?? ''),
                 'test-connection' => ['ok' => true, 'message' => 'Connection successful'],
+                'repl-create-user' => \MuseDockPanel\Services\ReplicationService::createReplicationUserForRemote(
+                    $payload['engine'] ?? 'pg',
+                    $payload['slave_ip'] ?? ''
+                ),
                 default           => ['ok' => false, 'message' => "Unknown action: {$action}"],
             };
 

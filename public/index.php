@@ -166,20 +166,25 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 
 // Replication
 \MuseDockPanel\Router::get('/settings/replication', 'ReplicationController@index');
-\MuseDockPanel\Router::post('/settings/replication/save', 'ReplicationController@saveConfig');
-\MuseDockPanel\Router::post('/settings/replication/setup-master', 'ReplicationController@setupMaster');
-\MuseDockPanel\Router::post('/settings/replication/setup-slave', 'ReplicationController@setupSlave');
-\MuseDockPanel\Router::post('/settings/replication/promote', 'ReplicationController@promote');
-\MuseDockPanel\Router::post('/settings/replication/demote', 'ReplicationController@demote');
 \MuseDockPanel\Router::get('/settings/replication/status', 'ReplicationController@status');
 \MuseDockPanel\Router::post('/settings/replication/test-connection', 'ReplicationController@testConnection');
-\MuseDockPanel\Router::post('/settings/replication/add-slave', 'ReplicationController@addSlave');
-\MuseDockPanel\Router::post('/settings/replication/update-slave', 'ReplicationController@updateSlave');
-\MuseDockPanel\Router::post('/settings/replication/remove-slave', 'ReplicationController@removeSlave');
-\MuseDockPanel\Router::post('/settings/replication/apply-master', 'ReplicationController@applyMaster');
-\MuseDockPanel\Router::get('/settings/replication/slave-status', 'ReplicationController@slaveStatus');
-\MuseDockPanel\Router::post('/settings/replication/test-slave-connection', 'ReplicationController@testSlaveConnection');
-\MuseDockPanel\Router::post('/settings/replication/save-advanced', 'ReplicationController@saveAdvanced');
+// Mode 1: Master (activate + users + IPs)
+\MuseDockPanel\Router::post('/settings/replication/activate-master', 'ReplicationController@activateMaster');
+\MuseDockPanel\Router::post('/settings/replication/reset-standalone', 'ReplicationController@resetStandalone');
+\MuseDockPanel\Router::post('/settings/replication/repl-user/create', 'ReplicationController@createReplUser');
+\MuseDockPanel\Router::post('/settings/replication/repl-user/delete', 'ReplicationController@deleteReplUser');
+\MuseDockPanel\Router::get('/settings/replication/repl-users', 'ReplicationController@listReplUsers');
+\MuseDockPanel\Router::post('/settings/replication/authorized-ip/add', 'ReplicationController@addAuthorizedIp');
+\MuseDockPanel\Router::post('/settings/replication/authorized-ip/remove', 'ReplicationController@removeAuthorizedIp');
+\MuseDockPanel\Router::get('/settings/replication/authorized-ips', 'ReplicationController@listAuthorizedIps');
+// Mode 2: Slave (manual)
+\MuseDockPanel\Router::post('/settings/replication/convert-to-slave', 'ReplicationController@convertToSlave');
+\MuseDockPanel\Router::post('/settings/replication/test-slave-master', 'ReplicationController@testSlaveMaster');
+// Mode 3: Auto (cluster)
+\MuseDockPanel\Router::post('/settings/replication/auto-configure', 'ReplicationController@autoConfigure');
+// Switchover
+\MuseDockPanel\Router::post('/settings/replication/promote', 'ReplicationController@promote');
+\MuseDockPanel\Router::post('/settings/replication/demote', 'ReplicationController@demote');
 
 // Cluster
 \MuseDockPanel\Router::get('/settings/cluster', 'ClusterController@index');

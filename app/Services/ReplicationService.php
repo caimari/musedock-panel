@@ -1201,4 +1201,442 @@ class ReplicationService
     {
         return static::setupMysqlSlave($newMasterIp, $port, $replUser, $replPass);
     }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── NEW: Activate Master (config only, no credentials) ──
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Activate PostgreSQL as master: only touches postgresql.conf + restart.
+     * Does NOT create users or modify pg_hba.conf.
+     */
+    public static function activatePgMaster(): array
+    {
+        $steps = [];
+        $configDir = static::getPgConfigDir();
+        $pgConf = "{$configDir}/postgresql.conf";
+
+        if (!file_exists($pgConf)) {
+            return ['ok' => false, 'steps' => [], 'error' => "postgresql.conf no encontrado en {$configDir}"];
+        }
+
+        static::backupFile($pgConf);
+        $steps[] = ['name' => 'Backup postgresql.conf', 'ok' => true, 'output' => 'OK'];
+
+        $pgVer = (int)(static::detectPgVersion() ?? '16');
+        $walKeepParam = $pgVer >= 13 ? 'wal_keep_size' : 'wal_keep_segments';
+        $walKeepValue = $pgVer >= 13 ? '512MB' : '64';
+        $walLevel = Settings::get('repl_pg_wal_level', 'replica');
+
+        $ok = static::modifyConfigFile($pgConf, [
+            'wal_level'         => $walLevel,
+            'max_wal_senders'   => '10',
+            $walKeepParam       => $walKeepValue,
+            'hot_standby'       => 'on',
+            'listen_addresses'  => "'*'",
+        ]);
+        $steps[] = ['name' => 'Modificar postgresql.conf', 'ok' => $ok, 'output' => $ok ? "wal_level={$walLevel}" : 'Error'];
+        if (!$ok) return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo modificar postgresql.conf'];
+
+        $output = shell_exec("systemctl restart postgresql 2>&1");
+        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $steps[] = ['name' => 'Reiniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
+
+        return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : 'PostgreSQL no arranco'];
+    }
+
+    /**
+     * Activate MySQL as master: only touches my.cnf + restart.
+     * Does NOT create users.
+     */
+    public static function activateMysqlMaster(): array
+    {
+        $steps = [];
+        $configPath = static::getMysqlConfigPath();
+        $service = static::detectMysqlServiceName();
+
+        static::backupFile($configPath);
+        $steps[] = ['name' => 'Backup configuracion MySQL', 'ok' => true, 'output' => 'OK'];
+
+        $localIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
+        $parts = explode('.', $localIp);
+        $serverId = (int)($parts[3] ?? 1);
+        if ($serverId < 1) $serverId = 1;
+
+        $mysqlConf = [
+            'server-id'      => (string)$serverId,
+            'log-bin'        => 'mysql-bin',
+            'bind-address'   => '0.0.0.0',
+            'binlog_format'  => Settings::get('repl_mysql_binlog_format', 'ROW'),
+        ];
+
+        if (Settings::get('repl_mysql_gtid_mode', '0') === '1') {
+            $mysqlConf['gtid_mode'] = 'ON';
+            $mysqlConf['enforce-gtid-consistency'] = 'ON';
+        }
+
+        $ok = static::modifyConfigFile($configPath, $mysqlConf, 'mysqld');
+        $steps[] = ['name' => 'Modificar configuracion MySQL', 'ok' => $ok, 'output' => $ok ? "server-id={$serverId}" : 'Error'];
+        if (!$ok) return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo modificar configuracion MySQL'];
+
+        $output = shell_exec("systemctl restart {$service} 2>&1");
+        $running = trim((string)shell_exec("systemctl is-active {$service} 2>/dev/null")) === 'active';
+        $steps[] = ['name' => "Reiniciar {$service}", 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
+
+        return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : "{$service} no arranco"];
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── NEW: Replication Users CRUD ─────────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    public static function generateSecurePassword(int $length = 32): string
+    {
+        return bin2hex(random_bytes($length / 2));
+    }
+
+    /**
+     * Create a replication user in the database engine and store in panel DB.
+     * Returns the plaintext password (shown once for copy).
+     */
+    public static function createReplicationUser(string $engine, ?string $username = null): array
+    {
+        $suffix = substr(bin2hex(random_bytes(4)), 0, 6);
+        if ($username === null || $username === '') {
+            $username = $engine === 'pg' ? "repl_{$suffix}" : "repl_{$suffix}";
+        }
+        $safeUser = preg_replace('/[^a-zA-Z0-9_]/', '', $username);
+        $password = static::generateSecurePassword(32);
+
+        if ($engine === 'pg') {
+            $safePass = escapeshellarg($password);
+            $sql = "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{$safeUser}') THEN CREATE ROLE {$safeUser} WITH REPLICATION LOGIN PASSWORD {$safePass}; ELSE ALTER ROLE {$safeUser} WITH PASSWORD {$safePass}; END IF; END \$\$;";
+            $output = shell_exec("sudo -u postgres psql -c " . escapeshellarg($sql) . " 2>&1");
+            if ($output !== null && stripos($output, 'error') !== false && stripos($output, 'DO') === false) {
+                return ['ok' => false, 'error' => trim($output)];
+            }
+        } elseif ($engine === 'mysql') {
+            $pdo = static::getMysqlPdo();
+            if (!$pdo) {
+                return ['ok' => false, 'error' => 'No se pudo conectar a MySQL'];
+            }
+            try {
+                // Create user with wildcard host initially (IPs are managed separately)
+                $pdo->exec("CREATE USER IF NOT EXISTS '{$safeUser}'@'%' IDENTIFIED BY " . $pdo->quote($password));
+                $pdo->exec("GRANT REPLICATION SLAVE ON *.* TO '{$safeUser}'@'%'");
+                $pdo->exec("FLUSH PRIVILEGES");
+            } catch (\Throwable $e) {
+                return ['ok' => false, 'error' => $e->getMessage()];
+            }
+        } else {
+            return ['ok' => false, 'error' => 'Motor no valido'];
+        }
+
+        // Store in panel DB
+        $encPass = static::encryptPassword($password);
+        $id = Database::insert('replication_users', [
+            'engine'             => $engine,
+            'username'           => $safeUser,
+            'password_encrypted' => $encPass,
+            'created_at'         => date('Y-m-d H:i:s'),
+            'updated_at'         => date('Y-m-d H:i:s'),
+        ]);
+
+        return [
+            'ok'       => true,
+            'id'       => $id,
+            'username' => $safeUser,
+            'password' => $password, // Plaintext, shown once
+        ];
+    }
+
+    /**
+     * Delete a replication user from engine and panel DB.
+     */
+    public static function deleteReplicationUser(int $id): array
+    {
+        $row = Database::fetchOne("SELECT * FROM replication_users WHERE id = :id", ['id' => $id]);
+        if (!$row) return ['ok' => false, 'error' => 'Usuario no encontrado'];
+
+        $engine = $row['engine'];
+        $username = $row['username'];
+        $safeUser = preg_replace('/[^a-zA-Z0-9_]/', '', $username);
+
+        if ($engine === 'pg') {
+            shell_exec("sudo -u postgres psql -c " . escapeshellarg("DROP ROLE IF EXISTS {$safeUser}") . " 2>&1");
+        } elseif ($engine === 'mysql') {
+            $pdo = static::getMysqlPdo();
+            if ($pdo) {
+                try {
+                    // Drop all host variants
+                    $rows = $pdo->query("SELECT Host FROM mysql.user WHERE User = " . $pdo->quote($safeUser))->fetchAll(\PDO::FETCH_ASSOC);
+                    foreach ($rows as $r) {
+                        $pdo->exec("DROP USER IF EXISTS '{$safeUser}'@'{$r['Host']}'");
+                    }
+                    $pdo->exec("FLUSH PRIVILEGES");
+                } catch (\Throwable) {}
+            }
+        }
+
+        Database::delete('replication_users', 'id = :id', ['id' => $id]);
+        return ['ok' => true];
+    }
+
+    /**
+     * Get all replication users for an engine. Password decrypted for display.
+     */
+    public static function getReplicationUsers(string $engine): array
+    {
+        try {
+            $rows = Database::fetchAll(
+                "SELECT * FROM replication_users WHERE engine = :engine ORDER BY created_at DESC",
+                ['engine' => $engine]
+            );
+            foreach ($rows as &$row) {
+                $row['password'] = static::decryptPassword($row['password_encrypted']);
+                unset($row['password_encrypted']);
+            }
+            return $rows;
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── NEW: Authorized IPs CRUD ────────────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Add an authorized IP for replication (pg_hba.conf + reload, or MySQL GRANT).
+     */
+    public static function addAuthorizedIp(string $engine, string $ip, string $label = ''): array
+    {
+        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'error' => 'IP no valida'];
+        }
+
+        if ($engine === 'pg') {
+            // Get all PG replication users to authorize this IP for each
+            $users = static::getReplicationUsers('pg');
+            $configDir = static::getPgConfigDir();
+            $hbaConf = "{$configDir}/pg_hba.conf";
+
+            if (file_exists($hbaConf)) {
+                $existing = file_get_contents($hbaConf);
+                $newLines = [];
+
+                if (empty($users)) {
+                    // Add a generic line for any replication user
+                    $hbaLine = "host    replication     all     {$ip}/32     md5";
+                    if (!str_contains($existing, "{$ip}/32")) {
+                        $newLines[] = $hbaLine;
+                    }
+                } else {
+                    foreach ($users as $user) {
+                        $hbaLine = "host    replication     {$user['username']}     {$ip}/32     md5";
+                        if (!str_contains($existing, $hbaLine)) {
+                            $newLines[] = $hbaLine;
+                        }
+                    }
+                }
+
+                if (!empty($newLines)) {
+                    file_put_contents($hbaConf, $existing . "\n" . implode("\n", $newLines) . "\n");
+                }
+
+                // Reload PG (not restart — pg_hba changes only need reload)
+                shell_exec("systemctl reload postgresql 2>&1");
+            }
+
+        } elseif ($engine === 'mysql') {
+            $pdo = static::getMysqlPdo();
+            if ($pdo) {
+                $users = static::getReplicationUsers('mysql');
+                foreach ($users as $user) {
+                    $safeUser = preg_replace('/[^a-zA-Z0-9_]/', '', $user['username']);
+                    try {
+                        $pdo->exec("CREATE USER IF NOT EXISTS '{$safeUser}'@'{$ip}' IDENTIFIED BY " . $pdo->quote($user['password']));
+                        $pdo->exec("GRANT REPLICATION SLAVE ON *.* TO '{$safeUser}'@'{$ip}'");
+                    } catch (\Throwable) {}
+                }
+                try { $pdo->exec("FLUSH PRIVILEGES"); } catch (\Throwable) {}
+            }
+        }
+
+        // Store in panel DB
+        $id = Database::insert('replication_authorized_ips', [
+            'engine'     => $engine,
+            'ip_address' => $ip,
+            'label'      => $label,
+            'created_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        return ['ok' => true, 'id' => $id];
+    }
+
+    /**
+     * Remove an authorized IP.
+     */
+    public static function removeAuthorizedIp(int $id): array
+    {
+        $row = Database::fetchOne("SELECT * FROM replication_authorized_ips WHERE id = :id", ['id' => $id]);
+        if (!$row) return ['ok' => false, 'error' => 'IP no encontrada'];
+
+        $engine = $row['engine'];
+        $ip = $row['ip_address'];
+
+        if ($engine === 'pg') {
+            $configDir = static::getPgConfigDir();
+            $hbaConf = "{$configDir}/pg_hba.conf";
+            if (file_exists($hbaConf)) {
+                $content = file_get_contents($hbaConf);
+                // Remove all lines containing this IP/32
+                $content = preg_replace('/^.*' . preg_quote($ip, '/') . '\/32.*$/m', '', $content);
+                $content = preg_replace('/\n{3,}/', "\n\n", $content);
+                file_put_contents($hbaConf, $content);
+                shell_exec("systemctl reload postgresql 2>&1");
+            }
+        } elseif ($engine === 'mysql') {
+            $pdo = static::getMysqlPdo();
+            if ($pdo) {
+                $users = static::getReplicationUsers('mysql');
+                foreach ($users as $user) {
+                    $safeUser = preg_replace('/[^a-zA-Z0-9_]/', '', $user['username']);
+                    try {
+                        $pdo->exec("DROP USER IF EXISTS '{$safeUser}'@'{$ip}'");
+                    } catch (\Throwable) {}
+                }
+                try { $pdo->exec("FLUSH PRIVILEGES"); } catch (\Throwable) {}
+            }
+        }
+
+        Database::delete('replication_authorized_ips', 'id = :id', ['id' => $id]);
+        return ['ok' => true];
+    }
+
+    /**
+     * Get all authorized IPs for an engine.
+     */
+    public static function getAuthorizedIps(string $engine): array
+    {
+        try {
+            return Database::fetchAll(
+                "SELECT * FROM replication_authorized_ips WHERE engine = :engine ORDER BY created_at DESC",
+                ['engine' => $engine]
+            );
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── NEW: Auto-configure via Cluster API ─────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Called on the MASTER when a remote slave requests replication access.
+     * Creates a replication user and authorizes the slave IP.
+     * Returns credentials for the slave to use.
+     */
+    public static function createReplicationUserForRemote(string $engine, string $slaveIp): array
+    {
+        // Create a replication user
+        $result = static::createReplicationUser($engine);
+        if (!$result['ok']) {
+            return $result;
+        }
+
+        // Authorize the slave IP
+        $ipResult = static::addAuthorizedIp($engine, $slaveIp, "auto-cluster-{$slaveIp}");
+
+        return [
+            'ok'       => true,
+            'username' => $result['username'],
+            'password' => $result['password'],
+            'port'     => $engine === 'pg' ? (int)Settings::get('repl_pg_port', '5432') : (int)Settings::get('repl_mysql_port', '3306'),
+        ];
+    }
+
+    /**
+     * Called on the SLAVE to orchestrate automatic replication setup.
+     * Calls the master's cluster API to get credentials, then runs setup.
+     */
+    public static function autoConfigureReplication(int $clusterNodeId, string $engine): array
+    {
+        $steps = [];
+
+        // Step 1: Get local IP
+        $localIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
+        if (!$localIp) {
+            return ['ok' => false, 'steps' => [], 'error' => 'No se pudo determinar la IP local'];
+        }
+        $steps[] = ['name' => 'IP local detectada', 'ok' => true, 'output' => $localIp];
+
+        // Step 2: Call master's cluster API to create user and authorize our IP
+        $response = ClusterService::callNode($clusterNodeId, 'POST', 'api/cluster/action', [
+            'action'  => 'repl-create-user',
+            'payload' => [
+                'engine'   => $engine,
+                'slave_ip' => $localIp,
+            ],
+        ]);
+
+        if (!$response['ok']) {
+            $steps[] = ['name' => 'Solicitar credenciales al master', 'ok' => false, 'output' => $response['error'] ?? 'Error de conexion'];
+            return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo contactar con el master: ' . ($response['error'] ?? '')];
+        }
+
+        $remoteData = $response['data'] ?? [];
+        $username = $remoteData['username'] ?? '';
+        $password = $remoteData['password'] ?? '';
+        $port = (int)($remoteData['port'] ?? ($engine === 'pg' ? 5432 : 3306));
+
+        if (!$username || !$password) {
+            $steps[] = ['name' => 'Solicitar credenciales al master', 'ok' => false, 'output' => 'Credenciales vacias'];
+            return ['ok' => false, 'steps' => $steps, 'error' => 'El master no devolvio credenciales validas'];
+        }
+        $steps[] = ['name' => 'Credenciales recibidas del master', 'ok' => true, 'output' => "usuario: {$username}"];
+
+        // Step 3: Get master IP from cluster node
+        $node = ClusterService::getNode($clusterNodeId);
+        $masterUrl = $node['api_url'] ?? '';
+        // Extract IP from URL
+        $parsed = parse_url($masterUrl);
+        $masterIp = $parsed['host'] ?? '';
+
+        if (!$masterIp || !filter_var($masterIp, FILTER_VALIDATE_IP)) {
+            // Try to resolve hostname
+            $resolved = gethostbyname($masterIp);
+            if ($resolved !== $masterIp) {
+                $masterIp = $resolved;
+            } else {
+                $steps[] = ['name' => 'Resolver IP del master', 'ok' => false, 'output' => "No se pudo resolver: {$masterUrl}"];
+                return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo determinar la IP del master'];
+            }
+        }
+        $steps[] = ['name' => 'IP del master', 'ok' => true, 'output' => $masterIp];
+
+        // Step 4: Run slave setup
+        if ($engine === 'pg') {
+            $result = static::setupPgSlave($masterIp, $port, $username, $password);
+        } else {
+            $result = static::setupMysqlSlave($masterIp, $port, $username, $password);
+        }
+
+        // Merge steps
+        foreach ($result['steps'] ?? [] as $s) {
+            $steps[] = $s;
+        }
+
+        if ($result['ok']) {
+            // Save connection info
+            $prefix = $engine === 'pg' ? 'repl_pg' : 'repl_mysql';
+            Settings::set("{$prefix}_remote_ip", $masterIp);
+            Settings::set("{$prefix}_port", (string)$port);
+            Settings::set("{$prefix}_user", $username);
+            Settings::set("{$prefix}_pass", static::encryptPassword($password));
+        }
+
+        return ['ok' => $result['ok'], 'steps' => $steps, 'error' => $result['error'] ?? null];
+    }
 }
