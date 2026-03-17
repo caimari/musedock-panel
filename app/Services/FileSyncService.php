@@ -1127,7 +1127,7 @@ class FileSyncService
                 // --force skips errors (e.g. GENERATED column inserts) and continues
                 // sed: remove NO_AUTO_CREATE_USER + fix MySQL 8.0 collation
                 $importCmd = sprintf(
-                    'gunzip -c %s | sed "s/NO_AUTO_CREATE_USER,\\?//g; s/,\\+/,/g; s/,\x27/\x27/g; s/utf8mb4_0900_ai_ci/utf8mb4_unicode_ci/g" | %s --force %s 2>&1',
+                    'gunzip -c %s | sed "s/NO_AUTO_CREATE_USER,\\?//g; s/utf8mb4_0900_ai_ci/utf8mb4_unicode_ci/g" | %s --force %s 2>&1',
                     escapeshellarg($file),
                     $mysqlCmd,
                     escapeshellarg($dbName)
