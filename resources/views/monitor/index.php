@@ -2,8 +2,8 @@
 
 <!-- Health Score + Alert Badge -->
 <div class="row g-3 mb-4">
-    <div class="col-md-6">
-        <div class="stat-card d-flex align-items-center gap-3">
+    <div class="col-md-6 d-flex">
+        <div class="stat-card w-100 d-flex align-items-center gap-3">
             <?php
                 $hClass = 'text-success';
                 $hLabel = 'OK';
@@ -25,8 +25,8 @@
             </div>
         </div>
     </div>
-    <div class="col-md-6">
-        <div class="stat-card d-flex align-items-center gap-3">
+    <div class="col-md-6 d-flex">
+        <div class="stat-card w-100 d-flex align-items-center gap-3">
             <div>
                 <div class="stat-value"><?= $alertCount ?></div>
                 <div class="stat-label">Unacknowledged Alerts</div>
@@ -41,8 +41,8 @@
 <!-- Stat Cards — Current bandwidth per interface + CPU + RAM -->
 <div class="row g-3 mb-4">
     <?php foreach ($interfaces as $iface): ?>
-    <div class="col-md-3">
-        <div class="stat-card">
+    <div class="col-md-3 d-flex">
+        <div class="stat-card w-100 d-flex flex-column">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value" id="card-<?= View::e($iface) ?>-rx">--</div>
@@ -50,7 +50,7 @@
                 </div>
                 <i class="bi bi-arrow-down-circle stat-icon" style="color:#22c55e"></i>
             </div>
-            <div class="mt-2">
+            <div class="mt-auto pt-2">
                 <small class="text-muted">TX (Out): <span id="card-<?= View::e($iface) ?>-tx">--</span></small>
             </div>
             <?php if (!empty($ifaceIPs[$iface])): ?>
@@ -59,8 +59,8 @@
         </div>
     </div>
     <?php endforeach; ?>
-    <div class="col-md-3">
-        <div class="stat-card">
+    <div class="col-md-3 d-flex">
+        <div class="stat-card w-100 d-flex flex-column">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value" id="card-cpu">--</div>
@@ -68,11 +68,11 @@
                 </div>
                 <i class="bi bi-cpu stat-icon"></i>
             </div>
-            <div class="progress mt-2"><div class="progress-bar bg-info" id="bar-cpu" style="width:0%"></div></div>
+            <div class="progress mt-auto"><div class="progress-bar bg-info" id="bar-cpu" style="width:0%"></div></div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="stat-card">
+    <div class="col-md-3 d-flex">
+        <div class="stat-card w-100 d-flex flex-column">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value" id="card-ram">--</div>
@@ -80,7 +80,7 @@
                 </div>
                 <i class="bi bi-memory stat-icon"></i>
             </div>
-            <div class="progress mt-2"><div class="progress-bar bg-warning" id="bar-ram" style="width:0%"></div></div>
+            <div class="progress mt-auto"><div class="progress-bar bg-warning" id="bar-ram" style="width:0%"></div></div>
         </div>
     </div>
 </div>
@@ -89,8 +89,8 @@
 <?php if (!empty($gpus)): ?>
 <div class="row g-3 mb-4">
     <?php foreach ($gpus as $gpu): ?>
-    <div class="col-md-3">
-        <div class="stat-card">
+    <div class="col-md-3 d-flex">
+        <div class="stat-card w-100 d-flex flex-column">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value" id="card-gpu<?= $gpu['index'] ?>-util">--</div>
@@ -106,7 +106,7 @@
                 <small class="text-muted">Temp: <span id="card-gpu<?= $gpu['index'] ?>-temp">--</span></small>
                 <small class="text-muted">Power: <span id="card-gpu<?= $gpu['index'] ?>-power">--</span></small>
             </div>
-            <div class="progress mt-2"><div class="progress-bar" id="bar-gpu<?= $gpu['index'] ?>" style="width:0%;background:#a855f7"></div></div>
+            <div class="progress mt-auto pt-2"><div class="progress-bar" id="bar-gpu<?= $gpu['index'] ?>" style="width:0%;background:#a855f7"></div></div>
         </div>
     </div>
     <?php endforeach; ?>

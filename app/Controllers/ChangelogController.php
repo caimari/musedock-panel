@@ -20,6 +20,45 @@ class ChangelogController
     {
         return [
             [
+                'version' => '0.7.6',
+                'date' => '2026-03-17',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Alertas escalonadas para nodos caidos — Intervalo progresivo: 1min, 5min, 15min, 30min, 45min, 1h, 2h, 4h, 8h, 12h en vez de alertar cada minuto',
+                            'Silenciar alertas por nodo — Boton para silenciar alertas de un nodo especifico (mantenimiento programado). Se reactivan automaticamente al recuperarse el nodo',
+                            'Notificacion de recuperacion — Cuando un nodo vuelve online se envia aviso con el tiempo total que estuvo caido',
+                            'Banner de nodos caidos en Dashboard — Alerta roja prominente con tabla de nodos offline, tiempo caido y controles de silenciar/reactivar',
+                            'Controles de alertas en Cluster > Nodos — Columna "Alertas" con estado (Activas/Silenciadas) y botones silenciar/reactivar por nodo',
+                            'Modal "Ver Estado" instantaneo — El modal abre al momento con datos de la DB y verifica la conexion en vivo en paralelo con spinner',
+                            'Endpoint ping individual — GET /settings/cluster/ping-node para verificar un solo nodo sin bloquear',
+                            'Confirmacion con password para eliminar nodo — El modal de eliminar nodo ahora pide contraseña de admin y explica que solo desvincula (no borra datos remotos)',
+                        ],
+                        'en' => [
+                            'Escalating alerts for offline nodes — Progressive interval: 1min, 5min, 15min, 30min, 45min, 1h, 2h, 4h, 8h, 12h instead of alerting every minute',
+                            'Mute alerts per node — Button to silence alerts for a specific node (scheduled maintenance). Auto-reactivates when node recovers',
+                            'Recovery notification — When a node comes back online, a notification is sent with total downtime',
+                            'Offline nodes banner on Dashboard — Prominent red alert with table of offline nodes, downtime and mute/unmute controls',
+                            'Alert controls in Cluster > Nodes — "Alerts" column with status (Active/Muted) and mute/unmute buttons per node',
+                            'Instant "View Status" modal — Modal opens immediately with DB data and verifies live connection in parallel with spinner',
+                            'Individual ping endpoint — GET /settings/cluster/ping-node to check a single node without blocking',
+                            'Password confirmation to delete node — Delete node modal now requires admin password and explains it only unlinks (does not delete remote data)',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Cards de Dashboard con misma altura — Las stat-cards de CPU, RAM, Disco y Hosting Accounts ahora se alinean uniformemente',
+                            'Cards de Monitoring con misma altura — Las stat-cards de Health, Alerts, Network, CPU, RAM y GPU ahora se alinean uniformemente',
+                        ],
+                        'en' => [
+                            'Dashboard cards equal height — CPU, RAM, Disk and Hosting Accounts stat-cards now align uniformly',
+                            'Monitoring cards equal height — Health, Alerts, Network, CPU, RAM and GPU stat-cards now align uniformly',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '0.7.5',
                 'date' => '2026-03-17',
                 'badge' => 'success',

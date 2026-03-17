@@ -1,9 +1,89 @@
 <?php use MuseDockPanel\View; ?>
 
+<!-- Offline Nodes Alert Banner -->
+<?php if (!empty($offlineNodes)): ?>
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="card border-danger">
+            <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center py-2">
+                <span>
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    <strong><?= count($offlineNodes) ?> nodo<?= count($offlineNodes) > 1 ? 's' : '' ?> del cluster caido<?= count($offlineNodes) > 1 ? 's' : '' ?></strong>
+                </span>
+                <a href="/settings/cluster" class="btn btn-outline-light btn-sm py-0">
+                    <i class="bi bi-gear me-1"></i>Cluster
+                </a>
+            </div>
+            <div class="card-body p-0">
+                <table class="table table-sm table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th class="ps-3">Nodo</th>
+                            <th>URL</th>
+                            <th>Ultimo contacto</th>
+                            <th>Caido</th>
+                            <th class="text-center">Alertas</th>
+                            <th class="text-end pe-3">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($offlineNodes as $oNode): ?>
+                        <tr>
+                            <td class="ps-3">
+                                <i class="bi bi-circle-fill text-danger me-1" style="font-size: 0.5rem; vertical-align: middle;"></i>
+                                <strong><?= View::e($oNode['name']) ?></strong>
+                            </td>
+                            <td><code class="small"><?= View::e($oNode['api_url']) ?></code></td>
+                            <td><small class="text-muted"><?= View::e($oNode['last_seen_at']) ?></small></td>
+                            <td>
+                                <?php if ($oNode['down_minutes'] !== null): ?>
+                                    <?php
+                                        $dm = $oNode['down_minutes'];
+                                        if ($dm >= 1440) {
+                                            $downLabel = round($dm / 1440, 1) . ' dias';
+                                        } elseif ($dm >= 60) {
+                                            $downLabel = round($dm / 60, 1) . ' horas';
+                                        } else {
+                                            $downLabel = $dm . ' min';
+                                        }
+                                    ?>
+                                    <span class="badge bg-danger"><?= $downLabel ?></span>
+                                <?php else: ?>
+                                    <span class="badge bg-secondary">Nunca visto</span>
+                                <?php endif; ?>
+                            </td>
+                            <td class="text-center">
+                                <?php if ($oNode['muted']): ?>
+                                    <span class="badge bg-secondary"><i class="bi bi-bell-slash me-1"></i>Silenciadas</span>
+                                <?php else: ?>
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-bell-fill me-1"></i>Activas</span>
+                                <?php endif; ?>
+                            </td>
+                            <td class="text-end pe-3">
+                                <?php if ($oNode['muted']): ?>
+                                    <button class="btn btn-outline-warning btn-sm py-0 px-2" onclick="toggleNodeAlerts(<?= $oNode['id'] ?>, 'unmute', '<?= View::e($oNode['name']) ?>')" title="Reactivar alertas">
+                                        <i class="bi bi-bell me-1"></i>Reactivar
+                                    </button>
+                                <?php else: ?>
+                                    <button class="btn btn-outline-secondary btn-sm py-0 px-2" onclick="toggleNodeAlerts(<?= $oNode['id'] ?>, 'mute', '<?= View::e($oNode['name']) ?>')" title="Silenciar alertas">
+                                        <i class="bi bi-bell-slash me-1"></i>Silenciar
+                                    </button>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- System Stats -->
 <div class="row g-3 mb-4">
-    <div class="col-md-3">
-        <div class="stat-card" role="button" onclick="openProcessModal('cpu')" title="Ver procesos por CPU" style="cursor:pointer">
+    <div class="col-md-3 d-flex">
+        <div class="stat-card w-100 d-flex flex-column" role="button" onclick="openProcessModal('cpu')" title="Ver procesos por CPU" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value"><?= $stats['cpu']['percent'] ?>%</div>
@@ -13,11 +93,11 @@
             </div>
             <div class="progress mt-2"><div class="progress-bar bg-info" style="width: <?= $stats['cpu']['percent'] ?>%"></div></div>
             <small class="text-muted">Load: <?= $stats['cpu']['load_1'] ?> / <?= $stats['cpu']['load_5'] ?> / <?= $stats['cpu']['load_15'] ?></small>
-            <div class="text-end"><small class="text-muted"><i class="bi bi-eye"></i> Click para ver procesos</small></div>
+            <div class="text-end mt-auto"><small class="text-muted"><i class="bi bi-eye"></i> Click para ver procesos</small></div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="stat-card" role="button" onclick="openProcessModal('ram')" title="Ver procesos por RAM" style="cursor:pointer">
+    <div class="col-md-3 d-flex">
+        <div class="stat-card w-100 d-flex flex-column" role="button" onclick="openProcessModal('ram')" title="Ver procesos por RAM" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value"><?= $stats['memory']['percent'] ?>%</div>
@@ -26,11 +106,11 @@
                 <i class="bi bi-memory stat-icon"></i>
             </div>
             <div class="progress mt-2"><div class="progress-bar bg-warning" style="width: <?= $stats['memory']['percent'] ?>%"></div></div>
-            <div class="text-end"><small class="text-muted"><i class="bi bi-eye"></i> Click para ver procesos</small></div>
+            <div class="text-end mt-auto"><small class="text-muted"><i class="bi bi-eye"></i> Click para ver procesos</small></div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="stat-card">
+    <div class="col-md-3 d-flex">
+        <div class="stat-card w-100 d-flex flex-column">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value"><?= $stats['disk']['percent'] ?>%</div>
@@ -42,8 +122,8 @@
             <small class="text-muted"><?= $stats['disk']['free_gb'] ?> GB free</small>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="stat-card">
+    <div class="col-md-3 d-flex">
+        <div class="stat-card w-100 d-flex flex-column">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value"><?= $accounts['total'] ?? 0 ?></div>
@@ -51,7 +131,7 @@
                 </div>
                 <i class="bi bi-server stat-icon"></i>
             </div>
-            <div class="mt-2">
+            <div class="mt-auto pt-2">
                 <span class="badge badge-active"><?= $accounts['active'] ?? 0 ?> active</span>
                 <?php if (($accounts['suspended'] ?? 0) > 0): ?>
                     <span class="badge badge-suspended"><?= $accounts['suspended'] ?> suspended</span>
@@ -559,4 +639,52 @@
     };
 
 })();
+
+// ─── Node Alert Mute/Unmute ──────────────────────────────
+window.toggleNodeAlerts = async function(nodeId, action, nodeName) {
+    const csrfToken = document.querySelector('input[name=_csrf_token]')?.value || '<?= $_SESSION['csrf_token'] ?? '' ?>';
+    const isMute = action === 'mute';
+
+    const confirmed = await (typeof SwalDark !== 'undefined' ? SwalDark : Swal).fire({
+        title: isMute ? 'Silenciar alertas' : 'Reactivar alertas',
+        html: isMute
+            ? `<p>Silenciar todas las alertas (Telegram/Email) del nodo <b>${nodeName}</b>?</p><p class="text-muted"><small>Las alertas se reactivaran automaticamente cuando el nodo vuelva a estar online.</small></p>`
+            : `<p>Reactivar las alertas del nodo <b>${nodeName}</b>?</p>`,
+        icon: isMute ? 'warning' : 'question',
+        showCancelButton: true,
+        confirmButtonText: isMute ? 'Silenciar' : 'Reactivar',
+        confirmButtonColor: isMute ? '#6c757d' : '#ffc107',
+        cancelButtonText: 'Cancelar',
+    });
+
+    if (!confirmed.isConfirmed) return;
+
+    try {
+        const url = isMute
+            ? '/settings/cluster/mute-node-alerts'
+            : '/settings/cluster/unmute-node-alerts';
+
+        const form = new FormData();
+        form.append('node_id', nodeId);
+        form.append('_csrf_token', csrfToken);
+
+        const resp = await fetch(url, { method: 'POST', body: form });
+        const data = await resp.json();
+
+        (typeof SwalDark !== 'undefined' ? SwalDark : Swal).fire({
+            title: data.ok ? 'OK' : 'Error',
+            text: data.message || data.error || 'Operacion completada',
+            icon: data.ok ? 'success' : 'error',
+            timer: 2000,
+        }).then(() => {
+            if (data.ok) location.reload();
+        });
+    } catch (e) {
+        (typeof SwalDark !== 'undefined' ? SwalDark : Swal).fire({
+            title: 'Error',
+            text: e.message,
+            icon: 'error',
+        });
+    }
+};
 </script>

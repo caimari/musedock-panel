@@ -44,6 +44,14 @@ class ClusterController
             $localToken = ReplicationService::decryptPassword($rawToken);
         }
 
+        // Enrich nodes with mute status
+        $now = time();
+        foreach ($nodes as &$node) {
+            $mutedUntil = Settings::get("cluster_node_{$node['id']}_muted_until", '');
+            $node['alerts_muted'] = ($mutedUntil && strtotime($mutedUntil) > $now);
+        }
+        unset($node);
+
         View::render('settings/cluster', [
             'layout'       => 'main',
             'pageTitle'    => 'Cluster',
@@ -252,6 +260,80 @@ class ClusterController
             'master_info' => $masterInfo,
             'timestamp'   => date('Y-m-d H:i:s'),
         ], JSON_PRETTY_PRINT);
+        exit;
+    }
+
+    /**
+     * GET /settings/cluster/node-status-quick?node_id=X (JSON)
+     * Returns node data from DB instantly (no heartbeat/ping).
+     */
+    public function nodeStatusQuick(): void
+    {
+        header('Content-Type: application/json');
+
+        $nodeId = (int)($_GET['node_id'] ?? 0);
+        if ($nodeId < 1) {
+            echo json_encode(['ok' => false, 'error' => 'Node ID requerido']);
+            exit;
+        }
+
+        $node = ClusterService::getNode($nodeId);
+        if (!$node) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado']);
+            exit;
+        }
+
+        $lastSeen = $node['last_seen_at'] ?? null;
+        $age = $lastSeen ? (time() - strtotime($lastSeen)) : null;
+
+        $mutedUntil = Settings::get("cluster_node_{$nodeId}_muted_until", '');
+        $isMuted = ($mutedUntil && strtotime($mutedUntil) > time());
+
+        echo json_encode([
+            'ok'             => true,
+            'id'             => $node['id'],
+            'name'           => $node['name'],
+            'api_url'        => $node['api_url'],
+            'status'         => $node['status'] ?? 'offline',
+            'role'           => $node['role'] ?? 'unknown',
+            'last_seen_at'   => $lastSeen,
+            'age_seconds'    => $age,
+            'sync_lag'       => (int)($node['sync_lag_seconds'] ?? 0),
+            'alerts_muted'   => $isMuted,
+        ]);
+        exit;
+    }
+
+    /**
+     * GET /settings/cluster/ping-node?node_id=X (JSON)
+     * Performs a live heartbeat to a single node (may be slow if offline).
+     */
+    public function pingNode(): void
+    {
+        header('Content-Type: application/json');
+
+        $nodeId = (int)($_GET['node_id'] ?? 0);
+        if ($nodeId < 1) {
+            echo json_encode(['ok' => false, 'error' => 'Node ID requerido']);
+            exit;
+        }
+
+        $node = ClusterService::getNode($nodeId);
+        if (!$node) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado']);
+            exit;
+        }
+
+        $result = ClusterService::sendHeartbeat($nodeId);
+
+        echo json_encode([
+            'ok'           => $result['ok'],
+            'status'       => $result['ok'] ? 'online' : 'offline',
+            'role'         => $result['data']['role'] ?? $node['role'] ?? 'unknown',
+            'last_seen_at' => $result['ok'] ? date('Y-m-d H:i:s') : ($node['last_seen_at'] ?? null),
+            'error'        => $result['error'] ?? '',
+            'response_ms'  => $result['data']['response_ms'] ?? null,
+        ]);
         exit;
     }
 
@@ -680,6 +762,70 @@ class ClusterController
             'warnings' => $allWarnings,
             'warning_count' => count($allWarnings),
         ]);
+        exit;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Node Alert Muting
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * POST /settings/cluster/mute-node-alerts (JSON)
+     * Mute alerts for a specific offline node.
+     */
+    public function muteNodeAlerts(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        if ($nodeId < 1) {
+            echo json_encode(['ok' => false, 'error' => 'Node ID requerido']);
+            exit;
+        }
+
+        $node = ClusterService::getNode($nodeId);
+        if (!$node) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado']);
+            exit;
+        }
+
+        // Mute indefinitely (set far future date) — unmute on recovery or manual action
+        $mutedUntil = date('Y-m-d H:i:s', strtotime('+10 years'));
+        Settings::set("cluster_node_{$nodeId}_muted_until", $mutedUntil);
+
+        LogService::log('cluster.mute', 'mute', "Alertas silenciadas para nodo {$node['name']}");
+
+        echo json_encode(['ok' => true, 'message' => "Alertas silenciadas para {$node['name']}"]);
+        exit;
+    }
+
+    /**
+     * POST /settings/cluster/unmute-node-alerts (JSON)
+     * Unmute alerts for a specific node.
+     */
+    public function unmuteNodeAlerts(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        if ($nodeId < 1) {
+            echo json_encode(['ok' => false, 'error' => 'Node ID requerido']);
+            exit;
+        }
+
+        $node = ClusterService::getNode($nodeId);
+        if (!$node) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado']);
+            exit;
+        }
+
+        Settings::set("cluster_node_{$nodeId}_muted_until", '');
+
+        LogService::log('cluster.mute', 'unmute', "Alertas reactivadas para nodo {$node['name']}");
+
+        echo json_encode(['ok' => true, 'message' => "Alertas reactivadas para {$node['name']}"]);
         exit;
     }
 

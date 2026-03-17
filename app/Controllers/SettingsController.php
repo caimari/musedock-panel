@@ -15,11 +15,22 @@ class SettingsController
     public function services(): void
     {
         $services = $this->getServicesStatus();
+        $panelIds = array_column($services, 'id');
+        // Also exclude aliases (mysql↔mariadb, redis↔redis-server, etc.)
+        if (in_array('mysql', $panelIds) || in_array('mariadb', $panelIds)) {
+            $panelIds = array_merge($panelIds, ['mysql', 'mariadb', 'mysqld']);
+        }
+        if (in_array('redis-server', $panelIds)) {
+            $panelIds[] = 'redis';
+        }
+        $panelIds = array_unique($panelIds);
+        $systemServices = $this->getAllSystemServices($panelIds);
 
         View::render('settings/services', [
             'layout' => 'main',
             'pageTitle' => 'Servicios del Servidor',
             'services' => $services,
+            'systemServices' => $systemServices,
         ]);
     }
 
@@ -29,13 +40,34 @@ class SettingsController
         $action = $_POST['action'] ?? '';
 
         $allowed = $this->getAllowedServices();
+        $isSystemService = false;
+
         if (!in_array($service, $allowed)) {
-            Flash::set('error', 'Servicio no permitido.');
-            Router::redirect('/settings/services');
-            return;
+            // Check if it's a valid system service
+            if (preg_match('/^[a-zA-Z0-9_@:.-]+\.service$/', $service) || preg_match('/^[a-zA-Z0-9_@:.-]+$/', $service)) {
+                $svcFile = trim(shell_exec(sprintf('systemctl show %s --property=FragmentPath --value 2>/dev/null', escapeshellarg($service))) ?? '');
+                if (empty($svcFile) || !file_exists($svcFile)) {
+                    Flash::set('error', 'Servicio no encontrado.');
+                    Router::redirect('/settings/services');
+                    return;
+                }
+                // Block critical system services
+                $critical = $this->getCriticalServices();
+                $svcBase = preg_replace('/\.service$/', '', $service);
+                if (in_array($svcBase, $critical)) {
+                    Flash::set('error', 'No se puede modificar un servicio critico del sistema.');
+                    Router::redirect('/settings/services');
+                    return;
+                }
+                $isSystemService = true;
+            } else {
+                Flash::set('error', 'Servicio no permitido.');
+                Router::redirect('/settings/services');
+                return;
+            }
         }
 
-        $allowedActions = ['start', 'stop', 'restart', 'reload'];
+        $allowedActions = ['start', 'stop', 'restart', 'reload', 'enable', 'disable'];
 
         // Block reload for Caddy (it wipes API routes by reloading Caddyfile)
         if ($service === 'caddy' && $action === 'reload') {
@@ -68,7 +100,7 @@ class SettingsController
             }
         }
 
-        $actionLabels = ['start' => 'iniciado', 'stop' => 'detenido', 'restart' => 'reiniciado', 'reload' => 'recargado'];
+        $actionLabels = ['start' => 'iniciado', 'stop' => 'detenido', 'restart' => 'reiniciado', 'reload' => 'recargado', 'enable' => 'habilitado', 'disable' => 'deshabilitado'];
         Flash::set('success', "Servicio {$service} {$actionLabels[$action]}. Estado actual: {$status}");
         Router::redirect('/settings/services');
     }
@@ -151,6 +183,110 @@ class SettingsController
                 'uptime' => $uptime,
             ]);
         }
+
+        return $results;
+    }
+
+    /**
+     * Critical services that cannot be stopped/disabled from the panel
+     */
+    private function getCriticalServices(): array
+    {
+        return [
+            'systemd-journald', 'systemd-logind', 'systemd-udevd', 'systemd-resolved',
+            'systemd-networkd', 'systemd-timesyncd', 'dbus', 'ssh', 'sshd',
+            'networking', 'NetworkManager', 'init', 'getty@tty1',
+        ];
+    }
+
+    /**
+     * Get ALL systemd services on the system
+     */
+    private function getAllSystemServices(array $excludeIds = []): array
+    {
+        // Get list of all service unit files
+        $output = shell_exec('systemctl list-unit-files --type=service --no-pager --no-legend 2>/dev/null') ?? '';
+        $unitFiles = [];
+        foreach (explode("\n", trim($output)) as $line) {
+            if (empty(trim($line))) continue;
+            // Format: "service-name.service  enabled|disabled|static|masked  vendor-preset"
+            $parts = preg_split('/\s+/', trim($line));
+            if (count($parts) >= 2) {
+                $svcName = $parts[0];
+                $preset = $parts[1]; // enabled, disabled, static, masked, generated, alias, indirect
+                $unitFiles[$svcName] = $preset;
+            }
+        }
+
+        // Get active/inactive state for all services
+        $output2 = shell_exec('systemctl list-units --type=service --all --no-pager --no-legend 2>/dev/null') ?? '';
+        $activeStates = [];
+        foreach (explode("\n", trim($output2)) as $line) {
+            if (empty(trim($line))) continue;
+            // Format: "● service-name.service  loaded  inactive dead   Description"
+            // or:     "  service-name.service  loaded  active   running Description"
+            if (preg_match('/\s*[●\s]*(\S+\.service)\s+(\S+)\s+(\S+)\s+(\S+)\s+(.*)/', trim($line), $m)) {
+                $activeStates[$m[1]] = [
+                    'load' => $m[2],
+                    'active' => $m[3],
+                    'sub' => $m[4],
+                    'description' => trim($m[5]),
+                ];
+            }
+        }
+
+        // Panel services to exclude (already shown above)
+        $critical = $this->getCriticalServices();
+
+        $results = [];
+        foreach ($unitFiles as $svcFile => $preset) {
+            // Skip non-service files, template units, and static/masked
+            if (!str_ends_with($svcFile, '.service')) continue;
+            if (str_contains($svcFile, '@') && !isset($activeStates[$svcFile])) continue;
+            if (in_array($preset, ['static', 'masked', 'generated', 'alias', 'indirect'])) continue;
+            // Normalize enabled-runtime to enabled
+            if ($preset === 'enabled-runtime') $preset = 'enabled';
+
+            $svcBase = preg_replace('/\.service$/', '', $svcFile);
+
+            // Skip panel services (already shown in top section)
+            if (in_array($svcBase, $excludeIds)) continue;
+            // Also skip related panel services (caddy-api, mariadb@, redis-server@, etc.)
+            $skipRelated = false;
+            foreach ($excludeIds as $pid) {
+                if ($svcBase !== $pid && str_starts_with($svcBase, $pid)) {
+                    $skipRelated = true;
+                    break;
+                }
+            }
+            if ($skipRelated) continue;
+
+            $isCritical = in_array($svcBase, $critical);
+            $state = $activeStates[$svcFile] ?? null;
+            $isActive = ($state['active'] ?? '') === 'active';
+            $sub = $state['sub'] ?? '';
+            $description = $state['description'] ?? '';
+
+            $results[] = [
+                'id' => $svcBase,
+                'name' => $svcBase,
+                'description' => $description,
+                'status' => $isActive ? 'active' : 'inactive',
+                'sub' => $sub,
+                'enabled' => $preset, // enabled or disabled
+                'uptime' => '',
+                'critical' => $isCritical,
+            ];
+        }
+
+        // Sort: active first, then alphabetical
+        usort($results, function ($a, $b) {
+            // Active before inactive
+            if ($a['status'] !== $b['status']) {
+                return $a['status'] === 'active' ? -1 : 1;
+            }
+            return strcasecmp($a['name'], $b['name']);
+        });
 
         return $results;
     }

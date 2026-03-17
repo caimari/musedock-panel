@@ -15,7 +15,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.7.0');
+define('PANEL_VERSION', '0.7.6');
 
 // Autoloader
 spl_autoload_register(function ($class) {
@@ -103,29 +103,126 @@ try {
     logMsg("ERROR sending heartbeats: " . $e->getMessage());
 }
 
-// ─── Step 3: Check for unreachable nodes ──────────────────────
+// ─── Step 3: Check for unreachable nodes (escalating alerts) ──
 logMsg("Checking unreachable nodes...");
 try {
     $timeoutMinutes = (int)(Settings::get('cluster_unreachable_timeout', '300')) / 60;
     if ($timeoutMinutes < 1) $timeoutMinutes = 5;
 
     $unreachable = ClusterService::getUnreachableNodes((int)$timeoutMinutes);
-    if (!empty($unreachable)) {
-        $names = array_map(fn($n) => $n['name'] . ' (' . $n['api_url'] . ')', $unreachable);
-        $alertMsg = "Los siguientes nodos del cluster no responden:\n" . implode("\n", $names);
 
+    // Load per-node alert state: JSON { nodeId: { "first_seen": ts, "last_alert": ts, "alert_count": n } }
+    $alertStateRaw = Settings::get('cluster_node_alert_state', '{}');
+    $alertState = json_decode($alertStateRaw, true) ?: [];
+
+    // Escalating intervals in seconds: 1min, 5min, 15min, 30min, 45min, 60min, 2h, 4h, 8h, 12h
+    $escalationIntervals = [60, 300, 900, 1800, 2700, 3600, 7200, 14400, 28800, 43200];
+
+    $now = time();
+    $unreachableIds = [];
+
+    if (!empty($unreachable)) {
         logMsg("  Unreachable nodes: " . implode(', ', array_column($unreachable, 'name')));
 
-        // Send alert
-        ClusterService::sendAlert(
-            '[MuseDock Cluster] Nodos inaccesibles',
-            $alertMsg . "\n\nFecha: " . date('Y-m-d H:i:s')
-        );
+        foreach ($unreachable as $node) {
+            $nid = (string)$node['id'];
+            $unreachableIds[] = $nid;
 
-        LogService::log('cluster.alert', 'unreachable', 'Nodos inaccesibles: ' . implode(', ', array_column($unreachable, 'name')));
+            // Check if alerts are muted for this node
+            $mutedUntil = Settings::get("cluster_node_{$nid}_muted_until", '');
+            if ($mutedUntil && strtotime($mutedUntil) > $now) {
+                logMsg("  Node #{$nid} ({$node['name']}): alerts muted until {$mutedUntil}");
+                continue;
+            }
+
+            // Initialize state for newly detected offline nodes
+            if (!isset($alertState[$nid])) {
+                $alertState[$nid] = [
+                    'first_seen' => $now,
+                    'last_alert' => 0,
+                    'alert_count' => 0,
+                ];
+            }
+
+            $state = &$alertState[$nid];
+            $alertCount = (int)$state['alert_count'];
+            $lastAlert = (int)$state['last_alert'];
+
+            // Determine the required interval for the next alert
+            $intervalIdx = min($alertCount, count($escalationIntervals) - 1);
+            $requiredInterval = $escalationIntervals[$intervalIdx];
+
+            $elapsed = $now - $lastAlert;
+
+            if ($elapsed >= $requiredInterval) {
+                // Time to send alert
+                $downSince = date('Y-m-d H:i:s', (int)$state['first_seen']);
+                $downMinutes = round(($now - (int)$state['first_seen']) / 60);
+                $nextIdx = min($alertCount + 1, count($escalationIntervals) - 1);
+                $nextMinutes = round($escalationIntervals[$nextIdx] / 60);
+
+                $alertMsg = "Nodo caido: {$node['name']} ({$node['api_url']})\n"
+                    . "Caido desde: {$downSince} ({$downMinutes} min)\n"
+                    . "Alerta #{$state['alert_count']}+1\n"
+                    . "Proxima alerta en: {$nextMinutes} min\n\n"
+                    . "Silenciar alertas desde el dashboard:\n"
+                    . "https://" . (\MuseDockPanel\Env::get('PANEL_DOMAIN', gethostname())) . ":8444/\n\n"
+                    . "Fecha: " . date('Y-m-d H:i:s');
+
+                ClusterService::sendAlert(
+                    "[MuseDock Cluster] Nodo caido: {$node['name']}",
+                    $alertMsg
+                );
+
+                $state['last_alert'] = $now;
+                $state['alert_count']++;
+
+                LogService::log('cluster.alert', 'unreachable', "Nodo {$node['name']} caido (alerta #{$state['alert_count']}, proxima en {$nextMinutes}min)");
+                logMsg("  Node #{$nid} ({$node['name']}): ALERT #{$state['alert_count']} sent. Next in {$nextMinutes}min.");
+            } else {
+                $remaining = $requiredInterval - $elapsed;
+                logMsg("  Node #{$nid} ({$node['name']}): throttled, next alert in {$remaining}s.");
+            }
+
+            unset($state);
+        }
     } else {
         logMsg("  All nodes reachable.");
     }
+
+    // Clear state for nodes that came back online
+    $cleared = false;
+    foreach (array_keys($alertState) as $nid) {
+        if (!in_array($nid, $unreachableIds)) {
+            // Node recovered — send recovery notification
+            $recoveredNode = null;
+            foreach (ClusterService::getNodes() as $n) {
+                if ((string)$n['id'] === $nid) { $recoveredNode = $n; break; }
+            }
+            $nodeName = $recoveredNode ? $recoveredNode['name'] : "#{$nid}";
+            $downMinutes = round(($now - (int)$alertState[$nid]['first_seen']) / 60);
+
+            ClusterService::sendAlert(
+                "[MuseDock Cluster] Nodo recuperado: {$nodeName}",
+                "El nodo {$nodeName} ha vuelto a estar online.\n"
+                . "Estuvo caido {$downMinutes} minutos.\n"
+                . "Fecha: " . date('Y-m-d H:i:s')
+            );
+
+            // Clear mute if was muted
+            Settings::set("cluster_node_{$nid}_muted_until", '');
+
+            LogService::log('cluster.recovery', 'online', "Nodo {$nodeName} recuperado tras {$downMinutes}min caido");
+            logMsg("  Node #{$nid} ({$nodeName}): RECOVERED after {$downMinutes}min. Notification sent.");
+
+            unset($alertState[$nid]);
+            $cleared = true;
+        }
+    }
+
+    // Persist alert state
+    Settings::set('cluster_node_alert_state', json_encode($alertState));
+
 } catch (\Throwable $e) {
     logMsg("ERROR checking unreachable: " . $e->getMessage());
 }

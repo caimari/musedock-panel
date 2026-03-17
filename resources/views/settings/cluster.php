@@ -380,6 +380,7 @@
                                 <th>Último Heartbeat</th>
                                 <th>Lag</th>
                                 <th>Rol Remoto</th>
+                                <th class="text-center">Alertas</th>
                                 <th class="text-end">Acciones</th>
                             </tr>
                         </thead>
@@ -412,7 +413,27 @@
                                         <?= View::e(ucfirst($node['role'] ?? 'unknown')) ?>
                                     </span>
                                 </td>
+                                <td class="text-center" id="node-alerts-<?= (int)$node['id'] ?>">
+                                    <?php if (!empty($node['alerts_muted'])): ?>
+                                        <span class="badge bg-secondary"><i class="bi bi-bell-slash me-1"></i>Silenciadas</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-success"><i class="bi bi-bell-fill me-1"></i>Activas</span>
+                                    <?php endif; ?>
+                                </td>
                                 <td class="text-end">
+                                    <?php if (!empty($node['alerts_muted'])): ?>
+                                    <button type="button" class="btn btn-outline-warning btn-sm"
+                                            onclick="toggleNodeAlerts(<?= (int)$node['id'] ?>, 'unmute', '<?= View::e($node['name']) ?>')"
+                                            title="Reactivar alertas para este nodo">
+                                        <i class="bi bi-bell me-1"></i>Reactivar
+                                    </button>
+                                    <?php else: ?>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm"
+                                            onclick="toggleNodeAlerts(<?= (int)$node['id'] ?>, 'mute', '<?= View::e($node['name']) ?>')"
+                                            title="Silenciar alertas (mantenimiento programado)">
+                                        <i class="bi bi-bell-slash me-1"></i>Silenciar
+                                    </button>
+                                    <?php endif; ?>
                                     <?php if ($clusterRole === 'master'): ?>
                                     <button type="button" class="btn btn-outline-success btn-sm"
                                             onclick="confirmSyncAll(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')"
@@ -1380,30 +1401,57 @@ function generateTokenForAdd() {
 
 function viewNodeStatus(nodeId, nodeName) {
     document.getElementById('node-status-name').textContent = nodeName;
-    document.getElementById('node-status-content').innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>Cargando estado del nodo...</div>';
+    document.getElementById('node-status-content').innerHTML = '<div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>Cargando...</div>';
     new bootstrap.Modal(document.getElementById('nodeStatusModal')).show();
 
-    // Get node status via the node-status endpoint
-    fetch('/settings/cluster/node-status')
+    // Step 1: Load instantly from DB (no network call to remote node)
+    fetch('/settings/cluster/node-status-quick?node_id=' + nodeId)
         .then(r => r.json())
         .then(data => {
-            const node = (data.nodes || []).find(n => n.id == nodeId);
-            if (!node) {
-                document.getElementById('node-status-content').innerHTML = '<div class="text-danger">Nodo no encontrado en la respuesta</div>';
+            if (!data.ok) {
+                document.getElementById('node-status-content').innerHTML = '<div class="text-danger">' + (data.error || 'Error') + '</div>';
                 return;
             }
 
-            let html = '<table class="table table-sm">';
-            html += '<tr><td class="text-muted">Estado</td><td><span class="badge ' + (node.status === 'online' ? 'bg-success' : 'bg-danger') + '">' + node.status + '</span></td></tr>';
-            html += '<tr><td class="text-muted">Rol</td><td>' + (node.role || 'unknown') + '</td></tr>';
-            html += '<tr><td class="text-muted">URL</td><td><code>' + (node.api_url || '') + '</code></td></tr>';
-            html += '<tr><td class="text-muted">Último heartbeat</td><td>' + (node.last_seen_at || 'Nunca') + '</td></tr>';
-            if (node.error) {
-                html += '<tr><td class="text-muted">Error</td><td class="text-danger">' + node.error + '</td></tr>';
-            }
+            const statusBadge = data.status === 'online' ? 'bg-success' : 'bg-danger';
+            const ageText = data.age_seconds !== null
+                ? (data.age_seconds < 60 ? data.age_seconds + 's' : Math.round(data.age_seconds / 60) + ' min')
+                : 'N/A';
+            const mutedBadge = data.alerts_muted
+                ? '<span class="badge bg-secondary ms-1"><i class="bi bi-bell-slash me-1"></i>Silenciadas</span>'
+                : '<span class="badge bg-success ms-1"><i class="bi bi-bell-fill me-1"></i>Activas</span>';
+
+            let html = '<table class="table table-sm mb-3">';
+            html += '<tr><td class="text-muted" style="width:160px">Estado (DB)</td><td><span class="badge ' + statusBadge + '">' + data.status + '</span></td></tr>';
+            html += '<tr><td class="text-muted">Conectividad</td><td id="ping-result"><div class="spinner-border spinner-border-sm text-info me-2"></div><span class="text-muted">Verificando conexión en vivo...</span></td></tr>';
+            html += '<tr><td class="text-muted">Rol</td><td>' + (data.role || 'unknown') + '</td></tr>';
+            html += '<tr><td class="text-muted">URL</td><td><code>' + (data.api_url || '') + '</code></td></tr>';
+            html += '<tr><td class="text-muted">Último heartbeat</td><td>' + (data.last_seen_at || 'Nunca') + (data.age_seconds !== null ? ' <small class="text-muted">(' + ageText + ' atrás)</small>' : '') + '</td></tr>';
+            html += '<tr><td class="text-muted">Sync lag</td><td>' + data.sync_lag + 's</td></tr>';
+            html += '<tr><td class="text-muted">Alertas</td><td>' + mutedBadge + '</td></tr>';
             html += '</table>';
 
             document.getElementById('node-status-content').innerHTML = html;
+
+            // Step 2: Live ping (may take up to 30s if offline)
+            fetch('/settings/cluster/ping-node?node_id=' + nodeId)
+                .then(r => r.json())
+                .then(ping => {
+                    const el = document.getElementById('ping-result');
+                    if (!el) return;
+                    if (ping.ok) {
+                        el.innerHTML = '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Online</span>' +
+                            (ping.response_ms ? ' <small class="text-muted">' + ping.response_ms + 'ms</small>' : '') +
+                            ' <small class="text-muted">— responde correctamente</small>';
+                    } else {
+                        el.innerHTML = '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>No responde</span>' +
+                            (ping.error ? ' <small class="text-danger ms-2">' + ping.error + '</small>' : '');
+                    }
+                })
+                .catch(() => {
+                    const el = document.getElementById('ping-result');
+                    if (el) el.innerHTML = '<span class="badge bg-warning text-dark"><i class="bi bi-question-circle me-1"></i>No se pudo verificar</span>';
+                });
         })
         .catch(function() {
             document.getElementById('node-status-content').innerHTML = '<div class="text-danger">Error al obtener el estado</div>';
@@ -1413,14 +1461,57 @@ function viewNodeStatus(nodeId, nodeName) {
 function confirmRemoveNode(nodeId, nodeName) {
     Swal.fire({
         title: 'Eliminar nodo',
-        html: 'Se eliminará el nodo <strong>' + nodeName + '</strong> y todos sus elementos de la cola.<br><br>Esta acción no se puede deshacer.',
+        html: '<div class="text-start">' +
+              '<p>Se eliminará el nodo <strong>' + nodeName + '</strong> del cluster.</p>' +
+              '<div class="rounded p-3 mb-3" style="background:rgba(13,202,240,0.1);border:1px solid rgba(13,202,240,0.2);">' +
+              '<small>' +
+              '<i class="bi bi-info-circle text-info me-1"></i>' +
+              '<strong>Esto solo desvincula el nodo de este panel.</strong><br>' +
+              'Los hostings, datos y configuración del servidor remoto <strong>no se borran</strong>. ' +
+              'El nodo seguirá funcionando de forma independiente.' +
+              '</small>' +
+              '</div>' +
+              '<p class="mb-1">Se eliminará:</p>' +
+              '<ul class="small text-muted">' +
+              '<li>El registro del nodo en este panel</li>' +
+              '<li>Todos los elementos de la cola pendientes para este nodo</li>' +
+              '<li>Las alertas y heartbeats dejarán de enviarse</li>' +
+              '</ul>' +
+              '<hr class="border-secondary">' +
+              '<p class="mb-1">Introduce tu contraseña de administrador para confirmar:</p>' +
+              '<input type="password" id="swal-remove-pass" class="form-control bg-dark text-light border-secondary" placeholder="Contraseña de admin">' +
+              '</div>',
         icon: 'warning',
         showCancelButton: true,
-        confirmButtonText: 'Sí, eliminar',
+        confirmButtonText: 'Eliminar nodo',
         cancelButtonText: 'Cancelar',
         confirmButtonColor: '#ef4444',
         background: '#1e1e2e',
         color: '#fff',
+        preConfirm: function() {
+            const pass = document.getElementById('swal-remove-pass').value;
+            if (!pass) {
+                Swal.showValidationMessage('Introduce tu contraseña');
+                return false;
+            }
+            // Verify password via API
+            const fd = new FormData();
+            fd.append('password', pass);
+            fd.append('_csrf_token', document.querySelector('[name=_csrf_token]').value);
+            return fetch('/settings/cluster/verify-admin-password', { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(data => {
+                    if (!data.ok) {
+                        Swal.showValidationMessage('Contraseña incorrecta');
+                        return false;
+                    }
+                    return true;
+                })
+                .catch(() => {
+                    Swal.showValidationMessage('Error al verificar contraseña');
+                    return false;
+                });
+        },
     }).then(function(result) {
         if (result.isConfirmed) {
             const form = document.getElementById('form-remove-node');
@@ -1428,6 +1519,50 @@ function confirmRemoveNode(nodeId, nodeName) {
             form.action = '/settings/cluster/remove-node/' + nodeId;
             form.submit();
         }
+    });
+}
+
+function toggleNodeAlerts(nodeId, action, nodeName) {
+    const isMute = action === 'mute';
+    Swal.fire({
+        title: isMute ? 'Silenciar alertas' : 'Reactivar alertas',
+        html: isMute
+            ? '<p>Silenciar todas las alertas (Telegram/Email) del nodo <strong>' + nodeName + '</strong>?</p>' +
+              '<p class="text-muted"><small>Útil para mantenimiento programado. Las alertas se reactivarán automáticamente si el nodo vuelve online.</small></p>'
+            : '<p>Reactivar las alertas del nodo <strong>' + nodeName + '</strong>?</p>',
+        icon: isMute ? 'warning' : 'question',
+        showCancelButton: true,
+        confirmButtonText: isMute ? 'Silenciar' : 'Reactivar',
+        confirmButtonColor: isMute ? '#6c757d' : '#ffc107',
+        cancelButtonText: 'Cancelar',
+        background: '#1e1e2e',
+        color: '#fff',
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+
+        const url = isMute
+            ? '/settings/cluster/mute-node-alerts'
+            : '/settings/cluster/unmute-node-alerts';
+
+        const form = new FormData();
+        form.append('node_id', nodeId);
+        form.append('_csrf_token', document.querySelector('[name=_csrf_token]').value);
+
+        fetch(url, { method: 'POST', body: form })
+            .then(r => r.json())
+            .then(data => {
+                Swal.fire({
+                    title: data.ok ? 'OK' : 'Error',
+                    text: data.message || data.error,
+                    icon: data.ok ? 'success' : 'error',
+                    timer: 2000,
+                    background: '#1e1e2e',
+                    color: '#fff',
+                }).then(() => { if (data.ok) location.reload(); });
+            })
+            .catch(e => {
+                Swal.fire({ title: 'Error', text: e.message, icon: 'error', background: '#1e1e2e', color: '#fff' });
+            });
     });
 }
 

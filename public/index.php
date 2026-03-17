@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.7.5');
+define('PANEL_VERSION', '0.7.6');
 
 
 
@@ -225,6 +225,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/remove-node/{id}', 'ClusterController@removeNode');
 \MuseDockPanel\Router::post('/settings/cluster/test-node', 'ClusterController@testNode');
 \MuseDockPanel\Router::get('/settings/cluster/node-status', 'ClusterController@nodeStatus');
+\MuseDockPanel\Router::get('/settings/cluster/node-status-quick', 'ClusterController@nodeStatusQuick');
+\MuseDockPanel\Router::get('/settings/cluster/ping-node', 'ClusterController@pingNode');
 \MuseDockPanel\Router::post('/settings/cluster/process-queue', 'ClusterController@processQueue');
 \MuseDockPanel\Router::post('/settings/cluster/promote', 'ClusterController@promoteLocal');
 \MuseDockPanel\Router::post('/settings/cluster/demote', 'ClusterController@demoteLocal');
@@ -241,6 +243,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/cluster/sync-progress', 'ClusterController@syncProgress');
 \MuseDockPanel\Router::post('/settings/cluster/check-dbhost', 'ClusterController@checkDbHost');
 \MuseDockPanel\Router::post('/settings/cluster/full-sync', 'ClusterController@fullSync');
+\MuseDockPanel\Router::post('/settings/cluster/mute-node-alerts', 'ClusterController@muteNodeAlerts');
+\MuseDockPanel\Router::post('/settings/cluster/unmute-node-alerts', 'ClusterController@unmuteNodeAlerts');
 
 // WireGuard
 \MuseDockPanel\Router::get('/settings/wireguard', 'WireGuardController@index');

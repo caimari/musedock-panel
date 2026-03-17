@@ -4,6 +4,7 @@ namespace MuseDockPanel\Controllers;
 use MuseDockPanel\Database;
 use MuseDockPanel\View;
 use MuseDockPanel\Settings;
+use MuseDockPanel\Services\ClusterService;
 
 class DashboardController
 {
@@ -37,6 +38,29 @@ class DashboardController
             ];
         }
 
+        // Offline cluster nodes (for alert banner)
+        $offlineNodes = [];
+        try {
+            $allNodes = ClusterService::getNodes();
+            $now = time();
+            foreach ($allNodes as $node) {
+                if ($node['status'] === 'offline' || empty($node['last_seen_at']) || (time() - strtotime($node['last_seen_at'])) > 300) {
+                    $mutedUntil = Settings::get("cluster_node_{$node['id']}_muted_until", '');
+                    $isMuted = ($mutedUntil && strtotime($mutedUntil) > $now);
+                    $downSince = $node['last_seen_at'] ? date('Y-m-d H:i:s', strtotime($node['last_seen_at'])) : 'Nunca';
+                    $downMinutes = $node['last_seen_at'] ? round(($now - strtotime($node['last_seen_at'])) / 60) : null;
+                    $offlineNodes[] = [
+                        'id'           => $node['id'],
+                        'name'         => $node['name'],
+                        'api_url'      => $node['api_url'],
+                        'last_seen_at' => $downSince,
+                        'down_minutes' => $downMinutes,
+                        'muted'        => $isMuted,
+                    ];
+                }
+            }
+        } catch (\Throwable) {}
+
         View::render('dashboard/index', [
             'layout' => 'main',
             'pageTitle' => 'Dashboard',
@@ -44,6 +68,7 @@ class DashboardController
             'accounts' => $accounts,
             'recentLog' => $recentLog,
             'clusterInfo' => $clusterInfo,
+            'offlineNodes' => $offlineNodes,
         ]);
     }
 
