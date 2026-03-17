@@ -101,6 +101,10 @@ if [ -n "$LOCAL_CHANGES" ]; then
     fi
 fi
 
+# Checksum of this script BEFORE pull (to detect self-update)
+SELF_SCRIPT="${PANEL_DIR}/bin/update.sh"
+SELF_HASH_BEFORE=$(md5sum "$SELF_SCRIPT" 2>/dev/null | cut -d' ' -f1)
+
 # Pull
 BEFORE_HASH=$(git rev-parse HEAD 2>/dev/null)
 git pull --ff-only origin main 2>&1 | sed 's/^/    /'
@@ -113,6 +117,15 @@ else
     COMMITS=$(git log --oneline "${BEFORE_HASH}..${AFTER_HASH}" 2>/dev/null | wc -l)
     ok "Updated: ${COMMITS} new commit(s)"
     git log --oneline "${BEFORE_HASH}..${AFTER_HASH}" 2>/dev/null | head -10 | sed 's/^/    /'
+fi
+
+# If update.sh itself changed, re-exec with the new version
+SELF_HASH_AFTER=$(md5sum "$SELF_SCRIPT" 2>/dev/null | cut -d' ' -f1)
+if [ "$SELF_HASH_BEFORE" != "$SELF_HASH_AFTER" ] && [ -z "${MUSEDOCK_RELAUNCH:-}" ]; then
+    warn "update.sh changed — relaunching with new version..."
+    echo ""
+    export MUSEDOCK_RELAUNCH=1
+    exec bash "$SELF_SCRIPT" ${1:+"$1"}
 fi
 
 echo ""
