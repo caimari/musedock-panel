@@ -160,38 +160,70 @@ class MonitorService
      * Detect available NVIDIA GPUs via nvidia-smi.
      * Returns array of ['index' => 0, 'name' => 'RTX 4090', 'memory_total' => 24576] or empty.
      */
-    public static function detectGpus(): array
+    /**
+     * Detect GPUs for a given host.
+     * For the local host: runs nvidia-smi directly.
+     * For any host: also checks the database for collected gpu metrics,
+     * which handles remote hosts where nvidia-smi can't be run locally.
+     */
+    public static function detectGpus(?string $host = null): array
     {
-        static $cache = null;
-        if ($cache !== null) return $cache;
+        $host = self::resolveHost($host);
+        $localHost = gethostname() ?: 'localhost';
 
-        $output = @shell_exec('nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader,nounits 2>/dev/null');
-        if (empty($output)) {
-            $cache = [];
-            return $cache;
-        }
+        static $cache = [];
+        if (isset($cache[$host])) return $cache[$host];
 
         $gpus = [];
-        foreach (explode("\n", trim($output)) as $line) {
-            $parts = array_map('trim', explode(',', $line));
-            if (count($parts) >= 3) {
-                $gpus[] = [
-                    'index'        => (int) $parts[0],
-                    'name'         => $parts[1],
-                    'memory_total' => (int) $parts[2], // MiB
-                ];
+
+        // For the local host, try nvidia-smi first
+        if ($host === $localHost) {
+            $output = @shell_exec('nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader,nounits 2>/dev/null');
+            if (!empty($output)) {
+                foreach (explode("\n", trim($output)) as $line) {
+                    $parts = array_map('trim', explode(',', $line));
+                    if (count($parts) >= 3) {
+                        $gpus[] = [
+                            'index'        => (int) $parts[0],
+                            'name'         => $parts[1],
+                            'memory_total' => (int) $parts[2],
+                        ];
+                    }
+                }
             }
         }
-        $cache = $gpus;
-        return $cache;
+
+        // If no GPUs found via nvidia-smi (or remote host), detect from database
+        if (empty($gpus)) {
+            $rows = Database::fetchAll(
+                "SELECT DISTINCT metric FROM monitor_metrics
+                 WHERE host = :host AND metric LIKE 'gpu%_util'
+                 AND ts >= NOW() - INTERVAL '1 hour'
+                 ORDER BY metric",
+                ['host' => $host]
+            );
+            foreach ($rows as $row) {
+                if (preg_match('/^gpu(\d+)_util$/', $row['metric'], $m)) {
+                    $idx = (int) $m[1];
+                    $gpus[] = [
+                        'index'        => $idx,
+                        'name'         => "GPU {$idx}",
+                        'memory_total' => 0,
+                    ];
+                }
+            }
+        }
+
+        $cache[$host] = $gpus;
+        return $gpus;
     }
 
     /**
      * Check if this server has NVIDIA GPUs.
      */
-    public static function hasGpu(): bool
+    public static function hasGpu(?string $host = null): bool
     {
-        return !empty(self::detectGpus());
+        return !empty(self::detectGpus($host));
     }
 
     // ─── Private helpers ─────────────────────────────────────

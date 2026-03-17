@@ -167,8 +167,9 @@ if systemctl is-active --quiet musedock-panel 2>/dev/null; then
     if [ -f "${PANEL_DIR}/bin/musedock-panel.service" ]; then
         PANEL_PORT=$(grep -E '^PANEL_PORT=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'')
         PANEL_PORT=${PANEL_PORT:-8444}
+        PANEL_INTERNAL_PORT=$((PANEL_PORT + 1))
         sed -e "s|__PANEL_DIR__|${PANEL_DIR}|g" \
-            -e "s|__PANEL_PORT__|${PANEL_PORT}|g" \
+            -e "s|__PANEL_INTERNAL_PORT__|${PANEL_INTERNAL_PORT}|g" \
             "${PANEL_DIR}/bin/musedock-panel.service" > /etc/systemd/system/musedock-panel.service
         systemctl daemon-reload
     fi

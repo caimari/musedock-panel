@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '0.7.1',
+                'date' => '2026-03-17',
+                'badge' => 'success',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'update.sh systemd — Corregido placeholder __PANEL_PORT__ por __PANEL_INTERNAL_PORT__ que causaba 502 Bad Gateway tras actualizar',
+                            'GPU multi-host — detectGpus() ahora consulta la base de datos para hosts remotos en vez de ejecutar nvidia-smi local, permitiendo detectar todas las GPUs de servidores remotos',
+                        ],
+                        'en' => [
+                            'update.sh systemd — Fixed placeholder __PANEL_PORT__ to __PANEL_INTERNAL_PORT__ which caused 502 Bad Gateway after update',
+                            'GPU multi-host — detectGpus() now queries the database for remote hosts instead of running local nvidia-smi, allowing detection of all GPUs on remote servers',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '0.7.0',
                 'date' => '2026-03-17',
                 'badge' => 'success',

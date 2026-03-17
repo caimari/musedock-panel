@@ -19,7 +19,7 @@ class MonitorController
         $healthScore = MonitorService::getHealthScore($host);
         $alertCount = MonitorService::getUnacknowledgedCount($host);
 
-        $gpus = MonitorService::detectGpus();
+        $gpus = MonitorService::detectGpus($host);
         $panelTz = Settings::get('panel_timezone', 'UTC');
 
         View::render('monitor/index', [
