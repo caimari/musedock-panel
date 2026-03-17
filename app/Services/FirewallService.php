@@ -588,4 +588,103 @@ class FirewallService
 
         return false;
     }
+
+    // ─── Failover: open/close public ports ───────────────────
+
+    /**
+     * Open HTTP/HTTPS ports to the public (when slave becomes master)
+     * Adds rules with a comment marker so we can identify and remove them later
+     */
+    public static function openPublicPorts(): array
+    {
+        $type = self::getType();
+        $results = [];
+
+        $ports = [80, 443];
+
+        if ($type === 'iptables') {
+            foreach ($ports as $port) {
+                // Check if port is already open
+                if (self::isPortOpen($port)) {
+                    $results[] = ['port' => $port, 'ok' => true, 'output' => 'Ya abierto'];
+                    continue;
+                }
+                // Add rule with comment for identification
+                $cmd = sprintf(
+                    'iptables -A INPUT -p tcp --dport %d -j ACCEPT -m comment --comment "musedock-failover" 2>&1',
+                    $port
+                );
+                $output = trim((string)shell_exec($cmd));
+                $ok = $output === '' || stripos($output, 'error') === false;
+                $results[] = ['port' => $port, 'ok' => $ok, 'output' => $output ?: 'Abierto'];
+            }
+            // Save rules
+            self::iptablesSave();
+
+        } elseif ($type === 'ufw') {
+            foreach ($ports as $port) {
+                $result = self::ufwAddRule('allow', '0.0.0.0/0', (string)$port, 'tcp', 'musedock-failover');
+                $results[] = ['port' => $port, 'ok' => $result['ok'], 'output' => $result['output']];
+            }
+        }
+
+        return $results;
+    }
+
+    /**
+     * Close HTTP/HTTPS ports (when promoted slave goes back to slave role)
+     * Only removes rules tagged with "musedock-failover" comment
+     */
+    public static function closePublicPorts(): array
+    {
+        $type = self::getType();
+        $results = [];
+
+        if ($type === 'iptables') {
+            // Remove all rules with musedock-failover comment (in reverse order to keep numbering)
+            $output = (string)shell_exec('iptables -L INPUT -n --line-numbers -v 2>/dev/null');
+            $lines = array_reverse(explode("\n", $output));
+            $removed = 0;
+
+            foreach ($lines as $line) {
+                if (stripos($line, 'musedock-failover') !== false) {
+                    // Extract rule number
+                    if (preg_match('/^\s*(\d+)\s/', trim($line), $m)) {
+                        $ruleNum = (int)$m[1];
+                        $delOutput = trim((string)shell_exec("iptables -D INPUT {$ruleNum} 2>&1"));
+                        $removed++;
+                    }
+                }
+            }
+
+            if ($removed > 0) {
+                self::iptablesSave();
+                $results[] = ['ok' => true, 'output' => "{$removed} regla(s) de failover eliminadas"];
+            } else {
+                $results[] = ['ok' => true, 'output' => 'No habia reglas de failover que eliminar'];
+            }
+
+        } elseif ($type === 'ufw') {
+            // Delete rules with musedock-failover comment (reverse order)
+            $rules = self::ufwGetRules();
+            $removed = 0;
+            foreach (array_reverse($rules) as $rule) {
+                if (stripos($rule['comment'] ?? '', 'musedock-failover') !== false) {
+                    self::ufwDeleteRule($rule['num']);
+                    $removed++;
+                }
+            }
+            $results[] = ['ok' => true, 'output' => "{$removed} regla(s) de failover eliminadas"];
+        }
+
+        return $results;
+    }
+
+    /**
+     * Check if public ports (80/443) are open — used by failover logic
+     */
+    public static function arePublicPortsOpen(): bool
+    {
+        return self::isPortOpen(80) && self::isPortOpen(443);
+    }
 }

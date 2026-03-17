@@ -4,6 +4,8 @@ namespace MuseDockPanel\Services;
 use MuseDockPanel\Database;
 use MuseDockPanel\Settings;
 use MuseDockPanel\Env;
+use MuseDockPanel\Services\FirewallService;
+use MuseDockPanel\Services\NotificationService;
 
 class ClusterService
 {
@@ -624,7 +626,25 @@ class ClusterService
             Database::update('servers', ['role' => 'master'], 'is_local = true');
         } catch (\Throwable) {}
 
-        LogService::log('cluster.failover', 'promote', 'Servidor promovido a master' . (empty($errors) ? '' : ' (con errores: ' . implode(', ', $errors) . ')'));
+        // Open public ports (80/443) so this server can serve web traffic
+        try {
+            $fwResults = FirewallService::openPublicPorts();
+            $results['firewall'] = $fwResults;
+            foreach ($fwResults as $fwr) {
+                if (!$fwr['ok']) {
+                    $errors[] = "Firewall: no se pudo abrir puerto {$fwr['port']}";
+                }
+            }
+        } catch (\Throwable $e) {
+            $errors[] = 'Firewall: ' . $e->getMessage();
+        }
+
+        LogService::log('cluster.failover', 'promote', 'Servidor promovido a master (puertos 80/443 abiertos)' . (empty($errors) ? '' : ' (con errores: ' . implode(', ', $errors) . ')'));
+
+        NotificationService::send(
+            'Failover: Slave promovido a Master',
+            'El servidor ha sido promovido a Master. Puertos HTTP/HTTPS abiertos al publico.'
+        );
 
         return [
             'ok'      => empty($errors),
@@ -684,7 +704,20 @@ class ClusterService
             Database::update('servers', ['role' => 'slave'], 'is_local = true');
         } catch (\Throwable) {}
 
-        LogService::log('cluster.failover', 'demote', "Servidor degradado a slave, nuevo master: {$newMasterIp}" . (empty($errors) ? '' : ' (con errores: ' . implode(', ', $errors) . ')'));
+        // Close public ports (80/443) — only removes failover-tagged rules
+        try {
+            $fwResults = FirewallService::closePublicPorts();
+            $results['firewall'] = $fwResults;
+        } catch (\Throwable $e) {
+            $errors[] = 'Firewall: ' . $e->getMessage();
+        }
+
+        LogService::log('cluster.failover', 'demote', "Servidor degradado a slave, nuevo master: {$newMasterIp} (puertos 80/443 cerrados)" . (empty($errors) ? '' : ' (con errores: ' . implode(', ', $errors) . ')'));
+
+        NotificationService::send(
+            'Failover: Master degradado a Slave',
+            "El servidor ha sido degradado a Slave. Nuevo master: {$newMasterIp}. Puertos HTTP/HTTPS cerrados."
+        );
 
         return [
             'ok'      => empty($errors),
