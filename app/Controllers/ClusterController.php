@@ -384,7 +384,7 @@ class ClusterController
         header('Content-Type: application/json');
 
         $password = $_POST['password'] ?? '';
-        $adminId = $_SESSION['admin_id'] ?? 0;
+        $adminId = $_SESSION['panel_user']['id'] ?? 0;
 
         if (!$adminId || !$password) {
             echo json_encode(['ok' => false]);

@@ -1900,6 +1900,7 @@ function _updateSyncModal(data, nodeName, syncId) {
         const phase = data.phase || '';
         let icon = '<i class="bi bi-arrow-repeat spin-icon me-1"></i>';
         if (phase === 'ssl') icon = '<i class="bi bi-shield-lock me-1 text-warning"></i>';
+        if (phase === 'db_dumps') icon = '<i class="bi bi-database me-1 text-info"></i>';
         if (phase === 'done') icon = '<i class="bi bi-check me-1 text-success"></i>';
         current.innerHTML = icon + 'Sincronizando: <strong>' + data.current_domain + '</strong>';
     }
@@ -1938,6 +1939,14 @@ function _updateSyncModal(data, nodeName, syncId) {
             if (data.ssl) {
                 const sslIcon = data.ssl.ok ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-x-circle text-danger"></i>';
                 html += '<p>' + sslIcon + ' Certificados SSL: ' + (data.ssl.ok ? 'copiados' : (data.ssl.error || 'error')) + '</p>';
+            }
+
+            if (data.db_dumps) {
+                const dbIcon = data.db_dumps.ok ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-x-circle text-danger"></i>';
+                const dbDetail = data.db_dumps.dump_ok
+                    ? data.db_dumps.dump_ok + '/' + data.db_dumps.dumped + ' bases de datos restauradas'
+                    : (data.db_dumps.detail || data.db_dumps.error || 'error');
+                html += '<p>' + dbIcon + ' Bases de datos: ' + dbDetail + '</p>';
             }
 
             if (data.details && data.details.length) {

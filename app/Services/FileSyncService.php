@@ -515,6 +515,31 @@ class FileSyncService
             $sslResult = self::syncSslCerts($node);
         }
 
+        // Sync DB dumps if enabled and streaming replication is not active
+        $dbResult = null;
+        if ($config['db_dumps']) {
+            $streamingStatus = ReplicationService::isStreamingActive();
+            if (!$streamingStatus['any_active']) {
+                if ($progressFile) {
+                    self::writeProgress($progressFile, [
+                        'status' => 'running', 'total' => $total, 'current' => $total,
+                        'ok' => $ok, 'fail' => $fail, 'current_domain' => 'Bases de datos (dump)',
+                        'phase' => 'db_dumps', 'details' => $results,
+                        'elapsed' => round(microtime(true) - $startTime, 1),
+                    ]);
+                }
+                $dumpResults = self::dumpAllDatabases();
+                $dumpOk = count(array_filter($dumpResults, fn($r) => $r['ok']));
+                if ($dumpOk > 0) {
+                    $dbResult = self::syncDatabaseDumps($node);
+                    $dbResult['dumped'] = count($dumpResults);
+                    $dbResult['dump_ok'] = $dumpOk;
+                } else {
+                    $dbResult = ['ok' => true, 'dumped' => count($dumpResults), 'dump_ok' => 0, 'detail' => 'No hay bases de datos para exportar'];
+                }
+            }
+        }
+
         $finalResult = [
             'ok' => $fail === 0,
             'total' => $total,
@@ -522,6 +547,7 @@ class FileSyncService
             'fail_count' => $fail,
             'details' => $results,
             'ssl' => $sslResult,
+            'db_dumps' => $dbResult,
             'elapsed' => round(microtime(true) - $startTime, 1),
         ];
 

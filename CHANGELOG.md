@@ -9,6 +9,7 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 - **Sincronización Completa** — Botón orquestador en pestaña Estado que ejecuta en secuencia: hostings (API) → archivos (rsync) → bases de datos (dump) → certificados SSL. Detecta automáticamente qué está configurado y avisa si falta SSH
 - **Endpoint full-sync** — `POST /settings/cluster/full-sync` lanza proceso en background (`fullsync-run.php`) con progreso en tiempo real via AJAX polling
 - **DB dump sync (Nivel 1)** — Sincronización simple de bases de datos entre master y slave usando `pg_dump`/`mysqldump` comprimidos con gzip. Se restauran automáticamente en el slave con `DROP + CREATE + IMPORT`. Configurable en pestaña Archivos
+- **DB dump en sync manual** — La sincronización manual de archivos ahora también incluye dump y restauración de bases de datos si está habilitado
 - **DB dump periódico** — El cron `filesync-worker` ahora incluye dumps de BD cada intervalo si está habilitado. Se omite automáticamente si streaming replication (Nivel 2) está activo
 - **isStreamingActive()** — Nuevo método en ReplicationService que detecta si la replicación streaming de PostgreSQL o MySQL está activa, consultando `pg_stat_wal_receiver` y `SHOW REPLICA STATUS`
 - **restore-db-dumps** — Nueva acción en la API del cluster para que el slave restaure los dumps recibidos. Crea usuarios de BD si no existen (`CREATE ROLE IF NOT EXISTS` / `CREATE USER IF NOT EXISTS`)
@@ -20,6 +21,8 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 - **Hosting repair on re-sync** — Si un hosting ya existe en el slave, se repara (UID, shell, grupos, password hash, caddy_route_id) en vez de saltarlo
 - **SSL cert detection en slave** — El panel ahora detecta certificados SSL copiados del master via Caddy admin API (`localhost:2019`) y filesystem, mostrando candado azul si el cert existe aunque el DNS no apunte al servidor
 - **Sync progress modal** — Modal con barra de progreso, cronómetro y dominio actual durante la sincronización. Persiste tras recargar página con sessionStorage
+- **Auto-configurar replicación en slave** — Botón "Convertir este nodo en Slave de X" con modal de advertencia, backup automático y verificación de contraseña
+- **Nodo virtual en slave** — Si el slave no tiene nodos de cluster registrados pero conoce la IP del master, muestra un nodo virtual para auto-configurar
 
 ### Corregido
 - **Tildes en español** — Corregidas todas las tildes faltantes en la página de Cluster (más de 50 correcciones en HTML y JavaScript)
@@ -27,6 +30,9 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 - **JSON sync modal** — Corregido mismatch de campos entre backend (`synced`/`failed`) y frontend (`ok_count`/`fail_count`)
 - **filesync-run.php bootstrap** — Corregido error de archivo no encontrado usando bootstrap inline como `cluster-worker.php`
 - **rsync --delete en certs** — Los certificados del slave ya no se borran al sincronizar (opción `no_delete`)
+- **DROP DATABASE con conexiones activas** — Añadido `pg_terminate_backend` + `DROP DATABASE WITH (FORCE)` con fallback para PG < 13
+- **Session key en verify-admin-password** — Corregido `$_SESSION['admin_id']` inexistente por `$_SESSION['panel_user']['id']` en verificación de contraseña del cluster
+- **Auto-configure en slave sin nodos** — El botón de auto-configurar ahora aparece en el slave usando nodo virtual del master
 
 ---
 
@@ -96,9 +102,6 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 - **ApiAuthMiddleware** — Autenticacion por token para rutas /api/*, separada de la autenticacion por sesion
 - **Instalador dual PostgreSQL** — Deteccion automatica de cluster existente, 3 escenarios (instalacion limpia en 5433, migracion de 5432 a 5433, ya migrado)
 - **PANEL_ROLE en .env** — Rol del servidor (standalone/master/slave) almacenado en .env para evitar sobreescritura durante sincronizacion
-
-### Por hacer
-- **Multi-idioma panel** — Soporte ES/EN en toda la interfaz del panel
 
 ---
 
