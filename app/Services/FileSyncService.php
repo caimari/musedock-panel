@@ -1119,208 +1119,15 @@ class FileSyncService
                 file_put_contents($sqlOps, "DROP DATABASE IF EXISTS `{$tempDb}`;\nCREATE DATABASE `{$tempDb}`;\nGRANT ALL ON `{$tempDb}`.* TO '{$dbUser}'@'localhost';\n");
                 shell_exec(sprintf('%s < %s 2>/dev/null', $mysqlCmd, escapeshellarg($sqlOps)));
 
-                // 2. Build a PHP filter script to strip GENERATED columns from INSERT statements
-                //    The dump uses --complete-insert so INSERT INTO t (`col1`,`col2`,`gen_col`) VALUES (...)
-                //    We need to remove the generated column name and its corresponding value.
-                $generatedCols = $entry['generated_cols'] ?? [];
-                $filterScript = null;
-
-                if (!empty($generatedCols)) {
-                    // Create a PHP script that reads stdin, removes generated columns from INSERTs
-                    $filterScript = $dumpPath . '/_filter_generated.php';
-                    $genColsJson = json_encode($generatedCols);
-                    $phpFilter = <<<'PHPEOF'
-<?php
-// Filter script: removes GENERATED columns from INSERT INTO ... VALUES statements
-// Generated columns per table: {"table_name": ["col1", "col2"]}
-$genCols = json_decode($argv[1], true);
-
-while (($line = fgets(STDIN)) !== false) {
-    // Match INSERT INTO `table` (`col1`,`col2`,...) VALUES
-    if (preg_match('/^INSERT INTO `([^`]+)` \(/', $line, $m)) {
-        $table = $m[1];
-        if (isset($genCols[$table])) {
-            $colsToRemove = $genCols[$table];
-            // Parse the column list to find positions of generated columns
-            if (preg_match('/^(INSERT INTO `[^`]+` \()([^)]+)(\) VALUES\s*)/', $line, $cm)) {
-                $prefix = $cm[1];
-                $colList = $cm[2];
-                $suffix = $cm[3];
-                $rest = substr($line, strlen($cm[0]));
-
-                $cols = array_map(function($c) { return trim($c, " `"); }, explode(',', $colList));
-                $removeIdx = [];
-                foreach ($cols as $i => $c) {
-                    if (in_array($c, $colsToRemove, true)) {
-                        $removeIdx[] = $i;
-                    }
-                }
-
-                if (!empty($removeIdx)) {
-                    // Rebuild column list without generated columns
-                    $newCols = [];
-                    foreach ($cols as $i => $c) {
-                        if (!in_array($i, $removeIdx, true)) {
-                            $newCols[] = '`' . $c . '`';
-                        }
-                    }
-
-                    // Parse and rebuild each VALUES group, removing the Nth value
-                    // Values are: (val1,val2,...),(val1,val2,...),...;
-                    $newLine = $prefix . implode(',', $newCols) . $suffix;
-
-                    // Parse values carefully (handles quoted strings with commas/parens)
-                    $pos = 0;
-                    $len = strlen($rest);
-                    $first = true;
-
-                    while ($pos < $len) {
-                        // Skip whitespace
-                        while ($pos < $len && $rest[$pos] === ' ') $pos++;
-                        if ($pos >= $len) break;
-
-                        if ($rest[$pos] === ';' || $rest[$pos] === "\n") {
-                            $newLine .= substr($rest, $pos);
-                            break;
-                        }
-
-                        if ($rest[$pos] === ',') {
-                            $pos++; // skip comma between value groups
-                            continue;
-                        }
-
-                        if ($rest[$pos] !== '(') {
-                            // Unexpected char, output rest as-is
-                            $newLine .= substr($rest, $pos);
-                            break;
-                        }
-
-                        // Parse one (...) value group
-                        $pos++; // skip (
-                        $values = [];
-                        $val = '';
-                        $inQuote = false;
-                        $escaped = false;
-                        $depth = 0;
-
-                        while ($pos < $len) {
-                            $ch = $rest[$pos];
-
-                            if ($escaped) {
-                                $val .= $ch;
-                                $escaped = false;
-                                $pos++;
-                                continue;
-                            }
-
-                            if ($ch === '\\') {
-                                $val .= $ch;
-                                $escaped = true;
-                                $pos++;
-                                continue;
-                            }
-
-                            if ($ch === "'" && !$inQuote) {
-                                $inQuote = true;
-                                $val .= $ch;
-                                $pos++;
-                                continue;
-                            }
-
-                            if ($ch === "'" && $inQuote) {
-                                $val .= $ch;
-                                $inQuote = false;
-                                $pos++;
-                                continue;
-                            }
-
-                            if ($inQuote) {
-                                $val .= $ch;
-                                $pos++;
-                                continue;
-                            }
-
-                            if ($ch === '(') {
-                                $depth++;
-                                $val .= $ch;
-                                $pos++;
-                                continue;
-                            }
-
-                            if ($ch === ')' && $depth > 0) {
-                                $depth--;
-                                $val .= $ch;
-                                $pos++;
-                                continue;
-                            }
-
-                            if ($ch === ')' && $depth === 0) {
-                                $values[] = $val;
-                                $pos++; // skip )
-                                break;
-                            }
-
-                            if ($ch === ',' && $depth === 0) {
-                                $values[] = $val;
-                                $val = '';
-                                $pos++;
-                                continue;
-                            }
-
-                            $val .= $ch;
-                            $pos++;
-                        }
-
-                        // Remove generated column values
-                        $newValues = [];
-                        foreach ($values as $i => $v) {
-                            if (!in_array($i, $removeIdx, true)) {
-                                $newValues[] = $v;
-                            }
-                        }
-
-                        if (!$first) $newLine .= ',';
-                        $newLine .= '(' . implode(',', $newValues) . ')';
-                        $first = false;
-                    }
-
-                    echo $newLine;
-                    continue;
-                }
-            }
-        }
-    }
-    echo $line;
-}
-PHPEOF;
-                    file_put_contents($filterScript, $phpFilter);
-                }
-
-                // 3. Import: gunzip → sed pipeline (MariaDB compat) → optional PHP filter → mysql --force
-                // Fix ERROR 1231: NO_AUTO_CREATE_USER doesn't exist in MariaDB
-                // Fix ERROR 1101: MariaDB rejects DEFAULT on TEXT/BLOB/JSON columns
-                // Only fix NO_AUTO_CREATE_USER (doesn't exist in MariaDB) and MySQL 8.0 collation
-                $sedPipeline = "sed \"s/NO_AUTO_CREATE_USER,\\\\\\?//g; s/,\\\\+/,/g; s/,'/'/g; s/utf8mb4_0900_ai_ci/utf8mb4_unicode_ci/g\"";
-
-                if ($filterScript) {
-                    $importCmd = sprintf(
-                        'gunzip -c %s | %s | php %s %s | %s --force %s 2>&1',
-                        escapeshellarg($file),
-                        $sedPipeline,
-                        escapeshellarg($filterScript),
-                        escapeshellarg(json_encode($generatedCols)),
-                        $mysqlCmd,
-                        escapeshellarg($tempDb)
-                    );
-                } else {
-                    $importCmd = sprintf(
-                        'gunzip -c %s | %s | %s --force %s 2>&1',
-                        escapeshellarg($file),
-                        $sedPipeline,
-                        $mysqlCmd,
-                        escapeshellarg($tempDb)
-                    );
-                }
+                // 2. Import: gunzip → sed (minimal fixes) → mysql --force
+                // --force skips errors (e.g. GENERATED column inserts) and continues
+                // sed: remove NO_AUTO_CREATE_USER + fix MySQL 8.0 collation
+                $importCmd = sprintf(
+                    'gunzip -c %s | sed "s/NO_AUTO_CREATE_USER,\\?//g; s/,\\+/,/g; s/,\x27/\x27/g; s/utf8mb4_0900_ai_ci/utf8mb4_unicode_ci/g" | %s --force %s 2>&1',
+                    escapeshellarg($file),
+                    $mysqlCmd,
+                    escapeshellarg($tempDb)
+                );
                 $output = trim((string)shell_exec($importCmd));
 
                 // 4. Get table list (one per line, avoids GROUP_CONCAT 1024-byte truncation)
@@ -1353,7 +1160,6 @@ PHPEOF;
                 }
 
                 @unlink($sqlOps);
-                if ($filterScript) @unlink($filterScript);
                 $ok = $importOk;
             }
 
