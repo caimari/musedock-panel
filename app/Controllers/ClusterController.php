@@ -578,6 +578,7 @@ class ClusterController
 
     /**
      * POST /settings/cluster/sync-files-now (JSON)
+     * Launches sync in background and returns a sync_id for polling.
      */
     public function syncFilesNow(): void
     {
@@ -591,10 +592,57 @@ class ClusterController
             exit;
         }
 
-        $result = FileSyncService::syncAllToNode($nodeId);
-        LogService::log('cluster.filesync', 'manual', "Sync archivos al nodo #{$nodeId}: {$result['synced']}/{$result['total']} OK");
+        $node = ClusterService::getNode($nodeId);
+        if (!$node) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado']);
+            exit;
+        }
 
-        echo json_encode($result);
+        // Generate unique sync ID and launch background process
+        $syncId = 'sync-' . $nodeId . '-' . time();
+        $progressFile = FileSyncService::progressFilePath($syncId);
+
+        // Write initial progress
+        file_put_contents($progressFile, json_encode([
+            'status' => 'starting', 'total' => 0, 'current' => 0,
+            'ok' => 0, 'fail' => 0, 'current_domain' => 'Iniciando...',
+            'elapsed' => 0,
+        ]));
+
+        // Launch background PHP process
+        $cmd = sprintf(
+            'nohup /usr/bin/php /opt/musedock-panel/bin/filesync-run.php %d %s > /dev/null 2>&1 &',
+            $nodeId,
+            escapeshellarg($syncId)
+        );
+        shell_exec($cmd);
+
+        LogService::log('cluster.filesync', 'manual', "Sync archivos iniciado al nodo {$node['name']} (ID: {$syncId})");
+
+        echo json_encode(['ok' => true, 'sync_id' => $syncId, 'node_name' => $node['name']]);
+        exit;
+    }
+
+    /**
+     * GET /settings/cluster/sync-progress?sync_id=xxx (JSON)
+     * Returns current sync progress for polling.
+     */
+    public function syncProgress(): void
+    {
+        header('Content-Type: application/json');
+        $syncId = $_GET['sync_id'] ?? '';
+        if (!$syncId) {
+            echo json_encode(['error' => 'Missing sync_id']);
+            exit;
+        }
+
+        $progress = FileSyncService::readProgress($syncId);
+        if (!$progress) {
+            echo json_encode(['status' => 'unknown', 'error' => 'Sync not found']);
+            exit;
+        }
+
+        echo json_encode($progress);
         exit;
     }
 

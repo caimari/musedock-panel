@@ -441,8 +441,9 @@ class FileSyncService
 
     /**
      * Sync all active hostings to a specific node.
+     * If $progressFile is provided, write progress JSON to it after each hosting.
      */
-    public static function syncAllToNode(int $nodeId): array
+    public static function syncAllToNode(int $nodeId, string $progressFile = ''): array
     {
         $node = ClusterService::getNode($nodeId);
         if (!$node) {
@@ -453,21 +454,108 @@ class FileSyncService
         $results = [];
         $ok = 0;
         $fail = 0;
+        $total = count($accounts);
+        $startTime = microtime(true);
 
-        foreach ($accounts as $acc) {
-            $result = self::syncHostingToNode($acc, $node);
-            $result['domain'] = $acc['domain'];
-            $results[] = $result;
-            if ($result['ok']) $ok++; else $fail++;
+        // Write initial progress
+        if ($progressFile) {
+            self::writeProgress($progressFile, [
+                'status' => 'running', 'total' => $total, 'current' => 0,
+                'ok' => 0, 'fail' => 0, 'current_domain' => '', 'details' => [],
+                'elapsed' => 0, 'started_at' => date('Y-m-d H:i:s'),
+            ]);
         }
 
-        return [
+        foreach ($accounts as $i => $acc) {
+            $domain = $acc['domain'];
+
+            // Update progress before sync
+            if ($progressFile) {
+                self::writeProgress($progressFile, [
+                    'status' => 'running', 'total' => $total, 'current' => $i,
+                    'ok' => $ok, 'fail' => $fail, 'current_domain' => $domain,
+                    'phase' => 'syncing', 'details' => $results,
+                    'elapsed' => round(microtime(true) - $startTime, 1),
+                ]);
+            }
+
+            $result = self::syncHostingToNode($acc, $node);
+            $result['domain'] = $domain;
+            $results[] = $result;
+            if ($result['ok']) $ok++; else $fail++;
+
+            // Update progress after sync
+            if ($progressFile) {
+                self::writeProgress($progressFile, [
+                    'status' => 'running', 'total' => $total, 'current' => $i + 1,
+                    'ok' => $ok, 'fail' => $fail, 'current_domain' => $domain,
+                    'phase' => 'done', 'details' => $results,
+                    'elapsed' => round(microtime(true) - $startTime, 1),
+                ]);
+            }
+        }
+
+        // Sync SSL certs if enabled
+        $sslResult = null;
+        $config = self::getConfig();
+        if ($config['sync_ssl_certs']) {
+            if ($progressFile) {
+                self::writeProgress($progressFile, [
+                    'status' => 'running', 'total' => $total, 'current' => $total,
+                    'ok' => $ok, 'fail' => $fail, 'current_domain' => 'Certificados SSL',
+                    'phase' => 'ssl', 'details' => $results,
+                    'elapsed' => round(microtime(true) - $startTime, 1),
+                ]);
+            }
+            $sslResult = self::syncSslCerts($node);
+        }
+
+        $finalResult = [
             'ok' => $fail === 0,
-            'total' => count($accounts),
-            'synced' => $ok,
-            'failed' => $fail,
-            'results' => $results,
+            'total' => $total,
+            'ok_count' => $ok,
+            'fail_count' => $fail,
+            'details' => $results,
+            'ssl' => $sslResult,
+            'elapsed' => round(microtime(true) - $startTime, 1),
         ];
+
+        // Write final progress
+        if ($progressFile) {
+            $finalResult['status'] = 'completed';
+            self::writeProgress($progressFile, $finalResult);
+        }
+
+        return $finalResult;
+    }
+
+    /**
+     * Write progress to a JSON file atomically.
+     */
+    private static function writeProgress(string $file, array $data): void
+    {
+        $tmp = $file . '.tmp';
+        file_put_contents($tmp, json_encode($data, JSON_UNESCAPED_UNICODE));
+        rename($tmp, $file);
+    }
+
+    /**
+     * Read sync progress from file.
+     */
+    public static function readProgress(string $syncId): ?array
+    {
+        $file = self::progressFilePath($syncId);
+        if (!file_exists($file)) return null;
+        $data = json_decode(file_get_contents($file), true);
+        return is_array($data) ? $data : null;
+    }
+
+    /**
+     * Get the progress file path for a sync operation.
+     */
+    public static function progressFilePath(string $syncId): string
+    {
+        return '/opt/musedock-panel/storage/logs/sync-progress-' . preg_replace('/[^a-zA-Z0-9_-]/', '', $syncId) . '.json';
     }
 
     // ═══════════════════════════════════════════════════════════════

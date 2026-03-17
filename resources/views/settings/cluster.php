@@ -926,6 +926,10 @@
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- JavaScript                                                 -->
 <!-- ═══════════════════════════════════════════════════════════ -->
+<style>
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+.spin-icon { display: inline-block; animation: spin 1s linear infinite; }
+</style>
 <script>
 // Auto-refresh every 10 seconds
 let statusInterval = null;
@@ -1411,13 +1415,17 @@ function testSshNode(nodeId, nodeName) {
     });
 }
 
+let _syncPollTimer = null;
+let _syncStartTime = null;
+
 function syncFilesNow(nodeId, nodeName) {
     const csrf = document.querySelector('[name=_csrf_token]').value;
 
     Swal.fire({
         title: 'Sincronizar archivos a ' + nodeName,
-        html: 'Se sincronizaran los archivos de <strong>todos los hostings activos</strong> al nodo seleccionado.<br><br>' +
-              '<span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Esto puede tardar varios minutos dependiendo del volumen de datos.</span>',
+        html: '<p>Se sincronizaran los archivos de <strong>todos los hostings activos</strong> al nodo seleccionado.</p>' +
+              '<p><i class="bi bi-arrow-repeat me-1"></i>Usa rsync incremental — solo copia archivos nuevos o modificados.</p>' +
+              '<p class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Puede tardar varios minutos segun el volumen de datos.</p>',
         icon: 'question',
         showCancelButton: true,
         confirmButtonText: 'Sincronizar ahora',
@@ -1428,13 +1436,8 @@ function syncFilesNow(nodeId, nodeName) {
     }).then(function(result) {
         if (!result.isConfirmed) return;
 
-        Swal.fire({
-            title: 'Sincronizando archivos...',
-            html: 'Enviando archivos a <strong>' + nodeName + '</strong>. Por favor espere...',
-            allowOutsideClick: false, allowEscapeKey: false,
-            didOpen: () => Swal.showLoading(),
-            background: '#1e1e2e', color: '#fff'
-        });
+        // Show initial loading modal
+        _showSyncModal('Iniciando sincronizacion...', nodeName);
 
         const formData = new FormData();
         formData.append('node_id', nodeId);
@@ -1443,20 +1446,16 @@ function syncFilesNow(nodeId, nodeName) {
         fetch('/settings/cluster/sync-files-now', { method: 'POST', body: formData })
         .then(r => r.json())
         .then(data => {
-            if (data.ok) {
-                let html = '<strong>Resultado:</strong><br>';
-                html += 'OK: ' + (data.ok_count || 0) + ' | Fallidos: ' + (data.fail_count || 0);
-                if (data.details && data.details.length) {
-                    html += '<br><br><div class="text-start" style="max-height:200px;overflow-y:auto;font-size:0.85rem;">';
-                    data.details.forEach(function(d) {
-                        const icon = d.ok ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-x-circle text-danger"></i>';
-                        html += icon + ' ' + d.domain + (d.error ? ' — ' + d.error : '') + '<br>';
-                    });
-                    html += '</div>';
-                }
-                Swal.fire({ title: 'Sincronizacion completada', html: html, icon: 'success', background: '#1e1e2e', color: '#fff' });
+            if (data.ok && data.sync_id) {
+                // Save to sessionStorage so modal survives page reload
+                sessionStorage.setItem('active_sync', JSON.stringify({
+                    sync_id: data.sync_id, node_name: data.node_name || nodeName,
+                    started: Date.now()
+                }));
+                _syncStartTime = Date.now();
+                _startSyncPolling(data.sync_id, data.node_name || nodeName);
             } else {
-                Swal.fire({ title: 'Error', text: data.error || 'Error al sincronizar', icon: 'error', background: '#1e1e2e', color: '#fff' });
+                Swal.fire({ title: 'Error', text: data.error || 'Error al iniciar sync', icon: 'error', background: '#1e1e2e', color: '#fff' });
             }
         })
         .catch(function() {
@@ -1464,6 +1463,142 @@ function syncFilesNow(nodeId, nodeName) {
         });
     });
 }
+
+function _showSyncModal(subtitle, nodeName) {
+    Swal.fire({
+        title: 'Sincronizando archivos',
+        html: '<div id="sync-progress-content">' +
+              '<p class="mb-2">' + subtitle + '</p>' +
+              '<div class="progress mb-2" style="height:20px;background:rgba(255,255,255,0.1);border-radius:10px;">' +
+              '  <div id="sync-bar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width:0%;background:#22c55e;"></div>' +
+              '</div>' +
+              '<div class="d-flex justify-content-between mb-2" style="font-size:0.85rem;">' +
+              '  <span id="sync-counter">0 / 0</span>' +
+              '  <span id="sync-timer">00:00</span>' +
+              '</div>' +
+              '<div id="sync-current" class="text-muted mb-2" style="font-size:0.85rem;"></div>' +
+              '<div id="sync-details" class="text-start" style="max-height:180px;overflow-y:auto;font-size:0.8rem;"></div>' +
+              '</div>',
+        allowOutsideClick: false, allowEscapeKey: false,
+        showConfirmButton: false,
+        background: '#1e1e2e', color: '#fff'
+    });
+}
+
+function _startSyncPolling(syncId, nodeName) {
+    if (_syncPollTimer) clearInterval(_syncPollTimer);
+
+    _syncPollTimer = setInterval(function() {
+        fetch('/settings/cluster/sync-progress?sync_id=' + encodeURIComponent(syncId))
+        .then(r => r.json())
+        .then(data => {
+            _updateSyncModal(data, nodeName, syncId);
+        })
+        .catch(function() {});
+    }, 2000);
+}
+
+function _updateSyncModal(data, nodeName, syncId) {
+    // Update timer
+    const timerEl = document.getElementById('sync-timer');
+    if (timerEl) {
+        const elapsed = data.elapsed || 0;
+        const mins = Math.floor(elapsed / 60);
+        const secs = Math.floor(elapsed % 60);
+        timerEl.textContent = String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+    }
+
+    // Update progress bar
+    const bar = document.getElementById('sync-bar');
+    const counter = document.getElementById('sync-counter');
+    const current = document.getElementById('sync-current');
+    const details = document.getElementById('sync-details');
+
+    if (bar && data.total > 0) {
+        const pct = Math.round((data.current / data.total) * 100);
+        bar.style.width = pct + '%';
+        bar.textContent = pct + '%';
+    }
+
+    if (counter) {
+        counter.textContent = (data.current || 0) + ' / ' + (data.total || 0);
+    }
+
+    if (current && data.current_domain) {
+        const phase = data.phase || '';
+        let icon = '<i class="bi bi-arrow-repeat spin-icon me-1"></i>';
+        if (phase === 'ssl') icon = '<i class="bi bi-shield-lock me-1 text-warning"></i>';
+        if (phase === 'done') icon = '<i class="bi bi-check me-1 text-success"></i>';
+        current.innerHTML = icon + 'Sincronizando: <strong>' + data.current_domain + '</strong>';
+    }
+
+    if (details && data.details && data.details.length) {
+        let html = '';
+        data.details.forEach(function(d) {
+            const icon = d.ok
+                ? '<i class="bi bi-check-circle text-success"></i>'
+                : '<i class="bi bi-x-circle text-danger"></i>';
+            const err = d.error ? ' <span class="text-danger">— ' + d.error + '</span>' : '';
+            html += icon + ' ' + d.domain + err + '<br>';
+        });
+        details.innerHTML = html;
+        details.scrollTop = details.scrollHeight;
+    }
+
+    // Check if completed
+    if (data.status === 'completed' || data.status === 'error') {
+        if (_syncPollTimer) { clearInterval(_syncPollTimer); _syncPollTimer = null; }
+        sessionStorage.removeItem('active_sync');
+
+        setTimeout(function() {
+            if (data.status === 'error') {
+                Swal.fire({ title: 'Error', text: data.error || 'Error durante la sincronizacion', icon: 'error', background: '#1e1e2e', color: '#fff' });
+                return;
+            }
+
+            let html = '<div class="text-start">';
+            html += '<div class="d-flex justify-content-around mb-3">';
+            html += '<div class="text-center"><div style="font-size:1.5rem;color:#22c55e;">' + (data.ok_count || 0) + '</div><small class="text-muted">OK</small></div>';
+            html += '<div class="text-center"><div style="font-size:1.5rem;color:#ef4444;">' + (data.fail_count || 0) + '</div><small class="text-muted">Fallidos</small></div>';
+            html += '<div class="text-center"><div style="font-size:1.5rem;color:#94a3b8;">' + (data.elapsed || 0).toFixed(1) + 's</div><small class="text-muted">Tiempo</small></div>';
+            html += '</div>';
+
+            if (data.ssl) {
+                const sslIcon = data.ssl.ok ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-x-circle text-danger"></i>';
+                html += '<p>' + sslIcon + ' Certificados SSL: ' + (data.ssl.ok ? 'copiados' : (data.ssl.error || 'error')) + '</p>';
+            }
+
+            if (data.details && data.details.length) {
+                html += '<div style="max-height:200px;overflow-y:auto;font-size:0.85rem;border-top:1px solid rgba(255,255,255,0.1);padding-top:8px;">';
+                data.details.forEach(function(d) {
+                    const icon = d.ok ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-x-circle text-danger"></i>';
+                    const err = d.error ? ' <span class="text-danger">— ' + d.error + '</span>' : '';
+                    html += icon + ' ' + d.domain + err + '<br>';
+                });
+                html += '</div>';
+            }
+            html += '</div>';
+
+            const finalIcon = (data.fail_count || 0) === 0 ? 'success' : 'warning';
+            Swal.fire({ title: 'Sincronizacion completada', html: html, icon: finalIcon, background: '#1e1e2e', color: '#fff' });
+        }, 500);
+    }
+}
+
+// Resume sync modal on page load if a sync was in progress
+(function() {
+    const saved = sessionStorage.getItem('active_sync');
+    if (saved) {
+        try {
+            const info = JSON.parse(saved);
+            if (info.sync_id) {
+                _syncStartTime = info.started || Date.now();
+                _showSyncModal('Recuperando progreso...', info.node_name || '');
+                _startSyncPolling(info.sync_id, info.node_name || '');
+            }
+        } catch(e) { sessionStorage.removeItem('active_sync'); }
+    }
+})();
 
 function checkDbHost() {
     const csrf = document.querySelector('[name=_csrf_token]').value;

@@ -218,6 +218,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/install-ssh-key', 'ClusterController@installSshKey');
 \MuseDockPanel\Router::post('/settings/cluster/test-ssh', 'ClusterController@testSshConnection');
 \MuseDockPanel\Router::post('/settings/cluster/sync-files-now', 'ClusterController@syncFilesNow');
+\MuseDockPanel\Router::get('/settings/cluster/sync-progress', 'ClusterController@syncProgress');
 \MuseDockPanel\Router::post('/settings/cluster/check-dbhost', 'ClusterController@checkDbHost');
 
 // WireGuard
