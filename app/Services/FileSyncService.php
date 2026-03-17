@@ -179,8 +179,10 @@ class FileSyncService
         // -a: archive (preserves permissions, symlinks, times)
         // -v: verbose
         // -z: compress during transfer
-        // --delete: remove files on slave that don't exist on master
-        $cmd = 'rsync -avz --delete';
+        $cmd = 'rsync -avz';
+        if (empty($options['no_delete'])) {
+            $cmd .= ' --delete'; // remove files on slave that don't exist on master
+        }
 
         // Fix ownership on remote by username (solves UID mismatch between servers)
         if ($ownerUser) {
@@ -629,11 +631,95 @@ class FileSyncService
         if ($config['method'] === 'https') {
             $token = ReplicationService::decryptPassword($node['auth_token'] ?? '');
             // Send certs, slave will fix ownership to caddy:caddy
-            return self::httpsSyncHosting($certDir, $node['api_url'], $token, $certDir, 'caddy');
+            $result = self::httpsSyncHosting($certDir, $node['api_url'], $token, $certDir, 'caddy');
+        } else {
+            // rsync with --chown=caddy:caddy, NO --delete to preserve slave's own certs
+            $result = self::rsyncHosting($certDir, $host, $certDir, [
+                'owner_user' => 'caddy',
+                'no_delete'  => true,
+            ]);
         }
 
-        // rsync with --chown=caddy:caddy to fix ownership on slave
-        return self::rsyncHosting($certDir, $host, $certDir, ['owner_user' => 'caddy']);
+        // Reload Caddy on slave so it picks up the new certificates
+        if ($result['ok'] ?? false) {
+            $reloadResult = self::reloadRemoteCaddy($host, $config);
+            $result['caddy_reload'] = $reloadResult;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Reload Caddy on a remote server via SSH.
+     */
+    private static function reloadRemoteCaddy(string $host, array $config): array
+    {
+        $port = $config['ssh_port'] ?? 22;
+        $keyPath = $config['ssh_key_path'] ?? '/root/.ssh/id_ed25519';
+        $user = $config['ssh_user'] ?? 'root';
+
+        $sshCmd = sprintf(
+            'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d -i %s %s@%s %s 2>&1',
+            $port,
+            escapeshellarg($keyPath),
+            escapeshellarg($user),
+            escapeshellarg($host),
+            escapeshellarg('systemctl reload caddy 2>&1 || caddy reload --config /etc/caddy/Caddyfile 2>&1')
+        );
+
+        $output = trim((string)shell_exec($sshCmd));
+        $ok = (stripos($output, 'error') === false && stripos($output, 'fail') === false);
+
+        return ['ok' => $ok, 'output' => $output];
+    }
+
+    /**
+     * Check if a valid SSL certificate exists for a domain.
+     * Uses Caddy admin API first, falls back to filesystem check.
+     */
+    public static function hasCertForDomain(string $domain): bool
+    {
+        // Method 1: Check via Caddy admin API (works without filesystem permissions)
+        $ch = curl_init("http://localhost:2019/id/{$domain}");
+        if ($ch) {
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 2,
+                CURLOPT_CONNECTTIMEOUT => 1,
+            ]);
+            $response = curl_exec($ch);
+            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            // If Caddy knows this domain, it likely has a cert
+            if ($httpCode === 200 && $response) {
+                return true;
+            }
+        }
+
+        // Method 2: Filesystem check (works when running as root, e.g. cron)
+        $certDir = self::findCaddyCertDir();
+        if ($certDir) {
+            // Direct subdirectory check
+            if (is_dir($certDir . '/' . $domain)) {
+                return true;
+            }
+            // Under ACME directory
+            $acmeBase = dirname($certDir);
+            foreach (['acme-v02.api.letsencrypt.org-directory', 'acme.zerossl.com-v2-DV90'] as $issuer) {
+                if (is_dir($acmeBase . '/certificates/' . $issuer . '/' . $domain)) {
+                    return true;
+                }
+            }
+        }
+
+        // Method 3: Shell fallback (find as root-capable processes)
+        $found = trim((string)shell_exec(sprintf(
+            'find /var/lib/caddy -type d -name %s 2>/dev/null | head -1',
+            escapeshellarg($domain)
+        )));
+
+        return !empty($found);
     }
 
     // ═══════════════════════════════════════════════════════════════

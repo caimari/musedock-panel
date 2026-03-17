@@ -109,19 +109,32 @@
                             </td>
                             <td><?= $d['is_primary'] ? '<span class="badge bg-info">Primary</span>' : '' ?></td>
                             <td>
+                                <?php
+                                    // Check if cert exists via Caddy admin API or filesystem
+                                    $hasCertOnDisk = false;
+                                    if (!$pointsHere) {
+                                        $hasCertOnDisk = \MuseDockPanel\Services\FileSyncService::hasCertForDomain($d['domain']);
+                                    }
+                                ?>
                                 <?php if ($pointsHere): ?>
-                                    <i class="bi bi-lock-fill text-success" title="SSL active"></i>
+                                    <i class="bi bi-lock-fill text-success" title="SSL activo"></i>
+                                <?php elseif ($hasCertOnDisk): ?>
+                                    <i class="bi bi-lock-fill text-info" title="SSL copiado del master (cert en disco)"></i>
                                 <?php else: ?>
-                                    <i class="bi bi-unlock text-warning" title="SSL pending — DNS must point to <?= $serverIp ?>"></i>
+                                    <i class="bi bi-unlock text-warning" title="SSL pendiente — DNS debe apuntar a <?= $serverIp ?>"></i>
                                 <?php endif; ?>
                             </td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
-                <?php if (!$pointsHere): ?>
+                <?php if (!$pointsHere && !$hasCertOnDisk): ?>
                 <div class="p-2 m-2 rounded" style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);">
-                    <small style="color:#fbbf24;"><i class="bi bi-info-circle me-1"></i>SSL certificate will be obtained automatically when DNS A record points to <code><?= $serverIp ?></code>. Update your DNS provider and click "Renew SSL".</small>
+                    <small style="color:#fbbf24;"><i class="bi bi-info-circle me-1"></i>El certificado SSL se obtendra automaticamente cuando el DNS A apunte a <code><?= $serverIp ?></code>. Actualiza tu proveedor DNS y pulsa "Renew SSL".</small>
+                </div>
+                <?php elseif (!$pointsHere && $hasCertOnDisk): ?>
+                <div class="p-2 m-2 rounded" style="background:rgba(13,202,240,0.08);border:1px solid rgba(13,202,240,0.2);">
+                    <small style="color:#0dcaf0;"><i class="bi bi-info-circle me-1"></i>El certificado SSL fue copiado del master. HTTPS funciona aunque el DNS no apunte a este servidor. Cuando el DNS cambie, Caddy renovara el certificado automaticamente.</small>
                 </div>
                 <?php endif; ?>
             </div>

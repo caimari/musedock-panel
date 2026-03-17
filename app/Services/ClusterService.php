@@ -551,13 +551,31 @@ class ClusterService
                         $passwordHash = $hostingData['password_hash'] ?? '';
                         $repairs = SystemService::repairSystemUser($username, $expectedUid, $shell, $passwordHash);
 
-                        // Update DB record if UID changed
-                        if ($expectedUid && $expectedUid > 0 && (int)($existing['system_uid'] ?? 0) !== $expectedUid) {
-                            Database::update('hosting_accounts', [
-                                'system_uid' => $expectedUid,
-                                'shell'      => $shell,
-                            ], 'id = :id', ['id' => (int)$existing['id']]);
+                        // Update DB record — sync all fields from master
+                        $updateFields = ['shell' => $shell];
+                        if ($expectedUid && $expectedUid > 0) {
+                            $updateFields['system_uid'] = $expectedUid;
                         }
+                        // Sync caddy_route_id from master
+                        if (!empty($hostingData['caddy_route_id'])) {
+                            $updateFields['caddy_route_id'] = $hostingData['caddy_route_id'];
+                        }
+                        // Sync quota
+                        if (isset($hostingData['disk_quota_mb'])) {
+                            $updateFields['disk_quota_mb'] = (int)$hostingData['disk_quota_mb'];
+                        }
+                        // Sync PHP version
+                        if (!empty($hostingData['php_version'])) {
+                            $updateFields['php_version'] = $hostingData['php_version'];
+                        }
+                        // Recalculate disk usage on this server
+                        if ($homeDir && is_dir($homeDir)) {
+                            $duOutput = trim((string)shell_exec(sprintf('du -sm %s 2>/dev/null | cut -f1', escapeshellarg($homeDir))));
+                            if (is_numeric($duOutput)) {
+                                $updateFields['disk_used_mb'] = (int)$duOutput;
+                            }
+                        }
+                        Database::update('hosting_accounts', $updateFields, 'id = :id', ['id' => (int)$existing['id']]);
 
                         $repairMsg = implode(', ', $repairs);
                         LogService::log('cluster.sync', $domain, "Hosting exists, repaired: {$repairMsg}");

@@ -463,6 +463,7 @@ class ClusterController
                     'password_hash' => $passwordHash,
                     'shell' => $acc['shell'] ?? '/usr/sbin/nologin',
                     'system_uid' => $acc['system_uid'] ?? null,
+                    'caddy_route_id' => $acc['caddy_route_id'] ?? null,
                     'customer_id' => $acc['customer_id'] ?? null,
                     'disk_quota_mb' => $acc['disk_quota_mb'] ?? 1024,
                     'description' => $acc['description'] ?? '',

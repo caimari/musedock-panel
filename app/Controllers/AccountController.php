@@ -158,6 +158,7 @@ class AccountController
                             'password_hash' => SystemService::getPasswordHash($username),
                             'shell' => $shell,
                             'system_uid' => $result['uid'] ?? null,
+                            'caddy_route_id' => $result['caddy_route_id'] ?? null,
                             'customer_id' => $customerId,
                             'disk_quota_mb' => $diskQuota,
                             'description' => $description,
