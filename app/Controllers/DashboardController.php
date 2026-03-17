@@ -3,6 +3,7 @@ namespace MuseDockPanel\Controllers;
 
 use MuseDockPanel\Database;
 use MuseDockPanel\View;
+use MuseDockPanel\Settings;
 
 class DashboardController
 {
@@ -25,12 +26,24 @@ class DashboardController
         // Recent log
         $recentLog = Database::fetchAll("SELECT l.*, a.username as admin_name FROM panel_log l LEFT JOIN panel_admins a ON a.id = l.admin_id ORDER BY l.created_at DESC LIMIT 10");
 
+        // Cluster info for slave dashboard
+        $clusterInfo = null;
+        $clusterRole = Settings::get('cluster_role', 'standalone');
+        if ($clusterRole !== 'standalone') {
+            $clusterInfo = [
+                'role'             => $clusterRole,
+                'master_ip'        => Settings::get('cluster_master_ip', ''),
+                'master_last_hb'   => Settings::get('cluster_master_last_heartbeat', ''),
+            ];
+        }
+
         View::render('dashboard/index', [
             'layout' => 'main',
             'pageTitle' => 'Dashboard',
             'stats' => $stats,
             'accounts' => $accounts,
             'recentLog' => $recentLog,
+            'clusterInfo' => $clusterInfo,
         ]);
     }
 

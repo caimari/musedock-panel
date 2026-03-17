@@ -4,6 +4,7 @@ namespace MuseDockPanel\Controllers;
 use MuseDockPanel\Database;
 use MuseDockPanel\Flash;
 use MuseDockPanel\Router;
+use MuseDockPanel\Settings;
 use MuseDockPanel\View;
 use MuseDockPanel\Services\LogService;
 
@@ -30,6 +31,12 @@ class CustomerController
 
     public function create(): void
     {
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es Slave. La creacion de clientes solo esta permitida en el Master.');
+            Router::redirect('/customers');
+            return;
+        }
+
         View::render('customers/create', [
             'layout' => 'main',
             'pageTitle' => 'New Customer',
@@ -38,6 +45,12 @@ class CustomerController
 
     public function store(): void
     {
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es Slave. La creacion de clientes solo esta permitida en el Master.');
+            Router::redirect('/customers');
+            return;
+        }
+
         $name = trim($_POST['name'] ?? '');
         $email = trim($_POST['email'] ?? '');
         $company = trim($_POST['company'] ?? '');
@@ -100,6 +113,12 @@ class CustomerController
 
     public function edit(array $params): void
     {
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es Slave. La edicion de clientes solo esta permitida en el Master.');
+            Router::redirect('/customers');
+            return;
+        }
+
         $customer = Database::fetchOne("SELECT * FROM customers WHERE id = :id", ['id' => $params['id']]);
         if (!$customer) {
             Flash::set('error', 'Cliente no encontrado.');
@@ -116,6 +135,12 @@ class CustomerController
 
     public function update(array $params): void
     {
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es Slave. La edicion de clientes solo esta permitida en el Master.');
+            Router::redirect('/customers');
+            return;
+        }
+
         $customer = Database::fetchOne("SELECT * FROM customers WHERE id = :id", ['id' => $params['id']]);
         if (!$customer) {
             Flash::set('error', 'Cliente no encontrado.');
@@ -161,6 +186,12 @@ class CustomerController
 
     public function delete(array $params): void
     {
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es Slave. Eliminar clientes solo esta permitido en el Master.');
+            Router::redirect('/customers');
+            return;
+        }
+
         $customer = Database::fetchOne("SELECT * FROM customers WHERE id = :id", ['id' => $params['id']]);
         if (!$customer) {
             Flash::set('error', 'Cliente no encontrado.');

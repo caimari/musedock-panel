@@ -174,6 +174,12 @@ class DatabaseController
      */
     public function create(): void
     {
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es Slave. La creacion de bases de datos solo esta permitida en el Master.');
+            Router::redirect('/databases');
+            return;
+        }
+
         $accounts = Database::fetchAll("
             SELECT id, username, domain
             FROM hosting_accounts
@@ -193,6 +199,12 @@ class DatabaseController
      */
     public function store(): void
     {
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es Slave. La creacion de bases de datos solo esta permitida en el Master.');
+            Router::redirect('/databases');
+            return;
+        }
+
         $accountId = (int) ($_POST['account_id'] ?? 0);
         $dbSuffix = trim($_POST['db_name'] ?? '');
         $dbType = trim($_POST['db_type'] ?? 'mysql');
@@ -336,6 +348,12 @@ class DatabaseController
      */
     public function delete(array $params = []): void
     {
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es Slave. Eliminar bases de datos solo esta permitido en el Master.');
+            Router::redirect('/databases');
+            return;
+        }
+
         $id = (int) ($params['id'] ?? 0);
 
         $db = Database::fetchOne("

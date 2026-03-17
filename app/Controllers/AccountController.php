@@ -13,6 +13,16 @@ use MuseDockPanel\Services\LogService;
 
 class AccountController
 {
+    private function slaveGuard(string $action = 'Esta accion'): bool
+    {
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', "Este servidor es Slave. {$action} solo esta permitido en el Master.");
+            Router::redirect('/accounts');
+            return true;
+        }
+        return false;
+    }
+
     public function index(): void
     {
         $accounts = Database::fetchAll(
@@ -36,6 +46,8 @@ class AccountController
 
     public function create(): void
     {
+        if ($this->slaveGuard('La creacion de hostings')) return;
+
         $customers = Database::fetchAll("SELECT id, name, email, company FROM customers WHERE status = 'active' ORDER BY name");
 
         View::render('accounts/create', [
@@ -47,12 +59,7 @@ class AccountController
 
     public function store(): void
     {
-        // Block hosting creation on slave nodes
-        if (Settings::get('cluster_role', 'standalone') === 'slave') {
-            Flash::set('error', 'Este servidor es Slave. La creacion de hostings solo esta permitida en el Master.');
-            Router::redirect('/accounts');
-            return;
-        }
+        if ($this->slaveGuard('La creacion de hostings')) return;
 
         $domain = trim($_POST['domain'] ?? '');
         $username = trim($_POST['username'] ?? '');
@@ -187,6 +194,8 @@ class AccountController
 
     public function edit(array $params): void
     {
+        if ($this->slaveGuard('La edicion de hostings')) return;
+
         $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
         if (!$account) {
             Flash::set('error', 'Cuenta no encontrada.');
@@ -232,6 +241,8 @@ class AccountController
 
     public function update(array $params): void
     {
+        if ($this->slaveGuard('La edicion de hostings')) return;
+
         $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
         if (!$account) {
             Flash::set('error', 'Cuenta no encontrada.');
@@ -471,6 +482,8 @@ class AccountController
 
     public function suspend(array $params): void
     {
+        if ($this->slaveGuard('Suspender hostings')) return;
+
         $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
         if (!$account) {
             Flash::set('error', 'Cuenta no encontrada.');
@@ -502,6 +515,8 @@ class AccountController
 
     public function activate(array $params): void
     {
+        if ($this->slaveGuard('Activar hostings')) return;
+
         $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
         if (!$account) {
             Flash::set('error', 'Cuenta no encontrada.');
@@ -776,6 +791,8 @@ class AccountController
 
     public function updatePhp(array $params): void
     {
+        if ($this->slaveGuard('Cambiar PHP de hostings')) return;
+
         $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
         if (!$account) {
             Flash::set('error', 'Cuenta no encontrada.');
@@ -880,6 +897,8 @@ class AccountController
 
     public function delete(array $params): void
     {
+        if ($this->slaveGuard('Eliminar hostings')) return;
+
         $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
         if (!$account) {
             Flash::set('error', 'Cuenta no encontrada.');

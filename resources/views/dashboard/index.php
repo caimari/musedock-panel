@@ -146,6 +146,56 @@
     </div>
 </div>
 
+<!-- Cluster Status (solo si no es standalone) -->
+<?php if (!empty($clusterInfo)): ?>
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <?php
+            $cRole = $clusterInfo['role'];
+            $cBadge = $cRole === 'master' ? 'bg-success' : 'bg-info';
+            $cLabel = $cRole === 'master' ? 'Master' : 'Slave';
+            $mIp = $clusterInfo['master_ip'] ?? '';
+            $mHb = $clusterInfo['master_last_hb'] ?? '';
+            $mAge = $mHb ? (time() - strtotime($mHb)) : 99999;
+        ?>
+        <div class="card border-<?= $cRole === 'slave' ? 'info' : 'success' ?>">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>
+                    <i class="bi bi-diagram-3 me-2"></i>Cluster
+                    <span class="badge <?= $cBadge ?> ms-2"><?= $cLabel ?></span>
+                </span>
+                <a href="/settings/cluster" class="btn btn-outline-light btn-sm">
+                    <i class="bi bi-gear me-1"></i>Configuracion
+                </a>
+            </div>
+            <div class="card-body py-2">
+                <?php if ($cRole === 'slave' && $mIp): ?>
+                    <div class="d-flex align-items-center gap-3">
+                        <i class="bi bi-shield-check fs-4 text-info"></i>
+                        <div>
+                            <span class="text-muted">Master:</span>
+                            <code><?= View::e($mIp) ?></code>
+                            <?php if ($mAge < 120): ?>
+                                <span class="badge bg-success ms-2"><i class="bi bi-check-circle me-1"></i>Conectado</span>
+                            <?php else: ?>
+                                <span class="badge bg-danger ms-2"><i class="bi bi-exclamation-triangle me-1"></i>Sin contacto</span>
+                            <?php endif; ?>
+                            <?php if ($mHb): ?>
+                                <small class="text-muted ms-2">(ultimo heartbeat: <?= View::e($mHb) ?>)</small>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                <?php elseif ($cRole === 'slave'): ?>
+                    <span class="text-muted"><i class="bi bi-hourglass me-1"></i>Esperando heartbeat del master...</span>
+                <?php elseif ($cRole === 'master'): ?>
+                    <span class="text-muted"><i class="bi bi-broadcast me-1"></i>Este servidor gestiona y sincroniza hostings a los nodos slave.</span>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- System Info -->
 <div class="row g-3 mb-4">
     <div class="col-md-6">

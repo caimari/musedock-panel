@@ -4,9 +4,9 @@ $clusterRole = \MuseDockPanel\Settings::get('cluster_role', 'standalone');
 ?>
 
 <?php if ($clusterRole === 'slave'): ?>
-<div class="alert alert-info d-flex align-items-center mb-3">
-    <i class="bi bi-info-circle me-2"></i>
-    Este servidor es <strong class="ms-1">Slave</strong>. La creacion de hostings esta deshabilitada. Los hostings se reciben del servidor Master.
+<div class="alert d-flex align-items-center mb-3" style="background:rgba(13,202,240,0.1);border:1px solid rgba(13,202,240,0.3);color:#0dcaf0;">
+    <i class="bi bi-lock me-2"></i>
+    Este servidor es <strong class="mx-1">Slave</strong>. La creacion de hostings esta deshabilitada. Los hostings se reciben del servidor Master.
 </div>
 <?php endif; ?>
 
@@ -26,7 +26,11 @@ $clusterRole = \MuseDockPanel\Settings::get('cluster_role', 'standalone');
             <div class="p-4 text-center text-muted">
                 <i class="bi bi-server" style="font-size: 2rem;"></i>
                 <p class="mt-2">No hosting accounts yet.</p>
+                <?php if ($clusterRole !== 'slave'): ?>
                 <a href="/accounts/create" class="btn btn-primary btn-sm">Create first account</a>
+                <?php else: ?>
+                <p class="small text-warning mb-0"><i class="bi bi-lock me-1"></i>Servidor Slave: la creacion de hostings esta bloqueada.</p>
+                <?php endif; ?>
             </div>
         <?php else: ?>
             <table class="table table-hover mb-0">
