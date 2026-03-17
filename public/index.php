@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.7.4');
+define('PANEL_VERSION', '0.7.5');
 
 
 
@@ -108,6 +108,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/monitor/api/status', 'MonitorController@apiStatus');
 \MuseDockPanel\Router::get('/monitor/api/alerts', 'MonitorController@apiAlerts');
 \MuseDockPanel\Router::post('/monitor/api/alerts/ack', 'MonitorController@apiAckAlert');
+\MuseDockPanel\Router::post('/monitor/api/alerts/clear', 'MonitorController@apiClearAlerts');
+\MuseDockPanel\Router::post('/monitor/settings', 'MonitorController@saveSettings');
 
 // Hosting Accounts
 \MuseDockPanel\Router::get('/accounts', 'AccountController@index');

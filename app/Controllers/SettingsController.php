@@ -1313,11 +1313,18 @@ class SettingsController
             if ($mysqlPass) {
                 $mysqlDsn = "mysql:host={$mysqlHost};port={$mysqlPort}";
                 $mysqlPdo = new \PDO($mysqlDsn, $mysqlUser, $mysqlPass, [\PDO::ATTR_TIMEOUT => 3]);
-                $mysqlTzRow = $mysqlPdo->query("SELECT @@global.time_zone AS tz")->fetch(\PDO::FETCH_ASSOC);
+                $mysqlTzRow = $mysqlPdo->query("SELECT @@global.time_zone AS tz, TIMEDIFF(NOW(), UTC_TIMESTAMP()) AS utc_offset")->fetch(\PDO::FETCH_ASSOC);
                 $mysqlTimezone = $mysqlTzRow['tz'] ?? '';
+                $mysqlUtcOffset = $mysqlTzRow['utc_offset'] ?? '';
                 $mysqlOk = true;
             }
         } catch (\Throwable) {}
+
+        // MySQL is OK if timezone is explicitly UTC/+00:00, or if SYSTEM and actual offset is 00:00:00
+        $mysqlIsUtc = in_array($mysqlTimezone, ['UTC', '+00:00'], true);
+        if (!$mysqlIsUtc && $mysqlTimezone === 'SYSTEM' && $mysqlOk) {
+            $mysqlIsUtc = in_array($mysqlUtcOffset, ['00:00:00', '00:00'], true);
+        }
 
         $checks['database'] = [
             'connected'      => $dbOk,
@@ -1325,8 +1332,8 @@ class SettingsController
             'pg_timezone'    => $pgTimezone,
             'pg_tz_ok'       => in_array($pgTimezone, ['UTC', 'Etc/UTC', 'GMT'], true),
             'mysql_ok'       => $mysqlOk,
-            'mysql_timezone' => $mysqlTimezone,
-            'mysql_tz_ok'    => in_array($mysqlTimezone, ['UTC', 'SYSTEM', '+00:00'], true) || !$mysqlOk,
+            'mysql_timezone' => $mysqlTimezone . ($mysqlTimezone === 'SYSTEM' && $mysqlOk ? " (offset: {$mysqlUtcOffset})" : ''),
+            'mysql_tz_ok'    => $mysqlIsUtc || !$mysqlOk,
         ];
 
         // ─── 7. GPU Health ────────────────────────────────────────
@@ -1615,11 +1622,8 @@ class SettingsController
                 }
             }
 
-            // Restart PostgreSQL instances
-            shell_exec('systemctl restart postgresql 2>/dev/null');
-            // Also try per-cluster restart
-            shell_exec('pg_ctlcluster 14 panel restart 2>/dev/null');
-            shell_exec('pg_ctlcluster 14 main restart 2>/dev/null');
+            // Restart PostgreSQL instances in background (delay 2s so the HTTP response arrives first)
+            shell_exec('nohup bash -c "sleep 2 && systemctl restart postgresql 2>/dev/null; pg_ctlcluster 14 panel restart 2>/dev/null; pg_ctlcluster 14 main restart 2>/dev/null" > /dev/null 2>&1 &');
 
             LogService::log('system.health', 'fix-timezone', 'PostgreSQL timezone set to UTC');
         }
@@ -1650,7 +1654,7 @@ class SettingsController
             if (!$found) {
                 $errors[] = 'MySQL config file not found';
             } else {
-                shell_exec('systemctl restart mysql 2>/dev/null || systemctl restart mariadb 2>/dev/null');
+                shell_exec('nohup bash -c "sleep 2 && systemctl restart mysql 2>/dev/null || systemctl restart mariadb 2>/dev/null" > /dev/null 2>&1 &');
                 LogService::log('system.health', 'fix-timezone', 'MySQL timezone set to UTC');
             }
         }

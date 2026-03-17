@@ -20,6 +20,37 @@ class ChangelogController
     {
         return [
             [
+                'version' => '0.7.5',
+                'date' => '2026-03-17',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Alert Settings — Panel colapsable en Monitoring para configurar thresholds de CPU, RAM, red, GPU temp y GPU util. Valor 0 = alerta desactivada',
+                            'Clear All Alerts — Boton para borrar todas las alertas del host actual con confirmacion',
+                            'Database Timezone fix — El reinicio de PostgreSQL/MySQL al corregir timezone se hace en background para no romper la pagina',
+                            'MySQL timezone real — Detecta offset real con TIMEDIFF cuando MySQL usa SYSTEM timezone',
+                        ],
+                        'en' => [
+                            'Alert Settings — Collapsible panel in Monitoring to configure CPU, RAM, network, GPU temp and GPU util thresholds. Value 0 = alert disabled',
+                            'Clear All Alerts — Button to delete all alerts for the current host with confirmation',
+                            'Database Timezone fix — PostgreSQL/MySQL restart after timezone fix runs in background to avoid breaking the page',
+                            'MySQL timezone real — Detects real offset with TIMEDIFF when MySQL uses SYSTEM timezone',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'CSRF en acknowledge — Corregido nombre de session key csrf_token → _csrf_token en el JS de monitoring',
+                            'Threshold 0 desactiva alertas — Poner un threshold a 0 ahora desactiva esa alerta en vez de disparar siempre',
+                        ],
+                        'en' => [
+                            'CSRF in acknowledge — Fixed session key name csrf_token → _csrf_token in monitoring JS',
+                            'Threshold 0 disables alerts — Setting a threshold to 0 now disables that alert instead of always triggering',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '0.7.4',
                 'date' => '2026-03-17',
                 'badge' => 'success',

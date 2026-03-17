@@ -266,29 +266,32 @@ function checkAlert(string $host, string $type, string $message, float $value): 
     logMsg("ALERT: {$type} - {$message} ({$value})");
 }
 
-if ($cpuPercent > $alertCpuThreshold) {
+// Threshold = 0 means disabled
+if ($alertCpuThreshold > 0 && $cpuPercent > $alertCpuThreshold) {
     checkAlert($hostname, 'CPU_HIGH', "CPU usage at {$cpuPercent}% (threshold: {$alertCpuThreshold}%)", $cpuPercent);
 }
-if ($ramPercent > $alertRamThreshold) {
+if ($alertRamThreshold > 0 && $ramPercent > $alertRamThreshold) {
     checkAlert($hostname, 'RAM_HIGH', "RAM usage at {$ramPercent}% (threshold: {$alertRamThreshold}%)", $ramPercent);
 }
 
-// Check network alerts for each interface
-foreach ($inserts as $row) {
-    if (str_contains($row[1], '_rx') && $row[2] > $alertNetBps) {
-        $iface = str_replace(['net_', '_rx'], '', $row[1]);
-        checkAlert($hostname, 'NET_HIGH', "High inbound traffic on {$iface}: " . formatBytes($row[2]), $row[2]);
+// Check network alerts for each interface (0 = disabled)
+if ($alertNetBps > 0) {
+    foreach ($inserts as $row) {
+        if (str_contains($row[1], '_rx') && $row[2] > $alertNetBps) {
+            $iface = str_replace(['net_', '_rx'], '', $row[1]);
+            checkAlert($hostname, 'NET_HIGH', "High inbound traffic on {$iface}: " . formatBytes($row[2]), $row[2]);
+        }
     }
 }
 
-// Check GPU alerts (temperature > threshold, default 85C)
+// Check GPU alerts (0 = disabled)
 $alertGpuTemp = (float) Settings::get('monitor_alert_gpu_temp', '85');
 $alertGpuUtil = (float) Settings::get('monitor_alert_gpu_util', '95');
 foreach ($inserts as $row) {
-    if (preg_match('/^gpu(\d+)_temp$/', $row[1], $gm) && $row[2] > $alertGpuTemp) {
+    if ($alertGpuTemp > 0 && preg_match('/^gpu(\d+)_temp$/', $row[1], $gm) && $row[2] > $alertGpuTemp) {
         checkAlert($hostname, 'GPU_TEMP', "GPU{$gm[1]} temperature at {$row[2]}°C (threshold: {$alertGpuTemp}°C)", $row[2]);
     }
-    if (preg_match('/^gpu(\d+)_util$/', $row[1], $gm) && $row[2] > $alertGpuUtil) {
+    if ($alertGpuUtil > 0 && preg_match('/^gpu(\d+)_util$/', $row[1], $gm) && $row[2] > $alertGpuUtil) {
         checkAlert($hostname, 'GPU_HIGH', "GPU{$gm[1]} utilization at {$row[2]}% (threshold: {$alertGpuUtil}%)", $row[2]);
     }
 }

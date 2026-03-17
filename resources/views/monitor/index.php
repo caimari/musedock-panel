@@ -207,7 +207,10 @@
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-bell me-2"></i>Alerts</span>
-        <span class="badge bg-warning" id="alertBadge" style="display:none">0</span>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-warning" id="alertBadge" style="display:none">0</span>
+            <button class="btn btn-outline-danger btn-sm" onclick="clearAllAlerts()" id="btnClearAlerts" style="display:none"><i class="bi bi-trash me-1"></i>Clear All</button>
+        </div>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
@@ -230,13 +233,68 @@
     </div>
 </div>
 
+<!-- Alert Settings -->
+<div class="card mb-4">
+    <div class="card-header" role="button" data-bs-toggle="collapse" data-bs-target="#alertSettingsBody" style="cursor:pointer">
+        <i class="bi bi-gear me-2"></i>Alert Settings
+        <i class="bi bi-chevron-down float-end"></i>
+    </div>
+    <div class="collapse" id="alertSettingsBody">
+        <div class="card-body">
+            <form method="POST" action="/monitor/settings">
+                <?= View::csrf() ?>
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="form-check form-switch mb-3">
+                            <input class="form-check-input" type="checkbox" id="monitorEnabled" name="monitor_enabled" value="1" <?= ($alertSettings['enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="monitorEnabled">Alerts enabled</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">CPU threshold (%)</label>
+                        <input type="number" class="form-control form-control-sm" name="alert_cpu" value="<?= View::e($alertSettings['cpu'] ?? '90') ?>" min="0" max="100">
+                        <small class="text-muted">0 = disabled</small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">RAM threshold (%)</label>
+                        <input type="number" class="form-control form-control-sm" name="alert_ram" value="<?= View::e($alertSettings['ram'] ?? '90') ?>" min="0" max="100">
+                        <small class="text-muted">0 = disabled</small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Network threshold (Mbps)</label>
+                        <input type="number" class="form-control form-control-sm" name="alert_net_mbps" value="<?= View::e($alertSettings['net_mbps'] ?? '800') ?>" min="0" max="100000">
+                        <small class="text-muted">0 = disabled</small>
+                    </div>
+                </div>
+                <?php if (!empty($gpus)): ?>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">GPU temperature (°C)</label>
+                        <input type="number" class="form-control form-control-sm" name="alert_gpu_temp" value="<?= View::e($alertSettings['gpu_temp'] ?? '85') ?>" min="0" max="110">
+                        <small class="text-muted">0 = disabled</small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">GPU utilization (%)</label>
+                        <input type="number" class="form-control form-control-sm" name="alert_gpu_util" value="<?= View::e($alertSettings['gpu_util'] ?? '95') ?>" min="0" max="100">
+                        <small class="text-muted">0 = disabled</small>
+                    </div>
+                </div>
+                <?php endif; ?>
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-lg me-1"></i>Save</button>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Chart.js from CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 
 <script>
 (function() {
     const HOST = '<?= View::e($host) ?>';
-    const CSRF = '<?= $_SESSION['csrf_token'] ?? '' ?>';
+    const CSRF = '<?= $_SESSION['_csrf_token'] ?? '' ?>';
 
     let currentIface = '<?= View::e($interfaces[0] ?? 'eth0') ?>';
     let currentRange = '1h';
@@ -598,11 +656,14 @@
             const badge = document.getElementById('alertBadge');
             const alerts = json.alerts || [];
 
+            const clearBtn = document.getElementById('btnClearAlerts');
             if (alerts.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No alerts</td></tr>';
                 badge.style.display = 'none';
+                if (clearBtn) clearBtn.style.display = 'none';
                 return;
             }
+            if (clearBtn) clearBtn.style.display = 'inline-block';
 
             const unack = alerts.filter(a => !a.acknowledged).length;
             badge.textContent = unack;
@@ -636,10 +697,32 @@
             const form = new FormData();
             form.append('id', id);
             form.append('_csrf_token', CSRF);
-            await fetch('/monitor/api/alerts/ack', { method: 'POST', body: form });
-            loadAlerts();
+            const resp = await fetch('/monitor/api/alerts/ack', { method: 'POST', body: form });
+            const json = await resp.json();
+            if (json.ok) loadAlerts();
         } catch (e) {
             console.error('Error acknowledging alert:', e);
+        }
+    };
+
+    window.clearAllAlerts = async function() {
+        const result = await SwalDark.fire({
+            title: 'Clear all alerts?',
+            text: 'This will permanently delete all alerts for this host.',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Clear All',
+            cancelButtonText: 'Cancel'
+        });
+        if (!result.isConfirmed) return;
+        try {
+            const form = new FormData();
+            form.append('host', HOST);
+            form.append('_csrf_token', CSRF);
+            await fetch('/monitor/api/alerts/clear', { method: 'POST', body: form });
+            loadAlerts();
+        } catch (e) {
+            console.error('Error clearing alerts:', e);
         }
     };
 
