@@ -1115,52 +1115,31 @@ class FileSyncService
                 file_put_contents($sqlOps, "CREATE USER IF NOT EXISTS '{$dbUser}'@'localhost';\n");
                 shell_exec(sprintf('%s < %s 2>/dev/null', $mysqlCmd, escapeshellarg($sqlOps)));
 
-                // 1. Drop temp DB if leftover, create temp DB
-                file_put_contents($sqlOps, "DROP DATABASE IF EXISTS `{$tempDb}`;\nCREATE DATABASE `{$tempDb}`;\nGRANT ALL ON `{$tempDb}`.* TO '{$dbUser}'@'localhost';\n");
+                // 1. Ensure DB and user exist
+                file_put_contents($sqlOps, "CREATE DATABASE IF NOT EXISTS `{$dbName}`;\nGRANT ALL ON `{$dbName}`.* TO '{$dbUser}'@'localhost';\n");
                 shell_exec(sprintf('%s < %s 2>/dev/null', $mysqlCmd, escapeshellarg($sqlOps)));
 
-                // 2. Import: gunzip → sed (minimal fixes) → mysql --force
+                // 2. Clean up any leftover temp DB from previous failed sync
+                file_put_contents($sqlOps, "DROP DATABASE IF EXISTS `{$tempDb}`;\n");
+                shell_exec(sprintf('%s < %s 2>/dev/null', $mysqlCmd, escapeshellarg($sqlOps)));
+
+                // 3. Import directly into DB — dump already has DROP TABLE IF EXISTS per table
                 // --force skips errors (e.g. GENERATED column inserts) and continues
                 // sed: remove NO_AUTO_CREATE_USER + fix MySQL 8.0 collation
                 $importCmd = sprintf(
                     'gunzip -c %s | sed "s/NO_AUTO_CREATE_USER,\\?//g; s/,\\+/,/g; s/,\x27/\x27/g; s/utf8mb4_0900_ai_ci/utf8mb4_unicode_ci/g" | %s --force %s 2>&1',
                     escapeshellarg($file),
                     $mysqlCmd,
-                    escapeshellarg($tempDb)
+                    escapeshellarg($dbName)
                 );
                 $output = trim((string)shell_exec($importCmd));
 
-                // 4. Get table list (one per line, avoids GROUP_CONCAT 1024-byte truncation)
-                file_put_contents($sqlOps, "SELECT table_name FROM information_schema.tables WHERE table_schema = '{$tempDb}' AND table_type = 'BASE TABLE';\n");
-                $tablesRaw = trim((string)shell_exec(sprintf('%s -N < %s 2>/dev/null', $mysqlCmd, escapeshellarg($sqlOps))));
-                $tableList = array_filter(array_map('trim', explode("\n", $tablesRaw)));
-
-                $importOk = !empty($tableList);
-
-                if ($importOk) {
-                    // 5. Atomic swap: DROP original → CREATE original → RENAME tables one by one
-                    // Using individual RENAME to avoid single-statement failure blocking all tables
-                    $swapSql = "DROP DATABASE IF EXISTS `{$dbName}`;\n";
-                    $swapSql .= "CREATE DATABASE `{$dbName}`;\n";
-                    $swapSql .= "GRANT ALL ON `{$dbName}`.* TO '{$dbUser}'@'localhost';\n";
-                    foreach ($tableList as $tbl) {
-                        $swapSql .= "RENAME TABLE `{$tempDb}`.`{$tbl}` TO `{$dbName}`.`{$tbl}`;\n";
-                    }
-                    $swapSql .= "DROP DATABASE IF EXISTS `{$tempDb}`;\n";
-
-                    file_put_contents($sqlOps, $swapSql);
-                    $swapOutput = trim((string)shell_exec(sprintf('%s --force < %s 2>&1', $mysqlCmd, escapeshellarg($sqlOps))));
-                    if ($swapOutput) {
-                        $output = ($output ? $output . "\n" : '') . "SWAP: " . $swapOutput;
-                    }
-                } else {
-                    // Import failed — clean temp, leave original
-                    file_put_contents($sqlOps, "DROP DATABASE IF EXISTS `{$tempDb}`;\n");
-                    shell_exec(sprintf('%s < %s 2>/dev/null', $mysqlCmd, escapeshellarg($sqlOps)));
-                }
+                // 4. Verify import: check table count
+                file_put_contents($sqlOps, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = '{$dbName}' AND table_type = 'BASE TABLE';\n");
+                $tableCount = (int)trim((string)shell_exec(sprintf('%s -N < %s 2>/dev/null', $mysqlCmd, escapeshellarg($sqlOps))));
 
                 @unlink($sqlOps);
-                $ok = $importOk;
+                $ok = ($tableCount > 0);
             }
 
             $results[] = ['db_name' => $dbName, 'db_type' => $dbType, 'ok' => $ok, 'output' => substr($output ?? '', 0, 500)];
