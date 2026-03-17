@@ -125,11 +125,56 @@ class MonitorService
 
     /**
      * Get configured network interfaces.
+     * If set to 'auto' (or not configured), auto-detects physical + WireGuard interfaces.
      */
     public static function getInterfaces(): array
     {
-        $raw = Settings::get('monitor_interfaces', 'eth0,wg0');
-        return array_filter(array_map('trim', explode(',', $raw)));
+        $raw = Settings::get('monitor_interfaces', 'auto');
+        if ($raw !== 'auto') {
+            $list = array_filter(array_map('trim', explode(',', $raw)));
+            if (!empty($list)) return $list;
+        }
+
+        return self::detectInterfaces();
+    }
+
+    /**
+     * Auto-detect network interfaces: physical (non-virtual) + WireGuard.
+     * Excludes lo, docker*, veth*, br-*, virbr*.
+     */
+    public static function detectInterfaces(): array
+    {
+        $all = @scandir('/sys/class/net');
+        if ($all === false) return ['eth0'];
+
+        $skip = ['lo'];
+        $skipPrefixes = ['docker', 'veth', 'br-', 'virbr', 'flannel', 'cni', 'cali'];
+        $ifaces = [];
+
+        foreach ($all as $name) {
+            if ($name === '.' || $name === '..') continue;
+            if (in_array($name, $skip, true)) continue;
+
+            $excluded = false;
+            foreach ($skipPrefixes as $prefix) {
+                if (str_starts_with($name, $prefix)) { $excluded = true; break; }
+            }
+            if ($excluded) continue;
+
+            $ifaces[] = $name;
+        }
+
+        // Sort: physical first (en*, eth*), then wg*, then others
+        usort($ifaces, function ($a, $b) {
+            $order = function ($n) {
+                if (str_starts_with($n, 'en') || str_starts_with($n, 'eth')) return 0;
+                if (str_starts_with($n, 'wg')) return 1;
+                return 2;
+            };
+            return $order($a) <=> $order($b) ?: strcmp($a, $b);
+        });
+
+        return $ifaces ?: ['eth0'];
     }
 
     /**

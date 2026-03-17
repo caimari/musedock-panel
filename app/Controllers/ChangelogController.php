@@ -20,18 +20,32 @@ class ChangelogController
     {
         return [
             [
-                'version' => '0.7.1',
+                'version' => '0.7.2',
                 'date' => '2026-03-17',
                 'badge' => 'success',
                 'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Auto-deteccion de interfaces de red — El monitor detecta automaticamente las interfaces fisicas y WireGuard del servidor (eno1, eth0, enp0s3, wg0, etc.) sin necesidad de configuracion manual',
+                            'Nombre de GPU en graficas — Las graficas de GPU muestran el modelo (ej. RTX 3090 Ti) en el titulo y en la leyenda de cada dataset',
+                        ],
+                        'en' => [
+                            'Auto-detect network interfaces — Monitor automatically detects physical and WireGuard interfaces (eno1, eth0, enp0s3, wg0, etc.) without manual configuration',
+                            'GPU name in charts — GPU charts show the model name (e.g. RTX 3090 Ti) in chart headers and dataset legends',
+                        ],
+                    ],
                     'fixed' => [
                         'es' => [
                             'update.sh systemd — Corregido placeholder __PANEL_PORT__ por __PANEL_INTERNAL_PORT__ que causaba 502 Bad Gateway tras actualizar',
-                            'GPU multi-host — detectGpus() ahora consulta la base de datos para hosts remotos en vez de ejecutar nvidia-smi local, permitiendo detectar todas las GPUs de servidores remotos',
+                            'update.sh auto-relaunch — Si update.sh cambia durante git pull, se re-ejecuta automaticamente con la version nueva para evitar bugs del script viejo',
+                            'GPU multi-host — detectGpus() ahora consulta la base de datos para hosts remotos en vez de ejecutar nvidia-smi local',
+                            'Update banner — El banner de actualizaciones ahora comprueba GitHub automaticamente si no hay cache o ha expirado',
                         ],
                         'en' => [
                             'update.sh systemd — Fixed placeholder __PANEL_PORT__ to __PANEL_INTERNAL_PORT__ which caused 502 Bad Gateway after update',
-                            'GPU multi-host — detectGpus() now queries the database for remote hosts instead of running local nvidia-smi, allowing detection of all GPUs on remote servers',
+                            'update.sh auto-relaunch — If update.sh changes during git pull, it re-executes itself with the new version to avoid stale script bugs',
+                            'GPU multi-host — detectGpus() now queries the database for remote hosts instead of running local nvidia-smi',
+                            'Update banner — Update banner now auto-checks GitHub if no cache exists or cache has expired',
                         ],
                     ],
                 ],

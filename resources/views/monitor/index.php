@@ -165,7 +165,7 @@
 <div class="row g-3 mb-4">
     <div class="col-md-6">
         <div class="card">
-            <div class="card-header"><i class="bi bi-gpu-card me-2"></i>GPU Utilization</div>
+            <div class="card-header"><i class="bi bi-gpu-card me-2"></i>GPU Utilization<?php if (count($gpus) === 1): ?> — <?= View::e($gpus[0]['name']) ?><?php endif; ?></div>
             <div class="card-body" style="height:200px;position:relative">
                 <canvas id="gpuUtilChart"></canvas>
             </div>
@@ -173,7 +173,7 @@
     </div>
     <div class="col-md-6">
         <div class="card">
-            <div class="card-header"><i class="bi bi-thermometer-half me-2"></i>GPU Temperature</div>
+            <div class="card-header"><i class="bi bi-thermometer-half me-2"></i>GPU Temperature<?php if (count($gpus) === 1): ?> — <?= View::e($gpus[0]['name']) ?><?php endif; ?></div>
             <div class="card-body" style="height:200px;position:relative">
                 <canvas id="gpuTempChart"></canvas>
             </div>
@@ -183,7 +183,7 @@
 <div class="row g-3 mb-4">
     <div class="col-md-6">
         <div class="card">
-            <div class="card-header"><i class="bi bi-memory me-2"></i>GPU Memory</div>
+            <div class="card-header"><i class="bi bi-memory me-2"></i>GPU Memory<?php if (count($gpus) === 1): ?> — <?= View::e($gpus[0]['name']) ?><?php endif; ?></div>
             <div class="card-body" style="height:200px;position:relative">
                 <canvas id="gpuMemChart"></canvas>
             </div>
@@ -191,7 +191,7 @@
     </div>
     <div class="col-md-6">
         <div class="card">
-            <div class="card-header"><i class="bi bi-lightning me-2"></i>GPU Power</div>
+            <div class="card-header"><i class="bi bi-lightning me-2"></i>GPU Power<?php if (count($gpus) === 1): ?> — <?= View::e($gpus[0]['name']) ?><?php endif; ?></div>
             <div class="card-body" style="height:200px;position:relative">
                 <canvas id="gpuPowerChart"></canvas>
             </div>
@@ -241,6 +241,7 @@
     let gpuUtilChart, gpuTempChart, gpuMemChart, gpuPowerChart;
     let refreshTimer = null;
     const GPU_COUNT = <?= count($gpus ?? []) ?>;
+    const GPU_NAMES = <?= json_encode(array_map(fn($g) => $g['name'], $gpus ?? [])) ?>;
     const GPU_COLORS = ['#a855f7', '#ec4899', '#f97316', '#06b6d4'];
 
     // Panel timezone from Settings > Server (e.g. 'UTC', 'Asia/Tokyo', 'Europe/Madrid')
@@ -418,11 +419,11 @@
 
         // GPU charts (only if GPUs exist)
         if (GPU_COUNT > 0 && document.getElementById('gpuUtilChart')) {
-            function gpuDatasets(suffix, unit) {
+            function gpuDatasets() {
                 const ds = [];
                 for (let i = 0; i < GPU_COUNT; i++) {
                     ds.push({
-                        label: 'GPU' + i,
+                        label: 'GPU' + i + (GPU_NAMES[i] ? ' — ' + GPU_NAMES[i] : ''),
                         data: [],
                         borderColor: GPU_COLORS[i % GPU_COLORS.length],
                         backgroundColor: GPU_COLORS[i % GPU_COLORS.length] + '14',

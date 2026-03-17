@@ -62,7 +62,7 @@ if (Settings::get('monitor_enabled', '1') !== '1') {
 }
 
 $hostname = gethostname() ?: 'localhost';
-$interfaces = array_filter(array_map('trim', explode(',', Settings::get('monitor_interfaces', 'eth0,wg0'))));
+$interfaces = \MuseDockPanel\Services\MonitorService::getInterfaces();
 $lastFile = '/tmp/musedock_monitor_last.json';
 $last = file_exists($lastFile) ? json_decode(file_get_contents($lastFile), true) : [];
 $now = microtime(true);

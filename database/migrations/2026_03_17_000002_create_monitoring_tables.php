@@ -60,7 +60,7 @@ return function (PDO $pdo): void {
 
     // Default settings
     $defaults = [
-        'monitor_interfaces'          => 'eth0,wg0',
+        'monitor_interfaces'          => 'auto',
         'monitor_alert_cpu'           => '90',
         'monitor_alert_ram'           => '90',
         'monitor_alert_net_mbps'      => '800',
