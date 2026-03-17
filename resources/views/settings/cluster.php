@@ -205,8 +205,9 @@
 </div>
 <?php endif; ?>
 
+<?php if ($clusterRole !== 'slave'): ?>
 <!-- ═══════════════════════════════════════════════════════════ -->
-<!-- CARD 2 — Nodos Vinculados                                  -->
+<!-- CARD 2 — Nodos Vinculados (solo master)                    -->
 <!-- ═══════════════════════════════════════════════════════════ -->
 <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -370,6 +371,7 @@
         <?php endif; ?>
     </div>
 </div>
+<?php endif; /* end solo master: nodos + cola */ ?>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- CARD 4 — Operaciones de Failover                           -->
@@ -506,9 +508,10 @@
     </div>
 </div>
 
+<?php if ($clusterRole !== 'slave'): ?>
 <?php $fsConfig = \MuseDockPanel\Services\FileSyncService::getConfig(); ?>
 <!-- ═══════════════════════════════════════════════════════════ -->
-<!-- CARD 6 — Sincronizacion de Archivos                         -->
+<!-- CARD 6 — Sincronizacion de Archivos (solo master)           -->
 <!-- ═══════════════════════════════════════════════════════════ -->
 <div class="card mb-3">
     <div class="card-header"><i class="bi bi-arrow-repeat me-2"></i>Sincronizacion de Archivos</div>
@@ -716,7 +719,9 @@
         </form>
     </div>
 </div>
+<?php endif; /* end solo master: file sync */ ?>
 
+<?php if ($clusterRole !== 'slave'): ?>
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- Modal: Anadir Nodo                                         -->
 <!-- ═══════════════════════════════════════════════════════════ -->
@@ -805,6 +810,7 @@
     <?= View::csrf() ?>
     <input type="hidden" name="node_id" id="sync-all-node-id">
 </form>
+<?php endif; /* end solo master: modales y forms */ ?>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- JavaScript                                                 -->
