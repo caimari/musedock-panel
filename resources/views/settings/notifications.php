@@ -53,10 +53,11 @@
                     <div class="col-md-3">
                         <label class="form-label">Cifrado</label>
                         <select name="notify_smtp_encryption" class="form-select">
-                            <option value="tls" <?= $encryption === 'tls' ? 'selected' : '' ?>>STARTTLS (587)</option>
-                            <option value="ssl" <?= $encryption === 'ssl' ? 'selected' : '' ?>>SSL/TLS (465)</option>
-                            <option value="none" <?= $encryption === 'none' ? 'selected' : '' ?>>Ninguno (25)</option>
+                            <option value="tls" <?= $encryption === 'tls' ? 'selected' : '' ?>>STARTTLS</option>
+                            <option value="ssl" <?= $encryption === 'ssl' ? 'selected' : '' ?>>SSL/TLS</option>
+                            <option value="none" <?= $encryption === 'none' ? 'selected' : '' ?>>Sin cifrado</option>
                         </select>
+                        <small class="text-muted">STARTTLS = puertos 587, 2525. SSL = puerto 465.</small>
                     </div>
                 </div>
                 <div class="row mb-3">
@@ -87,6 +88,12 @@
                     <?php else: ?>
                         <small class="text-warning">Configura tu email en <a href="/profile" class="text-info">tu perfil</a></small>
                     <?php endif; ?>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Nombre remitente</label>
+                    <input type="text" name="notify_smtp_from_name" class="form-control"
+                           value="<?= View::e($settings['notify_smtp_from_name'] ?? '') ?>" placeholder="MuseDock Panel">
+                    <small class="text-muted">Ej: "Mortadelo Master", "Filemon Slave"</small>
                 </div>
             </div>
 

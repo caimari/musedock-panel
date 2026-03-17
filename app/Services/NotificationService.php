@@ -32,12 +32,13 @@ class NotificationService
 
         $from = Settings::get('notify_smtp_from', '');
         if (!$from) $from = self::getAdminEmail();
+        $fromName = Settings::get('notify_smtp_from_name', '');
 
         if ($method === 'php') {
-            return self::sendViaPhpMail($to, $from, $subject, $body);
+            return self::sendViaPhpMail($to, $from, $subject, $body, $fromName);
         }
 
-        return self::sendViaSmtp($to, $from, $subject, $body);
+        return self::sendViaSmtp($to, $from, $subject, $body, $fromName);
     }
 
     /**
@@ -76,7 +77,7 @@ class NotificationService
         }
     }
 
-    private static function sendViaSmtp(string $to, string $from, string $subject, string $body): bool
+    private static function sendViaSmtp(string $to, string $from, string $subject, string $body, string $fromName = ''): bool
     {
         $host = Settings::get('notify_smtp_host', '');
         $port = (int)Settings::get('notify_smtp_port', '587');
@@ -139,7 +140,8 @@ class NotificationService
             fwrite($socket, "DATA\r\n"); fgets($socket);
 
             $date = date('r');
-            $headers = "From: {$from}\r\nTo: {$to}\r\nSubject: {$subject}\r\nDate: {$date}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n";
+            $fromHeader = $fromName ? "=?UTF-8?B?" . base64_encode($fromName) . "?= <{$from}>" : $from;
+            $headers = "From: {$fromHeader}\r\nTo: {$to}\r\nSubject: {$subject}\r\nDate: {$date}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n";
             fwrite($socket, "{$headers}\r\n{$body}\r\n.\r\n");
             $dataResponse = trim(fgets($socket));
             fwrite($socket, "QUIT\r\n");
@@ -162,9 +164,10 @@ class NotificationService
         return $response;
     }
 
-    private static function sendViaPhpMail(string $to, string $from, string $subject, string $body): bool
+    private static function sendViaPhpMail(string $to, string $from, string $subject, string $body, string $fromName = ''): bool
     {
-        $headers = "From: {$from}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n";
+        $fromHeader = $fromName ? "=?UTF-8?B?" . base64_encode($fromName) . "?= <{$from}>" : $from;
+        $headers = "From: {$fromHeader}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n";
         return @mail($to, $subject, $body, $headers);
     }
 

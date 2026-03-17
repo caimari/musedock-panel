@@ -53,6 +53,7 @@ class NotificationController
         Settings::set('notify_smtp_port', (string)(int)($_POST['notify_smtp_port'] ?? 587));
         Settings::set('notify_smtp_user', trim($_POST['notify_smtp_user'] ?? ''));
         Settings::set('notify_smtp_from', trim($_POST['notify_smtp_from'] ?? ''));
+        Settings::set('notify_smtp_from_name', trim($_POST['notify_smtp_from_name'] ?? ''));
 
         $encryption = in_array($_POST['notify_smtp_encryption'] ?? '', ['tls', 'ssl', 'none']) ? $_POST['notify_smtp_encryption'] : 'tls';
         Settings::set('notify_smtp_encryption', $encryption);
