@@ -77,6 +77,22 @@ class ReplicationController
             $clusterNodes = ClusterService::getNodes();
         } catch (\Throwable) {}
 
+        // On slave: if no nodes but we know the master, add it as a virtual node
+        $clusterRole = Settings::get('cluster_role', 'standalone');
+        if (empty($clusterNodes) && $clusterRole === 'slave') {
+            $masterIp = Settings::get('cluster_master_ip', '');
+            if ($masterIp) {
+                $clusterNodes[] = [
+                    'id'       => 0,
+                    'name'     => 'Master',
+                    'api_url'  => 'https://' . $masterIp . ':8444',
+                    'status'   => 'online',
+                    'role'     => 'master',
+                    '_virtual' => true,
+                ];
+            }
+        }
+
         // PostgreSQL database list
         $pgDatabases = [];
         try {
@@ -467,9 +483,32 @@ class ReplicationController
         $nodeId = (int)($_POST['node_id'] ?? 0);
         $engine = $_POST['engine'] ?? '';
 
-        if ($nodeId < 1 || !in_array($engine, ['pg', 'mysql'])) {
-            echo json_encode(['ok' => false, 'error' => 'Parametros incompletos']);
+        if (!in_array($engine, ['pg', 'mysql'])) {
+            echo json_encode(['ok' => false, 'error' => 'Motor no especificado']);
             exit;
+        }
+
+        // If node_id=0, this is a slave calling with virtual master node — use master IP from settings
+        if ($nodeId < 1) {
+            $masterIp = Settings::get('cluster_master_ip', '');
+            if (!$masterIp) {
+                echo json_encode(['ok' => false, 'error' => 'No hay IP de master configurada']);
+                exit;
+            }
+            // Find the actual node by IP or create a temporary call
+            $nodes = ClusterService::getNodes();
+            foreach ($nodes as $n) {
+                $nHost = parse_url($n['api_url'], PHP_URL_HOST);
+                if ($nHost === $masterIp) {
+                    $nodeId = (int)$n['id'];
+                    break;
+                }
+            }
+            // If still no node found, try direct API call with master token
+            if ($nodeId < 1) {
+                echo json_encode(['ok' => false, 'error' => 'El master (' . $masterIp . ') no está registrado como nodo. Añádalo primero en Settings > Cluster > Nodos.']);
+                exit;
+            }
         }
 
         $result = ReplicationService::autoConfigureReplication($nodeId, $engine);

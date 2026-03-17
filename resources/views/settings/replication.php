@@ -120,11 +120,24 @@
         <?php if (!empty($clusterNodes)): ?>
         <!-- Opcion 3: Configuracion Automatica -->
         <div class="mt-3">
-            <h6 class="text-muted"><i class="bi bi-diagram-3 me-1"></i>Configuracion Automatica</h6>
+            <h6 class="text-muted"><i class="bi bi-diagram-3 me-1"></i>Configuración Automática</h6>
+            <p class="small text-muted mb-2">
+                Configura <strong>este servidor como Slave</strong> del nodo seleccionado (que será el Master).
+                El nodo remoto se configura como Master automáticamente.
+                <strong class="text-warning">Las bases de datos locales serán reemplazadas.</strong>
+            </p>
             <?php foreach ($clusterNodes as $node): ?>
-                <?php if (($node['status'] ?? '') === 'online'): ?>
-                <button type="button" class="btn btn-outline-primary btn-sm mb-2 w-100" onclick="autoConfigureRepl(<?= (int)$node['id'] ?>, 'pg')">
-                    <i class="bi bi-lightning me-1"></i>Configurar replicacion automatica con <?= View::e($node['name']) ?>
+                <?php
+                    $nodeHost = parse_url($node['api_url'], PHP_URL_HOST);
+                    $isOnline = ($node['status'] ?? '') === 'online';
+                ?>
+                <?php if ($isOnline): ?>
+                <button type="button" class="btn btn-outline-primary btn-sm mb-2 w-100" onclick="autoConfigureRepl(<?= (int)$node['id'] ?>, 'pg', '<?= View::e($node['name']) ?>', '<?= View::e($nodeHost) ?>')">
+                    <i class="bi bi-arrow-down-circle me-1"></i>Convertir este nodo en Slave de <?= View::e($node['name']) ?> (<?= View::e($nodeHost) ?>)
+                </button>
+                <?php else: ?>
+                <button type="button" class="btn btn-outline-secondary btn-sm mb-2 w-100" disabled>
+                    <i class="bi bi-x-circle me-1"></i><?= View::e($node['name']) ?> — offline
                 </button>
                 <?php endif; ?>
             <?php endforeach; ?>
@@ -401,13 +414,26 @@
         </div>
 
         <?php if (!empty($clusterNodes)): ?>
-        <!-- Opcion 3: Configuracion Automatica -->
+        <!-- Opcion 3: Configuración Automática -->
         <div class="mt-3">
-            <h6 class="text-muted"><i class="bi bi-diagram-3 me-1"></i>Configuracion Automatica</h6>
+            <h6 class="text-muted"><i class="bi bi-diagram-3 me-1"></i>Configuración Automática</h6>
+            <p class="small text-muted mb-2">
+                Configura <strong>este servidor como Slave</strong> del nodo seleccionado (que será el Master).
+                El nodo remoto se configura como Master automáticamente.
+                <strong class="text-warning">Las bases de datos locales serán reemplazadas.</strong>
+            </p>
             <?php foreach ($clusterNodes as $node): ?>
-                <?php if (($node['status'] ?? '') === 'online'): ?>
-                <button type="button" class="btn btn-outline-primary btn-sm mb-2 w-100" onclick="autoConfigureRepl(<?= (int)$node['id'] ?>, 'mysql')">
-                    <i class="bi bi-lightning me-1"></i>Configurar replicacion automatica con <?= View::e($node['name']) ?>
+                <?php
+                    $nodeHost = parse_url($node['api_url'], PHP_URL_HOST);
+                    $isOnline = ($node['status'] ?? '') === 'online';
+                ?>
+                <?php if ($isOnline): ?>
+                <button type="button" class="btn btn-outline-primary btn-sm mb-2 w-100" onclick="autoConfigureRepl(<?= (int)$node['id'] ?>, 'mysql', '<?= View::e($node['name']) ?>', '<?= View::e($nodeHost) ?>')">
+                    <i class="bi bi-arrow-down-circle me-1"></i>Convertir este nodo en Slave de <?= View::e($node['name']) ?> (<?= View::e($nodeHost) ?>)
+                </button>
+                <?php else: ?>
+                <button type="button" class="btn btn-outline-secondary btn-sm mb-2 w-100" disabled>
+                    <i class="bi bi-x-circle me-1"></i><?= View::e($node['name']) ?> — offline
                 </button>
                 <?php endif; ?>
             <?php endforeach; ?>
@@ -918,36 +944,87 @@
     };
 
     // ── Auto Configure Replication ──
-    window.autoConfigureRepl = async function(nodeId, engine) {
+    window.autoConfigureRepl = async function(nodeId, engine, nodeName, nodeIp) {
         var label = engine === 'pg' ? 'PostgreSQL' : 'MySQL';
+        nodeName = nodeName || 'Nodo #' + nodeId;
+        nodeIp = nodeIp || '';
+
         var result = await SwalDark.fire({
-            title: 'Configuracion Automatica',
-            html: '<p>Se configurara la replicacion de ' + label + ' automaticamente con el nodo seleccionado.</p>',
-            icon: 'question',
+            title: 'Convertir este nodo en Slave de ' + label,
+            html: '<div class="text-start">' +
+                  '<div class="alert" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#f87171;">' +
+                  '<i class="bi bi-exclamation-octagon me-1"></i>' +
+                  '<strong>TODAS las bases de datos locales de ' + label + ' serán eliminadas</strong> y reemplazadas con una copia exacta del Master.' +
+                  '</div>' +
+                  '<div class="p-2 mb-3 rounded" style="background:#2a2a3e;">' +
+                  '<div class="d-flex justify-content-between">' +
+                  '<span><strong>' + escHtml(nodeName) + '</strong>' + (nodeIp ? ' <code>(' + escHtml(nodeIp) + ')</code>' : '') + '</span>' +
+                  '<span class="badge bg-success">Master</span>' +
+                  '</div>' +
+                  '<hr class="border-secondary my-2">' +
+                  '<div class="d-flex justify-content-between">' +
+                  '<span><strong>Este servidor</strong> (local)</span>' +
+                  '<span class="badge bg-warning text-dark">Slave</span>' +
+                  '</div>' +
+                  '</div>' +
+                  '<p><strong>Lo que hará:</strong></p>' +
+                  '<ol class="small">' +
+                  '<li>Configurar <strong>' + escHtml(nodeName) + '</strong> como Master de ' + label + '</li>' +
+                  '<li>Crear usuario de replicación en el Master</li>' +
+                  '<li>Crear backup automático de las BD locales</li>' +
+                  '<li>Configurar <strong>este servidor</strong> como Slave (réplica)</li>' +
+                  '</ol>' +
+                  '<hr class="border-secondary">' +
+                  '<p class="mb-1">Escriba su contraseña de administrador para confirmar:</p>' +
+                  '<input type="password" id="swal-auto-repl-pass" class="form-control bg-dark text-light border-secondary" placeholder="Contraseña de admin">' +
+                  '</div>',
+            icon: 'warning',
             showCancelButton: true,
-            confirmButtonText: 'Configurar',
-            confirmButtonColor: '#0d6efd',
-            cancelButtonText: 'Cancelar'
+            confirmButtonText: 'Sí, convertir en Slave',
+            confirmButtonColor: '#dc3545',
+            cancelButtonText: 'Cancelar',
+            preConfirm: function() {
+                var pass = document.getElementById('swal-auto-repl-pass').value;
+                if (!pass) {
+                    Swal.showValidationMessage('Debe ingresar la contraseña');
+                    return false;
+                }
+                return fetch('/settings/cluster/verify-admin-password', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: '_csrf_token=' + encodeURIComponent(csrfToken) +
+                          '&password=' + encodeURIComponent(pass)
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (!data.ok) {
+                        Swal.showValidationMessage('Contraseña incorrecta');
+                        return false;
+                    }
+                    return true;
+                });
+            }
         });
         if (!result.isConfirmed) return;
 
         SwalDark.fire({
-            title: 'Configurando...',
-            html: '<p>Esto puede tardar unos minutos.</p>',
+            title: 'Configurando replicación...',
+            html: '<p>Configurando ' + label + ' entre <strong>' + escHtml(nodeName) + '</strong> (Master) y este servidor (Slave).</p>' +
+                  '<p class="small text-muted">Esto puede tardar unos minutos.</p>',
             allowOutsideClick: false,
             didOpen: function() { Swal.showLoading(); }
         });
         try {
             var data = await ajaxPost('/settings/replication/auto-configure', { node_id: nodeId, engine: engine });
             SwalDark.fire({
-                title: 'Configuracion completa',
-                html: '<p class="text-success">' + (data.message || 'Replicacion configurada correctamente.') + '</p>',
+                title: 'Replicación configurada',
+                html: '<p class="text-success"><i class="bi bi-check-circle me-1"></i>' + (data.message || 'Este servidor es ahora Slave de ' + label + '.') + '</p>',
                 icon: 'success'
             }).then(function() { location.reload(); });
         } catch (e) {
             SwalDark.fire({
                 title: 'Error',
-                html: '<p class="text-danger">' + (e.message || 'Error en la configuracion automatica.') + '</p>',
+                html: '<p class="text-danger"><i class="bi bi-x-circle me-1"></i>' + (e.message || 'Error en la configuración automática.') + '</p>',
                 icon: 'error'
             });
         }
