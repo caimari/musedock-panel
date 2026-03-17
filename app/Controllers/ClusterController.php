@@ -375,6 +375,31 @@ class ClusterController
     }
 
     /**
+     * POST /settings/cluster/verify-admin-password (JSON)
+     */
+    public function verifyAdminPassword(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $password = $_POST['password'] ?? '';
+        $adminId = $_SESSION['admin_id'] ?? 0;
+
+        if (!$adminId || !$password) {
+            echo json_encode(['ok' => false]);
+            exit;
+        }
+
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        if ($admin && password_verify($password, $admin['password_hash'])) {
+            echo json_encode(['ok' => true]);
+        } else {
+            echo json_encode(['ok' => false]);
+        }
+        exit;
+    }
+
+    /**
      * POST /settings/cluster/clean-queue
      */
     public function cleanQueue(): void
@@ -432,6 +457,9 @@ class ClusterController
                     'php_version' => $acc['php_version'] ?? '8.3',
                     'password' => '',
                     'shell' => $acc['shell'] ?? '/usr/sbin/nologin',
+                    'customer_id' => $acc['customer_id'] ?? null,
+                    'disk_quota_mb' => $acc['disk_quota_mb'] ?? 1024,
+                    'description' => $acc['description'] ?? '',
                 ],
             ], 5);
             $count++;

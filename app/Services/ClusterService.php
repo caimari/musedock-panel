@@ -532,16 +532,57 @@ class ClusterService
         try {
             switch ($hostingAction) {
                 case 'create_hosting':
-                    $result = SystemService::createAccount(
-                        $hostingData['username'] ?? '',
-                        $hostingData['domain'] ?? '',
-                        $hostingData['home_dir'] ?? '/var/www/vhosts/' . ($hostingData['domain'] ?? ''),
-                        $hostingData['document_root'] ?? '/var/www/vhosts/' . ($hostingData['domain'] ?? '') . '/httpdocs',
-                        $hostingData['php_version'] ?? '8.3',
-                        $hostingData['password'] ?? '',
-                        $hostingData['shell'] ?? '/usr/sbin/nologin'
+                    $domain = $hostingData['domain'] ?? '';
+                    $username = $hostingData['username'] ?? '';
+                    $homeDir = $hostingData['home_dir'] ?? '/var/www/vhosts/' . $domain;
+                    $documentRoot = $hostingData['document_root'] ?? $homeDir . '/httpdocs';
+                    $phpVersion = $hostingData['php_version'] ?? '8.3';
+                    $password = $hostingData['password'] ?? '';
+                    $shell = $hostingData['shell'] ?? '/usr/sbin/nologin';
+
+                    // Check if already exists in DB
+                    $existing = Database::fetchOne(
+                        "SELECT id FROM hosting_accounts WHERE domain = :d OR username = :u",
+                        ['d' => $domain, 'u' => $username]
                     );
-                    return ['ok' => $result['success'] ?? false, 'message' => $result['error'] ?? 'Account created'];
+                    if ($existing) {
+                        return ['ok' => true, 'message' => "Hosting {$domain} already exists, skipped"];
+                    }
+
+                    // Create system account (user, dirs, PHP-FPM, Caddy)
+                    $result = SystemService::createAccount($username, $domain, $homeDir, $documentRoot, $phpVersion, $password, $shell);
+
+                    if (!($result['success'] ?? false)) {
+                        return ['ok' => false, 'message' => $result['error'] ?? 'System account creation failed'];
+                    }
+
+                    // Insert into hosting_accounts DB
+                    $fpmSocket = "unix//run/php/php{$phpVersion}-fpm-{$username}.sock";
+                    $accountId = Database::insert('hosting_accounts', [
+                        'customer_id'    => $hostingData['customer_id'] ?? null,
+                        'domain'         => $domain,
+                        'username'       => $username,
+                        'system_uid'     => $result['uid'] ?? null,
+                        'home_dir'       => $homeDir,
+                        'document_root'  => $documentRoot,
+                        'php_version'    => $phpVersion,
+                        'fpm_socket'     => $fpmSocket,
+                        'disk_quota_mb'  => $hostingData['disk_quota_mb'] ?? 1024,
+                        'caddy_route_id' => $result['caddy_route_id'] ?? null,
+                        'description'    => $hostingData['description'] ?? 'Synced from master',
+                        'shell'          => $shell,
+                    ]);
+
+                    // Insert primary domain
+                    Database::insert('hosting_domains', [
+                        'account_id' => $accountId,
+                        'domain'     => $domain,
+                        'is_primary' => true,
+                    ]);
+
+                    LogService::log('cluster.sync', $domain, "Hosting synced from master: {$username}@{$domain}");
+
+                    return ['ok' => true, 'message' => "Account {$domain} created and registered"];
 
                 case 'update_hosting':
                     if (!empty($hostingData['id'])) {

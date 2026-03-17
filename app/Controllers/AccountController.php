@@ -156,6 +156,9 @@ class AccountController
                             'php_version' => $phpVersion,
                             'password' => $password,
                             'shell' => $shell,
+                            'customer_id' => $customerId,
+                            'disk_quota_mb' => $diskQuota,
+                            'description' => $description,
                         ],
                     ]);
                 }
