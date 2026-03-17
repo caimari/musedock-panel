@@ -130,7 +130,87 @@ try {
     logMsg("ERROR checking unreachable: " . $e->getMessage());
 }
 
-// ─── Step 4: Clean old completed items (once a day check) ─────
+// ─── Step 4: Slave — detect master down ──────────────────────
+$clusterRole = Settings::get('cluster_role', 'standalone');
+if ($clusterRole === 'slave') {
+    logMsg("Checking master heartbeat (slave mode)...");
+    try {
+        $masterLastHb = Settings::get('cluster_master_last_heartbeat', '');
+        $masterIp = Settings::get('cluster_master_ip', '');
+        $timeoutSec = (int)Settings::get('cluster_unreachable_timeout', '300');
+
+        if ($masterLastHb && $masterIp) {
+            $age = time() - strtotime($masterLastHb);
+
+            if ($age > $timeoutSec) {
+                // Master is down — check if we already alerted recently (avoid spam)
+                $lastAlert = Settings::get('cluster_master_down_alerted', '');
+                $alertAge = $lastAlert ? (time() - strtotime($lastAlert)) : 99999;
+
+                if ($alertAge > $timeoutSec) {
+                    // Send alert via configured channels
+                    $notifyEmail = Settings::get('cluster_slave_notify_email', '1') === '1';
+                    $notifyTelegram = Settings::get('cluster_slave_notify_telegram', '1') === '1';
+
+                    $subject = '[MuseDock Cluster] ALERTA: Master caido';
+                    $body = "El servidor Master ({$masterIp}) no envia heartbeat desde hace " . round($age / 60) . " minutos.\n\n"
+                          . "Ultimo heartbeat: {$masterLastHb}\n"
+                          . "Timeout configurado: {$timeoutSec}s\n"
+                          . "Servidor slave: " . gethostname() . "\n"
+                          . "Fecha: " . date('Y-m-d H:i:s') . "\n\n"
+                          . "Puede promover este servidor a Master desde:\n"
+                          . "https://" . (\MuseDockPanel\Env::get('PANEL_DOMAIN', gethostname())) . ":8444/settings/cluster";
+
+                    if ($notifyEmail || $notifyTelegram) {
+                        if ($notifyEmail && $notifyTelegram) {
+                            \MuseDockPanel\Services\NotificationService::send($subject, $body);
+                        } elseif ($notifyEmail) {
+                            \MuseDockPanel\Services\NotificationService::sendEmail($subject, $body);
+                        } elseif ($notifyTelegram) {
+                            \MuseDockPanel\Services\NotificationService::sendTelegram($subject . "\n\n" . $body);
+                        }
+                    }
+
+                    Settings::set('cluster_master_down_alerted', date('Y-m-d H:i:s'));
+                    LogService::log('cluster.alert', 'master-down', "Master {$masterIp} sin heartbeat desde hace " . round($age / 60) . " min");
+                    logMsg("  ALERT: Master {$masterIp} down for " . round($age / 60) . " min. Notification sent.");
+
+                    // Auto-failover if enabled
+                    $autoFailover = Settings::get('cluster_auto_failover', '0') === '1';
+                    if ($autoFailover) {
+                        logMsg("  AUTO-FAILOVER: Promoting to master...");
+                        $result = ClusterService::promoteToMaster();
+                        if ($result['ok']) {
+                            logMsg("  AUTO-FAILOVER: Success — this server is now Master.");
+                            LogService::log('cluster.failover', 'auto-promote', "Auto-failover ejecutado: promovido a master");
+                            \MuseDockPanel\Services\NotificationService::send(
+                                '[MuseDock Cluster] Auto-Failover ejecutado',
+                                "Este servidor ha sido promovido automaticamente a Master tras detectar que {$masterIp} no responde.\n\nFecha: " . date('Y-m-d H:i:s')
+                            );
+                        } else {
+                            logMsg("  AUTO-FAILOVER: FAILED — " . implode(', ', $result['errors'] ?? []));
+                            LogService::log('cluster.failover', 'auto-promote-failed', implode(', ', $result['errors'] ?? []));
+                        }
+                    }
+                } else {
+                    logMsg("  Master down (already alerted " . round($alertAge / 60) . " min ago).");
+                }
+            } else {
+                // Master is alive — clear alert flag if set
+                if (Settings::get('cluster_master_down_alerted', '')) {
+                    Settings::set('cluster_master_down_alerted', '');
+                }
+                logMsg("  Master {$masterIp} alive (last heartbeat {$age}s ago).");
+            }
+        } else {
+            logMsg("  No master heartbeat recorded yet.");
+        }
+    } catch (\Throwable $e) {
+        logMsg("ERROR checking master: " . $e->getMessage());
+    }
+}
+
+// ─── Step 5: Clean old completed items (once a day check) ─────
 $hour = (int)date('H');
 $minute = (int)date('i');
 if ($hour === 3 && $minute < 2) {

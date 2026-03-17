@@ -381,22 +381,45 @@
     <div class="card-body">
         <p class="text-muted mb-3">
             Las operaciones de failover permiten cambiar el rol de este servidor dentro del cluster.
-            Use estas opciones con precaucion, ya que afectan la replicacion de bases de datos.
+            Use estas opciones con precaucion.
         </p>
 
-        <?php if ($replRole === 'slave'): ?>
-            <div class="alert" style="background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); color: #fbbf24;">
-                <i class="bi bi-exclamation-triangle me-2"></i>
-                Este servidor es actualmente un <strong>Slave</strong>. Puede promoverlo a Master si el master actual ha fallado.
-            </div>
+        <?php
+            // Determine effective failover role: cluster_role OR repl_role
+            $failoverRole = 'standalone';
+            if ($clusterRole === 'slave' || $replRole === 'slave') $failoverRole = 'slave';
+            elseif ($clusterRole === 'master' || $replRole === 'master') $failoverRole = 'master';
+        ?>
+
+        <?php if ($failoverRole === 'slave'): ?>
+            <?php
+                $masterIpSaved = $settings['cluster_master_ip'] ?? '';
+                $masterLastHb = $settings['cluster_master_last_heartbeat'] ?? '';
+                $masterAge = $masterLastHb ? (time() - strtotime($masterLastHb)) : 99999;
+                $masterDown = $masterAge > (int)($settings['cluster_unreachable_timeout'] ?? 300);
+            ?>
+
+            <?php if ($masterDown && $masterIpSaved): ?>
+                <div class="alert" style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #f87171;">
+                    <i class="bi bi-exclamation-octagon me-2"></i>
+                    <strong>Master caido.</strong> El master (<?= View::e($masterIpSaved) ?>) no responde desde hace <?= round($masterAge / 60) ?> minutos.
+                    Puede promover este servidor a Master para que atienda el trafico.
+                </div>
+            <?php else: ?>
+                <div class="alert" style="background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); color: #fbbf24;">
+                    <i class="bi bi-exclamation-triangle me-2"></i>
+                    Este servidor es actualmente un <strong>Slave</strong>. Puede promoverlo a Master si el master actual ha fallado.
+                </div>
+            <?php endif; ?>
+
             <form method="post" action="/settings/cluster/promote" id="form-promote-cluster">
                 <?= View::csrf() ?>
-                <button type="button" class="btn btn-warning" onclick="confirmPromoteCluster()">
+                <button type="button" class="btn btn-warning btn-lg" onclick="confirmPromoteCluster()">
                     <i class="bi bi-arrow-up-circle me-1"></i>Promover a Master
                 </button>
             </form>
 
-        <?php elseif ($replRole === 'master'): ?>
+        <?php elseif ($failoverRole === 'master'): ?>
             <div class="alert" style="background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); color: #60a5fa;">
                 <i class="bi bi-info-circle me-2"></i>
                 Este servidor es actualmente el <strong>Master</strong>. Puede degradarlo a Slave si necesita transferir el rol a otro servidor.
@@ -415,8 +438,7 @@
         <?php else: ?>
             <div class="alert" style="background: rgba(107,114,128,0.1); border: 1px solid rgba(107,114,128,0.3); color: #9ca3af;">
                 <i class="bi bi-info-circle me-2"></i>
-                Este servidor es <strong>Standalone</strong>. Configure la replicacion primero en
-                <a href="/settings/replication" class="text-info">Ajustes de Replicacion</a> antes de usar operaciones de failover.
+                Este servidor es <strong>Standalone</strong>. Configure el cluster primero seleccionando un rol (Master o Slave) en la configuracion de abajo.
             </div>
         <?php endif; ?>
     </div>
@@ -499,6 +521,48 @@
             <a href="/settings/notifications" class="btn btn-outline-info btn-sm mb-3">
                 <i class="bi bi-bell me-1"></i>Configurar Notificaciones (Email / Telegram)
             </a>
+
+            <?php if ($clusterRole === 'slave'): ?>
+            <hr class="border-secondary">
+
+            <!-- Slave: alertas de master caido -->
+            <h6 class="text-muted mb-2">Alerta de Master caido</h6>
+            <p class="small text-muted mb-2">
+                Si este servidor deja de recibir heartbeat del master durante el timeout configurado, se enviara una alerta.
+                Seleccione los canales por los que desea recibir la notificacion.
+            </p>
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" name="cluster_slave_notify_email" id="slaveNotifyEmail"
+                       <?= (($settings['cluster_slave_notify_email'] ?? '1') === '1') ? 'checked' : '' ?>>
+                <label class="form-check-label" for="slaveNotifyEmail">
+                    <i class="bi bi-envelope me-1"></i>Notificar por Email
+                </label>
+            </div>
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" name="cluster_slave_notify_telegram" id="slaveNotifyTelegram"
+                       <?= (($settings['cluster_slave_notify_telegram'] ?? '1') === '1') ? 'checked' : '' ?>>
+                <label class="form-check-label" for="slaveNotifyTelegram">
+                    <i class="bi bi-telegram me-1"></i>Notificar por Telegram
+                </label>
+            </div>
+
+            <hr class="border-secondary">
+
+            <!-- Slave: auto-failover -->
+            <h6 class="text-muted mb-2">Auto-Failover</h6>
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" name="cluster_auto_failover" id="autoFailover"
+                       <?= (($settings['cluster_auto_failover'] ?? '0') === '1') ? 'checked' : '' ?>>
+                <label class="form-check-label" for="autoFailover">
+                    Promover automaticamente a Master si el master cae
+                </label>
+            </div>
+            <div class="small text-muted mb-3" style="max-width:600px;">
+                <i class="bi bi-exclamation-triangle text-warning me-1"></i>
+                <strong>Precaucion:</strong> Si se activa, este servidor se promovera automaticamente a Master cuando detecte que el master no responde.
+                Esto abrira los puertos 80/443 y cambiara el rol del cluster. Desactivado por defecto para evitar problemas de split-brain.
+            </div>
+            <?php endif; ?>
 
             <br>
             <button type="submit" class="btn btn-success">

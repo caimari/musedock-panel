@@ -363,6 +363,11 @@ class ClusterController
         Settings::set('cluster_heartbeat_interval', (string)(int)($_POST['cluster_heartbeat_interval'] ?? 30));
         Settings::set('cluster_unreachable_timeout', (string)(int)($_POST['cluster_unreachable_timeout'] ?? 300));
 
+        // Slave notification preferences
+        Settings::set('cluster_slave_notify_email', isset($_POST['cluster_slave_notify_email']) ? '1' : '0');
+        Settings::set('cluster_slave_notify_telegram', isset($_POST['cluster_slave_notify_telegram']) ? '1' : '0');
+        Settings::set('cluster_auto_failover', isset($_POST['cluster_auto_failover']) ? '1' : '0');
+
         LogService::log('cluster.settings', 'save', 'Configuracion del cluster guardada');
         Flash::set('success', 'Configuracion del cluster guardada');
         header('Location: /settings/cluster');
