@@ -1316,21 +1316,19 @@ PHPEOF;
                 }
                 $output = trim((string)shell_exec($importCmd));
 
-                // 4. Check if temp DB has tables
-                file_put_contents($sqlOps, "SELECT GROUP_CONCAT(table_name) FROM information_schema.tables WHERE table_schema = '{$tempDb}' AND table_type = 'BASE TABLE';\n");
-                $tables = trim((string)shell_exec(sprintf('%s -N < %s 2>/dev/null', $mysqlCmd, escapeshellarg($sqlOps))));
+                // 4. Get table list (one per line, avoids GROUP_CONCAT 1024-byte truncation)
+                file_put_contents($sqlOps, "SELECT table_name FROM information_schema.tables WHERE table_schema = '{$tempDb}' AND table_type = 'BASE TABLE';\n");
+                $tablesRaw = trim((string)shell_exec(sprintf('%s -N < %s 2>/dev/null', $mysqlCmd, escapeshellarg($sqlOps))));
+                $tableList = array_filter(array_map('trim', explode("\n", $tablesRaw)));
 
-                $importOk = !empty($tables) && $tables !== 'NULL';
+                $importOk = !empty($tableList);
 
                 if ($importOk) {
-                    // 5. Atomic swap: DROP original → CREATE original → RENAME all tables
+                    // 5. Atomic swap: DROP original → CREATE original → RENAME all tables in one statement
                     $renameSql = "DROP DATABASE IF EXISTS `{$dbName}`;\nCREATE DATABASE `{$dbName}`;\nGRANT ALL ON `{$dbName}`.* TO '{$dbUser}'@'localhost';\nRENAME TABLE ";
                     $parts = [];
-                    foreach (explode(',', $tables) as $tbl) {
-                        $tbl = trim($tbl);
-                        if ($tbl) {
-                            $parts[] = "`{$tempDb}`.`{$tbl}` TO `{$dbName}`.`{$tbl}`";
-                        }
+                    foreach ($tableList as $tbl) {
+                        $parts[] = "`{$tempDb}`.`{$tbl}` TO `{$dbName}`.`{$tbl}`";
                     }
                     $renameSql .= implode(', ', $parts) . ";\n";
                     $renameSql .= "DROP DATABASE IF EXISTS `{$tempDb}`;\n";
