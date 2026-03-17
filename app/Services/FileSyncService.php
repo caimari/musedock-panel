@@ -1296,11 +1296,16 @@ PHPEOF;
                     file_put_contents($filterScript, $phpFilter);
                 }
 
-                // 3. Import: gunzip → optional PHP filter → mysql
+                // 3. Import: gunzip → sed (fix TEXT/BLOB DEFAULT) → optional PHP filter → mysql
+                // MariaDB 10.x rejects DEFAULT on TEXT/BLOB/JSON columns (ERROR 1101)
+                // Remove DEFAULT 'value' or DEFAULT NULL from lines containing text/blob/json types
+                $sedFix = "sed -E \"s/(text|blob|json)([^,]*) DEFAULT (NULL|'[^']*')/\\1\\2/gi\"";
+
                 if ($filterScript) {
                     $importCmd = sprintf(
-                        'gunzip -c %s | php %s %s | %s --force %s 2>&1',
+                        'gunzip -c %s | %s | php %s %s | %s --force %s 2>&1',
                         escapeshellarg($file),
+                        $sedFix,
                         escapeshellarg($filterScript),
                         escapeshellarg(json_encode($generatedCols)),
                         $mysqlCmd,
@@ -1308,8 +1313,9 @@ PHPEOF;
                     );
                 } else {
                     $importCmd = sprintf(
-                        'gunzip -c %s | %s --force %s 2>&1',
+                        'gunzip -c %s | %s | %s --force %s 2>&1',
                         escapeshellarg($file),
+                        $sedFix,
                         $mysqlCmd,
                         escapeshellarg($tempDb)
                     );
