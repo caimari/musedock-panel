@@ -10,6 +10,7 @@ use MuseDockPanel\Services\ClusterService;
 use MuseDockPanel\Services\FileSyncService;
 use MuseDockPanel\Services\ReplicationService;
 use MuseDockPanel\Services\LogService;
+use MuseDockPanel\Services\SystemService;
 
 class ClusterController
 {
@@ -447,6 +448,9 @@ class ClusterController
         $count = 0;
 
         foreach ($accounts as $acc) {
+            // Get password hash from system for exact replication
+            $passwordHash = SystemService::getPasswordHash($acc['username']);
+
             ClusterService::enqueue($nodeId, 'sync-hosting', [
                 'hosting_action' => 'create_hosting',
                 'hosting_data' => [
@@ -456,7 +460,9 @@ class ClusterController
                     'document_root' => $acc['document_root'],
                     'php_version' => $acc['php_version'] ?? '8.3',
                     'password' => '',
+                    'password_hash' => $passwordHash,
                     'shell' => $acc['shell'] ?? '/usr/sbin/nologin',
+                    'system_uid' => $acc['system_uid'] ?? null,
                     'customer_id' => $acc['customer_id'] ?? null,
                     'disk_quota_mb' => $acc['disk_quota_mb'] ?? 1024,
                     'description' => $acc['description'] ?? '',

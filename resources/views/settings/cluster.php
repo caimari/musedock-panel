@@ -287,6 +287,42 @@
                 </table>
             </div>
         <?php endif; ?>
+
+        <?php
+            $fsEnabled = ($settings['filesync_enabled'] ?? '0') === '1';
+            $sshKeyExists = file_exists($settings['filesync_ssh_key_path'] ?? '/root/.ssh/id_ed25519');
+        ?>
+        <?php if (!empty($nodes)): ?>
+        <hr class="border-secondary mt-3 mb-2">
+        <div class="small">
+            <div class="mb-1">
+                <i class="bi bi-info-circle text-info me-1"></i>
+                <strong>Que se sincroniza:</strong>
+            </div>
+            <div class="d-flex flex-wrap gap-3 ms-3">
+                <div>
+                    <span class="badge bg-success"><i class="bi bi-check me-1"></i>Hostings</span>
+                    <span class="text-muted ms-1">Cuentas, dirs, Caddy, PHP-FPM (via API, automatico)</span>
+                </div>
+                <div>
+                    <?php if ($fsEnabled && $sshKeyExists): ?>
+                        <span class="badge bg-success"><i class="bi bi-check me-1"></i>Archivos</span>
+                        <span class="text-muted ms-1">Contenido web via SSH cada <?= (int)($settings['filesync_interval'] ?? 15) ?> min</span>
+                    <?php else: ?>
+                        <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Archivos</span>
+                        <span class="text-muted ms-1">
+                            <?php if (!$sshKeyExists): ?>
+                                Falta generar clave SSH
+                            <?php elseif (!$fsEnabled): ?>
+                                Sincronizacion de archivos desactivada
+                            <?php endif; ?>
+                            — <a href="#card-filesync" class="text-info">configurar abajo</a>
+                        </span>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -312,6 +348,9 @@
         </div>
     </div>
     <div class="card-body">
+        <div class="small text-muted mb-2">
+            <i class="bi bi-clock me-1"></i>La cola se procesa automaticamente cada minuto. El boton "Procesar Cola" es para forzar manualmente.
+        </div>
         <!-- Stats -->
         <div class="d-flex gap-3 mb-3 flex-wrap" id="queue-stats">
             <span class="badge bg-secondary fs-6">
@@ -550,13 +589,21 @@
 
             <!-- Slave: auto-failover -->
             <h6 class="text-muted mb-2">Auto-Failover</h6>
-            <div class="form-check form-switch mb-2">
-                <input class="form-check-input" type="checkbox" name="cluster_auto_failover" id="autoFailover"
-                       <?= (($settings['cluster_auto_failover'] ?? '0') === '1') ? 'checked' : '' ?>>
-                <label class="form-check-label" for="autoFailover">
-                    Promover automaticamente a Master si el master cae
-                </label>
+            <?php $autoFailoverOn = (($settings['cluster_auto_failover'] ?? '0') === '1'); ?>
+            <div class="d-flex align-items-center gap-3 mb-2">
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="autoFailoverToggle"
+                           <?= $autoFailoverOn ? 'checked' : '' ?>
+                           onchange="toggleAutoFailover(this)">
+                    <label class="form-check-label" for="autoFailoverToggle">
+                        Promover automaticamente a Master si el master cae
+                    </label>
+                </div>
+                <?php if ($autoFailoverOn): ?>
+                    <span class="badge bg-danger"><i class="bi bi-lightning me-1"></i>ACTIVO</span>
+                <?php endif; ?>
             </div>
+            <input type="hidden" name="cluster_auto_failover" id="autoFailoverValue" value="<?= $autoFailoverOn ? '1' : '0' ?>">
             <div class="small text-muted mb-3" style="max-width:600px;">
                 <i class="bi bi-exclamation-triangle text-warning me-1"></i>
                 <strong>Precaucion:</strong> Si se activa, este servidor se promovera automaticamente a Master cuando detecte que el master no responde.
@@ -577,7 +624,7 @@
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- CARD 6 — Sincronizacion de Archivos (solo master)           -->
 <!-- ═══════════════════════════════════════════════════════════ -->
-<div class="card mb-3">
+<div class="card mb-3" id="card-filesync">
     <div class="card-header"><i class="bi bi-arrow-repeat me-2"></i>Sincronizacion de Archivos</div>
     <div class="card-body">
         <form method="post" action="/settings/cluster/filesync-settings">
@@ -1112,12 +1159,84 @@ function confirmDemoteCluster() {
     });
 }
 
+function toggleAutoFailover(checkbox) {
+    const hiddenInput = document.getElementById('autoFailoverValue');
+    if (checkbox.checked) {
+        // Activating — show confirmation modal with password
+        Swal.fire({
+            title: 'Activar Auto-Failover',
+            html: '<div class="text-start">' +
+                  '<p><strong class="text-danger">ATENCION:</strong> Esta es una operacion critica.</p>' +
+                  '<p>Si se activa, este servidor se promovera <strong>automaticamente a Master</strong> cuando detecte que el master no responde durante el timeout configurado.</p>' +
+                  '<p>Consecuencias:</p>' +
+                  '<ul>' +
+                  '<li>Se abriran los puertos 80/443 al publico</li>' +
+                  '<li>El rol del cluster cambiara a Master</li>' +
+                  '<li>Se detendra la replicacion de base de datos</li>' +
+                  '<li><strong class="text-warning">Riesgo de split-brain</strong> si hay problemas de red temporales</li>' +
+                  '</ul>' +
+                  '<p class="mb-1">Escriba su contraseña de administrador para confirmar:</p>' +
+                  '<input type="password" id="swal-admin-pass" class="form-control bg-dark text-light border-secondary" placeholder="Contraseña">' +
+                  '</div>',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Activar Auto-Failover',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#ef4444',
+            background: '#1e1e2e',
+            color: '#fff',
+            preConfirm: function() {
+                const pass = document.getElementById('swal-admin-pass').value;
+                if (!pass) {
+                    Swal.showValidationMessage('Debe ingresar su contraseña');
+                    return false;
+                }
+                return pass;
+            }
+        }).then(function(result) {
+            if (result.isConfirmed) {
+                // Verify password via AJAX
+                const form = new FormData();
+                form.append('password', result.value);
+                form.append('_csrf_token', document.querySelector('[name=_csrf_token]').value);
+                fetch('/settings/cluster/verify-admin-password', { method: 'POST', body: form })
+                    .then(r => r.json())
+                    .then(data => {
+                        if (data.ok) {
+                            hiddenInput.value = '1';
+                            Swal.fire({ title: 'Auto-Failover activado', icon: 'success', timer: 2000, background: '#1e1e2e', color: '#fff' });
+                        } else {
+                            checkbox.checked = false;
+                            hiddenInput.value = '0';
+                            Swal.fire({ title: 'Contraseña incorrecta', icon: 'error', background: '#1e1e2e', color: '#fff' });
+                        }
+                    })
+                    .catch(function() {
+                        checkbox.checked = false;
+                        hiddenInput.value = '0';
+                    });
+            } else {
+                checkbox.checked = false;
+                hiddenInput.value = '0';
+            }
+        });
+    } else {
+        // Deactivating — no confirmation needed
+        hiddenInput.value = '0';
+    }
+}
+
 function confirmSyncAll(nodeId, nodeName) {
     Swal.fire({
         title: 'Sincronizar todos los hostings',
-        html: 'Se encolaran <strong>todos los hostings existentes</strong> para ser creados en el nodo <strong>' + nodeName + '</strong>.<br><br>' +
-              'Esto creara la estructura (usuario Linux, pool FPM, ruta Caddy) en el nodo remoto.<br><br>' +
-              '<span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Si los hostings ya existen en el nodo, se intentaran crear de nuevo (pueden dar error).</span>',
+        html: '<p>Se encolaran <strong>todos los hostings existentes</strong> para ser creados en el nodo <strong>' + nodeName + '</strong>.</p>' +
+              '<p><i class="bi bi-clock me-1"></i>Los elementos se añaden a la <strong>cola de sincronización</strong> y se procesan <strong>automáticamente cada minuto</strong> por el cron worker.</p>' +
+              '<p><i class="bi bi-check-circle me-1 text-success"></i>Si un hosting ya existe en el nodo remoto, se detecta y se omite (no se duplica ni genera errores).</p>' +
+              '<hr style="border-color:rgba(255,255,255,0.1)">' +
+              '<p class="mb-1"><strong>Qué se sincroniza automáticamente (API):</strong></p>' +
+              '<ul class="text-start" style="font-size:0.9em"><li>Cuenta de sistema (usuario Linux, pool FPM, Caddy)</li><li>Registro en base de datos (hosting + dominio)</li></ul>' +
+              '<p class="mb-1"><strong>Qué requiere SSH configurado:</strong></p>' +
+              '<ul class="text-start" style="font-size:0.9em"><li>Contenido de archivos (rsync incremental — solo copia archivos nuevos o modificados)</li></ul>',
         icon: 'question',
         showCancelButton: true,
         confirmButtonText: 'Si, sincronizar todo',

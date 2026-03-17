@@ -102,6 +102,9 @@
         <a href="/customers" class="<?= str_contains($pageTitle ?? '', 'Customer') ? 'active' : '' ?>">
             <i class="bi bi-people"></i> Customers
         </a>
+        <a href="/system-users" class="<?= str_contains($pageTitle ?? '', 'System User') ? 'active' : '' ?>">
+            <i class="bi bi-people-fill"></i> System Users
+        </a>
         <a href="/logs" class="<?= ($pageTitle ?? '') === 'Activity Log' ? 'active' : '' ?>">
             <i class="bi bi-journal-text"></i> Activity Log
         </a>

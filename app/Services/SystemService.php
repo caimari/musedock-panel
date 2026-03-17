@@ -29,12 +29,12 @@ class SystemService
      * 4. Caddy route
      * 5. Default index.html
      */
-    public static function createAccount(string $username, string $domain, string $homeDir, string $documentRoot, string $phpVersion = '8.3', string $password = '', string $shell = '/usr/sbin/nologin'): array
+    public static function createAccount(string $username, string $domain, string $homeDir, string $documentRoot, string $phpVersion = '8.3', string $password = '', string $shell = '/usr/sbin/nologin', ?int $forceUid = null): array
     {
         $errors = [];
 
-        // 1. Create Linux system user
-        $uid = self::createSystemUser($username, $homeDir, $shell);
+        // 1. Create Linux system user (with forced UID for cluster sync)
+        $uid = self::createSystemUser($username, $homeDir, $shell, $forceUid);
         if ($uid === null) {
             return ['success' => false, 'error' => "Failed to create system user: {$username}"];
         }
@@ -78,7 +78,7 @@ class SystemService
     /**
      * Create a Linux system user with home directory
      */
-    public static function createSystemUser(string $username, string $homeDir, string $shell = '/usr/sbin/nologin'): ?int
+    public static function createSystemUser(string $username, string $homeDir, string $shell = '/usr/sbin/nologin', ?int $forceUid = null): ?int
     {
         // Validate username format (alphanumeric, underscore, hyphen, max 32 chars)
         if (!preg_match('/^[a-z][a-z0-9_-]{0,31}$/i', $username)) {
@@ -91,10 +91,21 @@ class SystemService
             return (int) trim($check);
         }
 
+        // Build useradd command — force UID if provided (for cluster sync)
+        $uidFlag = '';
+        if ($forceUid !== null && $forceUid > 0) {
+            // Check if UID is already taken by another user
+            $uidCheck = shell_exec(sprintf('getent passwd %d 2>/dev/null', $forceUid));
+            if (empty(trim($uidCheck ?? ''))) {
+                $uidFlag = sprintf(' -u %d', $forceUid);
+            }
+        }
+
         $cmd = sprintf(
-            'useradd -m -d %s -s %s -G www-data %s 2>&1',
+            'useradd -m -d %s -s %s -G www-data%s %s 2>&1',
             escapeshellarg($homeDir),
             escapeshellarg($shell),
+            $uidFlag,
             escapeshellarg($username)
         );
         shell_exec($cmd);
@@ -115,6 +126,111 @@ class SystemService
         );
         shell_exec($cmd);
         return true;
+    }
+
+    /**
+     * Get the password hash from /etc/shadow for a system user.
+     */
+    public static function getPasswordHash(string $username): string
+    {
+        $line = trim((string)shell_exec(sprintf('getent shadow %s 2>/dev/null', escapeshellarg($username))));
+        if (!$line) return '';
+        $parts = explode(':', $line);
+        return $parts[1] ?? '';
+    }
+
+    /**
+     * Set a pre-hashed password directly in /etc/shadow (for cluster sync).
+     */
+    public static function setPasswordHash(string $username, string $hash): bool
+    {
+        if (empty($hash) || $hash === '!' || $hash === '*' || $hash === '!!') {
+            return false;
+        }
+        $cmd = sprintf(
+            'usermod -p %s %s 2>&1',
+            escapeshellarg($hash),
+            escapeshellarg($username)
+        );
+        shell_exec($cmd);
+        return true;
+    }
+
+    /**
+     * Get system user info: uid, gid, groups, shell, home, password hash.
+     */
+    public static function getUserInfo(string $username): ?array
+    {
+        $passwd = trim((string)shell_exec(sprintf('getent passwd %s 2>/dev/null', escapeshellarg($username))));
+        if (!$passwd) return null;
+
+        $parts = explode(':', $passwd);
+        $groups = trim((string)shell_exec(sprintf('id -Gn %s 2>/dev/null', escapeshellarg($username))));
+
+        return [
+            'username' => $parts[0],
+            'uid'      => (int)($parts[2] ?? 0),
+            'gid'      => (int)($parts[3] ?? 0),
+            'home'     => $parts[5] ?? '',
+            'shell'    => $parts[6] ?? '',
+            'groups'   => $groups ? explode(' ', $groups) : [],
+            'password_hash' => self::getPasswordHash($parts[0]),
+        ];
+    }
+
+    /**
+     * Repair a system user to match expected UID, shell, groups, and password.
+     * Returns list of changes made.
+     */
+    public static function repairSystemUser(string $username, ?int $expectedUid, string $expectedShell, string $expectedPasswordHash = '', array $expectedGroups = ['www-data']): array
+    {
+        $info = self::getUserInfo($username);
+        if (!$info) return ['error' => 'User does not exist'];
+
+        $changes = [];
+
+        // Fix UID if wrong
+        if ($expectedUid !== null && $expectedUid > 0 && $info['uid'] !== $expectedUid) {
+            // Check if target UID is free
+            $uidCheck = trim((string)shell_exec(sprintf('getent passwd %d 2>/dev/null', $expectedUid)));
+            if (empty($uidCheck)) {
+                $oldUid = $info['uid'];
+                shell_exec(sprintf('usermod -u %d %s 2>&1', $expectedUid, escapeshellarg($username)));
+                // Fix file ownership in home dir
+                $home = $info['home'];
+                if ($home && is_dir($home)) {
+                    shell_exec(sprintf('find %s -user %d -exec chown %d {} + 2>/dev/null', escapeshellarg($home), $oldUid, $expectedUid));
+                }
+                $changes[] = "UID: {$oldUid} → {$expectedUid}";
+            } else {
+                $changes[] = "UID: no se pudo cambiar a {$expectedUid} (ya en uso)";
+            }
+        }
+
+        // Fix shell if wrong
+        if (!empty($expectedShell) && $info['shell'] !== $expectedShell) {
+            shell_exec(sprintf('usermod -s %s %s 2>&1', escapeshellarg($expectedShell), escapeshellarg($username)));
+            $changes[] = "Shell: {$info['shell']} → {$expectedShell}";
+        }
+
+        // Fix groups
+        foreach ($expectedGroups as $group) {
+            if (!in_array($group, $info['groups'])) {
+                shell_exec(sprintf('usermod -aG %s %s 2>&1', escapeshellarg($group), escapeshellarg($username)));
+                $changes[] = "Grupo añadido: {$group}";
+            }
+        }
+
+        // Fix password hash if provided and different
+        if (!empty($expectedPasswordHash) && $expectedPasswordHash !== '!' && $expectedPasswordHash !== '*') {
+            $currentHash = $info['password_hash'];
+            if ($currentHash !== $expectedPasswordHash) {
+                self::setPasswordHash($username, $expectedPasswordHash);
+                $changes[] = "Password hash sincronizado";
+            }
+        }
+
+        return $changes ?: ['sin cambios'];
     }
 
     /**

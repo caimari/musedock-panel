@@ -542,18 +542,41 @@ class ClusterService
 
                     // Check if already exists in DB
                     $existing = Database::fetchOne(
-                        "SELECT id FROM hosting_accounts WHERE domain = :d OR username = :u",
+                        "SELECT id, system_uid FROM hosting_accounts WHERE domain = :d OR username = :u",
                         ['d' => $domain, 'u' => $username]
                     );
                     if ($existing) {
-                        return ['ok' => true, 'message' => "Hosting {$domain} already exists, skipped"];
+                        // Hosting exists — repair system user if needed
+                        $expectedUid = isset($hostingData['system_uid']) ? (int)$hostingData['system_uid'] : null;
+                        $passwordHash = $hostingData['password_hash'] ?? '';
+                        $repairs = SystemService::repairSystemUser($username, $expectedUid, $shell, $passwordHash);
+
+                        // Update DB record if UID changed
+                        if ($expectedUid && $expectedUid > 0 && (int)($existing['system_uid'] ?? 0) !== $expectedUid) {
+                            Database::update('hosting_accounts', [
+                                'system_uid' => $expectedUid,
+                                'shell'      => $shell,
+                            ], 'id = :id', ['id' => (int)$existing['id']]);
+                        }
+
+                        $repairMsg = implode(', ', $repairs);
+                        LogService::log('cluster.sync', $domain, "Hosting exists, repaired: {$repairMsg}");
+                        return ['ok' => true, 'message' => "Hosting {$domain} exists — repaired: {$repairMsg}"];
                     }
 
                     // Create system account (user, dirs, PHP-FPM, Caddy)
-                    $result = SystemService::createAccount($username, $domain, $homeDir, $documentRoot, $phpVersion, $password, $shell);
+                    // Force same UID as master for consistency
+                    $forceUid = isset($hostingData['system_uid']) ? (int)$hostingData['system_uid'] : null;
+                    $result = SystemService::createAccount($username, $domain, $homeDir, $documentRoot, $phpVersion, $password, $shell, $forceUid);
 
                     if (!($result['success'] ?? false)) {
                         return ['ok' => false, 'message' => $result['error'] ?? 'System account creation failed'];
+                    }
+
+                    // Apply password hash from master (exact copy, not plaintext)
+                    $passwordHash = $hostingData['password_hash'] ?? '';
+                    if ($passwordHash) {
+                        SystemService::setPasswordHash($username, $passwordHash);
                     }
 
                     // Insert into hosting_accounts DB

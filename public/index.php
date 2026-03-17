@@ -210,6 +210,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/demote', 'ClusterController@demoteLocal');
 \MuseDockPanel\Router::post('/settings/cluster/generate-token', 'ClusterController@generateToken');
 \MuseDockPanel\Router::post('/settings/cluster/save-settings', 'ClusterController@saveSettings');
+\MuseDockPanel\Router::post('/settings/cluster/verify-admin-password', 'ClusterController@verifyAdminPassword');
 \MuseDockPanel\Router::post('/settings/cluster/clean-queue', 'ClusterController@cleanQueue');
 \MuseDockPanel\Router::post('/settings/cluster/sync-all-hostings', 'ClusterController@syncAllHostings');
 \MuseDockPanel\Router::post('/settings/cluster/filesync-settings', 'ClusterController@saveFileSyncSettings');
@@ -262,6 +263,10 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/profile/username', 'ProfileController@updateUsername');
 \MuseDockPanel\Router::post('/profile/email', 'ProfileController@updateEmail');
 \MuseDockPanel\Router::post('/profile/password', 'ProfileController@updatePassword');
+
+// System Users
+\MuseDockPanel\Router::get('/system-users', 'SystemUserController@index');
+\MuseDockPanel\Router::get('/system-users/:uid', 'SystemUserController@show');
 
 // Activity Log
 \MuseDockPanel\Router::get('/logs', 'LogController@index');
