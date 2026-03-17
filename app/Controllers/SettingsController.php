@@ -1298,6 +1298,110 @@ class SettingsController
             'version'   => $dbVersion,
         ];
 
+        // ─── 7. GPU Health ────────────────────────────────────────
+        $gpuChecks = [];
+        $nvidiaSmi = trim((string)@shell_exec('which nvidia-smi 2>/dev/null'));
+        if ($nvidiaSmi && is_executable($nvidiaSmi)) {
+            // Check nvidia-smi -L for GPU listing and errors
+            $gpuListOutput = @shell_exec('nvidia-smi -L 2>&1') ?? '';
+            $gpuQueryOutput = @shell_exec('nvidia-smi --query-gpu=index,name,driver_version,memory.total,temperature.gpu,utilization.gpu,power.draw --format=csv,noheader,nounits 2>&1') ?? '';
+
+            // Check dmesg for nvidia errors (last 200 lines)
+            $dmesgErrors = trim((string)@shell_exec('dmesg 2>/dev/null | grep -i nvidia | grep -i error | tail -5'));
+
+            // Parse each GPU
+            preg_match_all('/GPU (\d+): (.+?) \(UUID: (.+?)\)/', $gpuListOutput, $gpuMatches, PREG_SET_ORDER);
+
+            // Detect errors per GPU from nvidia-smi -L
+            $gpuErrors = [];
+            foreach (explode("\n", $gpuListOutput) as $line) {
+                if (stripos($line, 'Unable to determine') !== false || stripos($line, 'Unknown Error') !== false) {
+                    // Try to extract PCI address
+                    if (preg_match('/gpu ([0-9a-f:\.]+)/i', $line, $em)) {
+                        $gpuErrors[$em[1]] = trim($line);
+                    } else {
+                        $gpuErrors['unknown'] = trim($line);
+                    }
+                }
+            }
+
+            // Parse dmesg errors per GPU index
+            $dmesgPerGpu = [];
+            if ($dmesgErrors) {
+                foreach (explode("\n", $dmesgErrors) as $line) {
+                    if (preg_match('/GPU:(\d+)/', $line, $dm)) {
+                        $dmesgPerGpu[(int)$dm[1]][] = trim(preg_replace('/^\[[\d\.]+\]\s*/', '', $line));
+                    }
+                }
+            }
+
+            // Parse working GPU details from query
+            $gpuDetails = [];
+            if ($gpuQueryOutput && stripos($gpuQueryOutput, 'Failed') === false) {
+                foreach (explode("\n", trim($gpuQueryOutput)) as $line) {
+                    $parts = array_map('trim', explode(',', $line));
+                    if (count($parts) >= 7 && is_numeric($parts[0])) {
+                        $gpuDetails[(int)$parts[0]] = [
+                            'driver'      => $parts[2],
+                            'memory'      => $parts[3] . ' MiB',
+                            'temperature' => $parts[4] . '°C',
+                            'utilization' => $parts[5] . '%',
+                            'power'       => $parts[6] . 'W',
+                        ];
+                    }
+                }
+            }
+
+            foreach ($gpuMatches as $m) {
+                $idx = (int)$m[1];
+                $name = $m[2];
+                $uuid = $m[3];
+
+                $healthy = true;
+                $status = 'OK';
+                $errors = [];
+
+                // Check dmesg errors for this GPU
+                if (!empty($dmesgPerGpu[$idx])) {
+                    $healthy = false;
+                    $status = 'Hardware Error';
+                    $errors = array_slice($dmesgPerGpu[$idx], -3); // last 3 errors
+                }
+
+                // Check nvidia-smi communication errors
+                if (!isset($gpuDetails[$idx])) {
+                    $healthy = false;
+                    $status = 'Not Responding';
+                    if (empty($errors)) $errors[] = 'nvidia-smi cannot query this GPU';
+                }
+
+                $gpuChecks[] = [
+                    'index'   => $idx,
+                    'name'    => $name,
+                    'uuid'    => $uuid,
+                    'healthy' => $healthy,
+                    'status'  => $status,
+                    'errors'  => $errors,
+                    'details' => $gpuDetails[$idx] ?? null,
+                ];
+            }
+
+            // If no GPUs matched from -L but there are general errors
+            if (empty($gpuMatches) && !empty($gpuErrors)) {
+                $gpuChecks[] = [
+                    'index'   => -1,
+                    'name'    => 'Unknown GPU',
+                    'uuid'    => '',
+                    'healthy' => false,
+                    'status'  => 'Detection Failed',
+                    'errors'  => array_values($gpuErrors),
+                    'details' => null,
+                ];
+            }
+        }
+        $checks['gpus'] = $gpuChecks;
+        $checks['gpu_driver'] = $nvidiaSmi ? true : false;
+
         // Summary counts
         $totalChecks = 0;
         $passedChecks = 0;
@@ -1308,6 +1412,7 @@ class SettingsController
         $totalChecks += 2; // service + database
         if ($checks['service']['active']) $passedChecks++;
         if ($checks['database']['connected']) $passedChecks++;
+        foreach ($checks['gpus'] as $g) { $totalChecks++; if ($g['healthy']) $passedChecks++; }
 
         View::render('settings/health', [
             'layout'       => 'main',

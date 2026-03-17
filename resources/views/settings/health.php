@@ -192,6 +192,68 @@
     </div>
 </div>
 
+<!-- GPU Health -->
+<?php if ($checks['gpu_driver'] || !empty($checks['gpus'])): ?>
+<div class="card mb-4">
+    <div class="card-header"><i class="bi bi-gpu-card me-2"></i>GPU Health (NVIDIA)</div>
+    <div class="card-body p-0">
+        <?php if (empty($checks['gpus'])): ?>
+            <div class="text-center text-muted py-3">nvidia-smi installed but no GPUs detected</div>
+        <?php else: ?>
+        <table class="table table-sm table-hover mb-0">
+            <thead>
+                <tr>
+                    <th class="ps-3">GPU</th>
+                    <th>Model</th>
+                    <th>Details</th>
+                    <th>Estado</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($checks['gpus'] as $gpu): ?>
+                <tr>
+                    <td class="ps-3"><code>GPU <?= $gpu['index'] >= 0 ? $gpu['index'] : '?' ?></code></td>
+                    <td><strong><?= View::e($gpu['name']) ?></strong>
+                        <?php if ($gpu['uuid']): ?>
+                            <br><small class="text-muted"><?= View::e(substr($gpu['uuid'], 0, 20)) ?>...</small>
+                        <?php endif; ?>
+                    </td>
+                    <td>
+                        <?php if ($gpu['details']): ?>
+                            <small>
+                                Driver: <?= View::e($gpu['details']['driver']) ?> &middot;
+                                VRAM: <?= View::e($gpu['details']['memory']) ?> &middot;
+                                Temp: <?= View::e($gpu['details']['temperature']) ?> &middot;
+                                Util: <?= View::e($gpu['details']['utilization']) ?> &middot;
+                                Power: <?= View::e($gpu['details']['power']) ?>
+                            </small>
+                        <?php else: ?>
+                            <small class="text-muted">No data available</small>
+                        <?php endif; ?>
+                    </td>
+                    <td>
+                        <?php if ($gpu['healthy']): ?>
+                            <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;"><i class="bi bi-check-circle me-1"></i>Healthy</span>
+                        <?php else: ?>
+                            <span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;"><i class="bi bi-x-circle me-1"></i><?= View::e($gpu['status']) ?></span>
+                            <?php if (!empty($gpu['errors'])): ?>
+                                <div class="mt-1">
+                                    <?php foreach ($gpu['errors'] as $err): ?>
+                                        <small class="d-block text-danger" style="font-size:0.75rem"><i class="bi bi-exclamation-triangle me-1"></i><?= View::e(substr($err, 0, 120)) ?></small>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        <?php endif; ?>
+    </div>
+</div>
+<?php endif; ?>
+
 <script>
 function confirmRepair(e, form, name) {
     e.preventDefault();
