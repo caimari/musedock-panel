@@ -71,7 +71,11 @@ class UpdateController
     {
         header('Content-Type: application/json');
 
+        // Auto-check if no cache or cache expired (respects 6h TTL)
         $cached = UpdateService::getCachedUpdateInfo();
+        if (!$cached || (time() - ($cached['checked_at_epoch'] ?? 0)) > 21600) {
+            $cached = UpdateService::checkForUpdate();
+        }
         $status = UpdateService::getUpdateStatus();
 
         echo json_encode([
