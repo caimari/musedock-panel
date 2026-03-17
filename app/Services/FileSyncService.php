@@ -927,13 +927,33 @@ class FileSyncService
             if ($dbType === 'mysql' && !$config['db_dump_mysql']) continue;
             if ($dbType === 'pgsql' && !$config['db_dump_pgsql']) continue;
 
+            $generatedCols = [];
+
             if ($dbType === 'mysql') {
                 $cmd = self::buildMysqldumpCmd();
                 if (!$cmd) {
                     $results[] = ['db_name' => $dbName, 'db_type' => $dbType, 'ok' => false, 'error' => 'MySQL auth no disponible'];
                     continue;
                 }
-                $fullCmd = sprintf('%s --single-transaction --quick %s 2>/dev/null | gzip > %s',
+
+                // Detect GENERATED columns — these cause ERROR 3105 on restore
+                $mysqlCmd = self::buildMysqlCmd();
+                $genColsRaw = trim((string)shell_exec(sprintf(
+                    '%s -N -e "SELECT CONCAT(TABLE_NAME, \'|\', COLUMN_NAME) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = %s AND EXTRA LIKE \'%%GENERATED%%\'" 2>/dev/null',
+                    $mysqlCmd, escapeshellarg($dbName)
+                )));
+                $generatedCols = [];
+                if ($genColsRaw) {
+                    foreach (explode("\n", $genColsRaw) as $line) {
+                        $p = explode('|', trim($line));
+                        if (count($p) === 2) {
+                            $generatedCols[$p[0]][] = $p[1];
+                        }
+                    }
+                }
+
+                // Use --complete-insert so INSERT has column names (needed for GENERATED col filtering)
+                $fullCmd = sprintf('%s --single-transaction --quick --complete-insert %s 2>/dev/null | gzip > %s',
                     $cmd, escapeshellarg($dbName), escapeshellarg($dumpFile));
             } else {
                 $fullCmd = sprintf('sudo -u postgres pg_dump -Fc %s 2>/dev/null | gzip > %s',
@@ -943,7 +963,7 @@ class FileSyncService
             shell_exec($fullCmd);
             $ok = file_exists($dumpFile) && filesize($dumpFile) > 20; // gzip header is ~20 bytes min
 
-            $manifest[] = [
+            $manifestEntry = [
                 'db_name' => $dbName,
                 'db_user' => $dbUser,
                 'db_type' => $dbType,
@@ -951,6 +971,10 @@ class FileSyncService
                 'file'    => $dbName . '.sql.gz',
                 'size'    => $ok ? filesize($dumpFile) : 0,
             ];
+            if (!empty($generatedCols)) {
+                $manifestEntry['generated_cols'] = $generatedCols;
+            }
+            $manifest[] = $manifestEntry;
             $results[] = ['db_name' => $dbName, 'db_type' => $dbType, 'ok' => $ok, 'file' => $dumpFile];
         }
 
@@ -1084,137 +1108,243 @@ class FileSyncService
                     continue;
                 }
 
+                // SQL file to avoid shell escaping issues with backticks
+                $sqlOps = $dumpPath . '/_restore_ops.sql';
+
                 // Ensure user exists
-                shell_exec(sprintf("%s -e \"CREATE USER IF NOT EXISTS '%s'@'localhost'\" 2>/dev/null", $mysqlCmd, $dbUser));
+                file_put_contents($sqlOps, "CREATE USER IF NOT EXISTS '{$dbUser}'@'localhost';\n");
+                shell_exec(sprintf('%s < %s 2>/dev/null', $mysqlCmd, escapeshellarg($sqlOps)));
 
-                // 1. Drop temp DB if leftover
-                shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`" 2>/dev/null', $mysqlCmd, $tempDb));
+                // 1. Drop temp DB if leftover, create temp DB
+                file_put_contents($sqlOps, "DROP DATABASE IF EXISTS `{$tempDb}`;\nCREATE DATABASE `{$tempDb}`;\nGRANT ALL ON `{$tempDb}`.* TO '{$dbUser}'@'localhost';\n");
+                shell_exec(sprintf('%s < %s 2>/dev/null', $mysqlCmd, escapeshellarg($sqlOps)));
 
-                // 2. Create temp DB, grant, import
-                shell_exec(sprintf('%s -e "CREATE DATABASE \`%s\`" 2>/dev/null', $mysqlCmd, $tempDb));
-                shell_exec(sprintf("%s -e \"GRANT ALL ON \`%s\`.* TO '%s'@'localhost'\" 2>/dev/null", $mysqlCmd, $tempDb, $dbUser));
+                // 2. Build a PHP filter script to strip GENERATED columns from INSERT statements
+                //    The dump uses --complete-insert so INSERT INTO t (`col1`,`col2`,`gen_col`) VALUES (...)
+                //    We need to remove the generated column name and its corresponding value.
+                $generatedCols = $entry['generated_cols'] ?? [];
+                $filterScript = null;
 
-                // First try normal import
-                $output = trim((string)shell_exec(sprintf(
-                    'gunzip -c %s | %s %s 2>&1',
-                    escapeshellarg($file), $mysqlCmd, escapeshellarg($tempDb)
-                )));
+                if (!empty($generatedCols)) {
+                    // Create a PHP script that reads stdin, removes generated columns from INSERTs
+                    $filterScript = $dumpPath . '/_filter_generated.php';
+                    $genColsJson = json_encode($generatedCols);
+                    $phpFilter = <<<'PHPEOF'
+<?php
+// Filter script: removes GENERATED columns from INSERT INTO ... VALUES statements
+// Generated columns per table: {"table_name": ["col1", "col2"]}
+$genCols = json_decode($argv[1], true);
 
-                $importOk = (stripos($output, 'ERROR') === false);
+while (($line = fgets(STDIN)) !== false) {
+    // Match INSERT INTO `table` (`col1`,`col2`,...) VALUES
+    if (preg_match('/^INSERT INTO `([^`]+)` \(/', $line, $m)) {
+        $table = $m[1];
+        if (isset($genCols[$table])) {
+            $colsToRemove = $genCols[$table];
+            // Parse the column list to find positions of generated columns
+            if (preg_match('/^(INSERT INTO `[^`]+` \()([^)]+)(\) VALUES\s*)/', $line, $cm)) {
+                $prefix = $cm[1];
+                $colList = $cm[2];
+                $suffix = $cm[3];
+                $rest = substr($line, strlen($cm[0]));
 
-                // If ERROR 3105 (generated column) — retry: import structure,
-                // then drop generated columns, import data, recreate generated columns
-                if (!$importOk && stripos($output, 'ERROR 3105') !== false) {
-                    // Reset temp DB
-                    shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`; CREATE DATABASE \`%s\`" 2>/dev/null', $mysqlCmd, $tempDb, $tempDb));
+                $cols = array_map(function($c) { return trim($c, " `"); }, explode(',', $colList));
+                $removeIdx = [];
+                foreach ($cols as $i => $c) {
+                    if (in_array($c, $colsToRemove, true)) {
+                        $removeIdx[] = $i;
+                    }
+                }
 
-                    // Import with --force to get structure + as much data as possible
-                    $output = trim((string)shell_exec(sprintf(
-                        'gunzip -c %s | %s --force %s 2>&1',
-                        escapeshellarg($file), $mysqlCmd, escapeshellarg($tempDb)
-                    )));
-
-                    // Now find tables with missing data due to generated columns and fix them:
-                    // Get generated column definitions from the temp DB
-                    $genCols = trim((string)shell_exec(sprintf(
-                        "%s -N -e \"SELECT CONCAT(TABLE_NAME, '|', COLUMN_NAME, '|', COLUMN_TYPE, '|', GENERATION_EXPRESSION, '|', EXTRA) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s' AND EXTRA LIKE '%%%%GENERATED%%%%' ORDER BY TABLE_NAME, ORDINAL_POSITION\" 2>/dev/null",
-                        $mysqlCmd, $tempDb
-                    )));
-
-                    if ($genCols) {
-                        // Group by table
-                        $tableGenCols = [];
-                        foreach (explode("\n", $genCols) as $line) {
-                            $parts = explode('|', trim($line));
-                            if (count($parts) >= 5) {
-                                $tblName = $parts[0];
-                                $tableGenCols[$tblName][] = [
-                                    'column' => $parts[1],
-                                    'type' => $parts[2],
-                                    'expression' => $parts[3],
-                                    'extra' => $parts[4],
-                                ];
-                            }
-                        }
-
-                        foreach ($tableGenCols as $tblName => $cols) {
-                            // Check if table has 0 rows (import failed for all rows)
-                            $rowCount = trim((string)shell_exec(sprintf(
-                                "%s -N -e \"SELECT COUNT(*) FROM \`%s\`.\`%s\`\" 2>/dev/null",
-                                $mysqlCmd, $tempDb, $tblName
-                            )));
-
-                            if ((int)$rowCount === 0) {
-                                // Drop generated columns temporarily
-                                foreach ($cols as $col) {
-                                    shell_exec(sprintf(
-                                        "%s -e \"ALTER TABLE \`%s\`.\`%s\` DROP COLUMN \`%s\`\" 2>/dev/null",
-                                        $mysqlCmd, $tempDb, $tblName, $col['column']
-                                    ));
-                                }
-
-                                // Re-import just this table's data (structure already exists minus generated cols)
-                                // Extract table data from dump and import
-                                shell_exec(sprintf(
-                                    'gunzip -c %s | sed -n "/^-- Dumping data for table .%s./,/^-- Dumping data for table\\|^-- Table structure/p" | %s --force %s 2>/dev/null',
-                                    escapeshellarg($file), $tblName, $mysqlCmd, escapeshellarg($tempDb)
-                                ));
-
-                                // Recreate generated columns
-                                foreach ($cols as $col) {
-                                    $isStored = (stripos($col['extra'], 'STORED') !== false) ? 'STORED' : 'VIRTUAL';
-                                    shell_exec(sprintf(
-                                        "%s -e \"ALTER TABLE \`%s\`.\`%s\` ADD COLUMN \`%s\` %s GENERATED ALWAYS AS (%s) %s\" 2>/dev/null",
-                                        $mysqlCmd, $tempDb, $tblName, $col['column'], $col['type'], $col['expression'], $isStored
-                                    ));
-                                }
-                            }
+                if (!empty($removeIdx)) {
+                    // Rebuild column list without generated columns
+                    $newCols = [];
+                    foreach ($cols as $i => $c) {
+                        if (!in_array($i, $removeIdx, true)) {
+                            $newCols[] = '`' . $c . '`';
                         }
                     }
 
-                    // Consider it OK if the tables have data now (ignore ERROR 3105)
-                    $outputClean = preg_replace('/^.*ERROR 3105.*$/m', '', $output);
-                    $importOk = (stripos(trim($outputClean), 'ERROR') === false) || !empty($tableGenCols);
+                    // Parse and rebuild each VALUES group, removing the Nth value
+                    // Values are: (val1,val2,...),(val1,val2,...),...;
+                    $newLine = $prefix . implode(',', $newCols) . $suffix;
+
+                    // Parse values carefully (handles quoted strings with commas/parens)
+                    $pos = 0;
+                    $len = strlen($rest);
+                    $first = true;
+
+                    while ($pos < $len) {
+                        // Skip whitespace
+                        while ($pos < $len && $rest[$pos] === ' ') $pos++;
+                        if ($pos >= $len) break;
+
+                        if ($rest[$pos] === ';' || $rest[$pos] === "\n") {
+                            $newLine .= substr($rest, $pos);
+                            break;
+                        }
+
+                        if ($rest[$pos] === ',') {
+                            $pos++; // skip comma between value groups
+                            continue;
+                        }
+
+                        if ($rest[$pos] !== '(') {
+                            // Unexpected char, output rest as-is
+                            $newLine .= substr($rest, $pos);
+                            break;
+                        }
+
+                        // Parse one (...) value group
+                        $pos++; // skip (
+                        $values = [];
+                        $val = '';
+                        $inQuote = false;
+                        $escaped = false;
+                        $depth = 0;
+
+                        while ($pos < $len) {
+                            $ch = $rest[$pos];
+
+                            if ($escaped) {
+                                $val .= $ch;
+                                $escaped = false;
+                                $pos++;
+                                continue;
+                            }
+
+                            if ($ch === '\\') {
+                                $val .= $ch;
+                                $escaped = true;
+                                $pos++;
+                                continue;
+                            }
+
+                            if ($ch === "'" && !$inQuote) {
+                                $inQuote = true;
+                                $val .= $ch;
+                                $pos++;
+                                continue;
+                            }
+
+                            if ($ch === "'" && $inQuote) {
+                                $val .= $ch;
+                                $inQuote = false;
+                                $pos++;
+                                continue;
+                            }
+
+                            if ($inQuote) {
+                                $val .= $ch;
+                                $pos++;
+                                continue;
+                            }
+
+                            if ($ch === '(') {
+                                $depth++;
+                                $val .= $ch;
+                                $pos++;
+                                continue;
+                            }
+
+                            if ($ch === ')' && $depth > 0) {
+                                $depth--;
+                                $val .= $ch;
+                                $pos++;
+                                continue;
+                            }
+
+                            if ($ch === ')' && $depth === 0) {
+                                $values[] = $val;
+                                $pos++; // skip )
+                                break;
+                            }
+
+                            if ($ch === ',' && $depth === 0) {
+                                $values[] = $val;
+                                $val = '';
+                                $pos++;
+                                continue;
+                            }
+
+                            $val .= $ch;
+                            $pos++;
+                        }
+
+                        // Remove generated column values
+                        $newValues = [];
+                        foreach ($values as $i => $v) {
+                            if (!in_array($i, $removeIdx, true)) {
+                                $newValues[] = $v;
+                            }
+                        }
+
+                        if (!$first) $newLine .= ',';
+                        $newLine .= '(' . implode(',', $newValues) . ')';
+                        $first = false;
+                    }
+
+                    echo $newLine;
+                    continue;
                 }
+            }
+        }
+    }
+    echo $line;
+}
+PHPEOF;
+                    file_put_contents($filterScript, $phpFilter);
+                }
+
+                // 3. Import: gunzip → optional PHP filter → mysql
+                if ($filterScript) {
+                    $importCmd = sprintf(
+                        'gunzip -c %s | php %s %s | %s --force %s 2>&1',
+                        escapeshellarg($file),
+                        escapeshellarg($filterScript),
+                        escapeshellarg(json_encode($generatedCols)),
+                        $mysqlCmd,
+                        escapeshellarg($tempDb)
+                    );
+                } else {
+                    $importCmd = sprintf(
+                        'gunzip -c %s | %s --force %s 2>&1',
+                        escapeshellarg($file),
+                        $mysqlCmd,
+                        escapeshellarg($tempDb)
+                    );
+                }
+                $output = trim((string)shell_exec($importCmd));
+
+                // 4. Check if temp DB has tables
+                file_put_contents($sqlOps, "SELECT GROUP_CONCAT(table_name) FROM information_schema.tables WHERE table_schema = '{$tempDb}' AND table_type = 'BASE TABLE';\n");
+                $tables = trim((string)shell_exec(sprintf('%s -N < %s 2>/dev/null', $mysqlCmd, escapeshellarg($sqlOps))));
+
+                $importOk = !empty($tables) && $tables !== 'NULL';
 
                 if ($importOk) {
-                    // 3. Rename tables: MySQL doesn't support RENAME DATABASE,
-                    //    so we rename all tables from temp to original atomically
-                    $tables = trim((string)shell_exec(sprintf(
-                        "%s -N -e \"SELECT GROUP_CONCAT(table_name) FROM information_schema.tables WHERE table_schema = '%s' AND table_type = 'BASE TABLE'\" 2>/dev/null",
-                        $mysqlCmd, $tempDb
-                    )));
-
-                    if ($tables) {
-                        // Build atomic RENAME TABLE statement: temp.t1 TO orig.t1, temp.t2 TO orig.t2, ...
-                        $renameStmts = [];
-                        foreach (explode(',', $tables) as $tbl) {
-                            $tbl = trim($tbl);
-                            if ($tbl) {
-                                $renameStmts[] = sprintf('`%s`.`%s` TO `%s`.`%s`', $tempDb, $tbl, $dbName, $tbl);
-                            }
+                    // 5. Atomic swap: DROP original → CREATE original → RENAME all tables
+                    $renameSql = "DROP DATABASE IF EXISTS `{$dbName}`;\nCREATE DATABASE `{$dbName}`;\nGRANT ALL ON `{$dbName}`.* TO '{$dbUser}'@'localhost';\nRENAME TABLE ";
+                    $parts = [];
+                    foreach (explode(',', $tables) as $tbl) {
+                        $tbl = trim($tbl);
+                        if ($tbl) {
+                            $parts[] = "`{$tempDb}`.`{$tbl}` TO `{$dbName}`.`{$tbl}`";
                         }
-
-                        if ($renameStmts) {
-                            // DROP original + CREATE empty + RENAME all tables in one atomic statement
-                            shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`; CREATE DATABASE \`%s\`" 2>/dev/null', $mysqlCmd, $dbName, $dbName));
-                            shell_exec(sprintf("%s -e \"GRANT ALL ON \`%s\`.* TO '%s'@'localhost'\" 2>/dev/null", $mysqlCmd, $dbName, $dbUser));
-                            shell_exec(sprintf('%s -e "RENAME TABLE %s" 2>/dev/null', $mysqlCmd, implode(', ', $renameStmts)));
-                        }
-                    } else {
-                        // No tables — just replace the DB
-                        shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`; CREATE DATABASE \`%s\`" 2>/dev/null', $mysqlCmd, $dbName, $dbName));
-                        shell_exec(sprintf("%s -e \"GRANT ALL ON \`%s\`.* TO '%s'@'localhost'\" 2>/dev/null", $mysqlCmd, $dbName, $dbUser));
                     }
+                    $renameSql .= implode(', ', $parts) . ";\n";
+                    $renameSql .= "DROP DATABASE IF EXISTS `{$tempDb}`;\n";
 
-                    // Clean up temp DB (now empty after rename, or just drop it)
-                    shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`" 2>/dev/null', $mysqlCmd, $tempDb));
+                    file_put_contents($sqlOps, $renameSql);
+                    shell_exec(sprintf('%s < %s 2>&1', $mysqlCmd, escapeshellarg($sqlOps)));
                 } else {
-                    // Import failed — clean up temp and leave original untouched
-                    shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`" 2>/dev/null', $mysqlCmd, $tempDb));
+                    // Import failed — clean temp, leave original
+                    file_put_contents($sqlOps, "DROP DATABASE IF EXISTS `{$tempDb}`;\n");
+                    shell_exec(sprintf('%s < %s 2>/dev/null', $mysqlCmd, escapeshellarg($sqlOps)));
                 }
 
-                // Also handle views, routines (they stay with the dump, imported into temp)
+                @unlink($sqlOps);
+                if ($filterScript) @unlink($filterScript);
                 $ok = $importOk;
             }
 
