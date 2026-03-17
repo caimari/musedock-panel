@@ -1296,16 +1296,18 @@ PHPEOF;
                     file_put_contents($filterScript, $phpFilter);
                 }
 
-                // 3. Import: gunzip → sed (fix TEXT/BLOB DEFAULT) → optional PHP filter → mysql
-                // MariaDB 10.x rejects DEFAULT on TEXT/BLOB/JSON columns (ERROR 1101)
-                // Remove DEFAULT 'value' or DEFAULT NULL from lines containing text/blob/json types
-                $sedFix = "sed -E \"s/(text|blob|json)([^,]*) DEFAULT (NULL|'[^']*')/\\1\\2/gi\"";
+                // 3. Import: gunzip → sed pipeline (MariaDB compat) → optional PHP filter → mysql --force
+                // Fix ERROR 1231: NO_AUTO_CREATE_USER doesn't exist in MariaDB
+                // Fix ERROR 1101: MariaDB rejects DEFAULT on TEXT/BLOB/JSON columns
+                $sedPipeline = "sed \"s/NO_AUTO_CREATE_USER,\\\\\\?//g; s/,\\\\+/,/g; s/,'/'/g\""
+                    . " | sed -E \"s/(longtext|mediumtext|text|blob|longblob|mediumblob|json)([^,]*) DEFAULT '[^']*'/\\1\\2 DEFAULT NULL/gi\""
+                    . " | sed 's/utf8mb4_0900_ai_ci/utf8mb4_unicode_ci/g'";
 
                 if ($filterScript) {
                     $importCmd = sprintf(
                         'gunzip -c %s | %s | php %s %s | %s --force %s 2>&1',
                         escapeshellarg($file),
-                        $sedFix,
+                        $sedPipeline,
                         escapeshellarg($filterScript),
                         escapeshellarg(json_encode($generatedCols)),
                         $mysqlCmd,
@@ -1315,7 +1317,7 @@ PHPEOF;
                     $importCmd = sprintf(
                         'gunzip -c %s | %s | %s --force %s 2>&1',
                         escapeshellarg($file),
-                        $sedFix,
+                        $sedPipeline,
                         $mysqlCmd,
                         escapeshellarg($tempDb)
                     );
@@ -1330,17 +1332,21 @@ PHPEOF;
                 $importOk = !empty($tableList);
 
                 if ($importOk) {
-                    // 5. Atomic swap: DROP original → CREATE original → RENAME all tables in one statement
-                    $renameSql = "DROP DATABASE IF EXISTS `{$dbName}`;\nCREATE DATABASE `{$dbName}`;\nGRANT ALL ON `{$dbName}`.* TO '{$dbUser}'@'localhost';\nRENAME TABLE ";
-                    $parts = [];
+                    // 5. Atomic swap: DROP original → CREATE original → RENAME tables one by one
+                    // Using individual RENAME to avoid single-statement failure blocking all tables
+                    $swapSql = "DROP DATABASE IF EXISTS `{$dbName}`;\n";
+                    $swapSql .= "CREATE DATABASE `{$dbName}`;\n";
+                    $swapSql .= "GRANT ALL ON `{$dbName}`.* TO '{$dbUser}'@'localhost';\n";
                     foreach ($tableList as $tbl) {
-                        $parts[] = "`{$tempDb}`.`{$tbl}` TO `{$dbName}`.`{$tbl}`";
+                        $swapSql .= "RENAME TABLE `{$tempDb}`.`{$tbl}` TO `{$dbName}`.`{$tbl}`;\n";
                     }
-                    $renameSql .= implode(', ', $parts) . ";\n";
-                    $renameSql .= "DROP DATABASE IF EXISTS `{$tempDb}`;\n";
+                    $swapSql .= "DROP DATABASE IF EXISTS `{$tempDb}`;\n";
 
-                    file_put_contents($sqlOps, $renameSql);
-                    shell_exec(sprintf('%s < %s 2>&1', $mysqlCmd, escapeshellarg($sqlOps)));
+                    file_put_contents($sqlOps, $swapSql);
+                    $swapOutput = trim((string)shell_exec(sprintf('%s --force < %s 2>&1', $mysqlCmd, escapeshellarg($sqlOps))));
+                    if ($swapOutput) {
+                        $output = ($output ? $output . "\n" : '') . "SWAP: " . $swapOutput;
+                    }
                 } else {
                     // Import failed — clean temp, leave original
                     file_put_contents($sqlOps, "DROP DATABASE IF EXISTS `{$tempDb}`;\n");
