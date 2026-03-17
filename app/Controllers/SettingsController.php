@@ -475,6 +475,15 @@ class SettingsController
         // Get all timezones
         $timezones = \DateTimeZone::listIdentifiers();
 
+        // NTP info
+        $ntpSynced = str_contains(shell_exec('timedatectl 2>/dev/null') ?? '', 'System clock synchronized: yes');
+        $ntpActive = str_contains(shell_exec('timedatectl 2>/dev/null') ?? '', 'NTP service: active');
+        $ntpServer = trim(shell_exec("systemctl show systemd-timesyncd --property=StatusText --value 2>/dev/null") ?? '');
+        // Try to get the actual NTP server from timesyncd
+        if (empty($ntpServer) || $ntpServer === '[not set]') {
+            $ntpServer = trim(shell_exec("timedatectl timesync-status 2>/dev/null | grep 'Server:' | awk '{print \$2}'") ?? '');
+        }
+
         // Panel access info
         $panelPort = \MuseDockPanel\Env::get('PANEL_PORT', '8444');
 
@@ -490,6 +499,9 @@ class SettingsController
             'serverIp' => $serverIp,
             'panelPort' => $panelPort,
             'timezones' => $timezones,
+            'ntpSynced' => $ntpSynced,
+            'ntpActive' => $ntpActive,
+            'ntpServer' => $ntpServer,
         ]);
     }
 
@@ -1118,5 +1130,234 @@ class SettingsController
                 }
             }
         }
+    }
+
+    // ================================================================
+    // System Health
+    // ================================================================
+
+    public function health(): void
+    {
+        $checks = [];
+
+        // ─── 1. Cron jobs ────────────────────────────────────────
+        $requiredCrons = [
+            'musedock-cluster'  => ['desc' => 'Cluster worker (queue, heartbeat, alerts)', 'interval' => 'Every minute'],
+            'musedock-backup'   => ['desc' => 'Panel DB backup (hourly)', 'interval' => 'Every hour'],
+            'musedock-filesync' => ['desc' => 'File sync worker (master-slave replication)', 'interval' => 'Every minute'],
+            'musedock-monitor'  => ['desc' => 'Network/system monitoring collector', 'interval' => 'Every 30 seconds'],
+        ];
+        $cronChecks = [];
+        foreach ($requiredCrons as $name => $info) {
+            $file = "/etc/cron.d/{$name}";
+            $exists = file_exists($file);
+            $content = $exists ? @file_get_contents($file) : '';
+            // Check if cron content is not empty and has valid entries (not just comments)
+            $hasEntries = false;
+            if ($content) {
+                foreach (explode("\n", $content) as $line) {
+                    $line = trim($line);
+                    if ($line && $line[0] !== '#') {
+                        $hasEntries = true;
+                        break;
+                    }
+                }
+            }
+            $cronChecks[$name] = [
+                'name'     => $name,
+                'desc'     => $info['desc'],
+                'interval' => $info['interval'],
+                'exists'   => $exists,
+                'valid'    => $exists && $hasEntries,
+            ];
+        }
+        $checks['crons'] = $cronChecks;
+
+        // ─── 2. Required PHP extensions ──────────────────────────
+        $requiredExtensions = [
+            'pdo'       => 'Database connectivity (PDO)',
+            'pdo_pgsql' => 'PostgreSQL database driver',
+            'pdo_mysql' => 'MySQL database driver',
+            'curl'      => 'HTTP requests (API, notifications)',
+            'mbstring'  => 'Multibyte string support',
+            'json'      => 'JSON encoding/decoding',
+            'openssl'   => 'SSL/TLS and encryption',
+            'session'   => 'Session management',
+            'fileinfo'  => 'File type detection',
+            'posix'     => 'POSIX functions (system users)',
+        ];
+        $extChecks = [];
+        foreach ($requiredExtensions as $ext => $desc) {
+            $extChecks[$ext] = [
+                'name'      => $ext,
+                'desc'      => $desc,
+                'loaded'    => extension_loaded($ext),
+            ];
+        }
+        $checks['extensions'] = $extChecks;
+
+        // ─── 3. Required system binaries ─────────────────────────
+        $requiredBinaries = [
+            'php'         => ['paths' => ['/usr/bin/php', '/usr/bin/php8.3'], 'desc' => 'PHP CLI interpreter'],
+            'caddy'       => ['paths' => ['/usr/bin/caddy'], 'desc' => 'Web server'],
+            'psql'        => ['paths' => ['/usr/bin/psql'], 'desc' => 'PostgreSQL client'],
+            'pg_dump'     => ['paths' => ['/usr/bin/pg_dump'], 'desc' => 'PostgreSQL backup tool'],
+            'mysql'       => ['paths' => ['/usr/bin/mysql', '/usr/bin/mariadb'], 'desc' => 'MySQL/MariaDB client'],
+            'wg'          => ['paths' => ['/usr/bin/wg'], 'desc' => 'WireGuard tools'],
+            'ufw'         => ['paths' => ['/usr/sbin/ufw'], 'desc' => 'Uncomplicated Firewall'],
+            'fail2ban-client' => ['paths' => ['/usr/bin/fail2ban-client'], 'desc' => 'Fail2Ban intrusion prevention'],
+
+            'rsync'       => ['paths' => ['/usr/bin/rsync'], 'desc' => 'File synchronization'],
+            'git'         => ['paths' => ['/usr/bin/git'], 'desc' => 'Version control'],
+            'nproc'       => ['paths' => ['/usr/bin/nproc'], 'desc' => 'CPU core detection'],
+        ];
+        $binChecks = [];
+        foreach ($requiredBinaries as $name => $info) {
+            $found = false;
+            $foundPath = '';
+            foreach ($info['paths'] as $path) {
+                if (is_executable($path)) {
+                    $found = true;
+                    $foundPath = $path;
+                    break;
+                }
+            }
+            // Try which as fallback
+            if (!$found) {
+                $which = trim((string)shell_exec("which {$name} 2>/dev/null"));
+                if ($which && is_executable($which)) {
+                    $found = true;
+                    $foundPath = $which;
+                }
+            }
+            $version = '';
+            if ($found) {
+                if ($name === 'php') {
+                    $version = PHP_VERSION;
+                } elseif ($name === 'caddy') {
+                    $version = trim(shell_exec("{$foundPath} version 2>/dev/null | head -1") ?? '');
+                } elseif (in_array($name, ['psql', 'pg_dump'])) {
+                    $version = trim(shell_exec("{$foundPath} --version 2>/dev/null | head -1") ?? '');
+                } elseif ($name === 'mysql') {
+                    $version = trim(shell_exec("{$foundPath} --version 2>/dev/null | head -1") ?? '');
+                } elseif ($name === 'git') {
+                    $version = trim(shell_exec("{$foundPath} --version 2>/dev/null") ?? '');
+                }
+            }
+            $binChecks[$name] = [
+                'name'    => $name,
+                'desc'    => $info['desc'],
+                'found'   => $found,
+                'path'    => $foundPath,
+                'version' => $version,
+            ];
+        }
+        $checks['binaries'] = $binChecks;
+
+        // ─── 4. Directories & permissions ────────────────────────
+        $panelDir = defined('PANEL_ROOT') ? PANEL_ROOT : '/opt/musedock-panel';
+        $requiredDirs = [
+            'storage/logs'     => 'Log files',
+            'storage/sessions' => 'PHP sessions',
+            'storage/cache'    => 'Cache files',
+            'storage/backups'  => 'Database backups',
+        ];
+        $dirChecks = [];
+        foreach ($requiredDirs as $dir => $desc) {
+            $fullPath = $panelDir . '/' . $dir;
+            $exists = is_dir($fullPath);
+            $writable = $exists && is_writable($fullPath);
+            $dirChecks[$dir] = [
+                'path'     => $dir,
+                'desc'     => $desc,
+                'exists'   => $exists,
+                'writable' => $writable,
+            ];
+        }
+        $checks['directories'] = $dirChecks;
+
+        // ─── 5. Panel service ────────────────────────────────────
+        $svcStatus = trim(shell_exec('systemctl is-active musedock-panel 2>/dev/null') ?? 'unknown');
+        $svcEnabled = trim(shell_exec('systemctl is-enabled musedock-panel 2>/dev/null') ?? 'unknown');
+        $checks['service'] = [
+            'active'  => $svcStatus === 'active',
+            'enabled' => $svcEnabled === 'enabled',
+            'status'  => $svcStatus,
+        ];
+
+        // ─── 6. Database connectivity ────────────────────────────
+        $dbOk = false;
+        $dbVersion = '';
+        try {
+            $row = \MuseDockPanel\Database::fetchOne("SELECT version() AS v");
+            $dbOk = true;
+            $dbVersion = $row['v'] ?? '';
+        } catch (\Throwable) {}
+        $checks['database'] = [
+            'connected' => $dbOk,
+            'version'   => $dbVersion,
+        ];
+
+        // Summary counts
+        $totalChecks = 0;
+        $passedChecks = 0;
+        foreach ($checks['crons'] as $c) { $totalChecks++; if ($c['valid']) $passedChecks++; }
+        foreach ($checks['extensions'] as $c) { $totalChecks++; if ($c['loaded']) $passedChecks++; }
+        foreach ($checks['binaries'] as $c) { $totalChecks++; if ($c['found']) $passedChecks++; }
+        foreach ($checks['directories'] as $c) { $totalChecks++; if ($c['writable']) $passedChecks++; }
+        $totalChecks += 2; // service + database
+        if ($checks['service']['active']) $passedChecks++;
+        if ($checks['database']['connected']) $passedChecks++;
+
+        View::render('settings/health', [
+            'layout'       => 'main',
+            'pageTitle'    => 'System Health',
+            'checks'       => $checks,
+            'totalChecks'  => $totalChecks,
+            'passedChecks' => $passedChecks,
+        ]);
+    }
+
+    /**
+     * POST /settings/health/repair-cron — Repair a missing cron file
+     */
+    public function healthRepairCron(): void
+    {
+        View::verifyCsrf();
+
+        $cronName = $_POST['cron'] ?? '';
+        $panelDir = defined('PANEL_ROOT') ? PANEL_ROOT : '/opt/musedock-panel';
+
+        $cronTemplates = [
+            'musedock-cluster' => "# MuseDock Panel — Cluster worker (queue, heartbeat, alerts)\n* * * * * root /usr/bin/php {$panelDir}/bin/cluster-worker.php >> {$panelDir}/storage/logs/cluster-worker.log 2>&1\n",
+            'musedock-backup' => "# MuseDock Panel — Hourly panel DB backup\n0 * * * * postgres pg_dump -p 5433 musedock_panel | gzip > {$panelDir}/storage/backups/panel-\$(date +\\%Y\\%m\\%d_\\%H).sql.gz 2>/dev/null\n# Cleanup backups older than 48 hours\n5 * * * * root find {$panelDir}/storage/backups/ -name \"panel-*.sql.gz\" -mmin +2880 -delete 2>/dev/null\n",
+            'musedock-filesync' => "# MuseDock Panel — File sync worker (master -> slave file replication)\n* * * * * root /usr/bin/php {$panelDir}/bin/filesync-worker.php >> {$panelDir}/storage/logs/filesync-worker.log 2>&1\n",
+            'musedock-monitor' => "# MuseDock Panel — Network/system monitoring collector (every 30s)\n* * * * * root /usr/bin/php {$panelDir}/bin/monitor-collector.php\n* * * * * root sleep 30 && /usr/bin/php {$panelDir}/bin/monitor-collector.php\n",
+        ];
+
+        if (!isset($cronTemplates[$cronName])) {
+            Flash::set('error', 'Cron no reconocido.');
+            Router::redirect('/settings/health');
+            return;
+        }
+
+        $file = "/etc/cron.d/{$cronName}";
+        $result = @file_put_contents($file, $cronTemplates[$cronName]);
+
+        if ($result === false) {
+            // Try via shell
+            $escaped = escapeshellarg($cronTemplates[$cronName]);
+            $escaped_file = escapeshellarg($file);
+            shell_exec("echo {$escaped} > {$escaped_file} 2>&1");
+            @chmod($file, 0644);
+            shell_exec("systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null");
+        } else {
+            @chmod($file, 0644);
+            shell_exec("systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null");
+        }
+
+        LogService::log('system.health', 'repair-cron', "Repaired cron: {$cronName}");
+        Flash::set('success', "Cron {$cronName} reparado correctamente.");
+        Router::redirect('/settings/health');
     }
 }

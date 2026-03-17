@@ -1029,7 +1029,7 @@ if [ "$REPAIR_MODE" = true ]; then
     echo ""
     echo -e "  ${CYAN}$(t repair_check_crons)${NC}"
     CRONS_FIXED=0
-    for cronfile in musedock-cluster musedock-backup musedock-filesync; do
+    for cronfile in musedock-cluster musedock-backup musedock-filesync musedock-monitor; do
         if [ ! -f "/etc/cron.d/${cronfile}" ]; then
             warn "  /etc/cron.d/${cronfile} — faltante"
             CRONS_FIXED=$((CRONS_FIXED + 1))
@@ -1057,6 +1057,13 @@ CRONEOF
 * * * * * root /usr/bin/php ${PANEL_DIR}/bin/filesync-worker.php >> ${PANEL_DIR}/storage/logs/filesync-worker.log 2>&1
 CRONEOF
         chmod 644 /etc/cron.d/musedock-filesync
+
+        cat > /etc/cron.d/musedock-monitor << CRONEOF
+# MuseDock Panel — Network/system monitoring collector (every 30s)
+* * * * * root /usr/bin/php ${PANEL_DIR}/bin/monitor-collector.php
+* * * * * root sleep 30 && /usr/bin/php ${PANEL_DIR}/bin/monitor-collector.php
+CRONEOF
+        chmod 644 /etc/cron.d/musedock-monitor
 
         systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
         ok "$(t repair_fixed)"
@@ -1478,6 +1485,14 @@ CRONEOF
 * * * * * root /usr/bin/php ${PANEL_DIR}/bin/filesync-worker.php >> ${PANEL_DIR}/storage/logs/filesync-worker.log 2>&1
 CRONEOF
     chmod 644 /etc/cron.d/musedock-filesync
+
+    # Monitor collector (network, CPU, RAM — every 30s)
+    cat > /etc/cron.d/musedock-monitor << CRONEOF
+# MuseDock Panel — Network/system monitoring collector (every 30s)
+* * * * * root /usr/bin/php ${PANEL_DIR}/bin/monitor-collector.php
+* * * * * root sleep 30 && /usr/bin/php ${PANEL_DIR}/bin/monitor-collector.php
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-monitor
 
     systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
     ok "$(t update_crons)"
@@ -2588,6 +2603,16 @@ cat > "$CRON_FILESYNC" << CRONEOF
 CRONEOF
 chmod 644 "$CRON_FILESYNC"
 ok "Cron: filesync-worker.php (cada minuto, respeta intervalo configurado)"
+
+# Monitor collector — reads network/CPU/RAM stats every 30 seconds
+CRON_MONITOR="/etc/cron.d/musedock-monitor"
+cat > "$CRON_MONITOR" << CRONEOF
+# MuseDock Panel — Network/system monitoring collector (every 30s)
+* * * * * root /usr/bin/php ${PANEL_DIR}/bin/monitor-collector.php
+* * * * * root sleep 30 && /usr/bin/php ${PANEL_DIR}/bin/monitor-collector.php
+CRONEOF
+chmod 644 "$CRON_MONITOR"
+ok "Cron: monitor-collector.php (cada 30 segundos)"
 
 # Reload cron daemon
 systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true

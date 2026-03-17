@@ -90,6 +90,9 @@
         <a href="/" class="<?= ($pageTitle ?? '') === 'Dashboard' ? 'active' : '' ?>">
             <i class="bi bi-speedometer2"></i> Dashboard
         </a>
+        <a href="/monitor" class="<?= ($pageTitle ?? '') === 'Monitoring' ? 'active' : '' ?>">
+            <i class="bi bi-activity"></i> Monitoring
+        </a>
         <a href="/accounts" class="<?= str_contains($pageTitle ?? '', 'Hosting') || str_contains($pageTitle ?? '', 'Create') ? 'active' : '' ?>">
             <i class="bi bi-server"></i> Hosting Accounts
         </a>
@@ -126,6 +129,12 @@
     <div class="top-bar">
         <h4><?= View::e($pageTitle ?? 'Dashboard') ?></h4>
         <span class="text-muted small"><?= date('d M Y, H:i') ?> (<?= date('T') ?> — System Time)</span>
+        <span id="update-banner" style="display:none;" class="ms-3">
+            <a href="/settings/updates" class="badge text-decoration-none" style="background:rgba(34,197,94,0.15);color:#22c55e;font-size:0.8rem;padding:6px 12px;">
+                <i class="bi bi-cloud-arrow-down me-1"></i>
+                v<span id="update-remote-ver"></span> disponible
+            </a>
+        </span>
     </div>
 
     <div class="content-area">
@@ -202,6 +211,14 @@ document.querySelectorAll('.flash-alert').forEach(function(el) {
         alert.close();
     }, 4000);
 });
+</script>
+<script>
+fetch('/settings/updates/api/status').then(r=>r.json()).then(d=>{
+    if(d.has_update){
+        document.getElementById('update-remote-ver').textContent=d.remote;
+        document.getElementById('update-banner').style.display='inline';
+    }
+}).catch(()=>{});
 </script>
 </body>
 </html>

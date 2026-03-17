@@ -77,17 +77,27 @@ cd "${PANEL_DIR}"
 # Check for local modifications (excluding .env and storage)
 LOCAL_CHANGES=$(git status --porcelain --ignore-submodules 2>/dev/null | grep -v '^\?\?' | grep -v '.env' | grep -v 'storage/' || true)
 
+AUTO_MODE=false
+if [ "${1:-}" = "--auto" ]; then
+    AUTO_MODE=true
+fi
+
 if [ -n "$LOCAL_CHANGES" ]; then
-    warn "Local modifications detected:"
-    echo "$LOCAL_CHANGES" | head -10 | sed 's/^/    /'
-    echo ""
-    read -rp "  Stash local changes and continue? [Y/n] " STASH_CONFIRM
-    STASH_CONFIRM=${STASH_CONFIRM:-Y}
-    if [[ "$STASH_CONFIRM" =~ ^[Yy]$ ]]; then
-        git stash push -m "musedock-update-$(date +%Y%m%d%H%M%S)" > /dev/null 2>&1
-        ok "Local changes stashed (use 'git stash pop' to recover)"
+    if [ "$AUTO_MODE" = true ]; then
+        git stash push -m "musedock-auto-update-$(date +%Y%m%d%H%M%S)" > /dev/null 2>&1
+        ok "Local changes stashed automatically (use 'git stash pop' to recover)"
     else
-        fail "Update cancelled. Commit or stash your changes first."
+        warn "Local modifications detected:"
+        echo "$LOCAL_CHANGES" | head -10 | sed 's/^/    /'
+        echo ""
+        read -rp "  Stash local changes and continue? [Y/n] " STASH_CONFIRM
+        STASH_CONFIRM=${STASH_CONFIRM:-Y}
+        if [[ "$STASH_CONFIRM" =~ ^[Yy]$ ]]; then
+            git stash push -m "musedock-update-$(date +%Y%m%d%H%M%S)" > /dev/null 2>&1
+            ok "Local changes stashed (use 'git stash pop' to recover)"
+        else
+            fail "Update cancelled. Commit or stash your changes first."
+        fi
     fi
 fi
 
@@ -132,6 +142,18 @@ echo -e "${CYAN}${BOLD}[3/4]${NC} Clearing cache..."
 
 rm -rf "${PANEL_DIR}/storage/cache/"* 2>/dev/null || true
 ok "Cache cleared"
+
+# Install monitor cron if missing (added in monitoring feature)
+if [ ! -f /etc/cron.d/musedock-monitor ]; then
+    cat > /etc/cron.d/musedock-monitor << CRONEOF
+# MuseDock Panel — Network/system monitoring collector (every 30s)
+* * * * * root /usr/bin/php ${PANEL_DIR}/bin/monitor-collector.php
+* * * * * root sleep 30 && /usr/bin/php ${PANEL_DIR}/bin/monitor-collector.php
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-monitor
+    systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
+    ok "Monitor cron installed"
+fi
 
 echo ""
 

@@ -19,6 +19,22 @@
                     <tr><td class="text-muted">Uptime</td><td><?= View::e($uptime) ?></td></tr>
                     <tr><td class="text-muted">PHP</td><td><?= PHP_VERSION ?></td></tr>
                     <tr><td class="text-muted">Panel</td><td>v<?= View::e($panelVersion ?? '0.1.0') ?></td></tr>
+                    <tr><td class="text-muted">Timezone</td><td><?= View::e($currentTz) ?> — <?= date('H:i:s T') ?></td></tr>
+                    <tr>
+                        <td class="text-muted">NTP</td>
+                        <td>
+                            <?php if ($ntpActive && $ntpSynced): ?>
+                                <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;"><i class="bi bi-check-circle me-1"></i>Synchronized</span>
+                            <?php elseif ($ntpActive): ?>
+                                <span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;"><i class="bi bi-exclamation-triangle me-1"></i>Active (not synced)</span>
+                            <?php else: ?>
+                                <span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;"><i class="bi bi-x-circle me-1"></i>Inactive</span>
+                            <?php endif; ?>
+                            <?php if (!empty($ntpServer)): ?>
+                                <small class="text-muted ms-2"><?= View::e($ntpServer) ?></small>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
                 </table>
             </div>
         </div>

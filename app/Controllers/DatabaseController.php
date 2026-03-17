@@ -52,7 +52,7 @@ class DatabaseController
                        pg_catalog.pg_database_size(d.datname) AS size_bytes
                 FROM pg_catalog.pg_database d
                 WHERE d.datistemplate = false
-                ORDER BY d.datname
+                ORDER BY (d.datname = 'musedock_panel') DESC, d.datname
             ");
         } catch (\Throwable) {}
 

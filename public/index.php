@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.6.0');
+define('PANEL_VERSION', '0.7.0');
 
 
 
@@ -102,6 +102,13 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/dashboard/process-detail', 'DashboardController@processDetail');
 \MuseDockPanel\Router::post('/dashboard/process-kill', 'DashboardController@processKill');
 
+// Monitoring
+\MuseDockPanel\Router::get('/monitor', 'MonitorController@index');
+\MuseDockPanel\Router::get('/monitor/api/metrics', 'MonitorController@apiMetrics');
+\MuseDockPanel\Router::get('/monitor/api/status', 'MonitorController@apiStatus');
+\MuseDockPanel\Router::get('/monitor/api/alerts', 'MonitorController@apiAlerts');
+\MuseDockPanel\Router::post('/monitor/api/alerts/ack', 'MonitorController@apiAckAlert');
+
 // Hosting Accounts
 \MuseDockPanel\Router::get('/accounts', 'AccountController@index');
 \MuseDockPanel\Router::get('/accounts/create', 'AccountController@create');
@@ -169,6 +176,16 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/fail2ban/unban', 'SettingsController@fail2banUnban');
 \MuseDockPanel\Router::get('/settings/logs', 'SettingsController@logs');
 \MuseDockPanel\Router::post('/settings/logs/clear', 'SettingsController@logClear');
+
+// System Health
+\MuseDockPanel\Router::get('/settings/health', 'SettingsController@health');
+\MuseDockPanel\Router::post('/settings/health/repair-cron', 'SettingsController@healthRepairCron');
+
+// Updates
+\MuseDockPanel\Router::get('/settings/updates', 'UpdateController@index');
+\MuseDockPanel\Router::post('/settings/updates/check', 'UpdateController@check');
+\MuseDockPanel\Router::post('/settings/updates/run', 'UpdateController@run');
+\MuseDockPanel\Router::get('/settings/updates/api/status', 'UpdateController@apiStatus');
 
 // Notifications
 \MuseDockPanel\Router::get('/settings/notifications', 'NotificationController@index');

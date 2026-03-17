@@ -103,6 +103,79 @@ function formatDbSize(int $bytes): string {
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
+<!-- PostgreSQL Panel (port 5433) — Panel only, no replication   -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="card mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between">
+        <span>
+            <i class="bi bi-database me-2" style="color:#fbbf24;"></i>PostgreSQL — Panel
+            <span class="badge bg-secondary ms-1"><?= $totalPgPanel ?></span>
+            <small class="text-muted ms-2">Puerto 5433 &middot; Cluster <code>panel</code></small>
+        </span>
+        <span>
+            <span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;">
+                <i class="bi bi-lock me-1"></i>Instancia dedicada
+            </span>
+            <span class="badge bg-secondary ms-1">No replicable</span>
+        </span>
+    </div>
+    <div class="card-body p-0">
+        <?php if (empty($pgPanelDatabases)): ?>
+            <div class="p-4 text-center text-muted">
+                <i class="bi bi-database-x" style="font-size: 2rem;"></i>
+                <p class="mt-2">No se pudo conectar a PostgreSQL en puerto 5433.</p>
+            </div>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th class="ps-3">Base de Datos</th>
+                            <th>Owner</th>
+                            <th>Tamano</th>
+                            <th>Estado</th>
+                            <th class="text-end pe-3">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($pgPanelDatabases as $db): ?>
+                            <?php
+                                $dbName = $db['db_name'];
+                                $isSystem = in_array($dbName, $pgPanelSystemDbs);
+                            ?>
+                            <tr>
+                                <td class="ps-3">
+                                    <code><?= View::e($dbName) ?></code>
+                                    <?php if ($dbName === 'musedock_panel'): ?>
+                                        <span class="badge ms-1" style="background:rgba(251,191,36,0.15);color:#fbbf24;">
+                                            <i class="bi bi-lock me-1"></i>Panel
+                                        </span>
+                                    <?php elseif ($dbName === 'postgres'): ?>
+                                        <span class="badge bg-secondary ms-1">Default</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td><small class="text-muted"><?= View::e($db['owner'] ?? '-') ?></small></td>
+                                <td><small><?= formatDbSize((int)($db['size_bytes'] ?? 0)) ?></small></td>
+                                <td>
+                                    <?php if ($isSystem): ?>
+                                        <span class="badge bg-secondary">Sistema</span>
+                                    <?php else: ?>
+                                        <span class="badge" style="background:rgba(107,114,128,0.15);color:#9ca3af;">Externa</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-end pe-3">
+                                    <span class="text-muted"><small>Protegida</small></span>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
 <!-- PostgreSQL Main (port 5432) — Hosting, replicable          -->
 <!-- ═══════════════════════════════════════════════════════════ -->
 <div class="card mb-4">
@@ -212,79 +285,6 @@ function formatDbSize(int $bytes): string {
                                     <?php else: ?>
                                         <span class="text-muted"><small>No gestionada</small></span>
                                     <?php endif; ?>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        <?php endif; ?>
-    </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════ -->
-<!-- PostgreSQL Panel (port 5433) — Panel only, no replication   -->
-<!-- ═══════════════════════════════════════════════════════════ -->
-<div class="card mb-4">
-    <div class="card-header d-flex align-items-center justify-content-between">
-        <span>
-            <i class="bi bi-database me-2" style="color:#fbbf24;"></i>PostgreSQL — Panel
-            <span class="badge bg-secondary ms-1"><?= $totalPgPanel ?></span>
-            <small class="text-muted ms-2">Puerto 5433 &middot; Cluster <code>panel</code></small>
-        </span>
-        <span>
-            <span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;">
-                <i class="bi bi-lock me-1"></i>Instancia dedicada
-            </span>
-            <span class="badge bg-secondary ms-1">No replicable</span>
-        </span>
-    </div>
-    <div class="card-body p-0">
-        <?php if (empty($pgPanelDatabases)): ?>
-            <div class="p-4 text-center text-muted">
-                <i class="bi bi-database-x" style="font-size: 2rem;"></i>
-                <p class="mt-2">No se pudo conectar a PostgreSQL en puerto 5433.</p>
-            </div>
-        <?php else: ?>
-            <div class="table-responsive">
-                <table class="table table-hover mb-0">
-                    <thead>
-                        <tr>
-                            <th class="ps-3">Base de Datos</th>
-                            <th>Owner</th>
-                            <th>Tamano</th>
-                            <th>Estado</th>
-                            <th class="text-end pe-3">Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($pgPanelDatabases as $db): ?>
-                            <?php
-                                $dbName = $db['db_name'];
-                                $isSystem = in_array($dbName, $pgPanelSystemDbs);
-                            ?>
-                            <tr>
-                                <td class="ps-3">
-                                    <code><?= View::e($dbName) ?></code>
-                                    <?php if ($dbName === 'musedock_panel'): ?>
-                                        <span class="badge ms-1" style="background:rgba(251,191,36,0.15);color:#fbbf24;">
-                                            <i class="bi bi-lock me-1"></i>Panel
-                                        </span>
-                                    <?php elseif ($dbName === 'postgres'): ?>
-                                        <span class="badge bg-secondary ms-1">Default</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td><small class="text-muted"><?= View::e($db['owner'] ?? '-') ?></small></td>
-                                <td><small><?= formatDbSize((int)($db['size_bytes'] ?? 0)) ?></small></td>
-                                <td>
-                                    <?php if ($isSystem): ?>
-                                        <span class="badge bg-secondary">Sistema</span>
-                                    <?php else: ?>
-                                        <span class="badge" style="background:rgba(107,114,128,0.15);color:#9ca3af;">Externa</span>
-                                    <?php endif; ?>
-                                </td>
-                                <td class="text-end pe-3">
-                                    <span class="text-muted"><small>Protegida</small></span>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
