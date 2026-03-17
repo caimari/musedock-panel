@@ -32,6 +32,8 @@ class FileSyncService
             'ssl_cert_path'    => Settings::get('filesync_ssl_cert_path', ''),
             'rewrite_db_host'  => Settings::get('filesync_rewrite_dbhost', '1') === '1',
             'db_dumps'         => Settings::get('filesync_db_dumps', '0') === '1',
+            'db_dump_mysql'    => Settings::get('filesync_db_dump_mysql', '1') === '1',
+            'db_dump_pgsql'    => Settings::get('filesync_db_dump_pgsql', '1') === '1',
             'db_dump_path'     => Settings::get('filesync_db_dump_path', '/tmp/musedock-dumps'),
         ];
     }
@@ -43,7 +45,8 @@ class FileSyncService
             'filesync_ssh_key_path', 'filesync_ssh_user', 'filesync_interval',
             'filesync_bwlimit', 'filesync_exclude', 'filesync_ssl_certs',
             'filesync_ssl_cert_path', 'filesync_rewrite_dbhost',
-            'filesync_db_dumps', 'filesync_db_dump_path',
+            'filesync_db_dumps', 'filesync_db_dump_mysql', 'filesync_db_dump_pgsql',
+            'filesync_db_dump_path',
         ];
         foreach ($keys as $key) {
             if (isset($data[$key])) {
@@ -920,13 +923,17 @@ class FileSyncService
             $dbUser = $db['db_user'];
             $dumpFile = $dumpPath . '/' . $dbName . '.sql.gz';
 
+            // Skip if engine not selected for dump
+            if ($dbType === 'mysql' && !$config['db_dump_mysql']) continue;
+            if ($dbType === 'pgsql' && !$config['db_dump_pgsql']) continue;
+
             if ($dbType === 'mysql') {
                 $cmd = self::buildMysqldumpCmd();
                 if (!$cmd) {
                     $results[] = ['db_name' => $dbName, 'db_type' => $dbType, 'ok' => false, 'error' => 'MySQL auth no disponible'];
                     continue;
                 }
-                $fullCmd = sprintf('%s --single-transaction --quick --insert-ignore %s 2>/dev/null | gzip > %s',
+                $fullCmd = sprintf('%s --single-transaction --quick %s 2>/dev/null | gzip > %s',
                     $cmd, escapeshellarg($dbName), escapeshellarg($dumpFile));
             } else {
                 $fullCmd = sprintf('sudo -u postgres pg_dump -Fc %s 2>/dev/null | gzip > %s',
@@ -1018,11 +1025,15 @@ class FileSyncService
             $dbUser = $entry['db_user'];
             $dbType = $entry['db_type'];
             $file = $dumpPath . '/' . $entry['file'];
+            $tempDb = $dbName . '_sync_tmp';
 
             if (!file_exists($file) || filesize($file) < 20) {
                 $results[] = ['db_name' => $dbName, 'ok' => false, 'error' => 'Dump vacío o no encontrado'];
                 continue;
             }
+
+            // Strategy: Import into temp DB → DROP original → RENAME temp → original
+            // This minimizes downtime to the instant of the rename.
 
             if ($dbType === 'pgsql') {
                 // Ensure user exists
@@ -1031,26 +1042,40 @@ class FileSyncService
                     "'" . str_replace("'", "''", $dbUser) . "'",
                     $dbUser
                 ));
-                // Terminate active connections before DROP (required if FPM/Laravel holds connections)
+
+                // 1. Drop temp DB if leftover from a previous failed sync
+                shell_exec(sprintf('sudo -u postgres dropdb --if-exists %s 2>/dev/null', escapeshellarg($tempDb)));
+
+                // 2. Create temp DB and import
+                shell_exec(sprintf('sudo -u postgres createdb -O %s %s 2>/dev/null', escapeshellarg($dbUser), escapeshellarg($tempDb)));
+                $output = trim((string)shell_exec(sprintf(
+                    'gunzip -c %s | sudo -u postgres pg_restore -d %s --no-owner --no-acl 2>&1 || gunzip -c %s | sudo -u postgres psql %s 2>&1',
+                    escapeshellarg($file), escapeshellarg($tempDb),
+                    escapeshellarg($file), escapeshellarg($tempDb)
+                )));
+
+                // 3. Terminate connections to the original DB
                 shell_exec(sprintf(
                     'sudo -u postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()" 2>/dev/null',
                     "'" . str_replace("'", "''", $dbName) . "'"
                 ));
-                // DROP + CREATE + RESTORE (WITH FORCE for PG13+, fallback to regular drop)
+
+                // 4. DROP original (WITH FORCE for PG13+, fallback for older)
                 $dropResult = trim((string)shell_exec(sprintf(
                     'sudo -u postgres psql -c "DROP DATABASE IF EXISTS %s WITH (FORCE)" 2>&1',
                     '"' . str_replace('"', '""', $dbName) . '"'
                 )));
                 if (stripos($dropResult, 'ERROR') !== false) {
-                    // PG <13 fallback: WITH (FORCE) not supported
                     shell_exec(sprintf('sudo -u postgres dropdb --if-exists %s 2>/dev/null', escapeshellarg($dbName)));
                 }
-                shell_exec(sprintf('sudo -u postgres createdb -O %s %s 2>/dev/null', escapeshellarg($dbUser), escapeshellarg($dbName)));
-                $output = trim((string)shell_exec(sprintf(
-                    'gunzip -c %s | sudo -u postgres pg_restore -d %s --no-owner --no-acl 2>&1 || gunzip -c %s | sudo -u postgres psql %s 2>&1',
-                    escapeshellarg($file), escapeshellarg($dbName),
-                    escapeshellarg($file), escapeshellarg($dbName)
-                )));
+
+                // 5. RENAME temp → original (ALTER DATABASE ... RENAME TO is atomic)
+                shell_exec(sprintf(
+                    'sudo -u postgres psql -c "ALTER DATABASE %s RENAME TO %s" 2>/dev/null',
+                    '"' . str_replace('"', '""', $tempDb) . '"',
+                    '"' . str_replace('"', '""', $dbName) . '"'
+                ));
+
                 $ok = true; // pg_restore returns warnings that aren't errors
             } else {
                 $mysqlCmd = self::buildMysqlCmd();
@@ -1058,16 +1083,139 @@ class FileSyncService
                     $results[] = ['db_name' => $dbName, 'ok' => false, 'error' => 'MySQL auth no disponible'];
                     continue;
                 }
+
                 // Ensure user exists
                 shell_exec(sprintf("%s -e \"CREATE USER IF NOT EXISTS '%s'@'localhost'\" 2>/dev/null", $mysqlCmd, $dbUser));
-                // DROP + CREATE + GRANT + IMPORT
-                shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`; CREATE DATABASE \`%s\`" 2>/dev/null', $mysqlCmd, $dbName, $dbName));
-                shell_exec(sprintf("%s -e \"GRANT ALL ON \`%s\`.* TO '%s'@'localhost'\" 2>/dev/null", $mysqlCmd, $dbName, $dbUser));
+
+                // 1. Drop temp DB if leftover
+                shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`" 2>/dev/null', $mysqlCmd, $tempDb));
+
+                // 2. Create temp DB, grant, import
+                shell_exec(sprintf('%s -e "CREATE DATABASE \`%s\`" 2>/dev/null', $mysqlCmd, $tempDb));
+                shell_exec(sprintf("%s -e \"GRANT ALL ON \`%s\`.* TO '%s'@'localhost'\" 2>/dev/null", $mysqlCmd, $tempDb, $dbUser));
+
+                // First try normal import
                 $output = trim((string)shell_exec(sprintf(
                     'gunzip -c %s | %s %s 2>&1',
-                    escapeshellarg($file), $mysqlCmd, escapeshellarg($dbName)
+                    escapeshellarg($file), $mysqlCmd, escapeshellarg($tempDb)
                 )));
-                $ok = (stripos($output, 'ERROR') === false);
+
+                $importOk = (stripos($output, 'ERROR') === false);
+
+                // If ERROR 3105 (generated column) — retry: import structure,
+                // then drop generated columns, import data, recreate generated columns
+                if (!$importOk && stripos($output, 'ERROR 3105') !== false) {
+                    // Reset temp DB
+                    shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`; CREATE DATABASE \`%s\`" 2>/dev/null', $mysqlCmd, $tempDb, $tempDb));
+
+                    // Import with --force to get structure + as much data as possible
+                    $output = trim((string)shell_exec(sprintf(
+                        'gunzip -c %s | %s --force %s 2>&1',
+                        escapeshellarg($file), $mysqlCmd, escapeshellarg($tempDb)
+                    )));
+
+                    // Now find tables with missing data due to generated columns and fix them:
+                    // Get generated column definitions from the temp DB
+                    $genCols = trim((string)shell_exec(sprintf(
+                        "%s -N -e \"SELECT CONCAT(TABLE_NAME, '|', COLUMN_NAME, '|', COLUMN_TYPE, '|', GENERATION_EXPRESSION, '|', EXTRA) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = '%s' AND EXTRA LIKE '%%%%GENERATED%%%%' ORDER BY TABLE_NAME, ORDINAL_POSITION\" 2>/dev/null",
+                        $mysqlCmd, $tempDb
+                    )));
+
+                    if ($genCols) {
+                        // Group by table
+                        $tableGenCols = [];
+                        foreach (explode("\n", $genCols) as $line) {
+                            $parts = explode('|', trim($line));
+                            if (count($parts) >= 5) {
+                                $tblName = $parts[0];
+                                $tableGenCols[$tblName][] = [
+                                    'column' => $parts[1],
+                                    'type' => $parts[2],
+                                    'expression' => $parts[3],
+                                    'extra' => $parts[4],
+                                ];
+                            }
+                        }
+
+                        foreach ($tableGenCols as $tblName => $cols) {
+                            // Check if table has 0 rows (import failed for all rows)
+                            $rowCount = trim((string)shell_exec(sprintf(
+                                "%s -N -e \"SELECT COUNT(*) FROM \`%s\`.\`%s\`\" 2>/dev/null",
+                                $mysqlCmd, $tempDb, $tblName
+                            )));
+
+                            if ((int)$rowCount === 0) {
+                                // Drop generated columns temporarily
+                                foreach ($cols as $col) {
+                                    shell_exec(sprintf(
+                                        "%s -e \"ALTER TABLE \`%s\`.\`%s\` DROP COLUMN \`%s\`\" 2>/dev/null",
+                                        $mysqlCmd, $tempDb, $tblName, $col['column']
+                                    ));
+                                }
+
+                                // Re-import just this table's data (structure already exists minus generated cols)
+                                // Extract table data from dump and import
+                                shell_exec(sprintf(
+                                    'gunzip -c %s | sed -n "/^-- Dumping data for table .%s./,/^-- Dumping data for table\\|^-- Table structure/p" | %s --force %s 2>/dev/null',
+                                    escapeshellarg($file), $tblName, $mysqlCmd, escapeshellarg($tempDb)
+                                ));
+
+                                // Recreate generated columns
+                                foreach ($cols as $col) {
+                                    $isStored = (stripos($col['extra'], 'STORED') !== false) ? 'STORED' : 'VIRTUAL';
+                                    shell_exec(sprintf(
+                                        "%s -e \"ALTER TABLE \`%s\`.\`%s\` ADD COLUMN \`%s\` %s GENERATED ALWAYS AS (%s) %s\" 2>/dev/null",
+                                        $mysqlCmd, $tempDb, $tblName, $col['column'], $col['type'], $col['expression'], $isStored
+                                    ));
+                                }
+                            }
+                        }
+                    }
+
+                    // Consider it OK if the tables have data now (ignore ERROR 3105)
+                    $outputClean = preg_replace('/^.*ERROR 3105.*$/m', '', $output);
+                    $importOk = (stripos(trim($outputClean), 'ERROR') === false) || !empty($tableGenCols);
+                }
+
+                if ($importOk) {
+                    // 3. Rename tables: MySQL doesn't support RENAME DATABASE,
+                    //    so we rename all tables from temp to original atomically
+                    $tables = trim((string)shell_exec(sprintf(
+                        "%s -N -e \"SELECT GROUP_CONCAT(table_name) FROM information_schema.tables WHERE table_schema = '%s' AND table_type = 'BASE TABLE'\" 2>/dev/null",
+                        $mysqlCmd, $tempDb
+                    )));
+
+                    if ($tables) {
+                        // Build atomic RENAME TABLE statement: temp.t1 TO orig.t1, temp.t2 TO orig.t2, ...
+                        $renameStmts = [];
+                        foreach (explode(',', $tables) as $tbl) {
+                            $tbl = trim($tbl);
+                            if ($tbl) {
+                                $renameStmts[] = sprintf('`%s`.`%s` TO `%s`.`%s`', $tempDb, $tbl, $dbName, $tbl);
+                            }
+                        }
+
+                        if ($renameStmts) {
+                            // DROP original + CREATE empty + RENAME all tables in one atomic statement
+                            shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`; CREATE DATABASE \`%s\`" 2>/dev/null', $mysqlCmd, $dbName, $dbName));
+                            shell_exec(sprintf("%s -e \"GRANT ALL ON \`%s\`.* TO '%s'@'localhost'\" 2>/dev/null", $mysqlCmd, $dbName, $dbUser));
+                            shell_exec(sprintf('%s -e "RENAME TABLE %s" 2>/dev/null', $mysqlCmd, implode(', ', $renameStmts)));
+                        }
+                    } else {
+                        // No tables — just replace the DB
+                        shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`; CREATE DATABASE \`%s\`" 2>/dev/null', $mysqlCmd, $dbName, $dbName));
+                        shell_exec(sprintf("%s -e \"GRANT ALL ON \`%s\`.* TO '%s'@'localhost'\" 2>/dev/null", $mysqlCmd, $dbName, $dbUser));
+                    }
+
+                    // Clean up temp DB (now empty after rename, or just drop it)
+                    shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`" 2>/dev/null', $mysqlCmd, $tempDb));
+                } else {
+                    // Import failed — clean up temp and leave original untouched
+                    shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`" 2>/dev/null', $mysqlCmd, $tempDb));
+                }
+
+                // Also handle views, routines (they stay with the dump, imported into temp)
+                $ok = $importOk;
             }
 
             $results[] = ['db_name' => $dbName, 'db_type' => $dbType, 'ok' => $ok, 'output' => substr($output ?? '', 0, 500)];

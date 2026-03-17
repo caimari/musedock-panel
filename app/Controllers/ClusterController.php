@@ -502,6 +502,8 @@ class ClusterController
             'filesync_ssl_cert_path'   => trim($_POST['filesync_ssl_cert_path'] ?? ''),
             'filesync_rewrite_dbhost'  => isset($_POST['filesync_rewrite_dbhost']) ? '1' : '0',
             'filesync_db_dumps'        => isset($_POST['filesync_db_dumps']) ? '1' : '0',
+            'filesync_db_dump_mysql'   => isset($_POST['filesync_db_dump_mysql']) ? '1' : '0',
+            'filesync_db_dump_pgsql'   => isset($_POST['filesync_db_dump_pgsql']) ? '1' : '0',
             'filesync_db_dump_path'    => trim($_POST['filesync_db_dump_path'] ?? '/tmp/musedock-dumps'),
         ]);
 

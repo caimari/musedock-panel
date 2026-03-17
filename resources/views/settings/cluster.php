@@ -796,6 +796,26 @@
                         Incluir dump de bases de datos en la sincronización
                     </label>
                 </div>
+                <div class="row mb-2 ms-4">
+                    <div class="col-md-4">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="filesync_db_dump_mysql" id="filesyncDbMySQL"
+                                   <?= ($settings['filesync_db_dump_mysql'] ?? '1') === '1' ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="filesyncDbMySQL">
+                                <i class="bi bi-database-fill me-1"></i>MySQL / MariaDB
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="filesync_db_dump_pgsql" id="filesyncDbPgSQL"
+                                   <?= ($settings['filesync_db_dump_pgsql'] ?? '1') === '1' ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="filesyncDbPgSQL">
+                                <i class="bi bi-database me-1"></i>PostgreSQL (hosting, puerto 5432)
+                            </label>
+                        </div>
+                    </div>
+                </div>
                 <div class="row mb-2">
                     <div class="col-md-6">
                         <label class="form-label small text-muted">Ruta temporal de dumps</label>
@@ -807,8 +827,8 @@
                 <p class="small text-muted mb-3">
                     <i class="bi bi-info-circle me-1"></i>
                     Las bases de datos se exportan con <code>pg_dump</code> / <code>mysqldump</code> (comprimidas con gzip)
-                    y se restauran en el slave cada intervalo. Si activa la
-                    <a href="/settings/replication" class="text-info">replicación streaming</a> (nivel avanzado),
+                    y se restauran en el slave cada intervalo. La BD del panel (<code>musedock_panel</code>) nunca se sincroniza.
+                    Si activa la <a href="/settings/replication" class="text-info">replicación streaming</a> (nivel avanzado),
                     este paso se omite automáticamente.
                 </p>
                 <?php endif; ?>
