@@ -1299,9 +1299,8 @@ PHPEOF;
                 // 3. Import: gunzip → sed pipeline (MariaDB compat) → optional PHP filter → mysql --force
                 // Fix ERROR 1231: NO_AUTO_CREATE_USER doesn't exist in MariaDB
                 // Fix ERROR 1101: MariaDB rejects DEFAULT on TEXT/BLOB/JSON columns
-                $sedPipeline = "sed \"s/NO_AUTO_CREATE_USER,\\\\\\?//g; s/,\\\\+/,/g; s/,'/'/g\""
-                    . " | sed -E \"s/(longtext|mediumtext|text|blob|longblob|mediumblob|json)([^,]*) DEFAULT '[^']*'/\\1\\2 DEFAULT NULL/gi\""
-                    . " | sed 's/utf8mb4_0900_ai_ci/utf8mb4_unicode_ci/g'";
+                // Only fix NO_AUTO_CREATE_USER (doesn't exist in MariaDB) and MySQL 8.0 collation
+                $sedPipeline = "sed \"s/NO_AUTO_CREATE_USER,\\\\\\?//g; s/,\\\\+/,/g; s/,'/'/g; s/utf8mb4_0900_ai_ci/utf8mb4_unicode_ci/g\"";
 
                 if ($filterScript) {
                     $importCmd = sprintf(
