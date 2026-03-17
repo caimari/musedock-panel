@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.7.3');
+define('PANEL_VERSION', '0.7.4');
 
 
 
@@ -180,6 +180,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // System Health
 \MuseDockPanel\Router::get('/settings/health', 'SettingsController@health');
 \MuseDockPanel\Router::post('/settings/health/repair-cron', 'SettingsController@healthRepairCron');
+\MuseDockPanel\Router::post('/settings/health/fix-timezone', 'SettingsController@healthFixTimezone');
 
 // Updates
 \MuseDockPanel\Router::get('/settings/updates', 'UpdateController@index');

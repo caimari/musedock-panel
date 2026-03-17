@@ -191,6 +191,35 @@ class MonitorService
     }
 
     /**
+     * Get IP addresses for each network interface.
+     * Returns ['eth0' => '192.168.1.1', 'wg0' => '10.10.70.1', ...]
+     */
+    public static function getInterfaceIPs(array $interfaces): array
+    {
+        $ips = [];
+        $output = @shell_exec('ip -4 addr show 2>/dev/null');
+        if (!$output) return $ips;
+
+        // Split by interface blocks (each starts with "N: ifname")
+        $blocks = preg_split('/(?=^\d+:\s)/m', $output);
+        $ifaceBlocks = [];
+        foreach ($blocks as $block) {
+            if (preg_match('/^\d+:\s+(\S+?)[@:]/', $block, $bm)) {
+                $ifaceBlocks[$bm[1]] = $block;
+            }
+        }
+
+        foreach ($interfaces as $iface) {
+            if (isset($ifaceBlocks[$iface]) && preg_match('/inet\s+([0-9.\/]+)/', $ifaceBlocks[$iface], $m)) {
+                $ips[$iface] = $m[1];
+            } else {
+                $ips[$iface] = '';
+            }
+        }
+        return $ips;
+    }
+
+    /**
      * Format bytes/sec to human-readable string.
      */
     public static function formatBytes(float $bytes): string

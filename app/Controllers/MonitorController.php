@@ -21,11 +21,13 @@ class MonitorController
 
         $gpus = MonitorService::detectGpus($host);
         $panelTz = Settings::get('panel_timezone', 'UTC');
+        $ifaceIPs = MonitorService::getInterfaceIPs($interfaces);
 
         View::render('monitor/index', [
             'layout'      => 'main',
             'pageTitle'   => 'Monitoring',
             'interfaces'  => $interfaces,
+            'ifaceIPs'    => $ifaceIPs,
             'status'      => $status,
             'healthScore' => $healthScore,
             'alertCount'  => $alertCount,

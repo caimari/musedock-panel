@@ -53,6 +53,9 @@
             <div class="mt-2">
                 <small class="text-muted">TX (Out): <span id="card-<?= View::e($iface) ?>-tx">--</span></small>
             </div>
+            <?php if (!empty($ifaceIPs[$iface])): ?>
+            <div><small class="text-muted"><i class="bi bi-hdd-network me-1"></i><?= View::e($ifaceIPs[$iface]) ?></small></div>
+            <?php endif; ?>
         </div>
     </div>
     <?php endforeach; ?>

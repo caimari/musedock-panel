@@ -44,6 +44,82 @@
     </div>
 </div>
 
+<!-- Database Timezone -->
+<?php if ($checks['database']['pg_timezone'] || $checks['database']['mysql_ok']): ?>
+<div class="card mb-4">
+    <div class="card-header"><i class="bi bi-clock me-2"></i>Database Timezone</div>
+    <div class="card-body p-0">
+        <table class="table table-sm table-hover mb-0">
+            <thead>
+                <tr>
+                    <th class="ps-3">Engine</th>
+                    <th>Timezone Actual</th>
+                    <th>Recomendado</th>
+                    <th>Estado</th>
+                    <th class="text-end pe-3">Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if ($checks['database']['pg_timezone']): ?>
+                <tr>
+                    <td class="ps-3"><code>PostgreSQL</code></td>
+                    <td><strong><?= View::e($checks['database']['pg_timezone']) ?></strong></td>
+                    <td><small class="text-muted">UTC</small></td>
+                    <td>
+                        <?php if ($checks['database']['pg_tz_ok']): ?>
+                            <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;"><i class="bi bi-check-circle me-1"></i>OK</span>
+                        <?php else: ?>
+                            <span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;"><i class="bi bi-exclamation-triangle me-1"></i>No UTC</span>
+                        <?php endif; ?>
+                    </td>
+                    <td class="text-end pe-3">
+                        <?php if (!$checks['database']['pg_tz_ok']): ?>
+                            <form method="POST" action="/settings/health/fix-timezone" class="d-inline" onsubmit="return confirmTimezone(event, this, 'PostgreSQL')">
+                                <?= View::csrf() ?>
+                                <input type="hidden" name="engine" value="postgresql">
+                                <button type="submit" class="btn btn-outline-success btn-sm">
+                                    <i class="bi bi-wrench me-1"></i>Set UTC
+                                </button>
+                            </form>
+                        <?php else: ?>
+                            <small class="text-muted"><i class="bi bi-check"></i></small>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endif; ?>
+                <?php if ($checks['database']['mysql_ok']): ?>
+                <tr>
+                    <td class="ps-3"><code>MySQL</code></td>
+                    <td><strong><?= View::e($checks['database']['mysql_timezone']) ?></strong></td>
+                    <td><small class="text-muted">UTC / +00:00</small></td>
+                    <td>
+                        <?php if ($checks['database']['mysql_tz_ok']): ?>
+                            <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;"><i class="bi bi-check-circle me-1"></i>OK</span>
+                        <?php else: ?>
+                            <span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;"><i class="bi bi-exclamation-triangle me-1"></i>No UTC</span>
+                        <?php endif; ?>
+                    </td>
+                    <td class="text-end pe-3">
+                        <?php if (!$checks['database']['mysql_tz_ok']): ?>
+                            <form method="POST" action="/settings/health/fix-timezone" class="d-inline" onsubmit="return confirmTimezone(event, this, 'MySQL')">
+                                <?= View::csrf() ?>
+                                <input type="hidden" name="engine" value="mysql">
+                                <button type="submit" class="btn btn-outline-success btn-sm">
+                                    <i class="bi bi-wrench me-1"></i>Set UTC
+                                </button>
+                            </form>
+                        <?php else: ?>
+                            <small class="text-muted"><i class="bi bi-check"></i></small>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Cron Jobs -->
 <div class="card mb-4">
     <div class="card-header"><i class="bi bi-clock-history me-2"></i>Cron Jobs del Panel</div>
@@ -263,6 +339,22 @@ function confirmRepair(e, form, name) {
         icon: 'question',
         showCancelButton: true,
         confirmButtonText: '<i class="bi bi-wrench me-1"></i> Repair',
+        confirmButtonColor: '#22c55e',
+        cancelButtonText: 'Cancel'
+    }).then(function(result) {
+        if (result.isConfirmed) form.submit();
+    });
+    return false;
+}
+
+function confirmTimezone(e, form, engine) {
+    e.preventDefault();
+    SwalDark.fire({
+        title: 'Set ' + engine + ' timezone to UTC?',
+        html: 'This will modify the ' + engine + ' configuration file, set the timezone to <strong>UTC</strong>, and <strong>restart the service</strong>.<br><br><small class="text-muted">UTC is recommended for clean timestamp storage. The panel displays times in the timezone configured in Settings &gt; Server.</small>',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-wrench me-1"></i> Set UTC & Restart',
         confirmButtonColor: '#22c55e',
         cancelButtonText: 'Cancel'
     }).then(function(result) {

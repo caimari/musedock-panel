@@ -1293,9 +1293,40 @@ class SettingsController
             $dbOk = true;
             $dbVersion = $row['v'] ?? '';
         } catch (\Throwable) {}
+        // Check PostgreSQL timezone
+        $pgTimezone = '';
+        if ($dbOk) {
+            try {
+                $tzRow = \MuseDockPanel\Database::fetchOne("SHOW timezone");
+                $pgTimezone = $tzRow['TimeZone'] ?? $tzRow['timezone'] ?? '';
+            } catch (\Throwable) {}
+        }
+
+        // Check MySQL timezone (hosting instance, port 3306)
+        $mysqlTimezone = '';
+        $mysqlOk = false;
+        try {
+            $mysqlHost = \MuseDockPanel\Env::get('MYSQL_HOST', '127.0.0.1');
+            $mysqlPort = \MuseDockPanel\Env::get('MYSQL_PORT', '3306');
+            $mysqlUser = \MuseDockPanel\Env::get('MYSQL_ROOT_USER', 'root');
+            $mysqlPass = \MuseDockPanel\Env::get('MYSQL_ROOT_PASS', '');
+            if ($mysqlPass) {
+                $mysqlDsn = "mysql:host={$mysqlHost};port={$mysqlPort}";
+                $mysqlPdo = new \PDO($mysqlDsn, $mysqlUser, $mysqlPass, [\PDO::ATTR_TIMEOUT => 3]);
+                $mysqlTzRow = $mysqlPdo->query("SELECT @@global.time_zone AS tz")->fetch(\PDO::FETCH_ASSOC);
+                $mysqlTimezone = $mysqlTzRow['tz'] ?? '';
+                $mysqlOk = true;
+            }
+        } catch (\Throwable) {}
+
         $checks['database'] = [
-            'connected' => $dbOk,
-            'version'   => $dbVersion,
+            'connected'      => $dbOk,
+            'version'        => $dbVersion,
+            'pg_timezone'    => $pgTimezone,
+            'pg_tz_ok'       => in_array($pgTimezone, ['UTC', 'Etc/UTC', 'GMT'], true),
+            'mysql_ok'       => $mysqlOk,
+            'mysql_timezone' => $mysqlTimezone,
+            'mysql_tz_ok'    => in_array($mysqlTimezone, ['UTC', 'SYSTEM', '+00:00'], true) || !$mysqlOk,
         ];
 
         // ─── 7. GPU Health ────────────────────────────────────────
@@ -1478,6 +1509,8 @@ class SettingsController
         $totalChecks += 2; // service + database
         if ($checks['service']['active']) $passedChecks++;
         if ($checks['database']['connected']) $passedChecks++;
+        if ($checks['database']['pg_timezone']) { $totalChecks++; if ($checks['database']['pg_tz_ok']) $passedChecks++; }
+        if ($checks['database']['mysql_ok']) { $totalChecks++; if ($checks['database']['mysql_tz_ok']) $passedChecks++; }
         foreach ($checks['gpus'] as $g) { $totalChecks++; if ($g['healthy']) $passedChecks++; }
 
         View::render('settings/health', [
@@ -1529,6 +1562,105 @@ class SettingsController
 
         LogService::log('system.health', 'repair-cron', "Repaired cron: {$cronName}");
         Flash::set('success', "Cron {$cronName} reparado correctamente.");
+        Router::redirect('/settings/health');
+    }
+
+    /**
+     * POST /settings/health/fix-timezone — Set database timezone to UTC
+     */
+    public function healthFixTimezone(): void
+    {
+        View::verifyCsrf();
+        $engine = $_POST['engine'] ?? '';
+        $errors = [];
+
+        if ($engine === 'postgresql' || $engine === 'all') {
+            // Find PostgreSQL config files for all instances
+            $pgConfigs = [];
+
+            // Panel instance (5433)
+            $panelConf = glob('/etc/postgresql/*/panel/postgresql.conf');
+            foreach ($panelConf as $f) $pgConfigs[] = $f;
+
+            // Hosting instance (5432)
+            $hostingConf = glob('/etc/postgresql/*/main/postgresql.conf');
+            foreach ($hostingConf as $f) $pgConfigs[] = $f;
+
+            foreach ($pgConfigs as $conf) {
+                $content = @file_get_contents($conf);
+                if ($content === false) {
+                    $errors[] = "Cannot read {$conf}";
+                    continue;
+                }
+
+                // Replace timezone setting
+                $newContent = preg_replace(
+                    "/^(timezone\s*=\s*).*/m",
+                    "timezone = 'UTC'",
+                    $content
+                );
+                $newContent = preg_replace(
+                    "/^(log_timezone\s*=\s*).*/m",
+                    "log_timezone = 'UTC'",
+                    $newContent
+                );
+
+                if ($newContent !== $content) {
+                    if (@file_put_contents($conf, $newContent) === false) {
+                        // Try via shell
+                        $escaped = escapeshellarg($conf);
+                        shell_exec("sed -i \"s/^timezone = .*/timezone = 'UTC'/\" {$escaped} 2>&1");
+                        shell_exec("sed -i \"s/^log_timezone = .*/log_timezone = 'UTC'/\" {$escaped} 2>&1");
+                    }
+                }
+            }
+
+            // Restart PostgreSQL instances
+            shell_exec('systemctl restart postgresql 2>/dev/null');
+            // Also try per-cluster restart
+            shell_exec('pg_ctlcluster 14 panel restart 2>/dev/null');
+            shell_exec('pg_ctlcluster 14 main restart 2>/dev/null');
+
+            LogService::log('system.health', 'fix-timezone', 'PostgreSQL timezone set to UTC');
+        }
+
+        if ($engine === 'mysql' || $engine === 'all') {
+            // Set MySQL timezone to UTC
+            $myCnfPaths = ['/etc/mysql/mysql.conf.d/mysqld.cnf', '/etc/mysql/my.cnf', '/etc/my.cnf'];
+            $found = false;
+
+            foreach ($myCnfPaths as $cnf) {
+                if (!file_exists($cnf)) continue;
+                $content = @file_get_contents($cnf);
+                if ($content === false) continue;
+                $found = true;
+
+                // Check if default-time-zone is already set
+                if (preg_match('/^default-time-zone\s*=/m', $content)) {
+                    $content = preg_replace('/^default-time-zone\s*=.*/m', 'default-time-zone = "+00:00"', $content);
+                } else {
+                    // Add after [mysqld] section
+                    $content = preg_replace('/^\[mysqld\]\s*$/m', "[mysqld]\ndefault-time-zone = \"+00:00\"", $content);
+                }
+
+                @file_put_contents($cnf, $content);
+                break;
+            }
+
+            if (!$found) {
+                $errors[] = 'MySQL config file not found';
+            } else {
+                shell_exec('systemctl restart mysql 2>/dev/null || systemctl restart mariadb 2>/dev/null');
+                LogService::log('system.health', 'fix-timezone', 'MySQL timezone set to UTC');
+            }
+        }
+
+        if (!empty($errors)) {
+            Flash::set('warning', 'Timezone parcialmente actualizado: ' . implode(', ', $errors));
+        } else {
+            Flash::set('success', 'Timezone de base de datos configurado a UTC correctamente. Servicios reiniciados.');
+        }
+
         Router::redirect('/settings/health');
     }
 }
