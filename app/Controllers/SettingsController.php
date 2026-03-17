@@ -1418,26 +1418,18 @@ class SettingsController
             }
 
             // Also detect PCI errors from nvidia-smi -L output (e.g. "Unable to determine...")
-            if (!empty($gpuErrors)) {
-                // Try lspci to find GPUs not already shown
+            // Only add if we haven't already detected a failed GPU from dmesg
+            $hasFailedGpu = false;
+            foreach ($gpuChecks as $gc) {
+                if (!$gc['healthy']) { $hasFailedGpu = true; break; }
+            }
+
+            if (!empty($gpuErrors) && !$hasFailedGpu) {
                 $lspciOutput = @shell_exec('lspci 2>/dev/null | grep -i "vga\|3d\|display" | grep -i nvidia');
                 $lspciGpus = $lspciOutput ? explode("\n", trim($lspciOutput)) : [];
                 $shownCount = count($gpuChecks);
 
                 foreach ($gpuErrors as $pciAddr => $errMsg) {
-                    // Check if this PCI address matches a GPU not yet shown
-                    $alreadyShown = false;
-                    foreach ($gpuChecks as $gc) {
-                        if ($gc['index'] >= 0 && $gc['index'] < count($lspciGpus)) {
-                            if (str_contains($lspciGpus[$gc['index']] ?? '', $pciAddr)) {
-                                $alreadyShown = true;
-                                break;
-                            }
-                        }
-                    }
-                    if ($alreadyShown) continue;
-
-                    // Find the GPU in lspci by PCI address
                     $gpuName = '';
                     foreach ($lspciGpus as $lLine) {
                         if (str_contains($lLine, $pciAddr) || str_contains($lLine, substr($pciAddr, -7))) {
@@ -1459,6 +1451,18 @@ class SettingsController
                     ];
                     $shownCount++;
                 }
+            } elseif (!empty($gpuErrors) && $hasFailedGpu) {
+                // Append PCI error messages to the existing failed GPU entry
+                foreach ($gpuChecks as &$gc) {
+                    if (!$gc['healthy']) {
+                        foreach ($gpuErrors as $errMsg) {
+                            $gc['errors'][] = $errMsg;
+                        }
+                        $gc['errors'] = array_slice($gc['errors'], -5);
+                        break; // only add to the first failed GPU
+                    }
+                }
+                unset($gc);
             }
         }
         $checks['gpus'] = $gpuChecks;
