@@ -20,18 +20,20 @@ class ChangelogController
     {
         return [
             [
-                'version' => '0.7.2',
+                'version' => '0.7.3',
                 'date' => '2026-03-17',
                 'badge' => 'success',
                 'changes' => [
                     'added' => [
                         'es' => [
-                            'Auto-deteccion de interfaces de red — El monitor detecta automaticamente las interfaces fisicas y WireGuard del servidor (eno1, eth0, enp0s3, wg0, etc.) sin necesidad de configuracion manual',
+                            'Auto-deteccion de interfaces de red — El monitor detecta automaticamente las interfaces fisicas y WireGuard del servidor (eno1, eth0, enp0s3, wg0, etc.) sin configuracion manual. Si las interfaces configuradas no existen, auto-detecta las reales',
                             'Nombre de GPU en graficas — Las graficas de GPU muestran el modelo (ej. RTX 3090 Ti) en el titulo y en la leyenda de cada dataset',
+                            'GPU Health en System Health — Nueva seccion que detecta GPUs NVIDIA, muestra estado de cada una (driver, VRAM, temp, util, power) y alerta si hay errores de hardware via dmesg y nvidia-smi',
                         ],
                         'en' => [
-                            'Auto-detect network interfaces — Monitor automatically detects physical and WireGuard interfaces (eno1, eth0, enp0s3, wg0, etc.) without manual configuration',
+                            'Auto-detect network interfaces — Monitor automatically detects physical and WireGuard interfaces (eno1, eth0, enp0s3, wg0, etc.) without manual config. Falls back to auto-detect if configured interfaces don\'t exist',
                             'GPU name in charts — GPU charts show the model name (e.g. RTX 3090 Ti) in chart headers and dataset legends',
+                            'GPU Health in System Health — New section that detects NVIDIA GPUs, shows per-GPU status (driver, VRAM, temp, util, power) and alerts on hardware errors via dmesg and nvidia-smi',
                         ],
                     ],
                     'fixed' => [
@@ -40,12 +42,14 @@ class ChangelogController
                             'update.sh auto-relaunch — Si update.sh cambia durante git pull, se re-ejecuta automaticamente con la version nueva para evitar bugs del script viejo',
                             'GPU multi-host — detectGpus() ahora consulta la base de datos para hosts remotos en vez de ejecutar nvidia-smi local',
                             'Update banner — El banner de actualizaciones ahora comprueba GitHub automaticamente si no hay cache o ha expirado',
+                            'Interfaces de red en remoto — Servidores con interfaces distintas a eth0 (ej. eno1) ahora funcionan sin configuracion manual',
                         ],
                         'en' => [
                             'update.sh systemd — Fixed placeholder __PANEL_PORT__ to __PANEL_INTERNAL_PORT__ which caused 502 Bad Gateway after update',
                             'update.sh auto-relaunch — If update.sh changes during git pull, it re-executes itself with the new version to avoid stale script bugs',
                             'GPU multi-host — detectGpus() now queries the database for remote hosts instead of running local nvidia-smi',
                             'Update banner — Update banner now auto-checks GitHub if no cache exists or cache has expired',
+                            'Remote network interfaces — Servers with non-eth0 interfaces (e.g. eno1) now work without manual configuration',
                         ],
                     ],
                 ],
