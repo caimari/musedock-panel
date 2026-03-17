@@ -1352,10 +1352,14 @@ class SettingsController
                 }
             }
 
+            // Track which GPU indices we've seen
+            $seenIndices = [];
+
             foreach ($gpuMatches as $m) {
                 $idx = (int)$m[1];
                 $name = $m[2];
                 $uuid = $m[3];
+                $seenIndices[] = $idx;
 
                 $healthy = true;
                 $status = 'OK';
@@ -1365,7 +1369,7 @@ class SettingsController
                 if (!empty($dmesgPerGpu[$idx])) {
                     $healthy = false;
                     $status = 'Hardware Error';
-                    $errors = array_slice($dmesgPerGpu[$idx], -3); // last 3 errors
+                    $errors = array_slice($dmesgPerGpu[$idx], -3);
                 }
 
                 // Check nvidia-smi communication errors
@@ -1386,17 +1390,75 @@ class SettingsController
                 ];
             }
 
-            // If no GPUs matched from -L but there are general errors
-            if (empty($gpuMatches) && !empty($gpuErrors)) {
+            // Detect GPUs that appear in dmesg errors but NOT in nvidia-smi -L
+            foreach ($dmesgPerGpu as $dIdx => $dErrors) {
+                if (in_array($dIdx, $seenIndices, true)) continue;
+                // Try to get GPU name from lspci
+                $lspciName = '';
+                $lspciOutput = @shell_exec('lspci 2>/dev/null | grep -i "vga\|3d\|display" | grep -i nvidia');
+                if ($lspciOutput) {
+                    $lspciLines = explode("\n", trim($lspciOutput));
+                    if (isset($lspciLines[$dIdx])) {
+                        // Extract model name from lspci line
+                        if (preg_match('/NVIDIA.*?(\[.*?\]|GeForce.*|RTX.*|GTX.*|Tesla.*|Quadro.*)/', $lspciLines[$dIdx], $lm)) {
+                            $lspciName = trim($lm[1], '[] ');
+                        }
+                    }
+                }
+
                 $gpuChecks[] = [
-                    'index'   => -1,
-                    'name'    => 'Unknown GPU',
+                    'index'   => $dIdx,
+                    'name'    => $lspciName ?: "GPU {$dIdx} (not responding)",
                     'uuid'    => '',
                     'healthy' => false,
-                    'status'  => 'Detection Failed',
-                    'errors'  => array_values($gpuErrors),
+                    'status'  => 'Hardware Error',
+                    'errors'  => array_slice($dErrors, -3),
                     'details' => null,
                 ];
+            }
+
+            // Also detect PCI errors from nvidia-smi -L output (e.g. "Unable to determine...")
+            if (!empty($gpuErrors)) {
+                // Try lspci to find GPUs not already shown
+                $lspciOutput = @shell_exec('lspci 2>/dev/null | grep -i "vga\|3d\|display" | grep -i nvidia');
+                $lspciGpus = $lspciOutput ? explode("\n", trim($lspciOutput)) : [];
+                $shownCount = count($gpuChecks);
+
+                foreach ($gpuErrors as $pciAddr => $errMsg) {
+                    // Check if this PCI address matches a GPU not yet shown
+                    $alreadyShown = false;
+                    foreach ($gpuChecks as $gc) {
+                        if ($gc['index'] >= 0 && $gc['index'] < count($lspciGpus)) {
+                            if (str_contains($lspciGpus[$gc['index']] ?? '', $pciAddr)) {
+                                $alreadyShown = true;
+                                break;
+                            }
+                        }
+                    }
+                    if ($alreadyShown) continue;
+
+                    // Find the GPU in lspci by PCI address
+                    $gpuName = '';
+                    foreach ($lspciGpus as $lLine) {
+                        if (str_contains($lLine, $pciAddr) || str_contains($lLine, substr($pciAddr, -7))) {
+                            if (preg_match('/NVIDIA.*?(\[.*?\]|GeForce.*|RTX.*|GTX.*|Tesla.*|Quadro.*)/', $lLine, $lm)) {
+                                $gpuName = trim($lm[1], '[] ');
+                            }
+                            break;
+                        }
+                    }
+
+                    $gpuChecks[] = [
+                        'index'   => $shownCount,
+                        'name'    => $gpuName ?: "Unknown GPU (PCI {$pciAddr})",
+                        'uuid'    => '',
+                        'healthy' => false,
+                        'status'  => 'Not Responding',
+                        'errors'  => [$errMsg],
+                        'details' => null,
+                    ];
+                    $shownCount++;
+                }
             }
         }
         $checks['gpus'] = $gpuChecks;
