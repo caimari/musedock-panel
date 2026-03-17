@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.5.2');
+define('PANEL_VERSION', '0.6.0');
 
 
 
@@ -220,6 +220,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/sync-files-now', 'ClusterController@syncFilesNow');
 \MuseDockPanel\Router::get('/settings/cluster/sync-progress', 'ClusterController@syncProgress');
 \MuseDockPanel\Router::post('/settings/cluster/check-dbhost', 'ClusterController@checkDbHost');
+\MuseDockPanel\Router::post('/settings/cluster/full-sync', 'ClusterController@fullSync');
 
 // WireGuard
 \MuseDockPanel\Router::get('/settings/wireguard', 'WireGuardController@index');

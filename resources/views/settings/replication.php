@@ -823,10 +823,25 @@
 
         SwalDark.fire({
             title: 'PELIGRO: Convertir en Slave',
-            html: '<p>Esta operacion <b>destruira todos los datos locales</b> de ' + label + ' y los reemplazara con los del master.</p>' +
-                  '<p>Bases de datos que se perderan:</p>' +
+            html: '<div class="text-start">' +
+                  '<div class="alert" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#f87171;">' +
+                  '<i class="bi bi-exclamation-octagon me-1"></i>' +
+                  '<strong>Activar streaming replication borrará TODAS las bases de datos locales</strong> de ' + label + ' y las reemplazará con una copia exacta del master.' +
+                  '</div>' +
+                  '<p><strong>Bases de datos que se perderán:</strong></p>' +
                   dbList +
-                  '<p>Escribe <b>DELETE</b> para confirmar:</p>',
+                  '<div class="form-check form-switch mb-3">' +
+                  '<input class="form-check-input" type="checkbox" id="autoBackupCheck" checked>' +
+                  '<label class="form-check-label" for="autoBackupCheck">' +
+                  'Crear backup automático antes de proceder' +
+                  '</label>' +
+                  '</div>' +
+                  '<div class="small text-muted mb-3">' +
+                  '<i class="bi bi-shield-check me-1"></i>' +
+                  'El backup se guardará en <code>/var/backups/musedock/pre-replication/</code> y podrá restaurarse manualmente si es necesario.' +
+                  '</div>' +
+                  '<p>Escribe <b>DELETE</b> para confirmar:</p>' +
+                  '</div>',
             input: 'text',
             inputPlaceholder: 'DELETE',
             inputValidator: function(value) { return value !== 'DELETE' ? 'Escribe DELETE para confirmar' : null; },
@@ -836,19 +851,21 @@
             cancelButtonText: 'Cancelar'
         }).then(function(result) {
             if (result.isConfirmed) {
+                var autoBackup = document.getElementById('autoBackupCheck');
                 var form = document.createElement('form');
                 form.method = 'POST';
-                form.action = '/settings/replication/convert-slave';
+                form.action = '/settings/replication/convert-to-slave';
                 form.style.display = 'none';
 
                 var fields = {
                     '_csrf_token': csrfToken,
                     'engine': engine,
                     'master_ip': ip,
-                    'master_port': port,
-                    'master_user': user,
-                    'master_password': pass,
-                    'confirm': 'DELETE'
+                    'port': port,
+                    'user': user,
+                    'pass': pass,
+                    'confirm': 'DELETE',
+                    'auto_backup': (autoBackup && autoBackup.checked) ? '1' : '0'
                 };
                 for (var key in fields) {
                     var input = document.createElement('input');

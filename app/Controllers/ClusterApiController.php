@@ -94,6 +94,7 @@ class ClusterApiController
                 ),
                 'receive-files'    => $this->handleReceiveFiles($payload),
                 'install-ssh-key'  => \MuseDockPanel\Services\FileSyncService::installPublicKey($payload['public_key'] ?? ''),
+                'restore-db-dumps' => $this->handleRestoreDbDumps($payload),
                 default            => ['ok' => false, 'message' => "Unknown action: {$action}"],
             };
 
@@ -110,6 +111,19 @@ class ClusterApiController
     /**
      * Handle file reception on the slave.
      */
+    /**
+     * Handle database dump restoration on slave.
+     */
+    private function handleRestoreDbDumps(array $payload): array
+    {
+        $dumpPath = $payload['dump_path'] ?? '/tmp/musedock-dumps';
+        // Security: only allow known dump paths
+        if (!str_starts_with($dumpPath, '/tmp/musedock-dumps')) {
+            return ['ok' => false, 'error' => 'Ruta de dumps no permitida'];
+        }
+        return \MuseDockPanel\Services\FileSyncService::restoreDatabaseDumps($dumpPath);
+    }
+
     private function handleReceiveFiles(array $payload): array
     {
         $remotePath = $payload['remote_path'] ?? '';

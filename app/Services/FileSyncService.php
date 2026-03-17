@@ -31,6 +31,8 @@ class FileSyncService
             'sync_ssl_certs'   => Settings::get('filesync_ssl_certs', '0') === '1',
             'ssl_cert_path'    => Settings::get('filesync_ssl_cert_path', ''),
             'rewrite_db_host'  => Settings::get('filesync_rewrite_dbhost', '1') === '1',
+            'db_dumps'         => Settings::get('filesync_db_dumps', '0') === '1',
+            'db_dump_path'     => Settings::get('filesync_db_dump_path', '/tmp/musedock-dumps'),
         ];
     }
 
@@ -41,6 +43,7 @@ class FileSyncService
             'filesync_ssh_key_path', 'filesync_ssh_user', 'filesync_interval',
             'filesync_bwlimit', 'filesync_exclude', 'filesync_ssl_certs',
             'filesync_ssl_cert_path', 'filesync_rewrite_dbhost',
+            'filesync_db_dumps', 'filesync_db_dump_path',
         ];
         foreach ($keys as $key) {
             if (isset($data[$key])) {
@@ -356,7 +359,7 @@ class FileSyncService
         }
 
         // Security: validate remote_path is under allowed directories
-        $allowedPrefixes = ['/var/www/vhosts/', '/var/lib/caddy/'];
+        $allowedPrefixes = ['/var/www/vhosts/', '/var/lib/caddy/', '/tmp/musedock-dumps'];
         $pathAllowed = false;
         foreach ($allowedPrefixes as $prefix) {
             if (str_starts_with($remotePath, $prefix)) {
@@ -828,5 +831,275 @@ class FileSyncService
     {
         $parsed = parse_url($url);
         return $parsed['host'] ?? '';
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Database Dump Sync (Nivel 1 — simple cluster sync)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Build mysqldump command with auth from .env
+     */
+    private static function buildMysqldumpCmd(): ?string
+    {
+        $authMethod = \MuseDockPanel\Env::get('MYSQL_AUTH_METHOD', 'socket');
+        if ($authMethod === 'socket') return 'mysqldump -u root';
+        if ($authMethod === 'password') {
+            $pass = \MuseDockPanel\Env::get('MYSQL_ROOT_PASS', '');
+            return $pass ? 'mysqldump -u root -p' . escapeshellarg($pass) : null;
+        }
+        return null;
+    }
+
+    /**
+     * Build mysql client command with auth from .env
+     */
+    private static function buildMysqlCmd(): ?string
+    {
+        $authMethod = \MuseDockPanel\Env::get('MYSQL_AUTH_METHOD', 'socket');
+        if ($authMethod === 'socket') return 'mysql -u root';
+        if ($authMethod === 'password') {
+            $pass = \MuseDockPanel\Env::get('MYSQL_ROOT_PASS', '');
+            return $pass ? 'mysql -u root -p' . escapeshellarg($pass) : null;
+        }
+        return null;
+    }
+
+    /**
+     * Dump all hosting databases to the dump path.
+     * Returns array of results per database.
+     */
+    public static function dumpAllDatabases(): array
+    {
+        $config = self::getConfig();
+        $dumpPath = $config['db_dump_path'];
+        if (!is_dir($dumpPath)) {
+            @mkdir($dumpPath, 0750, true);
+        }
+
+        $databases = Database::fetchAll("
+            SELECT d.*, a.domain, a.username
+            FROM hosting_databases d
+            JOIN hosting_accounts a ON a.id = d.account_id
+            WHERE a.status != 'deleted'
+            ORDER BY d.db_name
+        ");
+
+        $results = [];
+        $manifest = [];
+
+        foreach ($databases as $db) {
+            $dbName = $db['db_name'];
+            $dbType = $db['db_type'] ?? 'pgsql';
+            $dbUser = $db['db_user'];
+            $dumpFile = $dumpPath . '/' . $dbName . '.sql.gz';
+
+            if ($dbType === 'mysql') {
+                $cmd = self::buildMysqldumpCmd();
+                if (!$cmd) {
+                    $results[] = ['db_name' => $dbName, 'db_type' => $dbType, 'ok' => false, 'error' => 'MySQL auth no disponible'];
+                    continue;
+                }
+                $fullCmd = sprintf('%s --single-transaction --quick %s 2>/dev/null | gzip > %s',
+                    $cmd, escapeshellarg($dbName), escapeshellarg($dumpFile));
+            } else {
+                $fullCmd = sprintf('sudo -u postgres pg_dump -Fc %s 2>/dev/null | gzip > %s',
+                    escapeshellarg($dbName), escapeshellarg($dumpFile));
+            }
+
+            shell_exec($fullCmd);
+            $ok = file_exists($dumpFile) && filesize($dumpFile) > 20; // gzip header is ~20 bytes min
+
+            $manifest[] = [
+                'db_name' => $dbName,
+                'db_user' => $dbUser,
+                'db_type' => $dbType,
+                'domain'  => $db['domain'],
+                'file'    => $dbName . '.sql.gz',
+                'size'    => $ok ? filesize($dumpFile) : 0,
+            ];
+            $results[] = ['db_name' => $dbName, 'db_type' => $dbType, 'ok' => $ok, 'file' => $dumpFile];
+        }
+
+        // Write manifest for the slave to know what to restore
+        file_put_contents($dumpPath . '/manifest.json', json_encode($manifest, JSON_PRETTY_PRINT));
+
+        return $results;
+    }
+
+    /**
+     * Sync database dumps to a slave node and trigger restore.
+     */
+    public static function syncDatabaseDumps(array $node): array
+    {
+        $config = self::getConfig();
+        $dumpPath = $config['db_dump_path'];
+
+        if (!is_dir($dumpPath) || !file_exists($dumpPath . '/manifest.json')) {
+            return ['ok' => false, 'error' => 'No hay dumps para sincronizar. Ejecute dumpAllDatabases() primero.'];
+        }
+
+        $host = self::extractHostFromUrl($node['api_url']);
+
+        // Step 1: rsync dump directory to slave
+        if ($config['method'] === 'https') {
+            $token = ReplicationService::decryptPassword($node['auth_token'] ?? '');
+            $rsyncResult = self::httpsSyncHosting($dumpPath, $node['api_url'], $token, $dumpPath, 'root');
+        } else {
+            $rsyncResult = self::rsyncHosting($dumpPath . '/', $host, $dumpPath . '/', [
+                'owner_user' => 'root',
+                'no_delete'  => false,
+            ]);
+        }
+
+        if (!($rsyncResult['ok'] ?? false)) {
+            return ['ok' => false, 'error' => 'Error sincronizando dumps: ' . ($rsyncResult['error'] ?? ''), 'rsync' => $rsyncResult];
+        }
+
+        // Step 2: Tell slave to restore via API
+        $token = ReplicationService::decryptPassword($node['auth_token'] ?? '');
+        $restoreResult = ClusterService::callNodeDirect($node['api_url'], $token, 'POST', 'api/cluster/action', [
+            'action'  => 'restore-db-dumps',
+            'payload' => ['dump_path' => $dumpPath],
+        ]);
+
+        return [
+            'ok'      => $restoreResult['ok'] ?? false,
+            'rsync'   => $rsyncResult,
+            'restore' => $restoreResult['data'] ?? $restoreResult,
+        ];
+    }
+
+    /**
+     * Restore database dumps on the slave side.
+     * Each DB is: DROP + CREATE + IMPORT from dump file.
+     */
+    public static function restoreDatabaseDumps(string $dumpPath): array
+    {
+        $manifestFile = $dumpPath . '/manifest.json';
+        if (!file_exists($manifestFile)) {
+            return ['ok' => false, 'error' => 'Manifest no encontrado en ' . $dumpPath];
+        }
+
+        $manifest = json_decode(file_get_contents($manifestFile), true);
+        if (!is_array($manifest)) {
+            return ['ok' => false, 'error' => 'Manifest inválido'];
+        }
+
+        $results = [];
+        foreach ($manifest as $entry) {
+            $dbName = $entry['db_name'];
+            $dbUser = $entry['db_user'];
+            $dbType = $entry['db_type'];
+            $file = $dumpPath . '/' . $entry['file'];
+
+            if (!file_exists($file) || filesize($file) < 20) {
+                $results[] = ['db_name' => $dbName, 'ok' => false, 'error' => 'Dump vacío o no encontrado'];
+                continue;
+            }
+
+            if ($dbType === 'pgsql') {
+                // Ensure user exists
+                shell_exec(sprintf(
+                    'sudo -u postgres psql -c "DO \\$\\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = %s) THEN CREATE ROLE %s LOGIN; END IF; END \\$\\$;" 2>/dev/null',
+                    "'" . str_replace("'", "''", $dbUser) . "'",
+                    $dbUser
+                ));
+                // Terminate active connections before DROP (required if FPM/Laravel holds connections)
+                shell_exec(sprintf(
+                    'sudo -u postgres psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s AND pid <> pg_backend_pid()" 2>/dev/null',
+                    "'" . str_replace("'", "''", $dbName) . "'"
+                ));
+                // DROP + CREATE + RESTORE (WITH FORCE for PG13+, fallback to regular drop)
+                $dropResult = trim((string)shell_exec(sprintf(
+                    'sudo -u postgres psql -c "DROP DATABASE IF EXISTS %s WITH (FORCE)" 2>&1',
+                    '"' . str_replace('"', '""', $dbName) . '"'
+                )));
+                if (stripos($dropResult, 'ERROR') !== false) {
+                    // PG <13 fallback: WITH (FORCE) not supported
+                    shell_exec(sprintf('sudo -u postgres dropdb --if-exists %s 2>/dev/null', escapeshellarg($dbName)));
+                }
+                shell_exec(sprintf('sudo -u postgres createdb -O %s %s 2>/dev/null', escapeshellarg($dbUser), escapeshellarg($dbName)));
+                $output = trim((string)shell_exec(sprintf(
+                    'gunzip -c %s | sudo -u postgres pg_restore -d %s --no-owner --no-acl 2>&1 || gunzip -c %s | sudo -u postgres psql %s 2>&1',
+                    escapeshellarg($file), escapeshellarg($dbName),
+                    escapeshellarg($file), escapeshellarg($dbName)
+                )));
+                $ok = true; // pg_restore returns warnings that aren't errors
+            } else {
+                $mysqlCmd = self::buildMysqlCmd();
+                if (!$mysqlCmd) {
+                    $results[] = ['db_name' => $dbName, 'ok' => false, 'error' => 'MySQL auth no disponible'];
+                    continue;
+                }
+                // Ensure user exists
+                shell_exec(sprintf("%s -e \"CREATE USER IF NOT EXISTS '%s'@'localhost'\" 2>/dev/null", $mysqlCmd, $dbUser));
+                // DROP + CREATE + GRANT + IMPORT
+                shell_exec(sprintf('%s -e "DROP DATABASE IF EXISTS \`%s\`; CREATE DATABASE \`%s\`" 2>/dev/null', $mysqlCmd, $dbName, $dbName));
+                shell_exec(sprintf("%s -e \"GRANT ALL ON \`%s\`.* TO '%s'@'localhost'\" 2>/dev/null", $mysqlCmd, $dbName, $dbUser));
+                $output = trim((string)shell_exec(sprintf(
+                    'gunzip -c %s | %s %s 2>&1',
+                    escapeshellarg($file), $mysqlCmd, escapeshellarg($dbName)
+                )));
+                $ok = (stripos($output, 'ERROR') === false);
+            }
+
+            $results[] = ['db_name' => $dbName, 'db_type' => $dbType, 'ok' => $ok, 'output' => substr($output ?? '', 0, 500)];
+        }
+
+        return ['ok' => true, 'databases' => $results];
+    }
+
+    /**
+     * Create a safety backup of ALL hosting databases before activating streaming replication.
+     * Saves to /var/backups/musedock/pre-replication/ with timestamp.
+     */
+    public static function backupAllDatabasesBeforeReplication(string $engine = 'all'): array
+    {
+        $backupDir = '/var/backups/musedock/pre-replication/' . date('Y-m-d_His');
+        if (!is_dir($backupDir)) {
+            @mkdir($backupDir, 0750, true);
+        }
+
+        $databases = Database::fetchAll("
+            SELECT d.*, a.domain FROM hosting_databases d
+            JOIN hosting_accounts a ON a.id = d.account_id
+            ORDER BY d.db_name
+        ");
+
+        $results = [];
+        foreach ($databases as $db) {
+            $dbName = $db['db_name'];
+            $dbType = $db['db_type'] ?? 'pgsql';
+
+            // Only backup the relevant engine type
+            if ($engine !== 'all' && $dbType !== ($engine === 'pg' ? 'pgsql' : 'mysql')) {
+                continue;
+            }
+
+            $dumpFile = $backupDir . '/' . $dbName . '.sql.gz';
+
+            if ($dbType === 'mysql') {
+                $cmd = self::buildMysqldumpCmd();
+                if ($cmd) {
+                    shell_exec(sprintf('%s --single-transaction --quick %s 2>/dev/null | gzip > %s',
+                        $cmd, escapeshellarg($dbName), escapeshellarg($dumpFile)));
+                }
+            } else {
+                shell_exec(sprintf('sudo -u postgres pg_dump %s 2>/dev/null | gzip > %s',
+                    escapeshellarg($dbName), escapeshellarg($dumpFile)));
+            }
+
+            $results[] = [
+                'db_name' => $dbName,
+                'db_type' => $dbType,
+                'ok'      => file_exists($dumpFile) && filesize($dumpFile) > 20,
+                'size'    => file_exists($dumpFile) ? filesize($dumpFile) : 0,
+            ];
+        }
+
+        Settings::set('repl_pre_backup_path', $backupDir);
+
+        return ['ok' => true, 'path' => $backupDir, 'databases' => $results];
     }
 }

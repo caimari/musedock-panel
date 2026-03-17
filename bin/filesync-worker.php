@@ -101,6 +101,27 @@ try {
                 $log("  SSL certs FAILED: " . ($sslResult['error'] ?? ''));
             }
         }
+
+        // Sync database dumps if enabled (Nivel 1 — simple cluster sync)
+        if ($config['db_dumps'] ?? false) {
+            $streamingStatus = \MuseDockPanel\Services\ReplicationService::isStreamingActive();
+            if (!$streamingStatus['any_active']) {
+                $log("  Dumping databases...");
+                $dumpResults = \MuseDockPanel\Services\FileSyncService::dumpAllDatabases();
+                $dumpOk = count(array_filter($dumpResults, fn($r) => $r['ok']));
+                $log("  {$dumpOk}/" . count($dumpResults) . " databases dumped");
+
+                $log("  Syncing database dumps to {$nodeName}...");
+                $dbSyncResult = \MuseDockPanel\Services\FileSyncService::syncDatabaseDumps($node);
+                if ($dbSyncResult['ok'] ?? false) {
+                    $log("  Database dumps synced and restored OK");
+                } else {
+                    $log("  Database dumps FAILED: " . ($dbSyncResult['error'] ?? ''));
+                }
+            } else {
+                $log("  DB dumps skipped — streaming replication active");
+            }
+        }
     }
 
     $log("Sync completed: {$totalOk} OK, {$totalFail} failed");

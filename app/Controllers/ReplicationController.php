@@ -372,6 +372,18 @@ class ReplicationController
             exit;
         }
 
+        // Auto-backup all databases before destructive streaming replication setup
+        $doBackup = ($_POST['auto_backup'] ?? '1') === '1';
+        if ($doBackup) {
+            $backupResult = \MuseDockPanel\Services\FileSyncService::backupAllDatabasesBeforeReplication($engine);
+            LogService::log('replication.backup', 'pre-convert', sprintf(
+                "Backup pre-replicación (%s): %s — %d bases de datos",
+                $engine,
+                $backupResult['path'] ?? 'N/A',
+                count($backupResult['databases'] ?? [])
+            ));
+        }
+
         if ($engine === 'pg') {
             $result = ReplicationService::setupPgSlave($masterIp, $port, $user, $pass);
             if ($result['ok']) {

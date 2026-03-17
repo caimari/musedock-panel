@@ -501,6 +501,8 @@ class ClusterController
             'filesync_ssl_certs'       => isset($_POST['filesync_ssl_certs']) ? '1' : '0',
             'filesync_ssl_cert_path'   => trim($_POST['filesync_ssl_cert_path'] ?? ''),
             'filesync_rewrite_dbhost'  => isset($_POST['filesync_rewrite_dbhost']) ? '1' : '0',
+            'filesync_db_dumps'        => isset($_POST['filesync_db_dumps']) ? '1' : '0',
+            'filesync_db_dump_path'    => trim($_POST['filesync_db_dump_path'] ?? '/tmp/musedock-dumps'),
         ]);
 
         LogService::log('cluster.filesync', 'save', 'Configuracion de sincronizacion de archivos guardada');
@@ -676,6 +678,65 @@ class ClusterController
             'warnings' => $allWarnings,
             'warning_count' => count($allWarnings),
         ]);
+        exit;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Full Sync Orchestrator
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * POST /settings/cluster/full-sync (JSON)
+     * Launches a background orchestrator that runs:
+     *   1) Sync hostings (API) — always
+     *   2) Sync files (rsync/SSH) — if SSH configured
+     *   3) Sync SSL certs — if SSH configured and enabled
+     * Returns sync_id for polling via syncProgress().
+     */
+    public function fullSync(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+
+        if (Settings::get('cluster_role', 'standalone') !== 'master') {
+            echo json_encode(['ok' => false, 'error' => 'Solo el master puede ejecutar sincronizacion completa']);
+            exit;
+        }
+
+        $node = ClusterService::getNode($nodeId);
+        if (!$node) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado']);
+            exit;
+        }
+
+        // Generate unique sync ID and launch background process
+        $syncId = 'fullsync-' . $nodeId . '-' . time();
+        $progressFile = FileSyncService::progressFilePath($syncId);
+
+        // Write initial progress
+        file_put_contents($progressFile, json_encode([
+            'status' => 'starting',
+            'phase' => 'init',
+            'phase_label' => 'Preparando sincronizacion completa...',
+            'total' => 0, 'current' => 0, 'ok' => 0, 'fail' => 0,
+            'current_domain' => '',
+            'elapsed' => 0,
+            'steps' => [],
+        ]));
+
+        // Launch background PHP process
+        $cmd = sprintf(
+            'nohup /usr/bin/php /opt/musedock-panel/bin/fullsync-run.php %d %s > /dev/null 2>&1 &',
+            $nodeId,
+            escapeshellarg($syncId)
+        );
+        shell_exec($cmd);
+
+        LogService::log('cluster.fullsync', 'manual', "Sync completa iniciada al nodo {$node['name']} (ID: {$syncId})");
+
+        echo json_encode(['ok' => true, 'sync_id' => $syncId, 'node_name' => $node['name']]);
         exit;
     }
 }

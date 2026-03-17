@@ -26,902 +26,1183 @@
         'slave'  => 'Slave',
         default  => 'Standalone',
     };
-?>
 
-<!-- ═══════════════════════════════════════════════════════════ -->
-<!-- CARD 1 — Estado del Cluster                                -->
-<!-- ═══════════════════════════════════════════════════════════ -->
-<div class="card mb-3">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-diagram-3 me-2"></i>Estado del Cluster</span>
-        <button type="button" class="btn btn-outline-light btn-sm" onclick="refreshClusterStatus()">
-            <i class="bi bi-arrow-clockwise me-1"></i>Actualizar
-        </button>
-    </div>
-    <div class="card-body">
-        <div class="row" id="local-status">
-            <div class="col-md-6">
-                <h6 class="text-muted mb-3">Servidor Local</h6>
-                <table class="table table-sm">
-                    <tr>
-                        <td class="text-muted" style="width:40%">Rol Cluster</td>
-                        <td>
-                            <span class="badge <?= $clusterBadge ?>" id="local-cluster-role"><?= $clusterLabel ?></span>
-                            <?php if ($clusterRole === 'master'): ?>
-                                <small class="text-muted ms-1">(gestiona hostings)</small>
-                            <?php elseif ($clusterRole === 'slave'): ?>
-                                <small class="text-muted ms-1">(recibe hostings, solo lectura)</small>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted">Rol Replicacion</td>
-                        <td><span class="badge <?= $roleBadge ?>" id="local-role"><?= $roleLabel ?></span></td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted">Uptime</td>
-                        <td id="local-uptime"><?= View::e($localStatus['uptime'] ?? '—') ?></td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted">PostgreSQL 5432</td>
-                        <td id="local-pg5432">
-                            <?php $pg5432 = $localStatus['pg_5432_status'] ?? []; ?>
-                            <?php if ($pg5432['running'] ?? false): ?>
-                                <span class="badge bg-success">Running</span>
-                                <small class="text-muted ms-1">(<?= View::e($pg5432['repl_role'] ?? 'standalone') ?>)</small>
-                            <?php else: ?>
-                                <span class="badge bg-danger">Stopped</span>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted">PostgreSQL 5433</td>
-                        <td id="local-pg5433">
-                            <?php $pg5433 = $localStatus['pg_5433_status'] ?? []; ?>
-                            <?php if ($pg5433['running'] ?? false): ?>
-                                <span class="badge bg-success">Running</span>
-                            <?php else: ?>
-                                <span class="badge bg-secondary">Stopped</span>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted">MySQL</td>
-                        <td id="local-mysql">
-                            <?php $mysql = $localStatus['mysql_status'] ?? []; ?>
-                            <?php if ($mysql['running'] ?? false): ?>
-                                <span class="badge bg-success">Running</span>
-                                <small class="text-muted ms-1">(<?= View::e($mysql['repl_role'] ?? 'standalone') ?>)</small>
-                            <?php else: ?>
-                                <span class="badge bg-secondary">Stopped</span>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                </table>
-            </div>
-            <div class="col-md-6">
-                <h6 class="text-muted mb-3">Recursos del Sistema</h6>
-                <table class="table table-sm">
-                    <?php $disk = $localStatus['disk_usage'] ?? []; ?>
-                    <tr>
-                        <td class="text-muted" style="width:40%">Disco</td>
-                        <td id="local-disk">
-                            <?= View::e($disk['used'] ?? '?') ?> / <?= View::e($disk['total'] ?? '?') ?>
-                            <small class="text-muted">(<?= View::e($disk['percent'] ?? '?') ?>)</small>
-                        </td>
-                    </tr>
-                    <?php $ram = $localStatus['ram_usage'] ?? []; ?>
-                    <tr>
-                        <td class="text-muted">RAM</td>
-                        <td id="local-ram">
-                            <?= number_format($ram['used'] ?? 0) ?> MB / <?= number_format($ram['total'] ?? 0) ?> MB
-                            <small class="text-muted">(<?= $ram['percent'] ?? 0 ?>%)</small>
-                        </td>
-                    </tr>
-                    <?php $cpu = $localStatus['cpu_load'] ?? []; ?>
-                    <tr>
-                        <td class="text-muted">CPU Load</td>
-                        <td id="local-cpu">
-                            <?= $cpu['1min'] ?? 0 ?> / <?= $cpu['5min'] ?? 0 ?> / <?= $cpu['15min'] ?? 0 ?>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted">Hostings</td>
-                        <td id="local-hostings"><?= (int)($localStatus['hosting_count'] ?? 0) ?></td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted">Version Panel</td>
-                        <td><?= View::e($localStatus['panel_version'] ?? '?') ?></td>
-                    </tr>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════ -->
-<!-- CARD 1B — Master que monitoriza (solo si somos slave)       -->
-<!-- ═══════════════════════════════════════════════════════════ -->
-<?php
     $masterIp = $settings['cluster_master_ip'] ?? '';
     $masterLastHb = $settings['cluster_master_last_heartbeat'] ?? '';
     $hbAge = $masterLastHb ? (time() - strtotime($masterLastHb)) : 99999;
+
+    $fsEnabled = ($settings['filesync_enabled'] ?? '0') === '1';
+    $sshKeyExists = file_exists($settings['filesync_ssh_key_path'] ?? '/root/.ssh/id_ed25519');
 ?>
-<?php if ($clusterRole === 'slave' && $masterIp): ?>
-<div class="card mb-3 border-info">
-    <div class="card-header bg-info bg-opacity-10">
-        <i class="bi bi-shield-check me-2"></i>Master que monitoriza este servidor
-    </div>
-    <div class="card-body">
-        <div class="d-flex align-items-center gap-4">
-            <div>
-                <i class="bi bi-pc-display-horizontal fs-3 text-info"></i>
-            </div>
-            <div>
-                <table class="table table-sm mb-0" style="width:auto">
-                    <tr>
-                        <td class="text-muted pe-3">IP del Master</td>
-                        <td><code id="master-ip"><?= View::e($masterIp) ?></code></td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted pe-3">Ultimo Heartbeat</td>
-                        <td>
-                            <span id="master-last-hb"><?= View::e($masterLastHb ?: 'Nunca') ?></span>
-                            <?php if ($masterLastHb): ?>
-                                <?php
-                                    $hbAge = time() - strtotime($masterLastHb);
-                                    if ($hbAge < 60) {
-                                        $hbBadge = 'bg-success';
-                                        $hbText = 'hace ' . $hbAge . 's';
-                                    } elseif ($hbAge < 300) {
-                                        $hbBadge = 'bg-warning text-dark';
-                                        $hbText = 'hace ' . round($hbAge / 60) . ' min';
-                                    } else {
-                                        $hbBadge = 'bg-danger';
-                                        $hbText = 'hace ' . round($hbAge / 60) . ' min';
-                                    }
-                                ?>
-                                <span class="badge <?= $hbBadge ?> ms-2" id="master-hb-age"><?= $hbText ?></span>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                    <tr>
-                        <td class="text-muted pe-3">Estado</td>
-                        <td>
-                            <?php if ($hbAge < 120): ?>
-                                <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Conectado</span>
-                            <?php else: ?>
-                                <span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>Sin contacto reciente</span>
-                            <?php endif; ?>
-                        </td>
-                    </tr>
-                </table>
-            </div>
-        </div>
-        <div class="mt-2 small text-muted">
-            <i class="bi bi-info-circle me-1"></i>Este servidor esta siendo monitorizado por el master indicado. Los heartbeats se reciben automaticamente.
-        </div>
-    </div>
-</div>
-<?php endif; ?>
 
-<?php if ($clusterRole !== 'slave'): ?>
 <!-- ═══════════════════════════════════════════════════════════ -->
-<!-- CARD 2 — Nodos Vinculados (solo master)                    -->
+<!-- Cluster Sub-Tabs                                            -->
 <!-- ═══════════════════════════════════════════════════════════ -->
-<div class="card mb-3">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-hdd-network me-2"></i>Nodos Vinculados</span>
-        <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addNodeModal">
-            <i class="bi bi-plus-circle me-1"></i>Anadir Nodo
+<style>
+.cluster-tabs .nav-link {
+    color: #94a3b8;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    margin-right: 0.25rem;
+    font-size: 0.9rem;
+}
+.cluster-tabs .nav-link:hover {
+    color: #cbd5e1;
+    background: rgba(255,255,255,0.05);
+}
+.cluster-tabs .nav-link.active {
+    background: rgba(34,197,94,0.15);
+    color: #22c55e;
+    border: none;
+}
+.cluster-tabs .nav-link .tab-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+.cluster-tabs .nav-link .tab-dot.dot-green { background: #22c55e; }
+.cluster-tabs .nav-link .tab-dot.dot-yellow { background: #eab308; }
+.cluster-tabs .nav-link .tab-dot.dot-gray { background: #64748b; }
+</style>
+
+<?php
+    // Determine tab status dots
+    $estadoDot = 'dot-green';
+    if ($clusterRole === 'standalone') $estadoDot = 'dot-gray';
+
+    $nodosDot = 'dot-gray';
+    if ($clusterRole === 'master' && !empty($nodes)) $nodosDot = 'dot-green';
+    elseif ($clusterRole === 'master' && empty($nodes)) $nodosDot = 'dot-yellow';
+
+    $archivosDot = 'dot-gray';
+    if ($clusterRole !== 'slave' && $fsEnabled && $sshKeyExists) $archivosDot = 'dot-green';
+    elseif ($clusterRole !== 'slave' && (!$fsEnabled || !$sshKeyExists)) $archivosDot = 'dot-yellow';
+
+    $failoverDot = 'dot-gray';
+    if ($clusterRole === 'master' || $clusterRole === 'slave') $failoverDot = 'dot-green';
+
+    $configDot = 'dot-green';
+    if ($clusterRole === 'standalone') $configDot = 'dot-yellow';
+
+    $colaDot = 'dot-gray';
+    if ($clusterRole !== 'slave') {
+        $pendingCount = (int)($queueStats['pending'] ?? 0);
+        $failedCount = (int)($queueStats['failed'] ?? 0);
+        if ($failedCount > 0) $colaDot = 'dot-yellow';
+        elseif ($pendingCount > 0) $colaDot = 'dot-yellow';
+        else $colaDot = 'dot-green';
+    }
+?>
+
+<ul class="nav nav-pills cluster-tabs mb-3" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-estado" type="button" role="tab">
+            <i class="bi bi-diagram-3 me-1"></i>Estado
+            <span class="tab-dot <?= $estadoDot ?>"></span>
         </button>
+    </li>
+    <?php if ($clusterRole !== 'slave'): ?>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-nodos" type="button" role="tab">
+            <i class="bi bi-hdd-network me-1"></i>Nodos
+            <span class="tab-dot <?= $nodosDot ?>"></span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-archivos" type="button" role="tab">
+            <i class="bi bi-arrow-repeat me-1"></i>Archivos
+            <span class="tab-dot <?= $archivosDot ?>"></span>
+        </button>
+    </li>
+    <?php endif; ?>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-failover" type="button" role="tab">
+            <i class="bi bi-arrow-left-right me-1"></i>Failover
+            <span class="tab-dot <?= $failoverDot ?>"></span>
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-configuracion" type="button" role="tab">
+            <i class="bi bi-gear me-1"></i>Configuración
+            <span class="tab-dot <?= $configDot ?>"></span>
+        </button>
+    </li>
+    <?php if ($clusterRole !== 'slave'): ?>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-cola" type="button" role="tab">
+            <i class="bi bi-collection me-1"></i>Cola
+            <span class="tab-dot <?= $colaDot ?>"></span>
+        </button>
+    </li>
+    <?php endif; ?>
+</ul>
+
+<div class="tab-content">
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- TAB 1 — Estado                                              -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="tab-pane fade show active" id="tab-estado" role="tabpanel">
+
+    <div class="mb-3 p-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);">
+        <small style="color:#6ea8fe;">
+            <i class="bi bi-info-circle me-1"></i>
+            Resumen del estado actual del cluster. Desde aquí puede lanzar una sincronización completa.
+        </small>
     </div>
-    <div class="card-body">
-        <?php if (empty($nodes)): ?>
-            <p class="text-muted text-center mb-0">
-                <i class="bi bi-info-circle me-1"></i>No hay nodos vinculados. Use "Anadir Nodo" para conectar otro servidor.
-            </p>
-        <?php else: ?>
-            <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0">
-                    <thead>
+
+    <!-- CARD 1 — Estado del Cluster -->
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-diagram-3 me-2"></i>Estado del Cluster</span>
+            <button type="button" class="btn btn-outline-light btn-sm" onclick="refreshClusterStatus()">
+                <i class="bi bi-arrow-clockwise me-1"></i>Actualizar
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="row" id="local-status">
+                <div class="col-md-6">
+                    <h6 class="text-muted mb-3">Servidor Local</h6>
+                    <table class="table table-sm">
                         <tr>
-                            <th>Nombre</th>
-                            <th>URL</th>
-                            <th>Estado</th>
-                            <th>Ultimo Heartbeat</th>
-                            <th>Lag</th>
-                            <th>Rol Remoto</th>
-                            <th class="text-end">Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody id="nodes-table-body">
-                        <?php foreach ($nodes as $node): ?>
-                        <tr id="node-row-<?= (int)$node['id'] ?>">
-                            <td><strong><?= View::e($node['name']) ?></strong></td>
-                            <td><code class="small"><?= View::e($node['api_url']) ?></code></td>
+                            <td class="text-muted" style="width:40%">Rol Cluster</td>
                             <td>
-                                <?php
-                                    $status = $node['status'] ?? 'offline';
-                                    $statusBadge = match($status) {
-                                        'online'  => 'bg-success',
-                                        'syncing' => 'bg-warning text-dark',
-                                        default   => 'bg-danger',
-                                    };
-                                ?>
-                                <span class="badge <?= $statusBadge ?>" id="node-status-<?= (int)$node['id'] ?>">
-                                    <?= View::e(ucfirst($status)) ?>
-                                </span>
-                            </td>
-                            <td class="small" id="node-lastseen-<?= (int)$node['id'] ?>">
-                                <?= $node['last_seen_at'] ? View::e($node['last_seen_at']) : '<span class="text-muted">Nunca</span>' ?>
-                            </td>
-                            <td id="node-lag-<?= (int)$node['id'] ?>">
-                                <?= (int)($node['sync_lag_seconds'] ?? 0) ?>s
-                            </td>
-                            <td>
-                                <span class="badge bg-secondary" id="node-role-<?= (int)$node['id'] ?>">
-                                    <?= View::e(ucfirst($node['role'] ?? 'unknown')) ?>
-                                </span>
-                            </td>
-                            <td class="text-end">
+                                <span class="badge <?= $clusterBadge ?>" id="local-cluster-role"><?= $clusterLabel ?></span>
                                 <?php if ($clusterRole === 'master'): ?>
-                                <button type="button" class="btn btn-outline-success btn-sm"
-                                        onclick="confirmSyncAll(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')"
-                                        title="Sincronizar todos los hostings existentes a este nodo">
-                                    <i class="bi bi-arrow-repeat me-1"></i>Sync Todo
-                                </button>
+                                    <small class="text-muted ms-1">(gestiona hostings)</small>
+                                <?php elseif ($clusterRole === 'slave'): ?>
+                                    <small class="text-muted ms-1">(recibe hostings, solo lectura)</small>
                                 <?php endif; ?>
-                                <button type="button" class="btn btn-outline-info btn-sm"
-                                        onclick="viewNodeStatus(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
-                                    <i class="bi bi-eye me-1"></i>Ver Estado
-                                </button>
-                                <button type="button" class="btn btn-outline-danger btn-sm"
-                                        onclick="confirmRemoveNode(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
-                                    <i class="bi bi-trash me-1"></i>Eliminar
-                                </button>
                             </td>
                         </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        <?php endif; ?>
-
-        <?php
-            $fsEnabled = ($settings['filesync_enabled'] ?? '0') === '1';
-            $sshKeyExists = file_exists($settings['filesync_ssh_key_path'] ?? '/root/.ssh/id_ed25519');
-        ?>
-        <?php if (!empty($nodes)): ?>
-        <hr class="border-secondary mt-3 mb-2">
-        <div class="small">
-            <div class="mb-1">
-                <i class="bi bi-info-circle text-info me-1"></i>
-                <strong>Que se sincroniza:</strong>
-            </div>
-            <div class="d-flex flex-wrap gap-3 ms-3">
-                <div>
-                    <span class="badge bg-success"><i class="bi bi-check me-1"></i>Hostings</span>
-                    <span class="text-muted ms-1">Cuentas, dirs, Caddy, PHP-FPM (via API, automatico)</span>
-                </div>
-                <div>
-                    <?php if ($fsEnabled && $sshKeyExists): ?>
-                        <span class="badge bg-success"><i class="bi bi-check me-1"></i>Archivos</span>
-                        <span class="text-muted ms-1">Contenido web via SSH cada <?= (int)($settings['filesync_interval'] ?? 15) ?> min</span>
-                    <?php else: ?>
-                        <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Archivos</span>
-                        <span class="text-muted ms-1">
-                            <?php if (!$sshKeyExists): ?>
-                                Falta generar clave SSH
-                            <?php elseif (!$fsEnabled): ?>
-                                Sincronizacion de archivos desactivada
-                            <?php endif; ?>
-                            — <a href="#card-filesync" class="text-info">configurar abajo</a>
-                        </span>
-                    <?php endif; ?>
-                </div>
-            </div>
-        </div>
-        <?php endif; ?>
-    </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════ -->
-<!-- CARD 3 — Cola de Sincronizacion                            -->
-<!-- ═══════════════════════════════════════════════════════════ -->
-<div class="card mb-3">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-collection me-2"></i>Cola de Sincronizacion</span>
-        <div class="d-flex gap-2">
-            <form method="post" action="/settings/cluster/process-queue" class="d-inline">
-                <?= View::csrf() ?>
-                <button type="submit" class="btn btn-success btn-sm">
-                    <i class="bi bi-play-circle me-1"></i>Procesar Cola
-                </button>
-            </form>
-            <form method="post" action="/settings/cluster/clean-queue" class="d-inline">
-                <?= View::csrf() ?>
-                <button type="button" class="btn btn-outline-warning btn-sm" onclick="confirmCleanQueue(this.closest('form'))">
-                    <i class="bi bi-trash me-1"></i>Limpiar Completados
-                </button>
-            </form>
-        </div>
-    </div>
-    <div class="card-body">
-        <div class="small text-muted mb-2">
-            <i class="bi bi-clock me-1"></i>La cola se procesa automaticamente cada minuto. El boton "Procesar Cola" es para forzar manualmente.
-        </div>
-        <!-- Stats -->
-        <div class="d-flex gap-3 mb-3 flex-wrap" id="queue-stats">
-            <span class="badge bg-secondary fs-6">
-                <i class="bi bi-hourglass me-1"></i>Pendientes: <?= (int)($queueStats['pending'] ?? 0) ?>
-            </span>
-            <span class="badge bg-info fs-6">
-                <i class="bi bi-gear-wide-connected me-1"></i>Procesando: <?= (int)($queueStats['processing'] ?? 0) ?>
-            </span>
-            <span class="badge bg-success fs-6">
-                <i class="bi bi-check-circle me-1"></i>Completados: <?= (int)($queueStats['completed'] ?? 0) ?>
-            </span>
-            <span class="badge bg-danger fs-6">
-                <i class="bi bi-x-circle me-1"></i>Fallidos: <?= (int)($queueStats['failed'] ?? 0) ?>
-            </span>
-        </div>
-
-        <?php if (empty($recentQueue)): ?>
-            <p class="text-muted text-center mb-0"><i class="bi bi-info-circle me-1"></i>La cola esta vacia.</p>
-        <?php else: ?>
-            <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0">
-                    <thead>
                         <tr>
-                            <th>Accion</th>
-                            <th>Nodo Destino</th>
-                            <th>Estado</th>
-                            <th>Intentos</th>
-                            <th>Creado</th>
-                            <th>Error</th>
+                            <td class="text-muted">Rol Replicación</td>
+                            <td><span class="badge <?= $roleBadge ?>" id="local-role"><?= $roleLabel ?></span></td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($recentQueue as $item): ?>
                         <tr>
-                            <td><code><?= View::e($item['action']) ?></code></td>
-                            <td><?= View::e($item['node_name'] ?? 'N/A') ?></td>
+                            <td class="text-muted">Uptime</td>
+                            <td id="local-uptime"><?= View::e($localStatus['uptime'] ?? '—') ?></td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">PostgreSQL 5432</td>
+                            <td id="local-pg5432">
+                                <?php $pg5432 = $localStatus['pg_5432_status'] ?? []; ?>
+                                <?php if ($pg5432['running'] ?? false): ?>
+                                    <span class="badge bg-success">Running</span>
+                                    <small class="text-muted ms-1">(<?= View::e($pg5432['repl_role'] ?? 'standalone') ?>)</small>
+                                <?php else: ?>
+                                    <span class="badge bg-danger">Stopped</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">PostgreSQL 5433</td>
+                            <td id="local-pg5433">
+                                <?php $pg5433 = $localStatus['pg_5433_status'] ?? []; ?>
+                                <?php if ($pg5433['running'] ?? false): ?>
+                                    <span class="badge bg-success">Running</span>
+                                <?php else: ?>
+                                    <span class="badge bg-secondary">Stopped</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">MySQL</td>
+                            <td id="local-mysql">
+                                <?php $mysql = $localStatus['mysql_status'] ?? []; ?>
+                                <?php if ($mysql['running'] ?? false): ?>
+                                    <span class="badge bg-success">Running</span>
+                                    <small class="text-muted ms-1">(<?= View::e($mysql['repl_role'] ?? 'standalone') ?>)</small>
+                                <?php else: ?>
+                                    <span class="badge bg-secondary">Stopped</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h6 class="text-muted mb-3">Recursos del Sistema</h6>
+                    <table class="table table-sm">
+                        <?php $disk = $localStatus['disk_usage'] ?? []; ?>
+                        <tr>
+                            <td class="text-muted" style="width:40%">Disco</td>
+                            <td id="local-disk">
+                                <?= View::e($disk['used'] ?? '?') ?> / <?= View::e($disk['total'] ?? '?') ?>
+                                <small class="text-muted">(<?= View::e($disk['percent'] ?? '?') ?>)</small>
+                            </td>
+                        </tr>
+                        <?php $ram = $localStatus['ram_usage'] ?? []; ?>
+                        <tr>
+                            <td class="text-muted">RAM</td>
+                            <td id="local-ram">
+                                <?= number_format($ram['used'] ?? 0) ?> MB / <?= number_format($ram['total'] ?? 0) ?> MB
+                                <small class="text-muted">(<?= $ram['percent'] ?? 0 ?>%)</small>
+                            </td>
+                        </tr>
+                        <?php $cpu = $localStatus['cpu_load'] ?? []; ?>
+                        <tr>
+                            <td class="text-muted">CPU Load</td>
+                            <td id="local-cpu">
+                                <?= $cpu['1min'] ?? 0 ?> / <?= $cpu['5min'] ?? 0 ?> / <?= $cpu['15min'] ?? 0 ?>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Hostings</td>
+                            <td id="local-hostings"><?= (int)($localStatus['hosting_count'] ?? 0) ?></td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted">Versión Panel</td>
+                            <td><?= View::e($localStatus['panel_version'] ?? '?') ?></td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CARD 1B — Master que monitoriza (solo si somos slave) -->
+    <?php if ($clusterRole === 'slave' && $masterIp): ?>
+    <div class="card mb-3 border-info">
+        <div class="card-header bg-info bg-opacity-10">
+            <i class="bi bi-shield-check me-2"></i>Master que monitoriza este servidor
+        </div>
+        <div class="card-body">
+            <div class="d-flex align-items-center gap-4">
+                <div>
+                    <i class="bi bi-pc-display-horizontal fs-3 text-info"></i>
+                </div>
+                <div>
+                    <table class="table table-sm mb-0" style="width:auto">
+                        <tr>
+                            <td class="text-muted pe-3">IP del Master</td>
+                            <td><code id="master-ip"><?= View::e($masterIp) ?></code></td>
+                        </tr>
+                        <tr>
+                            <td class="text-muted pe-3">Último Heartbeat</td>
                             <td>
-                                <?php
-                                    $qStatus = $item['status'] ?? 'pending';
-                                    $qBadge = match($qStatus) {
-                                        'completed'  => 'bg-success',
-                                        'processing' => 'bg-info',
-                                        'failed'     => 'bg-danger',
-                                        default      => 'bg-secondary',
-                                    };
-                                ?>
-                                <span class="badge <?= $qBadge ?>"><?= View::e(ucfirst($qStatus)) ?></span>
+                                <span id="master-last-hb"><?= View::e($masterLastHb ?: 'Nunca') ?></span>
+                                <?php if ($masterLastHb): ?>
+                                    <?php
+                                        $hbAge = time() - strtotime($masterLastHb);
+                                        if ($hbAge < 60) {
+                                            $hbBadge = 'bg-success';
+                                            $hbText = 'hace ' . $hbAge . 's';
+                                        } elseif ($hbAge < 300) {
+                                            $hbBadge = 'bg-warning text-dark';
+                                            $hbText = 'hace ' . round($hbAge / 60) . ' min';
+                                        } else {
+                                            $hbBadge = 'bg-danger';
+                                            $hbText = 'hace ' . round($hbAge / 60) . ' min';
+                                        }
+                                    ?>
+                                    <span class="badge <?= $hbBadge ?> ms-2" id="master-hb-age"><?= $hbText ?></span>
+                                <?php endif; ?>
                             </td>
-                            <td><?= (int)$item['attempts'] ?>/<?= (int)$item['max_attempts'] ?></td>
-                            <td class="small"><?= View::e($item['created_at'] ?? '') ?></td>
-                            <td class="small text-danger"><?= View::e($item['error_message'] ?? '') ?></td>
                         </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        <?php endif; ?>
-    </div>
-</div>
-<?php endif; /* end solo master: nodos + cola */ ?>
-
-<!-- ═══════════════════════════════════════════════════════════ -->
-<!-- CARD 4 — Operaciones de Failover                           -->
-<!-- ═══════════════════════════════════════════════════════════ -->
-<div class="card mb-3">
-    <div class="card-header"><i class="bi bi-arrow-left-right me-2"></i>Operaciones de Failover</div>
-    <div class="card-body">
-        <p class="text-muted mb-3">
-            Las operaciones de failover permiten cambiar el rol de este servidor dentro del cluster.
-            Use estas opciones con precaucion.
-        </p>
-
-        <?php
-            // Determine effective failover role: cluster_role OR repl_role
-            $failoverRole = 'standalone';
-            if ($clusterRole === 'slave' || $replRole === 'slave') $failoverRole = 'slave';
-            elseif ($clusterRole === 'master' || $replRole === 'master') $failoverRole = 'master';
-        ?>
-
-        <?php if ($failoverRole === 'slave'): ?>
-            <?php
-                $masterIpSaved = $settings['cluster_master_ip'] ?? '';
-                $masterLastHb = $settings['cluster_master_last_heartbeat'] ?? '';
-                $masterAge = $masterLastHb ? (time() - strtotime($masterLastHb)) : 99999;
-                $masterDown = $masterAge > (int)($settings['cluster_unreachable_timeout'] ?? 300);
-            ?>
-
-            <?php if ($masterDown && $masterIpSaved): ?>
-                <div class="alert" style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #f87171;">
-                    <i class="bi bi-exclamation-octagon me-2"></i>
-                    <strong>Master caido.</strong> El master (<?= View::e($masterIpSaved) ?>) no responde desde hace <?= round($masterAge / 60) ?> minutos.
-                    Puede promover este servidor a Master para que atienda el trafico.
+                        <tr>
+                            <td class="text-muted pe-3">Estado</td>
+                            <td>
+                                <?php if ($hbAge < 120): ?>
+                                    <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Conectado</span>
+                                <?php else: ?>
+                                    <span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>Sin contacto reciente</span>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                    </table>
                 </div>
+            </div>
+            <div class="mt-2 small text-muted">
+                <i class="bi bi-info-circle me-1"></i>Este servidor está siendo monitorizado por el master indicado. Los heartbeats se reciben automáticamente.
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+
+    <!-- Orchestrator: Sincronización Completa (solo master con nodos) -->
+    <?php if ($clusterRole === 'master' && !empty($nodes)): ?>
+    <?php foreach ($nodes as $node): ?>
+    <div class="card mb-3 border-success">
+        <div class="card-body text-center py-4">
+            <h5>Sincronización Completa</h5>
+            <p class="text-muted">Ejecuta todos los pasos en secuencia: crear hostings &rarr; copiar archivos &rarr; copiar certificados SSL</p>
+            <button class="btn btn-success btn-lg" onclick="fullSync(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                <i class="bi bi-play-circle me-1"></i>Sincronización Completa a <?= View::e($node['name']) ?>
+            </button>
+            <div class="mt-2 small text-muted">
+                Si SSH no está configurado, solo se ejecutará la parte de hostings (API) y avisará.
+            </div>
+        </div>
+    </div>
+    <?php endforeach; ?>
+    <?php endif; ?>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- TAB 2 — Nodos                                               -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<?php if ($clusterRole !== 'slave'): ?>
+<div class="tab-pane fade" id="tab-nodos" role="tabpanel">
+
+    <div class="mb-3 p-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);">
+        <small style="color:#6ea8fe;">
+            <i class="bi bi-info-circle me-1"></i>
+            Gestión de servidores vinculados. Añada nodos slave para replicar hostings. El botón 'Sync Todo' encola la creación de cuentas (usuario Linux, PHP-FPM, Caddy) en el nodo — NO copia archivos. Para archivos, vaya a la pestaña 'Archivos'.
+        </small>
+    </div>
+
+    <!-- CARD 2 — Nodos Vinculados -->
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-hdd-network me-2"></i>Nodos Vinculados</span>
+            <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addNodeModal">
+                <i class="bi bi-plus-circle me-1"></i>Añadir Nodo
+            </button>
+        </div>
+        <div class="card-body">
+            <?php if (empty($nodes)): ?>
+                <p class="text-muted text-center mb-0">
+                    <i class="bi bi-info-circle me-1"></i>No hay nodos vinculados. Use "Añadir Nodo" para conectar otro servidor.
+                </p>
             <?php else: ?>
-                <div class="alert" style="background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); color: #fbbf24;">
-                    <i class="bi bi-exclamation-triangle me-2"></i>
-                    Este servidor es actualmente un <strong>Slave</strong>. Puede promoverlo a Master si el master actual ha fallado.
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Nombre</th>
+                                <th>URL</th>
+                                <th>Estado</th>
+                                <th>Último Heartbeat</th>
+                                <th>Lag</th>
+                                <th>Rol Remoto</th>
+                                <th class="text-end">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody id="nodes-table-body">
+                            <?php foreach ($nodes as $node): ?>
+                            <tr id="node-row-<?= (int)$node['id'] ?>">
+                                <td><strong><?= View::e($node['name']) ?></strong></td>
+                                <td><code class="small"><?= View::e($node['api_url']) ?></code></td>
+                                <td>
+                                    <?php
+                                        $status = $node['status'] ?? 'offline';
+                                        $statusBadge = match($status) {
+                                            'online'  => 'bg-success',
+                                            'syncing' => 'bg-warning text-dark',
+                                            default   => 'bg-danger',
+                                        };
+                                    ?>
+                                    <span class="badge <?= $statusBadge ?>" id="node-status-<?= (int)$node['id'] ?>">
+                                        <?= View::e(ucfirst($status)) ?>
+                                    </span>
+                                </td>
+                                <td class="small" id="node-lastseen-<?= (int)$node['id'] ?>">
+                                    <?= $node['last_seen_at'] ? View::e($node['last_seen_at']) : '<span class="text-muted">Nunca</span>' ?>
+                                </td>
+                                <td id="node-lag-<?= (int)$node['id'] ?>">
+                                    <?= (int)($node['sync_lag_seconds'] ?? 0) ?>s
+                                </td>
+                                <td>
+                                    <span class="badge bg-secondary" id="node-role-<?= (int)$node['id'] ?>">
+                                        <?= View::e(ucfirst($node['role'] ?? 'unknown')) ?>
+                                    </span>
+                                </td>
+                                <td class="text-end">
+                                    <?php if ($clusterRole === 'master'): ?>
+                                    <button type="button" class="btn btn-outline-success btn-sm"
+                                            onclick="confirmSyncAll(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')"
+                                            title="Sincronizar todos los hostings existentes a este nodo">
+                                        <i class="bi bi-arrow-repeat me-1"></i>Sync Todo
+                                    </button>
+                                    <?php endif; ?>
+                                    <button type="button" class="btn btn-outline-info btn-sm"
+                                            onclick="viewNodeStatus(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                                        <i class="bi bi-eye me-1"></i>Ver Estado
+                                    </button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm"
+                                            onclick="confirmRemoveNode(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                                        <i class="bi bi-trash me-1"></i>Eliminar
+                                    </button>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
                 </div>
             <?php endif; ?>
 
-            <form method="post" action="/settings/cluster/promote" id="form-promote-cluster">
-                <?= View::csrf() ?>
-                <button type="button" class="btn btn-warning btn-lg" onclick="confirmPromoteCluster()">
-                    <i class="bi bi-arrow-up-circle me-1"></i>Promover a Master
-                </button>
-            </form>
-
-        <?php elseif ($failoverRole === 'master'): ?>
-            <div class="alert" style="background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); color: #60a5fa;">
-                <i class="bi bi-info-circle me-2"></i>
-                Este servidor es actualmente el <strong>Master</strong>. Puede degradarlo a Slave si necesita transferir el rol a otro servidor.
-            </div>
-            <form method="post" action="/settings/cluster/demote" id="form-demote-cluster">
-                <?= View::csrf() ?>
-                <div class="mb-3" style="max-width: 350px;">
-                    <label class="form-label">IP del nuevo Master</label>
-                    <input type="text" name="new_master_ip" class="form-control" placeholder="192.168.1.100" required>
+            <?php if (!empty($nodes)): ?>
+            <hr class="border-secondary mt-3 mb-2">
+            <div class="small">
+                <div class="mb-1">
+                    <i class="bi bi-info-circle text-info me-1"></i>
+                    <strong>Qué se sincroniza:</strong>
                 </div>
-                <button type="button" class="btn btn-danger" onclick="confirmDemoteCluster()">
-                    <i class="bi bi-arrow-down-circle me-1"></i>Degradar a Slave
-                </button>
-            </form>
-
-        <?php else: ?>
-            <div class="alert" style="background: rgba(107,114,128,0.1); border: 1px solid rgba(107,114,128,0.3); color: #9ca3af;">
-                <i class="bi bi-info-circle me-2"></i>
-                Este servidor es <strong>Standalone</strong>. Configure el cluster primero seleccionando un rol (Master o Slave) en la configuracion de abajo.
-            </div>
-        <?php endif; ?>
-    </div>
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════ -->
-<!-- CARD 5 — Configuracion                                     -->
-<!-- ═══════════════════════════════════════════════════════════ -->
-<div class="card mb-3">
-    <div class="card-header"><i class="bi bi-gear me-2"></i>Configuracion del Cluster</div>
-    <div class="card-body">
-        <form method="post" action="/settings/cluster/save-settings">
-            <?= View::csrf() ?>
-
-            <!-- Cluster Role -->
-            <h6 class="text-muted mb-2">Rol del Cluster</h6>
-            <p class="small text-muted">Define el rol de este servidor en la sincronizacion de hostings.</p>
-            <div class="row mb-3">
-                <div class="col-md-4">
-                    <select name="cluster_role" class="form-select">
-                        <option value="standalone" <?= ($clusterRole === 'standalone') ? 'selected' : '' ?>>Standalone (sin cluster)</option>
-                        <option value="master" <?= ($clusterRole === 'master') ? 'selected' : '' ?>>Master (crea y envia hostings)</option>
-                        <option value="slave" <?= ($clusterRole === 'slave') ? 'selected' : '' ?>>Slave (recibe hostings, solo lectura)</option>
-                    </select>
-                </div>
-                <div class="col-md-8">
-                    <div class="small mt-2">
-                        <?php if ($clusterRole === 'master'): ?>
-                            <span class="text-success"><i class="bi bi-check-circle me-1"></i>Los hostings creados aqui se replicaran a los nodos slave vinculados.</span>
-                        <?php elseif ($clusterRole === 'slave'): ?>
-                            <span class="text-info"><i class="bi bi-info-circle me-1"></i>La creacion de hostings esta bloqueada. Solo se reciben hostings del master.</span>
+                <div class="d-flex flex-wrap gap-3 ms-3">
+                    <div>
+                        <span class="badge bg-success"><i class="bi bi-check me-1"></i>Hostings</span>
+                        <span class="text-muted ms-1">Cuentas, dirs, Caddy, PHP-FPM (via API, automático)</span>
+                    </div>
+                    <div>
+                        <?php if ($fsEnabled && $sshKeyExists): ?>
+                            <span class="badge bg-success"><i class="bi bi-check me-1"></i>Archivos</span>
+                            <span class="text-muted ms-1">Contenido web via SSH cada <?= (int)($settings['filesync_interval'] ?? 15) ?> min</span>
                         <?php else: ?>
-                            <span class="text-muted"><i class="bi bi-dash-circle me-1"></i>No se sincronizan hostings. Cada servidor trabaja de forma independiente.</span>
+                            <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Archivos</span>
+                            <span class="text-muted ms-1">
+                                <?php if (!$sshKeyExists): ?>
+                                    Falta generar clave SSH
+                                <?php elseif (!$fsEnabled): ?>
+                                    Sincronización de archivos desactivada
+                                <?php endif; ?>
+                                — <a href="#archivos" class="text-info">configurar en pestaña Archivos</a>
+                            </span>
                         <?php endif; ?>
                     </div>
                 </div>
             </div>
-
-            <hr class="border-secondary">
-
-            <!-- Token Local -->
-            <h6 class="text-muted mb-2">Token Local</h6>
-            <p class="small text-muted">Este token se usa para que otros nodos se conecten a este servidor.</p>
-            <div class="input-group mb-3" style="max-width: 600px;">
-                <input type="text" class="form-control font-monospace" id="local-token-input"
-                       name="cluster_local_token" value="<?= View::e($localToken) ?>"
-                       placeholder="Token de autenticacion local" readonly>
-                <button type="button" class="btn btn-outline-light" onclick="copyLocalToken()">
-                    <i class="bi bi-clipboard"></i>
-                </button>
-                <button type="button" class="btn btn-outline-warning" onclick="regenerateLocalToken()">
-                    <i class="bi bi-arrow-clockwise"></i> Regenerar
-                </button>
-            </div>
-
-            <hr class="border-secondary">
-
-            <!-- Intervalos -->
-            <h6 class="text-muted mb-2">Intervalos</h6>
-            <div class="row mb-3">
-                <div class="col-md-4">
-                    <label class="form-label">Intervalo de Heartbeat (seg)</label>
-                    <input type="number" name="cluster_heartbeat_interval" class="form-control"
-                           value="<?= (int)($settings['cluster_heartbeat_interval'] ?? 30) ?>" min="10" max="300">
-                </div>
-                <div class="col-md-4">
-                    <label class="form-label">Timeout inaccesible (seg)</label>
-                    <input type="number" name="cluster_unreachable_timeout" class="form-control"
-                           value="<?= (int)($settings['cluster_unreachable_timeout'] ?? 300) ?>" min="60" max="3600">
-                </div>
-            </div>
-
-            <hr class="border-secondary">
-
-            <!-- Notificaciones — enlace a la nueva pagina -->
-            <h6 class="text-muted mb-2">Notificaciones</h6>
-            <p class="small text-muted mb-2">
-                Las alertas del cluster (nodos caidos, failover, etc.) se envian a traves de los canales configurados en Notificaciones.
-            </p>
-            <a href="/settings/notifications" class="btn btn-outline-info btn-sm mb-3">
-                <i class="bi bi-bell me-1"></i>Configurar Notificaciones (Email / Telegram)
-            </a>
-
-            <?php if ($clusterRole === 'slave'): ?>
-            <hr class="border-secondary">
-
-            <!-- Slave: alertas de master caido -->
-            <h6 class="text-muted mb-2">Alerta de Master caido</h6>
-            <p class="small text-muted mb-2">
-                Si este servidor deja de recibir heartbeat del master durante el timeout configurado, se enviara una alerta.
-                Seleccione los canales por los que desea recibir la notificacion.
-            </p>
-            <div class="form-check form-switch mb-2">
-                <input class="form-check-input" type="checkbox" name="cluster_slave_notify_email" id="slaveNotifyEmail"
-                       <?= (($settings['cluster_slave_notify_email'] ?? '1') === '1') ? 'checked' : '' ?>>
-                <label class="form-check-label" for="slaveNotifyEmail">
-                    <i class="bi bi-envelope me-1"></i>Notificar por Email
-                </label>
-            </div>
-            <div class="form-check form-switch mb-3">
-                <input class="form-check-input" type="checkbox" name="cluster_slave_notify_telegram" id="slaveNotifyTelegram"
-                       <?= (($settings['cluster_slave_notify_telegram'] ?? '1') === '1') ? 'checked' : '' ?>>
-                <label class="form-check-label" for="slaveNotifyTelegram">
-                    <i class="bi bi-telegram me-1"></i>Notificar por Telegram
-                </label>
-            </div>
-
-            <hr class="border-secondary">
-
-            <!-- Slave: auto-failover -->
-            <h6 class="text-muted mb-2">Auto-Failover</h6>
-            <?php $autoFailoverOn = (($settings['cluster_auto_failover'] ?? '0') === '1'); ?>
-            <div class="d-flex align-items-center gap-3 mb-2">
-                <div class="form-check form-switch mb-0">
-                    <input class="form-check-input" type="checkbox" id="autoFailoverToggle"
-                           <?= $autoFailoverOn ? 'checked' : '' ?>
-                           onchange="toggleAutoFailover(this)">
-                    <label class="form-check-label" for="autoFailoverToggle">
-                        Promover automaticamente a Master si el master cae
-                    </label>
-                </div>
-                <?php if ($autoFailoverOn): ?>
-                    <span class="badge bg-danger"><i class="bi bi-lightning me-1"></i>ACTIVO</span>
-                <?php endif; ?>
-            </div>
-            <input type="hidden" name="cluster_auto_failover" id="autoFailoverValue" value="<?= $autoFailoverOn ? '1' : '0' ?>">
-            <div class="small text-muted mb-3" style="max-width:600px;">
-                <i class="bi bi-exclamation-triangle text-warning me-1"></i>
-                <strong>Precaucion:</strong> Si se activa, este servidor se promovera automaticamente a Master cuando detecte que el master no responde.
-                Esto abrira los puertos 80/443 y cambiara el rol del cluster. Desactivado por defecto para evitar problemas de split-brain.
-            </div>
             <?php endif; ?>
-
-            <br>
-            <button type="submit" class="btn btn-success">
-                <i class="bi bi-check-circle me-1"></i>Guardar Configuracion
-            </button>
-        </form>
+        </div>
     </div>
-</div>
 
-<?php if ($clusterRole !== 'slave'): ?>
-<?php $fsConfig = \MuseDockPanel\Services\FileSyncService::getConfig(); ?>
-<!-- ═══════════════════════════════════════════════════════════ -->
-<!-- CARD 6 — Sincronizacion de Archivos (solo master)           -->
-<!-- ═══════════════════════════════════════════════════════════ -->
-<div class="card mb-3" id="card-filesync">
-    <div class="card-header"><i class="bi bi-arrow-repeat me-2"></i>Sincronizacion de Archivos</div>
-    <div class="card-body">
-        <form method="post" action="/settings/cluster/filesync-settings">
-            <?= View::csrf() ?>
-
-            <!-- Enable toggle -->
-            <div class="form-check form-switch mb-3">
-                <input class="form-check-input" type="checkbox" name="filesync_enabled" id="filesyncEnabled"
-                       <?= $fsConfig['enabled'] ? 'checked' : '' ?>>
-                <label class="form-check-label" for="filesyncEnabled">Activar sincronizacion automatica de archivos</label>
-            </div>
-
-            <!-- Method selector -->
-            <div class="row mb-3">
-                <div class="col-md-4">
-                    <label class="form-label">Metodo de sincronizacion</label>
-                    <select name="filesync_method" class="form-select" id="filesyncMethod">
-                        <option value="ssh" <?= $fsConfig['method'] === 'ssh' ? 'selected' : '' ?>>SSH (rsync)</option>
-                        <option value="https" <?= $fsConfig['method'] === 'https' ? 'selected' : '' ?>>HTTPS (API del panel)</option>
-                    </select>
+    <!-- Modal: Añadir Nodo -->
+    <div class="modal fade" id="addNodeModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Añadir Nodo</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="col-md-8">
-                    <div class="small mt-4">
-                        <span class="text-muted" id="filesyncMethodDesc">
-                            <?php if ($fsConfig['method'] === 'ssh'): ?>
-                                rsync por SSH. Ideal para WireGuard (~5 MB/s). Requiere clave SSH.
-                            <?php else: ?>
-                                Archivos via API HTTPS. Mas rapido entre VPS (~24 MB/s). No requiere SSH.
-                            <?php endif; ?>
-                        </span>
-                    </div>
-                </div>
-            </div>
-
-            <hr class="border-secondary">
-
-            <!-- SSH Settings (shown when method=ssh) -->
-            <div id="sshSettings" style="<?= $fsConfig['method'] !== 'ssh' ? 'display:none' : '' ?>">
-                <h6 class="text-muted mb-2">Configuracion SSH</h6>
-                <div class="alert alert-info small py-2 mb-3" style="background:#1a3a4a;border-color:#2a5a6a;color:#a8d8ea;">
-                    <i class="bi bi-info-circle me-1"></i>
-                    <strong>Como funciona:</strong> Este servidor (master) se conecta por SSH al slave para copiar archivos con rsync.
-                    La clave privada se queda aqui, la clave publica se instala en los slaves.
-                    <br>
-                    <strong>1.</strong> Pulsa "Generar" para crear el par de claves en este servidor &rarr;
-                    <strong>2.</strong> Pulsa "Instalar clave" en cada nodo slave &rarr;
-                    <strong>3.</strong> Pulsa "Test SSH" para verificar la conexion.
-                    <br>
-                    <span class="text-warning"><i class="bi bi-shield-check me-1"></i>Debe ser <code>root</code> para poder leer/escribir archivos de todos los hostings y mantener permisos.</span>
-                </div>
-                <div class="row mb-3">
-                    <div class="col-md-3">
-                        <label class="form-label">Puerto SSH</label>
-                        <input type="number" name="filesync_ssh_port" class="form-control"
-                               value="<?= $fsConfig['ssh_port'] ?>" min="1" max="65535">
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label">Usuario SSH</label>
-                        <input type="text" name="filesync_ssh_user" class="form-control"
-                               value="<?= View::e($fsConfig['ssh_user']) ?>">
-                        <small class="text-muted">Debe ser root</small>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Ruta clave SSH privada (de este servidor)</label>
-                        <div class="input-group">
-                            <input type="text" name="filesync_ssh_key_path" class="form-control font-monospace"
-                                   id="sshKeyPath" value="<?= View::e($fsConfig['ssh_key_path']) ?>">
-                            <button type="button" class="btn btn-outline-warning" onclick="generateSshKey()">
-                                <i class="bi bi-key me-1"></i>Generar
-                            </button>
+                <form method="post" action="/settings/cluster/add-node" id="form-add-node">
+                    <?= View::csrf() ?>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Nombre del Nodo</label>
+                            <input type="text" name="node_name" class="form-control" placeholder="Servidor 2" required>
                         </div>
-                        <small class="text-muted">Se genera aqui. La publica se envia a los slaves.</small>
-                    </div>
-                </div>
+                        <div class="mb-3">
+                            <label class="form-label">URL de la API</label>
+                            <input type="url" name="api_url" class="form-control" id="add-node-url"
+                                   placeholder="https://192.168.1.100:8444" required>
+                            <small class="text-muted">Formato: https://IP:PUERTO (normalmente puerto 8444)</small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Token de Autenticación</label>
+                            <div class="input-group">
+                                <input type="text" name="auth_token" class="form-control font-monospace" id="add-node-token"
+                                       placeholder="Token del nodo remoto" required>
+                                <button type="button" class="btn btn-outline-warning" onclick="generateTokenForAdd()">
+                                    <i class="bi bi-arrow-clockwise me-1"></i>Generar
+                                </button>
+                            </div>
+                        </div>
 
-                <!-- Public key display -->
-                <div class="mb-3" id="sshPubKeyArea" style="display:none">
-                    <label class="form-label small text-muted">Clave publica (para copiar al slave):</label>
-                    <div class="input-group">
-                        <input type="text" class="form-control font-monospace small" id="sshPubKeyDisplay" readonly>
-                        <button type="button" class="btn btn-outline-light" onclick="navigator.clipboard.writeText(document.getElementById('sshPubKeyDisplay').value)">
-                            <i class="bi bi-clipboard"></i>
+                        <!-- Test Connection -->
+                        <div class="mb-3">
+                            <button type="button" class="btn btn-outline-info" onclick="testNodeConnection()" id="btn-test-node">
+                                <i class="bi bi-plug me-1"></i>Probar Conexión
+                            </button>
+                            <span id="test-node-result" class="ms-2"></span>
+                        </div>
+
+                        <!-- Remote info (shown after test) -->
+                        <div id="remote-info" class="alert" style="display:none; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); color: #22c55e;"></div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-plus-circle me-1"></i>Añadir Nodo
                         </button>
                     </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Ver Estado del Nodo -->
+    <div class="modal fade" id="nodeStatusModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-eye me-2"></i>Estado del Nodo: <span id="node-status-name"></span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="node-status-content">
+                        <div class="text-center text-muted py-4">
+                            <div class="spinner-border spinner-border-sm me-2"></div>Cargando...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Hidden form for remove-node -->
+    <form method="post" id="form-remove-node" style="display:none;">
+        <?= View::csrf() ?>
+        <input type="hidden" name="node_id" id="remove-node-id">
+    </form>
+
+    <!-- Hidden form for sync-all-hostings -->
+    <form method="post" action="/settings/cluster/sync-all-hostings" id="form-sync-all" style="display:none;">
+        <?= View::csrf() ?>
+        <input type="hidden" name="node_id" id="sync-all-node-id">
+    </form>
+
+</div>
+<?php endif; ?>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- TAB 3 — Archivos                                            -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<?php if ($clusterRole !== 'slave'): ?>
+<?php $fsConfig = \MuseDockPanel\Services\FileSyncService::getConfig(); ?>
+<div class="tab-pane fade" id="tab-archivos" role="tabpanel">
+
+    <div class="mb-3 p-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);">
+        <small style="color:#6ea8fe;">
+            <i class="bi bi-info-circle me-1"></i>
+            Sincronización de contenido web entre servidores. Usa rsync (SSH) o HTTPS. Los archivos se copian cada X minutos automáticamente. Esto es independiente de la pestaña 'Nodos' — 'Nodos' crea la estructura del hosting, 'Archivos' copia el contenido.
+        </small>
+    </div>
+
+    <!-- Dependency indicators -->
+    <div class="mb-2 small">
+        <?php if (!empty($nodes)): ?>
+            <span class="badge bg-success"><i class="bi bi-check me-1"></i>Nodos</span> configurados
+        <?php else: ?>
+            <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Nodos</span> no configurados — <a href="#nodos">configurar</a>
+        <?php endif; ?>
+        &nbsp;
+        <?php if ($sshKeyExists): ?>
+            <span class="badge bg-success"><i class="bi bi-check me-1"></i>SSH</span> clave generada
+        <?php else: ?>
+            <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>SSH</span> no configurado — genere la clave abajo
+        <?php endif; ?>
+    </div>
+
+    <!-- CARD 6 — Sincronización de Archivos -->
+    <div class="card mb-3" id="card-filesync">
+        <div class="card-header"><i class="bi bi-arrow-repeat me-2"></i>Sincronización de Archivos</div>
+        <div class="card-body">
+            <form method="post" action="/settings/cluster/filesync-settings">
+                <?= View::csrf() ?>
+
+                <!-- Enable toggle -->
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" name="filesync_enabled" id="filesyncEnabled"
+                           <?= $fsConfig['enabled'] ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="filesyncEnabled">Activar sincronización automática de archivos</label>
                 </div>
 
-                <!-- Per-node SSH actions -->
-                <?php if (!empty($nodes)): ?>
-                <div class="mb-3">
-                    <label class="form-label small text-muted">Acciones SSH por nodo:</label>
-                    <div class="d-flex flex-wrap gap-2">
-                        <?php foreach ($nodes as $node): ?>
-                        <div class="btn-group btn-group-sm">
-                            <button type="button" class="btn btn-outline-info" onclick="installSshKeyOnNode(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
-                                <i class="bi bi-key me-1"></i><?= View::e($node['name']) ?>: Instalar clave
-                            </button>
-                            <button type="button" class="btn btn-outline-success" onclick="testSshNode(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
-                                <i class="bi bi-plug me-1"></i>Test SSH
+                <!-- Method selector -->
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Método de sincronización</label>
+                        <select name="filesync_method" class="form-select" id="filesyncMethod">
+                            <option value="ssh" <?= $fsConfig['method'] === 'ssh' ? 'selected' : '' ?>>SSH (rsync)</option>
+                            <option value="https" <?= $fsConfig['method'] === 'https' ? 'selected' : '' ?>>HTTPS (API del panel)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="small mt-4">
+                            <span class="text-muted" id="filesyncMethodDesc">
+                                <?php if ($fsConfig['method'] === 'ssh'): ?>
+                                    rsync por SSH. Ideal para WireGuard (~5 MB/s). Requiere clave SSH.
+                                <?php else: ?>
+                                    Archivos via API HTTPS. Más rápido entre VPS (~24 MB/s). No requiere SSH.
+                                <?php endif; ?>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="border-secondary">
+
+                <!-- SSH Settings (shown when method=ssh) -->
+                <div id="sshSettings" style="<?= $fsConfig['method'] !== 'ssh' ? 'display:none' : '' ?>">
+                    <h6 class="text-muted mb-2">Configuración SSH</h6>
+                    <div class="alert alert-info small py-2 mb-3" style="background:#1a3a4a;border-color:#2a5a6a;color:#a8d8ea;">
+                        <i class="bi bi-info-circle me-1"></i>
+                        <strong>Cómo funciona:</strong> Este servidor (master) se conecta por SSH al slave para copiar archivos con rsync.
+                        La clave privada se queda aquí, la clave pública se instala en los slaves.
+                        <br>
+                        <strong>1.</strong> Pulsa "Generar" para crear el par de claves en este servidor &rarr;
+                        <strong>2.</strong> Pulsa "Instalar clave" en cada nodo slave &rarr;
+                        <strong>3.</strong> Pulsa "Test SSH" para verificar la conexión.
+                        <br>
+                        <span class="text-warning"><i class="bi bi-shield-check me-1"></i>Debe ser <code>root</code> para poder leer/escribir archivos de todos los hostings y mantener permisos.</span>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col-md-3">
+                            <label class="form-label">Puerto SSH</label>
+                            <input type="number" name="filesync_ssh_port" class="form-control"
+                                   value="<?= $fsConfig['ssh_port'] ?>" min="1" max="65535">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Usuario SSH</label>
+                            <input type="text" name="filesync_ssh_user" class="form-control"
+                                   value="<?= View::e($fsConfig['ssh_user']) ?>">
+                            <small class="text-muted">Debe ser root</small>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Ruta clave SSH privada (de este servidor)</label>
+                            <div class="input-group">
+                                <input type="text" name="filesync_ssh_key_path" class="form-control font-monospace"
+                                       id="sshKeyPath" value="<?= View::e($fsConfig['ssh_key_path']) ?>">
+                                <button type="button" class="btn btn-outline-warning" onclick="generateSshKey()">
+                                    <i class="bi bi-key me-1"></i>Generar
+                                </button>
+                            </div>
+                            <small class="text-muted">Se genera aquí. La pública se envía a los slaves.</small>
+                        </div>
+                    </div>
+
+                    <!-- Public key display -->
+                    <div class="mb-3" id="sshPubKeyArea" style="display:none">
+                        <label class="form-label small text-muted">Clave pública (para copiar al slave):</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control font-monospace small" id="sshPubKeyDisplay" readonly>
+                            <button type="button" class="btn btn-outline-light" onclick="navigator.clipboard.writeText(document.getElementById('sshPubKeyDisplay').value)">
+                                <i class="bi bi-clipboard"></i>
                             </button>
                         </div>
-                        <?php endforeach; ?>
                     </div>
-                    <div id="sshActionResult" class="mt-2 small"></div>
+
+                    <!-- Per-node SSH actions -->
+                    <?php if (!empty($nodes)): ?>
+                    <div class="mb-3">
+                        <label class="form-label small text-muted">Acciones SSH por nodo:</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            <?php foreach ($nodes as $node): ?>
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-outline-info" onclick="installSshKeyOnNode(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                                    <i class="bi bi-key me-1"></i><?= View::e($node['name']) ?>: Instalar clave
+                                </button>
+                                <button type="button" class="btn btn-outline-success" onclick="testSshNode(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                                    <i class="bi bi-plug me-1"></i>Test SSH
+                                </button>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <div id="sshActionResult" class="mt-2 small"></div>
+                    </div>
+                    <?php else: ?>
+                    <div class="alert alert-warning small py-2 mb-3" style="background:#3a3000;border-color:#5a5000;color:#e8d44d;">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        No hay nodos configurados. Primero añade un nodo en la pestaña "Nodos" para poder instalar la clave SSH y hacer test de conexión.
+                    </div>
+                    <?php endif; ?>
+
+                    <hr class="border-secondary">
+                </div>
+
+                <!-- Common settings -->
+                <div class="row mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Intervalo (minutos)</label>
+                        <input type="number" name="filesync_interval" class="form-control"
+                               value="<?= $fsConfig['interval_minutes'] ?>" min="1" max="1440">
+                        <small class="text-muted">Cada cuántos minutos sincronizar</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Límite ancho de banda (KB/s)</label>
+                        <input type="number" name="filesync_bwlimit" class="form-control"
+                               value="<?= $fsConfig['bandwidth_limit'] ?>" min="0">
+                        <small class="text-muted">0 = sin límite</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Patrones a excluir</label>
+                        <input type="text" name="filesync_exclude" class="form-control"
+                               value="<?= View::e($fsConfig['exclude_patterns']) ?>">
+                        <small class="text-muted">Separados por coma</small>
+                    </div>
+                </div>
+
+                <hr class="border-secondary">
+
+                <!-- SSL Certificates -->
+                <h6 class="text-muted mb-2">Certificados SSL</h6>
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" name="filesync_ssl_certs" id="filesyncSslCerts"
+                           <?= $fsConfig['sync_ssl_certs'] ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="filesyncSslCerts">Copiar certificados SSL del master al slave</label>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label small text-muted">Ruta certificados Caddy (auto-detectada si vacío)</label>
+                        <?php $detectedCertDir = $fsConfig['ssl_cert_path'] ?: \MuseDockPanel\Services\FileSyncService::findCaddyCertDir(); ?>
+                        <input type="text" name="filesync_ssl_cert_path" class="form-control font-monospace"
+                               value="<?= View::e($detectedCertDir) ?>"
+                               placeholder="No detectado">
+                    </div>
+                </div>
+                <p class="small text-muted mb-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Opciones SSL para el slave: <strong>Copiar del master</strong> (recomendado),
+                    <strong>Cloudflare DNS challenge</strong> (requiere token),
+                    o <strong>certificados autofirmados</strong> de Caddy (temporal, warning en navegadores).
+                </p>
+
+                <hr class="border-secondary">
+
+                <!-- DB_HOST rewrite -->
+                <h6 class="text-muted mb-2">Protección de credenciales</h6>
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" name="filesync_rewrite_dbhost" id="filesyncRewriteDb"
+                           <?= $fsConfig['rewrite_db_host'] ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="filesyncRewriteDb">
+                        Reescribir DB_HOST a <code>localhost</code> en .env y wp-config.php del slave
+                    </label>
+                </div>
+                <p class="small text-muted mb-3">
+                    <i class="bi bi-shield-check me-1"></i>
+                    Evita que las apps del slave intenten conectar a la BD del master. Cambia automáticamente DB_HOST a localhost
+                    en archivos .env (Laravel) y wp-config.php (WordPress) al recibir archivos.
+                </p>
+
+                <!-- Check DB_HOST button -->
+                <button type="button" class="btn btn-outline-warning btn-sm mb-3" onclick="checkDbHost()">
+                    <i class="bi bi-search me-1"></i>Verificar DB_HOST en todos los hostings
+                </button>
+                <div id="dbhostCheckResult" class="mb-3"></div>
+
+                <hr class="border-secondary">
+
+                <!-- Database Dump Sync (Nivel 1) -->
+                <h6 class="text-muted mb-2"><i class="bi bi-database me-1"></i>Bases de datos (dump)</h6>
+                <?php
+                    $streamingActive = \MuseDockPanel\Services\ReplicationService::isStreamingActive();
+                ?>
+                <?php if ($streamingActive['any_active']): ?>
+                <div class="p-2 mb-3 rounded" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.15);">
+                    <small style="color:#22c55e;">
+                        <i class="bi bi-check-circle me-1"></i>
+                        <strong>Replicación streaming activa.</strong> Las bases de datos se replican en tiempo real.
+                        El dump periódico se omite automáticamente (es innecesario).
+                    </small>
                 </div>
                 <?php else: ?>
-                <div class="alert alert-warning small py-2 mb-3" style="background:#3a3000;border-color:#5a5000;color:#e8d44d;">
-                    <i class="bi bi-exclamation-triangle me-1"></i>
-                    No hay nodos configurados. Primero añade un nodo en la seccion "Nodos del Cluster" (arriba) para poder instalar la clave SSH y hacer test de conexion.
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" name="filesync_db_dumps" id="filesyncDbDumps"
+                           <?= ($settings['filesync_db_dumps'] ?? '0') === '1' ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="filesyncDbDumps">
+                        Incluir dump de bases de datos en la sincronización
+                    </label>
                 </div>
+                <div class="row mb-2">
+                    <div class="col-md-6">
+                        <label class="form-label small text-muted">Ruta temporal de dumps</label>
+                        <input type="text" name="filesync_db_dump_path" class="form-control font-monospace"
+                               value="<?= View::e($settings['filesync_db_dump_path'] ?? '/tmp/musedock-dumps') ?>"
+                               placeholder="/tmp/musedock-dumps">
+                    </div>
+                </div>
+                <p class="small text-muted mb-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Las bases de datos se exportan con <code>pg_dump</code> / <code>mysqldump</code> (comprimidas con gzip)
+                    y se restauran en el slave cada intervalo. Si activa la
+                    <a href="/settings/replication" class="text-info">replicación streaming</a> (nivel avanzado),
+                    este paso se omite automáticamente.
+                </p>
                 <?php endif; ?>
 
                 <hr class="border-secondary">
-            </div>
 
-            <!-- Common settings -->
-            <div class="row mb-3">
-                <div class="col-md-3">
-                    <label class="form-label">Intervalo (minutos)</label>
-                    <input type="number" name="filesync_interval" class="form-control"
-                           value="<?= $fsConfig['interval_minutes'] ?>" min="1" max="1440">
-                    <small class="text-muted">Cada cuantos minutos sincronizar</small>
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label">Limite ancho de banda (KB/s)</label>
-                    <input type="number" name="filesync_bwlimit" class="form-control"
-                           value="<?= $fsConfig['bandwidth_limit'] ?>" min="0">
-                    <small class="text-muted">0 = sin limite</small>
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label">Patrones a excluir</label>
-                    <input type="text" name="filesync_exclude" class="form-control"
-                           value="<?= View::e($fsConfig['exclude_patterns']) ?>">
-                    <small class="text-muted">Separados por coma</small>
-                </div>
-            </div>
-
-            <hr class="border-secondary">
-
-            <!-- SSL Certificates -->
-            <h6 class="text-muted mb-2">Certificados SSL</h6>
-            <div class="form-check form-switch mb-2">
-                <input class="form-check-input" type="checkbox" name="filesync_ssl_certs" id="filesyncSslCerts"
-                       <?= $fsConfig['sync_ssl_certs'] ? 'checked' : '' ?>>
-                <label class="form-check-label" for="filesyncSslCerts">Copiar certificados SSL del master al slave</label>
-            </div>
-            <div class="row mb-3">
-                <div class="col-md-6">
-                    <label class="form-label small text-muted">Ruta certificados Caddy (auto-detectada si vacio)</label>
-                    <?php $detectedCertDir = $fsConfig['ssl_cert_path'] ?: \MuseDockPanel\Services\FileSyncService::findCaddyCertDir(); ?>
-                    <input type="text" name="filesync_ssl_cert_path" class="form-control font-monospace"
-                           value="<?= View::e($detectedCertDir) ?>"
-                           placeholder="No detectado">
-                </div>
-            </div>
-            <p class="small text-muted mb-3">
-                <i class="bi bi-info-circle me-1"></i>
-                Opciones SSL para el slave: <strong>Copiar del master</strong> (recomendado),
-                <strong>Cloudflare DNS challenge</strong> (requiere token),
-                o <strong>certificados autofirmados</strong> de Caddy (temporal, warning en navegadores).
-            </p>
-
-            <hr class="border-secondary">
-
-            <!-- DB_HOST rewrite -->
-            <h6 class="text-muted mb-2">Proteccion de credenciales</h6>
-            <div class="form-check form-switch mb-2">
-                <input class="form-check-input" type="checkbox" name="filesync_rewrite_dbhost" id="filesyncRewriteDb"
-                       <?= $fsConfig['rewrite_db_host'] ? 'checked' : '' ?>>
-                <label class="form-check-label" for="filesyncRewriteDb">
-                    Reescribir DB_HOST a <code>localhost</code> en .env y wp-config.php del slave
-                </label>
-            </div>
-            <p class="small text-muted mb-3">
-                <i class="bi bi-shield-check me-1"></i>
-                Evita que las apps del slave intenten conectar a la BD del master. Cambia automaticamente DB_HOST a localhost
-                en archivos .env (Laravel) y wp-config.php (WordPress) al recibir archivos.
-            </p>
-
-            <!-- Check DB_HOST button -->
-            <button type="button" class="btn btn-outline-warning btn-sm mb-3" onclick="checkDbHost()">
-                <i class="bi bi-search me-1"></i>Verificar DB_HOST en todos los hostings
-            </button>
-            <div id="dbhostCheckResult" class="mb-3"></div>
-
-            <hr class="border-secondary">
-
-            <!-- Manual sync buttons -->
-            <?php if (!empty($nodes) && $clusterRole === 'master'): ?>
-            <h6 class="text-muted mb-2">Sincronizacion manual de archivos</h6>
-            <div class="d-flex flex-wrap gap-2 mb-3">
-                <?php foreach ($nodes as $node): ?>
-                <button type="button" class="btn btn-outline-success btn-sm" onclick="syncFilesNow(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
-                    <i class="bi bi-arrow-repeat me-1"></i>Sync archivos a <?= View::e($node['name']) ?>
-                </button>
-                <?php endforeach; ?>
-            </div>
-            <div id="syncFilesResult" class="mb-3"></div>
-            <?php endif; ?>
-
-            <button type="submit" class="btn btn-success">
-                <i class="bi bi-check-circle me-1"></i>Guardar Configuracion de Archivos
-            </button>
-        </form>
-    </div>
-</div>
-<?php endif; /* end solo master: file sync */ ?>
-
-<?php if ($clusterRole !== 'slave'): ?>
-<!-- ═══════════════════════════════════════════════════════════ -->
-<!-- Modal: Anadir Nodo                                         -->
-<!-- ═══════════════════════════════════════════════════════════ -->
-<div class="modal fade" id="addNodeModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content bg-dark text-light">
-            <div class="modal-header border-secondary">
-                <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>Anadir Nodo</h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <form method="post" action="/settings/cluster/add-node" id="form-add-node">
-                <?= View::csrf() ?>
-                <div class="modal-body">
-                    <div class="mb-3">
-                        <label class="form-label">Nombre del Nodo</label>
-                        <input type="text" name="node_name" class="form-control" placeholder="Servidor 2" required>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">URL de la API</label>
-                        <input type="url" name="api_url" class="form-control" id="add-node-url"
-                               placeholder="https://192.168.1.100:8444" required>
-                        <small class="text-muted">Formato: https://IP:PUERTO (normalmente puerto 8444)</small>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Token de Autenticacion</label>
-                        <div class="input-group">
-                            <input type="text" name="auth_token" class="form-control font-monospace" id="add-node-token"
-                                   placeholder="Token del nodo remoto" required>
-                            <button type="button" class="btn btn-outline-warning" onclick="generateTokenForAdd()">
-                                <i class="bi bi-arrow-clockwise me-1"></i>Generar
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Test Connection -->
-                    <div class="mb-3">
-                        <button type="button" class="btn btn-outline-info" onclick="testNodeConnection()" id="btn-test-node">
-                            <i class="bi bi-plug me-1"></i>Probar Conexion
-                        </button>
-                        <span id="test-node-result" class="ms-2"></span>
-                    </div>
-
-                    <!-- Remote info (shown after test) -->
-                    <div id="remote-info" class="alert" style="display:none; background: rgba(34,197,94,0.1); border: 1px solid rgba(34,197,94,0.3); color: #22c55e;"></div>
-                </div>
-                <div class="modal-footer border-secondary">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-plus-circle me-1"></i>Anadir Nodo
+                <!-- Manual sync buttons -->
+                <?php if (!empty($nodes) && $clusterRole === 'master'): ?>
+                <h6 class="text-muted mb-2">Sincronización manual de archivos</h6>
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                    <?php foreach ($nodes as $node): ?>
+                    <button type="button" class="btn btn-outline-success btn-sm" onclick="syncFilesNow(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                        <i class="bi bi-arrow-repeat me-1"></i>Sync archivos a <?= View::e($node['name']) ?>
                     </button>
+                    <?php endforeach; ?>
                 </div>
+                <div id="syncFilesResult" class="mb-3"></div>
+                <?php endif; ?>
+
+                <button type="submit" class="btn btn-success">
+                    <i class="bi bi-check-circle me-1"></i>Guardar Configuración de Archivos
+                </button>
             </form>
         </div>
     </div>
+
 </div>
+<?php endif; ?>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
-<!-- Modal: Ver Estado del Nodo                                 -->
+<!-- TAB 4 — Failover                                            -->
 <!-- ═══════════════════════════════════════════════════════════ -->
-<div class="modal fade" id="nodeStatusModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content bg-dark text-light">
-            <div class="modal-header border-secondary">
-                <h5 class="modal-title"><i class="bi bi-eye me-2"></i>Estado del Nodo: <span id="node-status-name"></span></h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                <div id="node-status-content">
-                    <div class="text-center text-muted py-4">
-                        <div class="spinner-border spinner-border-sm me-2"></div>Cargando...
+<div class="tab-pane fade" id="tab-failover" role="tabpanel">
+
+    <div class="mb-3 p-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);">
+        <small style="color:#6ea8fe;">
+            <i class="bi bi-info-circle me-1"></i>
+            Operaciones para cambiar el rol del servidor. Si el master cae, puede promover un slave a master desde aquí.
+        </small>
+    </div>
+
+    <!-- CARD 4 — Operaciones de Failover -->
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-arrow-left-right me-2"></i>Operaciones de Failover</div>
+        <div class="card-body">
+            <p class="text-muted mb-3">
+                Las operaciones de failover permiten cambiar el rol de este servidor dentro del cluster.
+                Use estas opciones con precaución.
+            </p>
+
+            <?php
+                // Determine effective failover role: cluster_role OR repl_role
+                $failoverRole = 'standalone';
+                if ($clusterRole === 'slave' || $replRole === 'slave') $failoverRole = 'slave';
+                elseif ($clusterRole === 'master' || $replRole === 'master') $failoverRole = 'master';
+            ?>
+
+            <?php if ($failoverRole === 'slave'): ?>
+                <?php
+                    $masterIpSaved = $settings['cluster_master_ip'] ?? '';
+                    $masterLastHb = $settings['cluster_master_last_heartbeat'] ?? '';
+                    $masterAge = $masterLastHb ? (time() - strtotime($masterLastHb)) : 99999;
+                    $masterDown = $masterAge > (int)($settings['cluster_unreachable_timeout'] ?? 300);
+                ?>
+
+                <?php if ($masterDown && $masterIpSaved): ?>
+                    <div class="alert" style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #f87171;">
+                        <i class="bi bi-exclamation-octagon me-2"></i>
+                        <strong>Master caído.</strong> El master (<?= View::e($masterIpSaved) ?>) no responde desde hace <?= round($masterAge / 60) ?> minutos.
+                        Puede promover este servidor a Master para que atienda el tráfico.
                     </div>
+                <?php else: ?>
+                    <div class="alert" style="background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); color: #fbbf24;">
+                        <i class="bi bi-exclamation-triangle me-2"></i>
+                        Este servidor es actualmente un <strong>Slave</strong>. Puede promoverlo a Master si el master actual ha fallado.
+                    </div>
+                <?php endif; ?>
+
+                <form method="post" action="/settings/cluster/promote" id="form-promote-cluster">
+                    <?= View::csrf() ?>
+                    <button type="button" class="btn btn-warning btn-lg" onclick="confirmPromoteCluster()">
+                        <i class="bi bi-arrow-up-circle me-1"></i>Promover a Master
+                    </button>
+                </form>
+
+            <?php elseif ($failoverRole === 'master'): ?>
+                <div class="alert" style="background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); color: #60a5fa;">
+                    <i class="bi bi-info-circle me-2"></i>
+                    Este servidor es actualmente el <strong>Master</strong>. Puede degradarlo a Slave si necesita transferir el rol a otro servidor.
                 </div>
-            </div>
+                <form method="post" action="/settings/cluster/demote" id="form-demote-cluster">
+                    <?= View::csrf() ?>
+                    <div class="mb-3" style="max-width: 400px;">
+                        <label class="form-label">Seleccione el nuevo Master</label>
+                        <?php if (!empty($nodes)): ?>
+                        <select name="new_master_ip" class="form-select" id="demote-node-select" required>
+                            <option value="">-- Seleccionar nodo --</option>
+                            <?php foreach ($nodes as $n):
+                                $nodeHost = parse_url($n['api_url'], PHP_URL_HOST);
+                            ?>
+                            <option value="<?= View::e($nodeHost) ?>"
+                                data-name="<?= View::e($n['name']) ?>"
+                                data-url="<?= View::e($n['api_url']) ?>">
+                                <?= View::e($n['name']) ?> (<?= View::e($nodeHost) ?>)
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <?php else: ?>
+                        <div class="text-warning small">
+                            <i class="bi bi-exclamation-triangle me-1"></i>No hay nodos configurados. Añada un nodo primero en la pestaña "Nodos".
+                        </div>
+                        <input type="text" name="new_master_ip" class="form-control mt-2" placeholder="IP manual (ej: 192.168.1.100)" required>
+                        <?php endif; ?>
+                    </div>
+                    <button type="button" class="btn btn-danger" onclick="confirmDemoteCluster()" <?= empty($nodes) ? '' : '' ?>>
+                        <i class="bi bi-arrow-down-circle me-1"></i>Degradar a Slave
+                    </button>
+                </form>
+
+            <?php else: ?>
+                <div class="alert" style="background: rgba(107,114,128,0.1); border: 1px solid rgba(107,114,128,0.3); color: #9ca3af;">
+                    <i class="bi bi-info-circle me-2"></i>
+                    Este servidor es <strong>Standalone</strong>. Configure el cluster primero seleccionando un rol (Master o Slave) en la pestaña Configuración.
+                </div>
+            <?php endif; ?>
         </div>
     </div>
+
+    <!-- Slave-specific: alertas y auto-failover -->
+    <?php if ($clusterRole === 'slave'): ?>
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-bell me-2"></i>Alertas y Auto-Failover</div>
+        <div class="card-body">
+            <!-- Slave: alertas de master caido -->
+            <h6 class="text-muted mb-2">Alerta de Master caído</h6>
+            <p class="small text-muted mb-2">
+                Si este servidor deja de recibir heartbeat del master durante el timeout configurado, se enviará una alerta.
+                Seleccione los canales por los que desea recibir la notificación.
+            </p>
+            <form method="post" action="/settings/cluster/save-settings" id="form-slave-alerts">
+                <?= View::csrf() ?>
+                <input type="hidden" name="cluster_role" value="<?= View::e($clusterRole) ?>">
+                <input type="hidden" name="cluster_local_token" value="<?= View::e($localToken) ?>">
+                <input type="hidden" name="cluster_heartbeat_interval" value="<?= (int)($settings['cluster_heartbeat_interval'] ?? 30) ?>">
+                <input type="hidden" name="cluster_unreachable_timeout" value="<?= (int)($settings['cluster_unreachable_timeout'] ?? 300) ?>">
+
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" name="cluster_slave_notify_email" id="slaveNotifyEmail"
+                           <?= (($settings['cluster_slave_notify_email'] ?? '1') === '1') ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="slaveNotifyEmail">
+                        <i class="bi bi-envelope me-1"></i>Notificar por Email
+                    </label>
+                </div>
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" name="cluster_slave_notify_telegram" id="slaveNotifyTelegram"
+                           <?= (($settings['cluster_slave_notify_telegram'] ?? '1') === '1') ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="slaveNotifyTelegram">
+                        <i class="bi bi-telegram me-1"></i>Notificar por Telegram
+                    </label>
+                </div>
+
+                <hr class="border-secondary">
+
+                <!-- Slave: auto-failover -->
+                <h6 class="text-muted mb-2">Auto-Failover</h6>
+                <?php $autoFailoverOn = (($settings['cluster_auto_failover'] ?? '0') === '1'); ?>
+                <div class="d-flex align-items-center gap-3 mb-2">
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="autoFailoverToggle"
+                               <?= $autoFailoverOn ? 'checked' : '' ?>
+                               onchange="toggleAutoFailover(this)">
+                        <label class="form-check-label" for="autoFailoverToggle">
+                            Promover automáticamente a Master si el master cae
+                        </label>
+                    </div>
+                    <?php if ($autoFailoverOn): ?>
+                        <span class="badge bg-danger"><i class="bi bi-lightning me-1"></i>ACTIVO</span>
+                    <?php endif; ?>
+                </div>
+                <input type="hidden" name="cluster_auto_failover" id="autoFailoverValue" value="<?= $autoFailoverOn ? '1' : '0' ?>">
+                <div class="small text-muted mb-3" style="max-width:600px;">
+                    <i class="bi bi-exclamation-triangle text-warning me-1"></i>
+                    <strong>Precaución:</strong> Si se activa, este servidor se promoverá automáticamente a Master cuando detecte que el master no responde.
+                    Esto abrirá los puertos 80/443 y cambiará el rol del cluster. Desactivado por defecto para evitar problemas de split-brain.
+                </div>
+
+                <button type="submit" class="btn btn-success">
+                    <i class="bi bi-check-circle me-1"></i>Guardar Alertas
+                </button>
+            </form>
+        </div>
+    </div>
+    <?php endif; ?>
+
 </div>
 
-<!-- Hidden form for remove-node -->
-<form method="post" id="form-remove-node" style="display:none;">
-    <?= View::csrf() ?>
-    <input type="hidden" name="node_id" id="remove-node-id">
-</form>
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- TAB 5 — Configuración                                       -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="tab-pane fade" id="tab-configuracion" role="tabpanel">
 
-<!-- Hidden form for sync-all-hostings -->
-<form method="post" action="/settings/cluster/sync-all-hostings" id="form-sync-all" style="display:none;">
-    <?= View::csrf() ?>
-    <input type="hidden" name="node_id" id="sync-all-node-id">
-</form>
-<?php endif; /* end solo master: modales y forms */ ?>
+    <div class="mb-3 p-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);">
+        <small style="color:#6ea8fe;">
+            <i class="bi bi-info-circle me-1"></i>
+            Configuración base del cluster: rol del servidor, token de autenticación y intervalos de monitorización.
+        </small>
+    </div>
+
+    <!-- CARD 5 — Configuración del Cluster -->
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-gear me-2"></i>Configuración del Cluster</div>
+        <div class="card-body">
+            <form method="post" action="/settings/cluster/save-settings">
+                <?= View::csrf() ?>
+
+                <!-- Cluster Role -->
+                <h6 class="text-muted mb-2">Rol del Cluster</h6>
+                <p class="small text-muted">Define el rol de este servidor en la sincronización de hostings.</p>
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <select name="cluster_role" class="form-select">
+                            <option value="standalone" <?= ($clusterRole === 'standalone') ? 'selected' : '' ?>>Standalone (sin cluster)</option>
+                            <option value="master" <?= ($clusterRole === 'master') ? 'selected' : '' ?>>Master (crea y envia hostings)</option>
+                            <option value="slave" <?= ($clusterRole === 'slave') ? 'selected' : '' ?>>Slave (recibe hostings, solo lectura)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="small mt-2">
+                            <?php if ($clusterRole === 'master'): ?>
+                                <span class="text-success"><i class="bi bi-check-circle me-1"></i>Los hostings creados aquí se replicarán a los nodos slave vinculados.</span>
+                            <?php elseif ($clusterRole === 'slave'): ?>
+                                <span class="text-info"><i class="bi bi-info-circle me-1"></i>La creación de hostings está bloqueada. Solo se reciben hostings del master.</span>
+                            <?php else: ?>
+                                <span class="text-muted"><i class="bi bi-dash-circle me-1"></i>No se sincronizan hostings. Cada servidor trabaja de forma independiente.</span>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="border-secondary">
+
+                <!-- Token Local -->
+                <h6 class="text-muted mb-2">Token Local</h6>
+                <p class="small text-muted">Este token se usa para que otros nodos se conecten a este servidor.</p>
+                <div class="input-group mb-3" style="max-width: 600px;">
+                    <input type="text" class="form-control font-monospace" id="local-token-input"
+                           name="cluster_local_token" value="<?= View::e($localToken) ?>"
+                           placeholder="Token de autenticación local" readonly>
+                    <button type="button" class="btn btn-outline-light" onclick="copyLocalToken()">
+                        <i class="bi bi-clipboard"></i>
+                    </button>
+                    <button type="button" class="btn btn-outline-warning" onclick="regenerateLocalToken()">
+                        <i class="bi bi-arrow-clockwise"></i> Regenerar
+                    </button>
+                </div>
+
+                <hr class="border-secondary">
+
+                <!-- Intervalos -->
+                <h6 class="text-muted mb-2">Intervalos</h6>
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Intervalo de Heartbeat (seg)</label>
+                        <input type="number" name="cluster_heartbeat_interval" class="form-control"
+                               value="<?= (int)($settings['cluster_heartbeat_interval'] ?? 30) ?>" min="10" max="300">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Timeout inaccesible (seg)</label>
+                        <input type="number" name="cluster_unreachable_timeout" class="form-control"
+                               value="<?= (int)($settings['cluster_unreachable_timeout'] ?? 300) ?>" min="60" max="3600">
+                    </div>
+                </div>
+
+                <hr class="border-secondary">
+
+                <!-- Notificaciones — enlace a la nueva página -->
+                <h6 class="text-muted mb-2">Notificaciones</h6>
+                <p class="small text-muted mb-2">
+                    Las alertas del cluster (nodos caídos, failover, etc.) se envían a través de los canales configurados en Notificaciones.
+                </p>
+                <a href="/settings/notifications" class="btn btn-outline-info btn-sm mb-3">
+                    <i class="bi bi-bell me-1"></i>Configurar Notificaciones (Email / Telegram)
+                </a>
+
+                <br>
+                <button type="submit" class="btn btn-success">
+                    <i class="bi bi-check-circle me-1"></i>Guardar Configuración
+                </button>
+            </form>
+        </div>
+    </div>
+
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- TAB 6 — Cola                                                -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<?php if ($clusterRole !== 'slave'): ?>
+<div class="tab-pane fade" id="tab-cola" role="tabpanel">
+
+    <div class="mb-3 p-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);">
+        <small style="color:#6ea8fe;">
+            <i class="bi bi-info-circle me-1"></i>
+            Eventos pendientes y completados. La cola procesa automáticamente cada minuto. Los elementos llegan aquí cuando se usa 'Sync Todo' en la pestaña Nodos.
+        </small>
+    </div>
+
+    <!-- CARD 3 — Cola de Sincronización -->
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-collection me-2"></i>Cola de Sincronización</span>
+            <div class="d-flex gap-2">
+                <form method="post" action="/settings/cluster/process-queue" class="d-inline">
+                    <?= View::csrf() ?>
+                    <button type="submit" class="btn btn-success btn-sm">
+                        <i class="bi bi-play-circle me-1"></i>Procesar Cola
+                    </button>
+                </form>
+                <form method="post" action="/settings/cluster/clean-queue" class="d-inline">
+                    <?= View::csrf() ?>
+                    <button type="button" class="btn btn-outline-warning btn-sm" onclick="confirmCleanQueue(this.closest('form'))">
+                        <i class="bi bi-trash me-1"></i>Limpiar Completados
+                    </button>
+                </form>
+            </div>
+        </div>
+        <div class="card-body">
+            <div class="small text-muted mb-2">
+                <i class="bi bi-clock me-1"></i>La cola se procesa automáticamente cada minuto. El botón "Procesar Cola" es para forzar manualmente.
+            </div>
+            <!-- Stats -->
+            <div class="d-flex gap-3 mb-3 flex-wrap" id="queue-stats">
+                <span class="badge bg-secondary fs-6">
+                    <i class="bi bi-hourglass me-1"></i>Pendientes: <?= (int)($queueStats['pending'] ?? 0) ?>
+                </span>
+                <span class="badge bg-info fs-6">
+                    <i class="bi bi-gear-wide-connected me-1"></i>Procesando: <?= (int)($queueStats['processing'] ?? 0) ?>
+                </span>
+                <span class="badge bg-success fs-6">
+                    <i class="bi bi-check-circle me-1"></i>Completados: <?= (int)($queueStats['completed'] ?? 0) ?>
+                </span>
+                <span class="badge bg-danger fs-6">
+                    <i class="bi bi-x-circle me-1"></i>Fallidos: <?= (int)($queueStats['failed'] ?? 0) ?>
+                </span>
+            </div>
+
+            <?php if (empty($recentQueue)): ?>
+                <p class="text-muted text-center mb-0"><i class="bi bi-info-circle me-1"></i>La cola está vacía.</p>
+            <?php else: ?>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Acción</th>
+                                <th>Nodo Destino</th>
+                                <th>Estado</th>
+                                <th>Intentos</th>
+                                <th>Creado</th>
+                                <th>Error</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($recentQueue as $item): ?>
+                            <tr>
+                                <td><code><?= View::e($item['action']) ?></code></td>
+                                <td><?= View::e($item['node_name'] ?? 'N/A') ?></td>
+                                <td>
+                                    <?php
+                                        $qStatus = $item['status'] ?? 'pending';
+                                        $qBadge = match($qStatus) {
+                                            'completed'  => 'bg-success',
+                                            'processing' => 'bg-info',
+                                            'failed'     => 'bg-danger',
+                                            default      => 'bg-secondary',
+                                        };
+                                    ?>
+                                    <span class="badge <?= $qBadge ?>"><?= View::e(ucfirst($qStatus)) ?></span>
+                                </td>
+                                <td><?= (int)$item['attempts'] ?>/<?= (int)$item['max_attempts'] ?></td>
+                                <td class="small"><?= View::e($item['created_at'] ?? '') ?></td>
+                                <td class="small text-danger"><?= View::e($item['error_message'] ?? '') ?></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+
+</div>
+<?php endif; ?>
+
+</div><!-- end tab-content -->
 
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- JavaScript                                                 -->
@@ -931,6 +1212,19 @@
 .spin-icon { display: inline-block; animation: spin 1s linear infinite; }
 </style>
 <script>
+// Tab switching with URL hash
+document.addEventListener('DOMContentLoaded', function() {
+    const hash = window.location.hash.replace('#', '') || 'estado';
+    const tab = document.querySelector('[data-bs-target="#tab-' + hash + '"]');
+    if (tab) new bootstrap.Tab(tab).show();
+
+    document.querySelectorAll('[data-bs-toggle="tab"]').forEach(function(el) {
+        el.addEventListener('shown.bs.tab', function(e) {
+            history.replaceState(null, '', '#' + e.target.dataset.bsTarget.replace('#tab-', ''));
+        });
+    });
+});
+
 // Auto-refresh every 10 seconds
 let statusInterval = null;
 
@@ -1032,7 +1326,7 @@ function testNodeConnection() {
                 resultEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>' + data.message + '</span>';
                 // Show remote info
                 const remote = data.remote || {};
-                let info = '<strong>Informacion del nodo remoto:</strong><br>';
+                let info = '<strong>Información del nodo remoto:</strong><br>';
                 info += 'Rol: ' + (remote.repl_role || remote.role || 'unknown') + '<br>';
                 info += 'Hostings: ' + (remote.hosting_count || 0) + '<br>';
                 info += 'Version: ' + (remote.panel_version || '?') + '<br>';
@@ -1045,7 +1339,7 @@ function testNodeConnection() {
         })
         .catch(function(e) {
             btn.disabled = false;
-            resultEl.innerHTML = '<span class="text-danger">Error de conexion</span>';
+            resultEl.innerHTML = '<span class="text-danger">Error de conexión</span>';
         });
 }
 
@@ -1083,7 +1377,7 @@ function viewNodeStatus(nodeId, nodeName) {
             html += '<tr><td class="text-muted">Estado</td><td><span class="badge ' + (node.status === 'online' ? 'bg-success' : 'bg-danger') + '">' + node.status + '</span></td></tr>';
             html += '<tr><td class="text-muted">Rol</td><td>' + (node.role || 'unknown') + '</td></tr>';
             html += '<tr><td class="text-muted">URL</td><td><code>' + (node.api_url || '') + '</code></td></tr>';
-            html += '<tr><td class="text-muted">Ultimo heartbeat</td><td>' + (node.last_seen_at || 'Nunca') + '</td></tr>';
+            html += '<tr><td class="text-muted">Último heartbeat</td><td>' + (node.last_seen_at || 'Nunca') + '</td></tr>';
             if (node.error) {
                 html += '<tr><td class="text-muted">Error</td><td class="text-danger">' + node.error + '</td></tr>';
             }
@@ -1099,10 +1393,10 @@ function viewNodeStatus(nodeId, nodeName) {
 function confirmRemoveNode(nodeId, nodeName) {
     Swal.fire({
         title: 'Eliminar nodo',
-        html: 'Se eliminara el nodo <strong>' + nodeName + '</strong> y todos sus elementos de la cola.<br><br>Esta accion no se puede deshacer.',
+        html: 'Se eliminará el nodo <strong>' + nodeName + '</strong> y todos sus elementos de la cola.<br><br>Esta acción no se puede deshacer.',
         icon: 'warning',
         showCancelButton: true,
-        confirmButtonText: 'Si, eliminar',
+        confirmButtonText: 'Sí, eliminar',
         cancelButtonText: 'Cancelar',
         confirmButtonColor: '#ef4444',
         background: '#1e1e2e',
@@ -1120,19 +1414,48 @@ function confirmRemoveNode(nodeId, nodeName) {
 function confirmPromoteCluster() {
     Swal.fire({
         title: 'Promover a Master',
-        html: '<strong>ATENCION:</strong> Esta operacion promovera este servidor a Master.<br><br>' +
-              'Esto significa que:<br>' +
-              '- PostgreSQL dejara de ser replica<br>' +
-              '- MySQL dejara de replicar<br>' +
-              '- El .env se actualizara a PANEL_ROLE=master<br><br>' +
-              '<strong>Solo haga esto si el master actual ha fallado.</strong>',
+        html: '<div class="text-start">' +
+              '<p><strong class="text-warning">⚠ OPERACIÓN CRÍTICA</strong></p>' +
+              '<p>Este servidor será promovido a <strong>Master</strong>. Esto implica:</p>' +
+              '<ul>' +
+              '<li>PostgreSQL dejará de ser réplica y aceptará escrituras</li>' +
+              '<li>MySQL dejará de replicar</li>' +
+              '<li>El rol del panel cambiará a <code>master</code></li>' +
+              '<li>Este servidor comenzará a atender tráfico de producción</li>' +
+              '</ul>' +
+              '<p class="text-danger"><strong>Solo haga esto si el master actual ha fallado y no se puede recuperar.</strong></p>' +
+              '<hr class="border-secondary">' +
+              '<p class="mb-1">Escriba su contraseña de administrador para confirmar:</p>' +
+              '<input type="password" id="swal-promote-pass" class="form-control bg-dark text-light border-secondary" placeholder="Contraseña de admin">' +
+              '</div>',
         icon: 'warning',
         showCancelButton: true,
-        confirmButtonText: 'Si, promover a Master',
+        confirmButtonText: 'Promover a Master',
         cancelButtonText: 'Cancelar',
         confirmButtonColor: '#f59e0b',
         background: '#1e1e2e',
         color: '#fff',
+        preConfirm: function() {
+            const pass = document.getElementById('swal-promote-pass').value;
+            if (!pass) {
+                Swal.showValidationMessage('Debe ingresar la contraseña');
+                return false;
+            }
+            return fetch('/settings/cluster/verify-admin-password', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: '_csrf_token=' + encodeURIComponent(document.querySelector('[name=_csrf_token]').value) +
+                      '&password=' + encodeURIComponent(pass)
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.ok) {
+                    Swal.showValidationMessage('Contraseña incorrecta');
+                    return false;
+                }
+                return true;
+            });
+        }
     }).then(function(result) {
         if (result.isConfirmed) {
             document.getElementById('form-promote-cluster').submit();
@@ -1141,21 +1464,70 @@ function confirmPromoteCluster() {
 }
 
 function confirmDemoteCluster() {
-    const ip = document.querySelector('[name=new_master_ip]').value;
+    const select = document.getElementById('demote-node-select');
+    const ipInput = document.querySelector('input[name=new_master_ip]');
+    let ip = '';
+    let nodeName = '';
+
+    if (select) {
+        ip = select.value;
+        nodeName = select.options[select.selectedIndex]?.dataset?.name || ip;
+    } else if (ipInput) {
+        ip = ipInput.value;
+        nodeName = ip;
+    }
+
     if (!ip) {
-        Swal.fire({ title: 'Error', text: 'Ingrese la IP del nuevo Master', icon: 'error', background: '#1e1e2e', color: '#fff' });
+        Swal.fire({ title: 'Error', text: 'Seleccione el nodo que será el nuevo Master', icon: 'error', background: '#1e1e2e', color: '#fff' });
         return;
     }
+
     Swal.fire({
         title: 'Degradar a Slave',
-        html: 'Este servidor sera degradado a <strong>Slave</strong> y se reconfigurara para replicar desde <strong>' + ip + '</strong>.<br><br>Esta seguro?',
+        html: '<div class="text-start">' +
+              '<p><strong class="text-danger">⚠ OPERACIÓN CRÍTICA</strong></p>' +
+              '<p>Este servidor será degradado a <strong>Slave</strong> y se reconfigurará para replicar desde:</p>' +
+              '<div class="p-2 mb-3 rounded" style="background:#2a2a3e;">' +
+              '<strong>' + nodeName + '</strong> <code>(' + ip + ')</code>' +
+              '</div>' +
+              '<p>Esto implica:</p>' +
+              '<ul>' +
+              '<li>El panel dejará de aceptar creación de hostings</li>' +
+              '<li>Las bases de datos se reconfigurarán como réplica</li>' +
+              '<li>El servidor pasará a modo de solo recepción</li>' +
+              '</ul>' +
+              '<hr class="border-secondary">' +
+              '<p class="mb-1">Escriba su contraseña de administrador para confirmar:</p>' +
+              '<input type="password" id="swal-demote-pass" class="form-control bg-dark text-light border-secondary" placeholder="Contraseña de admin">' +
+              '</div>',
         icon: 'warning',
         showCancelButton: true,
-        confirmButtonText: 'Si, degradar a Slave',
+        confirmButtonText: 'Sí, degradar a Slave',
         cancelButtonText: 'Cancelar',
         confirmButtonColor: '#ef4444',
         background: '#1e1e2e',
         color: '#fff',
+        preConfirm: function() {
+            const pass = document.getElementById('swal-demote-pass').value;
+            if (!pass) {
+                Swal.showValidationMessage('Debe ingresar la contraseña');
+                return false;
+            }
+            return fetch('/settings/cluster/verify-admin-password', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: '_csrf_token=' + encodeURIComponent(document.querySelector('[name=_csrf_token]').value) +
+                      '&password=' + encodeURIComponent(pass)
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (!data.ok) {
+                    Swal.showValidationMessage('Contraseña incorrecta');
+                    return false;
+                }
+                return true;
+            });
+        }
     }).then(function(result) {
         if (result.isConfirmed) {
             document.getElementById('form-demote-cluster').submit();
@@ -1170,13 +1542,13 @@ function toggleAutoFailover(checkbox) {
         Swal.fire({
             title: 'Activar Auto-Failover',
             html: '<div class="text-start">' +
-                  '<p><strong class="text-danger">ATENCION:</strong> Esta es una operacion critica.</p>' +
-                  '<p>Si se activa, este servidor se promovera <strong>automaticamente a Master</strong> cuando detecte que el master no responde durante el timeout configurado.</p>' +
+                  '<p><strong class="text-danger">ATENCIÓN:</strong> Esta es una operación crítica.</p>' +
+                  '<p>Si se activa, este servidor se promoverá <strong>automáticamente a Master</strong> cuando detecte que el master no responde durante el timeout configurado.</p>' +
                   '<p>Consecuencias:</p>' +
                   '<ul>' +
-                  '<li>Se abriran los puertos 80/443 al publico</li>' +
-                  '<li>El rol del cluster cambiara a Master</li>' +
-                  '<li>Se detendra la replicacion de base de datos</li>' +
+                  '<li>Se abrirán los puertos 80/443 al público</li>' +
+                  '<li>El rol del cluster cambiará a Master</li>' +
+                  '<li>Se detendrá la replicación de base de datos</li>' +
                   '<li><strong class="text-warning">Riesgo de split-brain</strong> si hay problemas de red temporales</li>' +
                   '</ul>' +
                   '<p class="mb-1">Escriba su contraseña de administrador para confirmar:</p>' +
@@ -1243,7 +1615,7 @@ function confirmSyncAll(nodeId, nodeName) {
               '<ul class="text-start" style="font-size:0.9em"><li>Contenido de archivos (rsync incremental — solo copia archivos nuevos o modificados)</li></ul>',
         icon: 'question',
         showCancelButton: true,
-        confirmButtonText: 'Si, sincronizar todo',
+        confirmButtonText: 'Sí, sincronizar todo',
         cancelButtonText: 'Cancelar',
         confirmButtonColor: '#22c55e',
         background: '#1e1e2e',
@@ -1259,10 +1631,10 @@ function confirmSyncAll(nodeId, nodeName) {
 function confirmCleanQueue(form) {
     Swal.fire({
         title: 'Limpiar cola',
-        text: 'Se eliminaran todos los elementos completados de la cola. Continuar?',
+        text: 'Se eliminarán todos los elementos completados de la cola. ¿Continuar?',
         icon: 'question',
         showCancelButton: true,
-        confirmButtonText: 'Si, limpiar',
+        confirmButtonText: 'Sí, limpiar',
         cancelButtonText: 'Cancelar',
         background: '#1e1e2e',
         color: '#fff',
@@ -1298,8 +1670,8 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             if (descEl) {
                 descEl.textContent = this.value === 'ssh'
-                    ? 'Usa rsync sobre SSH. Mas rapido para sincronizaciones incrementales.'
-                    : 'Usa la API HTTPS del panel. No requiere SSH, funciona a traves de NAT.';
+                    ? 'Usa rsync sobre SSH. Más rápido para sincronizaciones incrementales.'
+                    : 'Usa la API HTTPS del panel. No requiere SSH, funciona a través de NAT.';
             }
         });
     }
@@ -1309,7 +1681,7 @@ function generateSshKey() {
     const csrf = document.querySelector('[name=_csrf_token]').value;
     Swal.fire({
         title: 'Generar clave SSH',
-        text: 'Se generara un nuevo par de claves SSH ed25519. Si ya existe una, sera reemplazada.',
+        text: 'Se generará un nuevo par de claves SSH ed25519. Si ya existe una, será reemplazada.',
         icon: 'question',
         showCancelButton: true,
         confirmButtonText: 'Generar',
@@ -1342,7 +1714,7 @@ function generateSshKey() {
             }
         })
         .catch(function() {
-            Swal.fire({ title: 'Error', text: 'Error de conexion', icon: 'error', background: '#1e1e2e', color: '#fff' });
+            Swal.fire({ title: 'Error', text: 'Error de conexión', icon: 'error', background: '#1e1e2e', color: '#fff' });
         });
     });
 }
@@ -1351,7 +1723,7 @@ function installSshKeyOnNode(nodeId, nodeName) {
     const csrf = document.querySelector('[name=_csrf_token]').value;
     Swal.fire({
         title: 'Instalar clave SSH',
-        html: 'Se instalara la clave publica de este servidor en <strong>' + nodeName + '</strong> para permitir conexiones rsync.',
+        html: 'Se instalará la clave pública de este servidor en <strong>' + nodeName + '</strong> para permitir conexiones rsync.',
         icon: 'info',
         showCancelButton: true,
         confirmButtonText: 'Instalar',
@@ -1382,7 +1754,7 @@ function installSshKeyOnNode(nodeId, nodeName) {
             }
         })
         .catch(function() {
-            Swal.fire({ title: 'Error', text: 'Error de conexion', icon: 'error', background: '#1e1e2e', color: '#fff' });
+            Swal.fire({ title: 'Error', text: 'Error de conexión', icon: 'error', background: '#1e1e2e', color: '#fff' });
         });
     });
 }
@@ -1405,13 +1777,13 @@ function testSshNode(nodeId, nodeName) {
     .then(r => r.json())
     .then(data => {
         if (data.ok) {
-            Swal.fire({ title: 'Conexion SSH OK', html: '<pre class="text-start">' + (data.output || 'OK') + '</pre>', icon: 'success', background: '#1e1e2e', color: '#fff' });
+            Swal.fire({ title: 'Conexión SSH OK', html: '<pre class="text-start">' + (data.output || 'OK') + '</pre>', icon: 'success', background: '#1e1e2e', color: '#fff' });
         } else {
             Swal.fire({ title: 'Fallo SSH', html: '<pre class="text-start text-danger">' + (data.error || 'Error desconocido') + '</pre>', icon: 'error', background: '#1e1e2e', color: '#fff' });
         }
     })
     .catch(function() {
-        Swal.fire({ title: 'Error', text: 'Error de conexion', icon: 'error', background: '#1e1e2e', color: '#fff' });
+        Swal.fire({ title: 'Error', text: 'Error de conexión', icon: 'error', background: '#1e1e2e', color: '#fff' });
     });
 }
 
@@ -1423,9 +1795,9 @@ function syncFilesNow(nodeId, nodeName) {
 
     Swal.fire({
         title: 'Sincronizar archivos a ' + nodeName,
-        html: '<p>Se sincronizaran los archivos de <strong>todos los hostings activos</strong> al nodo seleccionado.</p>' +
+        html: '<p>Se sincronizarán los archivos de <strong>todos los hostings activos</strong> al nodo seleccionado.</p>' +
               '<p><i class="bi bi-arrow-repeat me-1"></i>Usa rsync incremental — solo copia archivos nuevos o modificados.</p>' +
-              '<p class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Puede tardar varios minutos segun el volumen de datos.</p>',
+              '<p class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Puede tardar varios minutos según el volumen de datos.</p>',
         icon: 'question',
         showCancelButton: true,
         confirmButtonText: 'Sincronizar ahora',
@@ -1437,7 +1809,7 @@ function syncFilesNow(nodeId, nodeName) {
         if (!result.isConfirmed) return;
 
         // Show initial loading modal
-        _showSyncModal('Iniciando sincronizacion...', nodeName);
+        _showSyncModal('Iniciando sincronización...', nodeName);
 
         const formData = new FormData();
         formData.append('node_id', nodeId);
@@ -1459,7 +1831,7 @@ function syncFilesNow(nodeId, nodeName) {
             }
         })
         .catch(function() {
-            Swal.fire({ title: 'Error', text: 'Error de conexion', icon: 'error', background: '#1e1e2e', color: '#fff' });
+            Swal.fire({ title: 'Error', text: 'Error de conexión', icon: 'error', background: '#1e1e2e', color: '#fff' });
         });
     });
 }
@@ -1552,7 +1924,7 @@ function _updateSyncModal(data, nodeName, syncId) {
 
         setTimeout(function() {
             if (data.status === 'error') {
-                Swal.fire({ title: 'Error', text: data.error || 'Error durante la sincronizacion', icon: 'error', background: '#1e1e2e', color: '#fff' });
+                Swal.fire({ title: 'Error', text: data.error || 'Error durante la sincronización', icon: 'error', background: '#1e1e2e', color: '#fff' });
                 return;
             }
 
@@ -1580,7 +1952,7 @@ function _updateSyncModal(data, nodeName, syncId) {
             html += '</div>';
 
             const finalIcon = (data.fail_count || 0) === 0 ? 'success' : 'warning';
-            Swal.fire({ title: 'Sincronizacion completada', html: html, icon: finalIcon, background: '#1e1e2e', color: '#fff' });
+            Swal.fire({ title: 'Sincronización completada', html: html, icon: finalIcon, background: '#1e1e2e', color: '#fff' });
         }, 500);
     }
 }
@@ -1642,17 +2014,17 @@ function checkDbHost() {
         }
     })
     .catch(function() {
-        Swal.fire({ title: 'Error', text: 'Error de conexion', icon: 'error', background: '#1e1e2e', color: '#fff' });
+        Swal.fire({ title: 'Error', text: 'Error de conexión', icon: 'error', background: '#1e1e2e', color: '#fff' });
     });
 }
 
 function regenerateLocalToken() {
     Swal.fire({
         title: 'Regenerar token local',
-        text: 'Los nodos remotos que usen este token dejaran de poder conectarse. Continuar?',
+        text: 'Los nodos remotos que usen este token dejarán de poder conectarse. ¿Continuar?',
         icon: 'warning',
         showCancelButton: true,
-        confirmButtonText: 'Si, regenerar',
+        confirmButtonText: 'Sí, regenerar',
         cancelButtonText: 'Cancelar',
         background: '#1e1e2e',
         color: '#fff',
@@ -1671,13 +2043,63 @@ function regenerateLocalToken() {
                     input.readOnly = false; // Allow form to submit the new value
                     Swal.fire({
                         toast: true, position: 'top-end', icon: 'success',
-                        title: 'Token regenerado. Guarde la configuracion para aplicar.',
+                        title: 'Token regenerado. Guarde la configuración para aplicar.',
                         showConfirmButton: false, timer: 3000,
                         background: '#1e1e2e', color: '#fff'
                     });
                 }
             });
         }
+    });
+}
+
+// ─── Full Sync Orchestrator ──────────────────────────────────────────
+
+function fullSync(nodeId, nodeName) {
+    const csrf = document.querySelector('[name=_csrf_token]').value;
+    Swal.fire({
+        title: 'Sincronización Completa a ' + nodeName,
+        html: '<div class="text-start">' +
+              '<p>Se ejecutarán los siguientes pasos en secuencia:</p>' +
+              '<ol>' +
+              '<li><strong>Hostings</strong> — Crear/reparar cuentas de sistema, PHP-FPM, Caddy (via API)</li>' +
+              '<li><strong>Archivos</strong> — Copiar contenido web con rsync (requiere SSH)</li>' +
+              '<li><strong>Certificados SSL</strong> — Copiar certs de Caddy al slave</li>' +
+              '</ol>' +
+              '<p class="text-muted small">Si SSH no está configurado, se ejecutará solo el paso 1 y se avisará.</p>' +
+              '</div>',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Iniciar sincronización completa',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#22c55e',
+        background: '#1e1e2e',
+        color: '#fff',
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+        _showSyncModal('Iniciando sincronización completa...', nodeName);
+
+        const formData = new FormData();
+        formData.append('node_id', nodeId);
+        formData.append('_csrf_token', csrf);
+
+        fetch('/settings/cluster/full-sync', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok && data.sync_id) {
+                sessionStorage.setItem('active_sync', JSON.stringify({
+                    sync_id: data.sync_id, node_name: data.node_name || nodeName,
+                    started: Date.now()
+                }));
+                _syncStartTime = Date.now();
+                _startSyncPolling(data.sync_id, data.node_name || nodeName);
+            } else {
+                Swal.fire({ title: 'Error', text: data.error || 'Error al iniciar', icon: 'error', background: '#1e1e2e', color: '#fff' });
+            }
+        })
+        .catch(function() {
+            Swal.fire({ title: 'Error', text: 'Error de conexión', icon: 'error', background: '#1e1e2e', color: '#fff' });
+        });
     });
 }
 </script>

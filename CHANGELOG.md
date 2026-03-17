@@ -1,6 +1,34 @@
 # Changelog
 
-Todas las versiones notables de MuseDock Panel se documentan aqui.
+Todas las versiones notables de MuseDock Panel se documentan aquí.
+
+## [0.6.0] — 2026-03-17
+
+### Añadido
+- **Cluster tabs** — La página de Cluster se reorganizó en 6 pestañas: Estado, Nodos, Archivos, Failover, Configuración, Cola. Cada pestaña incluye descripción explicativa y dependencias
+- **Sincronización Completa** — Botón orquestador en pestaña Estado que ejecuta en secuencia: hostings (API) → archivos (rsync) → bases de datos (dump) → certificados SSL. Detecta automáticamente qué está configurado y avisa si falta SSH
+- **Endpoint full-sync** — `POST /settings/cluster/full-sync` lanza proceso en background (`fullsync-run.php`) con progreso en tiempo real via AJAX polling
+- **DB dump sync (Nivel 1)** — Sincronización simple de bases de datos entre master y slave usando `pg_dump`/`mysqldump` comprimidos con gzip. Se restauran automáticamente en el slave con `DROP + CREATE + IMPORT`. Configurable en pestaña Archivos
+- **DB dump periódico** — El cron `filesync-worker` ahora incluye dumps de BD cada intervalo si está habilitado. Se omite automáticamente si streaming replication (Nivel 2) está activo
+- **isStreamingActive()** — Nuevo método en ReplicationService que detecta si la replicación streaming de PostgreSQL o MySQL está activa, consultando `pg_stat_wal_receiver` y `SHOW REPLICA STATUS`
+- **restore-db-dumps** — Nueva acción en la API del cluster para que el slave restaure los dumps recibidos. Crea usuarios de BD si no existen (`CREATE ROLE IF NOT EXISTS` / `CREATE USER IF NOT EXISTS`)
+- **Backup pre-replicación** — Al convertir un servidor a slave de streaming replication, se crea automáticamente un backup de todas las bases de datos en `/var/backups/musedock/pre-replication/` con timestamp. Checkbox en el modal para activar/desactivar
+- **Modal convert-to-slave mejorado** — El modal ahora muestra aviso en rojo explicando que se borrarán TODAS las bases de datos locales, lista las BD afectadas, y tiene checkbox de backup automático (activado por defecto)
+- **Failover con select de nodos** — El campo de IP manual para degradar a slave se reemplazó por un selector desplegable de nodos conectados con nombre e IP
+- **Failover con password** — Tanto "Promover a Master" como "Degradar a Slave" ahora requieren contraseña de administrador con validación AJAX antes de ejecutar. Modales detallados explicando las implicaciones de cada operación
+- **System Users** — Nueva sección de solo lectura mostrando todos los usuarios del sistema Linux (UID, grupos, shell, home). Root visible pero no editable
+- **Hosting repair on re-sync** — Si un hosting ya existe en el slave, se repara (UID, shell, grupos, password hash, caddy_route_id) en vez de saltarlo
+- **SSL cert detection en slave** — El panel ahora detecta certificados SSL copiados del master via Caddy admin API (`localhost:2019`) y filesystem, mostrando candado azul si el cert existe aunque el DNS no apunte al servidor
+- **Sync progress modal** — Modal con barra de progreso, cronómetro y dominio actual durante la sincronización. Persiste tras recargar página con sessionStorage
+
+### Corregido
+- **Tildes en español** — Corregidas todas las tildes faltantes en la página de Cluster (más de 50 correcciones en HTML y JavaScript)
+- **Caddy Route N/A en slave** — `caddy_route_id` ahora se incluye en el payload de sincronización de hostings
+- **JSON sync modal** — Corregido mismatch de campos entre backend (`synced`/`failed`) y frontend (`ok_count`/`fail_count`)
+- **filesync-run.php bootstrap** — Corregido error de archivo no encontrado usando bootstrap inline como `cluster-worker.php`
+- **rsync --delete en certs** — Los certificados del slave ya no se borran al sincronizar (opción `no_delete`)
+
+---
 
 ## [0.5.3] — 2026-03-16
 

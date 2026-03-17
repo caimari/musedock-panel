@@ -1055,6 +1055,38 @@ class ReplicationService
         }
     }
 
+    /**
+     * Check if streaming replication is currently active (either PG or MySQL).
+     * Used to skip dump-based sync when streaming is already handling it.
+     */
+    public static function isStreamingActive(): array
+    {
+        $pgActive = false;
+        $mysqlActive = false;
+
+        try {
+            $pgStatus = static::getPgSlaveStatus();
+            if ($pgStatus && ($pgStatus['status'] ?? '') === 'streaming') {
+                $pgActive = true;
+            }
+        } catch (\Throwable) {}
+
+        try {
+            $mysqlStatus = static::getMysqlSlaveStatus();
+            if ($mysqlStatus &&
+                in_array($mysqlStatus['Slave_IO_Running'] ?? $mysqlStatus['Replica_IO_Running'] ?? '', ['Yes'], true) &&
+                in_array($mysqlStatus['Slave_SQL_Running'] ?? $mysqlStatus['Replica_SQL_Running'] ?? '', ['Yes'], true)) {
+                $mysqlActive = true;
+            }
+        } catch (\Throwable) {}
+
+        return [
+            'any_active' => $pgActive || $mysqlActive,
+            'pg' => $pgActive,
+            'mysql' => $mysqlActive,
+        ];
+    }
+
     public static function getMysqlMasterStatus(): ?array
     {
         try {
