@@ -926,7 +926,7 @@ class FileSyncService
                     $results[] = ['db_name' => $dbName, 'db_type' => $dbType, 'ok' => false, 'error' => 'MySQL auth no disponible'];
                     continue;
                 }
-                $fullCmd = sprintf('%s --single-transaction --quick %s 2>/dev/null | gzip > %s',
+                $fullCmd = sprintf('%s --single-transaction --quick --insert-ignore %s 2>/dev/null | gzip > %s',
                     $cmd, escapeshellarg($dbName), escapeshellarg($dumpFile));
             } else {
                 $fullCmd = sprintf('sudo -u postgres pg_dump -Fc %s 2>/dev/null | gzip > %s',

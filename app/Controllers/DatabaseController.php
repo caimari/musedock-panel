@@ -120,6 +120,26 @@ class DatabaseController
             $creds = json_decode($creds, true);
         }
 
+        // DB dump sync status (for slave servers)
+        $dbSyncStatus = null;
+        $clusterRole = Settings::get('cluster_role', 'standalone');
+        if ($clusterRole === 'slave') {
+            $dumpPath = Settings::get('filesync_db_dump_path', '/tmp/musedock-dumps');
+            $manifestFile = $dumpPath . '/manifest.json';
+            if (file_exists($manifestFile)) {
+                $manifest = json_decode(file_get_contents($manifestFile), true);
+                $manifestTime = filemtime($manifestFile);
+                $dbSyncStatus = [
+                    'has_dumps' => true,
+                    'last_sync' => date('Y-m-d H:i:s', $manifestTime),
+                    'ago' => time() - $manifestTime,
+                    'databases' => $manifest ?: [],
+                ];
+            } else {
+                $dbSyncStatus = ['has_dumps' => false];
+            }
+        }
+
         View::render('databases/index', [
             'layout'              => 'main',
             'pageTitle'           => 'Bases de Datos',
@@ -137,6 +157,8 @@ class DatabaseController
             'totalPgPanel'        => count($pgPanelDatabases),
             'totalMysql'          => count($mysqlDatabases),
             'creds'               => $creds,
+            'dbSyncStatus'        => $dbSyncStatus,
+            'clusterRole'         => $clusterRole,
         ]);
     }
 

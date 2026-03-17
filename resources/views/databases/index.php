@@ -49,6 +49,44 @@ function formatDbSize(int $bytes): string {
 </div>
 <?php endif; ?>
 
+<?php if (!empty($dbSyncStatus) && ($clusterRole ?? '') === 'slave'): ?>
+<div class="card mb-4 border-info">
+    <div class="card-body py-2">
+        <div class="d-flex align-items-center">
+            <i class="bi bi-arrow-repeat me-2 text-info"></i>
+            <span class="text-info fw-bold me-2">Servidor Slave</span>
+            <?php if ($dbSyncStatus['has_dumps']): ?>
+                <?php
+                    $ago = $dbSyncStatus['ago'];
+                    if ($ago < 60) $agoText = $ago . ' segundos';
+                    elseif ($ago < 3600) $agoText = floor($ago / 60) . ' minutos';
+                    elseif ($ago < 86400) $agoText = floor($ago / 3600) . ' horas';
+                    else $agoText = floor($ago / 86400) . ' días';
+                ?>
+                <span class="text-muted">
+                    — Última sincronización de BD: <strong class="text-light"><?= View::e($dbSyncStatus['last_sync']) ?></strong>
+                    <span class="ms-1">(hace <?= $agoText ?>)</span>
+                </span>
+                <?php if (count($dbSyncStatus['databases']) > 0): ?>
+                    <span class="ms-3 text-muted">
+                        <?= count($dbSyncStatus['databases']) ?> BD<?= count($dbSyncStatus['databases']) > 1 ? 's' : '' ?> sincronizadas desde el master
+                        (<?php
+                            $totalSize = array_sum(array_column($dbSyncStatus['databases'], 'size'));
+                            echo formatDbSize($totalSize);
+                        ?> comprimido)
+                    </span>
+                <?php endif; ?>
+            <?php else: ?>
+                <span class="text-warning">
+                    — No se han recibido dumps del master. Active la sincronización de BD en el master
+                    (<a href="/settings/cluster#archivos" class="text-warning">Cluster → Archivos</a>)
+                </span>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
         <span class="text-muted">
