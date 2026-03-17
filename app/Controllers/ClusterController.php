@@ -231,11 +231,24 @@ class ClusterController
             $localStatus = ClusterService::getLocalStatus();
         } catch (\Throwable) {}
 
+        // Master monitoring info (for slaves)
+        $masterInfo = null;
+        $masterIp = Settings::get('cluster_master_ip', '');
+        if ($masterIp) {
+            $masterLastHb = Settings::get('cluster_master_last_heartbeat', '');
+            $masterInfo = [
+                'ip'             => $masterIp,
+                'last_heartbeat' => $masterLastHb,
+                'age_seconds'    => $masterLastHb ? (time() - strtotime($masterLastHb)) : null,
+            ];
+        }
+
         echo json_encode([
             'ok'          => true,
             'nodes'       => $nodesData,
             'local'       => $localStatus,
             'queue_stats' => ClusterService::getQueueStats(),
+            'master_info' => $masterInfo,
             'timestamp'   => date('Y-m-d H:i:s'),
         ], JSON_PRETTY_PRINT);
         exit;
@@ -342,6 +355,8 @@ class ClusterController
         $clusterRole = $_POST['cluster_role'] ?? 'standalone';
         if (in_array($clusterRole, ['standalone', 'master', 'slave'], true)) {
             Settings::set('cluster_role', $clusterRole);
+            // Also update PANEL_ROLE in .env so API reports correct role
+            ClusterService::updateEnvRole($clusterRole);
         }
 
         // Intervals

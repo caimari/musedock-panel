@@ -34,11 +34,22 @@ class ClusterApiController
     {
         header('Content-Type: application/json');
 
+        $clusterRole = Settings::get('cluster_role', '');
+        $envRole = Env::get('PANEL_ROLE', 'standalone');
+        $effectiveRole = ($clusterRole !== '' && $clusterRole !== 'standalone') ? $clusterRole : $envRole;
+
+        // Record who is monitoring us (master tracking)
+        $callerIp = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '';
+        if ($callerIp) {
+            Settings::set('cluster_master_ip', $callerIp);
+            Settings::set('cluster_master_last_heartbeat', date('Y-m-d H:i:s'));
+        }
+
         echo json_encode([
             'ok'           => true,
             'timestamp'    => date('Y-m-d H:i:s'),
-            'role'         => Env::get('PANEL_ROLE', 'standalone'),
-            'cluster_role' => Settings::get('cluster_role', 'standalone'),
+            'role'         => $effectiveRole,
+            'cluster_role' => $clusterRole ?: $envRole,
         ]);
         exit;
     }

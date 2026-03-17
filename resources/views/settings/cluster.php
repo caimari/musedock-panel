@@ -140,6 +140,72 @@
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
+<!-- CARD 1B — Master que monitoriza (solo si somos slave)       -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<?php
+    $masterIp = $settings['cluster_master_ip'] ?? '';
+    $masterLastHb = $settings['cluster_master_last_heartbeat'] ?? '';
+    $hbAge = $masterLastHb ? (time() - strtotime($masterLastHb)) : 99999;
+?>
+<?php if ($clusterRole === 'slave' && $masterIp): ?>
+<div class="card mb-3 border-info">
+    <div class="card-header bg-info bg-opacity-10">
+        <i class="bi bi-shield-check me-2"></i>Master que monitoriza este servidor
+    </div>
+    <div class="card-body">
+        <div class="d-flex align-items-center gap-4">
+            <div>
+                <i class="bi bi-pc-display-horizontal fs-3 text-info"></i>
+            </div>
+            <div>
+                <table class="table table-sm mb-0" style="width:auto">
+                    <tr>
+                        <td class="text-muted pe-3">IP del Master</td>
+                        <td><code id="master-ip"><?= View::e($masterIp) ?></code></td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted pe-3">Ultimo Heartbeat</td>
+                        <td>
+                            <span id="master-last-hb"><?= View::e($masterLastHb ?: 'Nunca') ?></span>
+                            <?php if ($masterLastHb): ?>
+                                <?php
+                                    $hbAge = time() - strtotime($masterLastHb);
+                                    if ($hbAge < 60) {
+                                        $hbBadge = 'bg-success';
+                                        $hbText = 'hace ' . $hbAge . 's';
+                                    } elseif ($hbAge < 300) {
+                                        $hbBadge = 'bg-warning text-dark';
+                                        $hbText = 'hace ' . round($hbAge / 60) . ' min';
+                                    } else {
+                                        $hbBadge = 'bg-danger';
+                                        $hbText = 'hace ' . round($hbAge / 60) . ' min';
+                                    }
+                                ?>
+                                <span class="badge <?= $hbBadge ?> ms-2" id="master-hb-age"><?= $hbText ?></span>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td class="text-muted pe-3">Estado</td>
+                        <td>
+                            <?php if ($hbAge < 120): ?>
+                                <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Conectado</span>
+                            <?php else: ?>
+                                <span class="badge bg-danger"><i class="bi bi-exclamation-triangle me-1"></i>Sin contacto reciente</span>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        <div class="mt-2 small text-muted">
+            <i class="bi bi-info-circle me-1"></i>Este servidor esta siendo monitorizado por el master indicado. Los heartbeats se reciben automaticamente.
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
 <!-- CARD 2 — Nodos Vinculados                                  -->
 <!-- ═══════════════════════════════════════════════════════════ -->
 <div class="card mb-3">
@@ -784,6 +850,22 @@ function refreshClusterStatus() {
             if (local.ram_usage) {
                 const ramEl = document.getElementById('local-ram');
                 if (ramEl) ramEl.innerHTML = local.ram_usage.used + ' MB / ' + local.ram_usage.total + ' MB <small class="text-muted">(' + local.ram_usage.percent + '%)</small>';
+            }
+
+            // Update master monitoring info (for slaves)
+            const mi = data.master_info;
+            if (mi) {
+                const hbEl = document.getElementById('master-last-hb');
+                const ageEl = document.getElementById('master-hb-age');
+                if (hbEl && mi.last_heartbeat) hbEl.textContent = mi.last_heartbeat;
+                if (ageEl && mi.age_seconds !== null) {
+                    let ageTxt, ageCls;
+                    if (mi.age_seconds < 60) { ageTxt = 'hace ' + mi.age_seconds + 's'; ageCls = 'badge bg-success ms-2'; }
+                    else if (mi.age_seconds < 300) { ageTxt = 'hace ' + Math.round(mi.age_seconds/60) + ' min'; ageCls = 'badge bg-warning text-dark ms-2'; }
+                    else { ageTxt = 'hace ' + Math.round(mi.age_seconds/60) + ' min'; ageCls = 'badge bg-danger ms-2'; }
+                    ageEl.className = ageCls;
+                    ageEl.textContent = ageTxt;
+                }
             }
 
             // Update queue stats

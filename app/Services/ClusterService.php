@@ -61,7 +61,10 @@ class ClusterService
 
     public static function getLocalStatus(): array
     {
-        $role = Env::get('PANEL_ROLE', 'standalone');
+        // Effective role: cluster_role (DB) takes priority over PANEL_ROLE (.env)
+        $clusterRole = Settings::get('cluster_role', '');
+        $envRole = Env::get('PANEL_ROLE', 'standalone');
+        $role = ($clusterRole !== '' && $clusterRole !== 'standalone') ? $clusterRole : $envRole;
 
         // Uptime
         $uptime = trim((string)shell_exec('uptime -s 2>/dev/null'));
