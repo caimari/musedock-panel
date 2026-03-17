@@ -124,23 +124,36 @@ class MonitorService
     }
 
     /**
-     * Get configured network interfaces.
-     * If set to 'auto' (or not configured), auto-detects physical + WireGuard interfaces.
+     * Get network interfaces to monitor.
+     * Always auto-detects from the system. The 'monitor_interfaces' setting
+     * is only used if explicitly set to a non-'auto' value AND all listed
+     * interfaces actually exist on the system.
      */
     public static function getInterfaces(): array
     {
-        $raw = Settings::get('monitor_interfaces', 'auto');
-        if ($raw !== 'auto') {
-            $list = array_filter(array_map('trim', explode(',', $raw)));
-            if (!empty($list)) return $list;
+        $raw = trim(Settings::get('monitor_interfaces', 'auto'));
+
+        if ($raw !== '' && $raw !== 'auto') {
+            $manual = array_filter(array_map('trim', explode(',', $raw)));
+            // Validate: only return manual list if ALL interfaces exist
+            $allExist = true;
+            foreach ($manual as $iface) {
+                if (!is_dir("/sys/class/net/{$iface}")) {
+                    $allExist = false;
+                    break;
+                }
+            }
+            if ($allExist && !empty($manual)) return $manual;
+            // Manual config invalid — fall through to auto-detect
         }
 
         return self::detectInterfaces();
     }
 
     /**
-     * Auto-detect network interfaces: physical (non-virtual) + WireGuard.
-     * Excludes lo, docker*, veth*, br-*, virbr*.
+     * Auto-detect network interfaces from the system.
+     * Returns all physical + WireGuard interfaces that are UP and have traffic.
+     * Excludes lo, docker*, veth*, br-*, virbr* and other virtual interfaces.
      */
     public static function detectInterfaces(): array
     {
