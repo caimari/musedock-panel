@@ -54,12 +54,13 @@ try {
     // Update last run timestamp
     \MuseDockPanel\Settings::set('filesync_last_run', (string)$now);
 
-    $log('File sync worker started (method: ' . $config['method'] . ')');
+    $syncMode = $config['sync_mode'] ?? 'periodic';
+    $log('File sync worker started (mode: ' . $syncMode . ', method: ' . $config['method'] . ')');
 
-    // Get all online nodes
-    $nodes = \MuseDockPanel\Services\ClusterService::getNodes();
+    // Get only active nodes (excludes standby/maintenance)
+    $nodes = \MuseDockPanel\Services\ClusterService::getActiveNodes();
     if (empty($nodes)) {
-        $log('No nodes configured, nothing to sync');
+        $log('No active nodes to sync (all may be in standby)');
         exit(0);
     }
 
@@ -76,22 +77,25 @@ try {
         $nodeName = $node['name'] ?? 'Unknown';
         $log("Syncing to node: {$nodeName}");
 
-        foreach ($accounts as $acc) {
-            $domain = $acc['domain'];
-            $result = \MuseDockPanel\Services\FileSyncService::syncHostingToNode($acc, $node);
-
+        // File sync — skip when lsyncd handles it in real-time
+        if ($syncMode === 'lsyncd') {
+            $log("  File sync skipped — lsyncd handles real-time sync");
+        } else {
+            // Sync entire /var/www/vhosts/ in one rsync — mirrors everything, not just panel hostings
+            $log("  Syncing /var/www/vhosts/ ...");
+            $result = \MuseDockPanel\Services\FileSyncService::syncVhostsToNode($node);
             if ($result['ok']) {
                 $totalOk++;
                 $elapsed = $result['elapsed_seconds'] ?? 0;
-                $log("  OK: {$domain} ({$elapsed}s)");
+                $log("  OK: /var/www/vhosts/ ({$elapsed}s)");
             } else {
                 $totalFail++;
                 $error = $result['error'] ?? 'Unknown error';
-                $log("  FAIL: {$domain} — {$error}");
+                $log("  FAIL: /var/www/vhosts/ — {$error}");
             }
         }
 
-        // Update disk_used_mb on master and slave after file sync
+        // Update disk_used_mb on master and slave (always runs)
         $diskResult = \MuseDockPanel\Services\FileSyncService::updateRemoteDiskUsage($node, $accounts);
         if ($diskResult['ok']) {
             $log("  Disk usage updated: {$diskResult['updated']} accounts");
@@ -111,9 +115,28 @@ try {
         }
 
         // Sync database dumps if enabled (Nivel 1 — simple cluster sync)
+        // Check streaming replication per engine — only skip dumps for engines with active streaming
         if ($config['db_dumps'] ?? false) {
             $streamingStatus = \MuseDockPanel\Services\ReplicationService::isStreamingActive();
-            if (!$streamingStatus['any_active']) {
+
+            $skipPgsql = $streamingStatus['pg'] ?? false;
+            $skipMysql = $streamingStatus['mysql'] ?? false;
+
+            if ($skipPgsql && $skipMysql) {
+                $log("  DB dumps skipped — streaming replication active for both engines");
+            } else {
+                // Temporarily disable dump for engines with active streaming
+                $origDumpPgsql = $config['db_dump_pgsql'];
+                $origDumpMysql = $config['db_dump_mysql'];
+                if ($skipPgsql) {
+                    \MuseDockPanel\Settings::set('filesync_db_dump_pgsql', '0');
+                    $log("  PostgreSQL dumps skipped — streaming replication active");
+                }
+                if ($skipMysql) {
+                    \MuseDockPanel\Settings::set('filesync_db_dump_mysql', '0');
+                    $log("  MySQL dumps skipped — streaming replication active");
+                }
+
                 $log("  Dumping databases...");
                 $dumpResults = \MuseDockPanel\Services\FileSyncService::dumpAllDatabases();
                 $dumpOk = count(array_filter($dumpResults, fn($r) => $r['ok']));
@@ -126,13 +149,23 @@ try {
                 } else {
                     $log("  Database dumps FAILED: " . ($dbSyncResult['error'] ?? ''));
                 }
-            } else {
-                $log("  DB dumps skipped — streaming replication active");
+
+                // Restore original settings
+                if ($skipPgsql) {
+                    \MuseDockPanel\Settings::set('filesync_db_dump_pgsql', $origDumpPgsql ? '1' : '0');
+                }
+                if ($skipMysql) {
+                    \MuseDockPanel\Settings::set('filesync_db_dump_mysql', $origDumpMysql ? '1' : '0');
+                }
             }
         }
     }
 
-    $log("Sync completed: {$totalOk} OK, {$totalFail} failed");
+    if ($syncMode === 'lsyncd') {
+        $log("Periodic tasks completed (lsyncd handles file sync)");
+    } else {
+        $log("Sync completed: {$totalOk} OK, {$totalFail} failed");
+    }
 
     // Log rotation (max 5 MB)
     $logFile = PANEL_ROOT . '/storage/logs/filesync-worker.log';

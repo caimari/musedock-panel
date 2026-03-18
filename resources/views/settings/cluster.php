@@ -386,10 +386,27 @@
                         </thead>
                         <tbody id="nodes-table-body">
                             <?php foreach ($nodes as $node): ?>
-                            <tr id="node-row-<?= (int)$node['id'] ?>">
-                                <td><strong><?= View::e($node['name']) ?></strong></td>
+                            <?php $isStandby = !empty($node['standby']); ?>
+                            <tr id="node-row-<?= (int)$node['id'] ?>" <?= $isStandby ? 'style="opacity:0.6;"' : '' ?>>
+                                <td>
+                                    <strong><?= View::e($node['name']) ?></strong>
+                                    <?php if ($isStandby): ?>
+                                        <br><span class="badge bg-warning text-dark"><i class="bi bi-pause-circle me-1"></i>Standby</span>
+                                        <?php if ($node['standby_reason']): ?>
+                                            <small class="text-muted d-block"><?= View::e($node['standby_reason']) ?></small>
+                                        <?php endif; ?>
+                                        <?php if ($node['standby_since']): ?>
+                                            <small class="text-muted d-block">Desde: <?= View::e($node['standby_since']) ?></small>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
+                                </td>
                                 <td><code class="small"><?= View::e($node['api_url']) ?></code></td>
                                 <td>
+                                    <?php if ($isStandby): ?>
+                                        <span class="badge bg-warning text-dark" id="node-status-<?= (int)$node['id'] ?>">
+                                            Standby
+                                        </span>
+                                    <?php else: ?>
                                     <?php
                                         $status = $node['status'] ?? 'offline';
                                         $statusBadge = match($status) {
@@ -401,6 +418,7 @@
                                     <span class="badge <?= $statusBadge ?>" id="node-status-<?= (int)$node['id'] ?>">
                                         <?= View::e(ucfirst($status)) ?>
                                     </span>
+                                    <?php endif; ?>
                                 </td>
                                 <td class="small" id="node-lastseen-<?= (int)$node['id'] ?>">
                                     <?= $node['last_seen_at'] ? View::e($node['last_seen_at']) : '<span class="text-muted">Nunca</span>' ?>
@@ -445,6 +463,19 @@
                                             onclick="viewNodeStatus(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
                                         <i class="bi bi-eye me-1"></i>Ver Estado
                                     </button>
+                                    <?php if ($isStandby): ?>
+                                    <button type="button" class="btn btn-outline-success btn-sm"
+                                            onclick="toggleStandby(<?= (int)$node['id'] ?>, 'deactivate', '<?= View::e($node['name']) ?>')"
+                                            title="Reactivar nodo — reanudar sync, cola y alertas">
+                                        <i class="bi bi-play-circle me-1"></i>Reactivar
+                                    </button>
+                                    <?php else: ?>
+                                    <button type="button" class="btn btn-outline-warning btn-sm"
+                                            onclick="toggleStandby(<?= (int)$node['id'] ?>, 'activate', '<?= View::e($node['name']) ?>')"
+                                            title="Poner en standby — pausar sync, cola y alertas">
+                                        <i class="bi bi-pause-circle me-1"></i>Standby
+                                    </button>
+                                    <?php endif; ?>
                                     <button type="button" class="btn btn-outline-danger btn-sm"
                                             onclick="confirmRemoveNode(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
                                         <i class="bi bi-trash me-1"></i>Eliminar
@@ -622,10 +653,94 @@
                     <label class="form-check-label" for="filesyncEnabled">Activar sincronización automática de archivos</label>
                 </div>
 
-                <!-- Method selector -->
+                <!-- Sync mode selector -->
+                <?php $syncMode = $fsConfig['sync_mode'] ?? 'periodic'; ?>
                 <div class="row mb-3">
                     <div class="col-md-4">
-                        <label class="form-label">Método de sincronización</label>
+                        <label class="form-label">Modo de sincronización de archivos</label>
+                        <select name="filesync_sync_mode" class="form-select" id="filesyncSyncMode" onchange="toggleSyncMode()">
+                            <option value="periodic" <?= $syncMode === 'periodic' ? 'selected' : '' ?>>Periódico (rsync cada X min)</option>
+                            <option value="lsyncd" <?= $syncMode === 'lsyncd' ? 'selected' : '' ?>>Tiempo real (lsyncd)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="small mt-4">
+                            <span class="text-muted" id="syncModeDesc"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- lsyncd panel (visible when mode=lsyncd) -->
+                <?php $lsyncdStatus = \MuseDockPanel\Services\FileSyncService::getLsyncdStatus(); ?>
+                <div id="lsyncdPanel" style="<?= $syncMode !== 'lsyncd' ? 'display:none' : '' ?>">
+                    <div class="card mb-3" style="background:rgba(13,110,253,0.05);border-color:rgba(13,110,253,0.15);">
+                        <div class="card-body py-3">
+                            <h6 class="mb-2"><i class="bi bi-lightning-charge me-1"></i>lsyncd — Sincronización en tiempo real</h6>
+                            <p class="small text-muted mb-2">
+                                lsyncd vigila <code>/var/www/vhosts/</code> y sincroniza cambios al instante via rsync SSH.
+                                El intervalo periódico no aplica para archivos, pero sigue activo para SSL, dumps de BD y disk usage.
+                            </p>
+
+                            <div class="d-flex align-items-center gap-3 mb-2">
+                                <span class="small">
+                                    Estado:
+                                    <?php if (!$lsyncdStatus['installed']): ?>
+                                        <span class="badge bg-secondary">No instalado</span>
+                                    <?php elseif ($lsyncdStatus['running']): ?>
+                                        <span class="badge bg-success">Activo</span>
+                                        <?php if ($lsyncdStatus['pid']): ?>
+                                            <span class="text-muted">(PID <?= $lsyncdStatus['pid'] ?>)</span>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <span class="badge bg-warning text-dark">Detenido</span>
+                                    <?php endif; ?>
+                                </span>
+                                <span id="lsyncdActionStatus" class="small"></span>
+                            </div>
+
+                            <div class="d-flex flex-wrap gap-2">
+                                <?php if (!$lsyncdStatus['installed']): ?>
+                                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="lsyncdAction('install')">
+                                        <i class="bi bi-download me-1"></i>Instalar lsyncd
+                                    </button>
+                                <?php else: ?>
+                                    <?php if ($lsyncdStatus['running']): ?>
+                                        <button type="button" class="btn btn-outline-warning btn-sm" onclick="lsyncdAction('stop')">
+                                            <i class="bi bi-stop-circle me-1"></i>Detener
+                                        </button>
+                                        <button type="button" class="btn btn-outline-info btn-sm" onclick="lsyncdAction('reload')">
+                                            <i class="bi bi-arrow-clockwise me-1"></i>Recargar config
+                                        </button>
+                                    <?php else: ?>
+                                        <button type="button" class="btn btn-outline-success btn-sm" onclick="lsyncdAction('start')">
+                                            <i class="bi bi-play-circle me-1"></i>Iniciar
+                                        </button>
+                                    <?php endif; ?>
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="lsyncdAction('status')">
+                                        <i class="bi bi-info-circle me-1"></i>Ver estado
+                                    </button>
+                                <?php endif; ?>
+                            </div>
+
+                            <?php if ($lsyncdStatus['installed'] && $lsyncdStatus['log_tail']): ?>
+                            <div class="mt-2">
+                                <button class="btn btn-link btn-sm text-muted p-0" type="button" data-bs-toggle="collapse" data-bs-target="#lsyncdLog">
+                                    <i class="bi bi-terminal me-1"></i>Ver log
+                                </button>
+                                <div class="collapse mt-1" id="lsyncdLog">
+                                    <pre class="p-2 rounded small" style="background:#1a1a2e;color:#a8d8ea;max-height:200px;overflow:auto;font-size:0.75rem;"><?= htmlspecialchars($lsyncdStatus['log_tail']) ?></pre>
+                                </div>
+                            </div>
+                            <?php endif; ?>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Method selector (for periodic mode or lsyncd SSH config) -->
+                <div id="methodSelector" style="<?= $syncMode === 'lsyncd' ? 'display:none' : '' ?>">
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Método de transferencia</label>
                         <select name="filesync_method" class="form-select" id="filesyncMethod">
                             <option value="ssh" <?= $fsConfig['method'] === 'ssh' ? 'selected' : '' ?>>SSH (rsync)</option>
                             <option value="https" <?= $fsConfig['method'] === 'https' ? 'selected' : '' ?>>HTTPS (API del panel)</option>
@@ -642,6 +757,7 @@
                             </span>
                         </div>
                     </div>
+                </div>
                 </div>
 
                 <hr class="border-secondary">
@@ -726,11 +842,11 @@
 
                 <!-- Common settings -->
                 <div class="row mb-3">
-                    <div class="col-md-3">
+                    <div class="col-md-3" id="intervalField">
                         <label class="form-label">Intervalo (minutos)</label>
                         <input type="number" name="filesync_interval" class="form-control"
                                value="<?= $fsConfig['interval_minutes'] ?>" min="1" max="1440">
-                        <small class="text-muted">Cada cuántos minutos sincronizar</small>
+                        <small class="text-muted" id="intervalDesc">Cada cuántos minutos sincronizar</small>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label">Límite ancho de banda (KB/s)</label>
@@ -742,11 +858,47 @@
                         <label class="form-label">Patrones a excluir</label>
                         <input type="text" name="filesync_exclude" class="form-control"
                                value="<?= View::e($fsConfig['exclude_patterns']) ?>">
-                        <small class="text-muted">Separados por coma</small>
+                        <small class="text-muted">Separados por coma (ej: <code>*.log</code>, <code>node_modules</code>, <code>*.tmp</code>)</small>
                     </div>
                 </div>
 
+                <!-- Specific exclusions -->
+                <?php
+                    $exclusionsList = array_filter(array_map('trim', explode("\n", \MuseDockPanel\Settings::get('filesync_exclusions_list', ''))));
+                ?>
+                <div class="mb-3">
+                    <label class="form-label">Exclusiones específicas</label>
+                    <div class="d-flex align-items-start gap-2">
+                        <div class="flex-grow-1">
+                            <?php if (empty($exclusionsList)): ?>
+                                <span class="text-muted small">No hay exclusiones específicas configuradas.</span>
+                            <?php else: ?>
+                                <div class="d-flex flex-wrap gap-1">
+                                    <?php foreach ($exclusionsList as $exc): ?>
+                                        <span class="badge bg-secondary" style="font-size:0.8rem;">
+                                            <i class="bi bi-folder-x me-1"></i><?= View::e($exc) ?>
+                                        </span>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php endif; ?>
+                        </div>
+                        <button type="button" class="btn btn-outline-info btn-sm" onclick="openExclusionBrowser()">
+                            <i class="bi bi-folder2-open me-1"></i>Explorar y excluir
+                        </button>
+                    </div>
+                    <small class="text-muted">Directorios o archivos específicos a excluir de la sincronización.</small>
+                </div>
+
                 <hr class="border-secondary">
+
+                <!-- Independent tasks info -->
+                <div class="p-2 mb-3 rounded" style="background:rgba(13,110,253,0.06);border:1px solid rgba(13,110,253,0.12);">
+                    <small class="text-info">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Las siguientes opciones (SSL, credenciales, bases de datos) se ejecutan cada intervalo independientemente del modo de archivos.
+                        Aunque uses <strong>lsyncd</strong> para archivos en tiempo real, estas tareas siguen ejecutándose de forma periódica.
+                    </small>
+                </div>
 
                 <!-- SSL Certificates -->
                 <h6 class="text-muted mb-2">Certificados SSL</h6>
@@ -800,13 +952,15 @@
                 <h6 class="text-muted mb-2"><i class="bi bi-database me-1"></i>Bases de datos (dump)</h6>
                 <?php
                     $streamingActive = \MuseDockPanel\Services\ReplicationService::isStreamingActive();
+                    $pgStreaming = $streamingActive['pg'] ?? false;
+                    $mysqlStreaming = $streamingActive['mysql'] ?? false;
                 ?>
-                <?php if ($streamingActive['any_active']): ?>
+                <?php if ($pgStreaming && $mysqlStreaming): ?>
                 <div class="p-2 mb-3 rounded" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.15);">
                     <small style="color:#22c55e;">
                         <i class="bi bi-check-circle me-1"></i>
-                        <strong>Replicación streaming activa.</strong> Las bases de datos se replican en tiempo real.
-                        El dump periódico se omite automáticamente (es innecesario).
+                        <strong>Ambos motores gestionados por <a href="/settings/replication" class="text-success">Replicación Streaming</a>.</strong>
+                        PostgreSQL y MySQL se replican en tiempo real. Los dumps periódicos no son necesarios.
                     </small>
                 </div>
                 <?php else: ?>
@@ -819,6 +973,15 @@
                 </div>
                 <div class="row mb-2 ms-4">
                     <div class="col-md-4">
+                        <?php if ($mysqlStreaming): ?>
+                        <div class="p-2 rounded" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.12);">
+                            <small style="color:#22c55e;">
+                                <i class="bi bi-database-fill me-1"></i>MySQL / MariaDB
+                                <br>
+                                <i class="bi bi-check-circle me-1"></i>Gestionado por <a href="/settings/replication" class="text-success">Replicación Streaming</a>
+                            </small>
+                        </div>
+                        <?php else: ?>
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" name="filesync_db_dump_mysql" id="filesyncDbMySQL"
                                    <?= ($settings['filesync_db_dump_mysql'] ?? '1') === '1' ? 'checked' : '' ?>>
@@ -826,8 +989,18 @@
                                 <i class="bi bi-database-fill me-1"></i>MySQL / MariaDB
                             </label>
                         </div>
+                        <?php endif; ?>
                     </div>
                     <div class="col-md-4">
+                        <?php if ($pgStreaming): ?>
+                        <div class="p-2 rounded" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.12);">
+                            <small style="color:#22c55e;">
+                                <i class="bi bi-database me-1"></i>PostgreSQL
+                                <br>
+                                <i class="bi bi-check-circle me-1"></i>Gestionado por <a href="/settings/replication" class="text-success">Replicación Streaming</a>
+                            </small>
+                        </div>
+                        <?php else: ?>
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" name="filesync_db_dump_pgsql" id="filesyncDbPgSQL"
                                    <?= ($settings['filesync_db_dump_pgsql'] ?? '1') === '1' ? 'checked' : '' ?>>
@@ -835,6 +1008,7 @@
                                 <i class="bi bi-database me-1"></i>PostgreSQL (hosting, puerto 5432)
                             </label>
                         </div>
+                        <?php endif; ?>
                     </div>
                 </div>
                 <div class="row mb-2">
@@ -847,10 +1021,10 @@
                 </div>
                 <p class="small text-muted mb-3">
                     <i class="bi bi-info-circle me-1"></i>
-                    Las bases de datos se exportan con <code>pg_dump</code> / <code>mysqldump</code> (comprimidas con gzip)
-                    y se restauran en el slave cada intervalo. La BD del panel (<code>musedock_panel</code>) nunca se sincroniza.
-                    Si activa la <a href="/settings/replication" class="text-info">replicación streaming</a> (nivel avanzado),
-                    este paso se omite automáticamente.
+                    Los dumps se ejecutan cada intervalo, independientemente del modo de archivos (periódico o lsyncd).
+                    La BD del panel (<code>musedock_panel</code>) nunca se sincroniza.
+                    Los motores con <a href="/settings/replication" class="text-info">replicación streaming</a> activa
+                    se gestionan allí y no necesitan dumps.
                 </p>
                 <?php endif; ?>
 
@@ -859,10 +1033,19 @@
                 <!-- Manual sync buttons -->
                 <?php if (!empty($nodes) && $clusterRole === 'master'): ?>
                 <h6 class="text-muted mb-2">Sincronización manual de archivos</h6>
+                <p class="small text-muted mb-2">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Fuerza un rsync completo de <code>/var/www/vhosts/</code> al nodo seleccionado de forma inmediata,
+                    independientemente del modo configurado (periódico o lsyncd).
+                    Respeta los patrones y exclusiones específicas configuradas arriba.
+                </p>
                 <div class="d-flex flex-wrap gap-2 mb-3">
                     <?php foreach ($nodes as $node): ?>
-                    <button type="button" class="btn btn-outline-success btn-sm" onclick="syncFilesNow(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                    <?php $nodeStandby = !empty($node['standby']); ?>
+                    <button type="button" class="btn btn-outline-success btn-sm" onclick="syncFilesNow(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')"
+                            <?= $nodeStandby ? 'disabled title="Nodo en standby"' : '' ?>>
                         <i class="bi bi-arrow-repeat me-1"></i>Sync archivos a <?= View::e($node['name']) ?>
+                        <?php if ($nodeStandby): ?><span class="badge bg-warning text-dark ms-1">standby</span><?php endif; ?>
                     </button>
                     <?php endforeach; ?>
                 </div>
@@ -1566,6 +1749,68 @@ function toggleNodeAlerts(nodeId, action, nodeName) {
     });
 }
 
+function toggleStandby(nodeId, action, nodeName) {
+    var isActivate = action === 'activate';
+
+    Swal.fire({
+        title: isActivate ? 'Poner en Standby' : 'Reactivar nodo',
+        html: isActivate
+            ? '<p>Poner el nodo <strong>' + nodeName + '</strong> en modo standby?</p>' +
+              '<p class="small text-muted mb-2">Se pausarán: sincronización de archivos, cola del cluster, dumps de BD, SSL, disk usage y alertas.</p>' +
+              '<div class="mb-3"><label class="form-label small">Motivo (opcional)</label>' +
+              '<input type="text" id="standbyReason" class="form-control" placeholder="Ej: Reparación hardware, migración..." style="background:#2a2a3e;color:#fff;border-color:#444;"></div>' +
+              '<div class="mb-2"><label class="form-label small">Contraseña de administrador</label>' +
+              '<input type="password" id="standbyPassword" class="form-control" placeholder="Confirmar con tu contraseña" style="background:#2a2a3e;color:#fff;border-color:#444;"></div>'
+            : '<p>Reactivar el nodo <strong>' + nodeName + '</strong>?</p>' +
+              '<p class="small text-muted">Se reanudarán: sincronización, cola, alertas y todas las operaciones.</p>' +
+              '<div class="mb-2"><label class="form-label small">Contraseña de administrador</label>' +
+              '<input type="password" id="standbyPassword" class="form-control" placeholder="Confirmar con tu contraseña" style="background:#2a2a3e;color:#fff;border-color:#444;"></div>',
+        icon: isActivate ? 'warning' : 'question',
+        showCancelButton: true,
+        confirmButtonText: isActivate ? 'Activar Standby' : 'Reactivar',
+        confirmButtonColor: isActivate ? '#ffc107' : '#22c55e',
+        cancelButtonText: 'Cancelar',
+        background: '#1e1e2e',
+        color: '#fff',
+        preConfirm: function() {
+            var pw = document.getElementById('standbyPassword').value;
+            if (!pw) {
+                Swal.showValidationMessage('La contraseña es obligatoria');
+                return false;
+            }
+            return {
+                password: pw,
+                reason: document.getElementById('standbyReason') ? document.getElementById('standbyReason').value : ''
+            };
+        }
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+
+        var form = new FormData();
+        form.append('node_id', nodeId);
+        form.append('action', action);
+        form.append('admin_password', result.value.password);
+        form.append('reason', result.value.reason || '');
+        form.append('_csrf_token', document.querySelector('[name=_csrf_token]').value);
+
+        fetch('/settings/cluster/node-standby', { method: 'POST', body: form })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            Swal.fire({
+                title: data.ok ? 'OK' : 'Error',
+                text: data.message || data.error,
+                icon: data.ok ? 'success' : 'error',
+                timer: 2500,
+                background: '#1e1e2e',
+                color: '#fff',
+            }).then(function() { if (data.ok) location.reload(); });
+        })
+        .catch(function(e) {
+            Swal.fire({ title: 'Error', text: e.message, icon: 'error', background: '#1e1e2e', color: '#fff' });
+        });
+    });
+}
+
 function confirmPromoteCluster() {
     Swal.fire({
         title: 'Promover a Master',
@@ -1942,6 +2187,195 @@ function testSshNode(nodeId, nodeName) {
     });
 }
 
+// ─── Sync mode toggle ──────────────────────────────────
+function toggleSyncMode() {
+    var mode = document.getElementById('filesyncSyncMode').value;
+    var lsyncdPanel = document.getElementById('lsyncdPanel');
+    var methodSelector = document.getElementById('methodSelector');
+    var intervalField = document.getElementById('intervalField');
+    var intervalDesc = document.getElementById('intervalDesc');
+    var descEl = document.getElementById('syncModeDesc');
+
+    if (mode === 'lsyncd') {
+        lsyncdPanel.style.display = '';
+        methodSelector.style.display = 'none';
+        intervalDesc.textContent = 'Solo para SSL, dumps de BD y disk usage';
+        descEl.innerHTML = '<i class="bi bi-lightning-charge text-info me-1"></i>Los archivos se sincronizan en tiempo real. El intervalo solo aplica a SSL, dumps y disk usage.';
+    } else {
+        lsyncdPanel.style.display = 'none';
+        methodSelector.style.display = '';
+        intervalDesc.textContent = 'Cada cuántos minutos sincronizar';
+        descEl.innerHTML = 'rsync periódico cada X minutos. Archivos, SSL, dumps y disk usage se sincronizan en el mismo ciclo.';
+    }
+}
+
+function lsyncdAction(action) {
+    var csrf = document.querySelector('[name=_csrf_token]').value;
+    var statusEl = document.getElementById('lsyncdActionStatus');
+
+    if (action === 'status') {
+        statusEl.innerHTML = '<span class="text-info"><i class="bi bi-hourglass-split me-1"></i>Consultando...</span>';
+        fetch('/settings/cluster/lsyncd-status')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var html = '<strong>Instalado:</strong> ' + (data.installed ? 'Si' : 'No');
+            if (data.installed) {
+                html += ' | <strong>Activo:</strong> ' + (data.running ? 'Si' : 'No');
+                if (data.pid) html += ' (PID ' + data.pid + ')';
+                html += ' | <strong>Habilitado:</strong> ' + (data.enabled ? 'Si' : 'No');
+            }
+            statusEl.innerHTML = '<span class="text-info">' + html + '</span>';
+            if (data.log_tail) {
+                var logEl = document.getElementById('lsyncdLog');
+                if (logEl) {
+                    logEl.querySelector('pre').textContent = data.log_tail;
+                }
+            }
+        })
+        .catch(function() {
+            statusEl.innerHTML = '<span class="text-danger">Error de conexion</span>';
+        });
+        return;
+    }
+
+    var labels = { install: 'Instalando lsyncd...', start: 'Iniciando lsyncd...', stop: 'Deteniendo lsyncd...', reload: 'Recargando config...' };
+    statusEl.innerHTML = '<span class="text-warning"><i class="bi bi-hourglass-split me-1"></i>' + (labels[action] || 'Procesando...') + '</span>';
+
+    var formData = new FormData();
+    formData.append('_csrf_token', csrf);
+
+    fetch('/settings/cluster/lsyncd-' + action, { method: 'POST', body: formData })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) {
+            statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>OK</span>';
+            setTimeout(function() { location.reload(); }, 1500);
+        } else {
+            statusEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>' + (data.error || 'Error') + '</span>';
+        }
+    })
+    .catch(function() {
+        statusEl.innerHTML = '<span class="text-danger">Error de conexion</span>';
+    });
+}
+
+// Init sync mode UI on page load
+document.addEventListener('DOMContentLoaded', function() { toggleSyncMode(); });
+
+// ─── Exclusion Browser ──────────────────────────────────
+var _exclusionSet = new Set();
+
+function openExclusionBrowser() {
+    // Load current exclusions
+    fetch('/settings/cluster/browse-vhosts')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (!data.ok) { alert(data.error); return; }
+        _exclusionSet = new Set(data.exclusions || []);
+        _showExclusionModal(data, '');
+    });
+}
+
+function _showExclusionModal(data, currentPath) {
+    var breadcrumb = '<span class="text-info" style="cursor:pointer;" onclick="browseExclusionPath(\'\')">/var/www/vhosts/</span>';
+    if (currentPath) {
+        var parts = currentPath.split('/');
+        var accumulated = '';
+        parts.forEach(function(part, i) {
+            accumulated += (i > 0 ? '/' : '') + part;
+            var accCopy = accumulated;
+            breadcrumb += '<span class="text-info" style="cursor:pointer;" onclick="browseExclusionPath(\'' + accCopy + '\')">' + part + '/</span>';
+        });
+    }
+
+    var tableRows = '';
+    data.items.forEach(function(item) {
+        var icon = item.is_dir ? '<i class="bi bi-folder-fill text-warning me-1"></i>' : '<i class="bi bi-file-earmark me-1"></i>';
+        var checked = _exclusionSet.has(item.path) ? 'checked' : '';
+        var nameHtml = item.is_dir
+            ? '<a href="#" onclick="browseExclusionPath(\'' + item.path + '\');return false;" class="text-info text-decoration-none">' + icon + item.name + '</a>'
+            : icon + '<span class="text-light">' + item.name + '</span>';
+        var sizeStr = item.is_dir ? '' : _formatSize(item.size);
+
+        tableRows += '<tr>' +
+            '<td style="width:40px;"><input type="checkbox" class="form-check-input excl-check" data-path="' + item.path + '" ' + checked + ' onchange="toggleExclusion(this)"></td>' +
+            '<td>' + nameHtml + '</td>' +
+            '<td class="text-end text-muted small">' + sizeStr + '</td>' +
+            '</tr>';
+    });
+
+    var countBadge = _exclusionSet.size > 0 ? ' <span class="badge bg-warning text-dark">' + _exclusionSet.size + ' excluidos</span>' : '';
+
+    Swal.fire({
+        title: 'Explorar /var/www/vhosts/',
+        html: '<div class="text-start">' +
+              '<div class="mb-2 small" style="word-break:break-all;">' + breadcrumb + countBadge + '</div>' +
+              '<div style="max-height:400px;overflow:auto;">' +
+              '<table class="table table-sm table-dark mb-0" style="font-size:0.85rem;">' +
+              '<thead><tr><th style="width:40px;"></th><th>Nombre</th><th class="text-end" style="width:80px;">Tamaño</th></tr></thead>' +
+              '<tbody>' + tableRows + '</tbody>' +
+              '</table>' +
+              '</div>' +
+              '</div>',
+        width: 650,
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-check-circle me-1"></i>Guardar exclusiones',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#22c55e',
+        background: '#1e1e2e',
+        color: '#fff',
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+        _saveExclusions();
+    });
+}
+
+function browseExclusionPath(path) {
+    fetch('/settings/cluster/browse-vhosts?path=' + encodeURIComponent(path))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (!data.ok) { alert(data.error); return; }
+        _showExclusionModal(data, path);
+    });
+}
+
+function toggleExclusion(checkbox) {
+    var path = checkbox.getAttribute('data-path');
+    if (checkbox.checked) {
+        _exclusionSet.add(path);
+    } else {
+        _exclusionSet.delete(path);
+    }
+}
+
+function _saveExclusions() {
+    var csrf = document.querySelector('[name=_csrf_token]').value;
+    var exclusions = Array.from(_exclusionSet).join("\n");
+
+    var form = new FormData();
+    form.append('_csrf_token', csrf);
+    form.append('exclusions', exclusions);
+
+    fetch('/settings/cluster/save-exclusions', { method: 'POST', body: form })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) {
+            Swal.fire({ title: 'Guardado', text: 'Exclusiones actualizadas', icon: 'success', timer: 1500, background: '#1e1e2e', color: '#fff' })
+            .then(function() { location.reload(); });
+        } else {
+            Swal.fire({ title: 'Error', text: data.error || 'Error', icon: 'error', background: '#1e1e2e', color: '#fff' });
+        }
+    });
+}
+
+function _formatSize(bytes) {
+    if (bytes === 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+    return (bytes / 1073741824).toFixed(1) + ' GB';
+}
+
 let _syncPollTimer = null;
 let _syncStartTime = null;
 
@@ -1950,8 +2384,10 @@ function syncFilesNow(nodeId, nodeName) {
 
     Swal.fire({
         title: 'Sincronizar archivos a ' + nodeName,
-        html: '<p>Se sincronizarán los archivos de <strong>todos los hostings activos</strong> al nodo seleccionado.</p>' +
+        html: '<p>Se sincronizará <strong>todo /var/www/vhosts/</strong> al nodo seleccionado de forma inmediata.</p>' +
               '<p><i class="bi bi-arrow-repeat me-1"></i>Usa rsync incremental — solo copia archivos nuevos o modificados.</p>' +
+              '<p class="small text-muted"><i class="bi bi-funnel me-1"></i>Respeta los patrones y exclusiones específicas configuradas.</p>' +
+              '<p class="small text-muted"><i class="bi bi-lightning-charge me-1"></i>Funciona independientemente del modo (periódico o lsyncd).</p>' +
               '<p class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Puede tardar varios minutos según el volumen de datos.</p>',
         icon: 'question',
         showCancelButton: true,

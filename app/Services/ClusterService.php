@@ -18,6 +18,12 @@ class ClusterService
         return Database::fetchAll('SELECT * FROM cluster_nodes ORDER BY name');
     }
 
+    /** Get only nodes NOT in standby — use for sync, queue processing, alerts */
+    public static function getActiveNodes(): array
+    {
+        return Database::fetchAll('SELECT * FROM cluster_nodes WHERE standby = false ORDER BY name');
+    }
+
     public static function getNode(int $id): ?array
     {
         return Database::fetchOne('SELECT * FROM cluster_nodes WHERE id = :id', ['id' => $id]);
@@ -260,12 +266,12 @@ class ClusterService
     {
         if ($nodeId > 0) {
             return Database::fetchAll(
-                "SELECT q.*, n.name AS node_name FROM cluster_queue q LEFT JOIN cluster_nodes n ON n.id = q.node_id WHERE q.status = 'pending' AND q.node_id = :nid ORDER BY q.priority ASC, q.scheduled_at ASC",
+                "SELECT q.*, n.name AS node_name FROM cluster_queue q LEFT JOIN cluster_nodes n ON n.id = q.node_id WHERE q.status = 'pending' AND q.node_id = :nid AND (n.standby IS NULL OR n.standby = false) ORDER BY q.priority ASC, q.scheduled_at ASC",
                 ['nid' => $nodeId]
             );
         }
         return Database::fetchAll(
-            "SELECT q.*, n.name AS node_name FROM cluster_queue q LEFT JOIN cluster_nodes n ON n.id = q.node_id WHERE q.status = 'pending' ORDER BY q.priority ASC, q.scheduled_at ASC"
+            "SELECT q.*, n.name AS node_name FROM cluster_queue q LEFT JOIN cluster_nodes n ON n.id = q.node_id WHERE q.status = 'pending' AND (n.standby IS NULL OR n.standby = false) ORDER BY q.priority ASC, q.scheduled_at ASC"
         );
     }
 

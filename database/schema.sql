@@ -136,6 +136,9 @@ CREATE TABLE IF NOT EXISTS cluster_nodes (
     last_sync_at TIMESTAMP,
     sync_lag_seconds INTEGER DEFAULT 0,
     metadata JSONB,                                  -- version, OS, IP, etc.
+    standby BOOLEAN NOT NULL DEFAULT false,          -- true = maintenance mode (no sync, no alerts)
+    standby_since TIMESTAMP,                         -- when standby was activated
+    standby_reason VARCHAR(255),                     -- optional reason (e.g. "hardware repair")
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );

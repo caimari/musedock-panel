@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.7.7');
+define('PANEL_VERSION', '0.7.8');
 
 
 
@@ -245,6 +245,14 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/cluster/sync-progress', 'ClusterController@syncProgress');
 \MuseDockPanel\Router::post('/settings/cluster/check-dbhost', 'ClusterController@checkDbHost');
 \MuseDockPanel\Router::post('/settings/cluster/full-sync', 'ClusterController@fullSync');
+\MuseDockPanel\Router::post('/settings/cluster/lsyncd-install', 'ClusterController@lsyncdInstall');
+\MuseDockPanel\Router::post('/settings/cluster/lsyncd-start', 'ClusterController@lsyncdStart');
+\MuseDockPanel\Router::post('/settings/cluster/lsyncd-stop', 'ClusterController@lsyncdStop');
+\MuseDockPanel\Router::post('/settings/cluster/lsyncd-reload', 'ClusterController@lsyncdReload');
+\MuseDockPanel\Router::get('/settings/cluster/lsyncd-status', 'ClusterController@lsyncdStatus');
+\MuseDockPanel\Router::post('/settings/cluster/node-standby', 'ClusterController@toggleNodeStandby');
+\MuseDockPanel\Router::get('/settings/cluster/browse-vhosts', 'ClusterController@browseVhosts');
+\MuseDockPanel\Router::post('/settings/cluster/save-exclusions', 'ClusterController@saveExclusions');
 \MuseDockPanel\Router::post('/settings/cluster/mute-node-alerts', 'ClusterController@muteNodeAlerts');
 \MuseDockPanel\Router::post('/settings/cluster/unmute-node-alerts', 'ClusterController@unmuteNodeAlerts');
 

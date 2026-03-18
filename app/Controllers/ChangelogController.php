@@ -20,6 +20,65 @@ class ChangelogController
     {
         return [
             [
+                'version' => '0.7.8',
+                'date' => '2026-03-18',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Modo de sincronizacion lsyncd — Nueva opcion en Cluster > Archivos para elegir entre rsync periodico o lsyncd (tiempo real con inotify y delay de 5s)',
+                            'Instalacion y gestion de lsyncd desde el panel — Botones para instalar, iniciar, detener, recargar y ver estado de lsyncd directamente desde la interfaz',
+                            'Modo standby/mantenimiento por nodo — Boton para pausar toda sincronizacion, cola y alertas de un nodo especifico con password de admin y campo de motivo',
+                            'Sincronizacion completa de /var/www/vhosts/ — Tanto rsync periodico como lsyncd sincronizan todo el directorio de vhosts, no solo los hostings registrados',
+                            'Explorador visual de exclusiones — Modal con arbol de directorios y checkboxes para excluir rutas especificas del sync (ademas de patrones)',
+                            'Actualizacion remota de disco — Calcula disk_used_mb en el slave via SSH tras cada sync y actualiza ambas bases de datos',
+                            'Comprobacion independiente de streaming por motor — PostgreSQL y MySQL se verifican por separado para dumps, evitando que uno bloquee al otro',
+                            'Indicador de motor gestionado por streaming — En la seccion de dumps, los motores con replicacion activa muestran enlace a la configuracion de streaming en vez del checkbox',
+                            'Nota informativa de tareas independientes — Info box explicando que SSL, credenciales y dumps se ejecutan en cada intervalo independientemente del modo de archivos',
+                        ],
+                        'en' => [
+                            'lsyncd sync mode — New option in Cluster > Files to choose between periodic rsync or lsyncd (real-time with inotify and 5s delay)',
+                            'lsyncd install and management from panel — Buttons to install, start, stop, reload and view lsyncd status directly from the UI',
+                            'Node standby/maintenance mode — Button to pause all sync, queue and alerts for a specific node with admin password and reason field',
+                            'Full /var/www/vhosts/ sync — Both periodic rsync and lsyncd mirror the entire vhosts directory, not just registered hostings',
+                            'Visual exclusion browser — Modal with directory tree and checkboxes to exclude specific paths from sync (in addition to patterns)',
+                            'Remote disk usage update — Calculates disk_used_mb on slave via SSH after each sync and updates both databases',
+                            'Independent streaming check per engine — PostgreSQL and MySQL are checked separately for dumps, preventing one from blocking the other',
+                            'Engine managed by streaming indicator — In the dumps section, engines with active replication show a link to streaming config instead of the checkbox',
+                            'Independent tasks info note — Info box explaining that SSL, credentials and dumps run on each interval regardless of file sync mode',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Sync manual independiente del modo — El boton de sincronizacion manual funciona siempre (rsync directo) independientemente de si lsyncd esta activo, respetando exclusiones',
+                            'Worker de filesync consciente de standby — El worker omite nodos en standby pero permite acumular cola para cuando se reactiven',
+                            'Worker de cluster silencia alertas en standby — No envia notificaciones de nodo caido para nodos marcados en mantenimiento',
+                        ],
+                        'en' => [
+                            'Manual sync independent of mode — Manual sync button always works (direct rsync) regardless of whether lsyncd is active, respecting exclusions',
+                            'Filesync worker standby-aware — Worker skips standby nodes but allows queue items to accumulate for when they are reactivated',
+                            'Cluster worker silences standby alerts — Does not send offline notifications for nodes marked in maintenance',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Monitor de red mostraba valores planos — El archivo de contadores en /tmp/ no se actualizaba (owner incorrecto), causando que elapsed fuera de horas en vez de 30s y diluyendo todos los rates de red',
+                            'Archivo de contadores movido a storage/ — Cambiado de /tmp/musedock_monitor_last.json a storage/.monitor_last.json para evitar problemas de permisos entre usuarios',
+                            'Contadores se guardan antes del INSERT — file_put_contents movido antes de las operaciones de BD para garantizar datos frescos incluso si la BD falla',
+                            'Database::execute() inexistente — Corregido a Database::query() en el worker de filesync',
+                            'Sync de disco del slave incorrecto — El rsync solo sincronizaba /httpdocs en vez de todo el vhost root, causando discrepancias de disco',
+                        ],
+                        'en' => [
+                            'Network monitor showed flat values — Counter file in /tmp/ was not updating (wrong owner), causing elapsed to be hours instead of 30s, diluting all network rates',
+                            'Counter file moved to storage/ — Changed from /tmp/musedock_monitor_last.json to storage/.monitor_last.json to avoid permission issues between users',
+                            'Counters saved before INSERT — file_put_contents moved before DB operations to guarantee fresh data even if DB fails',
+                            'Non-existent Database::execute() — Fixed to Database::query() in filesync worker',
+                            'Slave disk sync incorrect — rsync only synced /httpdocs instead of entire vhost root, causing disk discrepancies',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '0.7.7',
                 'date' => '2026-03-18',
                 'badge' => 'success',

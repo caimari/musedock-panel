@@ -12,7 +12,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.7.7');
+define('PANEL_VERSION', '0.7.8');
 
 // Autoloader
 spl_autoload_register(function ($class) {
@@ -63,7 +63,7 @@ if (Settings::get('monitor_enabled', '1') !== '1') {
 
 $hostname = gethostname() ?: 'localhost';
 $interfaces = \MuseDockPanel\Services\MonitorService::getInterfaces();
-$lastFile = '/tmp/musedock_monitor_last.json';
+$lastFile = PANEL_ROOT . '/storage/.monitor_last.json';
 $last = file_exists($lastFile) ? json_decode(file_get_contents($lastFile), true) : [];
 $now = microtime(true);
 $elapsed = isset($last['_ts']) ? ($now - $last['_ts']) : 0;
@@ -149,6 +149,10 @@ if (!empty($gpuOutput)) {
     // No GPU or nvidia-smi not available — skip silently
 }
 
+// Save current readings for next delta calculation BEFORE DB operations
+// This ensures we always have fresh counters even if DB fails
+file_put_contents($lastFile, json_encode($current));
+
 // ─── Batch INSERT ────────────────────────────────────────────
 if (!empty($inserts)) {
     $values = [];
@@ -165,9 +169,6 @@ if (!empty($inserts)) {
     Database::query($sql, $params);
     logMsg("Inserted {$i} metrics.");
 }
-
-// Save current readings for next delta calculation
-file_put_contents($lastFile, json_encode($current));
 
 // ─── Hourly aggregation ─────────────────────────────────────
 try {

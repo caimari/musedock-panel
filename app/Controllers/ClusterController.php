@@ -573,6 +573,7 @@ class ClusterController
 
         FileSyncService::saveConfig([
             'filesync_enabled'         => isset($_POST['filesync_enabled']) ? '1' : '0',
+            'filesync_sync_mode'       => in_array($_POST['filesync_sync_mode'] ?? '', ['periodic', 'lsyncd']) ? $_POST['filesync_sync_mode'] : 'periodic',
             'filesync_method'          => in_array($_POST['filesync_method'] ?? '', ['ssh', 'https']) ? $_POST['filesync_method'] : 'ssh',
             'filesync_ssh_port'        => (string)max(1, (int)($_POST['filesync_ssh_port'] ?? 22)),
             'filesync_ssh_key_path'    => trim($_POST['filesync_ssh_key_path'] ?? '/root/.ssh/id_ed25519'),
@@ -885,6 +886,215 @@ class ClusterController
         LogService::log('cluster.fullsync', 'manual', "Sync completa iniciada al nodo {$node['name']} (ID: {$syncId})");
 
         echo json_encode(['ok' => true, 'sync_id' => $syncId, 'node_name' => $node['name']]);
+        exit;
+    }
+
+    // ─── lsyncd Management ─────────────────────────────────────
+
+    /** GET /settings/cluster/lsyncd-status (JSON) */
+    public function lsyncdStatus(): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode(FileSyncService::getLsyncdStatus());
+        exit;
+    }
+
+    /** POST /settings/cluster/lsyncd-install (JSON) */
+    public function lsyncdInstall(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $result = FileSyncService::installLsyncd();
+        LogService::log('cluster.lsyncd', 'install', $result['ok'] ? 'lsyncd instalado' : 'Error instalando lsyncd');
+        echo json_encode($result);
+        exit;
+    }
+
+    /** POST /settings/cluster/lsyncd-start (JSON) */
+    public function lsyncdStart(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $result = FileSyncService::startLsyncd();
+        LogService::log('cluster.lsyncd', 'start', $result['ok'] ? 'lsyncd iniciado' : 'Error iniciando lsyncd');
+        echo json_encode($result);
+        exit;
+    }
+
+    /** POST /settings/cluster/lsyncd-stop (JSON) */
+    public function lsyncdStop(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $result = FileSyncService::stopLsyncd();
+        LogService::log('cluster.lsyncd', 'stop', $result['ok'] ? 'lsyncd detenido' : 'Error deteniendo lsyncd');
+        echo json_encode($result);
+        exit;
+    }
+
+    /** POST /settings/cluster/lsyncd-reload (JSON) */
+    public function lsyncdReload(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $result = FileSyncService::reloadLsyncd();
+        LogService::log('cluster.lsyncd', 'reload', $result['ok'] ? 'lsyncd recargado' : 'Error recargando lsyncd');
+        echo json_encode($result);
+        exit;
+    }
+
+    // ─── Node Standby (Maintenance Mode) ───────────────────
+
+    /** POST /settings/cluster/node-standby (JSON) — requires admin password */
+    public function toggleNodeStandby(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        $action = $_POST['action'] ?? ''; // 'activate' or 'deactivate'
+        $password = $_POST['admin_password'] ?? '';
+        $reason = trim($_POST['reason'] ?? '');
+
+        if (!$nodeId || !in_array($action, ['activate', 'deactivate'])) {
+            echo json_encode(['ok' => false, 'error' => 'Parámetros inválidos']);
+            exit;
+        }
+
+        // Verify admin password
+        $adminId = $_SESSION['admin_id'] ?? 0;
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        if (!$admin || !password_verify($password, $admin['password_hash'])) {
+            echo json_encode(['ok' => false, 'error' => 'Contraseña incorrecta']);
+            exit;
+        }
+
+        $node = ClusterService::getNode($nodeId);
+        if (!$node) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado']);
+            exit;
+        }
+
+        if ($action === 'activate') {
+            Database::update('cluster_nodes', [
+                'standby'        => true,
+                'standby_since'  => date('Y-m-d H:i:s'),
+                'standby_reason' => $reason ?: 'Mantenimiento',
+            ], 'id = :id', ['id' => $nodeId]);
+
+            // Also mute alerts implicitly
+            $meta = json_decode($node['metadata'] ?? '{}', true) ?: [];
+            $meta['alerts_muted'] = true;
+            $meta['alerts_muted_at'] = date('Y-m-d H:i:s');
+            Database::update('cluster_nodes', [
+                'metadata' => json_encode($meta),
+            ], 'id = :id', ['id' => $nodeId]);
+
+            LogService::log('cluster.standby', $node['name'], "Nodo en standby: {$reason}");
+            echo json_encode(['ok' => true, 'message' => "Nodo {$node['name']} en standby. Sync, cola y alertas pausadas."]);
+        } else {
+            Database::update('cluster_nodes', [
+                'standby'        => false,
+                'standby_since'  => null,
+                'standby_reason' => null,
+            ], 'id = :id', ['id' => $nodeId]);
+
+            // Unmute alerts
+            $meta = json_decode($node['metadata'] ?? '{}', true) ?: [];
+            unset($meta['alerts_muted'], $meta['alerts_muted_at']);
+            Database::update('cluster_nodes', [
+                'metadata' => json_encode($meta),
+            ], 'id = :id', ['id' => $nodeId]);
+
+            LogService::log('cluster.standby', $node['name'], 'Nodo reactivado');
+            echo json_encode(['ok' => true, 'message' => "Nodo {$node['name']} reactivado. Sync, cola y alertas reanudadas."]);
+        }
+        exit;
+    }
+
+    // ─── Exclusion Browser ─────────────────────────────────────
+
+    /** GET /settings/cluster/browse-vhosts?path=... (JSON) */
+    public function browseVhosts(): void
+    {
+        header('Content-Type: application/json');
+
+        $basePath = '/var/www/vhosts';
+        $requestedPath = $_GET['path'] ?? '';
+
+        // Security: resolve real path and ensure it's within /var/www/vhosts
+        $targetPath = $requestedPath ? realpath($basePath . '/' . ltrim($requestedPath, '/')) : $basePath;
+        if (!$targetPath || !str_starts_with($targetPath, $basePath) || !is_dir($targetPath)) {
+            echo json_encode(['ok' => false, 'error' => 'Ruta no válida']);
+            exit;
+        }
+
+        // Load current exclusions
+        $exclusions = array_filter(array_map('trim', explode("\n", Settings::get('filesync_exclusions_list', ''))));
+
+        $items = [];
+        $entries = @scandir($targetPath);
+        if ($entries === false) {
+            echo json_encode(['ok' => false, 'error' => 'No se puede leer el directorio']);
+            exit;
+        }
+
+        foreach ($entries as $entry) {
+            if ($entry === '.' || $entry === '..') continue;
+            $fullPath = $targetPath . '/' . $entry;
+            $relativePath = str_replace($basePath . '/', '', $fullPath);
+            $isDir = is_dir($fullPath);
+
+            $size = 0;
+            if (!$isDir) {
+                $size = @filesize($fullPath) ?: 0;
+            }
+
+            $items[] = [
+                'name'     => $entry,
+                'path'     => $relativePath,
+                'is_dir'   => $isDir,
+                'size'     => $size,
+                'excluded' => in_array($relativePath, $exclusions),
+            ];
+        }
+
+        // Sort: directories first, then alphabetical
+        usort($items, function ($a, $b) {
+            if ($a['is_dir'] !== $b['is_dir']) return $b['is_dir'] <=> $a['is_dir'];
+            return strcasecmp($a['name'], $b['name']);
+        });
+
+        $currentRelative = str_replace($basePath . '/', '', $targetPath);
+        $currentRelative = $currentRelative === $basePath ? '' : $currentRelative;
+
+        echo json_encode([
+            'ok'         => true,
+            'path'       => $currentRelative,
+            'items'      => $items,
+            'exclusions' => $exclusions,
+        ]);
+        exit;
+    }
+
+    /** POST /settings/cluster/save-exclusions (JSON) */
+    public function saveExclusions(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $exclusions = $_POST['exclusions'] ?? '';
+        // Store as newline-separated list
+        Settings::set('filesync_exclusions_list', $exclusions);
+
+        // Also update lsyncd config if active
+        $config = FileSyncService::getConfig();
+        if ($config['sync_mode'] === 'lsyncd') {
+            FileSyncService::generateLsyncdConfig();
+        }
+
+        LogService::log('cluster.filesync', 'exclusions', 'Lista de exclusiones actualizada');
+        echo json_encode(['ok' => true]);
         exit;
     }
 }

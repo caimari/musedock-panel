@@ -15,7 +15,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.7.7');
+define('PANEL_VERSION', '0.7.8');
 
 // Autoloader
 spl_autoload_register(function ($class) {
@@ -127,6 +127,12 @@ try {
         foreach ($unreachable as $node) {
             $nid = (string)$node['id'];
             $unreachableIds[] = $nid;
+
+            // Skip standby nodes — they're intentionally offline
+            if (!empty($node['standby'])) {
+                logMsg("  Node #{$nid} ({$node['name']}): in standby, skipping alerts");
+                continue;
+            }
 
             // Check if alerts are muted for this node
             $mutedUntil = Settings::get("cluster_node_{$nid}_muted_until", '');

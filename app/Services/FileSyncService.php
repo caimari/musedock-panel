@@ -21,6 +21,7 @@ class FileSyncService
     {
         return [
             'enabled'          => Settings::get('filesync_enabled', '0') === '1',
+            'sync_mode'        => Settings::get('filesync_sync_mode', 'periodic'), // 'periodic' or 'lsyncd'
             'method'           => Settings::get('filesync_method', 'ssh'),     // 'ssh' or 'https'
             'ssh_port'         => (int)Settings::get('filesync_ssh_port', '22'),
             'ssh_key_path'     => Settings::get('filesync_ssh_key_path', '/root/.ssh/id_ed25519'),
@@ -41,10 +42,10 @@ class FileSyncService
     public static function saveConfig(array $data): void
     {
         $keys = [
-            'filesync_enabled', 'filesync_method', 'filesync_ssh_port',
-            'filesync_ssh_key_path', 'filesync_ssh_user', 'filesync_interval',
-            'filesync_bwlimit', 'filesync_exclude', 'filesync_ssl_certs',
-            'filesync_ssl_cert_path', 'filesync_rewrite_dbhost',
+            'filesync_enabled', 'filesync_sync_mode', 'filesync_method',
+            'filesync_ssh_port', 'filesync_ssh_key_path', 'filesync_ssh_user',
+            'filesync_interval', 'filesync_bwlimit', 'filesync_exclude',
+            'filesync_ssl_certs', 'filesync_ssl_cert_path', 'filesync_rewrite_dbhost',
             'filesync_db_dumps', 'filesync_db_dump_mysql', 'filesync_db_dump_pgsql',
             'filesync_db_dump_path',
         ];
@@ -200,9 +201,15 @@ class FileSyncService
             $cmd .= ' --bwlimit=' . (int)$bwLimit;
         }
 
-        // Exclude patterns
+        // Exclude patterns (glob-style from config)
         foreach ($excludes as $pattern) {
             $cmd .= ' --exclude=' . escapeshellarg($pattern);
+        }
+
+        // Specific path exclusions (from visual browser)
+        $specificExclusions = array_filter(array_map('trim', explode("\n", Settings::get('filesync_exclusions_list', ''))));
+        foreach ($specificExclusions as $excPath) {
+            $cmd .= ' --exclude=' . escapeshellarg($excPath);
         }
 
         // SSH options
@@ -277,10 +284,14 @@ class FileSyncService
         // Create a temporary tar.gz of the directory
         $tmpFile = sys_get_temp_dir() . '/filesync_' . md5($localPath) . '_' . time() . '.tar.gz';
         $excludes = array_filter(array_map('trim', explode(',', self::getConfig()['exclude_patterns'])));
+        $specificExclusions = array_filter(array_map('trim', explode("\n", Settings::get('filesync_exclusions_list', ''))));
 
         $excludeArgs = '';
         foreach ($excludes as $pattern) {
             $excludeArgs .= ' --exclude=' . escapeshellarg($pattern);
+        }
+        foreach ($specificExclusions as $excPath) {
+            $excludeArgs .= ' --exclude=' . escapeshellarg($excPath);
         }
 
         $tarCmd = sprintf(
@@ -446,6 +457,23 @@ class FileSyncService
         // SSH method — extract host from API URL, pass owner for --chown
         $host = self::extractHostFromUrl($node['api_url']);
         return self::rsyncHosting($localPath, $host, $remotePath, ['owner_user' => $username]);
+    }
+
+    /**
+     * Sync entire /var/www/vhosts/ to a node — one rsync for everything.
+     * This is the preferred method: mirrors ALL vhosts, not just panel-registered ones.
+     */
+    public static function syncVhostsToNode(array $node): array
+    {
+        $config = self::getConfig();
+        $vhostsPath = '/var/www/vhosts';
+
+        if (!is_dir($vhostsPath)) {
+            return ['ok' => false, 'error' => 'Directorio /var/www/vhosts no existe'];
+        }
+
+        $host = self::extractHostFromUrl($node['api_url']);
+        return self::rsyncHosting($vhostsPath, $host, $vhostsPath, []);
     }
 
     /**
@@ -1325,7 +1353,7 @@ class FileSyncService
             if ($homeDir && is_dir($homeDir)) {
                 $localMb = (int)trim((string)shell_exec(sprintf('du -sm %s 2>/dev/null | cut -f1', escapeshellarg($homeDir))));
                 if ($localMb > 0) {
-                    Database::execute(
+                    Database::query(
                         "UPDATE hosting_accounts SET disk_used_mb = :mb WHERE id = :id",
                         ['mb' => $localMb, 'id' => (int)$acc['id']]
                     );
@@ -1334,5 +1362,169 @@ class FileSyncService
         }
 
         return ['ok' => true, 'updated' => $updated, 'disk_map' => $diskMap];
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // lsyncd — Real-time file sync
+    // ═══════════════════════════════════════════════════════════════
+
+    public static function isLsyncdInstalled(): bool
+    {
+        $path = trim((string)shell_exec('which lsyncd 2>/dev/null'));
+        return $path !== '' && file_exists($path);
+    }
+
+    public static function installLsyncd(): array
+    {
+        $output = shell_exec('apt-get update -qq 2>&1 && apt-get install -y -qq lsyncd 2>&1');
+        $installed = self::isLsyncdInstalled();
+        if ($installed) {
+            @mkdir('/etc/lsyncd', 0755, true);
+        }
+        return ['ok' => $installed, 'output' => $output];
+    }
+
+    public static function getLsyncdStatus(): array
+    {
+        if (!self::isLsyncdInstalled()) {
+            return ['installed' => false, 'running' => false, 'enabled' => false];
+        }
+        $active = trim((string)shell_exec('systemctl is-active lsyncd 2>/dev/null')) === 'active';
+        $enabled = trim((string)shell_exec('systemctl is-enabled lsyncd 2>/dev/null')) === 'enabled';
+        $pid = $active ? trim((string)shell_exec('pgrep -x lsyncd 2>/dev/null')) : '';
+        $logTail = '';
+        if (file_exists('/var/log/lsyncd/lsyncd.log')) {
+            $logTail = trim((string)shell_exec('tail -30 /var/log/lsyncd/lsyncd.log 2>/dev/null'));
+        }
+        return [
+            'installed' => true,
+            'running'   => $active,
+            'enabled'   => $enabled,
+            'pid'       => $pid,
+            'log_tail'  => $logTail,
+        ];
+    }
+
+    /**
+     * Generate lsyncd.conf.lua that watches /var/www/vhosts/ and syncs to all slave nodes.
+     */
+    public static function generateLsyncdConfig(): array
+    {
+        $config = self::getConfig();
+        $nodes = ClusterService::getNodes();
+        if (empty($nodes)) {
+            return ['ok' => false, 'error' => 'No hay nodos slave configurados'];
+        }
+
+        $port = $config['ssh_port'] ?? 22;
+        $keyPath = $config['ssh_key_path'] ?? '/root/.ssh/id_ed25519';
+        $user = $config['ssh_user'] ?? 'root';
+        $bwLimit = $config['bandwidth_limit'] ?? 0;
+        $excludes = array_filter(array_map('trim', explode(',', $config['exclude_patterns'] ?? '')));
+
+        $lua = "-- lsyncd configuration — auto-generated by MuseDock Panel\n";
+        $lua .= "-- Do not edit manually; changes will be overwritten.\n\n";
+        $lua .= "settings {\n";
+        $lua .= "    logfile    = \"/var/log/lsyncd/lsyncd.log\",\n";
+        $lua .= "    statusFile = \"/var/log/lsyncd/lsyncd.status\",\n";
+        $lua .= "    nodaemon   = false,\n";
+        $lua .= "    maxProcesses = 4,\n";
+        $lua .= "    insist     = true,\n";
+        $lua .= "}\n\n";
+
+        foreach ($nodes as $node) {
+            $host = self::extractHostFromUrl($node['api_url']);
+            $nodeName = preg_replace('/[^a-zA-Z0-9_]/', '_', $node['name'] ?? 'node');
+
+            $lua .= "-- Node: {$node['name']} ({$host})\n";
+            $lua .= "sync {\n";
+            $lua .= "    default.rsync,\n";
+            $lua .= "    source = \"/var/www/vhosts/\",\n";
+            $lua .= "    target = \"{$user}@{$host}:/var/www/vhosts/\",\n";
+            $lua .= "    delay  = 5,\n";
+            $lua .= "    delete = true,\n";
+
+            // Merge pattern excludes + specific path exclusions
+            $specificExclusions = array_filter(array_map('trim', explode("\n", Settings::get('filesync_exclusions_list', ''))));
+            $allExcludes = array_merge($excludes, $specificExclusions);
+            if (!empty($allExcludes)) {
+                $lua .= "    exclude = {\n";
+                foreach ($allExcludes as $ex) {
+                    $lua .= "        \"" . addcslashes($ex, '"') . "\",\n";
+                }
+                $lua .= "    },\n";
+            }
+
+            $lua .= "    rsync = {\n";
+            $lua .= "        archive  = true,\n";
+            $lua .= "        compress = true,\n";
+            $lua .= "        rsh      = \"ssh -o StrictHostKeyChecking=no -p {$port} -i {$keyPath}\",\n";
+            if ($bwLimit > 0) {
+                $lua .= "        bwlimit  = {$bwLimit},\n";
+            }
+            $lua .= "    },\n";
+            $lua .= "}\n\n";
+        }
+
+        @mkdir('/etc/lsyncd', 0755, true);
+        @mkdir('/var/log/lsyncd', 0755, true);
+        $confPath = '/etc/lsyncd/lsyncd.conf.lua';
+        $written = file_put_contents($confPath, $lua);
+
+        if ($written === false) {
+            return ['ok' => false, 'error' => 'No se pudo escribir ' . $confPath];
+        }
+
+        return ['ok' => true, 'path' => $confPath, 'config' => $lua];
+    }
+
+    public static function startLsyncd(): array
+    {
+        // Regenerate config before starting
+        $genResult = self::generateLsyncdConfig();
+        if (!$genResult['ok']) {
+            return $genResult;
+        }
+
+        shell_exec('systemctl enable lsyncd 2>&1');
+        $output = shell_exec('systemctl restart lsyncd 2>&1');
+        sleep(1);
+        $status = self::getLsyncdStatus();
+
+        return [
+            'ok' => $status['running'],
+            'output' => $output,
+            'status' => $status,
+        ];
+    }
+
+    public static function stopLsyncd(): array
+    {
+        shell_exec('systemctl stop lsyncd 2>&1');
+        shell_exec('systemctl disable lsyncd 2>&1');
+        sleep(1);
+        $status = self::getLsyncdStatus();
+
+        return [
+            'ok' => !$status['running'],
+            'status' => $status,
+        ];
+    }
+
+    /**
+     * Reload lsyncd config without stopping (e.g. after adding a new hosting/node).
+     */
+    public static function reloadLsyncd(): array
+    {
+        $genResult = self::generateLsyncdConfig();
+        if (!$genResult['ok']) {
+            return $genResult;
+        }
+
+        $output = shell_exec('systemctl restart lsyncd 2>&1');
+        sleep(1);
+        $status = self::getLsyncdStatus();
+
+        return ['ok' => $status['running'], 'output' => $output, 'status' => $status];
     }
 }
