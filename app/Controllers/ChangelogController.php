@@ -20,6 +20,65 @@ class ChangelogController
     {
         return [
             [
+                'version' => '0.7.7',
+                'date' => '2026-03-18',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Top procesos en alertas — Las notificaciones de CPU/RAM/GPU incluyen los 5 procesos que mas consumen al dispararse la alerta',
+                            'Importar hosting huerfano con cluster sync — Al importar un hosting existente se encola automaticamente la replicacion a nodos slave',
+                            'Auto-deteccion de bases de datos al importar — Detecta automaticamente las bases de datos PostgreSQL (por owner) y MySQL (por prefijo) asociadas al hosting importado',
+                            'Asociar base de datos externa — Boton "Asociar" en /databases para vincular bases de datos huerfanas a cuentas de hosting con auto-deteccion de owner',
+                            'Boton "Probar conexion SSH" en migraciones — Permite testear la conexion SSH de forma independiente sin iniciar la migracion',
+                            'Destino local editable en migraciones — Campo para especificar ruta de destino local con validacion de seguridad (debe estar dentro del home del usuario)',
+                            'Cascada de descarga en migraciones — Intenta HTTPS dominio → HTTPS host SSH → HTTP dominio → HTTP host SSH → SCP directo como ultimo recurso',
+                            'Cluster sync en edicion de hosting — Al editar document_root, PHP version, shell o quota en el master se sincroniza automaticamente a los slaves',
+                            'Accion update_hosting_full en cluster — Nueva accion de sync que actualiza document_root (con creacion de directorio y ruta Caddy), PHP version, shell y quota en el slave',
+                            'SSL cert sync robusto — Sincronizacion de certificados Caddy entre nodos sin depender de permisos del proceso PHP (rsync directo)',
+                        ],
+                        'en' => [
+                            'Top processes in alerts — CPU/RAM/GPU alert notifications now include the top 5 consuming processes when the alert fires',
+                            'Import orphan hosting with cluster sync — Importing an existing hosting automatically enqueues replication to slave nodes',
+                            'Auto-detect databases on import — Automatically detects PostgreSQL databases (by owner) and MySQL databases (by username prefix) associated with the imported hosting',
+                            'Associate external database — "Associate" button on /databases to link orphan databases to hosting accounts with owner auto-detection',
+                            'Standalone SSH test button in migrations — Test SSH connection independently without starting the migration',
+                            'Editable local destination in migrations — Field to specify local target path with security validation (must be within user home)',
+                            'Download cascade in migrations — Tries HTTPS domain → HTTPS SSH host → HTTP domain → HTTP SSH host → direct SCP as last resort',
+                            'Cluster sync on hosting edit — Editing document_root, PHP version, shell or quota on master automatically syncs to slaves',
+                            'update_hosting_full cluster action — New sync action that updates document_root (with directory creation and Caddy route), PHP version, shell and quota on the slave',
+                            'Robust SSL cert sync — Caddy certificate sync between nodes without depending on PHP process permissions (direct rsync)',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Timeouts en descarga de migraciones — wget con connect-timeout=30s, read-timeout=60s, deteccion de estancamiento (60s sin progreso) y timeout global de 10 minutos',
+                            'Filesync sin exclusiones — Eliminadas todas las exclusiones de rsync para copia fiel entre master y slave',
+                            'findCaddyCertDir tolerante a permisos — Detecta directorio de certificados Caddy incluso cuando el proceso PHP no puede leer el directorio (confia en la ruta por defecto si Caddy esta corriendo)',
+                        ],
+                        'en' => [
+                            'Migration download timeouts — wget with connect-timeout=30s, read-timeout=60s, stall detection (60s no progress) and 10-minute global timeout',
+                            'Filesync without exclusions — Removed all rsync exclusions for faithful copy between master and slave',
+                            'findCaddyCertDir permission-tolerant — Detects Caddy certificate directory even when PHP process cannot read it (trusts default path if Caddy is running)',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'CSRF en verificacion de destino local — Corregido hang infinito al verificar destino local por falta de _csrf_token en la peticion fetch',
+                            'Panel bloqueado por wget — El servidor PHP single-thread se bloqueaba con descargas wget estancadas. Ahora se fuerza terminacion con proc_terminate tras timeout',
+                            'Descarga desde host incorrecto — Las migraciones descargaban el backup desde el dominio (detras de Cloudflare/Laravel = 404) en vez del host SSH directo',
+                            'Modal de migracion reaparecia — El modal de migracion se reabria desde localStorage al recargar pagina. Limpieza de estado al completar/abortar',
+                        ],
+                        'en' => [
+                            'CSRF on local destination check — Fixed infinite hang when verifying local destination due to missing _csrf_token in fetch request',
+                            'Panel blocked by wget — PHP single-thread server was blocked by stalled wget downloads. Now forces termination with proc_terminate after timeout',
+                            'Download from wrong host — Migrations downloaded backup from domain (behind Cloudflare/Laravel = 404) instead of direct SSH host',
+                            'Migration modal reappeared — Migration modal reopened from localStorage on page reload. State cleanup on complete/abort',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '0.7.6',
                 'date' => '2026-03-17',
                 'badge' => 'success',

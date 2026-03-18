@@ -220,7 +220,14 @@ class MigrationController
         $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
         if (!$account) { echo json_encode(['has_content' => false]); return; }
 
-        $targetDir = $account['document_root'];
+        $targetDir = trim($_POST['local_target'] ?? '') ?: $account['document_root'];
+
+        // Security: ensure target is within the hosting home directory
+        $homeDir = $account['home_dir'];
+        if (strpos(realpath($targetDir) ?: $targetDir, $homeDir) !== 0) {
+            $targetDir = $account['document_root'];
+        }
+
         $fileCount = 0;
         $dirSize = '0';
         if (is_dir($targetDir)) {
@@ -246,6 +253,7 @@ class MigrationController
             'remote_path' => rtrim(trim($_POST['remote_path'] ?? ''), '/'),
             'remote_docroot' => trim($_POST['remote_docroot'] ?? '/httpdocs'),
             'remote_domain' => trim($_POST['remote_domain'] ?? ''),
+            'local_target' => trim($_POST['local_target'] ?? ''),
             'include_db' => isset($_POST['include_db']),
             'exclude_vendor' => isset($_POST['exclude_vendor']),
         ];
@@ -339,7 +347,19 @@ class MigrationController
         $remoteDomain = $data['remote_domain'];
         $includeDb = $data['include_db'];
         $excludeVendor = $data['exclude_vendor'];
-        $targetDir = $account['document_root'];
+        $targetDir = !empty($data['local_target']) ? $data['local_target'] : $account['document_root'];
+
+        // Security: ensure target is within the hosting home directory
+        $homeDir = $account['home_dir'];
+        if (strpos(realpath($targetDir) ?: $targetDir, $homeDir) !== 0) {
+            $targetDir = $account['document_root'];
+        }
+
+        // Create target directory if it doesn't exist
+        if (!is_dir($targetDir)) {
+            @mkdir($targetDir, 0755, true);
+            @chown($targetDir, $account['username']);
+        }
 
         $fullRemotePath = $remotePath . '/' . ltrim($remoteDocRoot, '/');
 
@@ -490,25 +510,56 @@ class MigrationController
         $this->sendSSE('log', 'Backup creado: ' . $remoteSize . ' MB', $st);
 
         // --- STEP 5: Download via HTTPS (with progress) ---
-        $downloadUrl = "https://{$remoteDomain}/{$backupName}";
-        $this->sendSSE('log', 'Descargando por HTTPS: ' . $downloadUrl, $st);
-        $this->sendSSE('step', 'Descargando (' . $remoteSize . ' MB)', $st);
-        $this->sendSSE('progress', json_encode(['type' => 'download', 'total' => $remoteSizeBytes, 'current' => 0]), $st);
+        // Try multiple download URLs: domain HTTPS, domain HTTP, SSH host HTTPS, SSH host HTTP, SCP fallback
+        $downloadUrls = [
+            "https://{$remoteDomain}/{$backupName}",
+        ];
+        // Add SSH host as fallback if different from domain
+        if ($sshHost !== $remoteDomain) {
+            $downloadUrls[] = "https://{$sshHost}/{$backupName}";
+        }
+        // Add HTTP variants
+        $downloadUrls[] = "http://{$remoteDomain}/{$backupName}";
+        if ($sshHost !== $remoteDomain) {
+            $downloadUrls[] = "http://{$sshHost}/{$backupName}";
+        }
 
-        // Download with progress tracking via proc_open
-        $downloaded = $this->downloadWithProgress($downloadUrl, $localBackup, $remoteSizeBytes, $st);
+        $downloaded = false;
+        foreach ($downloadUrls as $i => $downloadUrl) {
+            $label = ($i === 0) ? 'Descargando por HTTPS' : 'Intentando: ' . $downloadUrl;
+            $this->sendSSE('log', $label . ': ' . $downloadUrl, $st);
+            $this->sendSSE('step', 'Descargando (' . $remoteSize . ' MB)', $st);
+            $this->sendSSE('progress', json_encode(['type' => 'download', 'total' => $remoteSizeBytes, 'current' => 0]), $st);
 
+            @unlink($localBackup); // Clean before retry
+            $downloaded = $this->downloadWithProgress($downloadUrl, $localBackup, $remoteSizeBytes, $st);
+            if ($downloaded) break;
+
+            $this->sendSSE('log', 'Fallo descarga desde ' . parse_url($downloadUrl, PHP_URL_HOST) . '. Probando siguiente...', $st);
+        }
+
+        // Last resort: SCP via SSH
         if (!$downloaded) {
-            // Try HTTP fallback
-            $downloadUrlHttp = "http://{$remoteDomain}/{$backupName}";
-            $this->sendSSE('log', 'HTTPS fallo, intentando HTTP...', $st);
-            $downloaded = $this->downloadWithProgress($downloadUrlHttp, $localBackup, $remoteSizeBytes, $st);
+            $this->sendSSE('log', 'Todas las descargas HTTP fallaron. Intentando SCP directo...', $st);
+            $this->sendSSE('step', 'Descargando por SCP (' . $remoteSize . ' MB)', $st);
+            $scpCmd = sprintf(
+                'sshpass -p %s scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -P %d %s@%s:%s %s 2>&1',
+                escapeshellarg($sshPassword), $sshPort,
+                escapeshellarg($sshUser), escapeshellarg($sshHost),
+                escapeshellarg($remoteBackupPath), escapeshellarg($localBackup)
+            );
+            shell_exec("timeout 600 {$scpCmd}");
+            clearstatcache(true, $localBackup);
+            $downloaded = file_exists($localBackup) && filesize($localBackup) > 0;
+            if ($downloaded) {
+                $this->sendSSE('log', 'SCP completado.', $st);
+            }
         }
 
         if (!$downloaded) {
             $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "rm -f " . escapeshellarg($remoteBackupPath));
             @unlink($localBackup);
-            $this->sendSSE('error', 'Error descargando backup. Verifica que el dominio remoto tenga servidor web.', $st);
+            $this->sendSSE('error', 'Error descargando backup. Intentados: HTTPS, HTTP y SCP. Verifica que el servidor remoto sea accesible.', $st);
             $this->sendSSE('done', json_encode(['ok' => false]), $st);
             return;
         }
@@ -731,7 +782,11 @@ class MigrationController
      */
     private function downloadWithProgress(string $url, string $dest, int $expectedSize, string $statusToken): bool
     {
-        $cmd = sprintf('wget --no-check-certificate -O %s %s 2>&1', escapeshellarg($dest), escapeshellarg($url));
+        // Timeout: 30s connect, 60s read stall, max 3 tries
+        $cmd = sprintf(
+            'wget --no-check-certificate --connect-timeout=30 --read-timeout=60 --tries=2 -O %s %s 2>&1',
+            escapeshellarg($dest), escapeshellarg($url)
+        );
 
         $descriptors = [
             0 => ['pipe', 'r'],
@@ -741,8 +796,8 @@ class MigrationController
 
         $process = proc_open($cmd, $descriptors, $pipes);
         if (!is_resource($process)) {
-            // Fallback to simple shell_exec
-            shell_exec($cmd);
+            // Fallback to simple shell_exec with timeout
+            shell_exec("timeout 600 {$cmd}");
             return file_exists($dest) && filesize($dest) > 0;
         }
 
@@ -757,15 +812,39 @@ class MigrationController
         $lastCurrent = 0;
         $lastSpeedTime = $startTime;
         $speed = 0;
+        $maxTime = 600; // 10 minutes max for download
+        $stallTimeout = 60; // Kill if no progress for 60 seconds
+        $lastProgressTime = $startTime;
+
         while (true) {
             $status = proc_get_status($process);
             if (!$status['running']) break;
+
+            $now = microtime(true);
+
+            // Global timeout
+            if (($now - $startTime) > $maxTime) {
+                $this->sendSSE('log', 'AVISO: Descarga abortada por timeout (' . $maxTime . 's).', $statusToken);
+                proc_terminate($process, 9);
+                usleep(100000);
+                break;
+            }
 
             // Check file size for progress
             clearstatcache(true, $dest);
             if (file_exists($dest) && $expectedSize > 0) {
                 $current = filesize($dest);
-                $now = microtime(true);
+
+                // Stall detection
+                if ($current > $lastCurrent) {
+                    $lastProgressTime = $now;
+                } elseif (($now - $lastProgressTime) > $stallTimeout) {
+                    $this->sendSSE('log', 'AVISO: Descarga detenida (sin progreso en ' . $stallTimeout . 's). Abortando.', $statusToken);
+                    proc_terminate($process, 9);
+                    usleep(100000);
+                    break;
+                }
+
                 $pct = min(99, (int) round(($current / $expectedSize) * 100));
 
                 // Calculate speed every update (bytes/sec over last interval)
@@ -778,13 +857,20 @@ class MigrationController
 
                 if ($pct > $lastPct && ($pct - $lastPct) >= 2) {
                     $lastPct = $pct;
-                    $elapsed = $now - $startTime;
                     $eta = ($speed > 0 && $pct < 99) ? (int) round(($expectedSize - $current) / $speed) : 0;
                     $this->sendSSE('progress', json_encode([
                         'type' => 'download', 'total' => $expectedSize,
                         'current' => $current, 'percent' => $pct,
                         'speed' => (int) $speed, 'eta' => $eta,
                     ]), $statusToken);
+                }
+            } else {
+                // File doesn't exist yet — stall detection from start
+                if (($now - $lastProgressTime) > $stallTimeout) {
+                    $this->sendSSE('log', 'AVISO: Descarga no ha comenzado en ' . $stallTimeout . 's. Abortando.', $statusToken);
+                    proc_terminate($process, 9);
+                    usleep(100000);
+                    break;
                 }
             }
 

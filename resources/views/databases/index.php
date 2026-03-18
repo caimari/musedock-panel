@@ -283,7 +283,13 @@ function formatDbSize(int $bytes): string {
                                     <?php elseif ($isSystem): ?>
                                         <span class="text-muted"><small>Protegida</small></span>
                                     <?php else: ?>
-                                        <span class="text-muted"><small>No gestionada</small></span>
+                                        <button type="button" class="btn btn-outline-info btn-sm btn-associate-db"
+                                                data-db-name="<?= View::e($dbName) ?>"
+                                                data-db-type="pgsql"
+                                                data-db-owner="<?= View::e($db['owner'] ?? '') ?>"
+                                                title="Asociar a hosting">
+                                            <i class="bi bi-link-45deg"></i> Asociar
+                                        </button>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -407,7 +413,13 @@ function formatDbSize(int $bytes): string {
                                     <?php elseif ($isSystem): ?>
                                         <span class="text-muted"><small>Protegida</small></span>
                                     <?php else: ?>
-                                        <span class="text-muted"><small>No gestionada</small></span>
+                                        <button type="button" class="btn btn-outline-info btn-sm btn-associate-db"
+                                                data-db-name="<?= View::e($dbName) ?>"
+                                                data-db-type="mysql"
+                                                data-db-owner=""
+                                                title="Asociar a hosting">
+                                            <i class="bi bi-link-45deg"></i> Asociar
+                                        </button>
                                     <?php endif; ?>
                                 </td>
                             </tr>
@@ -419,8 +431,72 @@ function formatDbSize(int $bytes): string {
     </div>
 </div>
 
+<!-- Associate DB Modal -->
+<form method="POST" action="/databases/associate" id="associateDbForm">
+    <?= View::csrf() ?>
+    <input type="hidden" name="db_name" id="assocDbName" value="">
+    <input type="hidden" name="db_type" id="assocDbType" value="">
+</form>
+
 <script>
 (function() {
+    // Associate DB buttons
+    var hostingAccounts = <?= json_encode($hostingAccounts ?? []) ?>;
+    document.querySelectorAll('.btn-associate-db').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var dbName = btn.dataset.dbName;
+            var dbType = btn.dataset.dbType;
+            var dbOwner = btn.dataset.dbOwner || '';
+
+            var optionsHtml = '<option value="">-- Seleccionar hosting --</option>';
+            var bestMatch = '';
+            hostingAccounts.forEach(function(acc) {
+                var selected = '';
+                // Auto-select if owner matches username
+                if (dbOwner && acc.username === dbOwner) {
+                    selected = 'selected';
+                    bestMatch = acc.domain;
+                }
+                optionsHtml += '<option value="' + acc.id + '" ' + selected + '>' + acc.domain + ' (' + acc.username + ')</option>';
+            });
+
+            SwalDark.fire({
+                title: 'Asociar base de datos',
+                html: '<p>Vincular <strong><code>' + dbName + '</code></strong> (' + dbType.toUpperCase() + ') a un hosting.</p>' +
+                      (dbOwner ? '<p class="text-muted" style="font-size:0.85em;">Owner detectado: <strong>' + dbOwner + '</strong></p>' : '') +
+                      '<p style="color:#fbbf24;font-size:0.85em;"><i class="bi bi-info-circle me-1"></i>Solo se registra en el panel. No modifica la base de datos ni sus permisos.</p>' +
+                      '<select id="swal-account-id" class="swal2-select" style="background:#0f172a;color:#e2e8f0;border:1px solid #334155;width:100%;padding:8px;border-radius:4px;">' + optionsHtml + '</select>',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '<i class="bi bi-link-45deg me-1"></i> Asociar',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#0ea5e9',
+                preConfirm: function() {
+                    var accountId = document.getElementById('swal-account-id').value;
+                    if (!accountId) {
+                        Swal.showValidationMessage('Debes seleccionar un hosting');
+                        return false;
+                    }
+                    return accountId;
+                }
+            }).then(function(result) {
+                if (result.isConfirmed && result.value) {
+                    var form = document.getElementById('associateDbForm');
+                    document.getElementById('assocDbName').value = dbName;
+                    document.getElementById('assocDbType').value = dbType;
+                    // Add account_id dynamically
+                    var input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = 'account_id';
+                    input.value = result.value;
+                    form.appendChild(input);
+                    form.submit();
+                }
+            });
+        });
+    });
+
+    // Delete DB forms
     document.querySelectorAll('.delete-db-form').forEach(function(form) {
         form.addEventListener('submit', function(e) {
             e.preventDefault();

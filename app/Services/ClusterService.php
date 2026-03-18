@@ -633,6 +633,68 @@ class ClusterService
                     }
                     return ['ok' => true, 'message' => 'Hosting updated'];
 
+                case 'update_hosting_full':
+                    $domain = $hostingData['domain'] ?? '';
+                    $username = $hostingData['username'] ?? '';
+                    if (empty($domain)) {
+                        return ['ok' => false, 'message' => 'Domain required for update_hosting_full'];
+                    }
+
+                    $existing = Database::fetchOne(
+                        "SELECT * FROM hosting_accounts WHERE domain = :d",
+                        ['d' => $domain]
+                    );
+                    if (!$existing) {
+                        return ['ok' => false, 'message' => "Hosting {$domain} not found on slave"];
+                    }
+
+                    $updateFields = ['updated_at' => date('Y-m-d H:i:s')];
+                    $changes = [];
+
+                    // Sync document_root
+                    $newDocRoot = $hostingData['document_root'] ?? '';
+                    if (!empty($newDocRoot) && $newDocRoot !== $existing['document_root']) {
+                        // Create directory if needed
+                        if (!is_dir($newDocRoot)) {
+                            @mkdir($newDocRoot, 0755, true);
+                            @chown($newDocRoot, $existing['username']);
+                        }
+                        // Update Caddy route
+                        $phpVer = $hostingData['php_version'] ?? $existing['php_version'];
+                        SystemService::updateCaddyDocumentRoot($domain, $newDocRoot, $existing['username'], $phpVer);
+                        $updateFields['document_root'] = $newDocRoot;
+                        $changes[] = "document_root: {$existing['document_root']} -> {$newDocRoot}";
+                    }
+
+                    // Sync PHP version
+                    if (!empty($hostingData['php_version']) && $hostingData['php_version'] !== $existing['php_version']) {
+                        $updateFields['php_version'] = $hostingData['php_version'];
+                        $changes[] = "php: {$existing['php_version']} -> {$hostingData['php_version']}";
+                    }
+
+                    // Sync shell
+                    if (!empty($hostingData['shell']) && $hostingData['shell'] !== $existing['shell']) {
+                        shell_exec(sprintf('usermod -s %s %s 2>&1', escapeshellarg($hostingData['shell']), escapeshellarg($existing['username'])));
+                        $updateFields['shell'] = $hostingData['shell'];
+                        $changes[] = "shell: {$hostingData['shell']}";
+                    }
+
+                    // Sync disk quota
+                    if (isset($hostingData['disk_quota_mb'])) {
+                        $updateFields['disk_quota_mb'] = (int)$hostingData['disk_quota_mb'];
+                    }
+
+                    // Sync description
+                    if (isset($hostingData['description'])) {
+                        $updateFields['description'] = $hostingData['description'];
+                    }
+
+                    Database::update('hosting_accounts', $updateFields, 'id = :id', ['id' => (int)$existing['id']]);
+
+                    $changeMsg = !empty($changes) ? implode(', ', $changes) : 'metadata only';
+                    LogService::log('cluster.sync', $domain, "Hosting updated from master: {$changeMsg}");
+                    return ['ok' => true, 'message' => "Hosting {$domain} updated: {$changeMsg}"];
+
                 case 'suspend_hosting':
                     $username = $hostingData['username'] ?? '';
                     if ($username) {

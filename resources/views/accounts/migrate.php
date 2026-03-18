@@ -112,6 +112,12 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                         </div>
                     </div>
 
+                    <!-- Test SSH button -->
+                    <button type="button" id="sshTestBtn" class="btn btn-outline-info btn-sm w-100 mb-2">
+                        <i class="bi bi-plug me-1"></i>Probar conexion SSH
+                    </button>
+                    <div id="sshTestResult" style="display:none;" class="mb-2"></div>
+
                     <!-- Auto-filled from account domain, editable if different -->
                     <div class="mb-2 p-2 rounded" style="background: rgba(56,189,248,0.03); border: 1px solid #334155;">
                         <div class="d-flex justify-content-between align-items-center mb-1">
@@ -135,6 +141,11 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                                 <label class="form-label" style="font-size:0.8rem;">Subcarpeta web (document root)</label>
                                 <input type="text" name="remote_docroot" id="sshDocRoot" class="form-control form-control-sm" value="/httpdocs">
                                 <small class="text-muted" style="font-size:0.75rem;">Carpeta dentro del vhost que contiene los archivos web. En Plesk siempre es /httpdocs</small>
+                            </div>
+                            <div class="mt-2">
+                                <label class="form-label" style="font-size:0.8rem;">Destino local</label>
+                                <input type="text" name="local_target" id="sshLocalTarget" class="form-control form-control-sm" value="<?= View::e($account['document_root']) ?>">
+                                <small class="text-muted" style="font-size:0.75rem;">Carpeta local donde se descomprimiran los archivos. Por defecto: document_root del hosting</small>
                             </div>
                         </div>
                         <div id="sshAutoInfo">
@@ -277,14 +288,105 @@ document.getElementById('sshRemotePath').addEventListener('input', function() {
     var match = this.value.match(/\/vhosts\/([^\/]+)/);
     if (match) {
         document.getElementById('sshRemoteDomain').value = match[1];
-        // Update auto-info display
-        document.getElementById('sshAutoInfo').innerHTML =
-            '<small class="text-muted" style="font-size:0.8rem;">Dominio: <code>' + match[1] + '</code> &bull; Ruta: <code>' + this.value + '/httpdocs</code></small>';
     }
+    updateAutoInfo();
+});
+document.getElementById('sshDocRoot').addEventListener('input', updateAutoInfo);
+document.getElementById('sshLocalTarget').addEventListener('input', updateAutoInfo);
+
+function updateAutoInfo() {
+    var remotePath = document.getElementById('sshRemotePath').value;
+    var docRoot = document.getElementById('sshDocRoot').value;
+    var localTarget = document.getElementById('sshLocalTarget').value;
+    var match = remotePath.match(/\/vhosts\/([^\/]+)/);
+    var domain = match ? match[1] : '<?= View::e($account['domain']) ?>';
+    var fullRemote = remotePath + (docRoot ? '/' + docRoot.replace(/^\//, '') : '');
+    document.getElementById('sshAutoInfo').innerHTML =
+        '<small class="text-muted" style="font-size:0.8rem;">' +
+        'Remoto: <code>' + fullRemote + '</code> &rarr; Local: <code>' + localTarget + '</code></small>';
+}
+
+// ================================================================
+// SSH Test Connection (standalone button)
+// ================================================================
+var sshTestPassed = false;
+var cachedSshData = null;
+
+document.getElementById('sshTestBtn').addEventListener('click', function() {
+    var form = document.getElementById('sshMigrateForm');
+    var btn = this;
+    var resultDiv = document.getElementById('sshTestResult');
+    var accountId = <?= (int) $account['id'] ?>;
+
+    var host = document.getElementById('sshHost').value.trim();
+    var user = document.getElementById('sshUser').value.trim();
+    var pass = document.getElementById('sshPass').value;
+
+    if (!host || !user || !pass) {
+        resultDiv.style.display = '';
+        resultDiv.innerHTML = '<div class="p-2 rounded" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);">' +
+            '<small style="color:#ef4444;"><i class="bi bi-x-circle me-1"></i>Rellena host, usuario y password.</small></div>';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Probando...';
+    resultDiv.style.display = 'none';
+
+    var formData = new FormData(form);
+
+    fetch('/accounts/' + accountId + '/migrate/test-ssh', {
+        method: 'POST',
+        body: formData
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        btn.disabled = false;
+        resultDiv.style.display = '';
+
+        if (!data.ok) {
+            sshTestPassed = false;
+            btn.innerHTML = '<i class="bi bi-plug me-1"></i>Probar conexion SSH';
+            resultDiv.innerHTML = '<div class="p-2 rounded" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);">' +
+                '<small style="color:#ef4444;"><i class="bi bi-x-circle me-1"></i>' + data.message + '</small></div>';
+        } else {
+            sshTestPassed = true;
+            cachedSshData = data;
+            btn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Conexion OK';
+            btn.className = 'btn btn-outline-success btn-sm w-100 mb-2';
+            resultDiv.innerHTML = '<div class="p-2 rounded" style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);">' +
+                '<small style="color:#22c55e;"><i class="bi bi-check-circle me-1"></i><strong>Conexion SSH exitosa</strong></small>' +
+                '<table class="mt-1" style="width:100%;font-size:0.8rem;">' +
+                '<tr><td style="color:#64748b;padding:1px 8px 1px 0;">Ruta remota:</td><td style="color:#e2e8f0;"><code>' + data.path + '</code></td></tr>' +
+                '<tr><td style="color:#64748b;padding:1px 8px 1px 0;">Archivos:</td><td style="color:#e2e8f0;">' + data.files.toLocaleString() + '</td></tr>' +
+                '<tr><td style="color:#64748b;padding:1px 8px 1px 0;">Tamano:</td><td style="color:#e2e8f0;">' + data.size + '</td></tr>' +
+                '<tr><td style="color:#64748b;padding:1px 8px 1px 0;">Proyecto:</td><td style="color:#e2e8f0;">' + data.project + '</td></tr>' +
+                '</table></div>';
+        }
+    })
+    .catch(function() {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-plug me-1"></i>Probar conexion SSH';
+        resultDiv.style.display = '';
+        resultDiv.innerHTML = '<div class="p-2 rounded" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);">' +
+            '<small style="color:#ef4444;"><i class="bi bi-x-circle me-1"></i>Error de red. Intenta de nuevo.</small></div>';
+    });
+});
+
+// Reset test state when credentials change
+['sshHost', 'sshPort', 'sshUser', 'sshPass'].forEach(function(id) {
+    document.getElementById(id).addEventListener('input', function() {
+        sshTestPassed = false;
+        cachedSshData = null;
+        var testBtn = document.getElementById('sshTestBtn');
+        testBtn.className = 'btn btn-outline-info btn-sm w-100 mb-2';
+        testBtn.innerHTML = '<i class="bi bi-plug me-1"></i>Probar conexion SSH';
+        document.getElementById('sshTestResult').style.display = 'none';
+    });
 });
 
 // ================================================================
-// SSH Migration: Test connection + check overwrite + start migration
+// SSH Migration: Start migration (with built-in test if not done)
 // ================================================================
 document.getElementById('sshStartBtn').addEventListener('click', function() {
     var form = document.getElementById('sshMigrateForm');
@@ -298,114 +400,121 @@ document.getElementById('sshStartBtn').addEventListener('click', function() {
     }
 
     var formData = new FormData(form);
+    var localTarget = document.getElementById('sshLocalTarget').value;
 
-    // Step 1: Test SSH connection
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Probando conexion SSH...';
 
-    fetch('/accounts/' + accountId + '/migrate/test-ssh', {
-        method: 'POST',
-        body: formData
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-        if (!data.ok) {
-            // SSH failed - show SweetAlert2 error
-            btn.disabled = false;
-            btn.innerHTML = '<i class="bi bi-rocket-takeoff me-1"></i>Iniciar Migracion Completa';
-
-            SwalDark.fire({
-                icon: 'error',
-                title: 'Error de conexion SSH',
-                html: '<p style="color:#ef4444;font-size:0.95rem;">' + data.message + '</p>' +
-                      '<p style="color:#64748b;font-size:0.85rem;margin-top:0.5rem;">Verifica:<br>' +
-                      '&bull; Que el host sea accesible<br>' +
-                      '&bull; Que el puerto SSH este abierto<br>' +
-                      '&bull; Que el usuario y password sean correctos</p>',
-                confirmButtonText: 'Entendido'
-            });
-            return;
-        }
-
-        // SSH OK - show connection info
-        var infoHtml = '<div style="text-align:left;color:#94a3b8;font-size:0.9rem;">' +
-            '<p style="color:#22c55e;margin-bottom:0.5rem;"><i class="bi bi-check-circle me-1"></i><strong>Conexion SSH exitosa</strong></p>' +
-            '<table style="width:100%;font-size:0.85rem;">' +
-            '<tr><td style="color:#64748b;padding:2px 8px 2px 0;">Ruta:</td><td><code>' + data.path + '</code></td></tr>' +
-            '<tr><td style="color:#64748b;padding:2px 8px 2px 0;">Archivos:</td><td>' + data.files.toLocaleString() + '</td></tr>' +
-            '<tr><td style="color:#64748b;padding:2px 8px 2px 0;">Tamano:</td><td>' + data.size + '</td></tr>' +
-            '<tr><td style="color:#64748b;padding:2px 8px 2px 0;">Proyecto:</td><td>' + data.project + '</td></tr>' +
-            '</table></div>';
-
-        // Step 2: Check if local httpdocs has content
+    if (sshTestPassed && cachedSshData) {
+        // Already tested — go straight to checkLocal
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Verificando destino local...';
+        proceedWithMigration(btn, accountId, formData, cachedSshData, localTarget);
+    } else {
+        // Test SSH first
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Probando conexion SSH...';
 
-        fetch('/accounts/' + accountId + '/migrate/check-local', {
+        fetch('/accounts/' + accountId + '/migrate/test-ssh', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: '_=1'
+            body: formData
         })
         .then(function(r) { return r.json(); })
-        .then(function(localData) {
-            if (localData.has_content) {
-                // Local has content - ask for overwrite confirmation
+        .then(function(data) {
+            if (!data.ok) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-rocket-takeoff me-1"></i>Iniciar Migracion Completa';
                 SwalDark.fire({
-                    icon: 'warning',
-                    title: 'Este hosting ya tiene archivos',
-                    html: infoHtml +
-                        '<hr style="border-color:#334155;margin:0.75rem 0;">' +
-                        '<p style="color:#fbbf24;font-size:0.9rem;">' +
-                        '<i class="bi bi-exclamation-triangle me-1"></i>' +
-                        '<strong>La carpeta local ya contiene ' + localData.file_count + ' archivos (' + localData.size + ')</strong><br>' +
-                        'Los archivos coincidentes se sobreescribiran con los del remoto.<br>' +
-                        '<span style="color:#94a3b8;font-size:0.8rem;">Los archivos locales que no existan en el remoto NO se borran.</span></p>',
-                    showCancelButton: true,
-                    confirmButtonText: 'Sobreescribir y migrar',
-                    cancelButtonText: 'Cancelar',
-                    confirmButtonColor: '#dc3545',
-                }).then(function(result) {
-                    if (result.isConfirmed) {
-                        startSshMigration(btn);
-                    } else {
-                        btn.disabled = false;
-                        btn.innerHTML = '<i class="bi bi-rocket-takeoff me-1"></i>Iniciar Migracion Completa';
-                    }
+                    icon: 'error',
+                    title: 'Error de conexion SSH',
+                    html: '<p style="color:#ef4444;font-size:0.95rem;">' + data.message + '</p>' +
+                          '<p style="color:#64748b;font-size:0.85rem;margin-top:0.5rem;">Verifica:<br>' +
+                          '&bull; Que el host sea accesible<br>' +
+                          '&bull; Que el puerto SSH este abierto<br>' +
+                          '&bull; Que el usuario y password sean correctos</p>',
+                    confirmButtonText: 'Entendido'
                 });
-            } else {
-                // Local is empty - show confirmation with remote info
-                SwalDark.fire({
-                    icon: 'info',
-                    title: 'Confirmar migracion',
-                    html: infoHtml +
-                        '<hr style="border-color:#334155;margin:0.75rem 0;">' +
-                        '<p style="color:#94a3b8;font-size:0.85rem;">Se migraran los archivos' +
-                        (document.getElementById('includeDb').checked ? ' y la base de datos' : '') +
-                        ' al httpdocs local.</p>',
-                    showCancelButton: true,
-                    confirmButtonText: 'Iniciar migracion',
-                    cancelButtonText: 'Cancelar',
-                }).then(function(result) {
-                    if (result.isConfirmed) {
-                        startSshMigration(btn);
-                    } else {
-                        btn.disabled = false;
-                        btn.innerHTML = '<i class="bi bi-rocket-takeoff me-1"></i>Iniciar Migracion Completa';
-                    }
-                });
+                return;
             }
+            sshTestPassed = true;
+            cachedSshData = data;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Verificando destino local...';
+            proceedWithMigration(btn, accountId, formData, data, localTarget);
+        })
+        .catch(function() {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-rocket-takeoff me-1"></i>Iniciar Migracion Completa';
+            SwalDark.fire({ icon: 'error', title: 'Error de red', text: 'No se pudo conectar con el panel.' });
         });
-    })
-    .catch(function(err) {
-        btn.disabled = false;
-        btn.innerHTML = '<i class="bi bi-rocket-takeoff me-1"></i>Iniciar Migracion Completa';
-        SwalDark.fire({
-            icon: 'error',
-            title: 'Error de red',
-            text: 'No se pudo conectar con el panel. Intenta de nuevo.',
-            confirmButtonText: 'OK'
-        });
-    });
+    }
 });
+
+function proceedWithMigration(btn, accountId, formData, sshData, localTarget) {
+    var infoHtml = '<div style="text-align:left;color:#94a3b8;font-size:0.9rem;">' +
+        '<p style="color:#22c55e;margin-bottom:0.5rem;"><i class="bi bi-check-circle me-1"></i><strong>Conexion SSH exitosa</strong></p>' +
+        '<table style="width:100%;font-size:0.85rem;">' +
+        '<tr><td style="color:#64748b;padding:2px 8px 2px 0;">Ruta remota:</td><td><code>' + sshData.path + '</code></td></tr>' +
+        '<tr><td style="color:#64748b;padding:2px 8px 2px 0;">Archivos:</td><td>' + sshData.files.toLocaleString() + '</td></tr>' +
+        '<tr><td style="color:#64748b;padding:2px 8px 2px 0;">Tamano:</td><td>' + sshData.size + '</td></tr>' +
+        '<tr><td style="color:#64748b;padding:2px 8px 2px 0;">Proyecto:</td><td>' + sshData.project + '</td></tr>' +
+        '<tr><td style="color:#64748b;padding:2px 8px 2px 0;">Destino local:</td><td><code>' + localTarget + '</code></td></tr>' +
+        '</table></div>';
+
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Verificando destino local...';
+
+    // Get CSRF token from the form
+    var csrfToken = document.querySelector('#sshMigrateForm input[name="_csrf_token"]').value;
+
+    fetch('/accounts/' + accountId + '/migrate/check-local', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: '_csrf_token=' + encodeURIComponent(csrfToken) + '&local_target=' + encodeURIComponent(localTarget)
+    })
+    .then(function(r) { return r.json(); })
+    .then(function(localData) {
+        if (localData.has_content) {
+            SwalDark.fire({
+                icon: 'warning',
+                title: 'El destino ya tiene archivos',
+                html: infoHtml +
+                    '<hr style="border-color:#334155;margin:0.75rem 0;">' +
+                    '<p style="color:#fbbf24;font-size:0.9rem;">' +
+                    '<i class="bi bi-exclamation-triangle me-1"></i>' +
+                    '<strong>La carpeta local ya contiene ' + localData.file_count + ' archivos (' + localData.size + ')</strong><br>' +
+                    'Los archivos coincidentes se sobreescribiran con los del remoto.<br>' +
+                    '<span style="color:#94a3b8;font-size:0.8rem;">Los archivos locales que no existan en el remoto NO se borran.</span></p>',
+                showCancelButton: true,
+                confirmButtonText: 'Sobreescribir y migrar',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#dc3545',
+            }).then(function(result) {
+                if (result.isConfirmed) {
+                    startSshMigration(btn);
+                } else {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-rocket-takeoff me-1"></i>Iniciar Migracion Completa';
+                }
+            });
+        } else {
+            SwalDark.fire({
+                icon: 'info',
+                title: 'Confirmar migracion',
+                html: infoHtml +
+                    '<hr style="border-color:#334155;margin:0.75rem 0;">' +
+                    '<p style="color:#94a3b8;font-size:0.85rem;">Se migraran los archivos' +
+                    (document.getElementById('includeDb').checked ? ' y la base de datos' : '') +
+                    ' a <code>' + localTarget + '</code></p>',
+                showCancelButton: true,
+                confirmButtonText: 'Iniciar migracion',
+                cancelButtonText: 'Cancelar',
+            }).then(function(result) {
+                if (result.isConfirmed) {
+                    startSshMigration(btn);
+                } else {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="bi bi-rocket-takeoff me-1"></i>Iniciar Migracion Completa';
+                }
+            });
+        }
+    });
+}
 
 function startSshMigration(btn) {
     var form = document.getElementById('sshMigrateForm');

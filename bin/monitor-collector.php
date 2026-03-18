@@ -12,7 +12,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.7.0');
+define('PANEL_VERSION', '0.7.7');
 
 // Autoloader
 spl_autoload_register(function ($class) {
@@ -237,6 +237,60 @@ $alertRamThreshold = (float) Settings::get('monitor_alert_ram', '90');
 $alertNetMbps = (float) Settings::get('monitor_alert_net_mbps', '800');
 $alertNetBps = $alertNetMbps * 1000000 / 8; // Convert Mbps to bytes/sec
 
+/**
+ * Get top processes by resource usage for alert context
+ */
+function getTopProcesses(string $type, int $limit = 5): string
+{
+    $lines = [];
+    try {
+        if ($type === 'CPU_HIGH') {
+            $output = shell_exec("ps aux --sort=-%cpu 2>/dev/null | head -" . ($limit + 1));
+        } elseif ($type === 'RAM_HIGH') {
+            $output = shell_exec("ps aux --sort=-%mem 2>/dev/null | head -" . ($limit + 1));
+        } elseif (str_starts_with($type, 'GPU')) {
+            $output = @shell_exec('nvidia-smi --query-compute-apps=pid,process_name,used_gpu_memory --format=csv,noheader,nounits 2>/dev/null');
+            if (!empty($output)) {
+                $lines[] = "GPU Processes:";
+                foreach (explode("\n", trim($output)) as $i => $line) {
+                    if ($i >= $limit) break;
+                    $parts = array_map('trim', explode(',', $line));
+                    if (count($parts) >= 3) {
+                        $lines[] = "  PID {$parts[0]} — {$parts[1]} ({$parts[2]} MiB)";
+                    }
+                }
+                return implode("\n", $lines);
+            }
+            return "No GPU processes found.";
+        } else {
+            return '';
+        }
+
+        if (!empty($output)) {
+            $rows = explode("\n", trim($output));
+            $header = array_shift($rows); // Remove header
+            $lines[] = "Top {$limit} processes by " . ($type === 'CPU_HIGH' ? 'CPU' : 'RAM') . ":";
+            foreach ($rows as $row) {
+                $cols = preg_split('/\s+/', trim($row), 11);
+                if (count($cols) >= 11) {
+                    $user = $cols[0];
+                    $pid  = $cols[1];
+                    $cpu  = $cols[2];
+                    $mem  = $cols[3];
+                    $cmd  = $cols[10];
+                    // Truncate command to 60 chars
+                    if (strlen($cmd) > 60) $cmd = substr($cmd, 0, 57) . '...';
+                    $lines[] = "  PID {$pid} ({$user}) CPU:{$cpu}% MEM:{$mem}% — {$cmd}";
+                }
+            }
+        }
+    } catch (\Throwable $e) {
+        $lines[] = "(Could not retrieve processes: {$e->getMessage()})";
+    }
+
+    return !empty($lines) ? implode("\n", $lines) : '';
+}
+
 function checkAlert(string $host, string $type, string $message, float $value): void
 {
     // Anti-spam: max 1 alert per type per 5 minutes
@@ -246,6 +300,9 @@ function checkAlert(string $host, string $type, string $message, float $value): 
     );
     if ($recent) return;
 
+    // Capture top processes for context
+    $processInfo = getTopProcesses($type);
+
     Database::insert('monitor_alerts', [
         'host'    => $host,
         'type'    => $type,
@@ -253,11 +310,15 @@ function checkAlert(string $host, string $type, string $message, float $value): 
         'value'   => $value,
     ]);
 
-    // Send notification
+    // Send notification with process details
     try {
+        $body = "{$message}\nHost: {$host}\nValue: {$value}\nTime: " . date('Y-m-d H:i:s');
+        if (!empty($processInfo)) {
+            $body .= "\n\n{$processInfo}";
+        }
         \MuseDockPanel\Services\NotificationService::send(
             "[MuseDock Monitor] {$type}",
-            "{$message}\nHost: {$host}\nValue: {$value}\nTime: " . date('Y-m-d H:i:s')
+            $body
         );
     } catch (\Throwable $e) {
         logMsg("Notification error: " . $e->getMessage());

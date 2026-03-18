@@ -601,9 +601,9 @@ class FileSyncService
      */
     public static function findCaddyCertDir(): string
     {
-        // Check configured path first
+        // Check configured path first — trust it even without is_dir() since rsync runs as root
         $configured = Settings::get('filesync_ssl_cert_path', '');
-        if ($configured && is_dir($configured)) {
+        if ($configured) {
             return $configured;
         }
 
@@ -644,6 +644,17 @@ class FileSyncService
             }
         }
 
+        // If no path is accessible (permission denied), but Caddy is running,
+        // return the default path — rsync runs as root via SSH and CAN access it
+        if (trim((string)shell_exec('pgrep -x caddy 2>/dev/null'))) {
+            $caddyHome = '/var/lib/caddy';
+            if (isset($caddyPasswd) && $caddyPasswd) {
+                $parts = explode(':', $caddyPasswd);
+                $caddyHome = $parts[5] ?? '/var/lib/caddy';
+            }
+            return $caddyHome . '/.local/share/caddy/certificates';
+        }
+
         return '';
     }
 
@@ -653,7 +664,7 @@ class FileSyncService
     public static function syncSslCerts(array $node): array
     {
         $certDir = self::findCaddyCertDir();
-        if (!$certDir || !is_dir($certDir)) {
+        if (!$certDir) {
             return ['ok' => false, 'error' => 'No se encontro el directorio de certificados de Caddy'];
         }
 
@@ -665,11 +676,42 @@ class FileSyncService
             // Send certs, slave will fix ownership to caddy:caddy
             $result = self::httpsSyncHosting($certDir, $node['api_url'], $token, $certDir, 'caddy');
         } else {
-            // rsync with --chown=caddy:caddy, NO --delete to preserve slave's own certs
-            $result = self::rsyncHosting($certDir, $host, $certDir, [
-                'owner_user' => 'caddy',
-                'no_delete'  => true,
-            ]);
+            // Direct rsync for SSL certs (panel runs as root, can read caddy dirs)
+            $port = $config['ssh_port'] ?? 22;
+            $keyPath = $config['ssh_key_path'] ?? '/root/.ssh/id_ed25519';
+            $user = $config['ssh_user'] ?? 'root';
+            $bwLimit = (int)($config['bandwidth_limit'] ?? 0);
+
+            $cmd = 'rsync -avz --chown=caddy:caddy';
+            if ($bwLimit > 0) {
+                $cmd .= ' --bwlimit=' . $bwLimit;
+            }
+            $sshCmd = sprintf(
+                'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p %d -i %s',
+                $port, escapeshellarg($keyPath)
+            );
+            $cmd .= ' -e ' . escapeshellarg($sshCmd);
+            $cmd .= sprintf(
+                ' %s/ %s@%s:%s/ 2>&1',
+                escapeshellarg(rtrim($certDir, '/')),
+                escapeshellarg($user),
+                escapeshellarg($host),
+                escapeshellarg(rtrim($certDir, '/'))
+            );
+
+            $startTime = microtime(true);
+            $output = trim((string)shell_exec($cmd));
+            $elapsed = round(microtime(true) - $startTime, 2);
+
+            $ok = (stripos($output, 'error') === false && stripos($output, 'rsync error') === false);
+            $result = [
+                'ok' => $ok,
+                'elapsed_seconds' => $elapsed,
+                'output' => $output,
+            ];
+            if (!$ok) {
+                $result['error'] = $output;
+            }
         }
 
         // Reload Caddy on slave so it picks up the new certificates

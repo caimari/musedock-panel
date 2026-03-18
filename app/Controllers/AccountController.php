@@ -349,6 +349,26 @@ class AccountController
 
         Database::update('hosting_accounts', $dbFields, 'id = :id', ['id' => $params['id']]);
 
+        // Sync changes to cluster slave nodes
+        if (Settings::get('cluster_role', 'standalone') === 'master') {
+            $updated = array_merge($account, $dbFields); // Merge new values
+            $nodes = \MuseDockPanel\Services\ClusterService::getNodes();
+            foreach ($nodes as $node) {
+                \MuseDockPanel\Services\ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                    'hosting_action' => 'update_hosting_full',
+                    'hosting_data' => [
+                        'domain'         => $account['domain'],
+                        'username'       => $account['username'],
+                        'document_root'  => $updated['document_root'] ?? $account['document_root'],
+                        'php_version'    => $updated['php_version'] ?? $account['php_version'],
+                        'disk_quota_mb'  => $updated['disk_quota_mb'] ?? $account['disk_quota_mb'],
+                        'shell'          => $updated['shell'] ?? $account['shell'],
+                        'description'    => $updated['description'] ?? $account['description'],
+                    ],
+                ]);
+            }
+        }
+
         LogService::log('account.update', $account['domain'], "Updated account settings");
         Flash::set('success', 'Cuenta actualizada.');
         Router::redirect('/accounts/' . $params['id']);
@@ -688,8 +708,92 @@ class AccountController
             'is_primary' => true,
         ]);
 
-        LogService::log('account.import', $domain, "Imported existing hosting: {$username}@{$domain}");
-        Flash::set('success', "Hosting {$domain} importado correctamente como {$username}.");
+        // Auto-detect databases owned by this user (PostgreSQL port 5432)
+        $detectedDbs = [];
+        $pgQuery = "SELECT datname FROM pg_database WHERE datistemplate = false AND pg_get_userbyid(datdba) = " . escapeshellarg($username);
+        $pgCmd = sprintf("sudo -u postgres psql -p 5432 -t -A -c %s 2>/dev/null", escapeshellarg($pgQuery));
+        $pgOutput = trim((string)shell_exec($pgCmd));
+        if (!empty($pgOutput)) {
+            foreach (explode("\n", $pgOutput) as $dbName) {
+                $dbName = trim($dbName);
+                if (empty($dbName) || $dbName === 'postgres') continue;
+                // Check not already registered
+                $alreadyRegistered = Database::fetchOne("SELECT id FROM hosting_databases WHERE db_name = :n", ['n' => $dbName]);
+                if (!$alreadyRegistered) {
+                    Database::insert('hosting_databases', [
+                        'account_id' => $id,
+                        'db_name'    => $dbName,
+                        'db_user'    => $username,
+                        'db_type'    => 'pgsql',
+                        'created_at' => date('Y-m-d H:i:s'),
+                    ]);
+                    $detectedDbs[] = $dbName . ' (pgsql)';
+                }
+            }
+        }
+
+        // Auto-detect MySQL databases owned by this user
+        try {
+            $mysqlPdo = \MuseDockPanel\Services\ReplicationService::getMysqlPdo();
+            if ($mysqlPdo) {
+                // Find databases where the user has grants
+                $mysqlUserCheck = $mysqlPdo->query("SELECT DISTINCT TABLE_SCHEMA FROM information_schema.SCHEMA_PRIVILEGES WHERE GRANTEE LIKE " . $mysqlPdo->quote("'$username%'"))->fetchAll(\PDO::FETCH_COLUMN);
+                // Also check databases named with user prefix
+                $allDbs = $mysqlPdo->query("SHOW DATABASES")->fetchAll(\PDO::FETCH_COLUMN);
+                $mysqlSystemDbs = ['mysql', 'information_schema', 'performance_schema', 'sys'];
+                foreach ($allDbs as $dbName) {
+                    if (in_array($dbName, $mysqlSystemDbs)) continue;
+                    // Match databases prefixed with the username (convention: username_suffix)
+                    if (str_starts_with($dbName, str_replace('.', '_', $username) . '_') || in_array($dbName, $mysqlUserCheck)) {
+                        $alreadyRegistered = Database::fetchOne("SELECT id FROM hosting_databases WHERE db_name = :n", ['n' => $dbName]);
+                        if (!$alreadyRegistered) {
+                            Database::insert('hosting_databases', [
+                                'account_id' => $id,
+                                'db_name'    => $dbName,
+                                'db_user'    => $username,
+                                'db_type'    => 'mysql',
+                                'created_at' => date('Y-m-d H:i:s'),
+                            ]);
+                            $detectedDbs[] = $dbName . ' (mysql)';
+                        }
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // MySQL not available, skip
+        }
+
+        // Sync to cluster nodes if master
+        if (Settings::get('cluster_role', 'standalone') === 'master') {
+            $nodes = \MuseDockPanel\Services\ClusterService::getNodes();
+            foreach ($nodes as $node) {
+                \MuseDockPanel\Services\ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                    'hosting_action' => 'create_hosting',
+                    'hosting_data' => [
+                        'username'       => $username,
+                        'domain'         => $domain,
+                        'home_dir'       => $homeDir,
+                        'document_root'  => $documentRoot,
+                        'php_version'    => $phpVersion,
+                        'password'       => '',
+                        'password_hash'  => SystemService::getPasswordHash($username),
+                        'shell'          => $shell,
+                        'system_uid'     => $uid,
+                        'caddy_route_id' => $caddyRouteId,
+                        'disk_quota_mb'  => 0,
+                        'description'    => 'Importado desde master (huerfano)',
+                    ],
+                ]);
+            }
+        }
+
+        LogService::log('account.import', $domain, "Imported existing hosting: {$username}@{$domain}" . (!empty($detectedDbs) ? " | DBs: " . implode(', ', $detectedDbs) : ''));
+
+        $msg = "Hosting {$domain} importado correctamente como {$username}.";
+        if (!empty($detectedDbs)) {
+            $msg .= " Se detectaron y vincularon " . count($detectedDbs) . " base(s) de datos: " . implode(', ', $detectedDbs);
+        }
+        Flash::set('success', $msg);
         Router::redirect('/accounts');
     }
 

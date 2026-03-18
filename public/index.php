@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.7.6');
+define('PANEL_VERSION', '0.7.7');
 
 
 
@@ -148,6 +148,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/databases/create', 'DatabaseController@create');
 \MuseDockPanel\Router::post('/databases/store', 'DatabaseController@store');
 \MuseDockPanel\Router::post('/databases/{id}/delete', 'DatabaseController@delete');
+\MuseDockPanel\Router::post('/databases/associate', 'DatabaseController@associate');
+\MuseDockPanel\Router::get('/databases/accounts-json', 'DatabaseController@getAccounts');
 
 // Customers
 \MuseDockPanel\Router::get('/customers', 'CustomerController@index');

@@ -7,8 +7,10 @@ use MuseDockPanel\Flash;
 use MuseDockPanel\Router;
 use MuseDockPanel\Settings;
 use MuseDockPanel\View;
+use MuseDockPanel\Services\ClusterService;
 use MuseDockPanel\Services\LogService;
 use MuseDockPanel\Services\ReplicationService;
+use MuseDockPanel\Services\SystemService;
 
 class DatabaseController
 {
@@ -140,6 +142,14 @@ class DatabaseController
             }
         }
 
+        // Hosting accounts for associate modal
+        $hostingAccounts = Database::fetchAll("
+            SELECT id, username, domain
+            FROM hosting_accounts
+            WHERE status = 'active'
+            ORDER BY domain
+        ");
+
         View::render('databases/index', [
             'layout'              => 'main',
             'pageTitle'           => 'Bases de Datos',
@@ -159,6 +169,7 @@ class DatabaseController
             'creds'               => $creds,
             'dbSyncStatus'        => $dbSyncStatus,
             'clusterRole'         => $clusterRole,
+            'hostingAccounts'     => $hostingAccounts,
         ]);
     }
 
@@ -462,6 +473,84 @@ class DatabaseController
         LogService::log('database.delete', $db['db_name'], "Deleted {$logType} database: {$db['db_name']}, user: {$db['db_user']} from account {$db['username']}");
         Flash::set('success', "Base de datos '{$db['db_name']}' eliminada exitosamente.");
         Router::redirect('/databases');
+    }
+
+    /**
+     * Associate an external/orphan database to a hosting account
+     */
+    public function associate(): void
+    {
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es Slave. Asociar bases de datos solo esta permitido en el Master.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        $dbName = trim($_POST['db_name'] ?? '');
+        $dbType = trim($_POST['db_type'] ?? 'pgsql');
+        $accountId = (int) ($_POST['account_id'] ?? 0);
+
+        if (empty($dbName) || empty($accountId)) {
+            Flash::set('error', 'Datos incompletos.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        // Check not already registered
+        $existing = Database::fetchOne("SELECT id FROM hosting_databases WHERE db_name = :n", ['n' => $dbName]);
+        if ($existing) {
+            Flash::set('error', "La base de datos '{$dbName}' ya esta registrada en el panel.");
+            Router::redirect('/databases');
+            return;
+        }
+
+        $account = Database::fetchOne("SELECT id, username, domain FROM hosting_accounts WHERE id = :id", ['id' => $accountId]);
+        if (!$account) {
+            Flash::set('error', 'Cuenta de hosting no encontrada.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        // Detect the db_user (owner)
+        $dbUser = $account['username'];
+        if ($dbType === 'pgsql') {
+            $ownerQuery = sprintf(
+                "sudo -u postgres psql -p 5432 -t -A -c %s 2>/dev/null",
+                escapeshellarg("SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = " . escapeshellarg($dbName))
+            );
+            $detectedOwner = trim((string)shell_exec($ownerQuery));
+            if (!empty($detectedOwner)) {
+                $dbUser = $detectedOwner;
+            }
+        }
+
+        Database::insert('hosting_databases', [
+            'account_id' => $accountId,
+            'db_name'    => $dbName,
+            'db_user'    => $dbUser,
+            'db_type'    => $dbType,
+            'created_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        LogService::log('database.associate', $dbName, "Associated {$dbType} database '{$dbName}' to hosting {$account['domain']} ({$account['username']})");
+        Flash::set('success', "Base de datos '{$dbName}' asociada correctamente al hosting {$account['domain']}.");
+        Router::redirect('/databases');
+    }
+
+    /**
+     * Get unassociated hosting accounts for AJAX
+     */
+    public function getAccounts(): void
+    {
+        header('Content-Type: application/json');
+        $accounts = Database::fetchAll("
+            SELECT id, username, domain
+            FROM hosting_accounts
+            WHERE status = 'active'
+            ORDER BY domain
+        ");
+        echo json_encode($accounts);
+        exit;
     }
 
     private function buildMysqlCommand(): ?string
