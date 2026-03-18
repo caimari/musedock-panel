@@ -91,6 +91,14 @@ try {
             }
         }
 
+        // Update disk_used_mb on master and slave after file sync
+        $diskResult = \MuseDockPanel\Services\FileSyncService::updateRemoteDiskUsage($node, $accounts);
+        if ($diskResult['ok']) {
+            $log("  Disk usage updated: {$diskResult['updated']} accounts");
+        } else {
+            $log("  Disk usage update FAILED: " . ($diskResult['error'] ?? ''));
+        }
+
         // Sync SSL certs if enabled
         if ($config['sync_ssl_certs']) {
             $log("  Syncing SSL certificates...");

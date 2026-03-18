@@ -248,8 +248,8 @@ class FileSyncService
         $results = [];
 
         foreach ($accounts as $acc) {
-            $localPath = ($acc['home_dir'] ?? '') . '/httpdocs';
-            $remotePath = $localPath; // Same path on slave
+            $localPath = rtrim($acc['home_dir'] ?? '', '/');
+            $remotePath = $localPath; // Same path on slave — full vhost root
 
             $result = self::rsyncHosting($localPath, $remoteHost, $remotePath, $options);
             $result['domain'] = $acc['domain'];
@@ -433,7 +433,8 @@ class FileSyncService
         $config = self::getConfig();
         $homeDir = $account['home_dir'] ?? '';
         $username = $account['username'] ?? '';
-        $localPath = $homeDir . '/httpdocs';
+        // Sync entire vhost root — not just /httpdocs — for a faithful mirror
+        $localPath = rtrim($homeDir, '/');
         $remotePath = $localPath;
 
         if ($config['method'] === 'https') {
@@ -1241,5 +1242,97 @@ class FileSyncService
         Settings::set('repl_pre_backup_path', $backupDir);
 
         return ['ok' => true, 'path' => $backupDir, 'databases' => $results];
+    }
+
+    /**
+     * Recalculate disk_used_mb on a remote slave for all hosting accounts.
+     * Runs a single SSH command that calculates `du -sm` for each home_dir
+     * and returns the results, then updates the slave DB via its API.
+     */
+    public static function updateRemoteDiskUsage(array $node, array $accounts): array
+    {
+        $config = self::getConfig();
+        $host = self::extractHostFromUrl($node['api_url']);
+        $port = $config['ssh_port'] ?? 22;
+        $keyPath = $config['ssh_key_path'] ?? '/root/.ssh/id_ed25519';
+        $user = $config['ssh_user'] ?? 'root';
+
+        // Build a single SSH command that runs du -sm on all home dirs
+        $dirs = [];
+        foreach ($accounts as $acc) {
+            $homeDir = $acc['home_dir'] ?? '';
+            if ($homeDir) {
+                $dirs[] = escapeshellarg($homeDir);
+            }
+        }
+        if (empty($dirs)) {
+            return ['ok' => true, 'updated' => 0];
+        }
+
+        $duCmd = 'du -sm ' . implode(' ', $dirs) . ' 2>/dev/null';
+        $sshCmd = sprintf(
+            'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d -i %s %s@%s %s 2>/dev/null',
+            $port, escapeshellarg($keyPath), escapeshellarg($user),
+            escapeshellarg($host), escapeshellarg($duCmd)
+        );
+
+        $output = trim((string)shell_exec($sshCmd));
+        if (!$output) {
+            return ['ok' => false, 'error' => 'SSH du command returned empty'];
+        }
+
+        // Parse du output: "765\t/var/www/vhosts/festgate.com"
+        $diskMap = [];
+        foreach (explode("\n", $output) as $line) {
+            $parts = preg_split('/\s+/', trim($line), 2);
+            if (count($parts) === 2 && is_numeric($parts[0])) {
+                $diskMap[rtrim($parts[1], '/')] = (int)$parts[0];
+            }
+        }
+
+        // Update the slave's hosting_accounts via SSH + psql
+        $updated = 0;
+        $sqlParts = [];
+        foreach ($accounts as $acc) {
+            $homeDir = rtrim($acc['home_dir'] ?? '', '/');
+            if (isset($diskMap[$homeDir])) {
+                $mb = $diskMap[$homeDir];
+                $domain = $acc['domain'];
+                // Domain is safe — only alphanumeric, dots and hyphens
+                $safeDomain = preg_replace('/[^a-zA-Z0-9.\-]/', '', $domain);
+                $sqlParts[] = sprintf(
+                    "UPDATE hosting_accounts SET disk_used_mb = %d WHERE domain = '%s';",
+                    $mb, $safeDomain
+                );
+                $updated++;
+            }
+        }
+
+        if (!empty($sqlParts)) {
+            $sql = implode(' ', $sqlParts);
+            $remotePsql = sprintf(
+                'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d -i %s %s@%s %s 2>/dev/null',
+                $port, escapeshellarg($keyPath), escapeshellarg($user),
+                escapeshellarg($host),
+                escapeshellarg("psql -U musedock_panel -d musedock_panel -c " . escapeshellarg($sql))
+            );
+            shell_exec($remotePsql);
+        }
+
+        // Also update local (master) disk usage
+        foreach ($accounts as $acc) {
+            $homeDir = rtrim($acc['home_dir'] ?? '', '/');
+            if ($homeDir && is_dir($homeDir)) {
+                $localMb = (int)trim((string)shell_exec(sprintf('du -sm %s 2>/dev/null | cut -f1', escapeshellarg($homeDir))));
+                if ($localMb > 0) {
+                    Database::execute(
+                        "UPDATE hosting_accounts SET disk_used_mb = :mb WHERE id = :id",
+                        ['mb' => $localMb, 'id' => (int)$acc['id']]
+                    );
+                }
+            }
+        }
+
+        return ['ok' => true, 'updated' => $updated, 'disk_map' => $diskMap];
     }
 }
