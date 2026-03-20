@@ -15,7 +15,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.7.8');
+define('PANEL_VERSION', '1.0.0');
 
 // Autoloader
 spl_autoload_register(function ($class) {
@@ -101,6 +101,50 @@ try {
     }
 } catch (\Throwable $e) {
     logMsg("ERROR sending heartbeats: " . $e->getMessage());
+}
+
+// ─── Step 2b: Mail node health check ────────────────────────────
+if (Settings::get('mail_enabled', '0') === '1') {
+    logMsg("Checking mail nodes...");
+    try {
+        $mailNodes = \MuseDockPanel\Services\MailService::getMailNodes();
+        foreach ($mailNodes as $mn) {
+            if ($mn['standby'] ?? false) continue; // skip standby nodes
+
+            $health = \MuseDockPanel\Services\MailService::checkMailNodeHealth((int)$mn['id']);
+            if ($health['ok']) {
+                logMsg("  Mail node #{$mn['id']} ({$mn['name']}): ALL OK");
+            } else {
+                $failedSvcs = [];
+                foreach ($health['services'] ?? [] as $svc => $info) {
+                    if (!$info['ok']) $failedSvcs[] = "{$svc} (port {$info['port']}): {$info['error']}";
+                }
+                $failMsg = implode(', ', $failedSvcs);
+                logMsg("  Mail node #{$mn['id']} ({$mn['name']}): DEGRADED - {$failMsg}");
+
+                // Update node status to degraded
+                ClusterService::updateNode((int)$mn['id'], ['status' => 'error', 'metadata' => json_encode(
+                    array_merge(json_decode($mn['metadata'] ?? '{}', true) ?: [], ['mail_health' => $health['services']])
+                )]);
+
+                // Send alert
+                try {
+                    \MuseDockPanel\Services\NotificationService::send(
+                        "Mail Node Degraded: {$mn['name']}",
+                        "Mail node {$mn['name']} has degraded services:\n{$failMsg}\n\nCheck mail services on this node.",
+                        'warning'
+                    );
+                } catch (\Throwable $ne) {
+                    logMsg("  Failed to send mail node alert: " . $ne->getMessage());
+                }
+            }
+        }
+        if (empty($mailNodes)) {
+            logMsg("  No mail nodes configured.");
+        }
+    } catch (\Throwable $e) {
+        logMsg("ERROR checking mail nodes: " . $e->getMessage());
+    }
 }
 
 // ─── Step 3: Check for unreachable nodes (escalating alerts) ──

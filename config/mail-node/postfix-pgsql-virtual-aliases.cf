@@ -1,0 +1,11 @@
+# Postfix: virtual_alias_maps lookup via PostgreSQL
+# Location: /etc/postfix/pgsql-virtual-aliases.cf
+# In main.cf: virtual_alias_maps = pgsql:/etc/postfix/pgsql-virtual-aliases.cf
+
+hosts = localhost:5433
+dbname = musedock_panel
+user = musedock_mail
+password = CHANGE_ME
+
+# Regular aliases + catchall support
+query = SELECT destination FROM mail_aliases WHERE (source = '%s' OR (is_catchall = true AND source = CONCAT('@', split_part('%s', '@', 2)))) AND is_active = true LIMIT 1

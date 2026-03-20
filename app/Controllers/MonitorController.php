@@ -23,11 +23,14 @@ class MonitorController
         $panelTz = Settings::get('panel_timezone', 'UTC');
         $ifaceIPs = MonitorService::getInterfaceIPs($interfaces);
 
+        $disks = MonitorService::getDiskUsage();
+
         $alertSettings = [
             'enabled'      => Settings::get('monitor_enabled', '1'),
             'cpu'          => Settings::get('monitor_alert_cpu', '90'),
             'ram'          => Settings::get('monitor_alert_ram', '90'),
             'net_mbps'     => Settings::get('monitor_alert_net_mbps', '800'),
+            'disk'         => Settings::get('monitor_alert_disk', '90'),
             'gpu_temp'     => Settings::get('monitor_alert_gpu_temp', '85'),
             'gpu_util'     => Settings::get('monitor_alert_gpu_util', '95'),
         ];
@@ -42,6 +45,7 @@ class MonitorController
             'alertCount'    => $alertCount,
             'host'          => $host,
             'gpus'          => $gpus,
+            'disks'         => $disks,
             'panelTz'       => $panelTz,
             'alertSettings' => $alertSettings,
         ]);
@@ -154,6 +158,7 @@ class MonitorController
             'monitor_alert_cpu'      => $_POST['alert_cpu'] ?? '90',
             'monitor_alert_ram'      => $_POST['alert_ram'] ?? '90',
             'monitor_alert_net_mbps' => $_POST['alert_net_mbps'] ?? '800',
+            'monitor_alert_disk'     => $_POST['alert_disk'] ?? '90',
             'monitor_alert_gpu_temp' => $_POST['alert_gpu_temp'] ?? '85',
             'monitor_alert_gpu_util' => $_POST['alert_gpu_util'] ?? '95',
         ];

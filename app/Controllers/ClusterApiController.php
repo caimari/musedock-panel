@@ -4,6 +4,7 @@ namespace MuseDockPanel\Controllers;
 use MuseDockPanel\Env;
 use MuseDockPanel\Settings;
 use MuseDockPanel\Services\ClusterService;
+use MuseDockPanel\Services\MailService;
 use MuseDockPanel\Services\LogService;
 
 class ClusterApiController
@@ -95,6 +96,21 @@ class ClusterApiController
                 'receive-files'    => $this->handleReceiveFiles($payload),
                 'install-ssh-key'  => \MuseDockPanel\Services\FileSyncService::installPublicKey($payload['public_key'] ?? ''),
                 'restore-db-dumps' => $this->handleRestoreDbDumps($payload),
+
+                // ── Mail node actions ────────────────────────
+                'mail_create_domain'    => MailService::nodeCreateDomain($payload),
+                'mail_delete_domain'    => MailService::nodeDeleteDomain($payload),
+                'mail_create_mailbox'   => MailService::nodeCreateMailbox($payload),
+                'mail_delete_mailbox'   => MailService::nodeDeleteMailbox($payload),
+                'mail_update_quota'     => MailService::nodeUpdateQuota($payload),
+                'mail_suspend_mailbox'  => MailService::nodeSuspendMailbox($payload),
+                'mail_activate_mailbox' => MailService::nodeActivateMailbox($payload),
+                'mail_setup_node'          => MailService::nodeSetupMail($payload),
+                'mail_setup_status'        => MailService::nodeSetupStatus($payload),
+                'mail_generate_setup_token' => MailService::nodeGenerateSetupToken($payload),
+                'mail_rotate_db_password'  => MailService::nodeRotateDbPassword($payload),
+                'mail_check_configured'   => MailService::nodeCheckConfigured(),
+
                 default            => ['ok' => false, 'message' => "Unknown action: {$action}"],
             };
 

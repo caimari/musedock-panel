@@ -98,8 +98,13 @@ class ClusterController
             exit;
         }
 
-        $id = ClusterService::addNode($name, $apiUrl, $token);
-        LogService::log('cluster.node', 'add', "Nodo anadido: {$name} ({$apiUrl}), ID: {$id}");
+        // Parse services from checkboxes (default to ["web"] if none selected)
+        $services = $_POST['services'] ?? ['web'];
+        $validServices = array_intersect($services, ['web', 'mail']);
+        if (empty($validServices)) $validServices = ['web'];
+
+        $id = ClusterService::addNode($name, $apiUrl, $token, array_values($validServices));
+        LogService::log('cluster.node', 'add', "Nodo anadido: {$name} ({$apiUrl}), servicios: " . implode(',', $validServices) . ", ID: {$id}");
         Flash::set('success', "Nodo '{$name}' anadido correctamente");
         header('Location: /settings/cluster');
         exit;
@@ -142,6 +147,101 @@ class ClusterController
         }
 
         header('Location: /settings/cluster');
+        exit;
+    }
+
+    /**
+     * POST /settings/cluster/toggle-node-service (JSON)
+     * Toggle a service (web/mail) on a node.
+     */
+    public function toggleNodeService(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $nodeId  = (int)($_POST['node_id'] ?? 0);
+        $service = trim($_POST['service'] ?? '');
+
+        if (!$nodeId || !in_array($service, ['web', 'mail'])) {
+            echo json_encode(['ok' => false, 'error' => 'Parametros invalidos']);
+            exit;
+        }
+
+        $node = ClusterService::getNode($nodeId);
+        if (!$node) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado']);
+            exit;
+        }
+
+        $services = json_decode($node['services'] ?? '["web"]', true) ?: ['web'];
+        $isRemoving = in_array($service, $services);
+        $confirmed = !empty($_POST['confirmed']);
+
+        if ($isRemoving) {
+            // Check for active data before removing — require confirmation
+            if (!$confirmed) {
+                $count = 0;
+                $label = '';
+                if ($service === 'web') {
+                    $row = Database::fetchOne("SELECT COUNT(*) AS cnt FROM hosting_accounts WHERE status != 'deleted'");
+                    $count = (int)($row['cnt'] ?? 0);
+                    $label = $count . ' hosting(s) activo(s)';
+                } elseif ($service === 'mail') {
+                    $row = Database::fetchOne("SELECT COUNT(*) AS cnt FROM mail_domains WHERE mail_node_id = :nid", ['nid' => $nodeId]);
+                    $count = (int)($row['cnt'] ?? 0);
+                    $label = $count . ' dominio(s) de correo';
+                }
+                if ($count > 0) {
+                    echo json_encode([
+                        'ok' => false,
+                        'confirm_required' => true,
+                        'count' => $count,
+                        'label' => $label,
+                        'service' => $service,
+                        'message' => "Este nodo tiene {$label}.",
+                    ]);
+                    exit;
+                }
+            }
+
+            $services = array_values(array_diff($services, [$service]));
+            if (empty($services)) {
+                echo json_encode(['ok' => false, 'error' => 'El nodo debe tener al menos un servicio']);
+                exit;
+            }
+        } else {
+            // Activating a service — verify prerequisites
+            if ($service === 'mail') {
+                // Check if the mail stack is installed on this node
+                $token = \MuseDockPanel\Services\ReplicationService::decryptPassword($node['auth_token'] ?? '');
+                $configured = false;
+                try {
+                    $check = ClusterService::callNodeDirect($node['api_url'], $token, 'POST', 'api/cluster/action', [
+                        'action' => 'mail_check_configured',
+                        'payload' => [],
+                    ], 10);
+                    $configured = !empty($check['data']['configured']);
+                } catch (\Exception $e) {
+                    // Node unreachable — can't verify
+                }
+
+                if (!$configured) {
+                    echo json_encode([
+                        'ok' => false,
+                        'setup_required' => true,
+                        'error' => 'El stack de mail no esta instalado en este nodo. Configuralo primero desde Mail → Configurar Nodo de Mail.',
+                    ]);
+                    exit;
+                }
+            }
+
+            $services[] = $service;
+        }
+
+        ClusterService::updateNode($nodeId, ['services' => json_encode(array_values($services))]);
+        LogService::log('cluster.node', 'services-changed', "Servicios del nodo {$node['name']} actualizados: " . json_encode($services));
+
+        echo json_encode(['ok' => true, 'services' => array_values($services)]);
         exit;
     }
 
@@ -1074,6 +1174,494 @@ class ClusterController
             'items'      => $items,
             'exclusions' => $exclusions,
         ]);
+        exit;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Mail Node Provisioning
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * POST /settings/cluster/setup-mail-node (JSON)
+     *
+     * Remotely provisions a node as a mail server via the cluster API.
+     * Flow:
+     *   1. Generate a one-time setup_token on the remote node
+     *   2. Send mail_setup_node with that token → node returns 202 + task_id
+     *   3. Return task_id to frontend for polling via mail-setup-progress
+     *
+     * The actual installation runs asynchronously on the node.
+     */
+    public function setupMailNode(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $nodeId       = (int)($_POST['node_id'] ?? 0);
+        $mailHostname = trim($_POST['mail_hostname'] ?? '');
+        $sslMode      = in_array($_POST['ssl_mode'] ?? '', ['letsencrypt', 'selfsigned', 'manual'])
+                         ? $_POST['ssl_mode'] : 'letsencrypt';
+        $dbHost       = trim($_POST['db_host'] ?? 'localhost');
+
+        // Require admin password for this destructive operation
+        $adminPassword = $_POST['admin_password'] ?? '';
+        $adminId = $_SESSION['admin_id'] ?? $_SESSION['panel_user']['id'] ?? 0;
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        if (!$admin || !password_verify($adminPassword, $admin['password_hash'])) {
+            echo json_encode(['ok' => false, 'error' => 'Contrasena de administrador incorrecta']);
+            exit;
+        }
+
+        if (!$nodeId || !$mailHostname) {
+            echo json_encode(['ok' => false, 'error' => 'Faltan campos obligatorios: node_id, mail_hostname']);
+            exit;
+        }
+
+        $node = ClusterService::getNode($nodeId);
+        if (!$node) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado']);
+            exit;
+        }
+
+        // Validate hostname uniqueness (across nodes + local)
+        $existingHostname = Database::fetchOne(
+            "SELECT id, name FROM cluster_nodes WHERE mail_hostname = :h AND id != :nid",
+            ['h' => $mailHostname, 'nid' => $nodeId]
+        );
+        if ($existingHostname) {
+            echo json_encode(['ok' => false, 'error' => "El hostname '{$mailHostname}' ya esta asignado al nodo '{$existingHostname['name']}'."]);
+            exit;
+        }
+        $localHostname = Settings::get('mail_local_hostname', '');
+        if ($localHostname && $localHostname === $mailHostname) {
+            echo json_encode(['ok' => false, 'error' => "El hostname '{$mailHostname}' ya esta asignado al servidor local."]);
+            exit;
+        }
+
+        $token = \MuseDockPanel\Services\ReplicationService::decryptPassword($node['auth_token'] ?? '');
+        $dbPort = \MuseDockPanel\Env::int('DB_PORT', 5433);
+
+        // Step 0: Create/reuse musedock_mail PostgreSQL user on master
+        // Replicas are read-only — CREATE USER must run on master, then replicates to all nodes.
+        // Password is auto-generated once and stored encrypted in Settings for reuse across nodes.
+        $encryptedDbPass = Settings::get('mail_db_password_enc', '');
+        if ($encryptedDbPass) {
+            $dbPass = \MuseDockPanel\Services\ReplicationService::decryptPassword($encryptedDbPass);
+        } else {
+            $dbPass = bin2hex(random_bytes(20));
+            Settings::set('mail_db_password_enc', \MuseDockPanel\Services\ReplicationService::encryptPassword($dbPass));
+        }
+
+        try {
+            $existing = Database::fetchOne("SELECT 1 FROM pg_roles WHERE rolname = 'musedock_mail'");
+            $escapedPass = str_replace("'", "''", $dbPass);
+            if (!$existing) {
+                Database::execute("CREATE USER musedock_mail WITH PASSWORD '{$escapedPass}'");
+                Database::execute("GRANT CONNECT ON DATABASE musedock_panel TO musedock_mail");
+                Database::execute("GRANT USAGE ON SCHEMA public TO musedock_mail");
+                Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+            } else {
+                // User exists — ensure password and grants are current
+                Database::execute("ALTER USER musedock_mail WITH PASSWORD '{$escapedPass}'");
+                Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+            }
+        } catch (\Exception $e) {
+            echo json_encode(['ok' => false, 'error' => 'Error creando usuario musedock_mail en el master: ' . $e->getMessage()]);
+            exit;
+        }
+
+        // Step 1: Generate one-time setup token on the remote node
+        $tokenResult = ClusterService::callNodeDirect($node['api_url'], $token, 'POST', 'api/cluster/action', [
+            'action' => 'mail_generate_setup_token',
+            'payload' => [],
+        ]);
+
+        $setupToken = $tokenResult['data']['setup_token'] ?? '';
+        if (!$setupToken) {
+            echo json_encode(['ok' => false, 'error' => 'No se pudo generar token de setup en el nodo: ' . ($tokenResult['error'] ?? 'Error desconocido')]);
+            exit;
+        }
+
+        // Step 2: Send mail_setup_node — returns immediately with task_id
+        $result = ClusterService::callNodeDirect($node['api_url'], $token, 'POST', 'api/cluster/action', [
+            'action'  => 'mail_setup_node',
+            'payload' => [
+                'db_host'       => $dbHost,
+                'db_port'       => (string)$dbPort,
+                'db_name'       => 'musedock_panel',
+                'db_user'       => 'musedock_mail',
+                'db_pass'       => $dbPass,
+                'mail_hostname' => $mailHostname,
+                'ssl_mode'      => $sslMode,
+                'setup_token'   => $setupToken,
+            ],
+        ], 30); // Short timeout — node should respond immediately
+
+        $taskId = $result['data']['task_id'] ?? '';
+        if (!$taskId) {
+            echo json_encode(['ok' => false, 'error' => 'El nodo no devolvio task_id: ' . ($result['error'] ?? json_encode($result['data'] ?? []))]);
+            exit;
+        }
+
+        // Store task info for polling (including start time for master-side timeout)
+        Settings::set('mail_setup_node_id', (string)$nodeId);
+        Settings::set('mail_setup_task_id', $taskId);
+        Settings::set('mail_setup_hostname', $mailHostname);
+        Settings::set('mail_setup_started_at', date('Y-m-d H:i:s'));
+
+        // Update node services to include "mail" and save hostname
+        $services = json_decode($node['services'] ?? '["web"]', true) ?: ['web'];
+        if (!in_array('mail', $services)) {
+            $services[] = 'mail';
+        }
+        ClusterService::updateNode($nodeId, [
+            'services' => json_encode($services),
+            'mail_hostname' => $mailHostname,
+        ]);
+        Settings::set('mail_enabled', '1');
+
+        LogService::log('cluster.mail', 'setup-started', "Instalacion de mail iniciada en nodo {$node['name']} ({$mailHostname}), task: {$taskId}");
+
+        echo json_encode([
+            'ok'        => true,
+            'async'     => true,
+            'task_id'   => $taskId,
+            'node_id'   => $nodeId,
+            'node_name' => $node['name'],
+            'message'   => 'Instalacion iniciada en background. Puede tardar varios minutos.',
+        ]);
+        exit;
+    }
+
+    /**
+     * POST /settings/cluster/rotate-mail-db-password (JSON)
+     *
+     * Rotates the musedock_mail PostgreSQL password on master and propagates to all mail nodes.
+     * Use if a node is compromised or as periodic security hygiene.
+     */
+    public function rotateMailDbPassword(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $adminPassword = $_POST['admin_password'] ?? '';
+        $adminId = $_SESSION['admin_id'] ?? $_SESSION['panel_user']['id'] ?? 0;
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        if (!$admin || !password_verify($adminPassword, $admin['password_hash'])) {
+            echo json_encode(['ok' => false, 'error' => 'Contrasena de administrador incorrecta']);
+            exit;
+        }
+
+        // Generate new password
+        $newPass = bin2hex(random_bytes(20));
+        $dbPort = \MuseDockPanel\Env::int('DB_PORT', 5433);
+
+        // Update on master PostgreSQL
+        try {
+            $escapedPass = str_replace("'", "''", $newPass);
+            Database::execute("ALTER USER musedock_mail WITH PASSWORD '{$escapedPass}'");
+        } catch (\Exception $e) {
+            echo json_encode(['ok' => false, 'error' => 'Error actualizando password en master PG: ' . $e->getMessage()]);
+            exit;
+        }
+
+        // Store encrypted in Settings
+        Settings::set('mail_db_password_enc', \MuseDockPanel\Services\ReplicationService::encryptPassword($newPass));
+
+        // Propagate to all active mail nodes
+        $nodeResults = MailService::rotateDbPassword($newPass);
+
+        LogService::log('cluster.mail', 'db-password-rotated', 'Password de musedock_mail rotada. Nodos actualizados: ' . count($nodeResults));
+
+        echo json_encode([
+            'ok'      => true,
+            'nodes'   => $nodeResults,
+            'message' => 'Password rotada en master y propagada a los nodos.',
+        ]);
+        exit;
+    }
+
+    /**
+     * POST /settings/cluster/setup-mail-local (JSON)
+     *
+     * Install Postfix/Dovecot/OpenDKIM/Rspamd on the master server itself.
+     * Runs bin/mail-setup-run.php locally via nohup — no cluster node required.
+     * The DB is local (localhost:5433), no replica needed.
+     */
+    public function setupMailLocal(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $mailHostname = trim($_POST['mail_hostname'] ?? '');
+        $sslMode      = in_array($_POST['ssl_mode'] ?? '', ['letsencrypt', 'selfsigned', 'manual'])
+                         ? $_POST['ssl_mode'] : 'letsencrypt';
+
+        // Require admin password
+        $adminPassword = $_POST['admin_password'] ?? '';
+        $adminId = $_SESSION['admin_id'] ?? $_SESSION['panel_user']['id'] ?? 0;
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        if (!$admin || !password_verify($adminPassword, $admin['password_hash'])) {
+            echo json_encode(['ok' => false, 'error' => 'Contrasena de administrador incorrecta']);
+            exit;
+        }
+
+        if (!$mailHostname) {
+            echo json_encode(['ok' => false, 'error' => 'Falta el hostname de mail']);
+            exit;
+        }
+
+        // Validate hostname uniqueness (across nodes + local)
+        $existingHostname = Database::fetchOne(
+            "SELECT id, name FROM cluster_nodes WHERE mail_hostname = :h",
+            ['h' => $mailHostname]
+        );
+        if ($existingHostname) {
+            echo json_encode(['ok' => false, 'error' => "El hostname '{$mailHostname}' ya esta asignado al nodo '{$existingHostname['name']}'."]);
+            exit;
+        }
+
+        $dbPort = \MuseDockPanel\Env::int('DB_PORT', 5433);
+
+        // Create/reuse musedock_mail PostgreSQL user on this (master) server
+        $encryptedDbPass = Settings::get('mail_db_password_enc', '');
+        if ($encryptedDbPass) {
+            $dbPass = \MuseDockPanel\Services\ReplicationService::decryptPassword($encryptedDbPass);
+        } else {
+            $dbPass = bin2hex(random_bytes(20));
+            Settings::set('mail_db_password_enc', \MuseDockPanel\Services\ReplicationService::encryptPassword($dbPass));
+        }
+
+        try {
+            $existing = Database::fetchOne("SELECT 1 FROM pg_roles WHERE rolname = 'musedock_mail'");
+            $escapedPass = str_replace("'", "''", $dbPass);
+            if (!$existing) {
+                Database::execute("CREATE USER musedock_mail WITH PASSWORD '{$escapedPass}'");
+                Database::execute("GRANT CONNECT ON DATABASE musedock_panel TO musedock_mail");
+                Database::execute("GRANT USAGE ON SCHEMA public TO musedock_mail");
+                Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+            } else {
+                Database::execute("ALTER USER musedock_mail WITH PASSWORD '{$escapedPass}'");
+                Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+            }
+        } catch (\Exception $e) {
+            echo json_encode(['ok' => false, 'error' => 'Error creando usuario musedock_mail: ' . $e->getMessage()]);
+            exit;
+        }
+
+        // Launch mail-setup-run.php locally (same code that runs on remote nodes)
+        $payload = [
+            'db_host'       => 'localhost',
+            'db_port'       => (string)$dbPort,
+            'db_name'       => 'musedock_panel',
+            'db_user'       => 'musedock_mail',
+            'db_pass'       => $dbPass,
+            'mail_hostname' => $mailHostname,
+            'ssl_mode'      => $sslMode,
+            'setup_token'   => 'local',  // Not validated for local setup
+            'local_mode'    => true,
+        ];
+
+        // Generate task ID
+        $taskId = 'mail-local-' . time() . '-' . bin2hex(random_bytes(4));
+
+        // Write initial progress file
+        $safeTaskId = preg_replace('/[^a-zA-Z0-9_-]/', '', $taskId);
+        $progressFile = PANEL_ROOT . '/storage/mail-setup-' . $safeTaskId . '.json';
+        file_put_contents($progressFile, json_encode([
+            'status'      => 'starting',
+            'step'        => 0,
+            'total_steps' => 10,
+            'message'     => 'Iniciando instalacion local...',
+            'updated_at'  => date('Y-m-d H:i:s'),
+        ]));
+
+        // Launch background process
+        $payloadB64 = base64_encode(json_encode($payload));
+        $cmd = sprintf(
+            'nohup /usr/bin/php %s %s %s > /dev/null 2>&1 &',
+            escapeshellarg(PANEL_ROOT . '/bin/mail-setup-run.php'),
+            escapeshellarg($taskId),
+            escapeshellarg($payloadB64)
+        );
+        shell_exec($cmd);
+
+        // Store task info for polling
+        Settings::set('mail_setup_node_id', 'local');
+        Settings::set('mail_setup_task_id', $taskId);
+        Settings::set('mail_setup_hostname', $mailHostname);
+        Settings::set('mail_setup_started_at', date('Y-m-d H:i:s'));
+        Settings::set('mail_local_enabled', '1');
+        Settings::set('mail_enabled', '1');
+        Settings::set('mail_local_hostname', $mailHostname);
+
+        LogService::log('cluster.mail', 'local-setup-started', "Instalacion de mail local iniciada ({$mailHostname}), task: {$taskId}");
+
+        echo json_encode([
+            'ok'        => true,
+            'async'     => true,
+            'task_id'   => $taskId,
+            'node_id'   => 'local',
+            'node_name' => 'Este servidor (local)',
+            'message'   => 'Instalacion local iniciada en background. Puede tardar varios minutos.',
+        ]);
+        exit;
+    }
+
+    /**
+     * GET /settings/cluster/mail-setup-progress-local?task_id=Y (JSON)
+     *
+     * Polls local setup progress by reading the progress file directly.
+     */
+    public function mailSetupProgressLocal(): void
+    {
+        header('Content-Type: application/json');
+
+        $taskId = $_GET['task_id'] ?? '';
+        if (!$taskId) {
+            echo json_encode(['ok' => false, 'error' => 'task_id requerido']);
+            exit;
+        }
+
+        // Master-side timeout
+        $setupStarted = Settings::get('mail_setup_started_at', '');
+        if ($setupStarted) {
+            $elapsedMin = (time() - strtotime($setupStarted)) / 60;
+            if ($elapsedMin > 15) {
+                echo json_encode([
+                    'ok' => true,
+                    'progress' => [
+                        'status'  => 'timeout',
+                        'step'    => 0,
+                        'total_steps' => 10,
+                        'current' => 'master_timeout',
+                        'label'   => 'Timeout',
+                        'errors'  => [[
+                            'step'    => 'master_timeout',
+                            'command' => 'polling_timeout',
+                            'exit'    => -3,
+                            'output'  => "No se completo en 15 minutos. Revisa los logs en storage/logs/.",
+                        ]],
+                        'elapsed_min' => round($elapsedMin, 1),
+                    ],
+                ]);
+                Settings::set('mail_setup_started_at', '');
+                exit;
+            }
+        }
+
+        // Read progress directly from local file (same as nodeSetupStatus but without cluster API)
+        $result = MailService::nodeSetupStatus(['task_id' => $taskId]);
+
+        // If completed, clean up tracking and mark local mail as configured
+        $status = $result['progress']['status'] ?? '';
+        if (in_array($status, ['completed', 'completed_with_errors', 'failed', 'stale', 'timeout'])) {
+            Settings::set('mail_setup_started_at', '');
+            Settings::set('mail_setup_task_id', '');
+
+            if ($status === 'completed') {
+                Settings::set('mail_node_configured', '1');
+                Settings::set('mail_local_configured', '1');
+            }
+
+            LogService::log('cluster.mail', "local-setup-{$status}", "Mail setup local {$status}");
+        }
+
+        echo json_encode($result);
+        exit;
+    }
+
+    /**
+     * GET /settings/cluster/mail-setup-progress?node_id=X&task_id=Y (JSON)
+     *
+     * Polls the remote node for setup progress.
+     * Includes master-side timeout: if polling for >15 min with no completion,
+     * returns a timeout error so the frontend stops polling.
+     */
+    public function mailSetupProgress(): void
+    {
+        header('Content-Type: application/json');
+
+        $nodeId = (int)($_GET['node_id'] ?? 0);
+        $taskId = $_GET['task_id'] ?? '';
+
+        if (!$nodeId || !$taskId) {
+            echo json_encode(['ok' => false, 'error' => 'node_id y task_id requeridos']);
+            exit;
+        }
+
+        // Master-side timeout: if we started polling >15 min ago, give up
+        $setupStarted = Settings::get('mail_setup_started_at', '');
+        if ($setupStarted) {
+            $elapsedMin = (time() - strtotime($setupStarted)) / 60;
+            if ($elapsedMin > 15) {
+                echo json_encode([
+                    'ok' => true,
+                    'progress' => [
+                        'status'  => 'timeout',
+                        'step'    => 0,
+                        'total_steps' => 9,
+                        'current' => 'master_timeout',
+                        'label'   => 'Timeout',
+                        'errors'  => [[
+                            'step'    => 'master_timeout',
+                            'command' => 'polling_timeout',
+                            'exit'    => -3,
+                            'output'  => "No se completo en 15 minutos. El nodo puede estar caido, la instalacion puede seguir en background, o el proceso murio. Verifica el nodo directamente.",
+                        ]],
+                        'elapsed_min' => round($elapsedMin, 1),
+                    ],
+                ]);
+                // Clean up
+                Settings::set('mail_setup_started_at', '');
+                exit;
+            }
+        }
+
+        $node = ClusterService::getNode($nodeId);
+        if (!$node) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado']);
+            exit;
+        }
+
+        $token = \MuseDockPanel\Services\ReplicationService::decryptPassword($node['auth_token'] ?? '');
+        $result = ClusterService::callNodeDirect($node['api_url'], $token, 'POST', 'api/cluster/action', [
+            'action'  => 'mail_setup_status',
+            'payload' => ['task_id' => $taskId],
+        ]);
+
+        if (!($result['ok'] ?? false)) {
+            // Node unreachable during setup
+            echo json_encode([
+                'ok' => true,
+                'progress' => [
+                    'status'  => 'node_unreachable',
+                    'step'    => 0,
+                    'total_steps' => 9,
+                    'current' => 'node_unreachable',
+                    'label'   => 'Nodo no accesible',
+                    'errors'  => [[
+                        'step'    => 'polling',
+                        'command' => 'node_unreachable',
+                        'exit'    => -4,
+                        'output'  => 'No se pudo contactar al nodo: ' . ($result['error'] ?? 'Error desconocido') . '. La instalacion puede seguir en background.',
+                    ]],
+                ],
+            ]);
+            exit;
+        }
+
+        $response = $result['data'] ?? $result;
+
+        // If completed, clean up tracking
+        $status = $response['progress']['status'] ?? '';
+        if (in_array($status, ['completed', 'completed_with_errors', 'failed', 'stale', 'timeout'])) {
+            Settings::set('mail_setup_started_at', '');
+            Settings::set('mail_setup_task_id', '');
+            LogService::log('cluster.mail', "setup-{$status}", "Mail setup {$status} en nodo #{$nodeId}");
+        }
+
+        echo json_encode($response);
         exit;
     }
 

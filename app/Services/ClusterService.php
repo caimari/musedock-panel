@@ -18,6 +18,12 @@ class ClusterService
         return Database::fetchAll('SELECT * FROM cluster_nodes ORDER BY name');
     }
 
+    /** Get only nodes with web service — use for hosting sync (excludes mail-only nodes) */
+    public static function getWebNodes(): array
+    {
+        return Database::fetchAll("SELECT * FROM cluster_nodes WHERE services::text LIKE '%web%' ORDER BY name");
+    }
+
     /** Get only nodes NOT in standby — use for sync, queue processing, alerts */
     public static function getActiveNodes(): array
     {
@@ -29,7 +35,7 @@ class ClusterService
         return Database::fetchOne('SELECT * FROM cluster_nodes WHERE id = :id', ['id' => $id]);
     }
 
-    public static function addNode(string $name, string $apiUrl, string $authToken): int
+    public static function addNode(string $name, string $apiUrl, string $authToken, array $services = ['web']): int
     {
         $encryptedToken = ReplicationService::encryptPassword($authToken);
         return Database::insert('cluster_nodes', [
@@ -38,6 +44,7 @@ class ClusterService
             'auth_token' => $encryptedToken,
             'status'     => 'offline',
             'role'       => 'standalone',
+            'services'   => json_encode($services),
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -400,7 +407,7 @@ class ClusterService
         return self::callNodeDirect($apiUrl, $token, $method, $endpoint, $data);
     }
 
-    public static function callNodeDirect(string $apiUrl, string $token, string $method, string $endpoint, array $data = []): array
+    public static function callNodeDirect(string $apiUrl, string $token, string $method, string $endpoint, array $data = [], int $timeout = 30): array
     {
         $url = rtrim($apiUrl, '/') . '/' . ltrim($endpoint, '/');
 
@@ -408,7 +415,7 @@ class ClusterService
         curl_setopt_array($ch, [
             CURLOPT_URL            => $url,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_TIMEOUT        => $timeout,
             CURLOPT_CONNECTTIMEOUT => 10,
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => false,

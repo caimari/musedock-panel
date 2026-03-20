@@ -1,0 +1,55 @@
+# Postfix main.cf — Reference configuration for MuseDock Mail Node
+# This is NOT a drop-in replacement. Adapt to your server.
+
+# ── Basic ────────────────────────────────────
+myhostname = mail.example.com
+mydomain = example.com
+myorigin = $mydomain
+mydestination = localhost
+mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128
+
+# ── Virtual mailbox delivery ─────────────────
+virtual_transport = lmtp:unix:private/dovecot-lmtp
+virtual_mailbox_base = /var/mail/vhosts
+virtual_mailbox_domains = pgsql:/etc/postfix/pgsql-virtual-domains.cf
+virtual_mailbox_maps = pgsql:/etc/postfix/pgsql-virtual-mailboxes.cf
+virtual_alias_maps = pgsql:/etc/postfix/pgsql-virtual-aliases.cf
+
+virtual_uid_maps = static:5000
+virtual_gid_maps = static:5000
+
+# ── TLS (Let's Encrypt) ─────────────────────
+smtpd_use_tls = yes
+smtpd_tls_cert_file = /etc/letsencrypt/live/mail.example.com/fullchain.pem
+smtpd_tls_key_file = /etc/letsencrypt/live/mail.example.com/privkey.pem
+smtpd_tls_security_level = may
+smtpd_tls_auth_only = yes
+smtpd_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+
+smtp_tls_security_level = may
+smtp_tls_protocols = !SSLv2, !SSLv3, !TLSv1, !TLSv1.1
+
+# ── SASL Auth (Dovecot) ─────────────────────
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
+smtpd_sasl_auth_enable = yes
+
+# ── Restrictions ─────────────────────────────
+smtpd_recipient_restrictions =
+    permit_sasl_authenticated,
+    permit_mynetworks,
+    reject_unauth_destination,
+    reject_unknown_reverse_client_hostname
+
+# ── Message limits ───────────────────────────
+message_size_limit = 26214400
+mailbox_size_limit = 0
+
+# ── DKIM via OpenDKIM milter ─────────────────
+milter_protocol = 6
+milter_default_action = accept
+smtpd_milters = unix:opendkim/opendkim.sock
+non_smtpd_milters = unix:opendkim/opendkim.sock
+
+# ── Rate limiting (optional, via policyd-rate-limit) ──
+# smtpd_recipient_restrictions = ... check_policy_service unix:ratelimit/policy ...

@@ -10,14 +10,16 @@
                     <a href="/accounts/<?= $account['id'] ?>/migrate" class="btn btn-outline-light btn-sm"><i class="bi bi-cloud-download me-1"></i>Migrate</a>
                     <a href="/accounts/<?= $account['id'] ?>/edit" class="btn btn-outline-light btn-sm"><i class="bi bi-pencil"></i> Edit</a>
                     <?php if ($account['status'] === 'active'): ?>
+                        <?php $hasActiveMail = !empty($mailDomain) && $mailDomain['status'] === 'active'; ?>
                         <form id="suspendForm" method="POST" action="/accounts/<?= $account['id'] ?>/suspend">
                     <?= \MuseDockPanel\View::csrf() ?>
+                            <input type="hidden" name="suspend_mail" id="suspend-mail-input" value="0">
                             <button type="button" class="btn btn-outline-warning btn-sm" onclick="confirmAction(document.getElementById('suspendForm'), {
                                 title: 'Suspend <?= View::e($account['domain']) ?>?',
-                                html: '<p style=\'color:#94a3b8;\'>This will:</p><ul style=\'text-align:left;color:#94a3b8;font-size:0.9rem;\'><li>Block SSH/SFTP access</li><li>Stop PHP-FPM pool</li><li>Website will go offline</li></ul>',
+                                html: '<p style=\'color:#94a3b8;\'>This will:</p><ul style=\'text-align:left;color:#94a3b8;font-size:0.9rem;\'><li>Block SSH/SFTP access</li><li>Stop PHP-FPM pool</li><li>Website will go offline</li></ul><?= $hasActiveMail ? "<div style=\"margin-top:12px;padding:10px;background:rgba(251,191,36,0.1);border-radius:6px;text-align:left;\"><label style=\"color:#fbbf24;font-size:0.85rem;cursor:pointer;\"><input type=\"checkbox\" id=\"swal-suspend-mail\" style=\"margin-right:6px;\">Suspender tambien el correo (" . count($mailAccounts) . " cuenta/s)</label></div>" : "" ?>',
                                 icon: 'warning',
                                 confirmText: 'Yes, suspend it'
-                            })"><i class="bi bi-pause-circle"></i> Suspend</button>
+                            }, function() { <?= $hasActiveMail ? "document.getElementById('suspend-mail-input').value = document.getElementById('swal-suspend-mail')?.checked ? '1' : '0';" : "" ?> })"><i class="bi bi-pause-circle"></i> Suspend</button>
                         </form>
                     <?php else: ?>
                         <form id="activateForm" method="POST" action="/accounts/<?= $account['id'] ?>/activate">
@@ -140,6 +142,78 @@
             </div>
         </div>
 
+        <!-- Mail -->
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-envelope me-2"></i>Mail</span>
+                <?php if (!empty($mailDomain)): ?>
+                    <a href="/mail/domains/<?= $mailDomain['id'] ?>" class="btn btn-outline-light btn-sm py-0 px-2"><i class="bi bi-eye me-1"></i>Gestionar</a>
+                <?php endif; ?>
+            </div>
+            <div class="card-body">
+                <?php if (!empty($mailDomain)): ?>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span>
+                            <span class="badge badge-<?= $mailDomain['status'] === 'active' ? 'active' : 'suspended' ?>"><?= $mailDomain['status'] ?></span>
+                            <?php if (!empty($mailDomain['node_name'])): ?>
+                                <span class="badge bg-secondary ms-1"><i class="bi bi-hdd-network me-1"></i><?= View::e($mailDomain['node_name']) ?></span>
+                            <?php else: ?>
+                                <span class="badge bg-secondary ms-1"><i class="bi bi-pc-display me-1"></i>Local</span>
+                            <?php endif; ?>
+                            <?php if ($mailDomain['dkim_public_key']): ?>
+                                <span class="badge bg-success ms-1">DKIM</span>
+                            <?php endif; ?>
+                        </span>
+                        <span class="text-muted small"><?= count($mailAccounts) ?> cuenta(s)</span>
+                    </div>
+                    <?php if (!empty($mailAccounts)): ?>
+                        <div class="list-group list-group-flush" style="background:transparent;">
+                            <?php foreach ($mailAccounts as $ma): ?>
+                            <div class="list-group-item d-flex justify-content-between align-items-center px-0 py-1" style="background:transparent;border-color:#334155;">
+                                <span class="small"><i class="bi bi-person me-1 text-muted"></i><?= View::e($ma['email']) ?></span>
+                                <span>
+                                    <span class="badge <?= $ma['status'] === 'active' ? 'bg-success' : 'bg-warning text-dark' ?>" style="font-size:0.65rem;"><?= $ma['status'] ?></span>
+                                    <?php
+                                        $usedMb = (int)($ma['used_mb'] ?? 0);
+                                        $quotaMb = (int)$ma['quota_mb'];
+                                        $usagePct = $quotaMb > 0 ? round(($usedMb / $quotaMb) * 100) : 0;
+                                    ?>
+                                    <span class="text-muted small ms-1"><?= $usedMb ?>/<?= $quotaMb ?> MB</span>
+                                    <?php if ($usagePct > 85): ?>
+                                        <i class="bi bi-exclamation-triangle text-warning ms-1" title="<?= $usagePct ?>% usado" style="font-size:0.7rem;"></i>
+                                    <?php endif; ?>
+                                </span>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php else: ?>
+                        <p class="text-muted small mb-0">Dominio de correo activo pero sin cuentas creadas.
+                            <a href="/mail/domains/<?= $mailDomain['id'] ?>/accounts/create" class="text-info">Crear cuenta</a>
+                        </p>
+                    <?php endif; ?>
+                <?php elseif ($mailEnabled && $hasMailNodes): ?>
+                    <div class="text-center py-2">
+                        <p class="text-muted small mb-2">Este dominio no tiene correo configurado.</p>
+                        <a href="/mail/domains/create?domain=<?= urlencode($account['domain']) ?>" class="btn btn-outline-info btn-sm">
+                            <i class="bi bi-plus-circle me-1"></i>Activar correo para <?= View::e($account['domain']) ?>
+                        </a>
+                    </div>
+                <?php elseif ($mailEnabled && !$hasMailNodes): ?>
+                    <div class="text-center py-2">
+                        <p class="text-muted small mb-2">No hay servidor de mail configurado.</p>
+                        <a href="/mail?setup=1" class="btn btn-outline-secondary btn-sm">
+                            <i class="bi bi-envelope me-1"></i>Configurar servidor de mail
+                        </a>
+                    </div>
+                <?php else: ?>
+                    <p class="text-muted small mb-0 text-center py-1">
+                        <i class="bi bi-info-circle me-1"></i>Mail no habilitado.
+                        <a href="/mail?setup=1" class="text-info">Configurar</a>
+                    </p>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <!-- Databases -->
         <div class="card">
             <div class="card-header"><i class="bi bi-database me-2"></i>Databases</div>
@@ -185,14 +259,16 @@
             <div class="card-header text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Danger Zone</div>
             <div class="card-body">
                 <p class="small text-muted">Delete this account permanently. This removes the system user, FPM pool, and Caddy route. The home directory is kept for manual backup.</p>
+                <?php $hasMailForDelete = !empty($mailDomain); ?>
                 <form id="deleteForm" method="POST" action="/accounts/<?= $account['id'] ?>/delete">
                     <?= \MuseDockPanel\View::csrf() ?>
+                    <input type="hidden" name="delete_mail" id="delete-mail-input" value="0">
                     <button type="button" class="btn btn-danger btn-sm w-100" onclick="confirmAction(document.getElementById('deleteForm'), {
                         title: 'Delete <?= View::e($account['domain']) ?>?',
-                        html: '<p style=\'color:#ef4444;font-weight:600;\'>This action is PERMANENT and cannot be undone!</p><p style=\'color:#94a3b8;font-size:0.9rem;\'>This will remove:<br>• System user<br>• PHP-FPM pool<br>• Caddy route<br><br>The home directory is kept for manual backup.</p>',
+                        html: '<p style=\'color:#ef4444;font-weight:600;\'>This action is PERMANENT and cannot be undone!</p><p style=\'color:#94a3b8;font-size:0.9rem;\'>This will remove:<br>&bull; System user<br>&bull; PHP-FPM pool<br>&bull; Caddy route<br><br>The home directory is kept for manual backup.</p><?= $hasMailForDelete ? "<div style=\"margin-top:12px;padding:10px;background:rgba(239,68,68,0.1);border-radius:6px;text-align:left;\"><label style=\"color:#ef4444;font-size:0.85rem;cursor:pointer;\"><input type=\"checkbox\" id=\"swal-delete-mail\" style=\"margin-right:6px;\">Eliminar tambien el correo (" . count($mailAccounts) . " cuenta/s, buzones, DKIM)</label></div>" : "" ?>',
                         icon: 'error',
                         confirmText: 'Yes, DELETE permanently'
-                    })"><i class="bi bi-trash me-1"></i> Delete Account</button>
+                    }, function() { <?= $hasMailForDelete ? "document.getElementById('delete-mail-input').value = document.getElementById('swal-delete-mail')?.checked ? '1' : '0';" : "" ?> })"><i class="bi bi-trash me-1"></i> Delete Account</button>
                 </form>
             </div>
         </div>

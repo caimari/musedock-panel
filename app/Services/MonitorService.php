@@ -105,7 +105,7 @@ class MonitorService
         $host = self::resolveHost($host);
         return Database::fetchAll(
             "SELECT id, extract(epoch FROM ts AT TIME ZONE 'UTC') AS ts,
-                    host, type, message, value, acknowledged
+                    host, type, message, value, acknowledged, details
              FROM monitor_alerts
              WHERE host = :host
              ORDER BY ts DESC
@@ -311,6 +311,40 @@ class MonitorService
     public static function hasGpu(?string $host = null): bool
     {
         return !empty(self::detectGpus($host));
+    }
+
+    /**
+     * Get real disk usage (physical devices only, skip tmpfs/efivarfs/tiny partitions).
+     * Returns [['device'=>'/dev/sda1','mount'=>'/','size'=>..,'used'=>..,'percent'=>..], ...]
+     */
+    public static function getDiskUsage(): array
+    {
+        $disks = [];
+        $output = @shell_exec("df -B1 --output=source,fstype,size,used,avail,pcent,target 2>/dev/null");
+        if (empty($output)) return $disks;
+
+        $lines = explode("\n", trim($output));
+        array_shift($lines); // header
+        $skipFs = ['tmpfs', 'devtmpfs', 'efivarfs', 'squashfs', 'overlay', 'fuse.snapfuse', 'fuse.lxcfs'];
+
+        foreach ($lines as $line) {
+            $cols = preg_split('/\s+/', trim($line), 7);
+            if (count($cols) < 7) continue;
+            [$device, $fstype, $size, $used, $avail, $pct, $mount] = $cols;
+            if (!str_starts_with($device, '/dev/')) continue;
+            if (in_array($fstype, $skipFs, true)) continue;
+            if ((int)$size < 500 * 1024 * 1024) continue;
+
+            $disks[] = [
+                'device'  => $device,
+                'mount'   => $mount,
+                'size'    => (int)$size,
+                'used'    => (int)$used,
+                'percent' => (float)str_replace('%', '', $pct),
+                'metric'  => 'disk_' . (($mount === '/') ? 'root' : trim(str_replace('/', '_', $mount), '_')) . '_percent',
+            ];
+        }
+        return $disks;
     }
 
     // ─── Private helpers ─────────────────────────────────────

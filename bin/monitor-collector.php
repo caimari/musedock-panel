@@ -12,7 +12,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.7.8');
+define('PANEL_VERSION', '1.0.0');
 
 // Autoloader
 spl_autoload_register(function ($class) {
@@ -149,6 +149,91 @@ if (!empty($gpuOutput)) {
     // No GPU or nvidia-smi not available — skip silently
 }
 
+// ─── Disk metrics ────────────────────────────────────────────
+$diskData = [];
+$dfOutput = shell_exec("df -B1 --output=source,fstype,size,used,avail,pcent,target 2>/dev/null");
+if (!empty($dfOutput)) {
+    $dfLines = explode("\n", trim($dfOutput));
+    array_shift($dfLines); // Remove header
+    $skipFs = ['tmpfs', 'devtmpfs', 'efivarfs', 'squashfs', 'overlay', 'fuse.snapfuse', 'fuse.lxcfs'];
+    foreach ($dfLines as $dfLine) {
+        $cols = preg_split('/\s+/', trim($dfLine), 7);
+        if (count($cols) < 7) continue;
+        [$device, $fstype, $size, $used, $avail, $pct, $mount] = $cols;
+        // Only real block devices: /dev/sdX, /dev/nvmeX, /dev/vdX, /dev/mdX, /dev/mapper/*
+        if (!str_starts_with($device, '/dev/')) continue;
+        if (in_array($fstype, $skipFs, true)) continue;
+        // Skip tiny partitions (< 500MB) like /boot/efi
+        if ((int)$size < 500 * 1024 * 1024) continue;
+
+        $usedPct = (float) str_replace('%', '', $pct);
+        $sizeBytes = (int) $size;
+        $usedBytes = (int) $used;
+
+        // Create a safe metric name from mount point
+        $metricMount = ($mount === '/') ? 'root' : trim(str_replace('/', '_', $mount), '_');
+        $inserts[] = [$hostname, "disk_{$metricMount}_percent", $usedPct];
+
+        $diskData[] = [
+            'device'  => $device,
+            'mount'   => $mount,
+            'size'    => $sizeBytes,
+            'used'    => $usedBytes,
+            'percent' => $usedPct,
+            'metric'  => "disk_{$metricMount}_percent",
+            'metricMount' => $metricMount,
+        ];
+
+        logMsg("  Disk {$device} ({$mount}): {$usedPct}%");
+    }
+}
+
+// ─── Disk I/O metrics (read/write throughput) ────────────────
+// Uses /proc/diskstats: field 6 = sectors read, field 10 = sectors written
+// Sector size = 512 bytes
+if (!empty($diskData)) {
+    $diskstats = @file_get_contents('/proc/diskstats');
+    if (!empty($diskstats)) {
+        foreach ($diskData as $d) {
+            // Extract base device name (sda1 from /dev/sda1, nvme0n1p2 from /dev/nvme0n1p2)
+            $devBase = basename($d['device']);
+            // Match the device in /proc/diskstats
+            if (preg_match('/\s+\d+\s+\d+\s+' . preg_quote($devBase, '/') . '\s+(.+)/', $diskstats, $dsm)) {
+                $fields = preg_split('/\s+/', trim($dsm[1]));
+                // fields[2] = sectors read (index 2 in remaining), fields[6] = sectors written
+                if (count($fields) >= 7) {
+                    $sectorsRead = (int)$fields[2];
+                    $sectorsWritten = (int)$fields[6];
+                    $readBytes = $sectorsRead * 512;
+                    $writeBytes = $sectorsWritten * 512;
+
+                    $lastKeyR = "diskio_{$devBase}_read";
+                    $lastKeyW = "diskio_{$devBase}_write";
+
+                    if ($elapsed > 0 && isset($last[$lastKeyR])) {
+                        $readDelta = $readBytes - $last[$lastKeyR];
+                        $writeDelta = $writeBytes - $last[$lastKeyW];
+                        if ($readDelta < 0) $readDelta = $readBytes;
+                        if ($writeDelta < 0) $writeDelta = $writeBytes;
+
+                        $readRate = $readDelta / $elapsed;
+                        $writeRate = $writeDelta / $elapsed;
+
+                        $mm = $d['metricMount'];
+                        $inserts[] = [$hostname, "disk_{$mm}_read", $readRate];
+                        $inserts[] = [$hostname, "disk_{$mm}_write", $writeRate];
+
+                        logMsg("  Disk I/O {$devBase}: R=" . formatBytes($readRate) . " W=" . formatBytes($writeRate));
+                    }
+
+                    $current[$lastKeyR] = $readBytes;
+                    $current[$lastKeyW] = $writeBytes;
+                }
+            }
+        }
+    }
+}
+
 // Save current readings for next delta calculation BEFORE DB operations
 // This ensures we always have fresh counters even if DB fails
 file_put_contents($lastFile, json_encode($current));
@@ -236,6 +321,7 @@ try {
 $alertCpuThreshold = (float) Settings::get('monitor_alert_cpu', '90');
 $alertRamThreshold = (float) Settings::get('monitor_alert_ram', '90');
 $alertNetMbps = (float) Settings::get('monitor_alert_net_mbps', '800');
+$alertDiskThreshold = (float) Settings::get('monitor_alert_disk', '90');
 $alertNetBps = $alertNetMbps * 1000000 / 8; // Convert Mbps to bytes/sec
 
 /**
@@ -278,9 +364,7 @@ function getTopProcesses(string $type, int $limit = 5): string
                     $pid  = $cols[1];
                     $cpu  = $cols[2];
                     $mem  = $cols[3];
-                    $cmd  = $cols[10];
-                    // Truncate command to 60 chars
-                    if (strlen($cmd) > 60) $cmd = substr($cmd, 0, 57) . '...';
+                    $cmd  = $cols[10]; // Full command line, no truncation
                     $lines[] = "  PID {$pid} ({$user}) CPU:{$cpu}% MEM:{$mem}% — {$cmd}";
                 }
             }
@@ -292,6 +376,31 @@ function getTopProcesses(string $type, int $limit = 5): string
     return !empty($lines) ? implode("\n", $lines) : '';
 }
 
+/**
+ * Get disk usage summary for alert context
+ */
+function getDiskInfo(): string
+{
+    global $diskData;
+    if (empty($diskData)) return '';
+    $lines = ["Disk usage:"];
+    foreach ($diskData as $d) {
+        $sizeH = formatDiskSize($d['size']);
+        $usedH = formatDiskSize($d['used']);
+        $freeH = formatDiskSize($d['size'] - $d['used']);
+        $lines[] = "  {$d['device']} ({$d['mount']}): {$d['percent']}% used — {$usedH}/{$sizeH} (free: {$freeH})";
+    }
+    return implode("\n", $lines);
+}
+
+function formatDiskSize(float $bytes): string
+{
+    if ($bytes >= 1099511627776) return round($bytes / 1099511627776, 1) . 'T';
+    if ($bytes >= 1073741824) return round($bytes / 1073741824, 1) . 'G';
+    if ($bytes >= 1048576) return round($bytes / 1048576, 1) . 'M';
+    return round($bytes / 1024, 1) . 'K';
+}
+
 function checkAlert(string $host, string $type, string $message, float $value): void
 {
     // Anti-spam: max 1 alert per type per 5 minutes
@@ -301,21 +410,24 @@ function checkAlert(string $host, string $type, string $message, float $value): 
     );
     if ($recent) return;
 
-    // Capture top processes for context
+    // Capture top processes + disk info for context
     $processInfo = getTopProcesses($type);
+    $diskInfo = getDiskInfo();
+    $details = trim($processInfo . ($processInfo && $diskInfo ? "\n\n" : '') . $diskInfo);
 
     Database::insert('monitor_alerts', [
         'host'    => $host,
         'type'    => $type,
         'message' => $message,
         'value'   => $value,
+        'details' => !empty($details) ? $details : null,
     ]);
 
-    // Send notification with process details
+    // Send notification with process + disk details
     try {
         $body = "{$message}\nHost: {$host}\nValue: {$value}\nTime: " . date('Y-m-d H:i:s');
-        if (!empty($processInfo)) {
-            $body .= "\n\n{$processInfo}";
+        if (!empty($details)) {
+            $body .= "\n\n{$details}";
         }
         \MuseDockPanel\Services\NotificationService::send(
             "[MuseDock Monitor] {$type}",
@@ -355,6 +467,15 @@ foreach ($inserts as $row) {
     }
     if ($alertGpuUtil > 0 && preg_match('/^gpu(\d+)_util$/', $row[1], $gm) && $row[2] > $alertGpuUtil) {
         checkAlert($hostname, 'GPU_HIGH', "GPU{$gm[1]} utilization at {$row[2]}% (threshold: {$alertGpuUtil}%)", $row[2]);
+    }
+}
+
+// Check disk alerts (0 = disabled)
+if ($alertDiskThreshold > 0 && !empty($diskData)) {
+    foreach ($diskData as $d) {
+        if ($d['percent'] > $alertDiskThreshold) {
+            checkAlert($hostname, 'DISK_HIGH', "Disk {$d['device']} ({$d['mount']}) at {$d['percent']}% (threshold: {$alertDiskThreshold}%)", $d['percent']);
+        }
     }
 }
 

@@ -380,6 +380,8 @@
                                 <th>Último Heartbeat</th>
                                 <th>Lag</th>
                                 <th>Rol Remoto</th>
+                                <th>Servicios</th>
+                                <th>Mail Hostname</th>
                                 <th class="text-center">Alertas</th>
                                 <th class="text-end">Acciones</th>
                             </tr>
@@ -430,6 +432,30 @@
                                     <span class="badge bg-secondary" id="node-role-<?= (int)$node['id'] ?>">
                                         <?= View::e(ucfirst($node['role'] ?? 'unknown')) ?>
                                     </span>
+                                </td>
+                                <td id="node-services-<?= (int)$node['id'] ?>">
+                                    <?php $nodeServices = json_decode($node['services'] ?? '["web"]', true) ?: ['web']; ?>
+                                    <span class="badge <?= in_array('web', $nodeServices) ? 'bg-info' : 'bg-secondary opacity-50' ?> me-1"
+                                          style="font-size: 0.7rem; cursor: pointer;"
+                                          onclick="toggleNodeService(<?= (int)$node['id'] ?>, 'web')"
+                                          title="Click para <?= in_array('web', $nodeServices) ? 'desactivar' : 'activar' ?> web">
+                                        <i class="bi bi-globe me-1"></i>web
+                                    </span>
+                                    <span class="badge <?= in_array('mail', $nodeServices) ? 'bg-success' : 'bg-secondary opacity-50' ?>"
+                                          style="font-size: 0.7rem; cursor: pointer;"
+                                          onclick="toggleNodeService(<?= (int)$node['id'] ?>, 'mail')"
+                                          title="Click para <?= in_array('mail', $nodeServices) ? 'desactivar' : 'activar' ?> mail">
+                                        <i class="bi bi-envelope me-1"></i>mail
+                                    </span>
+                                </td>
+                                <td class="small">
+                                    <?php if (!empty($node['mail_hostname'])): ?>
+                                        <code><?= View::e($node['mail_hostname']) ?></code>
+                                    <?php elseif (in_array('mail', $nodeServices)): ?>
+                                        <span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Sin asignar</span>
+                                    <?php else: ?>
+                                        <span class="text-muted">-</span>
+                                    <?php endif; ?>
                                 </td>
                                 <td class="text-center" id="node-alerts-<?= (int)$node['id'] ?>">
                                     <?php if (!empty($node['alerts_muted'])): ?>
@@ -552,6 +578,25 @@
                                     <i class="bi bi-arrow-clockwise me-1"></i>Generar
                                 </button>
                             </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Servicios del Nodo</label>
+                            <div class="d-flex gap-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="services[]" value="web" id="svc-web" checked>
+                                    <label class="form-check-label" for="svc-web">
+                                        <i class="bi bi-globe me-1 text-info"></i>Web (hostings)
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" name="services[]" value="mail" id="svc-mail">
+                                    <label class="form-check-label" for="svc-mail">
+                                        <i class="bi bi-envelope me-1 text-success"></i>Mail
+                                    </label>
+                                </div>
+                            </div>
+                            <small class="text-muted">Define que funciones tendra este nodo. Un nodo solo mail no recibira hostings web.</small>
                         </div>
 
                         <!-- Test Connection -->
@@ -1639,6 +1684,84 @@ function viewNodeStatus(nodeId, nodeName) {
         .catch(function() {
             document.getElementById('node-status-content').innerHTML = '<div class="text-danger">Error al obtener el estado</div>';
         });
+}
+
+function toggleNodeService(nodeId, service, confirmed) {
+    var form = new FormData();
+    form.append('_csrf_token', '<?= View::csrfToken() ?>');
+    form.append('node_id', nodeId);
+    form.append('service', service);
+    if (confirmed) form.append('confirmed', '1');
+
+    fetch('/settings/cluster/toggle-node-service', { method: 'POST', body: form })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                updateServiceBadges(nodeId, data.services);
+            } else if (data.confirm_required) {
+                var details = '<div class="text-start">' +
+                    '<p><strong>' + data.message + '</strong></p>' +
+                    '<div class="rounded p-3 mb-3" style="background:rgba(220,53,69,0.1);border:1px solid rgba(220,53,69,0.3);">' +
+                    '<p class="mb-1"><strong>¿Que pasa al desactivar?</strong></p>' +
+                    '<ul class="mb-0 small">' +
+                    '<li>El nodo <strong>deja de recibir</strong> nuevas acciones de ' + data.service + '</li>' +
+                    '<li>Los datos y servicios existentes <strong>no se borran</strong> — siguen funcionando</li>' +
+                    '<li>La replica de PostgreSQL <strong>no se toca</strong> — es independiente</li>' +
+                    '<li>Las acciones perdidas durante la pausa <strong>no se recuperan automaticamente</strong></li>' +
+                    '</ul></div>' +
+                    '<p class="small text-muted mb-0">' +
+                    (data.service === 'web'
+                        ? 'Si reactivas mas tarde, usa <strong>Sync Todo</strong> para recuperar los hostings que falten.'
+                        : 'Si reactivas mas tarde, los nuevos dominios/cuentas se enviaran normalmente. Los creados durante la pausa habra que reenviarlos.') +
+                    '</p></div>';
+                Swal.fire({
+                    title: 'Desactivar ' + data.service,
+                    html: details,
+                    icon: 'warning',
+                    showCancelButton: true,
+                    confirmButtonText: 'Si, desactivar',
+                    confirmButtonColor: '#dc3545',
+                    cancelButtonText: 'Cancelar',
+                    background: '#1e1e2e',
+                    color: '#fff',
+                    width: 520
+                }).then(function(result) {
+                    if (result.isConfirmed) toggleNodeService(nodeId, service, true);
+                });
+            } else if (data.setup_required) {
+                Swal.fire({
+                    title: 'Mail no configurado',
+                    html: '<p>' + data.error + '</p>' +
+                          '<a href="/mail?setup=1" class="btn btn-primary btn-sm mt-2">' +
+                          '<i class="bi bi-gear me-1"></i>Ir a configurar mail</a>',
+                    icon: 'info',
+                    showConfirmButton: false,
+                    showCancelButton: true,
+                    cancelButtonText: 'Cerrar',
+                    background: '#1e1e2e',
+                    color: '#fff'
+                });
+            } else {
+                alert('Error: ' + (data.error || 'Error desconocido'));
+            }
+        })
+        .catch(function(err) { alert('Error: ' + err.message); });
+}
+
+function updateServiceBadges(nodeId, services) {
+    var td = document.getElementById('node-services-' + nodeId);
+    if (!td) return;
+    var html = '';
+    ['web', 'mail'].forEach(function(svc) {
+        var active = services.indexOf(svc) !== -1;
+        var color = svc === 'web' ? (active ? 'bg-info' : 'bg-secondary opacity-50') : (active ? 'bg-success' : 'bg-secondary opacity-50');
+        var icon = svc === 'web' ? 'bi-globe' : 'bi-envelope';
+        html += '<span class="badge ' + color + (svc === 'web' ? ' me-1' : '') + '" style="font-size:0.7rem;cursor:pointer;" ' +
+                'onclick="toggleNodeService(' + nodeId + ',\'' + svc + '\')" ' +
+                'title="Click para ' + (active ? 'desactivar' : 'activar') + ' ' + svc + '">' +
+                '<i class="bi ' + icon + ' me-1"></i>' + svc + '</span>';
+    });
+    td.innerHTML = html;
 }
 
 function confirmRemoveNode(nodeId, nodeName) {

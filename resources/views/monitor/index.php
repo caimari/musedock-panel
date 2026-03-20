@@ -113,6 +113,35 @@
 </div>
 <?php endif; ?>
 
+<!-- Disk Usage Cards -->
+<?php if (!empty($disks)): ?>
+<div class="row g-3 mb-4">
+    <?php foreach ($disks as $disk):
+        $diskColor = $disk['percent'] >= 90 ? '#ef4444' : ($disk['percent'] >= 75 ? '#fbbf24' : '#22c55e');
+        $sizeH = $disk['size'] >= 1099511627776 ? round($disk['size']/1099511627776,1).'T' : round($disk['size']/1073741824,1).'G';
+        $usedH = $disk['used'] >= 1099511627776 ? round($disk['used']/1099511627776,1).'T' : round($disk['used']/1073741824,1).'G';
+        $freeB = $disk['size'] - $disk['used'];
+        $freeH = $freeB >= 1099511627776 ? round($freeB/1099511627776,1).'T' : round($freeB/1073741824,1).'G';
+    ?>
+    <div class="col-md-3 d-flex">
+        <div class="stat-card w-100 d-flex flex-column">
+            <div class="d-flex justify-content-between align-items-start">
+                <div>
+                    <div class="stat-value" style="color:<?= $diskColor ?>"><?= $disk['percent'] ?>%</div>
+                    <div class="stat-label"><?= View::e($disk['mount']) ?></div>
+                </div>
+                <i class="bi bi-hdd stat-icon"></i>
+            </div>
+            <div class="mt-1">
+                <small class="text-muted"><?= View::e($disk['device']) ?> — <?= $usedH ?> / <?= $sizeH ?> (free: <?= $freeH ?>)</small>
+            </div>
+            <div class="progress mt-auto pt-2"><div class="progress-bar" style="width:<?= min(100, $disk['percent']) ?>%;background:<?= $diskColor ?>"></div></div>
+        </div>
+    </div>
+    <?php endforeach; ?>
+</div>
+<?php endif; ?>
+
 <!-- Chart Controls + Main Chart -->
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
@@ -203,6 +232,42 @@
 </div>
 <?php endif; ?>
 
+<!-- Disk Charts -->
+<?php if (!empty($disks)): ?>
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-hdd me-2"></i>Disk Usage %</span>
+                <?php if (count($disks) > 1): ?>
+                <select id="diskSelect" class="form-select form-select-sm" style="width:auto">
+                    <?php foreach ($disks as $dk): ?>
+                    <option value="<?= View::e($dk['metric']) ?>" data-mount="<?= View::e($dk['mount']) ?>" data-io-metric="<?= View::e(str_replace('_percent', '', $dk['metric'])) ?>"><?= View::e($dk['device']) ?> (<?= View::e($dk['mount']) ?>)</option>
+                    <?php endforeach; ?>
+                </select>
+                <?php endif; ?>
+            </div>
+            <div class="card-body" style="height:200px;position:relative">
+                <canvas id="diskUsageChart"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-arrow-left-right me-2"></i>Disk I/O</span>
+                <?php if (count($disks) > 1): ?>
+                <small class="text-muted" id="diskIoLabel"><?= View::e($disks[0]['device']) ?> (<?= View::e($disks[0]['mount']) ?>)</small>
+                <?php endif; ?>
+            </div>
+            <div class="card-body" style="height:200px;position:relative">
+                <canvas id="diskIoChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Alerts Panel -->
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -268,6 +333,13 @@
                         <small class="text-muted">0 = disabled</small>
                     </div>
                 </div>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Disk threshold (%)</label>
+                        <input type="number" class="form-control form-control-sm" name="alert_disk" value="<?= View::e($alertSettings['disk'] ?? '90') ?>" min="0" max="100">
+                        <small class="text-muted">0 = disabled</small>
+                    </div>
+                </div>
                 <?php if (!empty($gpus)): ?>
                 <div class="row g-3 mb-3">
                     <div class="col-md-4">
@@ -300,10 +372,13 @@
     let currentRange = '1h';
     let netChart, cpuChart, ramChart;
     let gpuUtilChart, gpuTempChart, gpuMemChart, gpuPowerChart;
+    let diskUsageChart, diskIoChart;
     let refreshTimer = null;
     const GPU_COUNT = <?= count($gpus ?? []) ?>;
     const GPU_NAMES = <?= json_encode(array_map(fn($g) => $g['name'], $gpus ?? [])) ?>;
     const GPU_COLORS = ['#a855f7', '#ec4899', '#f97316', '#06b6d4'];
+    const DISKS = <?= json_encode(array_map(fn($d) => ['metric' => $d['metric'], 'ioMetric' => str_replace('_percent', '', $d['metric']), 'device' => $d['device'], 'mount' => $d['mount']], $disks ?? [])) ?>;
+    let currentDiskIdx = 0;
 
     // Panel timezone from Settings > Server (e.g. 'UTC', 'Asia/Tokyo', 'Europe/Madrid')
     const PANEL_TZ = '<?= View::e($panelTz ?? "UTC") ?>';
@@ -520,6 +595,60 @@
                 type: 'line', data: { datasets: gpuDatasets() }, options: gpuPwrOpts
             });
         }
+
+        // Disk charts
+        if (DISKS.length > 0 && document.getElementById('diskUsageChart')) {
+            const diskPctOpts = chartDefaults();
+            diskPctOpts.scales.y.max = 100;
+            diskPctOpts.scales.y.ticks.callback = (v) => v + '%';
+
+            diskUsageChart = new Chart(document.getElementById('diskUsageChart'), {
+                type: 'line',
+                data: {
+                    datasets: [{
+                        label: 'Usage %',
+                        data: [],
+                        borderColor: '#22c55e',
+                        backgroundColor: 'rgba(34,197,94,0.08)',
+                        fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5,
+                    }]
+                },
+                options: diskPctOpts
+            });
+
+            const diskIoOpts = chartDefaults();
+            diskIoOpts.scales.y.ticks.callback = (v) => fmtBytes(v);
+            diskIoOpts.plugins.tooltip.callbacks = {
+                title: (items) => {
+                    if (!items.length) return '';
+                    return fmtTzFull(items[0].parsed.x) + ' (' + PANEL_TZ + ')';
+                },
+                label: (ctx) => ctx.dataset.label + ': ' + fmtBytes(ctx.parsed.y)
+            };
+
+            diskIoChart = new Chart(document.getElementById('diskIoChart'), {
+                type: 'line',
+                data: {
+                    datasets: [
+                        {
+                            label: 'Read',
+                            data: [],
+                            borderColor: '#22c55e',
+                            backgroundColor: 'rgba(34,197,94,0.08)',
+                            fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5,
+                        },
+                        {
+                            label: 'Write',
+                            data: [],
+                            borderColor: '#f59e0b',
+                            backgroundColor: 'rgba(245,158,11,0.08)',
+                            fill: true, tension: 0.3, pointRadius: 0, borderWidth: 1.5,
+                        }
+                    ]
+                },
+                options: diskIoOpts
+            });
+        }
     }
 
     // ─── Load chart data ─────────────────────────────────────
@@ -584,6 +713,31 @@
             }
         } catch (e) {
             console.error('Error loading GPU charts:', e);
+        }
+    }
+
+    // ─── Load Disk chart data ───────────────────────────────
+    async function loadDiskCharts() {
+        if (DISKS.length === 0 || !diskUsageChart) return;
+        const disk = DISKS[currentDiskIdx];
+        try {
+            const [usageResp, readResp, writeResp] = await Promise.all([
+                fetch(`/monitor/api/metrics?host=${HOST}&metric=${disk.metric}&range=${currentRange}`),
+                fetch(`/monitor/api/metrics?host=${HOST}&metric=${disk.ioMetric}_read&range=${currentRange}`),
+                fetch(`/monitor/api/metrics?host=${HOST}&metric=${disk.ioMetric}_write&range=${currentRange}`)
+            ]);
+            const usageJson = await usageResp.json();
+            const readJson = await readResp.json();
+            const writeJson = await writeResp.json();
+
+            diskUsageChart.data.datasets[0].data = (usageJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+            diskUsageChart.update();
+
+            diskIoChart.data.datasets[0].data = (readJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+            diskIoChart.data.datasets[1].data = (writeJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+            diskIoChart.update();
+        } catch (e) {
+            console.error('Error loading disk charts:', e);
         }
     }
 
@@ -669,6 +823,10 @@
             badge.textContent = unack;
             badge.style.display = unack > 0 ? 'inline' : 'none';
 
+            // Store alerts globally for modal access
+            window._monitorAlerts = {};
+            alerts.forEach(a => { window._monitorAlerts[a.id] = a; });
+
             tbody.innerHTML = alerts.slice(0, 20).map(a => {
                 const ts = fmtTzFull(parseUTC(a.ts));
                 const statusBadge = a.acknowledged
@@ -676,11 +834,12 @@
                     : '<span class="badge bg-warning">Active</span>';
                 const ackBtn = a.acknowledged
                     ? ''
-                    : `<button class="btn btn-outline-success btn-sm" onclick="ackAlert(${a.id})"><i class="bi bi-check-lg"></i></button>`;
+                    : `<button class="btn btn-outline-success btn-sm" onclick="event.stopPropagation();ackAlert(${a.id})"><i class="bi bi-check-lg"></i></button>`;
+                const detailsIcon = a.details ? ' <i class="bi bi-search text-muted" style="font-size:0.7rem" title="View process details"></i>' : '';
 
-                return `<tr>
+                return `<tr style="cursor:pointer" onclick="showAlertDetails(${a.id})">
                     <td class="ps-3"><small class="text-muted">${esc(ts)}</small></td>
-                    <td><span class="badge bg-dark">${esc(a.type)}</span></td>
+                    <td><span class="badge bg-dark">${esc(a.type)}</span>${detailsIcon}</td>
                     <td><small>${esc(a.message)}</small></td>
                     <td><small class="text-muted">${a.value !== null ? Number(a.value).toFixed(1) : '-'}</small></td>
                     <td>${statusBadge}</td>
@@ -726,11 +885,47 @@
         }
     };
 
+    window.showAlertDetails = function(id) {
+        const a = window._monitorAlerts[id];
+        if (!a) return;
+        const ts = fmtTzFull(parseUTC(a.ts));
+        const detailsHtml = a.details
+            ? `<pre style="text-align:left;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;font-size:0.8rem;white-space:pre-wrap;word-break:break-all;max-height:400px;overflow-y:auto;border:1px solid #334155;">${esc(a.details)}</pre>`
+            : '<p class="text-muted">No process details available for this alert.</p>';
+
+        SwalDark.fire({
+            title: `${a.type}`,
+            html: `<div style="text-align:left;">
+                <p style="margin-bottom:0.5rem;"><strong>Time:</strong> ${esc(ts)}</p>
+                <p style="margin-bottom:0.5rem;"><strong>Message:</strong> ${esc(a.message)}</p>
+                <p style="margin-bottom:0.75rem;"><strong>Value:</strong> ${a.value !== null ? Number(a.value).toFixed(2) : '-'}</p>
+                <hr style="border-color:#334155;margin:0.75rem 0;">
+                <p style="margin-bottom:0.5rem;color:#94a3b8;font-size:0.85rem;"><i class="bi bi-cpu me-1"></i>Processes at time of alert:</p>
+                ${detailsHtml}
+            </div>`,
+            width: 700,
+            showConfirmButton: true,
+            confirmButtonText: 'Close',
+            showCancelButton: false,
+        });
+    };
+
     // ─── Event handlers ──────────────────────────────────────
     document.getElementById('ifaceSelect').addEventListener('change', function() {
         currentIface = this.value;
         loadNetChart();
     });
+
+    const diskSelectEl = document.getElementById('diskSelect');
+    if (diskSelectEl) {
+        diskSelectEl.addEventListener('change', function() {
+            currentDiskIdx = this.selectedIndex;
+            const opt = this.options[this.selectedIndex];
+            const ioLabel = document.getElementById('diskIoLabel');
+            if (ioLabel) ioLabel.textContent = opt.textContent;
+            loadDiskCharts();
+        });
+    }
 
     document.getElementById('rangeButtons').addEventListener('click', function(e) {
         const btn = e.target.closest('[data-range]');
@@ -741,6 +936,7 @@
         loadNetChart();
         loadSystemCharts();
         loadGpuCharts();
+        loadDiskCharts();
     });
 
     // ─── Auto-refresh ────────────────────────────────────────
@@ -751,6 +947,7 @@
             loadNetChart();
             loadSystemCharts();
             loadGpuCharts();
+            loadDiskCharts();
             updateCards();
             loadAlerts();
         }, interval);
@@ -761,6 +958,7 @@
     loadNetChart();
     loadSystemCharts();
     loadGpuCharts();
+    loadDiskCharts();
     updateCards();
     loadAlerts();
     startAutoRefresh();

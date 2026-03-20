@@ -1,0 +1,12 @@
+# Postfix: virtual_mailbox_maps lookup via PostgreSQL
+# Location: /etc/postfix/pgsql-virtual-mailboxes.cf
+# In main.cf: virtual_mailbox_maps = pgsql:/etc/postfix/pgsql-virtual-mailboxes.cf
+
+hosts = localhost:5433
+dbname = musedock_panel
+user = musedock_mail
+password = CHANGE_ME
+
+# Returns the Maildir path relative to virtual_mailbox_base
+# Postfix delivers to: virtual_mailbox_base + query_result
+query = SELECT CONCAT(md.domain, '/', ma.local_part, '/Maildir/') FROM mail_accounts ma JOIN mail_domains md ON md.id = ma.mail_domain_id WHERE ma.email = '%s' AND ma.status = 'active'

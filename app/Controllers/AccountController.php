@@ -10,6 +10,7 @@ use MuseDockPanel\View;
 use MuseDockPanel\Services\ClusterService;
 use MuseDockPanel\Services\SystemService;
 use MuseDockPanel\Services\LogService;
+use MuseDockPanel\Services\MailService;
 
 class AccountController
 {
@@ -144,7 +145,7 @@ class AccountController
 
             // Sync to cluster nodes if master
             if (Settings::get('cluster_role', 'standalone') === 'master') {
-                $nodes = ClusterService::getNodes();
+                $nodes = ClusterService::getWebNodes();
                 foreach ($nodes as $node) {
                     ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
                         'hosting_action' => 'create_hosting',
@@ -189,12 +190,32 @@ class AccountController
         $databases = Database::fetchAll("SELECT * FROM hosting_databases WHERE account_id = :id", ['id' => $params['id']]);
         $account['disk_used_mb'] = SystemService::getDiskUsage($account['home_dir']);
 
+        // Mail info for this domain
+        $mailDomain = Database::fetchOne(
+            "SELECT md.*, cn.name AS node_name FROM mail_domains md LEFT JOIN cluster_nodes cn ON cn.id = md.mail_node_id WHERE md.domain = :d",
+            ['d' => $account['domain']]
+        );
+        $mailAccounts = [];
+        if ($mailDomain) {
+            $mailAccounts = Database::fetchAll(
+                "SELECT email, status, quota_mb, used_mb FROM mail_accounts WHERE mail_domain_id = :mid ORDER BY email",
+                ['mid' => $mailDomain['id']]
+            );
+        }
+        $mailEnabled = Settings::get('mail_enabled', '') === '1';
+        $mailLocalConfigured = Settings::get('mail_local_configured', '') === '1';
+        $hasMailNodes = !empty(MailService::getMailNodes()) || $mailLocalConfigured;
+
         View::render('accounts/show', [
             'layout' => 'main',
             'pageTitle' => $account['domain'],
             'account' => $account,
             'domains' => $domains,
             'databases' => $databases,
+            'mailDomain' => $mailDomain,
+            'mailAccounts' => $mailAccounts,
+            'mailEnabled' => $mailEnabled,
+            'hasMailNodes' => $hasMailNodes,
         ]);
     }
 
@@ -352,7 +373,7 @@ class AccountController
         // Sync changes to cluster slave nodes
         if (Settings::get('cluster_role', 'standalone') === 'master') {
             $updated = array_merge($account, $dbFields); // Merge new values
-            $nodes = \MuseDockPanel\Services\ClusterService::getNodes();
+            $nodes = \MuseDockPanel\Services\ClusterService::getWebNodes();
             foreach ($nodes as $node) {
                 \MuseDockPanel\Services\ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
                     'hosting_action' => 'update_hosting_full',
@@ -520,11 +541,32 @@ class AccountController
         SystemService::suspendAccount($account['username'], $account['fpm_socket'], $account['domain']);
         Database::update('hosting_accounts', ['status' => 'suspended', 'updated_at' => date('Y-m-d H:i:s')], 'id = :id', ['id' => $params['id']]);
 
+        // Suspend mail domain if requested
+        $suspendMail = ($_POST['suspend_mail'] ?? '0') === '1';
+        if ($suspendMail) {
+            $mailDomain = Database::fetchOne(
+                "SELECT id FROM mail_domains WHERE domain = :d AND status = 'active'",
+                ['d' => $account['domain']]
+            );
+            if ($mailDomain) {
+                MailService::updateDomain((int)$mailDomain['id'], ['status' => 'suspended']);
+                // Suspend all accounts under this domain
+                $mailAccounts = Database::fetchAll(
+                    "SELECT id FROM mail_accounts WHERE mail_domain_id = :mid AND status = 'active'",
+                    ['mid' => $mailDomain['id']]
+                );
+                foreach ($mailAccounts as $ma) {
+                    MailService::updateAccount((int)$ma['id'], ['status' => 'suspended']);
+                }
+                LogService::log('mail.domain.suspend', $account['domain'], "Mail suspended with hosting (" . count($mailAccounts) . " accounts)");
+            }
+        }
+
         LogService::log('account.suspend', $account['domain'], "Suspended account");
 
-        // Sync suspension to cluster nodes
+        // Sync suspension to cluster nodes (only web nodes)
         if (Settings::get('cluster_role', 'standalone') === 'master') {
-            foreach (ClusterService::getNodes() as $node) {
+            foreach (ClusterService::getWebNodes() as $node) {
                 ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
                     'hosting_action' => 'suspend_hosting',
                     'hosting_data' => [
@@ -553,11 +595,28 @@ class AccountController
         SystemService::activateAccount($account['username'], $account['fpm_socket'], $account['domain'], $account['document_root'], $account['php_version']);
         Database::update('hosting_accounts', ['status' => 'active', 'updated_at' => date('Y-m-d H:i:s')], 'id = :id', ['id' => $params['id']]);
 
+        // Reactivate mail domain if it was suspended
+        $mailDomain = Database::fetchOne(
+            "SELECT id FROM mail_domains WHERE domain = :d AND status = 'suspended'",
+            ['d' => $account['domain']]
+        );
+        if ($mailDomain) {
+            MailService::updateDomain((int)$mailDomain['id'], ['status' => 'active']);
+            $suspendedAccounts = Database::fetchAll(
+                "SELECT id FROM mail_accounts WHERE mail_domain_id = :mid AND status = 'suspended'",
+                ['mid' => $mailDomain['id']]
+            );
+            foreach ($suspendedAccounts as $ma) {
+                MailService::updateAccount((int)$ma['id'], ['status' => 'active']);
+            }
+            LogService::log('mail.domain.activate', $account['domain'], "Mail reactivated with hosting (" . count($suspendedAccounts) . " accounts)");
+        }
+
         LogService::log('account.activate', $account['domain'], "Activated account");
 
-        // Sync activation to cluster nodes
+        // Sync activation to cluster nodes (only web nodes)
         if (Settings::get('cluster_role', 'standalone') === 'master') {
-            foreach (ClusterService::getNodes() as $node) {
+            foreach (ClusterService::getWebNodes() as $node) {
                 ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
                     'hosting_action' => 'activate_hosting',
                     'hosting_data' => [
@@ -765,7 +824,7 @@ class AccountController
 
         // Sync to cluster nodes if master
         if (Settings::get('cluster_role', 'standalone') === 'master') {
-            $nodes = \MuseDockPanel\Services\ClusterService::getNodes();
+            $nodes = \MuseDockPanel\Services\ClusterService::getWebNodes();
             foreach ($nodes as $node) {
                 \MuseDockPanel\Services\ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
                     'hosting_action' => 'create_hosting',
@@ -1024,13 +1083,27 @@ class AccountController
         }
 
         SystemService::deleteAccount($account['username'], $account['domain'], $account['home_dir']);
+
+        // Delete associated mail domain if requested or always (with logging)
+        $deleteMail = ($_POST['delete_mail'] ?? '0') === '1';
+        $mailDomain = Database::fetchOne(
+            "SELECT id, domain FROM mail_domains WHERE domain = :d",
+            ['d' => $account['domain']]
+        );
+        if ($mailDomain && $deleteMail) {
+            MailService::deleteDomain((int)$mailDomain['id']);
+            LogService::log('mail.domain.delete', $account['domain'], "Mail domain deleted with hosting account");
+        } elseif ($mailDomain) {
+            LogService::log('account.delete', $account['domain'], "Hosting deleted but mail domain preserved (mail_domain #{$mailDomain['id']})");
+        }
+
         Database::delete('hosting_accounts', 'id = :id', ['id' => $params['id']]);
 
         LogService::log('account.delete', $account['domain'], "Deleted account and system user: {$account['username']}");
 
-        // Sync deletion to cluster nodes
+        // Sync deletion to cluster nodes (only web nodes)
         if (Settings::get('cluster_role', 'standalone') === 'master') {
-            foreach (ClusterService::getNodes() as $node) {
+            foreach (ClusterService::getWebNodes() as $node) {
                 ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
                     'hosting_action' => 'delete_hosting',
                     'hosting_data' => [

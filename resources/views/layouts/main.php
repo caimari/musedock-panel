@@ -105,6 +105,9 @@
         <a href="/customers" class="<?= str_contains($pageTitle ?? '', 'Customer') ? 'active' : '' ?>">
             <i class="bi bi-people"></i> Customers
         </a>
+        <a href="/mail" class="<?= str_contains($pageTitle ?? '', 'Mail') ? 'active' : '' ?>">
+            <i class="bi bi-envelope"></i> Mail
+        </a>
         <a href="/system-users" class="<?= str_contains($pageTitle ?? '', 'System User') ? 'active' : '' ?>">
             <i class="bi bi-people-fill"></i> System Users
         </a>
@@ -188,7 +191,7 @@ const SwalDark = Swal.mixin({
 });
 
 // Confirm action helper
-function confirmAction(form, options) {
+function confirmAction(form, options, preSubmitFn) {
     SwalDark.fire({
         title: options.title || 'Are you sure?',
         text: options.text || '',
@@ -199,6 +202,7 @@ function confirmAction(form, options) {
         cancelButtonText: 'Cancel',
     }).then(function(result) {
         if (result.isConfirmed) {
+            if (typeof preSubmitFn === 'function') preSubmitFn();
             form.submit();
         }
     });

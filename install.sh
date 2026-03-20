@@ -291,6 +291,11 @@ t() {
                 snapshot_desc) text="(servicios, puertos, configs guardados antes de la instalacion)" ;;
                 uninstall_label) text="Desinstalar:" ;;
                 enjoy) text="Disfruta MuseDock Panel!" ;;
+                next_steps_header) text="SIGUIENTES PASOS (desde el panel):" ;;
+                next_steps_mail) text="Mail: Mail → Setup (local o nodo remoto)" ;;
+                next_steps_cluster) text="Cluster: Settings → Cluster (anadir nodos)" ;;
+                next_steps_replication) text="Replicacion: Settings → Replication (master/slave)" ;;
+                next_steps_hint) text="Todo se configura desde el panel web — no necesitas volver a SSH." ;;
                 firewall_header) text="ACCESO AL PANEL:" ;;
                 firewall_ufw_active) text="UFW esta activo en este servidor." ;;
                 firewall_iptables_active) text="iptables esta activo en este servidor (sin UFW)." ;;
@@ -569,6 +574,11 @@ t() {
                 snapshot_desc) text="(services, ports, configs saved before installation)" ;;
                 uninstall_label) text="Uninstall:" ;;
                 enjoy) text="Enjoy MuseDock Panel!" ;;
+                next_steps_header) text="NEXT STEPS (from the panel):" ;;
+                next_steps_mail) text="Mail: Mail → Setup (local or remote node)" ;;
+                next_steps_cluster) text="Cluster: Settings → Cluster (add nodes)" ;;
+                next_steps_replication) text="Replication: Settings → Replication (master/slave)" ;;
+                next_steps_hint) text="Everything is configured from the web panel — no need to come back to SSH." ;;
                 firewall_header) text="PANEL ACCESS:" ;;
                 firewall_ufw_active) text="UFW is active on this server." ;;
                 firewall_iptables_active) text="iptables is active on this server (no UFW)." ;;
@@ -2925,6 +2935,14 @@ echo -e "  ${GREEN}${BOLD}│                                                   
 echo -e "  ${GREEN}${BOLD}│   $(t firewall_make_sure "$PANEL_PORT")  │${NC}"
 echo -e "  ${GREEN}${BOLD}│                                                          │${NC}"
 echo -e "  ${GREEN}${BOLD}└──────────────────────────────────────────────────────────┘${NC}"
+echo ""
+echo -e "  ${CYAN}${BOLD}$(t next_steps_header)${NC}"
+echo ""
+echo -e "  ${CYAN}📧${NC}  $(t next_steps_mail)"
+echo -e "  ${CYAN}🖧${NC}  $(t next_steps_cluster)"
+echo -e "  ${CYAN}🔄${NC}  $(t next_steps_replication)"
+echo ""
+echo -e "  ${YELLOW}$(t next_steps_hint)${NC}"
 echo ""
 echo -e "  ${GREEN}${BOLD}$(t enjoy)${NC}"
 echo ""

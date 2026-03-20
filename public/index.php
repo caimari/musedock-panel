@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '0.7.8');
+define('PANEL_VERSION', '1.0.0');
 
 
 
@@ -160,6 +160,22 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/customers/{id}/update', 'CustomerController@update');
 \MuseDockPanel\Router::post('/customers/{id}/delete', 'CustomerController@delete');
 
+// Mail
+\MuseDockPanel\Router::get('/mail', 'MailController@index');
+\MuseDockPanel\Router::get('/mail/domains/create', 'MailController@domainCreate');
+\MuseDockPanel\Router::post('/mail/domains/store', 'MailController@domainStore');
+\MuseDockPanel\Router::get('/mail/domains/{id}', 'MailController@domainShow');
+\MuseDockPanel\Router::post('/mail/domains/{id}/delete', 'MailController@domainDelete');
+\MuseDockPanel\Router::post('/mail/domains/{id}/regenerate-dkim', 'MailController@domainRegenerateDkim');
+\MuseDockPanel\Router::get('/mail/domains/{id}/accounts/create', 'MailController@accountCreate');
+\MuseDockPanel\Router::post('/mail/domains/{id}/accounts/store', 'MailController@accountStore');
+\MuseDockPanel\Router::get('/mail/accounts/{account_id}/edit', 'MailController@accountEdit');
+\MuseDockPanel\Router::post('/mail/accounts/{account_id}/update', 'MailController@accountUpdate');
+\MuseDockPanel\Router::post('/mail/accounts/{account_id}/delete', 'MailController@accountDelete');
+\MuseDockPanel\Router::post('/mail/domains/{id}/aliases/store', 'MailController@aliasStore');
+\MuseDockPanel\Router::post('/mail/domains/{id}/aliases/{alias_id}/delete', 'MailController@aliasDelete');
+\MuseDockPanel\Router::get('/mail/nodes/health', 'MailController@nodeHealth');
+
 // Settings
 \MuseDockPanel\Router::get('/settings/services', 'SettingsController@services');
 \MuseDockPanel\Router::post('/settings/services/action', 'SettingsController@serviceAction');
@@ -255,6 +271,12 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/save-exclusions', 'ClusterController@saveExclusions');
 \MuseDockPanel\Router::post('/settings/cluster/mute-node-alerts', 'ClusterController@muteNodeAlerts');
 \MuseDockPanel\Router::post('/settings/cluster/unmute-node-alerts', 'ClusterController@unmuteNodeAlerts');
+\MuseDockPanel\Router::post('/settings/cluster/setup-mail-node', 'ClusterController@setupMailNode');
+\MuseDockPanel\Router::post('/settings/cluster/setup-mail-local', 'ClusterController@setupMailLocal');
+\MuseDockPanel\Router::get('/settings/cluster/mail-setup-progress', 'ClusterController@mailSetupProgress');
+\MuseDockPanel\Router::get('/settings/cluster/mail-setup-progress-local', 'ClusterController@mailSetupProgressLocal');
+\MuseDockPanel\Router::post('/settings/cluster/rotate-mail-db-password', 'ClusterController@rotateMailDbPassword');
+\MuseDockPanel\Router::post('/settings/cluster/toggle-node-service', 'ClusterController@toggleNodeService');
 
 // WireGuard
 \MuseDockPanel\Router::get('/settings/wireguard', 'WireGuardController@index');

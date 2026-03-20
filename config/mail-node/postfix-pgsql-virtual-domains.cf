@@ -1,0 +1,10 @@
+# Postfix: virtual_mailbox_domains lookup via PostgreSQL
+# Location: /etc/postfix/pgsql-virtual-domains.cf
+# In main.cf: virtual_mailbox_domains = pgsql:/etc/postfix/pgsql-virtual-domains.cf
+
+hosts = localhost:5433
+dbname = musedock_panel
+user = musedock_mail
+password = CHANGE_ME
+
+query = SELECT domain FROM mail_domains WHERE domain = '%s' AND status = 'active'
