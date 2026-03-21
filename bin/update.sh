@@ -52,9 +52,7 @@ if [ ! -x "$PHP_BIN" ]; then
 fi
 
 # Get current version
-CURRENT_VERSION=$($PHP_BIN -r "define('PANEL_ROOT','${PANEL_DIR}'); echo require('${PANEL_DIR}/public/index.php') ?? '';" 2>/dev/null || echo "unknown")
-# Actually read from the define
-CURRENT_VERSION=$(grep "PANEL_VERSION" "${PANEL_DIR}/public/index.php" | head -1 | grep -oP "'[^']+'" | tr -d "'")
+CURRENT_VERSION=$(sed -n "s/.*PANEL_VERSION'.*'\\([0-9][0-9.]*\\)'.*/\\1/p" "${PANEL_DIR}/public/index.php" | head -1)
 
 echo ""
 echo -e "${CYAN}${BOLD}"
@@ -101,6 +99,9 @@ if [ -n "$LOCAL_CHANGES" ]; then
     fi
 fi
 
+# Reset tracked storage files that may have local changes (runtime data, not config)
+git checkout -- storage/ 2>/dev/null || true
+
 # Checksum of this script BEFORE pull (to detect self-update)
 SELF_SCRIPT="${PANEL_DIR}/bin/update.sh"
 SELF_HASH_BEFORE=$(md5sum "$SELF_SCRIPT" 2>/dev/null | cut -d' ' -f1)
@@ -131,7 +132,7 @@ fi
 echo ""
 
 # Read new version
-NEW_VERSION=$(grep "PANEL_VERSION" "${PANEL_DIR}/public/index.php" | head -1 | grep -oP "'[^']+'" | tr -d "'")
+NEW_VERSION=$(sed -n "s/.*PANEL_VERSION'.*'\\([0-9][0-9.]*\\)'.*/\\1/p" "${PANEL_DIR}/public/index.php" | head -1)
 
 if [ -n "$NEW_VERSION" ] && [ "$NEW_VERSION" != "$CURRENT_VERSION" ]; then
     echo -e "  ${GREEN}${BOLD}Version: ${CURRENT_VERSION} → ${NEW_VERSION}${NC}"
