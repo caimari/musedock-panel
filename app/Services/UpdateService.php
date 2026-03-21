@@ -47,9 +47,17 @@ class UpdateService
     {
         $remote = Settings::get('update_remote_version', '');
         $lastCheck = (int) Settings::get('update_last_check', '0');
-        $hasUpdate = Settings::get('update_has_update', '0') === '1';
 
         if ($lastCheck === 0) return null;
+
+        // Re-evaluate against actual running version — the DB flag may be stale
+        // after an update that didn't clear it properly.
+        $hasUpdate = $remote && version_compare(PANEL_VERSION, $remote, '<');
+
+        // Auto-clear stale flag if we're already up to date
+        if (!$hasUpdate && Settings::get('update_has_update', '0') === '1') {
+            Settings::set('update_has_update', '0');
+        }
 
         return [
             'current'          => PANEL_VERSION,

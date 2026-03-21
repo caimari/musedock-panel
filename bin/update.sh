@@ -198,6 +198,24 @@ else
     warn "Panel service not running — start it with: systemctl start musedock-panel"
 fi
 
+# ============================================================
+# Step 5: Clear update flags in panel DB
+# ============================================================
+$PHP_BIN -r "
+define('PANEL_ROOT', '${PANEL_DIR}');
+spl_autoload_register(function (\$c) {
+    \$p = 'MuseDockPanel\\\\';
+    if (strncmp(\$p, \$c, strlen(\$p)) !== 0) return;
+    \$f = PANEL_ROOT.'/app/'.str_replace('\\\\','/',substr(\$c,strlen(\$p))).'.php';
+    if (file_exists(\$f)) require \$f;
+});
+if (file_exists(PANEL_ROOT.'/.env')) MuseDockPanel\Env::load(PANEL_ROOT.'/.env');
+MuseDockPanel\Settings::set('update_has_update', '0');
+MuseDockPanel\Settings::set('update_in_progress', '0');
+MuseDockPanel\Settings::set('update_remote_version', '${NEW_VERSION:-$CURRENT_VERSION}');
+MuseDockPanel\Settings::set('update_last_check', (string)time());
+" 2>/dev/null && ok "Update flags cleared" || warn "Could not clear update flags (non-critical)"
+
 echo ""
 echo -e "${GREEN}${BOLD}  Update complete!${NC}"
 echo -e "  Version: ${BOLD}${NEW_VERSION:-$CURRENT_VERSION}${NC}"
