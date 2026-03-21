@@ -1,5 +1,25 @@
 <?php use MuseDockPanel\View; ?>
 
+<?php $isSlave = ($clusterRole ?? '') === 'slave'; ?>
+
+<?php if ($isSlave): ?>
+<div class="card mb-4" style="border: 1px solid rgba(251,191,36,0.3);">
+    <div class="card-body py-3">
+        <i class="bi bi-info-circle text-warning me-2"></i>
+        <strong>Modo Slave:</strong>
+        <span class="text-muted">
+            Este servidor es un nodo slave. La configuracion y gestion del correo se realiza desde el panel master.
+            <?php
+                $masterIp = \MuseDockPanel\Settings::get('cluster_master_ip', '');
+                if ($masterIp):
+            ?>
+                <a href="https://<?= View::e($masterIp) ?>:8444/mail" class="text-info" target="_blank">Abrir panel master <i class="bi bi-box-arrow-up-right"></i></a>
+            <?php endif; ?>
+        </span>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Stats cards -->
 <div class="row g-3 mb-4">
     <div class="col-md-3">
@@ -37,7 +57,7 @@
 </div>
 
 <!-- Local Mail Server Status -->
-<?php if ($mailLocalConfigured ?? false): ?>
+<?php if (($mailLocalConfigured ?? false) && !$isSlave): ?>
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-pc-display me-2"></i>Servidor de Mail Local</span>
@@ -78,7 +98,7 @@
 <?php endif; ?>
 
 <!-- Mail Nodes Status (remote) -->
-<?php if (!empty($mailNodes)): ?>
+<?php if (!empty($mailNodes) && !$isSlave): ?>
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-hdd-network me-2"></i>Mail Nodes (remotos)</span>
@@ -125,23 +145,27 @@
 </div>
 <?php endif; ?>
 
-<?php if ($showSetup ?? false): ?>
-    <?php include __DIR__ . '/setup-node.php'; ?>
-<?php elseif (empty($mailNodes) && !($mailLocalConfigured ?? false)): ?>
-    <div class="card mb-0" style="border: 1px solid rgba(13, 202, 240, 0.25);">
-        <div class="card-body py-3">
-            <i class="bi bi-info-circle text-info me-2"></i>
-            <strong>Mail Setup:</strong> Para usar correo, primero
-            <a href="/mail?setup=1" class="text-info">configura un servidor de mail</a> (local o en un nodo remoto del cluster).
+<?php if (!$isSlave): ?>
+    <?php if ($showSetup ?? false): ?>
+        <?php include __DIR__ . '/setup-node.php'; ?>
+    <?php elseif (empty($mailNodes) && !($mailLocalConfigured ?? false)): ?>
+        <div class="card mb-0" style="border: 1px solid rgba(13, 202, 240, 0.25);">
+            <div class="card-body py-3">
+                <i class="bi bi-info-circle text-info me-2"></i>
+                <strong>Mail Setup:</strong> Para usar correo, primero
+                <a href="/mail?setup=1" class="text-info">configura un servidor de mail</a> (local o en un nodo remoto del cluster).
+            </div>
         </div>
-    </div>
+    <?php endif; ?>
 <?php endif; ?>
 
 <!-- Domains list -->
 <div class="mb-4"></div>
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h6 class="mb-0"><i class="bi bi-globe2 me-2"></i>Mail Domains</h6>
+    <?php if (!$isSlave): ?>
     <a href="/mail/domains/create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i> New Domain</a>
+    <?php endif; ?>
 </div>
 
 <div class="card">
@@ -150,7 +174,9 @@
             <div class="p-4 text-center text-muted">
                 <i class="bi bi-envelope" style="font-size: 2rem;"></i>
                 <p class="mt-2">No mail domains yet.</p>
+                <?php if (!$isSlave): ?>
                 <a href="/mail/domains/create" class="btn btn-primary btn-sm">Add first mail domain</a>
+                <?php endif; ?>
             </div>
         <?php else: ?>
             <table class="table table-hover mb-0">

@@ -12,21 +12,34 @@ use MuseDockPanel\Services\ClusterService;
 
 class MailController
 {
+    private static function isSlave(): bool
+    {
+        $role = Settings::get('cluster_role', '');
+        if ($role === '' || $role === 'standalone') $role = \MuseDockPanel\Env::get('PANEL_ROLE', 'standalone');
+        return $role === 'slave';
+    }
+
     // ═══════════════════════════════════════════════════════════
     // ─── Dashboard / Overview ────────────────────────────────
     // ═══════════════════════════════════════════════════════════
 
     public function index(): void
     {
+        $clusterRole = Settings::get('cluster_role', '');
+        if ($clusterRole === '') $clusterRole = \MuseDockPanel\Env::get('PANEL_ROLE', 'standalone');
+
         $stats = MailService::getStats();
         $domains = MailService::getDomains();
         $mailNodes = MailService::getMailNodes();
 
-        // Show setup form if ?setup=1 or if no mail nodes exist
-        $showSetup = ($_GET['setup'] ?? '') === '1';
+        // Slaves cannot setup mail — only show read-only data
+        $showSetup = false;
         $clusterNodes = [];
-        if ($showSetup || empty($mailNodes)) {
-            $clusterNodes = ClusterService::getNodes();
+        if ($clusterRole !== 'slave') {
+            $showSetup = ($_GET['setup'] ?? '') === '1';
+            if ($showSetup || empty($mailNodes)) {
+                $clusterNodes = ClusterService::getNodes();
+            }
         }
 
         $mailLocalConfigured = Settings::get('mail_local_configured', '') === '1';
@@ -42,6 +55,7 @@ class MailController
             'clusterNodes'        => $clusterNodes,
             'mailLocalConfigured' => $mailLocalConfigured,
             'mailLocalHostname'   => $mailLocalHostname,
+            'clusterRole'         => $clusterRole,
         ]);
     }
 
@@ -51,7 +65,7 @@ class MailController
 
     public function domainCreate(): void
     {
-        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+        if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave. Solo el Master puede crear dominios de mail.');
             Router::redirect('/mail');
             return;
@@ -70,7 +84,7 @@ class MailController
 
     public function domainStore(): void
     {
-        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+        if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
             Router::redirect('/mail');
             return;
@@ -134,12 +148,13 @@ class MailController
             'accounts'   => $accounts,
             'aliases'    => $aliases,
             'dnsRecords' => $dnsRecords,
+            'readOnly'   => self::isSlave(),
         ]);
     }
 
     public function domainDelete(array $params): void
     {
-        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+        if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
             Router::redirect('/mail');
             return;
@@ -160,6 +175,12 @@ class MailController
 
     public function domainRegenerateDkim(array $params): void
     {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave. La gestion de mail se realiza desde el master.');
+            Router::redirect('/mail');
+            return;
+        }
+
         $domain = MailService::getDomain((int)$params['id']);
         if (!$domain) {
             Flash::set('error', 'Dominio no encontrado.');
@@ -194,7 +215,7 @@ class MailController
 
     public function accountCreate(array $params): void
     {
-        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+        if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
             Router::redirect('/mail');
             return;
@@ -221,7 +242,7 @@ class MailController
 
     public function accountStore(array $params): void
     {
-        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+        if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
             Router::redirect('/mail');
             return;
@@ -275,6 +296,12 @@ class MailController
 
     public function accountEdit(array $params): void
     {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave. La gestion de mail se realiza desde el master.');
+            Router::redirect('/mail');
+            return;
+        }
+
         $account = MailService::getAccount((int)$params['account_id']);
         if (!$account) {
             Flash::set('error', 'Cuenta no encontrada.');
@@ -294,7 +321,7 @@ class MailController
 
     public function accountUpdate(array $params): void
     {
-        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+        if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
             Router::redirect('/mail');
             return;
@@ -331,7 +358,7 @@ class MailController
 
     public function accountDelete(array $params): void
     {
-        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+        if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
             Router::redirect('/mail');
             return;
@@ -358,7 +385,7 @@ class MailController
 
     public function aliasStore(array $params): void
     {
-        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+        if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
             Router::redirect('/mail');
             return;
@@ -387,7 +414,7 @@ class MailController
 
     public function aliasDelete(array $params): void
     {
-        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+        if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
             Router::redirect('/mail');
             return;

@@ -1,9 +1,11 @@
 <?php use MuseDockPanel\View; ?>
+<?php $ro = $readOnly ?? false; ?>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
         <a href="/mail" class="text-muted text-decoration-none"><i class="bi bi-arrow-left me-1"></i> Mail</a>
     </div>
+    <?php if (!$ro): ?>
     <div class="d-flex gap-2">
         <a href="/mail/domains/<?= $domain['id'] ?>/accounts/create" class="btn btn-primary btn-sm">
             <i class="bi bi-plus-lg me-1"></i> New Mailbox
@@ -14,7 +16,14 @@
             <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
         </form>
     </div>
+    <?php endif; ?>
 </div>
+
+<?php if ($ro): ?>
+<div class="alert py-2 mb-3" style="background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.25);color:#fbbf24;">
+    <i class="bi bi-eye me-1"></i> Solo lectura — la gestion de mail se realiza desde el panel master.
+</div>
+<?php endif; ?>
 
 <!-- Domain info -->
 <div class="row g-3 mb-4">
@@ -46,10 +55,12 @@
                         <?php else: ?>
                             <span class="badge bg-warning text-dark">Not generated</span>
                         <?php endif; ?>
+                        <?php if (!$ro): ?>
                         <form method="POST" action="/mail/domains/<?= $domain['id'] ?>/regenerate-dkim" class="d-inline ms-1">
                             <?= View::csrf() ?>
                             <button class="btn btn-outline-light btn-sm py-0 px-1" title="Regenerate DKIM"><i class="bi bi-arrow-clockwise"></i></button>
                         </form>
+                        <?php endif; ?>
                     </div>
                     <div class="col-md-4">
                         <div class="text-muted small">Created</div>
@@ -94,15 +105,19 @@
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-mailbox me-2"></i>Mailboxes</span>
+        <?php if (!$ro): ?>
         <a href="/mail/domains/<?= $domain['id'] ?>/accounts/create" class="btn btn-primary btn-sm py-0 px-2">
             <i class="bi bi-plus-lg"></i>
         </a>
+        <?php endif; ?>
     </div>
     <div class="card-body p-0">
         <?php if (empty($accounts)): ?>
             <div class="p-4 text-center text-muted">
                 <p>No mailboxes yet.</p>
+                <?php if (!$ro): ?>
                 <a href="/mail/domains/<?= $domain['id'] ?>/accounts/create" class="btn btn-primary btn-sm">Create first mailbox</a>
+                <?php endif; ?>
             </div>
         <?php else: ?>
             <table class="table table-hover mb-0">
@@ -114,7 +129,7 @@
                         <th>Used</th>
                         <th>Status</th>
                         <th>Last Login</th>
-                        <th></th>
+                        <?php if (!$ro): ?><th></th><?php endif; ?>
                     </tr>
                 </thead>
                 <tbody>
@@ -137,6 +152,7 @@
                             <span class="badge badge-<?= $a['status'] === 'active' ? 'active' : 'suspended' ?>"><?= $a['status'] ?></span>
                         </td>
                         <td class="text-muted small"><?= $a['last_login_at'] ?? 'Never' ?></td>
+                        <?php if (!$ro): ?>
                         <td>
                             <a href="/mail/accounts/<?= $a['id'] ?>/edit" class="btn btn-outline-light btn-sm"><i class="bi bi-pencil"></i></a>
                             <form method="POST" action="/mail/accounts/<?= $a['id'] ?>/delete" class="d-inline"
@@ -145,6 +161,7 @@
                                 <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
                             </form>
                         </td>
+                        <?php endif; ?>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
@@ -160,7 +177,7 @@
         <?php if (!empty($aliases)): ?>
             <table class="table table-sm mb-3">
                 <thead>
-                    <tr><th>Source</th><th>Destination</th><th>Catchall</th><th></th></tr>
+                    <tr><th>Source</th><th>Destination</th><th>Catchall</th><?php if (!$ro): ?><th></th><?php endif; ?></tr>
                 </thead>
                 <tbody>
                     <?php foreach ($aliases as $al): ?>
@@ -168,18 +185,23 @@
                         <td><?= View::e($al['source']) ?></td>
                         <td><?= View::e($al['destination']) ?></td>
                         <td><?= $al['is_catchall'] ? '<span class="badge bg-info">Yes</span>' : '-' ?></td>
+                        <?php if (!$ro): ?>
                         <td>
                             <form method="POST" action="/mail/domains/<?= $domain['id'] ?>/aliases/<?= $al['id'] ?>/delete" class="d-inline">
                                 <?= View::csrf() ?>
                                 <button class="btn btn-outline-danger btn-sm py-0"><i class="bi bi-trash"></i></button>
                             </form>
                         </td>
+                        <?php endif; ?>
                     </tr>
                     <?php endforeach; ?>
                 </tbody>
             </table>
+        <?php elseif ($ro): ?>
+            <p class="text-muted mb-0">No aliases configured.</p>
         <?php endif; ?>
 
+        <?php if (!$ro): ?>
         <form method="POST" action="/mail/domains/<?= $domain['id'] ?>/aliases/store" class="row g-2 align-items-end">
             <?= View::csrf() ?>
             <div class="col-md-4">
@@ -200,5 +222,6 @@
                 <button class="btn btn-primary btn-sm w-100"><i class="bi bi-plus-lg me-1"></i> Add</button>
             </div>
         </form>
+        <?php endif; ?>
     </div>
 </div>
