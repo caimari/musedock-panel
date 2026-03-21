@@ -1,0 +1,2 @@
+#!/bin/sh
+exec /usr/bin/nice -n 15 /usr/bin/ionice -c2 -n7 /usr/bin/rsync "$@"

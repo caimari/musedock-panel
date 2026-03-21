@@ -20,6 +20,47 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.1',
+                'date' => '2026-03-21',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'Optimizacion de lsyncd para reducir consumo de CPU — maxProcesses reducido de 4 a 2, delay aumentado de 5s a 15s para agrupar mas cambios por batch',
+                            'Wrapper rsync-nice — Todos los rsync de lsyncd se ejecutan con nice -n 15 e ionice -c2 -n7 (prioridad baja de CPU e I/O) para evitar picos de CPU',
+                            'Exclusiones por defecto en lsyncd — Se excluyen automaticamente .vscode-server, .claude, .git, node_modules, storage/logs, storage/framework/cache, sessions y views',
+                            'Graficos de monitoring con picos reales en rangos largos — Los rangos 7d/30d/1y ahora usan max_val (picos reales) en vez de avg_val para preservar los valores maximos',
+                            'Graficos de barras para rangos diarios — Los rangos 30d y 1y muestran barras finas en vez de lineas para no dar impresion de trafico constante cuando son picos puntuales',
+                            'Lineas separadoras de dia en graficos 7d — Lineas verticales punteadas en medianoche para separar visualmente los dias',
+                            'Linea de media en rangos 7d — Linea punteada adicional mostrando el valor promedio junto al valor pico para mejor contexto',
+                            'Etiquetas de eje X adaptadas por rango — 1h-24h muestra hora:minuto, 7d muestra dia, 30d muestra dia+mes, 1y muestra mes+año',
+                            'Snapshot de red en alertas NET_HIGH — Las alertas de red alta ahora incluyen conexiones TCP activas, procesos, dominios asociados e IPs via ss -tnp y DNS inverso',
+                            'Comandos completos de procesos en alertas — ps aux ww en vez de ps aux para mostrar lineas de comando sin truncar en emails y detalles del panel',
+                        ],
+                        'en' => [
+                            'lsyncd optimization to reduce CPU usage — maxProcesses reduced from 4 to 2, delay increased from 5s to 15s to batch more changes',
+                            'rsync-nice wrapper — All lsyncd rsync operations run with nice -n 15 and ionice -c2 -n7 (low CPU and I/O priority) to prevent CPU spikes',
+                            'Default lsyncd exclusions — Automatically excludes .vscode-server, .claude, .git, node_modules, storage/logs, storage/framework/cache, sessions and views',
+                            'Monitoring charts with real peaks in long ranges — 7d/30d/1y ranges now use max_val (real peaks) instead of avg_val to preserve maximum values',
+                            'Bar charts for daily ranges — 30d and 1y ranges show thin bars instead of lines to avoid implying constant traffic from point-in-time peaks',
+                            'Day separator lines in 7d charts — Dotted vertical lines at midnight to visually separate days',
+                            'Average line in 7d ranges — Additional dashed line showing average value alongside peak value for better context',
+                            'X-axis labels adapted per range — 1h-24h shows hour:minute, 7d shows day, 30d shows day+month, 1y shows month+year',
+                            'Network snapshot in NET_HIGH alerts — High network alerts now include active TCP connections, processes, associated domains and IPs via ss -tnp and reverse DNS',
+                            'Full process commands in alerts — ps aux ww instead of ps aux to show untruncated command lines in emails and panel details',
+                        ],
+                    ],
+                    'added' => [
+                        'es' => [
+                            'Regeneracion automatica de lsyncd via cluster-worker — Flag storage/lsyncd-regen.flag permite regenerar y recargar la configuracion de lsyncd sin acceso directo a root',
+                        ],
+                        'en' => [
+                            'Automatic lsyncd regeneration via cluster-worker — Flag storage/lsyncd-regen.flag allows regenerating and reloading lsyncd config without direct root access',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.0',
                 'date' => '2026-03-20',
                 'badge' => 'primary',

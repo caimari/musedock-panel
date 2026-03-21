@@ -3,4 +3,6 @@ storage/sessions/
 storage/cache/
 storage/logs/
 storage/*.lock
+storage/*.json
+storage/*.flag
 .env

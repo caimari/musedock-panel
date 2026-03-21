@@ -15,7 +15,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.0');
+define('PANEL_VERSION', '1.0.1');
 
 // Autoloader
 spl_autoload_register(function ($class) {
@@ -367,6 +367,34 @@ if ($hour === 3 && $minute < 2) {
         logMsg("  Cleaned {$cleaned} old completed queue items.");
     } catch (\Throwable $e) {
         logMsg("ERROR cleaning: " . $e->getMessage());
+    }
+}
+
+// ─── Step 6: Regenerate lsyncd config if flag file exists ─────
+$regenFlag = PANEL_ROOT . '/storage/lsyncd-regen.flag';
+if (file_exists($regenFlag)) {
+    logMsg("Lsyncd regen flag detected, regenerating config...");
+    try {
+        $syncMode = \MuseDockPanel\Services\FileSyncService::getConfig()['sync_mode'] ?? 'periodic';
+        if ($syncMode === 'lsyncd') {
+            $result = \MuseDockPanel\Services\FileSyncService::reloadLsyncd();
+            if ($result['ok']) {
+                logMsg("  Lsyncd config regenerated and reloaded.");
+            } else {
+                logMsg("  Lsyncd reload failed: " . ($result['error'] ?? '?'));
+            }
+        } else {
+            $result = \MuseDockPanel\Services\FileSyncService::generateLsyncdConfig();
+            if ($result['ok']) {
+                shell_exec('systemctl restart lsyncd 2>&1');
+                logMsg("  Lsyncd config regenerated and service restarted.");
+            } else {
+                logMsg("  Lsyncd config generation failed: " . ($result['error'] ?? '?'));
+            }
+        }
+        @unlink($regenFlag);
+    } catch (\Throwable $e) {
+        logMsg("ERROR regenerating lsyncd: " . $e->getMessage());
     }
 }
 

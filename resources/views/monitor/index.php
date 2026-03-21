@@ -388,13 +388,17 @@
     // All formatting is done by us via Intl.DateTimeFormat with PANEL_TZ.
     // This completely bypasses Chart.js date-fns adapter = zero TZ bugs.
 
-    const _tzFmtShort = new Intl.DateTimeFormat('es-ES', { timeZone: PANEL_TZ, hour: '2-digit', minute: '2-digit' });
-    const _tzFmtFull  = new Intl.DateTimeFormat('es-ES', { timeZone: PANEL_TZ, year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    const _tzFmtDay   = new Intl.DateTimeFormat('es-ES', { timeZone: PANEL_TZ, month: 'short', day: 'numeric' });
+    const _tzFmtShort   = new Intl.DateTimeFormat('es-ES', { timeZone: PANEL_TZ, hour: '2-digit', minute: '2-digit' });
+    const _tzFmtFull    = new Intl.DateTimeFormat('es-ES', { timeZone: PANEL_TZ, year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const _tzFmtDay     = new Intl.DateTimeFormat('es-ES', { timeZone: PANEL_TZ, month: 'short', day: 'numeric' });
+    const _tzFmtDayHour = new Intl.DateTimeFormat('es-ES', { timeZone: PANEL_TZ, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    const _tzFmtMonth   = new Intl.DateTimeFormat('es-ES', { timeZone: PANEL_TZ, month: 'short', year: '2-digit' });
 
-    function fmtTzShort(ms) { return _tzFmtShort.format(new Date(ms)); }
-    function fmtTzFull(ms)  { return _tzFmtFull.format(new Date(ms)); }
-    function fmtTzDay(ms)   { return _tzFmtDay.format(new Date(ms)); }
+    function fmtTzShort(ms)   { return _tzFmtShort.format(new Date(ms)); }
+    function fmtTzFull(ms)    { return _tzFmtFull.format(new Date(ms)); }
+    function fmtTzDay(ms)     { return _tzFmtDay.format(new Date(ms)); }
+    function fmtTzDayHour(ms) { return _tzFmtDayHour.format(new Date(ms)); }
+    function fmtTzMonth(ms)   { return _tzFmtMonth.format(new Date(ms)); }
 
     function parseUTC(epoch) {
         return Number(epoch) * 1000; // just convert to ms, keep as number
@@ -420,10 +424,76 @@
     }
 
     // ─── Chart theme ─────────────────────────────────────────
-    const gridColor = 'rgba(51,65,85,0.5)';
+    const gridColor = 'rgba(51,65,85,0.25)';
     const tickColor = '#64748b';
     const tooltipBg = '#1e293b';
     const tooltipBorder = '#334155';
+
+    // Plugin: draw vertical day-separator lines for 7d/30d/1y
+    // Plugin: draw vertical day/month separator lines
+    const dayLinesPlugin = {
+        id: 'dayLines',
+        afterDraw(chart) {
+            if (currentRange !== '7d') return;
+            const xScale = chart.scales.x;
+            if (!xScale) return;
+            const ctx = chart.ctx;
+            const yTop = chart.chartArea.top;
+            const yBottom = chart.chartArea.bottom;
+
+            const minMs = xScale.min;
+            const maxMs = xScale.max;
+            if (!minMs || !maxMs) return;
+
+            // Choose step: daily for 7d/30d, monthly for 1y
+            const rangeMs = maxMs - minMs;
+            const oneDay = 86400000;
+            let stepMs, maxLines;
+
+            if (currentRange === '1y') {
+                stepMs = oneDay * 30; // ~monthly
+                maxLines = 12;
+            } else if (currentRange === '30d') {
+                stepMs = oneDay;
+                maxLines = 31;
+            } else {
+                stepMs = oneDay;
+                maxLines = 8;
+            }
+
+            // Find first midnight in panel TZ
+            const tzDate = new Intl.DateTimeFormat('en-CA', { timeZone: PANEL_TZ, year: 'numeric', month: '2-digit', day: '2-digit' });
+            const parts = tzDate.formatToParts(new Date(minMs));
+            const y = +parts.find(p => p.type === 'year').value;
+            const m = +parts.find(p => p.type === 'month').value - 1;
+            const d = +parts.find(p => p.type === 'day').value;
+
+            let midnightMs = new Date(y, m, d).getTime();
+            const fmt = new Intl.DateTimeFormat('en-US', { timeZone: PANEL_TZ, hour: 'numeric', hour12: false });
+            const hourAtCursor = +fmt.format(new Date(midnightMs));
+            if (hourAtCursor !== 0) midnightMs -= hourAtCursor * 3600000;
+
+            ctx.save();
+            ctx.strokeStyle = 'rgba(100,116,139,0.3)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+
+            let drawn = 0;
+            for (let ms = midnightMs; ms <= maxMs && drawn < maxLines; ms += stepMs) {
+                if (ms < minMs) continue;
+                const x = xScale.getPixelForValue(ms);
+                if (x >= chart.chartArea.left && x <= chart.chartArea.right) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, yTop);
+                    ctx.lineTo(x, yBottom);
+                    ctx.stroke();
+                    drawn++;
+                }
+            }
+            ctx.restore();
+        }
+    };
+    Chart.register(dayLinesPlugin);
 
     function chartDefaults() {
         return {
@@ -455,15 +525,17 @@
                         color: tickColor,
                         maxTicksLimit: 12,
                         callback: function(value) {
-                            // Pick format based on range
-                            if (['30d','1y'].includes(currentRange)) return fmtTzDay(value);
-                            return fmtTzShort(value);
+                            if (currentRange === '1y') return fmtTzMonth(value);
+                            if (currentRange === '30d') return fmtTzDay(value);
+                            if (currentRange === '7d') return fmtTzDay(value);
+                            return fmtTzShort(value); // 1h, 6h, 24h — just hour:min
                         }
                     }
                 },
                 y: {
                     beginAtZero: true,
-                    grid: { color: gridColor },
+                    grid: { display: false, drawTicks: false, drawBorder: false },
+                    border: { display: false },
                     ticks: { color: tickColor }
                 }
             }
@@ -505,6 +577,30 @@
                         tension: 0.3,
                         pointRadius: 0,
                         borderWidth: 1.5,
+                    },
+                    {
+                        label: 'RX Avg',
+                        data: [],
+                        borderColor: 'rgba(34,197,94,0.35)',
+                        backgroundColor: 'transparent',
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 1,
+                        borderDash: [4, 4],
+                        hidden: false,
+                    },
+                    {
+                        label: 'TX Avg',
+                        data: [],
+                        borderColor: 'rgba(56,189,248,0.35)',
+                        backgroundColor: 'transparent',
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 1,
+                        borderDash: [4, 4],
+                        hidden: false,
                     }
                 ]
             },
@@ -518,16 +614,29 @@
         cpuChart = new Chart(document.getElementById('cpuChart'), {
             type: 'line',
             data: {
-                datasets: [{
-                    label: 'CPU %',
-                    data: [],
-                    borderColor: '#0ea5e9',
-                    backgroundColor: 'rgba(14,165,233,0.08)',
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 0,
-                    borderWidth: 1.5,
-                }]
+                datasets: [
+                    {
+                        label: 'CPU %',
+                        data: [],
+                        borderColor: '#0ea5e9',
+                        backgroundColor: 'rgba(14,165,233,0.08)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 1.5,
+                    },
+                    {
+                        label: 'CPU Avg',
+                        data: [],
+                        borderColor: 'rgba(14,165,233,0.35)',
+                        backgroundColor: 'transparent',
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 1,
+                        borderDash: [4, 4],
+                    }
+                ]
             },
             options: cpuOpts
         });
@@ -539,16 +648,29 @@
         ramChart = new Chart(document.getElementById('ramChart'), {
             type: 'line',
             data: {
-                datasets: [{
-                    label: 'RAM %',
-                    data: [],
-                    borderColor: '#f59e0b',
-                    backgroundColor: 'rgba(245,158,11,0.08)',
-                    fill: true,
-                    tension: 0.3,
-                    pointRadius: 0,
-                    borderWidth: 1.5,
-                }]
+                datasets: [
+                    {
+                        label: 'RAM %',
+                        data: [],
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'rgba(245,158,11,0.08)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 1.5,
+                    },
+                    {
+                        label: 'RAM Avg',
+                        data: [],
+                        borderColor: 'rgba(245,158,11,0.35)',
+                        backgroundColor: 'transparent',
+                        fill: false,
+                        tension: 0.3,
+                        pointRadius: 0,
+                        borderWidth: 1,
+                        borderDash: [4, 4],
+                    }
+                ]
             },
             options: ramOpts
         });
@@ -653,6 +775,9 @@
 
     // ─── Load chart data ─────────────────────────────────────
     async function loadNetChart() {
+        const isAggregated = ['7d', '30d', '1y'].includes(currentRange);
+        const isDaily = ['30d', '1y'].includes(currentRange);
+
         try {
             const [rxResp, txResp] = await Promise.all([
                 fetch(`/monitor/api/metrics?host=${HOST}&metric=net_${currentIface}_rx&range=${currentRange}`),
@@ -661,11 +786,73 @@
             const rxJson = await rxResp.json();
             const txJson = await txResp.json();
 
+            // value = max_val (peak) for aggregated, raw value for realtime
             const rxData = (rxJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
             const txData = (txJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
 
-            netChart.data.datasets[0].data = rxData;
-            netChart.data.datasets[1].data = txData;
+            if (isDaily) {
+                // Daily (30d/1y): thin overlapping bars — discrete peaks per day
+                const barBase = {
+                    type: 'bar', borderWidth: 1, pointRadius: 0, fill: false,
+                    barPercentage: 1, categoryPercentage: 1,
+                    maxBarThickness: 20,
+                    stack: 'overlap',
+                };
+
+                Object.assign(netChart.data.datasets[0], barBase);
+                netChart.data.datasets[0].data = txData; // TX behind (drawn first)
+                netChart.data.datasets[0].label = 'TX Peak';
+                netChart.data.datasets[0].backgroundColor = 'rgba(56,189,248,0.5)';
+                netChart.data.datasets[0].borderColor = '#38bdf8';
+
+                Object.assign(netChart.data.datasets[1], barBase);
+                netChart.data.datasets[1].data = rxData; // RX in front
+                netChart.data.datasets[1].label = 'RX Peak';
+                netChart.data.datasets[1].backgroundColor = 'rgba(34,197,94,0.7)';
+                netChart.data.datasets[1].borderColor = '#22c55e';
+
+                netChart.data.datasets[2].data = [];
+                netChart.data.datasets[3].data = [];
+
+                // Enable stacked mode but NOT summed (overlapping bars)
+                netChart.options.scales.x.stacked = true;
+                netChart.options.scales.y.stacked = false;
+            } else {
+                // Line chart for 1h/6h/24h/7d
+                netChart.data.datasets[0].data = rxData;
+                netChart.data.datasets[0].label = isAggregated ? 'RX Peak' : 'RX (In)';
+                netChart.data.datasets[0].type = 'line';
+                netChart.data.datasets[0].borderWidth = 1.5;
+                netChart.data.datasets[0].borderColor = '#22c55e';
+                netChart.data.datasets[0].backgroundColor = 'rgba(34,197,94,0.08)';
+                netChart.data.datasets[0].fill = true;
+                netChart.data.datasets[0].tension = 0.3;
+                netChart.data.datasets[0].pointRadius = 0;
+
+                netChart.data.datasets[1].data = txData;
+                netChart.data.datasets[1].label = isAggregated ? 'TX Peak' : 'TX (Out)';
+                netChart.data.datasets[1].type = 'line';
+                netChart.data.datasets[1].borderWidth = 1.5;
+                netChart.data.datasets[1].borderColor = '#38bdf8';
+                netChart.data.datasets[1].backgroundColor = 'rgba(56,189,248,0.08)';
+                netChart.data.datasets[1].fill = true;
+                netChart.data.datasets[1].tension = 0.3;
+                netChart.data.datasets[1].pointRadius = 0;
+
+                // Disable stacked mode for line charts
+                netChart.options.scales.x.stacked = false;
+                netChart.options.scales.y.stacked = false;
+
+                // Avg dashed lines only for 7d (hourly)
+                if (isAggregated) {
+                    netChart.data.datasets[2].data = (rxJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
+                    netChart.data.datasets[3].data = (txJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
+                } else {
+                    netChart.data.datasets[2].data = [];
+                    netChart.data.datasets[3].data = [];
+                }
+            }
+
             netChart.update();
 
             document.getElementById('chartEmpty').style.display = (rxData.length === 0 && txData.length === 0) ? 'block' : 'none';
@@ -676,6 +863,8 @@
     }
 
     async function loadSystemCharts() {
+        const isAggregated = ['7d', '30d', '1y'].includes(currentRange);
+        const isDaily = ['30d', '1y'].includes(currentRange);
         try {
             const [cpuResp, ramResp] = await Promise.all([
                 fetch(`/monitor/api/metrics?host=${HOST}&metric=cpu_percent&range=${currentRange}`),
@@ -684,8 +873,57 @@
             const cpuJson = await cpuResp.json();
             const ramJson = await ramResp.json();
 
-            cpuChart.data.datasets[0].data = (cpuJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
-            ramChart.data.datasets[0].data = (ramJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+            const cpuData = (cpuJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+            const ramData = (ramJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+
+            if (isDaily) {
+                // Daily (30d/1y): thin bars for peaks + dashed line for avg
+                const barProps = (bg, border) => ({
+                    type: 'bar', borderWidth: 1, backgroundColor: bg, borderColor: border,
+                    barPercentage: 1, categoryPercentage: 1, maxBarThickness: 20,
+                    pointRadius: 0, fill: false,
+                });
+
+                Object.assign(cpuChart.data.datasets[0], barProps('rgba(14,165,233,0.7)', '#0ea5e9'));
+                cpuChart.data.datasets[0].data = cpuData;
+                cpuChart.data.datasets[0].label = 'CPU Peak';
+                cpuChart.data.datasets[1].data = (cpuJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
+                cpuChart.data.datasets[1].label = 'CPU Avg';
+                cpuChart.data.datasets[1].type = 'line';
+
+                Object.assign(ramChart.data.datasets[0], barProps('rgba(245,158,11,0.7)', '#f59e0b'));
+                ramChart.data.datasets[0].data = ramData;
+                ramChart.data.datasets[0].label = 'RAM Peak';
+                ramChart.data.datasets[1].data = (ramJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
+                ramChart.data.datasets[1].label = 'RAM Avg';
+                ramChart.data.datasets[1].type = 'line';
+            } else {
+                // Line chart for 1h/6h/24h/7d
+                const lineProps = (color, bg) => ({
+                    type: 'line', borderWidth: 1.5, borderColor: color,
+                    backgroundColor: bg, fill: true, tension: 0.3, pointRadius: 0,
+                });
+
+                Object.assign(cpuChart.data.datasets[0], lineProps('#0ea5e9', 'rgba(14,165,233,0.08)'));
+                cpuChart.data.datasets[0].data = cpuData;
+                cpuChart.data.datasets[0].label = isAggregated ? 'CPU Peak' : 'CPU %';
+
+                Object.assign(ramChart.data.datasets[0], lineProps('#f59e0b', 'rgba(245,158,11,0.08)'));
+                ramChart.data.datasets[0].data = ramData;
+                ramChart.data.datasets[0].label = isAggregated ? 'RAM Peak' : 'RAM %';
+
+                // Avg dashed line only for 7d (hourly)
+                if (isAggregated) {
+                    cpuChart.data.datasets[1].data = (cpuJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
+                    cpuChart.data.datasets[1].label = 'CPU Avg';
+                    ramChart.data.datasets[1].data = (ramJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
+                    ramChart.data.datasets[1].label = 'RAM Avg';
+                } else {
+                    cpuChart.data.datasets[1].data = [];
+                    ramChart.data.datasets[1].data = [];
+                }
+            }
+
             cpuChart.update();
             ramChart.update();
         } catch (e) {
@@ -716,10 +954,17 @@
         }
     }
 
+    // Helper: check if current range uses aggregated data
+    function isAggregatedRange() {
+        return ['7d', '30d', '1y'].includes(currentRange);
+    }
+
     // ─── Load Disk chart data ───────────────────────────────
     async function loadDiskCharts() {
         if (DISKS.length === 0 || !diskUsageChart) return;
         const disk = DISKS[currentDiskIdx];
+        const isAgg = isAggregatedRange();
+        const isDaily = ['30d', '1y'].includes(currentRange);
         try {
             const [usageResp, readResp, writeResp] = await Promise.all([
                 fetch(`/monitor/api/metrics?host=${HOST}&metric=${disk.metric}&range=${currentRange}`),
@@ -730,11 +975,83 @@
             const readJson = await readResp.json();
             const writeJson = await writeResp.json();
 
+            // Disk usage %: always line (it's a slowly changing value)
             diskUsageChart.data.datasets[0].data = (usageJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+            diskUsageChart.data.datasets[0].type = 'line';
+            diskUsageChart.data.datasets[0].tension = isDaily ? 0 : 0.3;
+            diskUsageChart.data.datasets[0].pointRadius = isDaily ? 3 : 0;
             diskUsageChart.update();
 
-            diskIoChart.data.datasets[0].data = (readJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
-            diskIoChart.data.datasets[1].data = (writeJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+            const readData = (readJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+            const writeData = (writeJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+
+            if (isDaily) {
+                // Daily: thin overlapping bars for I/O peaks
+                const barBase = {
+                    type: 'bar', borderWidth: 1, pointRadius: 0, fill: false,
+                    barPercentage: 1, categoryPercentage: 1,
+                    maxBarThickness: 20, // max 20px wide regardless of data density
+                    stack: 'overlap', tension: 0,
+                };
+
+                Object.assign(diskIoChart.data.datasets[0], barBase);
+                diskIoChart.data.datasets[0].data = readData;
+                diskIoChart.data.datasets[0].label = 'Read Peak';
+                diskIoChart.data.datasets[0].backgroundColor = 'rgba(34,197,94,0.7)';
+                diskIoChart.data.datasets[0].borderColor = '#22c55e';
+
+                Object.assign(diskIoChart.data.datasets[1], barBase);
+                diskIoChart.data.datasets[1].data = writeData;
+                diskIoChart.data.datasets[1].label = 'Write Peak';
+                diskIoChart.data.datasets[1].backgroundColor = 'rgba(245,158,11,0.5)';
+                diskIoChart.data.datasets[1].borderColor = '#f59e0b';
+
+                diskIoChart.options.scales.x.stacked = true;
+                diskIoChart.options.scales.y.stacked = false;
+
+                // Clear avg lines
+                if (diskIoChart.data.datasets[2]) {
+                    diskIoChart.data.datasets[2].data = [];
+                    diskIoChart.data.datasets[3].data = [];
+                }
+            } else {
+                // Line chart for 1h/6h/24h/7d
+                const lineProps = (color, bg) => ({
+                    type: 'line', borderWidth: 1.5, borderColor: color,
+                    backgroundColor: bg, fill: true, tension: 0.3, pointRadius: 0,
+                });
+
+                Object.assign(diskIoChart.data.datasets[0], lineProps('#22c55e', 'rgba(34,197,94,0.08)'));
+                diskIoChart.data.datasets[0].data = readData;
+                diskIoChart.data.datasets[0].label = isAgg ? 'Read Peak' : 'Read';
+
+                Object.assign(diskIoChart.data.datasets[1], lineProps('#f59e0b', 'rgba(245,158,11,0.08)'));
+                diskIoChart.data.datasets[1].data = writeData;
+                diskIoChart.data.datasets[1].label = isAgg ? 'Write Peak' : 'Write';
+
+                diskIoChart.options.scales.x.stacked = false;
+                diskIoChart.options.scales.y.stacked = false;
+
+                // Avg lines for 7d (hourly)
+                if (isAgg && !isDaily) {
+                    if (!diskIoChart.data.datasets[2]) {
+                        diskIoChart.data.datasets.push({
+                            label: 'Read Avg', data: [], borderColor: 'rgba(34,197,94,0.35)',
+                            backgroundColor: 'transparent', fill: false, tension: 0.3,
+                            pointRadius: 0, borderWidth: 1, borderDash: [4, 4],
+                        }, {
+                            label: 'Write Avg', data: [], borderColor: 'rgba(245,158,11,0.35)',
+                            backgroundColor: 'transparent', fill: false, tension: 0.3,
+                            pointRadius: 0, borderWidth: 1, borderDash: [4, 4],
+                        });
+                    }
+                    diskIoChart.data.datasets[2].data = (readJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
+                    diskIoChart.data.datasets[3].data = (writeJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
+                } else if (diskIoChart.data.datasets[2]) {
+                    diskIoChart.data.datasets[2].data = [];
+                    diskIoChart.data.datasets[3].data = [];
+                }
+            }
             diskIoChart.update();
         } catch (e) {
             console.error('Error loading disk charts:', e);

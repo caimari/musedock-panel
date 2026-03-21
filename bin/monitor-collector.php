@@ -12,7 +12,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.0');
+define('PANEL_VERSION', '1.0.1');
 
 // Autoloader
 spl_autoload_register(function ($class) {
@@ -332,9 +332,10 @@ function getTopProcesses(string $type, int $limit = 5): string
     $lines = [];
     try {
         if ($type === 'CPU_HIGH') {
-            $output = shell_exec("ps aux --sort=-%cpu 2>/dev/null | head -" . ($limit + 1));
+            // ww = unlimited width, shows full command line
+            $output = shell_exec("ps aux ww --sort=-%cpu 2>/dev/null | head -" . ($limit + 1));
         } elseif ($type === 'RAM_HIGH') {
-            $output = shell_exec("ps aux --sort=-%mem 2>/dev/null | head -" . ($limit + 1));
+            $output = shell_exec("ps aux ww --sort=-%mem 2>/dev/null | head -" . ($limit + 1));
         } elseif (str_starts_with($type, 'GPU')) {
             $output = @shell_exec('nvidia-smi --query-compute-apps=pid,process_name,used_gpu_memory --format=csv,noheader,nounits 2>/dev/null');
             if (!empty($output)) {
@@ -349,6 +350,9 @@ function getTopProcesses(string $type, int $limit = 5): string
                 return implode("\n", $lines);
             }
             return "No GPU processes found.";
+        } elseif ($type === 'NET_HIGH') {
+            // Network alert: show top connections and processes using network
+            return getNetworkSnapshot($limit);
         } else {
             return '';
         }
@@ -364,7 +368,7 @@ function getTopProcesses(string $type, int $limit = 5): string
                     $pid  = $cols[1];
                     $cpu  = $cols[2];
                     $mem  = $cols[3];
-                    $cmd  = $cols[10]; // Full command line, no truncation
+                    $cmd  = $cols[10]; // Full command line (ww = no truncation)
                     $lines[] = "  PID {$pid} ({$user}) CPU:{$cpu}% MEM:{$mem}% — {$cmd}";
                 }
             }
@@ -374,6 +378,181 @@ function getTopProcesses(string $type, int $limit = 5): string
     }
 
     return !empty($lines) ? implode("\n", $lines) : '';
+}
+
+/**
+ * Capture network snapshot: active connections, processes, and associated domains
+ */
+function getNetworkSnapshot(int $limit = 10): string
+{
+    $lines = [];
+
+    // 1. Get active TCP connections with process info
+    //    ss -tnp shows: State, Recv-Q, Send-Q, Local Address:Port, Peer Address:Port, Process
+    $ssOutput = shell_exec("ss -tnp 2>/dev/null");
+    if (!empty($ssOutput)) {
+        $connections = [];
+        $ssRows = explode("\n", trim($ssOutput));
+        array_shift($ssRows); // Remove header
+
+        foreach ($ssRows as $ssRow) {
+            $cols = preg_split('/\s+/', trim($ssRow));
+            if (count($cols) < 5) continue;
+
+            $state = $cols[0];
+            $recvQ = (int)$cols[1];
+            $sendQ = (int)$cols[2];
+            $local = $cols[3];
+            $peer  = $cols[4];
+            $proc  = isset($cols[5]) ? $cols[5] : '';
+
+            // Extract process name and PID from users:(("caddy",pid=1234,fd=5))
+            $procName = '-';
+            $pid = '-';
+            if (preg_match('/\("([^"]+)",pid=(\d+)/', $proc, $pm)) {
+                $procName = $pm[1];
+                $pid = $pm[2];
+            }
+
+            // Extract peer IP (without port)
+            $peerIp = preg_replace('/:\d+$/', '', $peer);
+            // For IPv6-mapped IPv4, extract the IPv4 part
+            $peerIp = preg_replace('/^::ffff:/', '', $peerIp);
+
+            // Queue sizes indicate data in flight
+            $queueTotal = $recvQ + $sendQ;
+
+            $connections[] = [
+                'state'    => $state,
+                'recvQ'    => $recvQ,
+                'sendQ'    => $sendQ,
+                'queue'    => $queueTotal,
+                'local'    => $local,
+                'peer'     => $peer,
+                'peerIp'   => $peerIp,
+                'process'  => $procName,
+                'pid'      => $pid,
+            ];
+        }
+
+        // Sort by queue size (most active data transfer first)
+        usort($connections, fn($a, $b) => $b['queue'] <=> $a['queue']);
+
+        // Count connections per process
+        $procCounts = [];
+        foreach ($connections as $c) {
+            $key = $c['process'];
+            $procCounts[$key] = ($procCounts[$key] ?? 0) + 1;
+        }
+        arsort($procCounts);
+
+        $lines[] = "Connections by process:";
+        $i = 0;
+        foreach ($procCounts as $proc => $count) {
+            if ($i++ >= 8) break;
+            $lines[] = "  {$proc}: {$count} connections";
+        }
+
+        // Show top connections with data in queues
+        $topConns = array_filter($connections, fn($c) => $c['queue'] > 0);
+        if (!empty($topConns)) {
+            $lines[] = "";
+            $lines[] = "Active data transfers (by queue):";
+            $shown = 0;
+            foreach ($topConns as $c) {
+                if ($shown++ >= $limit) break;
+                $recvH = $c['recvQ'] > 0 ? formatDiskSize($c['recvQ']) : '0';
+                $sendH = $c['sendQ'] > 0 ? formatDiskSize($c['sendQ']) : '0';
+                $lines[] = "  {$c['process']} (PID {$c['pid']}) {$c['local']} → {$c['peer']} recv={$recvH} send={$sendH}";
+            }
+        }
+
+        // Show top connections (by volume, even without queue)
+        $lines[] = "";
+        $lines[] = "Top {$limit} connections:";
+        $shown = 0;
+        foreach ($connections as $c) {
+            if ($shown++ >= $limit) break;
+            $lines[] = "  {$c['process']} (PID {$c['pid']}) {$c['state']} {$c['local']} → {$c['peer']}";
+        }
+    }
+
+    // 2. Try to identify domains from peer IPs using Caddy/panel vhosts
+    //    Match peer IPs to hosted domains
+    $peerIps = array_unique(array_column($connections ?? [], 'peerIp'));
+    if (!empty($peerIps)) {
+        // Get all hosted domains with their IPs (reverse DNS or panel data)
+        $domainMap = identifyDomainsFromConnections($peerIps);
+        if (!empty($domainMap)) {
+            $lines[] = "";
+            $lines[] = "Identified domains/hosts:";
+            foreach ($domainMap as $ip => $info) {
+                $lines[] = "  {$ip} → {$info}";
+            }
+        }
+    }
+
+    // 3. Top processes by network file descriptors (socket count)
+    $netProcs = shell_exec("ss -tnp 2>/dev/null | grep -oP 'pid=\K\d+' | sort | uniq -c | sort -rn | head -5 2>/dev/null");
+    if (!empty($netProcs)) {
+        $lines[] = "";
+        $lines[] = "Top processes by socket count:";
+        foreach (explode("\n", trim($netProcs)) as $np) {
+            $np = trim($np);
+            if (preg_match('/^(\d+)\s+(\d+)$/', $np, $npm)) {
+                $sockCount = $npm[1];
+                $npid = $npm[2];
+                // Get process command
+                $cmdline = @file_get_contents("/proc/{$npid}/cmdline");
+                $cmd = $cmdline ? str_replace("\0", ' ', trim($cmdline)) : '(unknown)';
+                $lines[] = "  PID {$npid}: {$sockCount} sockets — {$cmd}";
+            }
+        }
+    }
+
+    return !empty($lines) ? implode("\n", $lines) : 'No network data available.';
+}
+
+/**
+ * Try to identify domains from peer IPs via reverse DNS and panel data
+ */
+function identifyDomainsFromConnections(array $ips): array
+{
+    $result = [];
+    $checked = 0;
+
+    foreach ($ips as $ip) {
+        if ($checked >= 20) break; // Limit to avoid slowdown
+        if (empty($ip) || $ip === '127.0.0.1' || $ip === '::1') continue;
+
+        // Try reverse DNS (with short timeout)
+        $hostname = @gethostbyaddr($ip);
+        if ($hostname && $hostname !== $ip) {
+            $result[$ip] = $hostname;
+        }
+        $checked++;
+    }
+
+    // Also check if any IPs match hosted accounts in the panel
+    try {
+        $accounts = Database::fetchAll(
+            "SELECT domain, ip FROM hosting_accounts WHERE ip IS NOT NULL AND ip != '' AND suspended = false LIMIT 200"
+        );
+        $domainByIp = [];
+        foreach ($accounts as $acc) {
+            $domainByIp[$acc['ip']][] = $acc['domain'];
+        }
+        foreach ($ips as $ip) {
+            if (isset($domainByIp[$ip])) {
+                $domains = implode(', ', array_slice($domainByIp[$ip], 0, 3));
+                $result[$ip] = ($result[$ip] ?? $ip) . " [hosted: {$domains}]";
+            }
+        }
+    } catch (\Throwable $e) {
+        // Skip if table doesn't exist or other error
+    }
+
+    return $result;
 }
 
 /**

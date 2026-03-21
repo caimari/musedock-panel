@@ -29,9 +29,9 @@ class MonitorService
             );
         }
 
-        // Hourly or daily tables
+        // Hourly or daily tables — use max_val as main value to preserve peaks
         return Database::fetchAll(
-            "SELECT {$epochExpr} AS ts, avg_val AS value, max_val, min_val FROM {$table}
+            "SELECT {$epochExpr} AS ts, max_val AS value, avg_val, min_val FROM {$table}
              WHERE host = :host AND metric = :metric AND ts >= NOW() - INTERVAL '{$interval}'
              ORDER BY ts ASC",
             ['host' => $host, 'metric' => $metric]
