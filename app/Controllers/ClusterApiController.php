@@ -111,6 +111,9 @@ class ClusterApiController
                 'mail_rotate_db_password'  => MailService::nodeRotateDbPassword($payload),
                 'mail_check_configured'   => MailService::nodeCheckConfigured(),
 
+                // ── Standby management ─────────────────────
+                'set-standby' => $this->handleSetStandby($payload),
+
                 default            => ['ok' => false, 'message' => "Unknown action: {$action}"],
             };
 
@@ -161,5 +164,28 @@ class ClusterApiController
         }
 
         return $result;
+    }
+
+    /**
+     * Handle standby mode toggling from master.
+     */
+    private function handleSetStandby(array $payload): array
+    {
+        $enabled = !empty($payload['enabled']);
+        $reason = $payload['reason'] ?? '';
+
+        Settings::set('cluster_self_standby', $enabled ? '1' : '0');
+
+        if ($enabled) {
+            // Clear alert counters so they don't resume mid-escalation when reactivated
+            Settings::set('cluster_master_down_alerted', '');
+            Settings::set('cluster_master_down_alert_count', '0');
+            LogService::log('cluster.standby', 'self', "Puesto en standby por master: {$reason}");
+        } else {
+            Settings::set('cluster_self_standby', '0');
+            LogService::log('cluster.standby', 'self', 'Reactivado por master');
+        }
+
+        return ['ok' => true, 'message' => $enabled ? 'Standby activado' : 'Standby desactivado'];
     }
 }

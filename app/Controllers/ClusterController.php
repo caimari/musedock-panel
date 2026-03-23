@@ -1098,6 +1098,17 @@ class ClusterController
                 FileSyncService::reloadLsyncd();
             }
 
+            // Notify the slave node to enter standby mode (short timeout — node may be unreachable)
+            try {
+                ClusterService::callNodeDirect(
+                    rtrim($node['api_url'], '/'),
+                    \MuseDockPanel\Services\ReplicationService::decryptPassword($node['auth_token']),
+                    'POST', 'api/cluster/action',
+                    ['action' => 'set-standby', 'payload' => ['enabled' => true, 'reason' => $reason ?: 'Mantenimiento']],
+                    5 // 5s timeout
+                );
+            } catch (\Throwable) {} // non-critical — node may already be unreachable
+
             LogService::log('cluster.standby', $node['name'], "Nodo en standby: {$reason}");
             echo json_encode(['ok' => true, 'message' => "Nodo {$node['name']} en standby. Sync, cola y alertas pausadas."]);
         } else {
@@ -1113,6 +1124,17 @@ class ClusterController
             Database::update('cluster_nodes', [
                 'metadata' => json_encode($meta),
             ], 'id = :id', ['id' => $nodeId]);
+
+            // Notify the slave node to exit standby mode (short timeout to avoid blocking)
+            try {
+                ClusterService::callNodeDirect(
+                    rtrim($node['api_url'], '/'),
+                    \MuseDockPanel\Services\ReplicationService::decryptPassword($node['auth_token']),
+                    'POST', 'api/cluster/action',
+                    ['action' => 'set-standby', 'payload' => ['enabled' => false]],
+                    5 // 5s timeout — don't block if slave is slow
+                );
+            } catch (\Throwable) {} // non-critical
 
             // Regenerate lsyncd config including reactivated node and restart
             FileSyncService::reloadLsyncd();
