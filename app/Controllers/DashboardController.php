@@ -35,6 +35,7 @@ class DashboardController
                 'role'             => $clusterRole,
                 'master_ip'        => Settings::get('cluster_master_ip', ''),
                 'master_last_hb'   => Settings::get('cluster_master_last_heartbeat', ''),
+                'self_standby'     => Settings::get('cluster_self_standby', '0') === '1',
             ];
         }
 

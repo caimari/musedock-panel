@@ -295,6 +295,15 @@
                 </a>
             </div>
             <div class="card-body py-2">
+                <?php if ($cRole === 'slave' && !empty($clusterInfo['self_standby'])): ?>
+                    <div class="alert alert-warning mb-2 py-2 d-flex align-items-center gap-2" style="background:rgba(251,191,36,0.15);border-color:rgba(251,191,36,0.3);color:#fbbf24;">
+                        <i class="bi bi-pause-circle-fill fs-5"></i>
+                        <div>
+                            <strong>Nodo en Standby</strong> — El master ha pausado este nodo. No se reciben sincronizaciones de archivos, BD ni cola.
+                            El heartbeat sigue activo para mantener la conexion.
+                        </div>
+                    </div>
+                <?php endif; ?>
                 <?php if ($cRole === 'slave' && $mIp): ?>
                     <div class="d-flex align-items-center gap-3">
                         <i class="bi bi-shield-check fs-4 text-info"></i>
