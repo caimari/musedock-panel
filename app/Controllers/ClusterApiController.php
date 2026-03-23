@@ -46,6 +46,20 @@ class ClusterApiController
             Settings::set('cluster_master_last_heartbeat', date('Y-m-d H:i:s'));
         }
 
+        // Sync standby state from master — every heartbeat carries this flag
+        $masterSaysStandby = ($_GET['standby'] ?? '0') === '1';
+        $currentStandby = Settings::get('cluster_self_standby', '0') === '1';
+        if ($masterSaysStandby !== $currentStandby) {
+            Settings::set('cluster_self_standby', $masterSaysStandby ? '1' : '0');
+            if ($masterSaysStandby) {
+                Settings::set('cluster_master_down_alerted', '');
+                Settings::set('cluster_master_down_alert_count', '0');
+            }
+            LogService::log('cluster.standby', 'self', $masterSaysStandby
+                ? 'Standby activado via heartbeat del master'
+                : 'Standby desactivado via heartbeat del master');
+        }
+
         echo json_encode([
             'ok'           => true,
             'timestamp'    => date('Y-m-d H:i:s'),

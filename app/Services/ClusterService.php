@@ -463,7 +463,10 @@ class ClusterService
 
     public static function sendHeartbeat(int $nodeId): array
     {
-        $result = self::callNode($nodeId, 'GET', 'api/cluster/heartbeat');
+        $node = self::getNode($nodeId);
+        $isStandby = !empty($node['standby']) ? '1' : '0';
+
+        $result = self::callNode($nodeId, 'GET', "api/cluster/heartbeat?standby={$isStandby}");
 
         if ($result['ok']) {
             $remoteData = $result['data'] ?? [];
@@ -489,23 +492,14 @@ class ClusterService
         $summary = [];
 
         foreach ($nodes as $node) {
-            // Skip standby nodes — no heartbeat needed
-            if (!empty($node['standby'])) {
-                $summary[] = [
-                    'id'     => $node['id'],
-                    'name'   => $node['name'],
-                    'ok'     => true,
-                    'status' => 'standby',
-                    'error'  => '',
-                ];
-                continue;
-            }
+            // Always send heartbeat — even to standby nodes (carries standby flag)
             $result = self::sendHeartbeat((int)$node['id']);
+            $status = !empty($node['standby']) ? 'standby' : ($result['ok'] ? 'online' : 'offline');
             $summary[] = [
                 'id'     => $node['id'],
                 'name'   => $node['name'],
                 'ok'     => $result['ok'],
-                'status' => $result['ok'] ? 'online' : 'offline',
+                'status' => $status,
                 'error'  => $result['error'] ?? '',
             ];
         }
