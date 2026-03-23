@@ -1113,7 +1113,7 @@ class ClusterController
             echo json_encode(['ok' => true, 'message' => "Nodo {$node['name']} en standby. Sync, cola y alertas pausadas."]);
         } else {
             Database::update('cluster_nodes', [
-                'standby'        => false,
+                'standby'        => 0,
                 'standby_since'  => null,
                 'standby_reason' => null,
             ], 'id = :id', ['id' => $nodeId]);
