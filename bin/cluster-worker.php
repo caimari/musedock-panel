@@ -15,7 +15,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.1');
+define('PANEL_VERSION', '1.0.2');
 
 // Autoloader
 spl_autoload_register(function ($class) {
@@ -280,6 +280,13 @@ try {
 // ─── Step 4: Slave — detect master down ──────────────────────
 $clusterRole = Settings::get('cluster_role', 'standalone');
 if ($clusterRole === 'slave') {
+
+    // If this slave is in standby mode, skip master-down checks entirely
+    $selfStandby = Settings::get('cluster_self_standby', '0') === '1';
+    if ($selfStandby) {
+        logMsg("Slave in standby mode — skipping master heartbeat check.");
+    } else {
+
     logMsg("Checking master heartbeat (slave mode)...");
     try {
         $masterLastHb = Settings::get('cluster_master_last_heartbeat', '');
@@ -290,11 +297,23 @@ if ($clusterRole === 'slave') {
             $age = time() - strtotime($masterLastHb);
 
             if ($age > $timeoutSec) {
-                // Master is down — check if we already alerted recently (avoid spam)
+                // Master is down — escalating re-alert intervals to avoid spam
                 $lastAlert = Settings::get('cluster_master_down_alerted', '');
                 $alertAge = $lastAlert ? (time() - strtotime($lastAlert)) : 99999;
+                $alertCount = (int)Settings::get('cluster_master_down_alert_count', '0');
 
-                if ($alertAge > $timeoutSec) {
+                // Escalation: 1st immediate, then 1h x6, then 6h x4, then daily
+                if ($alertCount === 0) {
+                    $reAlertInterval = 0; // first alert: immediate
+                } elseif ($alertCount <= 6) {
+                    $reAlertInterval = 3600; // 1 hour
+                } elseif ($alertCount <= 10) {
+                    $reAlertInterval = 21600; // 6 hours
+                } else {
+                    $reAlertInterval = 86400; // daily
+                }
+
+                if ($alertAge > $reAlertInterval) {
                     // Send alert via configured channels
                     $notifyEmail = Settings::get('cluster_slave_notify_email', '1') === '1';
                     $notifyTelegram = Settings::get('cluster_slave_notify_telegram', '1') === '1';
@@ -319,8 +338,9 @@ if ($clusterRole === 'slave') {
                     }
 
                     Settings::set('cluster_master_down_alerted', date('Y-m-d H:i:s'));
-                    LogService::log('cluster.alert', 'master-down', "Master {$masterIp} sin heartbeat desde hace " . round($age / 60) . " min");
-                    logMsg("  ALERT: Master {$masterIp} down for " . round($age / 60) . " min. Notification sent.");
+                    Settings::set('cluster_master_down_alert_count', (string)($alertCount + 1));
+                    LogService::log('cluster.alert', 'master-down', "Master {$masterIp} sin heartbeat desde hace " . round($age / 60) . " min (alerta #{$alertCount})");
+                    logMsg("  ALERT #{$alertCount}: Master {$masterIp} down for " . round($age / 60) . " min. Notification sent.");
 
                     // Auto-failover if enabled
                     $autoFailover = Settings::get('cluster_auto_failover', '0') === '1';
@@ -343,9 +363,10 @@ if ($clusterRole === 'slave') {
                     logMsg("  Master down (already alerted " . round($alertAge / 60) . " min ago).");
                 }
             } else {
-                // Master is alive — clear alert flag if set
+                // Master is alive — clear alert flags
                 if (Settings::get('cluster_master_down_alerted', '')) {
                     Settings::set('cluster_master_down_alerted', '');
+                    Settings::set('cluster_master_down_alert_count', '0');
                 }
                 logMsg("  Master {$masterIp} alive (last heartbeat {$age}s ago).");
             }
@@ -355,6 +376,8 @@ if ($clusterRole === 'slave') {
     } catch (\Throwable $e) {
         logMsg("ERROR checking master: " . $e->getMessage());
     }
+
+    } // end if (!$selfStandby)
 }
 
 // ─── Step 5: Clean old completed items (once a day check) ─────

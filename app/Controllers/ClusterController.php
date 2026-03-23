@@ -1062,7 +1062,7 @@ class ClusterController
         }
 
         // Verify admin password
-        $adminId = $_SESSION['admin_id'] ?? 0;
+        $adminId = $_SESSION['admin_id'] ?? $_SESSION['panel_user']['id'] ?? 0;
         $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
         if (!$admin || !password_verify($password, $admin['password_hash'])) {
             echo json_encode(['ok' => false, 'error' => 'Contraseña incorrecta']);
@@ -1090,6 +1090,14 @@ class ClusterController
                 'metadata' => json_encode($meta),
             ], 'id = :id', ['id' => $nodeId]);
 
+            // Regenerate lsyncd config excluding standby nodes — stop if none active
+            $activeNodes = array_filter(ClusterService::getNodes(), fn($n) => empty($n['standby']) && $n['id'] !== $nodeId);
+            if (empty($activeNodes)) {
+                FileSyncService::stopLsyncd();
+            } else {
+                FileSyncService::reloadLsyncd();
+            }
+
             LogService::log('cluster.standby', $node['name'], "Nodo en standby: {$reason}");
             echo json_encode(['ok' => true, 'message' => "Nodo {$node['name']} en standby. Sync, cola y alertas pausadas."]);
         } else {
@@ -1105,6 +1113,9 @@ class ClusterController
             Database::update('cluster_nodes', [
                 'metadata' => json_encode($meta),
             ], 'id = :id', ['id' => $nodeId]);
+
+            // Regenerate lsyncd config including reactivated node and restart
+            FileSyncService::reloadLsyncd();
 
             LogService::log('cluster.standby', $node['name'], 'Nodo reactivado');
             echo json_encode(['ok' => true, 'message' => "Nodo {$node['name']} reactivado. Sync, cola y alertas reanudadas."]);

@@ -20,6 +20,39 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.2',
+                'date' => '2026-03-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Session key en standby de nodos — Corregido $_SESSION[admin_id] inexistente por $_SESSION[panel_user][id] que impedia poner nodos en standby (error de contraseña)',
+                            'Badges de actualizacion persistentes — Los badges "nueva version disponible" ya no persisten tras actualizar; update.sh limpia los flags en BD y getCachedUpdateInfo compara version real vs remota',
+                            'Codigos ANSI en actualizador web — Eliminados caracteres de escape de color ([0;36m, etc.) cuando update.sh se ejecuta desde el panel web en vez de terminal',
+                            'git pull bloqueado por storage/.monitor_last.json — update.sh ahora hace git checkout de archivos locales modificados antes del pull para evitar conflictos',
+                        ],
+                        'en' => [
+                            'Session key in node standby — Fixed non-existent $_SESSION[admin_id] to $_SESSION[panel_user][id] which prevented putting nodes in standby (password error)',
+                            'Persistent update badges — "New version available" badges no longer persist after updating; update.sh clears DB flags and getCachedUpdateInfo compares actual vs remote version',
+                            'ANSI codes in web updater — Removed color escape characters ([0;36m, etc.) when update.sh runs from panel web instead of terminal',
+                            'git pull blocked by storage/.monitor_last.json — update.sh now checks out locally modified files before pull to avoid conflicts',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Dashboard diferencia nodo caido vs standby — Banner amarillo con icono de pausa para standby, rojo para caido realmente; muestra tiempo en standby, motivo y boton "Reactivar"',
+                            'Alertas de slave con escalacion — El slave ya no spamea emails cada 5 min cuando el master no responde; escalacion progresiva: inmediata, luego 1h, 6h y diaria',
+                            'Slave en standby no alerta — Si el slave esta en modo standby, omite la comprobacion de heartbeat del master',
+                        ],
+                        'en' => [
+                            'Dashboard differentiates down vs standby nodes — Yellow banner with pause icon for standby, red for actually down; shows standby duration, reason and "Reactivate" button',
+                            'Slave alerts with escalation — Slave no longer spams emails every 5 min when master is unresponsive; progressive escalation: immediate, then 1h, 6h and daily',
+                            'Standby slave skips alerts — If slave is in standby mode, it skips master heartbeat checks entirely',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.1',
                 'date' => '2026-03-21',
                 'badge' => 'primary',

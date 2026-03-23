@@ -1428,8 +1428,10 @@ class FileSyncService
     {
         $config = self::getConfig();
         $nodes = ClusterService::getNodes();
+        // Filter out standby nodes — they should not receive any sync
+        $nodes = array_filter($nodes, fn($n) => empty($n['standby']));
         if (empty($nodes)) {
-            return ['ok' => false, 'error' => 'No hay nodos slave configurados'];
+            return ['ok' => false, 'error' => 'No hay nodos slave activos (todos en standby o ninguno configurado)'];
         }
 
         $port = $config['ssh_port'] ?? 22;

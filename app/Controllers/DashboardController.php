@@ -38,24 +38,30 @@ class DashboardController
             ];
         }
 
-        // Offline cluster nodes (for alert banner)
+        // Offline or standby cluster nodes (for alert banner)
         $offlineNodes = [];
         try {
             $allNodes = ClusterService::getNodes();
             $now = time();
             foreach ($allNodes as $node) {
-                if ($node['status'] === 'offline' || empty($node['last_seen_at']) || (time() - strtotime($node['last_seen_at'])) > 300) {
-                    $mutedUntil = Settings::get("cluster_node_{$node['id']}_muted_until", '');
-                    $isMuted = ($mutedUntil && strtotime($mutedUntil) > $now);
+                $isStandby = !empty($node['standby']);
+                $isDown = !$isStandby && ($node['status'] === 'offline' || empty($node['last_seen_at']) || (time() - strtotime($node['last_seen_at'])) > 300);
+
+                if ($isStandby || $isDown) {
+                    $meta = json_decode($node['metadata'] ?? '{}', true) ?: [];
+                    $isMuted = !empty($meta['alerts_muted']);
                     $downSince = $node['last_seen_at'] ? date('Y-m-d H:i:s', strtotime($node['last_seen_at'])) : 'Nunca';
                     $downMinutes = $node['last_seen_at'] ? round(($now - strtotime($node['last_seen_at'])) / 60) : null;
                     $offlineNodes[] = [
-                        'id'           => $node['id'],
-                        'name'         => $node['name'],
-                        'api_url'      => $node['api_url'],
-                        'last_seen_at' => $downSince,
-                        'down_minutes' => $downMinutes,
-                        'muted'        => $isMuted,
+                        'id'             => $node['id'],
+                        'name'           => $node['name'],
+                        'api_url'        => $node['api_url'],
+                        'last_seen_at'   => $downSince,
+                        'down_minutes'   => $downMinutes,
+                        'muted'          => $isMuted,
+                        'standby'        => $isStandby,
+                        'standby_reason' => $node['standby_reason'] ?? '',
+                        'standby_since'  => $node['standby_since'] ?? '',
                     ];
                 }
             }

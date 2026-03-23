@@ -16,7 +16,7 @@ if ($nodeId < 1 || empty($syncId)) {
 
 // Bootstrap panel (same as cluster-worker.php)
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.1');
+define('PANEL_VERSION', '1.0.2');
 
 spl_autoload_register(function ($class) {
     $prefix = 'MuseDockPanel\\';

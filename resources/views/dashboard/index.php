@@ -1,16 +1,32 @@
 <?php use MuseDockPanel\View; ?>
 
-<!-- Offline Nodes Alert Banner -->
-<?php if (!empty($offlineNodes)): ?>
+<!-- Offline / Standby Nodes Alert Banner -->
+<?php if (!empty($offlineNodes)):
+    $downNodes = array_filter($offlineNodes, fn($n) => empty($n['standby']));
+    $standbyNodes = array_filter($offlineNodes, fn($n) => !empty($n['standby']));
+    $hasDown = count($downNodes) > 0;
+    $hasStandby = count($standbyNodes) > 0;
+    // Banner color: red if any truly down, yellow/warning if only standby
+    $bannerBg = $hasDown ? 'danger' : 'warning';
+    $bannerText = $hasDown ? 'text-white' : 'text-dark';
+?>
 <div class="row g-3 mb-4">
     <div class="col-12">
-        <div class="card border-danger">
-            <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center py-2">
+        <div class="card border-<?= $bannerBg ?>">
+            <div class="card-header bg-<?= $bannerBg ?> <?= $bannerText ?> d-flex justify-content-between align-items-center py-2">
                 <span>
-                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                    <strong><?= count($offlineNodes) ?> nodo<?= count($offlineNodes) > 1 ? 's' : '' ?> del cluster caido<?= count($offlineNodes) > 1 ? 's' : '' ?></strong>
+                    <?php if ($hasDown): ?>
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                        <strong><?= count($downNodes) ?> nodo<?= count($downNodes) > 1 ? 's' : '' ?> caido<?= count($downNodes) > 1 ? 's' : '' ?></strong>
+                        <?php if ($hasStandby): ?>
+                            <span class="ms-2" style="opacity:0.8;">| <?= count($standbyNodes) ?> en standby</span>
+                        <?php endif; ?>
+                    <?php else: ?>
+                        <i class="bi bi-pause-circle-fill me-2"></i>
+                        <strong><?= count($standbyNodes) ?> nodo<?= count($standbyNodes) > 1 ? 's' : '' ?> en standby</strong>
+                    <?php endif; ?>
                 </span>
-                <a href="/settings/cluster" class="btn btn-outline-light btn-sm py-0">
+                <a href="/settings/cluster" class="btn btn-outline-<?= $hasDown ? 'light' : 'dark' ?> btn-sm py-0">
                     <i class="bi bi-gear me-1"></i>Cluster
                 </a>
             </div>
@@ -21,22 +37,46 @@
                             <th class="ps-3">Nodo</th>
                             <th>URL</th>
                             <th>Ultimo contacto</th>
-                            <th>Caido</th>
+                            <th>Estado</th>
                             <th class="text-center">Alertas</th>
                             <th class="text-end pe-3">Acciones</th>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($offlineNodes as $oNode): ?>
+                        <?php foreach ($offlineNodes as $oNode):
+                            $isStandby = !empty($oNode['standby']);
+                        ?>
                         <tr>
                             <td class="ps-3">
-                                <i class="bi bi-circle-fill text-danger me-1" style="font-size: 0.5rem; vertical-align: middle;"></i>
+                                <?php if ($isStandby): ?>
+                                    <i class="bi bi-pause-circle-fill text-warning me-1" style="font-size: 0.6rem; vertical-align: middle;"></i>
+                                <?php else: ?>
+                                    <i class="bi bi-circle-fill text-danger me-1" style="font-size: 0.5rem; vertical-align: middle;"></i>
+                                <?php endif; ?>
                                 <strong><?= View::e($oNode['name']) ?></strong>
                             </td>
                             <td><code class="small"><?= View::e($oNode['api_url']) ?></code></td>
                             <td><small class="text-muted"><?= View::e($oNode['last_seen_at']) ?></small></td>
                             <td>
-                                <?php if ($oNode['down_minutes'] !== null): ?>
+                                <?php if ($isStandby): ?>
+                                    <?php
+                                        $standbyTime = '';
+                                        if (!empty($oNode['standby_since'])) {
+                                            $sm = round((time() - strtotime($oNode['standby_since'])) / 60);
+                                            if ($sm >= 1440) {
+                                                $standbyTime = ' · ' . round($sm / 1440, 1) . 'd';
+                                            } elseif ($sm >= 60) {
+                                                $standbyTime = ' · ' . round($sm / 60, 1) . 'h';
+                                            } else {
+                                                $standbyTime = ' · ' . $sm . 'min';
+                                            }
+                                        }
+                                    ?>
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-pause-circle me-1"></i>Standby<?= $standbyTime ?></span>
+                                    <?php if ($oNode['standby_reason']): ?>
+                                        <small class="text-muted ms-1"><?= View::e($oNode['standby_reason']) ?></small>
+                                    <?php endif; ?>
+                                <?php elseif ($oNode['down_minutes'] !== null): ?>
                                     <?php
                                         $dm = $oNode['down_minutes'];
                                         if ($dm >= 1440) {
@@ -47,22 +87,28 @@
                                             $downLabel = $dm . ' min';
                                         }
                                     ?>
-                                    <span class="badge bg-danger"><?= $downLabel ?></span>
+                                    <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Caido <?= $downLabel ?></span>
                                 <?php else: ?>
                                     <span class="badge bg-secondary">Nunca visto</span>
                                 <?php endif; ?>
                             </td>
                             <td class="text-center">
-                                <?php if ($oNode['muted']): ?>
+                                <?php if ($isStandby): ?>
+                                    <span class="badge bg-secondary"><i class="bi bi-bell-slash me-1"></i>Pausadas</span>
+                                <?php elseif ($oNode['muted']): ?>
                                     <span class="badge bg-secondary"><i class="bi bi-bell-slash me-1"></i>Silenciadas</span>
                                 <?php else: ?>
                                     <span class="badge bg-warning text-dark"><i class="bi bi-bell-fill me-1"></i>Activas</span>
                                 <?php endif; ?>
                             </td>
                             <td class="text-end pe-3">
-                                <?php if ($oNode['muted']): ?>
+                                <?php if ($isStandby): ?>
+                                    <a href="/settings/cluster#nodos" class="btn btn-outline-success btn-sm py-0 px-2" title="Ir a cluster para reactivar">
+                                        <i class="bi bi-play-fill me-1"></i>Reactivar
+                                    </a>
+                                <?php elseif ($oNode['muted']): ?>
                                     <button class="btn btn-outline-warning btn-sm py-0 px-2" onclick="toggleNodeAlerts(<?= $oNode['id'] ?>, 'unmute', '<?= View::e($oNode['name']) ?>')" title="Reactivar alertas">
-                                        <i class="bi bi-bell me-1"></i>Reactivar
+                                        <i class="bi bi-bell me-1"></i>Reactivar alertas
                                     </button>
                                 <?php else: ?>
                                     <button class="btn btn-outline-secondary btn-sm py-0 px-2" onclick="toggleNodeAlerts(<?= $oNode['id'] ?>, 'mute', '<?= View::e($oNode['name']) ?>')" title="Silenciar alertas">

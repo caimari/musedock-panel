@@ -489,6 +489,17 @@ class ClusterService
         $summary = [];
 
         foreach ($nodes as $node) {
+            // Skip standby nodes — no heartbeat needed
+            if (!empty($node['standby'])) {
+                $summary[] = [
+                    'id'     => $node['id'],
+                    'name'   => $node['name'],
+                    'ok'     => true,
+                    'status' => 'standby',
+                    'error'  => '',
+                ];
+                continue;
+            }
             $result = self::sendHeartbeat((int)$node['id']);
             $summary[] = [
                 'id'     => $node['id'],
