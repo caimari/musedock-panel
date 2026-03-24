@@ -20,6 +20,41 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.4',
+                'date' => '2026-03-24',
+                'badge' => 'success',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Endpoint /api/health — Health check profundo que verifica Caddy, PostgreSQL (5432+5433 con query real), disco (<5% = fallo, <10% = warning), carga del sistema; devuelve HTTP 200 o 503',
+                            'Failover Worker (cron cada minuto) — Health checks automáticos con contadores consecutivos: N fallos → DOWN, M checks OK → RECOVERED. Evita falsos positivos',
+                            'Modo semiauto — Detecta caídas y notifica al admin sin ejecutar transiciones automáticas; el admin decide cuándo actuar',
+                            'Modo auto — Detecta caídas, ejecuta transición DNS + auto-promote del slave a master cuando el master original cae',
+                            'Failback inteligente con resync — Cuando el master original se recupera: primero sincroniza datos (pg_dump + rsync vhosts + certificados), luego failback DNS, luego demote automático',
+                            'Timestamp de activación — Guarda fecha exacta de activación del failover y IP del master original para saber qué datos sincronizar en el failback',
+                        ],
+                        'en' => [
+                            '/api/health endpoint — Deep health check verifying Caddy, PostgreSQL (5432+5433 with real query), disk (<5% = fail, <10% = warning), system load; returns HTTP 200 or 503',
+                            'Failover Worker (cron every minute) — Automatic health checks with consecutive counters: N failures → DOWN, M OK checks → RECOVERED. Prevents false positives',
+                            'Semiauto mode — Detects failures and notifies admin without executing automatic transitions; admin decides when to act',
+                            'Auto mode — Detects failures, executes DNS transition + auto-promote slave to master when original master goes down',
+                            'Intelligent failback with resync — When original master recovers: first syncs data (pg_dump + rsync vhosts + certificates), then DNS failback, then auto-demote',
+                            'Activation timestamp — Saves exact failover activation date and original master IP to determine what data needs syncing on failback',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Health checks mejorados — Ahora usa /api/health (HTTP con verificación real de servicios) en vez de solo TCP connect al 443. Fallback a TCP si el panel no responde',
+                            'Integración Failover ↔ Cluster — El failover ISP y el cluster master/slave ahora están conectados: failover cambia DNS + promote automático, failback hace resync + demote',
+                        ],
+                        'en' => [
+                            'Improved health checks — Now uses /api/health (HTTP with real service verification) instead of just TCP connect to 443. Falls back to TCP if panel is unreachable',
+                            'Failover ↔ Cluster integration — ISP failover and master/slave cluster are now connected: failover changes DNS + auto-promote, failback does resync + demote',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.3',
                 'date' => '2026-03-24',
                 'badge' => 'success',

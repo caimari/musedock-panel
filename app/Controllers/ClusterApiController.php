@@ -10,6 +10,105 @@ use MuseDockPanel\Services\LogService;
 class ClusterApiController
 {
     /**
+     * GET /api/health
+     * Lightweight health check for failover monitoring.
+     * Verifies: Caddy, PostgreSQL (5432+5433), disk space, panel responsiveness.
+     * Returns HTTP 200 if healthy, 503 if degraded.
+     */
+    public function health(): void
+    {
+        header('Content-Type: application/json');
+
+        $checks = [];
+        $healthy = true;
+
+        // 1. Caddy (port 443)
+        $caddyCheck = @fsockopen('127.0.0.1', 443, $errno, $errstr, 2);
+        $checks['caddy'] = ['ok' => (bool)$caddyCheck];
+        if ($caddyCheck) { fclose($caddyCheck); } else { $healthy = false; }
+
+        // 2. PostgreSQL 5432 (hosting databases)
+        $pg5432 = @fsockopen('127.0.0.1', 5432, $errno, $errstr, 2);
+        $checks['pg_5432'] = ['ok' => (bool)$pg5432];
+        if ($pg5432) {
+            fclose($pg5432);
+            // Verify it actually accepts queries
+            try {
+                $result = trim((string)shell_exec("sudo -u postgres psql -p 5432 -tAc 'SELECT 1' 2>/dev/null"));
+                $checks['pg_5432']['queryable'] = ($result === '1');
+                if ($result !== '1') $healthy = false;
+            } catch (\Throwable $e) {
+                $checks['pg_5432']['queryable'] = false;
+                $healthy = false;
+            }
+        } else {
+            $healthy = false;
+        }
+
+        // 3. PostgreSQL 5433 (panel database)
+        $pg5433 = @fsockopen('127.0.0.1', 5433, $errno, $errstr, 2);
+        $checks['pg_5433'] = ['ok' => (bool)$pg5433];
+        if ($pg5433) {
+            fclose($pg5433);
+            try {
+                $result = trim((string)shell_exec("sudo -u postgres psql -p 5433 -tAc 'SELECT 1' 2>/dev/null"));
+                $checks['pg_5433']['queryable'] = ($result === '1');
+                if ($result !== '1') $healthy = false;
+            } catch (\Throwable $e) {
+                $checks['pg_5433']['queryable'] = false;
+                $healthy = false;
+            }
+        } else {
+            $healthy = false;
+        }
+
+        // 4. Disk space (warn <10%, fail <5%)
+        $diskFree = @disk_free_space('/');
+        $diskTotal = @disk_total_space('/');
+        if ($diskTotal > 0) {
+            $diskPct = round(($diskFree / $diskTotal) * 100, 1);
+            $checks['disk'] = [
+                'ok' => $diskPct >= 5,
+                'free_pct' => $diskPct,
+                'free_gb' => round($diskFree / 1073741824, 1),
+                'warning' => $diskPct < 10,
+            ];
+            if ($diskPct < 5) $healthy = false;
+        } else {
+            $checks['disk'] = ['ok' => false, 'error' => 'Cannot read disk'];
+            $healthy = false;
+        }
+
+        // 5. System load (fail if load > 2x CPU cores)
+        $cpuCores = (int)trim((string)shell_exec('nproc 2>/dev/null')) ?: 1;
+        $load = sys_getloadavg();
+        $load1 = $load[0] ?? 0;
+        $checks['load'] = [
+            'ok' => $load1 < ($cpuCores * 2),
+            'load_1m' => $load1,
+            'cores' => $cpuCores,
+            'warning' => $load1 > $cpuCores,
+        ];
+        if ($load1 >= ($cpuCores * 3)) $healthy = false; // only fail on extreme load
+
+        // 6. Panel role info
+        $clusterRole = Settings::get('cluster_role', '');
+        $envRole = Env::get('PANEL_ROLE', 'standalone');
+        $role = ($clusterRole !== '' && $clusterRole !== 'standalone') ? $clusterRole : $envRole;
+
+        if (!$healthy) http_response_code(503);
+
+        echo json_encode([
+            'ok' => $healthy,
+            'timestamp' => date('Y-m-d H:i:s'),
+            'role' => $role,
+            'version' => defined('PANEL_VERSION') ? PANEL_VERSION : 'unknown',
+            'checks' => $checks,
+        ], JSON_PRETTY_PRINT);
+        exit;
+    }
+
+    /**
      * GET /api/cluster/status
      * Returns comprehensive local server status as JSON.
      */

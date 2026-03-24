@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.3');
+define('PANEL_VERSION', '1.0.4');
 
 
 
@@ -83,6 +83,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // ===============================
 // API Routes (token auth via ApiAuthMiddleware)
 // ===============================
+\MuseDockPanel\Router::get('/api/health', 'ClusterApiController@health');
 \MuseDockPanel\Router::get('/api/cluster/status', 'ClusterApiController@status');
 \MuseDockPanel\Router::get('/api/cluster/heartbeat', 'ClusterApiController@heartbeat');
 \MuseDockPanel\Router::post('/api/cluster/action', 'ClusterApiController@action');

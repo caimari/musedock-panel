@@ -168,19 +168,63 @@ class FailoverService
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Check if a host is reachable (TCP connect).
+     * Check if a host is reachable via /api/health endpoint (deep check).
+     * Falls back to TCP connect if the panel port is not available.
      */
     public static function checkHost(string $ip, int $port = 443, int $timeout = 5): array
     {
         $start = microtime(true);
-        $conn = @fsockopen($ip, $port, $errno, $errstr, $timeout);
+        $panelPort = (int)Settings::get('panel_port', '8444') ?: 8444;
+
+        // Try deep health check via /api/health endpoint first
+        $healthUrl = "https://{$ip}:{$panelPort}/api/health";
+        $ch = curl_init($healthUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_CONNECTTIMEOUT => $timeout,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => 0,
+            CURLOPT_HTTPHEADER => ['Accept: application/json'],
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
         $elapsed = round((microtime(true) - $start) * 1000);
+
+        if ($response && $httpCode > 0) {
+            $data = json_decode($response, true);
+            if (is_array($data)) {
+                return [
+                    'ok' => !empty($data['ok']),
+                    'ms' => $elapsed,
+                    'ip' => $ip,
+                    'http_code' => $httpCode,
+                    'checks' => $data['checks'] ?? [],
+                    'role' => $data['role'] ?? '',
+                    'version' => $data['version'] ?? '',
+                    'method' => 'health_endpoint',
+                ];
+            }
+        }
+
+        // Fallback: TCP connect to the service port (443)
+        $start2 = microtime(true);
+        $conn = @fsockopen($ip, $port, $errno, $errstr, $timeout);
+        $elapsed2 = round((microtime(true) - $start2) * 1000);
 
         if ($conn) {
             fclose($conn);
-            return ['ok' => true, 'ms' => $elapsed, 'ip' => $ip];
+            return ['ok' => true, 'ms' => $elapsed2, 'ip' => $ip, 'method' => 'tcp_fallback'];
         }
-        return ['ok' => false, 'ms' => $elapsed, 'ip' => $ip, 'error' => $errstr ?: 'Connection refused'];
+        return [
+            'ok' => false,
+            'ms' => $elapsed + $elapsed2,
+            'ip' => $ip,
+            'error' => $curlError ?: ($errstr ?: 'Connection refused'),
+            'method' => 'tcp_fallback',
+        ];
     }
 
     /**
