@@ -143,8 +143,8 @@ updateStatus($statusFile, [
 ]);
 
 $packStart = microtime(true);
-$tmpFile = sys_get_temp_dir() . '/backup_transfer_' . $backupName . '_' . time() . '.tar.gz';
-$cmd = sprintf('tar czf %s -C %s . 2>&1', escapeshellarg($tmpFile), escapeshellarg($backupPath));
+$tmpFile = sys_get_temp_dir() . '/backup_transfer_' . $backupName . '_' . time() . '.tar';
+$cmd = sprintf('tar cf %s -C %s . 2>&1', escapeshellarg($tmpFile), escapeshellarg($backupPath));
 shell_exec($cmd);
 $packElapsed = round(microtime(true) - $packStart, 1);
 
@@ -197,7 +197,7 @@ curl_setopt_array($ch, [
     CURLOPT_POSTFIELDS => [
         'action' => 'receive-backup',
         'backup_name' => $backupName,
-        'backup' => new CURLFile($tmpFile, 'application/gzip', 'backup.tar.gz'),
+        'backup' => new CURLFile($tmpFile, 'application/x-tar', 'backup.tar'),
     ],
     CURLOPT_NOPROGRESS => false,
     CURLOPT_PROGRESSFUNCTION => function ($ch, $dlTotal, $dlNow, $ulTotal, $ulNow) use ($statusFile, $backupName, $node, $meta, $fileSizeHuman, $fileSize, $uploadStartTime) {

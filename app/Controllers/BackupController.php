@@ -283,9 +283,12 @@ class BackupController
             return;
         }
 
+        // Build a descriptive download name: backupId_filename (e.g. picaliascomcalamar_2026-03-24_103154_files.tar.gz)
+        $downloadName = $backupId ? $backupId . '_' . basename($realPath) : basename($realPath);
+
         // Stream the file
         header('Content-Type: application/octet-stream');
-        header('Content-Disposition: attachment; filename="' . basename($realPath) . '"');
+        header('Content-Disposition: attachment; filename="' . $downloadName . '"');
         header('Content-Length: ' . filesize($realPath));
         header('Cache-Control: no-cache');
         readfile($realPath);
