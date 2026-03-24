@@ -1039,7 +1039,7 @@ if [ "$REPAIR_MODE" = true ]; then
     echo ""
     echo -e "  ${CYAN}$(t repair_check_crons)${NC}"
     CRONS_FIXED=0
-    for cronfile in musedock-cluster musedock-backup musedock-filesync musedock-monitor; do
+    for cronfile in musedock-cluster musedock-backup musedock-filesync musedock-monitor musedock-failover; do
         if [ ! -f "/etc/cron.d/${cronfile}" ]; then
             warn "  /etc/cron.d/${cronfile} — faltante"
             CRONS_FIXED=$((CRONS_FIXED + 1))
@@ -1074,6 +1074,12 @@ CRONEOF
 * * * * * root sleep 30 && /usr/bin/php ${PANEL_DIR}/bin/monitor-collector.php
 CRONEOF
         chmod 644 /etc/cron.d/musedock-monitor
+
+        cat > /etc/cron.d/musedock-failover << CRONEOF
+# MuseDock Panel — Failover worker (health checks, auto-failover, resync)
+* * * * * root /usr/bin/php ${PANEL_DIR}/bin/failover-worker.php >> ${PANEL_DIR}/storage/logs/failover-worker.log 2>&1
+CRONEOF
+        chmod 644 /etc/cron.d/musedock-failover
 
         systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
         ok "$(t repair_fixed)"
@@ -1364,6 +1370,14 @@ elif [ "$VERIFY_ONLY" = true ]; then
         echo -e "    ${CYAN}echo '* * * * * root /usr/bin/php ${PANEL_DIR}/bin/filesync-worker.php >> ${PANEL_DIR}/storage/logs/filesync-worker.log 2>&1' > /etc/cron.d/musedock-filesync${NC}"
         HEALTH_WARNINGS=$((HEALTH_WARNINGS + 1))
     fi
+    if [ -f /etc/cron.d/musedock-failover ]; then
+        ok "Failover worker: instalado (/etc/cron.d/musedock-failover)"
+    else
+        echo -e "  ${YELLOW}⚠ Failover worker no instalado${NC}"
+        echo -e "    ${YELLOW}Se instalara al reinstalar o ejecuta manualmente:${NC}"
+        echo -e "    ${CYAN}echo '* * * * * root /usr/bin/php ${PANEL_DIR}/bin/failover-worker.php >> ${PANEL_DIR}/storage/logs/failover-worker.log 2>&1' > /etc/cron.d/musedock-failover${NC}"
+        HEALTH_WARNINGS=$((HEALTH_WARNINGS + 1))
+    fi
 
     # --- 10. Panel role & .env ---
     echo ""
@@ -1503,6 +1517,13 @@ CRONEOF
 * * * * * root sleep 30 && /usr/bin/php ${PANEL_DIR}/bin/monitor-collector.php
 CRONEOF
     chmod 644 /etc/cron.d/musedock-monitor
+
+    # Failover worker (health checks, auto-failover, resync)
+    cat > /etc/cron.d/musedock-failover << CRONEOF
+# MuseDock Panel — Failover worker (health checks, auto-failover, resync)
+* * * * * root /usr/bin/php ${PANEL_DIR}/bin/failover-worker.php >> ${PANEL_DIR}/storage/logs/failover-worker.log 2>&1
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-failover
 
     systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
     ok "$(t update_crons)"
@@ -2623,6 +2644,15 @@ cat > "$CRON_MONITOR" << CRONEOF
 CRONEOF
 chmod 644 "$CRON_MONITOR"
 ok "Cron: monitor-collector.php (cada 30 segundos)"
+
+# Failover worker — health checks, auto-failover, resync (every minute)
+CRON_FAILOVER="/etc/cron.d/musedock-failover"
+cat > "$CRON_FAILOVER" << CRONEOF
+# MuseDock Panel — Failover worker (health checks, auto-failover, resync)
+* * * * * root /usr/bin/php ${PANEL_DIR}/bin/failover-worker.php >> ${PANEL_DIR}/storage/logs/failover-worker.log 2>&1
+CRONEOF
+chmod 644 "$CRON_FAILOVER"
+ok "Cron: failover-worker.php (cada minuto)"
 
 # Reload cron daemon
 systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
