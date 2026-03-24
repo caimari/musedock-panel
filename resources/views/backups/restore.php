@@ -1,4 +1,5 @@
 <?php use MuseDockPanel\View; ?>
+<?php $hasNodes = !empty($nodes); ?>
 
 <div class="row justify-content-center">
     <div class="col-lg-8">
@@ -11,6 +12,17 @@
             <i class="bi bi-arrow-left me-1"></i> Volver a Backups
         </a>
         <?php else: ?>
+
+        <?php if (!empty($isDbReplica)): ?>
+        <div class="alert" style="background: rgba(251,191,36,0.15); border: 1px solid rgba(251,191,36,0.3); color: #fbbf24;">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            <strong>Nodo en replicacion</strong> — La base de datos de hosting esta replicando desde
+            <?= $replicaMaster ? '<strong>' . View::e($replicaMaster) . '</strong>' : 'un master' ?>.
+            No se pueden restaurar bases de datos en un slave. Solo se permite restaurar archivos.
+            <br><small class="mt-1 d-block">Para restaurar BDs, promueve este nodo a standalone desde
+            <a href="/settings/replication" style="color:#fbbf24;">Replicacion</a>.</small>
+        </div>
+        <?php endif; ?>
 
         <div class="card mb-3">
             <div class="card-header">
@@ -50,6 +62,7 @@
 
                 <form method="POST" action="/backups/<?= urlencode($backup['dir_name']) ?>/restore" id="restoreForm">
                     <?= View::csrf() ?>
+                    <input type="hidden" name="admin_password" id="restoreAdminPass">
 
                     <h6 class="mb-3">Que restaurar:</h6>
 
@@ -71,12 +84,19 @@
 
                     <?php if (!empty($backup['db_files'])): ?>
                     <div class="form-check mb-3">
-                        <input class="form-check-input" type="checkbox" name="restore_databases" id="restoreDatabases" value="1" checked>
+                        <input class="form-check-input" type="checkbox" name="restore_databases" id="restoreDatabases" value="1"
+                            <?= !empty($isDbReplica) ? 'disabled' : 'checked' ?>>
                         <label class="form-check-label" for="restoreDatabases">
                             <i class="bi bi-database me-1" style="color: #38bdf8;"></i> Bases de datos
+                            <?php if (!empty($isDbReplica)): ?>
+                                <span class="badge ms-1" style="background:rgba(239,68,68,0.15);color:#ef4444;font-size:0.7em;">
+                                    <i class="bi bi-lock me-1"></i>Bloqueado — nodo en replicacion
+                                </span>
+                            <?php endif; ?>
                         </label>
                     </div>
 
+                    <?php if (empty($isDbReplica)): ?>
                     <div class="ms-4 mb-3">
                         <table class="table table-sm">
                             <thead>
@@ -103,12 +123,21 @@
                         </table>
                     </div>
                     <?php endif; ?>
+                    <?php endif; ?>
 
                     <div class="alert" style="background: rgba(251,191,36,0.15); border: 1px solid rgba(251,191,36,0.3); color: #fbbf24;">
                         <i class="bi bi-exclamation-triangle me-1"></i>
                         <strong>Atencion:</strong> La restauracion sobreescribira los archivos y datos actuales de la cuenta.
                         Asegurate de tener un backup actual si necesitas los datos existentes.
                     </div>
+
+                    <?php if ($hasNodes): ?>
+                    <div class="alert" style="background: rgba(56,189,248,0.1); border: 1px solid rgba(56,189,248,0.2); color: #38bdf8;">
+                        <i class="bi bi-info-circle me-1"></i>
+                        <strong>Restaurar en otro nodo?</strong> Transfiere el backup al nodo destino desde la
+                        <a href="/backups" style="color:#38bdf8;">lista de backups</a> y restauralo desde alli.
+                    </div>
+                    <?php endif; ?>
 
                     <div class="d-flex justify-content-between mt-4">
                         <a href="/backups" class="btn btn-outline-light">
@@ -130,20 +159,42 @@
     .form-check-input { background-color: #0f172a; border-color: #334155; }
     .form-check-input:checked { background-color: #0ea5e9; border-color: #0ea5e9; }
     .form-check-input:focus { box-shadow: 0 0 0 2px rgba(56,189,248,0.2); border-color: #38bdf8; }
+    .form-check-input:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 
 <script>
 function confirmRestore() {
+    const hasFiles = document.getElementById('restoreFiles')?.checked;
+    const hasDb = document.getElementById('restoreDatabases')?.checked;
+
+    if (!hasFiles && !hasDb) {
+        SwalDark.fire('', 'Selecciona al menos archivos o bases de datos para restaurar.', 'info');
+        return;
+    }
+
+    let what = [];
+    if (hasFiles) what.push('archivos');
+    if (hasDb) what.push('bases de datos');
+
     SwalDark.fire({
-        title: 'Confirmar restauracion?',
-        html: 'Se restaurara el backup de <strong><?= View::e($backup['username'] ?? '') ?></strong> del <strong><?= date('d/m/Y H:i', strtotime($backup['date'] ?? 'now')) ?></strong>.<br><br>' +
-              '<span style="color:#fbbf24;">Los archivos y datos actuales seran sobreescritos.</span>',
+        title: 'Confirmar restauracion',
+        html: 'Se restauraran <strong>' + what.join(' y ') + '</strong> del backup de <strong><?= View::e($backup['username'] ?? '') ?></strong> del <strong><?= date('d/m/Y H:i', strtotime($backup['date'] ?? 'now')) ?></strong>.<br><br>' +
+              '<span style="color:#fbbf24;">Los datos actuales seran sobreescritos.</span><br><br>' +
+              'Ingresa tu contrasena de administrador para confirmar:',
         icon: 'warning',
+        input: 'password',
+        inputPlaceholder: 'Contrasena de administrador',
+        inputAttributes: { autocomplete: 'current-password' },
         showCancelButton: true,
         confirmButtonText: 'Si, restaurar',
         cancelButtonText: 'Cancelar',
+        preConfirm: function(password) {
+            if (!password) { Swal.showValidationMessage('Debes ingresar tu contrasena'); return false; }
+            return password;
+        }
     }).then(function(result) {
-        if (result.isConfirmed) {
+        if (result.isConfirmed && result.value) {
+            document.getElementById('restoreAdminPass').value = result.value;
             document.getElementById('restoreForm').submit();
         }
     });

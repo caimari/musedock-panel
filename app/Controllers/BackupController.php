@@ -339,10 +339,28 @@ class BackupController
         $meta['account_exists'] = (bool) $account;
         $meta['account'] = $account;
 
+        // Detect if hosting DB (port 5432) is replicating — cannot restore DBs on a slave
+        $isDbReplica = false;
+        $replicaMaster = '';
+        try {
+            $recovery = trim((string) shell_exec("sudo -u postgres psql -p 5432 -tAc \"SELECT pg_is_in_recovery()\" 2>/dev/null"));
+            if ($recovery === 't') {
+                $isDbReplica = true;
+                $sender = trim((string) shell_exec("sudo -u postgres psql -p 5432 -tAc \"SELECT sender_host FROM pg_stat_wal_receiver LIMIT 1\" 2>/dev/null"));
+                if ($sender) $replicaMaster = $sender;
+            }
+        } catch (\Throwable) {}
+
+        // Get cluster nodes for "restore to slave" option
+        $nodes = ClusterService::getNodes();
+
         View::render('backups/restore', [
             'layout' => 'main',
             'pageTitle' => 'Restaurar Backup',
             'backup' => $meta,
+            'isDbReplica' => $isDbReplica,
+            'replicaMaster' => $replicaMaster,
+            'nodes' => $nodes,
         ]);
     }
 
@@ -368,6 +386,18 @@ class BackupController
             return;
         }
 
+        // Admin password confirmation
+        $password = $_POST['admin_password'] ?? '';
+        $user = Auth::user();
+        if ($user) {
+            $admin = Database::fetchOne("SELECT * FROM panel_admins WHERE id = :id", ['id' => $user['id']]);
+            if (!$admin || !password_verify($password, $admin['password_hash'])) {
+                Flash::set('error', 'Contrasena de administrador incorrecta.');
+                Router::redirect('/backups/' . urlencode($backupId) . '/restore');
+                return;
+            }
+        }
+
         $username = $meta['username'] ?? '';
         $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE username = :u", ['u' => $username]);
         if (!$account) {
@@ -379,6 +409,16 @@ class BackupController
         $homeDir = $account['home_dir'];
         $restoreFiles = isset($_POST['restore_files']);
         $restoreDatabases = isset($_POST['restore_databases']);
+
+        // Block DB restore if this node is a replication slave
+        if ($restoreDatabases) {
+            $recovery = trim((string) shell_exec("sudo -u postgres psql -p 5432 -tAc \"SELECT pg_is_in_recovery()\" 2>/dev/null"));
+            if ($recovery === 't') {
+                Flash::set('error', 'No se pueden restaurar bases de datos: este nodo esta replicando desde un master. Promueve a standalone primero.');
+                Router::redirect('/backups/' . urlencode($backupId) . '/restore');
+                return;
+            }
+        }
         $errors = [];
 
         // Restore files
