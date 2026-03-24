@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.2');
+define('PANEL_VERSION', '1.0.3');
 
 
 
@@ -250,6 +250,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/demote', 'ClusterController@demoteLocal');
 \MuseDockPanel\Router::post('/settings/cluster/generate-token', 'ClusterController@generateToken');
 \MuseDockPanel\Router::post('/settings/cluster/save-settings', 'ClusterController@saveSettings');
+\MuseDockPanel\Router::post('/settings/cluster/save-setting', 'ClusterController@saveSetting');
 \MuseDockPanel\Router::post('/settings/cluster/verify-admin-password', 'ClusterController@verifyAdminPassword');
 \MuseDockPanel\Router::post('/settings/cluster/clean-queue', 'ClusterController@cleanQueue');
 \MuseDockPanel\Router::post('/settings/cluster/sync-all-hostings', 'ClusterController@syncAllHostings');
@@ -277,6 +278,17 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/cluster/mail-setup-progress-local', 'ClusterController@mailSetupProgressLocal');
 \MuseDockPanel\Router::post('/settings/cluster/rotate-mail-db-password', 'ClusterController@rotateMailDbPassword');
 \MuseDockPanel\Router::post('/settings/cluster/toggle-node-service', 'ClusterController@toggleNodeService');
+
+// Failover
+\MuseDockPanel\Router::post('/settings/failover/save-config', 'FailoverController@saveConfig');
+\MuseDockPanel\Router::post('/settings/failover/save-servers', 'FailoverController@saveServers');
+\MuseDockPanel\Router::post('/settings/failover/save-cf-accounts', 'FailoverController@saveCfAccounts');
+\MuseDockPanel\Router::post('/settings/failover/verify-cf-token', 'FailoverController@verifyCfToken');
+\MuseDockPanel\Router::get('/settings/failover/check-health', 'FailoverController@checkHealth');
+\MuseDockPanel\Router::post('/settings/failover/execute', 'FailoverController@execute');
+\MuseDockPanel\Router::get('/settings/failover/caddy-l4-preview', 'FailoverController@caddyL4Preview');
+\MuseDockPanel\Router::get('/settings/failover/status', 'FailoverController@status');
+\MuseDockPanel\Router::get('/settings/failover/domains-not-cf', 'FailoverController@domainsNotCf');
 
 // WireGuard
 \MuseDockPanel\Router::get('/settings/wireguard', 'WireGuardController@index');

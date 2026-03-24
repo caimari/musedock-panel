@@ -52,15 +52,33 @@ class ClusterController
         }
         unset($node);
 
+        // Failover data
+        $failoverConfig = [];
+        $failoverStatus = [];
+        $failoverServers = [];
+        $cfAccounts = [];
+        try {
+            $failoverConfig = \MuseDockPanel\Services\FailoverService::getConfig();
+            $failoverStatus = \MuseDockPanel\Services\FailoverService::getStatusSummary();
+            $failoverServers = \MuseDockPanel\Services\FailoverService::getServers();
+            $cfAccounts = \MuseDockPanel\Services\CloudflareService::getConfiguredAccounts();
+        } catch (\Throwable $e) {
+            error_log("Failover data load error: " . $e->getMessage());
+        }
+
         View::render('settings/cluster', [
-            'layout'       => 'main',
-            'pageTitle'    => 'Cluster',
-            'nodes'        => $nodes,
-            'localStatus'  => $localStatus,
-            'queueStats'   => $queueStats,
-            'recentQueue'  => $recentQueue,
-            'settings'     => $settings,
-            'localToken'   => $localToken,
+            'layout'         => 'main',
+            'pageTitle'      => 'Cluster',
+            'nodes'          => $nodes,
+            'localStatus'    => $localStatus,
+            'queueStats'     => $queueStats,
+            'recentQueue'    => $recentQueue,
+            'settings'       => $settings,
+            'localToken'     => $localToken,
+            'failoverConfig'  => $failoverConfig,
+            'failoverStatus'  => $failoverStatus,
+            'failoverServers' => $failoverServers,
+            'cfAccounts'      => $cfAccounts,
         ]);
     }
 
@@ -555,6 +573,27 @@ class ClusterController
         Flash::set('success', 'Configuracion del cluster guardada');
         header('Location: /settings/cluster');
         exit;
+    }
+
+    /**
+     * POST /settings/cluster/save-setting (AJAX, single key-value)
+     */
+    public function saveSetting(): void
+    {
+        header('Content-Type: application/json');
+        View::verifyCsrf();
+
+        $key = trim($_POST['key'] ?? '');
+        $value = trim($_POST['value'] ?? '');
+
+        $allowed = ['cluster_auto_failover'];
+        if (!in_array($key, $allowed, true)) {
+            echo json_encode(['ok' => false, 'error' => 'Setting not allowed']);
+            return;
+        }
+
+        Settings::set($key, $value);
+        echo json_encode(['ok' => true]);
     }
 
     /**

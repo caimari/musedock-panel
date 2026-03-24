@@ -20,6 +20,49 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.3',
+                'date' => '2026-03-24',
+                'badge' => 'success',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Multi-ISP Failover (Fase 1) — Sistema completo de redundancia DNS entre múltiples servidores e ISPs con 4 estados: Normal, Degradado, Primarios Caídos y Emergencia',
+                            'Servidores dinámicos — Tabla flexible para configurar cualquier número de servidores Primary, Failover y Backup con nombres personalizados, cualquier proveedor',
+                            'Integración Cloudflare — Gestión multi-cuenta de tokens API con verificación de zonas; cambio automático de registros DNS A/CNAME durante failover',
+                            'caddy-l4 — Generador de configuración para proxy SNI en modo emergencia; preview en tiempo real del JSON generado',
+                            'Health checks — Comprobación de estado de todos los servidores con umbrales configurables (intervalo, timeout, caídas para DOWN, checks para UP)',
+                            'Acciones manuales de failover — Failover parcial, primarios caídos, emergencia y failback con confirmación por contraseña',
+                            'Widget de failover en Dashboard — Muestra estado actual y servidores con sus roles dinámicamente',
+                            'Endpoint AJAX save-setting — Permite guardar ajustes individuales del cluster sin recargar (auto-failover toggle)',
+                        ],
+                        'en' => [
+                            'Multi-ISP Failover (Phase 1) — Complete DNS redundancy system across multiple servers and ISPs with 4 states: Normal, Degraded, Primaries Down and Emergency',
+                            'Dynamic servers — Flexible table to configure any number of Primary, Failover and Backup servers with custom names, any provider',
+                            'Cloudflare integration — Multi-account API token management with zone verification; automatic DNS A/CNAME record switching during failover',
+                            'caddy-l4 — Configuration generator for SNI proxy in emergency mode; real-time JSON config preview',
+                            'Health checks — Server health monitoring with configurable thresholds (interval, timeout, failures for DOWN, checks for UP)',
+                            'Manual failover actions — Partial failover, primaries down, emergency and failback with password confirmation',
+                            'Dashboard failover widget — Shows current state and servers with their roles dynamically',
+                            'AJAX save-setting endpoint — Allows saving individual cluster settings without reload (auto-failover toggle)',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Reorganización del tab Failover — Tres secciones claras: Operaciones (estado + acciones), Infraestructura (servidores + Cloudflare) y Ajustes (config + caddy-l4)',
+                            'Promote/Demote movido al tab Estado — Junto al estado del cluster donde corresponde, con auto-failover toggle integrado',
+                            'Banner explicativo en Failover — Diagrama visual del flujo de estados, explicación de roles (Primary/Failover/Backup), requisitos de IP pública y NAT',
+                            'Eliminada card redundante de Alertas Slave — Notificaciones email/telegram ya se gestionan en Settings > Notifications',
+                        ],
+                        'en' => [
+                            'Failover tab reorganization — Three clear sections: Operations (status + actions), Infrastructure (servers + Cloudflare) and Settings (config + caddy-l4)',
+                            'Promote/Demote moved to Estado tab — Next to cluster status where it belongs, with integrated auto-failover toggle',
+                            'Explanatory banner in Failover — Visual state flow diagram, role explanation (Primary/Failover/Backup), public IP and NAT requirements',
+                            'Removed redundant Slave Alerts card — Email/telegram notifications already managed in Settings > Notifications',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.2',
                 'date' => '2026-03-23',
                 'badge' => 'primary',

@@ -68,6 +68,15 @@ class DashboardController
             }
         } catch (\Throwable) {}
 
+        // Failover status
+        $failoverStatus = null;
+        try {
+            $foSvc = \MuseDockPanel\Services\FailoverService::class;
+            if ($foSvc::isConfigured()) {
+                $failoverStatus = $foSvc::getStatusSummary();
+            }
+        } catch (\Throwable) {}
+
         View::render('dashboard/index', [
             'layout' => 'main',
             'pageTitle' => 'Dashboard',
@@ -76,6 +85,7 @@ class DashboardController
             'recentLog' => $recentLog,
             'clusterInfo' => $clusterInfo,
             'offlineNodes' => $offlineNodes,
+            'failoverStatus' => $failoverStatus,
         ]);
     }
 

@@ -103,9 +103,9 @@
                             </td>
                             <td class="text-end pe-3">
                                 <?php if ($isStandby): ?>
-                                    <a href="/settings/cluster#nodos" class="btn btn-outline-success btn-sm py-0 px-2" title="Ir a cluster para reactivar">
+                                    <button class="btn btn-outline-success btn-sm py-0 px-2" onclick="reactivateNode(<?= $oNode['id'] ?>, '<?= View::e($oNode['name']) ?>')" title="Reactivar nodo">
                                         <i class="bi bi-play-fill me-1"></i>Reactivar
-                                    </a>
+                                    </button>
                                 <?php elseif ($oNode['muted']): ?>
                                     <button class="btn btn-outline-warning btn-sm py-0 px-2" onclick="toggleNodeAlerts(<?= $oNode['id'] ?>, 'unmute', '<?= View::e($oNode['name']) ?>')" title="Reactivar alertas">
                                         <i class="bi bi-bell me-1"></i>Reactivar alertas
@@ -326,6 +326,62 @@
                     <span class="text-muted"><i class="bi bi-broadcast me-1"></i>Este servidor gestiona y sincroniza hostings a los nodos slave.</span>
                 <?php endif; ?>
             </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<!-- Failover ISP Status -->
+<?php if (!empty($failoverStatus)):
+    $foState = $failoverStatus['state'] ?? 'normal';
+    $foBadge = \MuseDockPanel\Services\FailoverService::stateBadgeClass($foState);
+    $foLabel = $failoverStatus['state_label'] ?? 'Normal';
+    $foIsNormal = $foState === 'normal';
+?>
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="card border-<?= $foIsNormal ? 'success' : 'danger' ?>">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span>
+                    <i class="bi bi-shield-check me-2"></i>Failover ISP
+                    <span class="badge <?= $foBadge ?> ms-2"><?= View::e($foLabel) ?></span>
+                </span>
+                <a href="/settings/cluster#tab-failover" class="btn btn-outline-light btn-sm">
+                    <i class="bi bi-gear me-1"></i>Configurar
+                </a>
+            </div>
+            <?php if (!$foIsNormal): ?>
+            <div class="card-body py-2">
+                <div class="alert alert-danger mb-0 py-2">
+                    <i class="bi bi-exclamation-octagon me-2"></i>
+                    <strong>Failover activo:</strong> <?= View::e($foLabel) ?>
+                    <?php if ($failoverStatus['state_since'] ?? ''): ?>
+                        desde <?= View::e($failoverStatus['state_since']) ?>
+                    <?php endif; ?>
+                    <a href="/settings/cluster#tab-failover" class="ms-2">Ver detalles</a>
+                </div>
+            </div>
+            <?php else: ?>
+            <div class="card-body py-2">
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <?php foreach ($failoverStatus['servers'] ?? [] as $srv): ?>
+                    <span class="small text-muted">
+                        <i class="bi bi-<?= ($srv['role'] ?? '') === 'backup' ? 'router' : 'cloud' ?> me-1"></i>
+                        <?= View::e($srv['name'] ?? '') ?>
+                        <code class="ms-1"><?= View::e($srv['ip'] ?? '--') ?></code>
+                        <span class="badge bg-<?= match($srv['role'] ?? '') { 'primary' => 'info', 'failover' => 'warning text-dark', default => 'secondary' } ?>" style="font-size:.6rem;">
+                            <?= View::e(ucfirst($srv['role'] ?? '')) ?>
+                        </span>
+                    </span>
+                    <?php endforeach; ?>
+                    <?php if ($failoverStatus['dyndns'] ?? ''): ?>
+                    <span class="small text-muted">
+                        <i class="bi bi-globe me-1"></i>DynDNS: <code><?= View::e($failoverStatus['dyndns']) ?></code>
+                    </span>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
 </div>
@@ -740,6 +796,55 @@ window.toggleNodeAlerts = async function(nodeId, action, nodeName) {
             text: e.message,
             icon: 'error',
         });
+    }
+};
+
+window.reactivateNode = async function(nodeId, nodeName) {
+    const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+    const csrfToken = document.querySelector('input[name=_csrf_token]')?.value || '<?= $_SESSION['csrf_token'] ?? '' ?>';
+
+    const result = await S.fire({
+        title: 'Reactivar nodo',
+        html: '<p>Reactivar el nodo <strong>' + nodeName + '</strong>?</p>' +
+              '<p class="small text-muted">Se reanudarán: sincronización de archivos, cola, alertas y todas las operaciones.</p>' +
+              '<div class="mb-2"><label class="form-label small">Contraseña de administrador</label>' +
+              '<input type="password" id="reactivatePassword" class="form-control" placeholder="Confirmar con tu contraseña" style="background:#2a2a3e;color:#fff;border-color:#444;"></div>',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Reactivar',
+        confirmButtonColor: '#22c55e',
+        cancelButtonText: 'Cancelar',
+        preConfirm: function() {
+            var pw = document.getElementById('reactivatePassword').value;
+            if (!pw) {
+                Swal.showValidationMessage('La contraseña es obligatoria');
+                return false;
+            }
+            return pw;
+        }
+    });
+
+    if (!result.isConfirmed) return;
+
+    try {
+        var form = new FormData();
+        form.append('node_id', nodeId);
+        form.append('action', 'deactivate');
+        form.append('admin_password', result.value);
+        form.append('reason', '');
+        form.append('_csrf_token', csrfToken);
+
+        const resp = await fetch('/settings/cluster/node-standby', { method: 'POST', body: form });
+        const data = await resp.json();
+
+        S.fire({
+            title: data.ok ? 'OK' : 'Error',
+            text: data.message || data.error,
+            icon: data.ok ? 'success' : 'error',
+            timer: 2500,
+        }).then(function() { if (data.ok) location.reload(); });
+    } catch (e) {
+        S.fire({ title: 'Error', text: e.message, icon: 'error' });
     }
 };
 </script>

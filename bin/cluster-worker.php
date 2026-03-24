@@ -15,7 +15,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.2');
+define('PANEL_VERSION', '1.0.3');
 
 // Autoloader
 spl_autoload_register(function ($class) {

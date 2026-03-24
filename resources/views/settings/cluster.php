@@ -83,7 +83,15 @@
     elseif ($clusterRole !== 'slave' && (!$fsEnabled || !$sshKeyExists)) $archivosDot = 'dot-yellow';
 
     $failoverDot = 'dot-gray';
-    if ($clusterRole === 'master' || $clusterRole === 'slave') $failoverDot = 'dot-green';
+    $foCurrentState = $failoverStatus['state'] ?? 'normal';
+    if (!empty($failoverStatus['configured'])) {
+        $failoverDot = match($foCurrentState) {
+            'normal' => 'dot-green',
+            'degraded' => 'dot-yellow',
+            'primary_down', 'emergency' => 'dot-yellow',
+            default => 'dot-gray',
+        };
+    }
 
     $configDot = 'dot-green';
     if ($clusterRole === 'standalone') $configDot = 'dot-yellow';
@@ -339,6 +347,80 @@
         </div>
     </div>
     <?php endforeach; ?>
+    <?php endif; ?>
+
+    <!-- ── Promote / Demote Cluster ──────────────────────────── -->
+    <?php
+        $failoverRole = 'standalone';
+        if ($clusterRole === 'slave' || $replRole === 'slave') $failoverRole = 'slave';
+        elseif ($clusterRole === 'master' || $replRole === 'master') $failoverRole = 'master';
+    ?>
+    <?php if ($failoverRole !== 'standalone'): ?>
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-arrow-left-right me-2"></i>Promote / Demote Cluster</div>
+        <div class="card-body">
+            <?php if ($failoverRole === 'slave'): ?>
+                <?php
+                    $masterIpSaved = $settings['cluster_master_ip'] ?? '';
+                    $masterLastHb2 = $settings['cluster_master_last_heartbeat'] ?? '';
+                    $masterAge2 = $masterLastHb2 ? (time() - strtotime($masterLastHb2)) : 99999;
+                    $masterDown2 = $masterAge2 > (int)($settings['cluster_unreachable_timeout'] ?? 300);
+                ?>
+                <?php if ($masterDown2 && $masterIpSaved): ?>
+                    <div class="alert" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#f87171;">
+                        <i class="bi bi-exclamation-octagon me-2"></i>
+                        <strong>Master caído</strong> (<?= View::e($masterIpSaved) ?>) — <?= round($masterAge2 / 60) ?> min sin respuesta
+                    </div>
+                <?php endif; ?>
+                <form method="post" action="/settings/cluster/promote" id="form-promote-cluster">
+                    <?= View::csrf() ?>
+                    <button type="button" class="btn btn-warning btn-sm" onclick="confirmPromoteCluster()">
+                        <i class="bi bi-arrow-up-circle me-1"></i>Promover a Master
+                    </button>
+                </form>
+
+                <?php $autoFailoverOn = (($settings['cluster_auto_failover'] ?? '0') === '1'); ?>
+                <hr class="border-secondary my-3">
+                <input type="hidden" id="autoFailoverValue" value="<?= $autoFailoverOn ? '1' : '0' ?>">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="autoFailoverToggle"
+                               <?= $autoFailoverOn ? 'checked' : '' ?> onchange="toggleAutoFailover(this)">
+                        <label class="form-check-label" for="autoFailoverToggle">
+                            Auto-promover a Master si el master cae
+                        </label>
+                    </div>
+                    <?php if ($autoFailoverOn): ?>
+                        <span class="badge bg-danger"><i class="bi bi-lightning me-1"></i>ACTIVO</span>
+                    <?php endif; ?>
+                </div>
+                <div class="small text-muted mt-1" style="max-width:600px;">
+                    <i class="bi bi-exclamation-triangle text-warning me-1"></i>
+                    Promoverá automáticamente este servidor a Master si pierde contacto con el master actual.
+                </div>
+            <?php elseif ($failoverRole === 'master'): ?>
+                <form method="post" action="/settings/cluster/demote" id="form-demote-cluster">
+                    <?= View::csrf() ?>
+                    <div class="mb-3" style="max-width:400px;">
+                        <label class="form-label small">Seleccione el nuevo Master</label>
+                        <?php if (!empty($nodes)): ?>
+                        <select name="new_master_ip" class="form-select form-select-sm" id="demote-node-select" required>
+                            <option value="">-- Seleccionar --</option>
+                            <?php foreach ($nodes as $n): $nodeHost = parse_url($n['api_url'], PHP_URL_HOST); ?>
+                            <option value="<?= View::e($nodeHost) ?>"><?= View::e($n['name']) ?> (<?= View::e($nodeHost) ?>)</option>
+                            <?php endforeach; ?>
+                        </select>
+                        <?php else: ?>
+                        <input type="text" name="new_master_ip" class="form-control form-control-sm" placeholder="IP" required>
+                        <?php endif; ?>
+                    </div>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="confirmDemoteCluster()">
+                        <i class="bi bi-arrow-down-circle me-1"></i>Degradar a Slave
+                    </button>
+                </form>
+            <?php endif; ?>
+        </div>
+    </div>
     <?php endif; ?>
 
 </div>
@@ -1108,171 +1190,612 @@
 <?php endif; ?>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
-<!-- TAB 4 — Failover                                            -->
+<!-- TAB 4 — Failover Multi-ISP                                    -->
 <!-- ═══════════════════════════════════════════════════════════ -->
+<?php
+    $fc = $failoverConfig ?? [];
+    $fs = $failoverStatus ?? [];
+    $foServers = $failoverServers ?? [];
+    $foState = $fs['state'] ?? 'normal';
+    $foConfigured = !empty($fs['configured']);
+?>
 <div class="tab-pane fade" id="tab-failover" role="tabpanel">
 
+    <!-- ── Explicación del sistema ───────────────────────────── -->
     <div class="mb-3 p-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);">
         <small style="color:#6ea8fe;">
             <i class="bi bi-info-circle me-1"></i>
-            Operaciones para cambiar el rol del servidor. Si el master cae, puede promover un slave a master desde aquí.
+            <strong>Multi-ISP Failover</strong> — Redundancia DNS automática entre múltiples servidores e ISPs.
+            La replicación de datos (PostgreSQL, archivos) se gestiona en las pestañas Estado y Configuración.
+            Este sistema gestiona <strong>hacia dónde apunta el tráfico</strong> cuando algo cae.
         </small>
+
+        <div class="mt-3 mb-1" style="font-size:.8rem;color:#94a3b8;">
+            <strong style="color:#6ea8fe;">¿Cómo funciona?</strong> Añada servidores con cualquier nombre y asígneles un rol:
+        </div>
+        <div class="ps-3" style="font-size:.78rem;color:#94a3b8;line-height:1.7;">
+            <strong class="text-info">Primary</strong> — Servidores principales (VPS, datacenter) con <strong>IP pública fija</strong>. Los registros DNS (A/CNAME) de Cloudflare apuntan aquí en estado normal. Puede añadir tantos como necesite.<br>
+            <strong class="text-warning">Failover</strong> — Servidores de respaldo (otro ISP, otra ubicación) con <strong>IP pública fija</strong>. Cuando un Primary cae, Cloudflare cambia los registros DNS para apuntar al Failover asignado. Puede tener varios.<br>
+            <strong style="color:#ef4444;">Backup</strong> — Último recurso, solo necesita <strong>una IP</strong> (puede ser dinámica con DynDNS). Este servidor ejecuta caddy-l4 como proxy SNI: recibe todo el tráfico y lo reenvía por nombre de dominio.
+            <strong>Configure NAT/port-forwarding en su router</strong> (puertos 80 y 443) hacia este equipo.
+        </div>
+
+        <div class="mt-3 mb-1" style="font-size:.8rem;color:#94a3b8;">
+            <strong style="color:#6ea8fe;">Flujo de failover:</strong>
+        </div>
+        <div class="d-flex align-items-stretch gap-0 flex-wrap mt-1" style="font-size:.73rem;">
+            <div class="p-2 rounded-start text-center" style="background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.3);min-width:140px;">
+                <div class="fw-bold text-success">NORMAL</div>
+                <div style="color:#86efac;">Todos los Primary sirven</div>
+                <div style="color:#6b7280;">DNS → Primary servers</div>
+            </div>
+            <div class="d-flex align-items-center px-1" style="color:#64748b;"><i class="bi bi-chevron-right"></i></div>
+            <div class="p-2 text-center" style="background:rgba(234,179,8,0.15);border:1px solid rgba(234,179,8,0.3);min-width:140px;">
+                <div class="fw-bold text-warning">DEGRADADO</div>
+                <div style="color:#fde68a;">Algún Primary cae</div>
+                <div style="color:#6b7280;">DNS caído → su Failover</div>
+            </div>
+            <div class="d-flex align-items-center px-1" style="color:#64748b;"><i class="bi bi-chevron-right"></i></div>
+            <div class="p-2 text-center" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);min-width:140px;">
+                <div class="fw-bold" style="color:#f87171;">PRIMARIOS CAÍDOS</div>
+                <div style="color:#fca5a5;">Todos los Primary caen</div>
+                <div style="color:#6b7280;">DNS → Failover servers</div>
+            </div>
+            <div class="d-flex align-items-center px-1" style="color:#64748b;"><i class="bi bi-chevron-right"></i></div>
+            <div class="p-2 rounded-end text-center" style="background:rgba(239,68,68,0.25);border:1px solid rgba(239,68,68,0.5);min-width:160px;">
+                <div class="fw-bold" style="color:#ef4444;"><i class="bi bi-radioactive me-1"></i>EMERGENCIA</div>
+                <div style="color:#fca5a5;">Primary + Failover caen</div>
+                <div style="color:#6b7280;">DNS → Backup + caddy-l4</div>
+            </div>
+        </div>
+        <div class="mt-2 d-flex align-items-center gap-2" style="font-size:.73rem;color:#64748b;">
+            <i class="bi bi-arrow-counterclockwise text-success"></i>
+            <span><strong class="text-success">Failback:</strong> Desde cualquier estado se puede restaurar a NORMAL cuando los servidores se recuperan.</span>
+        </div>
     </div>
 
-    <!-- CARD 4 — Operaciones de Failover -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- SECCIÓN: Operaciones                                     -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+
+    <!-- ── Estado + Health checks ────────────────────────────── -->
     <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-arrow-left-right me-2"></i>Operaciones de Failover</div>
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>
+                <i class="bi bi-shield-check me-2"></i>Estado del Failover
+                <span class="badge bg-secondary ms-2" style="font-size:.65rem;"><?= ucfirst($fc['failover_mode'] ?? 'manual') ?></span>
+            </span>
+            <span class="badge <?= \MuseDockPanel\Services\FailoverService::stateBadgeClass($foState) ?>" id="fo-state-badge">
+                <?= View::e($fs['state_label'] ?? 'Sin configurar') ?>
+            </span>
+        </div>
         <div class="card-body">
-            <p class="text-muted mb-3">
-                Las operaciones de failover permiten cambiar el rol de este servidor dentro del cluster.
-                Use estas opciones con precaución.
-            </p>
-
-            <?php
-                // Determine effective failover role: cluster_role OR repl_role
-                $failoverRole = 'standalone';
-                if ($clusterRole === 'slave' || $replRole === 'slave') $failoverRole = 'slave';
-                elseif ($clusterRole === 'master' || $replRole === 'master') $failoverRole = 'master';
-            ?>
-
-            <?php if ($failoverRole === 'slave'): ?>
-                <?php
-                    $masterIpSaved = $settings['cluster_master_ip'] ?? '';
-                    $masterLastHb = $settings['cluster_master_last_heartbeat'] ?? '';
-                    $masterAge = $masterLastHb ? (time() - strtotime($masterLastHb)) : 99999;
-                    $masterDown = $masterAge > (int)($settings['cluster_unreachable_timeout'] ?? 300);
-                ?>
-
-                <?php if ($masterDown && $masterIpSaved): ?>
-                    <div class="alert" style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #f87171;">
-                        <i class="bi bi-exclamation-octagon me-2"></i>
-                        <strong>Master caído.</strong> El master (<?= View::e($masterIpSaved) ?>) no responde desde hace <?= round($masterAge / 60) ?> minutos.
-                        Puede promover este servidor a Master para que atienda el tráfico.
-                    </div>
-                <?php else: ?>
-                    <div class="alert" style="background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); color: #fbbf24;">
-                        <i class="bi bi-exclamation-triangle me-2"></i>
-                        Este servidor es actualmente un <strong>Slave</strong>. Puede promoverlo a Master si el master actual ha fallado.
-                    </div>
-                <?php endif; ?>
-
-                <form method="post" action="/settings/cluster/promote" id="form-promote-cluster">
-                    <?= View::csrf() ?>
-                    <button type="button" class="btn btn-warning btn-lg" onclick="confirmPromoteCluster()">
-                        <i class="bi bi-arrow-up-circle me-1"></i>Promover a Master
-                    </button>
-                </form>
-
-            <?php elseif ($failoverRole === 'master'): ?>
-                <div class="alert" style="background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); color: #60a5fa;">
+            <?php if (!$foConfigured): ?>
+                <div class="alert mb-0" style="background:rgba(107,114,128,0.1);border:1px solid rgba(107,114,128,0.3);color:#9ca3af;">
                     <i class="bi bi-info-circle me-2"></i>
-                    Este servidor es actualmente el <strong>Master</strong>. Puede degradarlo a Slave si necesita transferir el rol a otro servidor.
+                    Añada al menos un servidor <strong>Primary</strong> y un <strong>Failover</strong> en la sección Infraestructura para activar el sistema.
                 </div>
-                <form method="post" action="/settings/cluster/demote" id="form-demote-cluster">
-                    <?= View::csrf() ?>
-                    <div class="mb-3" style="max-width: 400px;">
-                        <label class="form-label">Seleccione el nuevo Master</label>
-                        <?php if (!empty($nodes)): ?>
-                        <select name="new_master_ip" class="form-select" id="demote-node-select" required>
-                            <option value="">-- Seleccionar nodo --</option>
-                            <?php foreach ($nodes as $n):
-                                $nodeHost = parse_url($n['api_url'], PHP_URL_HOST);
-                            ?>
-                            <option value="<?= View::e($nodeHost) ?>"
-                                data-name="<?= View::e($n['name']) ?>"
-                                data-url="<?= View::e($n['api_url']) ?>">
-                                <?= View::e($n['name']) ?> (<?= View::e($nodeHost) ?>)
-                            </option>
-                            <?php endforeach; ?>
-                        </select>
-                        <?php else: ?>
-                        <div class="text-warning small">
-                            <i class="bi bi-exclamation-triangle me-1"></i>No hay nodos configurados. Añada un nodo primero en la pestaña "Nodos".
-                        </div>
-                        <input type="text" name="new_master_ip" class="form-control mt-2" placeholder="IP manual (ej: 192.168.1.100)" required>
-                        <?php endif; ?>
-                    </div>
-                    <button type="button" class="btn btn-danger" onclick="confirmDemoteCluster()" <?= empty($nodes) ? '' : '' ?>>
-                        <i class="bi bi-arrow-down-circle me-1"></i>Degradar a Slave
-                    </button>
-                </form>
-
             <?php else: ?>
-                <div class="alert" style="background: rgba(107,114,128,0.1); border: 1px solid rgba(107,114,128,0.3); color: #9ca3af;">
-                    <i class="bi bi-info-circle me-2"></i>
-                    Este servidor es <strong>Standalone</strong>. Configure el cluster primero seleccionando un rol (Master o Slave) en la pestaña Configuración.
+                <div class="row g-3 mb-3">
+                    <?php foreach ($foServers as $srv): ?>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="p-3 rounded" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <strong class="small"><?= View::e($srv['name'] ?? '') ?></strong>
+                                <div>
+                                    <span class="badge bg-<?= match($srv['role'] ?? '') { 'primary' => 'info', 'failover' => 'warning text-dark', 'backup' => 'secondary', default => 'secondary' } ?>" style="font-size:.65rem;">
+                                        <?= View::e(ucfirst($srv['role'] ?? '')) ?>
+                                    </span>
+                                    <span class="badge bg-secondary fo-badge" data-key="<?= View::e($srv['id'] ?? '') ?>">--</span>
+                                </div>
+                            </div>
+                            <code class="small text-muted"><?= View::e($srv['ip'] ?? '--') ?><?= ($srv['port'] ?? 443) != 443 ? ':' . $srv['port'] : '' ?></code>
+                            <?php if ($srv['dyndns'] ?? false): ?>
+                                <span class="badge bg-secondary" style="font-size:.6rem;">DynDNS</span>
+                            <?php endif; ?>
+                            <div class="small text-muted mt-1 fo-ms" data-key="<?= View::e($srv['id'] ?? '') ?>"></div>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                    <div class="col-md-6 col-lg-4">
+                        <div class="p-3 rounded" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <strong class="small">caddy-l4</strong>
+                                <span class="badge <?= ($fs['caddy_l4_installed'] ?? false) ? 'bg-success' : 'bg-secondary' ?>">
+                                    <?= ($fs['caddy_l4_installed'] ?? false) ? 'Instalado' : 'No instalado' ?>
+                                </span>
+                            </div>
+                            <code class="small text-muted"><?= View::e($fc['failover_caddy_l4_bin'] ?? '/usr/local/bin/caddy-l4') ?></code>
+                        </div>
+                    </div>
                 </div>
+
+                <div class="d-flex gap-2 align-items-center">
+                    <button class="btn btn-outline-info btn-sm" onclick="foCheckHealth()">
+                        <i class="bi bi-heart-pulse me-1"></i>Comprobar
+                    </button>
+                    <span class="small text-muted" id="fo-check-time"></span>
+                </div>
+
+                <?php if ($foState !== 'normal'): ?>
+                <div class="alert mt-3 mb-0" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#f87171;">
+                    <i class="bi bi-exclamation-octagon me-2"></i>
+                    <strong>Failover activo:</strong> <?= View::e($fs['state_label'] ?? '') ?>
+                    <?php if ($fs['state_since'] ?? ''): ?> desde <?= View::e($fs['state_since']) ?><?php endif; ?>
+                </div>
+                <?php endif; ?>
             <?php endif; ?>
         </div>
     </div>
 
-    <!-- Slave-specific: alertas y auto-failover -->
-    <?php if ($clusterRole === 'slave'): ?>
+    <!-- ── Acciones manuales ────────────────────────────────── -->
+    <?php if ($foConfigured): ?>
     <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-bell me-2"></i>Alertas y Auto-Failover</div>
+        <div class="card-header"><i class="bi bi-lightning me-2"></i>Acciones de Failover</div>
         <div class="card-body">
-            <!-- Slave: alertas de master caido -->
-            <h6 class="text-muted mb-2">Alerta de Master caído</h6>
-            <p class="small text-muted mb-2">
-                Si este servidor deja de recibir heartbeat del master durante el timeout configurado, se enviará una alerta.
-                Seleccione los canales por los que desea recibir la notificación.
-            </p>
-            <form method="post" action="/settings/cluster/save-settings" id="form-slave-alerts">
-                <?= View::csrf() ?>
-                <input type="hidden" name="cluster_role" value="<?= View::e($clusterRole) ?>">
-                <input type="hidden" name="cluster_local_token" value="<?= View::e($localToken) ?>">
-                <input type="hidden" name="cluster_heartbeat_interval" value="<?= (int)($settings['cluster_heartbeat_interval'] ?? 30) ?>">
-                <input type="hidden" name="cluster_unreachable_timeout" value="<?= (int)($settings['cluster_unreachable_timeout'] ?? 300) ?>">
-
-                <div class="form-check form-switch mb-2">
-                    <input class="form-check-input" type="checkbox" name="cluster_slave_notify_email" id="slaveNotifyEmail"
-                           <?= (($settings['cluster_slave_notify_email'] ?? '1') === '1') ? 'checked' : '' ?>>
-                    <label class="form-check-label" for="slaveNotifyEmail">
-                        <i class="bi bi-envelope me-1"></i>Notificar por Email
-                    </label>
-                </div>
-                <div class="form-check form-switch mb-3">
-                    <input class="form-check-input" type="checkbox" name="cluster_slave_notify_telegram" id="slaveNotifyTelegram"
-                           <?= (($settings['cluster_slave_notify_telegram'] ?? '1') === '1') ? 'checked' : '' ?>>
-                    <label class="form-check-label" for="slaveNotifyTelegram">
-                        <i class="bi bi-telegram me-1"></i>Notificar por Telegram
-                    </label>
-                </div>
-
-                <hr class="border-secondary">
-
-                <!-- Slave: auto-failover -->
-                <h6 class="text-muted mb-2">Auto-Failover</h6>
-                <?php $autoFailoverOn = (($settings['cluster_auto_failover'] ?? '0') === '1'); ?>
-                <div class="d-flex align-items-center gap-3 mb-2">
-                    <div class="form-check form-switch mb-0">
-                        <input class="form-check-input" type="checkbox" id="autoFailoverToggle"
-                               <?= $autoFailoverOn ? 'checked' : '' ?>
-                               onchange="toggleAutoFailover(this)">
-                        <label class="form-check-label" for="autoFailoverToggle">
-                            Promover automáticamente a Master si el master cae
-                        </label>
-                    </div>
-                    <?php if ($autoFailoverOn): ?>
-                        <span class="badge bg-danger"><i class="bi bi-lightning me-1"></i>ACTIVO</span>
+            <div class="d-flex flex-wrap gap-2">
+                <?php if ($foState === 'normal'): ?>
+                    <button class="btn btn-warning btn-sm" onclick="foExecute('failover_degraded', 'Failover parcial: redirigir primarios caídos a sus failover')">
+                        <i class="bi bi-exclamation-triangle me-1"></i>Failover Parcial
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="foExecute('failover_primary', 'Todos los primarios caídos: DNS a servidores failover')">
+                        <i class="bi bi-exclamation-octagon me-1"></i>Primarios Caídos
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="foExecute('failover_emergency', 'Emergencia: todo a backup + caddy-l4')">
+                        <i class="bi bi-radioactive me-1"></i>Emergencia
+                    </button>
+                <?php else: ?>
+                    <button class="btn btn-success" onclick="foExecute('failback', 'Failback: restaurar DNS a primarios')">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Failback a Normal
+                    </button>
+                    <?php if ($foState !== 'emergency'): ?>
+                    <button class="btn btn-danger btn-sm" onclick="foExecute('failover_emergency', 'Escalar a emergencia')">
+                        <i class="bi bi-radioactive me-1"></i>Escalar
+                    </button>
                     <?php endif; ?>
-                </div>
-                <input type="hidden" name="cluster_auto_failover" id="autoFailoverValue" value="<?= $autoFailoverOn ? '1' : '0' ?>">
-                <div class="small text-muted mb-3" style="max-width:600px;">
-                    <i class="bi bi-exclamation-triangle text-warning me-1"></i>
-                    <strong>Precaución:</strong> Si se activa, este servidor se promoverá automáticamente a Master cuando detecte que el master no responde.
-                    Esto abrirá los puertos 80/443 y cambiará el rol del cluster. Desactivado por defecto para evitar problemas de split-brain.
-                </div>
+                <?php endif; ?>
+            </div>
+            <div id="fo-action-result" class="mt-3" style="display:none;">
+                <pre class="p-3 rounded small" style="background:rgba(0,0,0,0.3);max-height:300px;overflow-y:auto;white-space:pre-wrap;"></pre>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
-                <button type="submit" class="btn btn-success">
-                    <i class="bi bi-check-circle me-1"></i>Guardar Alertas
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- SECCIÓN: Infraestructura                                 -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <hr class="border-secondary my-4">
+    <h6 class="text-muted mb-3"><i class="bi bi-hdd-network me-2"></i>Infraestructura</h6>
+
+    <!-- ── Servidores (dinámico) ─────────────────────────────── -->
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-server me-2"></i>Servidores</span>
+            <button type="button" class="btn btn-outline-info btn-sm" onclick="foAddServer()">
+                <i class="bi bi-plus me-1"></i>Añadir servidor
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="mb-3 p-2 rounded small" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);color:#94a3b8;">
+                <i class="bi bi-lightbulb text-warning me-1"></i>
+                Añada todos los servidores que participan en el failover. Puede tener <strong>múltiples Primary</strong> y <strong>múltiples Failover</strong>.
+                Cada Primary debe tener un Failover asignado en la columna "Failover a" (pueden compartir el mismo Failover).
+                El servidor <strong>Backup</strong> solo se usa en emergencia total — es donde caddy-l4 redirige el tráfico por SNI.
+                Si el Backup tiene IP dinámica, marque <strong>DynDNS</strong>.
+            </div>
+            <form method="post" action="/settings/failover/save-servers" id="form-fo-servers">
+                <?= View::csrf() ?>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0" id="fo-servers-table">
+                        <thead>
+                            <tr>
+                                <th>Nombre</th>
+                                <th>IP</th>
+                                <th>Puerto</th>
+                                <th>Rol</th>
+                                <th>Failover a</th>
+                                <th>DynDNS</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="fo-servers-body">
+                            <?php foreach ($foServers as $srv): ?>
+                            <tr class="fo-server-row">
+                                <td>
+                                    <input type="hidden" name="srv_id[]" value="<?= View::e($srv['id'] ?? '') ?>">
+                                    <input type="text" name="srv_name[]" class="form-control form-control-sm" value="<?= View::e($srv['name'] ?? '') ?>" required>
+                                </td>
+                                <td><input type="text" name="srv_ip[]" class="form-control form-control-sm" value="<?= View::e($srv['ip'] ?? '') ?>" placeholder="IP"></td>
+                                <td><input type="number" name="srv_port[]" class="form-control form-control-sm" value="<?= (int)($srv['port'] ?? 443) ?>" style="width:80px;"></td>
+                                <td>
+                                    <select name="srv_role[]" class="form-select form-select-sm">
+                                        <option value="primary" <?= ($srv['role'] ?? '') === 'primary' ? 'selected' : '' ?>>Primary</option>
+                                        <option value="failover" <?= ($srv['role'] ?? '') === 'failover' ? 'selected' : '' ?>>Failover</option>
+                                        <option value="backup" <?= ($srv['role'] ?? '') === 'backup' ? 'selected' : '' ?>>Backup</option>
+                                    </select>
+                                </td>
+                                <td>
+                                    <select name="srv_failover_to[]" class="form-select form-select-sm fo-failover-select">
+                                        <option value="">--</option>
+                                        <?php foreach ($foServers as $opt): if (($opt['role'] ?? '') !== 'primary'): ?>
+                                        <option value="<?= View::e($opt['id'] ?? '') ?>" <?= ($srv['failover_to'] ?? '') === ($opt['id'] ?? '') ? 'selected' : '' ?>>
+                                            <?= View::e($opt['name'] ?? '') ?>
+                                        </option>
+                                        <?php endif; endforeach; ?>
+                                    </select>
+                                </td>
+                                <td class="text-center">
+                                    <input type="hidden" name="srv_dyndns[]" value="0">
+                                    <input type="checkbox" value="1" class="form-check-input fo-dyndns-check" <?= !empty($srv['dyndns']) ? 'checked' : '' ?>
+                                           onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
+                                </td>
+                                <td>
+                                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <?php if (empty($foServers)): ?>
+                <div class="text-muted small mt-2 mb-2">
+                    <i class="bi bi-info-circle me-1"></i>No hay servidores configurados. Pulse "Añadir servidor" para empezar.
+                </div>
+                <?php endif; ?>
+                <button type="submit" class="btn btn-success btn-sm mt-2">
+                    <i class="bi bi-check-circle me-1"></i>Guardar Servidores
                 </button>
             </form>
+        </div>
+    </div>
+
+    <!-- ── Cuentas Cloudflare ───────────────────────────────── -->
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-cloud me-2"></i>Cuentas Cloudflare</span>
+            <button type="button" class="btn btn-outline-info btn-sm" onclick="foAddCfAccount()">
+                <i class="bi bi-plus me-1"></i>Añadir cuenta
+            </button>
+        </div>
+        <div class="card-body">
+            <form method="post" action="/settings/failover/save-cf-accounts" id="form-cf-accounts">
+                <?= View::csrf() ?>
+                <div id="cf-accounts-list">
+                    <?php foreach ($cfAccounts ?? [] as $i => $acct): ?>
+                    <div class="cf-account-row border rounded p-3 mb-2" style="border-color:rgba(255,255,255,0.1)!important;">
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-3">
+                                <label class="form-label small">Nombre</label>
+                                <input type="text" name="cf_name[]" class="form-control form-control-sm" value="<?= View::e($acct['name'] ?? '') ?>">
+                            </div>
+                            <div class="col-md-5">
+                                <label class="form-label small">API Token</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="password" name="cf_token[]" class="form-control cf-token-input" value="<?= View::e($acct['token'] ?? '') ?>">
+                                    <button type="button" class="btn btn-outline-info" onclick="foVerifyCfToken(this)">
+                                        <i class="bi bi-check-circle"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="col-md-3">
+                                <span class="small text-muted cf-zone-info">
+                                    <?php if (!empty($acct['zones'])): ?>
+                                        <?= count($acct['zones']) ?> zona(s):
+                                        <?= View::e(implode(', ', array_column($acct['zones'], 'name'))) ?>
+                                    <?php endif; ?>
+                                </span>
+                            </div>
+                            <div class="col-md-1 text-end">
+                                <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('.cf-account-row').remove()">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <?php if (empty($cfAccounts)): ?>
+                <div class="text-muted small mb-2">
+                    <i class="bi bi-info-circle me-1"></i>Sin cuentas Cloudflare. Añada al menos una para que el failover pueda cambiar DNS automáticamente.
+                </div>
+                <?php endif; ?>
+                <button type="submit" class="btn btn-success btn-sm mt-2">
+                    <i class="bi bi-check-circle me-1"></i>Guardar Cuentas CF
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- SECCIÓN: Ajustes                                         -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <hr class="border-secondary my-4">
+    <h6 class="text-muted mb-3"><i class="bi bi-sliders me-2"></i>Ajustes</h6>
+
+    <!-- ── Configuración general ────────────────────────────── -->
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-gear me-2"></i>Configuración Failover</div>
+        <div class="card-body">
+            <form method="post" action="/settings/failover/save-config" id="form-fo-config">
+                <?= View::csrf() ?>
+
+                <div class="row g-2 mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label small">Modo</label>
+                        <select name="failover_mode" class="form-select form-select-sm">
+                            <option value="manual" <?= ($fc['failover_mode'] ?? '') === 'manual' ? 'selected' : '' ?>>Manual</option>
+                            <option value="semiauto" <?= ($fc['failover_mode'] ?? '') === 'semiauto' ? 'selected' : '' ?>>Semi-auto</option>
+                            <option value="auto" <?= ($fc['failover_mode'] ?? '') === 'auto' ? 'selected' : '' ?>>Automático</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">Proveedor DynDNS</label>
+                        <select name="failover_dyndns_provider" class="form-select form-select-sm">
+                            <option value="" <?= empty($fc['failover_dyndns_provider'] ?? '') ? 'selected' : '' ?>>Ninguno</option>
+                            <option value="freedns" <?= ($fc['failover_dyndns_provider'] ?? '') === 'freedns' ? 'selected' : '' ?>>FreeDNS</option>
+                            <option value="noip" <?= ($fc['failover_dyndns_provider'] ?? '') === 'noip' ? 'selected' : '' ?>>No-IP</option>
+                            <option value="duckdns" <?= ($fc['failover_dyndns_provider'] ?? '') === 'duckdns' ? 'selected' : '' ?>>DuckDNS</option>
+                            <option value="dynu" <?= ($fc['failover_dyndns_provider'] ?? '') === 'dynu' ? 'selected' : '' ?>>Dynu</option>
+                            <option value="other" <?= ($fc['failover_dyndns_provider'] ?? '') === 'other' ? 'selected' : '' ?>>Otro</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small">Hostname DynDNS</label>
+                        <input type="text" name="failover_dyndns_hostname" class="form-control form-control-sm"
+                               value="<?= View::e($fc['failover_dyndns_hostname'] ?? '') ?>" placeholder="host.freedns.org">
+                    </div>
+                </div>
+
+                <div class="row g-2 mb-3">
+                    <div class="col-md-2">
+                        <label class="form-label small">TTL Normal</label>
+                        <input type="number" name="failover_ttl_normal" class="form-control form-control-sm" value="<?= (int)($fc['failover_ttl_normal'] ?? 300) ?>">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small">TTL Alerta</label>
+                        <input type="number" name="failover_ttl_alert" class="form-control form-control-sm" value="<?= (int)($fc['failover_ttl_alert'] ?? 60) ?>">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small">TTL Failover</label>
+                        <input type="number" name="failover_ttl_failover" class="form-control form-control-sm" value="<?= (int)($fc['failover_ttl_failover'] ?? 60) ?>">
+                    </div>
+                </div>
+
+                <h6 class="text-muted mb-2 mt-3">Health Checks</h6>
+                <div class="row g-2 mb-3">
+                    <div class="col-md-2">
+                        <label class="form-label small">Intervalo (seg)</label>
+                        <input type="number" name="failover_check_interval" class="form-control form-control-sm" value="<?= (int)($fc['failover_check_interval'] ?? 60) ?>">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small">Timeout (seg)</label>
+                        <input type="number" name="failover_check_timeout" class="form-control form-control-sm" value="<?= (int)($fc['failover_check_timeout'] ?? 10) ?>">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small">Caídas para DOWN</label>
+                        <input type="number" name="failover_down_threshold" class="form-control form-control-sm" value="<?= (int)($fc['failover_down_threshold'] ?? 3) ?>">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small">OK para UP</label>
+                        <input type="number" name="failover_up_threshold" class="form-control form-control-sm" value="<?= (int)($fc['failover_up_threshold'] ?? 5) ?>">
+                    </div>
+                </div>
+
+                <h6 class="text-muted mb-2 mt-3">caddy-l4 (modo emergencia)</h6>
+                <div class="row g-2 mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label small">Binario caddy-l4</label>
+                        <input type="text" name="failover_caddy_l4_bin" class="form-control form-control-sm font-monospace"
+                               value="<?= View::e($fc['failover_caddy_l4_bin'] ?? '/usr/local/bin/caddy-l4') ?>">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small">Config caddy-l4</label>
+                        <input type="text" name="failover_caddy_l4_conf" class="form-control form-control-sm font-monospace"
+                               value="<?= View::e($fc['failover_caddy_l4_conf'] ?? '/etc/caddy/caddy-l4.json') ?>">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small">Puerto normal</label>
+                        <input type="number" name="failover_caddy_normal_port" class="form-control form-control-sm"
+                               value="<?= (int)($fc['failover_caddy_normal_port'] ?? 443) ?>">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small">Puerto backup</label>
+                        <input type="number" name="failover_caddy_backup_port" class="form-control form-control-sm"
+                               value="<?= (int)($fc['failover_caddy_backup_port'] ?? 8443) ?>">
+                    </div>
+                </div>
+
+                <h6 class="text-muted mb-2 mt-3">Dominios remotos (caddy-l4 → otro servidor)</h6>
+                <textarea name="failover_remote_domains" class="form-control form-control-sm font-monospace mb-3" rows="3"
+                          placeholder="dominio1.com&#10;dominio2.com"><?= View::e(\MuseDockPanel\Settings::get('failover_remote_domains', '')) ?></textarea>
+
+                <button type="submit" class="btn btn-success btn-sm">
+                    <i class="bi bi-check-circle me-1"></i>Guardar Configuración
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ── Preview caddy-l4 ─────────────────────────────────── -->
+    <?php if ($foConfigured): ?>
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-filetype-json me-2"></i>caddy-l4 Config Preview</span>
+            <button type="button" class="btn btn-outline-info btn-sm" onclick="foPreviewCaddyL4()">
+                <i class="bi bi-eye me-1"></i>Generar preview
+            </button>
+        </div>
+        <div class="card-body" style="display:none;" id="fo-caddy-preview">
+            <div class="d-flex gap-3 mb-2">
+                <span class="small text-muted">Dominios locales: <strong id="fo-local-count">0</strong></span>
+                <span class="small text-muted">Dominios remotos: <strong id="fo-remote-count">0</strong></span>
+            </div>
+            <pre class="p-3 rounded small" style="background:rgba(0,0,0,0.3);max-height:400px;overflow-y:auto;" id="fo-caddy-json"></pre>
         </div>
     </div>
     <?php endif; ?>
 
 </div>
+
+<!-- ── Failover JS ──────────────────────────────────────────── -->
+<script>
+function foCheckHealth() {
+    document.querySelectorAll('.fo-badge').forEach(b => { b.textContent = '...'; b.className = 'badge bg-secondary fo-badge'; });
+    fetch('/settings/failover/check-health')
+        .then(r => r.json())
+        .then(data => {
+            if (!data.ok) return;
+            for (const [key, check] of Object.entries(data.checks)) {
+                const badge = document.querySelector(`.fo-badge[data-key="${key}"]`);
+                const ms = document.querySelector(`.fo-ms[data-key="${key}"]`);
+                if (badge) {
+                    badge.textContent = check.ok ? 'OK' : 'DOWN';
+                    badge.className = `badge fo-badge ${check.ok ? 'bg-success' : 'bg-danger'}`;
+                }
+                if (ms) ms.textContent = check.ok ? `${check.ms}ms` : (check.error || 'Sin respuesta');
+            }
+            document.getElementById('fo-check-time').textContent = 'Comprobado: ' + new Date().toLocaleTimeString();
+
+            if (data.mismatch) {
+                const labels = {normal:'Normal',degraded:'Degradado',primary_down:'Primarios caídos',emergency:'Emergencia'};
+                const msg = `Estado actual: ${labels[data.current]||data.current}. Estado recomendado: ${labels[data.recommended]||data.recommended}`;
+                const el = document.getElementById('fo-action-result');
+                el.style.display = 'block';
+                el.querySelector('pre').textContent = msg;
+            }
+        })
+        .catch(e => console.error('Health check error:', e));
+}
+
+function foExecute(action, description) {
+    Swal.fire({
+        title: description,
+        html: '<input type="password" id="fo-pwd" class="swal2-input" placeholder="Contraseña admin">',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Ejecutar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#dc3545',
+        preConfirm: () => {
+            const pwd = document.getElementById('fo-pwd').value;
+            if (!pwd) { Swal.showValidationMessage('Introduce la contraseña'); return false; }
+            return pwd;
+        }
+    }).then(result => {
+        if (!result.isConfirmed) return;
+        const el = document.getElementById('fo-action-result');
+        el.style.display = 'block';
+        el.querySelector('pre').textContent = 'Ejecutando...';
+
+        const fd = new FormData();
+        fd.append('action', action);
+        fd.append('password', result.value);
+        fd.append('_token', document.querySelector('input[name="_token"]').value);
+
+        fetch('/settings/failover/execute', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    el.querySelector('pre').textContent = (data.actions || []).join('\n') || 'OK';
+                    Swal.fire({icon:'success', title:'Failover ejecutado', text: data.state || '', timer:3000});
+                    setTimeout(() => location.reload(), 3000);
+                } else {
+                    el.querySelector('pre').textContent = 'ERROR: ' + (data.error || 'Error desconocido');
+                    Swal.fire({icon:'error', title:'Error', text: data.error || ''});
+                }
+            })
+            .catch(e => { el.querySelector('pre').textContent = 'Error: ' + e.message; });
+    });
+}
+
+function foAddCfAccount() {
+    const html = `<div class="cf-account-row border rounded p-3 mb-2" style="border-color:rgba(255,255,255,0.1)!important;">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-3"><label class="form-label small">Nombre</label>
+                <input type="text" name="cf_name[]" class="form-control form-control-sm" placeholder="Mi cuenta CF"></div>
+            <div class="col-md-5"><label class="form-label small">API Token</label>
+                <div class="input-group input-group-sm">
+                    <input type="text" name="cf_token[]" class="form-control cf-token-input" placeholder="Token Cloudflare">
+                    <button type="button" class="btn btn-outline-info" onclick="foVerifyCfToken(this)"><i class="bi bi-check-circle"></i></button>
+                </div></div>
+            <div class="col-md-3"><span class="small text-muted cf-zone-info"></span></div>
+            <div class="col-md-1 text-end"><button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('.cf-account-row').remove()"><i class="bi bi-trash"></i></button></div>
+        </div></div>`;
+    document.getElementById('cf-accounts-list').insertAdjacentHTML('beforeend', html);
+}
+
+function foVerifyCfToken(btn) {
+    const row = btn.closest('.cf-account-row');
+    const tokenInput = row.querySelector('.cf-token-input');
+    const info = row.querySelector('.cf-zone-info');
+    info.textContent = 'Verificando...';
+
+    const fd = new FormData();
+    fd.append('token', tokenInput.value);
+    fd.append('_token', document.querySelector('input[name="_token"]').value);
+
+    fetch('/settings/failover/verify-cf-token', { method: 'POST', body: fd })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) {
+                info.innerHTML = `<span class="text-success">${data.zones.length} zona(s): ${data.zones.map(z=>z.name).join(', ')}</span>`;
+            } else {
+                info.innerHTML = `<span class="text-danger">${data.error}</span>`;
+            }
+        })
+        .catch(e => { info.innerHTML = `<span class="text-danger">Error: ${e.message}</span>`; });
+}
+
+function foPreviewCaddyL4() {
+    const el = document.getElementById('fo-caddy-preview');
+    el.style.display = 'block';
+    document.getElementById('fo-caddy-json').textContent = 'Generando...';
+    fetch('/settings/failover/caddy-l4-preview')
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('fo-caddy-json').textContent = data.config || 'Error';
+            document.getElementById('fo-local-count').textContent = data.local || 0;
+            document.getElementById('fo-remote-count').textContent = data.remote || 0;
+        });
+}
+
+function foAddServer() {
+    const html = `<tr class="fo-server-row">
+        <td>
+            <input type="hidden" name="srv_id[]" value="">
+            <input type="text" name="srv_name[]" class="form-control form-control-sm" placeholder="Nombre" required>
+        </td>
+        <td><input type="text" name="srv_ip[]" class="form-control form-control-sm" placeholder="IP"></td>
+        <td><input type="number" name="srv_port[]" class="form-control form-control-sm" value="443" style="width:80px;"></td>
+        <td>
+            <select name="srv_role[]" class="form-select form-select-sm">
+                <option value="primary">Primary</option>
+                <option value="failover">Failover</option>
+                <option value="backup">Backup</option>
+            </select>
+        </td>
+        <td>
+            <select name="srv_failover_to[]" class="form-select form-select-sm fo-failover-select">
+                <option value="">--</option>
+            </select>
+        </td>
+        <td class="text-center">
+            <input type="hidden" name="srv_dyndns[]" value="0">
+            <input type="checkbox" value="1" class="form-check-input fo-dyndns-check"
+                   onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
+        </td>
+        <td>
+            <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()">
+                <i class="bi bi-trash"></i>
+            </button>
+        </td>
+    </tr>`;
+    document.getElementById('fo-servers-body').insertAdjacentHTML('beforeend', html);
+}
+</script>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- TAB 5 — Configuración                                       -->
@@ -2103,6 +2626,12 @@ function toggleAutoFailover(checkbox) {
                     .then(data => {
                         if (data.ok) {
                             hiddenInput.value = '1';
+                            // Save the setting
+                            const sf = new FormData();
+                            sf.append('key', 'cluster_auto_failover');
+                            sf.append('value', '1');
+                            sf.append('_csrf_token', document.querySelector('[name=_csrf_token]').value);
+                            fetch('/settings/cluster/save-setting', { method: 'POST', body: sf });
                             Swal.fire({ title: 'Auto-Failover activado', icon: 'success', timer: 2000, background: '#1e1e2e', color: '#fff' });
                         } else {
                             checkbox.checked = false;
@@ -2122,6 +2651,11 @@ function toggleAutoFailover(checkbox) {
     } else {
         // Deactivating — no confirmation needed
         hiddenInput.value = '0';
+        const sf = new FormData();
+        sf.append('key', 'cluster_auto_failover');
+        sf.append('value', '0');
+        sf.append('_csrf_token', document.querySelector('[name=_csrf_token]').value);
+        fetch('/settings/cluster/save-setting', { method: 'POST', body: sf });
     }
 }
 
