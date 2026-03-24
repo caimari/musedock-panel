@@ -26,6 +26,9 @@ class FailoverController
             'failover_up_threshold', 'failover_check_timeout',
             'failover_caddy_l4_bin', 'failover_caddy_l4_conf',
             'failover_caddy_normal_port', 'failover_caddy_backup_port',
+            'failover_disk_critical_pct', 'failover_disk_warning_pct',
+            'failover_load_critical_mult', 'failover_load_warning_mult',
+            'failover_pg_panel_severity',
         ];
 
         foreach ($fields as $f) {

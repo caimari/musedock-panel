@@ -60,6 +60,13 @@ class FailoverService
         'failover_up_threshold'     => '5',
         'failover_check_timeout'    => '10',
 
+        // Health severity thresholds (configurable by admin)
+        'failover_disk_critical_pct'  => '5',   // <5% free → critical (failover)
+        'failover_disk_warning_pct'   => '10',  // <10% free → warning (notify only)
+        'failover_load_critical_mult' => '3',   // load > 3x cores → critical
+        'failover_load_warning_mult'  => '2',   // load > 2x cores → warning
+        'failover_pg_panel_severity'  => 'warning', // pg_panel down = warning (not critical)
+
         // caddy-l4
         'failover_caddy_l4_bin'     => '/usr/local/bin/caddy-l4',
         'failover_caddy_l4_conf'    => '/etc/caddy/caddy-l4.json',

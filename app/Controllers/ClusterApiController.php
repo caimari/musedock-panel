@@ -25,6 +25,13 @@ class ClusterApiController
     {
         header('Content-Type: application/json');
 
+        // Load configurable thresholds from DB (admin can adjust in Settings > Failover)
+        $diskCriticalPct  = (float)(Settings::get('failover_disk_critical_pct', '5') ?: 5);
+        $diskWarningPct   = (float)(Settings::get('failover_disk_warning_pct', '10') ?: 10);
+        $loadCriticalMult = (float)(Settings::get('failover_load_critical_mult', '3') ?: 3);
+        $loadWarningMult  = (float)(Settings::get('failover_load_warning_mult', '2') ?: 2);
+        $pgPanelSeverity  = Settings::get('failover_pg_panel_severity', 'warning') ?: 'warning';
+
         $checks = [];
         $hasCritical = false;
         $hasWarning = false;
@@ -43,52 +50,61 @@ class ClusterApiController
         $checks['pg_hosting'] = self::checkPostgres(5432);
         if ($checks['pg_hosting']['status'] === 'critical') $hasCritical = true;
 
-        // 3. PostgreSQL 5433 (panel database) — WARNING: only panel admin affected, webs still work
+        // 3. PostgreSQL 5433 (panel database) — configurable severity (default: warning)
         $checks['pg_panel'] = self::checkPostgres(5433);
         if ($checks['pg_panel']['status'] === 'critical') {
-            $checks['pg_panel']['status'] = 'warning'; // downgrade: panel DB is not web-critical
-            $hasWarning = true;
+            if ($pgPanelSeverity === 'warning') {
+                $checks['pg_panel']['status'] = 'warning';
+                $hasWarning = true;
+            } elseif ($pgPanelSeverity === 'critical') {
+                $hasCritical = true;
+            } else {
+                // 'ignore' — don't count it at all
+                $checks['pg_panel']['status'] = 'info';
+            }
         }
 
-        // 4. Disk space
+        // 4. Disk space — configurable thresholds
         $diskFree = @disk_free_space('/');
         $diskTotal = @disk_total_space('/');
         if ($diskTotal > 0) {
             $diskPct = round(($diskFree / $diskTotal) * 100, 1);
             $diskStatus = 'ok';
-            if ($diskPct < 5) {
-                $diskStatus = 'critical';  // imminent failure
+            if ($diskPct < $diskCriticalPct) {
+                $diskStatus = 'critical';
                 $hasCritical = true;
-            } elseif ($diskPct < 10) {
-                $diskStatus = 'warning';   // needs attention
+            } elseif ($diskPct < $diskWarningPct) {
+                $diskStatus = 'warning';
                 $hasWarning = true;
             }
             $checks['disk'] = [
                 'status' => $diskStatus,
                 'free_percent' => $diskPct,
                 'free_gb' => round($diskFree / 1073741824, 1),
+                'thresholds' => ['critical' => $diskCriticalPct, 'warning' => $diskWarningPct],
             ];
         } else {
             $checks['disk'] = ['status' => 'critical', 'error' => 'Cannot read disk'];
             $hasCritical = true;
         }
 
-        // 5. System load
+        // 5. System load — configurable multipliers
         $cpuCores = (int)trim((string)shell_exec('nproc 2>/dev/null')) ?: 1;
         $load = sys_getloadavg();
         $load1 = $load[0] ?? 0;
         $loadStatus = 'ok';
-        if ($load1 >= ($cpuCores * 3)) {
-            $loadStatus = 'critical';  // server barely responsive
+        if ($load1 >= ($cpuCores * $loadCriticalMult)) {
+            $loadStatus = 'critical';
             $hasCritical = true;
-        } elseif ($load1 >= ($cpuCores * 2)) {
-            $loadStatus = 'warning';   // slow but operational
+        } elseif ($load1 >= ($cpuCores * $loadWarningMult)) {
+            $loadStatus = 'warning';
             $hasWarning = true;
         }
         $checks['load'] = [
             'status' => $loadStatus,
             'load_1m' => $load1,
             'cores' => $cpuCores,
+            'thresholds' => ['critical' => $cpuCores * $loadCriticalMult, 'warning' => $cpuCores * $loadWarningMult],
         ];
 
         // Determine overall severity

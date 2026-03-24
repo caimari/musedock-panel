@@ -1584,6 +1584,61 @@
                     </div>
                 </div>
 
+                <h6 class="text-muted mb-2 mt-3">Umbrales de Severidad</h6>
+                <p class="text-muted small mb-2">
+                    <strong>Critical</strong> = dispara failover tras N checks consecutivos.
+                    <strong>Warning</strong> = notifica al admin pero NO dispara failover.
+                </p>
+                <div class="row g-2 mb-3">
+                    <div class="col-md-2">
+                        <label class="form-label small">Disco critical (%)</label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">&lt;</span>
+                            <input type="number" name="failover_disk_critical_pct" class="form-control form-control-sm"
+                                   value="<?= (int)($fc['failover_disk_critical_pct'] ?? 5) ?>" min="1" max="50">
+                            <span class="input-group-text">%</span>
+                        </div>
+                        <div class="form-text">Libre &lt; X% → failover</div>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small">Disco warning (%)</label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">&lt;</span>
+                            <input type="number" name="failover_disk_warning_pct" class="form-control form-control-sm"
+                                   value="<?= (int)($fc['failover_disk_warning_pct'] ?? 10) ?>" min="1" max="80">
+                            <span class="input-group-text">%</span>
+                        </div>
+                        <div class="form-text">Libre &lt; X% → notificar</div>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small">Load critical (×cores)</label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">×</span>
+                            <input type="number" name="failover_load_critical_mult" class="form-control form-control-sm"
+                                   value="<?= (float)($fc['failover_load_critical_mult'] ?? 3) ?>" min="1" max="10" step="0.5">
+                        </div>
+                        <div class="form-text">Load &gt; X×cores → failover</div>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small">Load warning (×cores)</label>
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text">×</span>
+                            <input type="number" name="failover_load_warning_mult" class="form-control form-control-sm"
+                                   value="<?= (float)($fc['failover_load_warning_mult'] ?? 2) ?>" min="1" max="10" step="0.5">
+                        </div>
+                        <div class="form-text">Load &gt; X×cores → notificar</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">PG Panel (5433) caído</label>
+                        <select name="failover_pg_panel_severity" class="form-select form-select-sm">
+                            <option value="warning" <?= ($fc['failover_pg_panel_severity'] ?? 'warning') === 'warning' ? 'selected' : '' ?>>Warning — notificar (recomendado)</option>
+                            <option value="critical" <?= ($fc['failover_pg_panel_severity'] ?? '') === 'critical' ? 'selected' : '' ?>>Critical — disparar failover</option>
+                            <option value="ignore" <?= ($fc['failover_pg_panel_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar — solo log</option>
+                        </select>
+                        <div class="form-text">Las webs funcionan sin PG panel</div>
+                    </div>
+                </div>
+
                 <h6 class="text-muted mb-2 mt-3">caddy-l4 (modo emergencia)</h6>
                 <div class="row g-2 mb-3">
                     <div class="col-md-4">
