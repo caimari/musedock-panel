@@ -1522,6 +1522,13 @@
             <form method="post" action="/settings/failover/save-config" id="form-fo-config">
                 <?= View::csrf() ?>
 
+                <!-- Modo de operación -->
+                <h6 class="text-muted mb-2">Modo de operación</h6>
+                <div class="alert alert-light border small mb-3 py-2">
+                    <strong>Manual:</strong> El sistema detecta caídas y muestra el estado, pero el admin pulsa el botón para ejecutar failover/failback.<br>
+                    <strong>Semi-auto:</strong> Detecta caídas y envía notificación (email/Telegram) al admin. El admin confirma con un clic.<br>
+                    <strong>Auto:</strong> Detecta caídas y ejecuta failover/failback automáticamente sin intervención. Incluye promote/demote del cluster.
+                </div>
                 <div class="row g-2 mb-3">
                     <div class="col-md-3">
                         <label class="form-label small">Modo</label>
@@ -1531,6 +1538,15 @@
                             <option value="auto" <?= ($fc['failover_mode'] ?? '') === 'auto' ? 'selected' : '' ?>>Automático</option>
                         </select>
                     </div>
+                </div>
+
+                <!-- DynDNS -->
+                <h6 class="text-muted mb-2 mt-3">DynDNS (solo para servidores Backup con IP dinámica)</h6>
+                <div class="alert alert-light border small mb-3 py-2">
+                    Si tienes un servidor Backup con IP dinámica (ej: conexión doméstica), configura aquí el proveedor DynDNS para que el sistema siempre sepa su IP actual.
+                    Si todos tus servidores tienen IP fija, déjalo en "Ninguno".
+                </div>
+                <div class="row g-2 mb-3">
                     <div class="col-md-3">
                         <label class="form-label small">Proveedor DynDNS</label>
                         <select name="failover_dyndns_provider" class="form-select form-select-sm">
@@ -1549,130 +1565,183 @@
                     </div>
                 </div>
 
+                <!-- TTL -->
+                <h6 class="text-muted mb-2 mt-3">TTL de DNS en Cloudflare</h6>
+                <div class="alert alert-light border small mb-3 py-2">
+                    El TTL controla cuánto tiempo los DNS cachean las IPs. En estado normal se usa un TTL alto (menos consultas).
+                    Cuando se detecta un problema, el TTL se baja automáticamente para que el cambio de IP se propague rápido.
+                </div>
                 <div class="row g-2 mb-3">
                     <div class="col-md-2">
                         <label class="form-label small">TTL Normal</label>
-                        <input type="number" name="failover_ttl_normal" class="form-control form-control-sm" value="<?= (int)($fc['failover_ttl_normal'] ?? 300) ?>">
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="failover_ttl_normal" class="form-control form-control-sm" value="<?= (int)($fc['failover_ttl_normal'] ?? 300) ?>">
+                            <span class="input-group-text">seg</span>
+                        </div>
+                        <div class="form-text">Todo OK (def: 300 = 5min)</div>
                     </div>
                     <div class="col-md-2">
                         <label class="form-label small">TTL Alerta</label>
-                        <input type="number" name="failover_ttl_alert" class="form-control form-control-sm" value="<?= (int)($fc['failover_ttl_alert'] ?? 60) ?>">
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="failover_ttl_alert" class="form-control form-control-sm" value="<?= (int)($fc['failover_ttl_alert'] ?? 60) ?>">
+                            <span class="input-group-text">seg</span>
+                        </div>
+                        <div class="form-text">Algo va mal (def: 60)</div>
                     </div>
                     <div class="col-md-2">
                         <label class="form-label small">TTL Failover</label>
-                        <input type="number" name="failover_ttl_failover" class="form-control form-control-sm" value="<?= (int)($fc['failover_ttl_failover'] ?? 60) ?>">
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="failover_ttl_failover" class="form-control form-control-sm" value="<?= (int)($fc['failover_ttl_failover'] ?? 60) ?>">
+                            <span class="input-group-text">seg</span>
+                        </div>
+                        <div class="form-text">Durante failover (def: 60)</div>
                     </div>
                 </div>
 
+                <!-- Health Checks -->
                 <h6 class="text-muted mb-2 mt-3">Health Checks</h6>
-                <div class="row g-2 mb-3">
-                    <div class="col-md-2">
-                        <label class="form-label small">Intervalo (seg)</label>
-                        <input type="number" name="failover_check_interval" class="form-control form-control-sm" value="<?= (int)($fc['failover_check_interval'] ?? 60) ?>">
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label small">Timeout (seg)</label>
-                        <input type="number" name="failover_check_timeout" class="form-control form-control-sm" value="<?= (int)($fc['failover_check_timeout'] ?? 10) ?>">
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label small">Caídas para DOWN</label>
-                        <input type="number" name="failover_down_threshold" class="form-control form-control-sm" value="<?= (int)($fc['failover_down_threshold'] ?? 3) ?>">
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label small">OK para UP</label>
-                        <input type="number" name="failover_up_threshold" class="form-control form-control-sm" value="<?= (int)($fc['failover_up_threshold'] ?? 5) ?>">
-                    </div>
+                <div class="alert alert-light border small mb-3 py-2">
+                    El worker (cron cada minuto) llama a <code>/api/health</code> en cada servidor.
+                    Para evitar falsos positivos, un servidor no se marca como caído hasta que falle N veces seguidas.
+                    Igualmente, un servidor recuperado necesita M checks OK consecutivos antes de considerarse sano.
                 </div>
-
-                <h6 class="text-muted mb-2 mt-3">Umbrales de Severidad</h6>
-                <p class="text-muted small mb-2">
-                    <strong>Critical</strong> = dispara failover tras N checks consecutivos.
-                    <strong>Warning</strong> = notifica al admin pero NO dispara failover.
-                </p>
-                <div class="row g-2 mb-3">
-                    <div class="col-md-2">
-                        <label class="form-label small">Disco critical (%)</label>
-                        <div class="input-group input-group-sm">
-                            <span class="input-group-text">&lt;</span>
-                            <input type="number" name="failover_disk_critical_pct" class="form-control form-control-sm"
-                                   value="<?= (int)($fc['failover_disk_critical_pct'] ?? 5) ?>" min="1" max="50">
-                            <span class="input-group-text">%</span>
-                        </div>
-                        <div class="form-text">Libre &lt; X% → failover</div>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label small">Disco warning (%)</label>
-                        <div class="input-group input-group-sm">
-                            <span class="input-group-text">&lt;</span>
-                            <input type="number" name="failover_disk_warning_pct" class="form-control form-control-sm"
-                                   value="<?= (int)($fc['failover_disk_warning_pct'] ?? 10) ?>" min="1" max="80">
-                            <span class="input-group-text">%</span>
-                        </div>
-                        <div class="form-text">Libre &lt; X% → notificar</div>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label small">Load critical (×cores)</label>
-                        <div class="input-group input-group-sm">
-                            <span class="input-group-text">×</span>
-                            <input type="number" name="failover_load_critical_mult" class="form-control form-control-sm"
-                                   value="<?= (float)($fc['failover_load_critical_mult'] ?? 3) ?>" min="1" max="10" step="0.5">
-                        </div>
-                        <div class="form-text">Load &gt; X×cores → failover</div>
-                    </div>
-                    <div class="col-md-2">
-                        <label class="form-label small">Load warning (×cores)</label>
-                        <div class="input-group input-group-sm">
-                            <span class="input-group-text">×</span>
-                            <input type="number" name="failover_load_warning_mult" class="form-control form-control-sm"
-                                   value="<?= (float)($fc['failover_load_warning_mult'] ?? 2) ?>" min="1" max="10" step="0.5">
-                        </div>
-                        <div class="form-text">Load &gt; X×cores → notificar</div>
-                    </div>
-                </div>
-
-                <h6 class="text-muted mb-2 mt-2">Severidad por servicio</h6>
-                <p class="text-muted small mb-2">
-                    Elige qué hacer cuando cada servicio cae:
-                    <strong>Critical</strong> = failover,
-                    <strong>Warning</strong> = notificar,
-                    <strong>Ignorar</strong> = solo log.
-                </p>
                 <div class="row g-2 mb-3">
                     <div class="col-md-3">
-                        <label class="form-label small">Caddy (web server)</label>
+                        <label class="form-label small">Intervalo entre checks</label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="failover_check_interval" class="form-control form-control-sm" value="<?= (int)($fc['failover_check_interval'] ?? 60) ?>">
+                            <span class="input-group-text">seg</span>
+                        </div>
+                        <div class="form-text">Cada cuánto se comprueba (def: 60)</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">Timeout por servidor</label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="failover_check_timeout" class="form-control form-control-sm" value="<?= (int)($fc['failover_check_timeout'] ?? 10) ?>">
+                            <span class="input-group-text">seg</span>
+                        </div>
+                        <div class="form-text">Tiempo máximo de espera (def: 10)</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">Fallos para marcar DOWN</label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="failover_down_threshold" class="form-control form-control-sm" value="<?= (int)($fc['failover_down_threshold'] ?? 3) ?>" min="1" max="20">
+                            <span class="input-group-text">checks</span>
+                        </div>
+                        <div class="form-text">Ej: 3 = caído tras 3 minutos</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">OK para marcar RECOVERED</label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="failover_up_threshold" class="form-control form-control-sm" value="<?= (int)($fc['failover_up_threshold'] ?? 5) ?>" min="1" max="30">
+                            <span class="input-group-text">checks</span>
+                        </div>
+                        <div class="form-text">Ej: 5 = recuperado tras 5 minutos</div>
+                    </div>
+                </div>
+
+                <!-- Umbrales de Severidad -->
+                <h6 class="text-muted mb-2 mt-3">Umbrales de disco y carga</h6>
+                <div class="alert alert-light border small mb-3 py-2">
+                    <span class="badge bg-danger">Critical</span> = dispara failover (tras N checks consecutivos).
+                    <span class="badge bg-warning text-dark">Warning</span> = solo notifica al admin, NO dispara failover.
+                    <br>El disco se mide en <strong>% usado</strong>. Ej: 95% = disco casi lleno, solo queda 5% libre.
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label small">Disco: failover cuando uso &ge;</label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="failover_disk_critical_pct" class="form-control form-control-sm"
+                                   value="<?= (int)($fc['failover_disk_critical_pct'] ?? 5) ?>" min="1" max="50"
+                                   id="fo_disk_crit_free">
+                            <span class="input-group-text">% libre</span>
+                        </div>
+                        <div class="form-text text-danger" id="fo_disk_crit_text">
+                            = disco al <?= 100 - (int)($fc['failover_disk_critical_pct'] ?? 5) ?>% lleno → <strong>failover</strong>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">Disco: aviso cuando uso &ge;</label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="failover_disk_warning_pct" class="form-control form-control-sm"
+                                   value="<?= (int)($fc['failover_disk_warning_pct'] ?? 10) ?>" min="1" max="80"
+                                   id="fo_disk_warn_free">
+                            <span class="input-group-text">% libre</span>
+                        </div>
+                        <div class="form-text text-warning" id="fo_disk_warn_text">
+                            = disco al <?= 100 - (int)($fc['failover_disk_warning_pct'] ?? 10) ?>% lleno → <strong>notificar</strong>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">Carga CPU: failover cuando &gt;</label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="failover_load_critical_mult" class="form-control form-control-sm"
+                                   value="<?= (float)($fc['failover_load_critical_mult'] ?? 3) ?>" min="1" max="10" step="0.5"
+                                   id="fo_load_crit">
+                            <span class="input-group-text">× cores</span>
+                        </div>
+                        <div class="form-text text-danger">
+                            Ej: 3× en 8 cores = load &gt; 24 → <strong>failover</strong>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">Carga CPU: aviso cuando &gt;</label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="failover_load_warning_mult" class="form-control form-control-sm"
+                                   value="<?= (float)($fc['failover_load_warning_mult'] ?? 2) ?>" min="1" max="10" step="0.5"
+                                   id="fo_load_warn">
+                            <span class="input-group-text">× cores</span>
+                        </div>
+                        <div class="form-text text-warning">
+                            Ej: 2× en 8 cores = load &gt; 16 → <strong>notificar</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Severidad por servicio -->
+                <h6 class="text-muted mb-2 mt-3">Severidad por servicio</h6>
+                <div class="alert alert-light border small mb-3 py-2">
+                    Cada servicio monitorizado puede configurarse independientemente.
+                    <span class="badge bg-danger">Critical</span> = si este servicio cae, se dispara failover (tras N checks).
+                    <span class="badge bg-warning text-dark">Warning</span> = si cae, se notifica al admin pero las webs pueden seguir funcionando.
+                    <span class="badge bg-secondary">Ignorar</span> = si cae, solo se registra en el log.
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label small">Caddy (web server, puerto 443)</label>
                         <select name="failover_caddy_severity" class="form-select form-select-sm">
                             <option value="critical" <?= ($fc['failover_caddy_severity'] ?? 'critical') === 'critical' ? 'selected' : '' ?>>Critical — failover</option>
                             <option value="warning" <?= ($fc['failover_caddy_severity'] ?? '') === 'warning' ? 'selected' : '' ?>>Warning — notificar</option>
                             <option value="ignore" <?= ($fc['failover_caddy_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar</option>
                         </select>
-                        <div class="form-text">Sin Caddy no hay webs</div>
+                        <div class="form-text">Caddy sirve todas las webs. Sin él, nada funciona.</div>
                     </div>
                     <div class="col-md-3">
-                        <label class="form-label small">PG Hosting (5432)</label>
+                        <label class="form-label small">PostgreSQL Hosting (puerto 5432)</label>
                         <select name="failover_pg_hosting_severity" class="form-select form-select-sm">
                             <option value="critical" <?= ($fc['failover_pg_hosting_severity'] ?? 'critical') === 'critical' ? 'selected' : '' ?>>Critical — failover</option>
                             <option value="warning" <?= ($fc['failover_pg_hosting_severity'] ?? '') === 'warning' ? 'selected' : '' ?>>Warning — notificar</option>
                             <option value="ignore" <?= ($fc['failover_pg_hosting_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar</option>
                         </select>
-                        <div class="form-text">BD de las webs de clientes</div>
+                        <div class="form-text">BD de las webs de clientes (WordPress, etc.).</div>
                     </div>
                     <div class="col-md-3">
-                        <label class="form-label small">PG Panel (5433)</label>
+                        <label class="form-label small">PostgreSQL Panel (puerto 5433)</label>
                         <select name="failover_pg_panel_severity" class="form-select form-select-sm">
                             <option value="warning" <?= ($fc['failover_pg_panel_severity'] ?? 'warning') === 'warning' ? 'selected' : '' ?>>Warning — notificar</option>
                             <option value="critical" <?= ($fc['failover_pg_panel_severity'] ?? '') === 'critical' ? 'selected' : '' ?>>Critical — failover</option>
                             <option value="ignore" <?= ($fc['failover_pg_panel_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar</option>
                         </select>
-                        <div class="form-text">Solo afecta al panel admin</div>
+                        <div class="form-text">Solo afecta al panel admin. Las webs de clientes siguen funcionando sin él.</div>
                     </div>
                     <div class="col-md-3">
-                        <label class="form-label small">MySQL (3306)</label>
+                        <label class="form-label small">MySQL (puerto 3306)</label>
                         <select name="failover_mysql_severity" class="form-select form-select-sm">
                             <option value="warning" <?= ($fc['failover_mysql_severity'] ?? 'warning') === 'warning' ? 'selected' : '' ?>>Warning — notificar</option>
                             <option value="critical" <?= ($fc['failover_mysql_severity'] ?? '') === 'critical' ? 'selected' : '' ?>>Critical — failover</option>
                             <option value="ignore" <?= ($fc['failover_mysql_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar</option>
                         </select>
-                        <div class="form-text">BD MySQL de clientes</div>
+                        <div class="form-text">BD MySQL de clientes. Si no usas MySQL, ponlo en "Ignorar".</div>
                     </div>
                 </div>
 

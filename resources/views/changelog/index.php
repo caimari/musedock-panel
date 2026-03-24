@@ -20,50 +20,30 @@
         <small class="text-muted"><?= View::e($v['date']) ?></small>
     </div>
     <div class="card-body">
-        <?php if (!empty($v['changes']['planned'])): ?>
-        <h6 class="text-warning mb-2"><i class="bi bi-clock me-1"></i>
-            <span class="lang-es">Planificado</span>
-            <span class="lang-en" style="display:none">Planned</span>
+        <?php
+        $sections = [
+            'new'      => ['icon' => 'bi-plus-circle',    'color' => 'success', 'es' => 'Nuevo',       'en' => 'New'],
+            'added'    => ['icon' => 'bi-plus-circle',    'color' => 'success', 'es' => 'Anadido',     'en' => 'Added'],
+            'improved' => ['icon' => 'bi-arrow-up-circle','color' => 'primary', 'es' => 'Mejorado',    'en' => 'Improved'],
+            'fixed'    => ['icon' => 'bi-wrench',         'color' => 'info',    'es' => 'Corregido',   'en' => 'Fixed'],
+            'planned'  => ['icon' => 'bi-clock',          'color' => 'warning', 'es' => 'Planificado', 'en' => 'Planned'],
+        ];
+        foreach ($sections as $key => $meta):
+            if (empty($v['changes'][$key])) continue;
+        ?>
+        <h6 class="text-<?= $meta['color'] ?> mb-2"><i class="bi <?= $meta['icon'] ?> me-1"></i>
+            <span class="lang-es"><?= $meta['es'] ?></span>
+            <span class="lang-en" style="display:none"><?= $meta['en'] ?></span>
         </h6>
         <ul class="mb-3">
-            <?php foreach ($v['changes']['planned']['es'] as $i => $item): ?>
+            <?php foreach ($v['changes'][$key]['es'] as $i => $item): ?>
             <li>
                 <span class="lang-es"><?= View::e($item) ?></span>
-                <span class="lang-en" style="display:none"><?= View::e($v['changes']['planned']['en'][$i] ?? $item) ?></span>
+                <span class="lang-en" style="display:none"><?= View::e($v['changes'][$key]['en'][$i] ?? $item) ?></span>
             </li>
             <?php endforeach; ?>
         </ul>
-        <?php endif; ?>
-
-        <?php if (!empty($v['changes']['added'])): ?>
-        <h6 class="text-success mb-2"><i class="bi bi-plus-circle me-1"></i>
-            <span class="lang-es">Anadido</span>
-            <span class="lang-en" style="display:none">Added</span>
-        </h6>
-        <ul class="mb-3">
-            <?php foreach ($v['changes']['added']['es'] as $i => $item): ?>
-            <li>
-                <span class="lang-es"><?= View::e($item) ?></span>
-                <span class="lang-en" style="display:none"><?= View::e($v['changes']['added']['en'][$i] ?? $item) ?></span>
-            </li>
-            <?php endforeach; ?>
-        </ul>
-        <?php endif; ?>
-
-        <?php if (!empty($v['changes']['fixed'])): ?>
-        <h6 class="text-info mb-2"><i class="bi bi-wrench me-1"></i>
-            <span class="lang-es">Corregido</span>
-            <span class="lang-en" style="display:none">Fixed</span>
-        </h6>
-        <ul class="mb-0">
-            <?php foreach ($v['changes']['fixed']['es'] as $i => $item): ?>
-            <li>
-                <span class="lang-es"><?= View::e($item) ?></span>
-                <span class="lang-en" style="display:none"><?= View::e($v['changes']['fixed']['en'][$i] ?? $item) ?></span>
-            </li>
-            <?php endforeach; ?>
-        </ul>
-        <?php endif; ?>
+        <?php endforeach; ?>
     </div>
 </div>
 <?php endforeach; ?>
