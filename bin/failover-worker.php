@@ -191,18 +191,53 @@ try {
         // ─── RESYNC: always runs automatically when server recovers, regardless of mode ───
         if ($isFailback) {
             $resyncStatus = Settings::get('failover_resync_status', '');
-            if ($resyncStatus !== 'completed') {
+
+            if (str_starts_with($resyncStatus, 'failed:')) {
+                // Resync previously failed — BLOCK failback, notify periodically
+                $failedStep = substr($resyncStatus, 7);
+                $failedDetail = Settings::get('failover_resync_detail', '');
+                logMsg("Resync BLOCKED at step '{$failedStep}': {$failedDetail} — failback NOT allowed");
+
+                // Notify every 15 min that failback is blocked
+                $lastBlockNotif = Settings::get('failover_resync_block_notif', '');
+                if (!$lastBlockNotif || (time() - strtotime($lastBlockNotif)) >= 900) {
+                    NotificationService::send(
+                        "Failover: failback BLOQUEADO — resync falló en '{$failedStep}'",
+                        "El servidor principal se ha recuperado pero el failback está BLOQUEADO.\n\n" .
+                        "Paso fallido: {$failedStep}\n" .
+                        "Detalle: {$failedDetail}\n\n" .
+                        "El failback NO se ejecutará (ni manual ni auto) hasta resolver el resync.\n" .
+                        "Opciones:\n" .
+                        "1. Resolver el problema y reintentar el resync desde el panel\n" .
+                        "2. Ejecutar resync manual y marcar como completado"
+                    );
+                    Settings::set('failover_resync_block_notif', date('Y-m-d H:i:s'));
+                }
+
+                $isFailback = false;
+                $stateChanged = false;
+
+            } elseif ($resyncStatus === 'completed') {
+                // Resync already done — proceed to failback
+                logMsg("Resync already completed — proceeding to failback");
+
+            } elseif (str_starts_with($resyncStatus, 'syncing_')) {
+                // Resync in progress (another worker run?) — wait
+                logMsg("Resync in progress ({$resyncStatus}) — waiting");
+                $isFailback = false;
+                $stateChanged = false;
+
+            } else {
+                // No resync yet (pending or empty) — start it now
                 logMsg("Server recovered — running mandatory resync before failback (any mode)");
-                $resyncResult = autoFailbackResync($foConfig, false); // false = don't demote yet
-                if ($resyncResult) {
-                    Settings::set('failover_resync_status', 'completed');
-                    logMsg("Resync completed — data is ready for failback");
-                } else {
-                    Settings::set('failover_resync_status', 'failed');
+                setResyncStatus('pending', 'Starting resync');
+                $resyncResult = autoFailbackResync($foConfig, false);
+                if (!$resyncResult) {
                     logMsg("Resync FAILED — failback blocked until resync succeeds");
-                    // Don't proceed with failback if resync failed
                     $isFailback = false;
                     $stateChanged = false;
+                } else {
+                    logMsg("Resync completed — data is ready for failback");
                 }
             }
         }
@@ -366,14 +401,20 @@ function autoPromoteIfNeeded(array $checks, array $foConfig): void
 /**
  * Handle failback resync ONLY (no demote, no DNS change).
  * Resync runs automatically in ANY mode — it's a data integrity precaution, not a decision.
- * Returns true if resync succeeded, false if it failed.
+ *
+ * States: pending → syncing_db → syncing_files → syncing_certs → completed
+ *         Any step can fail → failed:step_name (e.g. "failed:syncing_db")
+ *
+ * If state is "failed:*", failback is BLOCKED until admin resolves and retries.
+ * Returns true only if ALL steps completed successfully.
  */
 function autoFailbackResync(array $foConfig, bool $alsoDemote = false): bool
 {
     $activatedAt = Settings::get('failover_activated_at', '');
     if (!$activatedAt) {
         logMsg("Failback resync: no activation timestamp — no data to sync");
-        return true; // nothing to sync is not a failure
+        setResyncStatus('completed', 'No data to sync (no activation timestamp)');
+        return true;
     }
 
     $clusterRole = Settings::get('cluster_role', 'standalone');
@@ -382,28 +423,33 @@ function autoFailbackResync(array $foConfig, bool $alsoDemote = false): bool
 
     if ($localRole !== 'master') {
         logMsg("Failback resync: local role is '{$localRole}', not temporary master — no resync needed");
+        setResyncStatus('completed', 'Not temporary master, no resync needed');
         return true;
     }
-
-    logMsg("Failback resync: we are temporary master since {$activatedAt}");
 
     $originalMasterIp = Settings::get('failover_original_master_ip', '');
     if (!$originalMasterIp) {
         logMsg("Failback resync: no original master IP stored — manual resync needed");
+        setResyncStatus('failed:no_master_ip', 'No original master IP stored');
         NotificationService::send(
-            "Failover: Resync manual necesario",
+            "Failover: Resync BLOQUEADO — falta IP del master original",
             "El servidor original ha vuelto a estar disponible, pero no se puede hacer resync automático.\n" .
             "No hay IP del master original guardada.\n" .
-            "Ejecute el resync manualmente antes de hacer failback."
+            "El failback está BLOQUEADO hasta que se resuelva.\n" .
+            "Ejecute el resync manualmente desde el panel."
         );
         return false;
     }
 
-    logMsg("Failback resync: syncing data to original master ({$originalMasterIp})...");
-    $resyncLog = [];
-    $hasErrors = false;
+    logMsg("Failback resync: we are temporary master since {$activatedAt}, syncing to {$originalMasterIp}");
 
-    // 1. PostgreSQL: dump data that may have changed
+    // ─── Step 1: syncing_db — PostgreSQL dump + push ──────────
+    setResyncStatus('syncing_db', "Dumping PostgreSQL data to push to {$originalMasterIp}");
+    logMsg("Resync step 1/3: syncing_db");
+
+    $panelPort = (int)Settings::get('panel_port', '8444') ?: 8444;
+    $token = Settings::get('cluster_api_token', '');
+
     try {
         $dumpFile = PANEL_ROOT . '/storage/failover-resync-' . date('YmdHis') . '.sql.gz';
         $cmd = "sudo -u postgres pg_dump -p 5433 musedock_panel --data-only " .
@@ -412,66 +458,110 @@ function autoFailbackResync(array $foConfig, bool $alsoDemote = false): bool
                "2>/dev/null | gzip > {$dumpFile}";
         shell_exec($cmd);
 
-        if (file_exists($dumpFile) && filesize($dumpFile) > 20) {
-            $resyncLog[] = "PostgreSQL dump created: {$dumpFile}";
-
-            $panelPort = (int)Settings::get('panel_port', '8444') ?: 8444;
-            $token = Settings::get('cluster_api_token', '');
-            if ($token) {
-                $pushCmd = "curl -sk -X POST 'https://{$originalMasterIp}:{$panelPort}/api/cluster/action' " .
-                           "-H 'X-Panel-Token: {$token}' " .
-                           "-F 'action=restore-panel-dump' " .
-                           "-F 'dump=@{$dumpFile}' " .
-                           "-F 'since={$activatedAt}' 2>/dev/null";
-                $pushResult = shell_exec($pushCmd);
-                $resyncLog[] = "PostgreSQL push: " . ($pushResult ?: 'no response');
-            } else {
-                $resyncLog[] = "WARNING: No cluster API token — PostgreSQL dump created but not pushed";
-                $hasErrors = true;
-            }
+        if (!file_exists($dumpFile) || filesize($dumpFile) <= 20) {
+            setResyncStatus('failed:syncing_db', 'pg_dump produced empty or no output');
+            logMsg("Resync FAILED at syncing_db: dump file empty or missing");
+            return false;
         }
+
+        if (!$token) {
+            setResyncStatus('failed:syncing_db', 'No cluster API token configured — cannot push dump to original master');
+            logMsg("Resync FAILED at syncing_db: no cluster API token");
+            return false;
+        }
+
+        $pushCmd = "curl -sk -X POST 'https://{$originalMasterIp}:{$panelPort}/api/cluster/action' " .
+                   "-H 'X-Panel-Token: {$token}' " .
+                   "-F 'action=restore-panel-dump' " .
+                   "-F 'dump=@{$dumpFile}' " .
+                   "-F 'since={$activatedAt}' 2>/dev/null";
+        $pushResult = trim((string)shell_exec($pushCmd));
+        $pushData = json_decode($pushResult, true);
+
+        if (empty($pushData['ok'])) {
+            $pushError = $pushData['error'] ?? ($pushResult ?: 'no response from original master');
+            setResyncStatus('failed:syncing_db', "Push failed: {$pushError}");
+            logMsg("Resync FAILED at syncing_db: push to {$originalMasterIp} failed — {$pushError}");
+            return false;
+        }
+
+        logMsg("Resync syncing_db: OK — dump pushed to {$originalMasterIp}");
     } catch (\Throwable $e) {
-        $resyncLog[] = "PostgreSQL resync error: " . $e->getMessage();
-        $hasErrors = true;
+        setResyncStatus('failed:syncing_db', $e->getMessage());
+        logMsg("Resync FAILED at syncing_db: " . $e->getMessage());
+        return false;
     }
 
-    // 2. Files: rsync vhosts + certificates to original master
+    // ─── Step 2: syncing_files — rsync vhosts ─────────────────
+    setResyncStatus('syncing_files', "Syncing /var/www/vhosts/ to {$originalMasterIp}");
+    logMsg("Resync step 2/3: syncing_files");
+
+    $sshKey = PANEL_ROOT . '/storage/.ssh/cluster_key';
+    if (!file_exists($sshKey)) {
+        setResyncStatus('failed:syncing_files', 'No SSH key at ' . $sshKey);
+        logMsg("Resync FAILED at syncing_files: no SSH key");
+        return false;
+    }
+
     try {
-        $sshKey = PANEL_ROOT . '/storage/.ssh/cluster_key';
-        if (file_exists($sshKey)) {
-            $rsyncCmd = "rsync -az --delete -e 'ssh -i {$sshKey} -o StrictHostKeyChecking=no -p 22' " .
-                        "/var/www/vhosts/ root@{$originalMasterIp}:/var/www/vhosts/ 2>&1";
-            $rsyncResult = shell_exec($rsyncCmd);
-            $vhostsOk = !str_contains($rsyncResult ?? '', 'error');
-            $resyncLog[] = "Vhosts rsync: " . ($vhostsOk ? "OK" : "ERROR: {$rsyncResult}");
-            if (!$vhostsOk) $hasErrors = true;
+        $rsyncCmd = "rsync -az --delete -e 'ssh -i {$sshKey} -o StrictHostKeyChecking=no -p 22' " .
+                    "/var/www/vhosts/ root@{$originalMasterIp}:/var/www/vhosts/ 2>&1";
+        $rsyncResult = trim((string)shell_exec($rsyncCmd));
 
-            $certCmd = "rsync -az -e 'ssh -i {$sshKey} -o StrictHostKeyChecking=no -p 22' " .
-                       "/var/lib/caddy/.local/share/caddy/ root@{$originalMasterIp}:/var/lib/caddy/.local/share/caddy/ 2>&1";
-            $certResult = shell_exec($certCmd);
-            $certsOk = !str_contains($certResult ?? '', 'error');
-            $resyncLog[] = "Certificates rsync: " . ($certsOk ? "OK" : "ERROR: {$certResult}");
-            if (!$certsOk) $hasErrors = true;
-        } else {
-            $resyncLog[] = "WARNING: No SSH key — manual file sync needed";
-            $hasErrors = true;
+        if (str_contains($rsyncResult, 'error') || str_contains($rsyncResult, 'rsync:')) {
+            setResyncStatus('failed:syncing_files', "rsync error: {$rsyncResult}");
+            logMsg("Resync FAILED at syncing_files: {$rsyncResult}");
+            return false;
         }
+        logMsg("Resync syncing_files: OK");
     } catch (\Throwable $e) {
-        $resyncLog[] = "File rsync error: " . $e->getMessage();
-        $hasErrors = true;
+        setResyncStatus('failed:syncing_files', $e->getMessage());
+        logMsg("Resync FAILED at syncing_files: " . $e->getMessage());
+        return false;
     }
 
-    // Log resync
-    $resyncSummary = implode("\n", $resyncLog);
-    logMsg("Failback resync " . ($hasErrors ? "completed WITH ERRORS" : "completed OK") . ":\n" . $resyncSummary);
-    LogService::log('failover.resync', $hasErrors ? 'partial' : 'complete', $resyncSummary);
+    // ─── Step 3: syncing_certs — rsync SSL certificates ───────
+    setResyncStatus('syncing_certs', "Syncing SSL certificates to {$originalMasterIp}");
+    logMsg("Resync step 3/3: syncing_certs");
 
-    // Optionally demote (only in auto mode, called separately)
+    try {
+        $certCmd = "rsync -az -e 'ssh -i {$sshKey} -o StrictHostKeyChecking=no -p 22' " .
+                   "/var/lib/caddy/.local/share/caddy/ root@{$originalMasterIp}:/var/lib/caddy/.local/share/caddy/ 2>&1";
+        $certResult = trim((string)shell_exec($certCmd));
+
+        if (str_contains($certResult, 'error') || str_contains($certResult, 'rsync:')) {
+            setResyncStatus('failed:syncing_certs', "rsync error: {$certResult}");
+            logMsg("Resync FAILED at syncing_certs: {$certResult}");
+            return false;
+        }
+        logMsg("Resync syncing_certs: OK");
+    } catch (\Throwable $e) {
+        setResyncStatus('failed:syncing_certs', $e->getMessage());
+        logMsg("Resync FAILED at syncing_certs: " . $e->getMessage());
+        return false;
+    }
+
+    // ─── All steps completed ──────────────────────────────────
+    setResyncStatus('completed', "All 3 steps completed: db, files, certs synced to {$originalMasterIp}");
+    logMsg("Failback resync: ALL STEPS COMPLETED");
+    LogService::log('failover.resync', 'completed', "Full resync to {$originalMasterIp} completed successfully");
+
     if ($alsoDemote) {
         autoFailbackDemote($foConfig);
     }
 
-    return !$hasErrors;
+    return true;
+}
+
+/**
+ * Set resync status with detail message.
+ * States: pending, syncing_db, syncing_files, syncing_certs, completed, failed:*
+ */
+function setResyncStatus(string $status, string $detail = ''): void
+{
+    Settings::set('failover_resync_status', $status);
+    Settings::set('failover_resync_detail', $detail);
+    Settings::set('failover_resync_updated_at', date('Y-m-d H:i:s'));
 }
 
 /**
