@@ -170,6 +170,14 @@ class DatabaseController
             'dbSyncStatus'        => $dbSyncStatus,
             'clusterRole'         => $clusterRole,
             'hostingAccounts'     => $hostingAccounts,
+            'dbBackups'           => Database::fetchAll("
+                SELECT b.*, a.username AS admin_username
+                FROM database_backups b
+                LEFT JOIN panel_admins a ON a.id = b.created_by
+                ORDER BY b.created_at DESC
+                LIMIT 100
+            "),
+            'backupDir'           => Settings::get('db_backup_path', '/opt/musedock-panel/storage/db-backups'),
         ]);
     }
 
@@ -552,6 +560,436 @@ class DatabaseController
         echo json_encode($accounts);
         exit;
     }
+
+    // ─── Database Backup Methods ──────────────────────────────────────
+
+    /**
+     * Get the backup directory path (configurable via settings)
+     */
+    private function getBackupDir(): string
+    {
+        return Settings::get('db_backup_path', '/opt/musedock-panel/storage/db-backups');
+    }
+
+    /**
+     * Backup a single database
+     */
+    public function backup(): void
+    {
+        $dbName = trim($_POST['db_name'] ?? '');
+        $dbType = trim($_POST['db_type'] ?? 'pgsql');
+
+        if (empty($dbName)) {
+            Flash::set('error', 'Nombre de base de datos requerido.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        $backupDir = $this->getBackupDir();
+        if (!is_dir($backupDir)) {
+            mkdir($backupDir, 0750, true);
+        }
+
+        $timestamp = date('Y-m-d_H-i-s');
+        $filename = "{$dbName}_{$timestamp}.sql.gz";
+        $filepath = "{$backupDir}/{$filename}";
+
+        if ($dbType === 'pgsql') {
+            $port = 5432;
+            // Check if it's a panel DB (port 5433)
+            if (in_array($dbName, ['musedock_panel'])) {
+                $port = 5433;
+            }
+            $cmd = sprintf(
+                'sudo -u postgres pg_dump -p %d -Fc %s 2>/dev/null | gzip > %s',
+                $port,
+                escapeshellarg($dbName),
+                escapeshellarg($filepath)
+            );
+        } else {
+            $mysqlCmd = $this->buildMysqlCommand();
+            if ($mysqlCmd === null) {
+                Flash::set('error', 'No se pudo determinar el método de autenticación de MySQL.');
+                Router::redirect('/databases');
+                return;
+            }
+            $cmd = sprintf(
+                '%s --single-transaction --quick --complete-insert %s 2>/dev/null | gzip > %s',
+                $mysqlCmd,
+                escapeshellarg($dbName),
+                escapeshellarg($filepath)
+            );
+        }
+
+        shell_exec($cmd);
+
+        if (!file_exists($filepath) || filesize($filepath) < 30) {
+            // Cleanup empty/failed file
+            if (file_exists($filepath)) unlink($filepath);
+            Flash::set('error', "Error al crear el backup de '{$dbName}'. Verifica que la base de datos existe.");
+            Router::redirect('/databases');
+            return;
+        }
+
+        $fileSize = filesize($filepath);
+
+        Database::insert('database_backups', [
+            'db_name'    => $dbName,
+            'db_type'    => $dbType,
+            'filename'   => $filename,
+            'file_size'  => $fileSize,
+            'status'     => 'completed',
+            'created_by' => $_SESSION['panel_user']['id'] ?? null,
+            'created_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        LogService::log('database.backup', $dbName, "Backup created: {$filename} (" . $this->formatBytes($fileSize) . ")");
+        Flash::set('success', "Backup de '{$dbName}' creado exitosamente: {$filename} (" . $this->formatBytes($fileSize) . ")");
+        Router::redirect('/databases');
+    }
+
+    /**
+     * Backup all non-system databases
+     */
+    public function backupAll(): void
+    {
+        $backupDir = $this->getBackupDir();
+        if (!is_dir($backupDir)) {
+            mkdir($backupDir, 0750, true);
+        }
+
+        $timestamp = date('Y-m-d_H-i-s');
+        $pgSystemDbs = ['postgres', 'template0', 'template1'];
+        $mysqlSystemDbs = ['mysql', 'information_schema', 'performance_schema', 'sys'];
+        $count = 0;
+        $errors = [];
+
+        // Backup PostgreSQL databases (port 5432 + port 5433 panel)
+        $pgPorts = [5432, 5433];
+        foreach ($pgPorts as $port) {
+            $pgDatabases = $this->getPgDatabasesViaShell($port);
+            foreach ($pgDatabases as $db) {
+                if (in_array($db['db_name'], $pgSystemDbs)) continue;
+
+                $filename = "{$db['db_name']}_{$timestamp}.sql.gz";
+                $filepath = "{$backupDir}/{$filename}";
+                $cmd = sprintf(
+                    'sudo -u postgres pg_dump -p %d -Fc %s 2>/dev/null | gzip > %s',
+                    $port,
+                    escapeshellarg($db['db_name']),
+                    escapeshellarg($filepath)
+                );
+                shell_exec($cmd);
+
+                if (file_exists($filepath) && filesize($filepath) >= 30) {
+                    Database::insert('database_backups', [
+                        'db_name'    => $db['db_name'],
+                        'db_type'    => 'pgsql',
+                        'filename'   => $filename,
+                        'file_size'  => filesize($filepath),
+                        'status'     => 'completed',
+                        'created_by' => $_SESSION['panel_user']['id'] ?? null,
+                        'created_at' => date('Y-m-d H:i:s'),
+                    ]);
+                    $count++;
+                } else {
+                    if (file_exists($filepath)) unlink($filepath);
+                    $errors[] = $db['db_name'];
+                }
+            }
+        }
+
+        // Backup MySQL databases
+        try {
+            $mysqlPdo = ReplicationService::getMysqlPdo();
+            if ($mysqlPdo) {
+                $mysqlCmd = $this->buildMysqlCommand();
+                if ($mysqlCmd) {
+                    $rows = $mysqlPdo->query("SHOW DATABASES")->fetchAll(\PDO::FETCH_COLUMN);
+                    foreach ($rows as $dbName) {
+                        if (in_array($dbName, $mysqlSystemDbs)) continue;
+
+                        $filename = "{$dbName}_{$timestamp}.sql.gz";
+                        $filepath = "{$backupDir}/{$filename}";
+                        $cmd = sprintf(
+                            '%s --single-transaction --quick --complete-insert %s 2>/dev/null | gzip > %s',
+                            $mysqlCmd,
+                            escapeshellarg($dbName),
+                            escapeshellarg($filepath)
+                        );
+                        shell_exec($cmd);
+
+                        if (file_exists($filepath) && filesize($filepath) >= 30) {
+                            Database::insert('database_backups', [
+                                'db_name'    => $dbName,
+                                'db_type'    => 'mysql',
+                                'filename'   => $filename,
+                                'file_size'  => filesize($filepath),
+                                'status'     => 'completed',
+                                'created_by' => $_SESSION['panel_user']['id'] ?? null,
+                                'created_at' => date('Y-m-d H:i:s'),
+                            ]);
+                            $count++;
+                        } else {
+                            if (file_exists($filepath)) unlink($filepath);
+                            $errors[] = $dbName;
+                        }
+                    }
+                }
+            }
+        } catch (\Throwable) {}
+
+        $msg = "{$count} backup(s) creados exitosamente.";
+        if (!empty($errors)) {
+            $msg .= ' Errores en: ' . implode(', ', $errors);
+        }
+
+        LogService::log('database.backup_all', 'all', "Backup all: {$count} databases backed up" . (!empty($errors) ? ', errors: ' . implode(', ', $errors) : ''));
+        Flash::set(!empty($errors) ? 'warning' : 'success', $msg);
+        Router::redirect('/databases');
+    }
+
+    /**
+     * Download a backup file
+     */
+    public function downloadBackup(array $params = []): void
+    {
+        $id = (int)($params['id'] ?? 0);
+        $backup = Database::fetchOne("SELECT * FROM database_backups WHERE id = :id", ['id' => $id]);
+
+        if (!$backup) {
+            Flash::set('error', 'Backup no encontrado.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        $filepath = $this->getBackupDir() . '/' . $backup['filename'];
+        if (!file_exists($filepath)) {
+            Flash::set('error', 'El archivo de backup no existe en el disco. Puede haber sido eliminado manualmente.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        header('Content-Type: application/gzip');
+        header('Content-Disposition: attachment; filename="' . $backup['filename'] . '"');
+        header('Content-Length: ' . filesize($filepath));
+        header('Cache-Control: no-cache');
+        readfile($filepath);
+        exit;
+    }
+
+    /**
+     * Restore a database from backup (with password verification)
+     */
+    public function restoreBackup(array $params = []): void
+    {
+        $id = (int)($params['id'] ?? 0);
+        $password = $_POST['password'] ?? '';
+
+        if (empty($password)) {
+            Flash::set('error', 'Debes ingresar tu contraseña de administrador para confirmar la restauración.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        $admin = Database::fetchOne("SELECT password_hash FROM panel_admins WHERE id = :id", ['id' => $_SESSION['panel_user']['id'] ?? 0]);
+        if (!$admin || !password_verify($password, $admin['password_hash'])) {
+            Flash::set('error', 'Contraseña incorrecta.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        $backup = Database::fetchOne("SELECT * FROM database_backups WHERE id = :id", ['id' => $id]);
+        if (!$backup) {
+            Flash::set('error', 'Backup no encontrado.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        $filepath = $this->getBackupDir() . '/' . $backup['filename'];
+        if (!file_exists($filepath)) {
+            Flash::set('error', 'El archivo de backup no existe en el disco.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        $dbName = $backup['db_name'];
+        $dbType = $backup['db_type'];
+
+        if ($dbType === 'pgsql') {
+            $port = 5432;
+            if ($dbName === 'musedock_panel') {
+                $port = 5433;
+            }
+            // pg_dump -Fc format → pg_restore
+            $cmd = sprintf(
+                'gunzip -c %s | sudo -u postgres pg_restore -p %d -d %s --clean --if-exists 2>&1',
+                escapeshellarg($filepath),
+                $port,
+                escapeshellarg($dbName)
+            );
+        } else {
+            $mysqlCmd = $this->buildMysqlCommand();
+            if ($mysqlCmd === null) {
+                Flash::set('error', 'No se pudo determinar el método de autenticación de MySQL.');
+                Router::redirect('/databases');
+                return;
+            }
+            $cmd = sprintf(
+                'gunzip -c %s | %s %s 2>&1',
+                escapeshellarg($filepath),
+                $mysqlCmd,
+                escapeshellarg($dbName)
+            );
+        }
+
+        $output = shell_exec($cmd);
+
+        // Check for critical errors (ignore warnings)
+        $hasError = false;
+        if ($output !== null) {
+            foreach (explode("\n", $output) as $line) {
+                $line = trim($line);
+                if (empty($line)) continue;
+                if (stripos($line, 'ERROR') !== false && stripos($line, 'does not exist') === false) {
+                    $hasError = true;
+                    break;
+                }
+            }
+        }
+
+        if ($hasError) {
+            LogService::log('database.restore.error', $dbName, "Restore failed: {$output}");
+            Flash::set('error', "Error al restaurar '{$dbName}': " . substr($output, 0, 500));
+        } else {
+            LogService::log('database.restore', $dbName, "Restored from backup: {$backup['filename']}");
+            Flash::set('success', "Base de datos '{$dbName}' restaurada exitosamente desde {$backup['filename']}.");
+        }
+
+        Router::redirect('/databases');
+    }
+
+    /**
+     * Delete a backup record and file
+     */
+    public function deleteBackup(array $params = []): void
+    {
+        $id = (int)($params['id'] ?? 0);
+        $backup = Database::fetchOne("SELECT * FROM database_backups WHERE id = :id", ['id' => $id]);
+
+        if (!$backup) {
+            Flash::set('error', 'Backup no encontrado.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        $filepath = $this->getBackupDir() . '/' . $backup['filename'];
+        if (file_exists($filepath)) {
+            unlink($filepath);
+        }
+
+        Database::delete('database_backups', 'id = :id', ['id' => $id]);
+
+        LogService::log('database.backup.delete', $backup['db_name'], "Deleted backup: {$backup['filename']}");
+        Flash::set('success', "Backup '{$backup['filename']}' eliminado.");
+        Router::redirect('/databases');
+    }
+
+    /**
+     * Cleanup: reconcile database records with filesystem
+     */
+    public function cleanupBackups(): void
+    {
+        $backupDir = $this->getBackupDir();
+        $records = Database::fetchAll("SELECT * FROM database_backups ORDER BY created_at");
+        $removed = 0;
+
+        // Remove records whose files no longer exist
+        foreach ($records as $record) {
+            $filepath = $backupDir . '/' . $record['filename'];
+            if (!file_exists($filepath)) {
+                Database::delete('database_backups', 'id = :id', ['id' => $record['id']]);
+                $removed++;
+            }
+        }
+
+        // Find orphan files (in filesystem but not in DB)
+        $orphans = 0;
+        if (is_dir($backupDir)) {
+            $dbFilenames = array_column($records, 'filename');
+            foreach (scandir($backupDir) as $file) {
+                if ($file === '.' || $file === '..' || $file === '.gitkeep') continue;
+                if (!in_array($file, $dbFilenames)) {
+                    // Register orphan file in DB
+                    $filepath = $backupDir . '/' . $file;
+                    if (preg_match('/^(.+?)_(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})\.sql\.gz$/', $file, $m)) {
+                        $dbName = $m[1];
+                        $dbType = 'pgsql'; // default assumption
+                        Database::insert('database_backups', [
+                            'db_name'    => $dbName,
+                            'db_type'    => $dbType,
+                            'filename'   => $file,
+                            'file_size'  => filesize($filepath),
+                            'status'     => 'completed',
+                            'notes'      => 'Recuperado por cleanup',
+                            'created_at' => date('Y-m-d H:i:s', filemtime($filepath)),
+                        ]);
+                        $orphans++;
+                    }
+                }
+            }
+        }
+
+        $msg = "Cleanup completado. {$removed} registro(s) huérfano(s) eliminados, {$orphans} archivo(s) huérfano(s) registrados.";
+        LogService::log('database.backup.cleanup', 'all', $msg);
+        Flash::set('success', $msg);
+        Router::redirect('/databases');
+    }
+
+    /**
+     * Save backup settings (backup directory path)
+     */
+    public function saveBackupSettings(): void
+    {
+        $path = trim($_POST['db_backup_path'] ?? '');
+        if (empty($path)) {
+            Flash::set('error', 'La ruta de backups no puede estar vacía.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        // Validate path is absolute
+        if ($path[0] !== '/') {
+            Flash::set('error', 'La ruta debe ser absoluta (comenzar con /).');
+            Router::redirect('/databases');
+            return;
+        }
+
+        // Try to create if not exists
+        if (!is_dir($path)) {
+            if (!@mkdir($path, 0750, true)) {
+                Flash::set('error', "No se pudo crear el directorio: {$path}");
+                Router::redirect('/databases');
+                return;
+            }
+        }
+
+        Settings::set('db_backup_path', $path);
+        LogService::log('database.backup.settings', $path, "Backup directory changed to: {$path}");
+        Flash::set('success', "Directorio de backups actualizado: {$path}");
+        Router::redirect('/databases');
+    }
+
+    private function formatBytes(int $bytes): string
+    {
+        if ($bytes <= 0) return '0 B';
+        if ($bytes < 1024) return $bytes . ' B';
+        if ($bytes < 1048576) return round($bytes / 1024, 1) . ' KB';
+        if ($bytes < 1073741824) return round($bytes / 1048576, 1) . ' MB';
+        return round($bytes / 1073741824, 2) . ' GB';
+    }
+
+    // ─── MySQL Helpers ──────────────────────────────────────────────
 
     private function buildMysqlCommand(): ?string
     {

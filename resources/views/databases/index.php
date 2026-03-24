@@ -61,10 +61,10 @@ function formatDbSize(int $bytes): string {
                     if ($ago < 60) $agoText = $ago . ' segundos';
                     elseif ($ago < 3600) $agoText = floor($ago / 60) . ' minutos';
                     elseif ($ago < 86400) $agoText = floor($ago / 3600) . ' horas';
-                    else $agoText = floor($ago / 86400) . ' días';
+                    else $agoText = floor($ago / 86400) . ' dias';
                 ?>
                 <span class="text-muted">
-                    — Última sincronización de BD: <strong class="text-light"><?= View::e($dbSyncStatus['last_sync']) ?></strong>
+                    — Ultima sincronizacion de BD: <strong class="text-light"><?= View::e($dbSyncStatus['last_sync']) ?></strong>
                     <span class="ms-1">(hace <?= $agoText ?>)</span>
                 </span>
                 <?php if (count($dbSyncStatus['databases']) > 0): ?>
@@ -78,8 +78,8 @@ function formatDbSize(int $bytes): string {
                 <?php endif; ?>
             <?php else: ?>
                 <span class="text-warning">
-                    — No se han recibido dumps del master. Active la sincronización de BD en el master
-                    (<a href="/settings/cluster#archivos" class="text-warning">Cluster → Archivos</a>)
+                    — No se han recibido dumps del master. Active la sincronizacion de BD en el master
+                    (<a href="/settings/cluster#archivos" class="text-warning">Cluster &rarr; Archivos</a>)
                 </span>
             <?php endif; ?>
         </div>
@@ -97,9 +97,17 @@ function formatDbSize(int $bytes): string {
             <?php endif; ?>
         </span>
     </div>
-    <a href="/databases/create" class="btn btn-primary">
-        <i class="bi bi-plus-lg me-1"></i> Nueva Base de Datos
-    </a>
+    <div class="d-flex gap-2">
+        <form method="POST" action="/databases/backup-all" class="d-inline" id="backupAllForm">
+            <?= View::csrf() ?>
+            <button type="submit" class="btn btn-outline-success" title="Backup de todas las bases de datos">
+                <i class="bi bi-archive me-1"></i> Backup All
+            </button>
+        </form>
+        <a href="/databases/create" class="btn btn-primary">
+            <i class="bi bi-plus-lg me-1"></i> Nueva Base de Datos
+        </a>
+    </div>
 </div>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
@@ -164,7 +172,18 @@ function formatDbSize(int $bytes): string {
                                     <?php endif; ?>
                                 </td>
                                 <td class="text-end pe-3">
-                                    <span class="text-muted"><small>Protegida</small></span>
+                                    <?php if ($dbName !== 'postgres'): ?>
+                                        <form method="POST" action="/databases/backup" class="d-inline backup-db-form">
+                                            <?= View::csrf() ?>
+                                            <input type="hidden" name="db_name" value="<?= View::e($dbName) ?>">
+                                            <input type="hidden" name="db_type" value="pgsql">
+                                            <button type="submit" class="btn btn-outline-success btn-sm" title="Crear backup">
+                                                <i class="bi bi-archive"></i>
+                                            </button>
+                                        </form>
+                                    <?php else: ?>
+                                        <span class="text-muted"><small>Protegida</small></span>
+                                    <?php endif; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -269,6 +288,16 @@ function formatDbSize(int $bytes): string {
                                     </td>
                                 <?php endif; ?>
                                 <td class="text-end pe-3">
+                                    <?php if (!$isSystem): ?>
+                                        <form method="POST" action="/databases/backup" class="d-inline backup-db-form">
+                                            <?= View::csrf() ?>
+                                            <input type="hidden" name="db_name" value="<?= View::e($dbName) ?>">
+                                            <input type="hidden" name="db_type" value="pgsql">
+                                            <button type="submit" class="btn btn-outline-success btn-sm" title="Crear backup">
+                                                <i class="bi bi-archive"></i>
+                                            </button>
+                                        </form>
+                                    <?php endif; ?>
                                     <?php if ($isManaged && !$isSystem): ?>
                                         <form method="POST" action="/databases/<?= $managedInfo['id'] ?>/delete" class="d-inline delete-db-form">
                                             <?= View::csrf() ?>
@@ -282,7 +311,7 @@ function formatDbSize(int $bytes): string {
                                         </form>
                                     <?php elseif ($isSystem): ?>
                                         <span class="text-muted"><small>Protegida</small></span>
-                                    <?php else: ?>
+                                    <?php elseif (!$isManaged): ?>
                                         <button type="button" class="btn btn-outline-info btn-sm btn-associate-db"
                                                 data-db-name="<?= View::e($dbName) ?>"
                                                 data-db-type="pgsql"
@@ -399,6 +428,16 @@ function formatDbSize(int $bytes): string {
                                     </td>
                                 <?php endif; ?>
                                 <td class="text-end pe-3">
+                                    <?php if (!$isSystem): ?>
+                                        <form method="POST" action="/databases/backup" class="d-inline backup-db-form">
+                                            <?= View::csrf() ?>
+                                            <input type="hidden" name="db_name" value="<?= View::e($dbName) ?>">
+                                            <input type="hidden" name="db_type" value="mysql">
+                                            <button type="submit" class="btn btn-outline-success btn-sm" title="Crear backup">
+                                                <i class="bi bi-archive"></i>
+                                            </button>
+                                        </form>
+                                    <?php endif; ?>
                                     <?php if ($isManaged && !$isSystem): ?>
                                         <form method="POST" action="/databases/<?= $managedInfo['id'] ?>/delete" class="d-inline delete-db-form">
                                             <?= View::csrf() ?>
@@ -412,7 +451,7 @@ function formatDbSize(int $bytes): string {
                                         </form>
                                     <?php elseif ($isSystem): ?>
                                         <span class="text-muted"><small>Protegida</small></span>
-                                    <?php else: ?>
+                                    <?php elseif (!$isManaged): ?>
                                         <button type="button" class="btn btn-outline-info btn-sm btn-associate-db"
                                                 data-db-name="<?= View::e($dbName) ?>"
                                                 data-db-type="mysql"
@@ -431,6 +470,95 @@ function formatDbSize(int $bytes): string {
     </div>
 </div>
 
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- Database Backups                                            -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="card mb-4">
+    <div class="card-header d-flex align-items-center justify-content-between">
+        <span>
+            <i class="bi bi-archive me-2" style="color:#a78bfa;"></i>Backups de Bases de Datos
+            <span class="badge bg-secondary ms-1"><?= count($dbBackups ?? []) ?></span>
+        </span>
+        <div class="d-flex gap-2 align-items-center">
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="btnBackupSettings" title="Configurar directorio">
+                <i class="bi bi-gear"></i>
+            </button>
+            <form method="POST" action="/databases/backups/cleanup" class="d-inline">
+                <?= View::csrf() ?>
+                <button type="submit" class="btn btn-outline-warning btn-sm" title="Sincroniza la tabla de registros con los archivos reales: elimina registros de archivos borrados y detecta archivos huerfanos no registrados">
+                    <i class="bi bi-arrow-repeat"></i> Cleanup
+                </button>
+            </form>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="px-3 py-2 border-bottom" style="background: rgba(167,139,250,0.05);">
+            <small class="text-muted">
+                <i class="bi bi-folder me-1"></i>Directorio: <code><?= View::e($backupDir ?? '/opt/musedock-panel/storage/db-backups') ?></code>
+            </small>
+        </div>
+        <?php if (empty($dbBackups)): ?>
+            <div class="p-4 text-center text-muted">
+                <i class="bi bi-archive" style="font-size: 2rem;"></i>
+                <p class="mt-2">No hay backups. Usa el boton <i class="bi bi-archive"></i> en cada base de datos o <strong>Backup All</strong> para crear backups.</p>
+            </div>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table class="table table-hover mb-0">
+                    <thead>
+                        <tr>
+                            <th class="ps-3">Base de Datos</th>
+                            <th>Tipo</th>
+                            <th>Archivo</th>
+                            <th>Tamano</th>
+                            <th>Fecha</th>
+                            <th>Creado por</th>
+                            <th class="text-end pe-3">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($dbBackups as $bk): ?>
+                            <tr>
+                                <td class="ps-3"><code><?= View::e($bk['db_name']) ?></code></td>
+                                <td>
+                                    <span class="badge <?= $bk['db_type'] === 'pgsql' ? 'bg-success' : '' ?>" style="<?= $bk['db_type'] === 'mysql' ? 'background:rgba(56,189,248,0.15);color:#38bdf8;' : '' ?>">
+                                        <?= strtoupper(View::e($bk['db_type'])) ?>
+                                    </span>
+                                </td>
+                                <td><small class="text-muted"><?= View::e($bk['filename']) ?></small></td>
+                                <td><small><?= formatDbSize((int)($bk['file_size'] ?? 0)) ?></small></td>
+                                <td><small class="text-muted"><?= date('d/m/Y H:i:s', strtotime($bk['created_at'])) ?></small></td>
+                                <td><small class="text-muted"><?= View::e($bk['admin_username'] ?? '-') ?></small></td>
+                                <td class="text-end pe-3">
+                                    <a href="/databases/backups/<?= $bk['id'] ?>/download" class="btn btn-outline-light btn-sm" title="Descargar">
+                                        <i class="bi bi-cloud-download"></i>
+                                    </a>
+                                    <form method="POST" action="/databases/backups/<?= $bk['id'] ?>/restore" class="d-inline restore-backup-form">
+                                        <?= View::csrf() ?>
+                                        <input type="hidden" name="password" class="restore-password-field" value="">
+                                        <button type="submit" class="btn btn-outline-warning btn-sm" title="Restaurar"
+                                                data-db-name="<?= View::e($bk['db_name']) ?>"
+                                                data-filename="<?= View::e($bk['filename']) ?>">
+                                            <i class="bi bi-arrow-counterclockwise"></i>
+                                        </button>
+                                    </form>
+                                    <form method="POST" action="/databases/backups/<?= $bk['id'] ?>/delete" class="d-inline delete-backup-form">
+                                        <?= View::csrf() ?>
+                                        <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar backup"
+                                                data-filename="<?= View::e($bk['filename']) ?>">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+
 <!-- Associate DB Modal -->
 <form method="POST" action="/databases/associate" id="associateDbForm">
     <?= View::csrf() ?>
@@ -438,9 +566,164 @@ function formatDbSize(int $bytes): string {
     <input type="hidden" name="db_type" id="assocDbType" value="">
 </form>
 
+<!-- Backup Settings Form (hidden) -->
+<form method="POST" action="/databases/backup-settings" id="backupSettingsForm">
+    <?= View::csrf() ?>
+    <input type="hidden" name="db_backup_path" id="backupPathField" value="">
+</form>
+
 <script>
 (function() {
-    // Associate DB buttons
+    // ─── Backup single DB confirmation ────────────────────────
+    document.querySelectorAll('.backup-db-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var dbName = form.querySelector('input[name="db_name"]').value;
+            SwalDark.fire({
+                title: 'Crear backup',
+                html: '<p>Se creara un backup de <strong><code>' + dbName + '</code></strong>.</p><p class="text-muted" style="font-size:0.85em;">El archivo se guardara comprimido (.sql.gz) en el directorio de backups.</p>',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '<i class="bi bi-archive me-1"></i> Crear Backup',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#22c55e'
+            }).then(function(result) {
+                if (result.isConfirmed) {
+                    SwalDark.fire({
+                        title: 'Creando backup...',
+                        html: '<p>Generando backup de <strong><code>' + dbName + '</code></strong></p><p class="text-muted" style="font-size:0.85em;">Esto puede tardar unos segundos.</p>',
+                        allowOutsideClick: false,
+                        allowEscapeKey: false,
+                        showConfirmButton: false,
+                        didOpen: function() { Swal.showLoading(); }
+                    });
+                    form.submit();
+                }
+            });
+        });
+    });
+
+    // ─── Backup All confirmation ──────────────────────────────
+    var backupAllForm = document.getElementById('backupAllForm');
+    if (backupAllForm) {
+        backupAllForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            SwalDark.fire({
+                title: 'Backup de todas las bases de datos',
+                html: '<p>Se creara un backup de <strong>todas</strong> las bases de datos (excepto las de sistema).</p><p class="text-muted" style="font-size:0.85em;">Esto puede tardar varios minutos dependiendo del tamano de las bases de datos.</p>',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '<i class="bi bi-archive me-1"></i> Backup All',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#22c55e'
+            }).then(function(result) {
+                if (result.isConfirmed) {
+                    SwalDark.fire({
+                        title: 'Creando backups...',
+                        html: '<p>Generando backup de todas las bases de datos.</p><p class="text-muted" style="font-size:0.85em;">Esto puede tardar varios minutos.</p>',
+                        allowOutsideClick: false,
+                        allowEscapeKey: false,
+                        showConfirmButton: false,
+                        didOpen: function() { Swal.showLoading(); }
+                    });
+                    backupAllForm.submit();
+                }
+            });
+        });
+    }
+
+    // ─── Restore backup confirmation (with password) ──────────
+    document.querySelectorAll('.restore-backup-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var btn = form.querySelector('button[type="submit"]');
+            var dbName = btn.dataset.dbName;
+            var filename = btn.dataset.filename;
+            var passwordField = form.querySelector('.restore-password-field');
+
+            SwalDark.fire({
+                title: 'Restaurar base de datos',
+                html: '<p>Se restaurara <strong><code>' + dbName + '</code></strong> desde el backup:</p>' +
+                      '<p><code style="font-size:0.85em;">' + filename + '</code></p>' +
+                      '<p style="color:#fbbf24;"><i class="bi bi-exclamation-triangle me-1"></i>Los datos actuales de la base de datos seran sobrescritos.</p>' +
+                      '<p>Escribe tu contrasena de admin para confirmar:</p>' +
+                      '<input type="password" id="swal-restore-password" class="swal2-input" style="background:#0f172a;color:#e2e8f0;border:1px solid #334155;" placeholder="Contrasena">',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: '<i class="bi bi-arrow-counterclockwise me-1"></i> Restaurar',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#f59e0b',
+                preConfirm: function() {
+                    var pwd = document.getElementById('swal-restore-password').value;
+                    if (!pwd) {
+                        Swal.showValidationMessage('Debes ingresar tu contrasena');
+                        return false;
+                    }
+                    return pwd;
+                }
+            }).then(function(result) {
+                if (result.isConfirmed && result.value) {
+                    passwordField.value = result.value;
+                    form.submit();
+                }
+            });
+        });
+    });
+
+    // ─── Delete backup confirmation ───────────────────────────
+    document.querySelectorAll('.delete-backup-form').forEach(function(form) {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var btn = form.querySelector('button[type="submit"]');
+            var filename = btn.dataset.filename;
+
+            SwalDark.fire({
+                title: 'Eliminar backup',
+                html: '<p>Se eliminara el backup:</p><p><code>' + filename + '</code></p><p style="color:#ef4444;">Esta accion es irreversible.</p>',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Eliminar',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#ef4444'
+            }).then(function(result) {
+                if (result.isConfirmed) {
+                    form.submit();
+                }
+            });
+        });
+    });
+
+    // ─── Backup Settings ──────────────────────────────────────
+    var btnSettings = document.getElementById('btnBackupSettings');
+    if (btnSettings) {
+        btnSettings.addEventListener('click', function() {
+            SwalDark.fire({
+                title: 'Directorio de Backups',
+                html: '<p class="text-muted" style="font-size:0.85em;">Ruta absoluta donde se guardan los backups de bases de datos.</p>' +
+                      '<input type="text" id="swal-backup-path" class="swal2-input" style="background:#0f172a;color:#e2e8f0;border:1px solid #334155;font-family:monospace;font-size:0.9em;" value="<?= View::e($backupDir ?? '/opt/musedock-panel/storage/db-backups') ?>">',
+                icon: 'info',
+                showCancelButton: true,
+                confirmButtonText: '<i class="bi bi-check-lg me-1"></i> Guardar',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#0ea5e9',
+                preConfirm: function() {
+                    var path = document.getElementById('swal-backup-path').value.trim();
+                    if (!path || path[0] !== '/') {
+                        Swal.showValidationMessage('La ruta debe ser absoluta (comenzar con /)');
+                        return false;
+                    }
+                    return path;
+                }
+            }).then(function(result) {
+                if (result.isConfirmed && result.value) {
+                    document.getElementById('backupPathField').value = result.value;
+                    document.getElementById('backupSettingsForm').submit();
+                }
+            });
+        });
+    }
+
+    // ─── Associate DB buttons ─────────────────────────────────
     var hostingAccounts = <?= json_encode($hostingAccounts ?? []) ?>;
     document.querySelectorAll('.btn-associate-db').forEach(function(btn) {
         btn.addEventListener('click', function() {
@@ -452,7 +735,6 @@ function formatDbSize(int $bytes): string {
             var bestMatch = '';
             hostingAccounts.forEach(function(acc) {
                 var selected = '';
-                // Auto-select if owner matches username
                 if (dbOwner && acc.username === dbOwner) {
                     selected = 'selected';
                     bestMatch = acc.domain;
@@ -484,7 +766,6 @@ function formatDbSize(int $bytes): string {
                     var form = document.getElementById('associateDbForm');
                     document.getElementById('assocDbName').value = dbName;
                     document.getElementById('assocDbType').value = dbType;
-                    // Add account_id dynamically
                     var input = document.createElement('input');
                     input.type = 'hidden';
                     input.name = 'account_id';
@@ -496,7 +777,7 @@ function formatDbSize(int $bytes): string {
         });
     });
 
-    // Delete DB forms
+    // ─── Delete DB forms ──────────────────────────────────────
     document.querySelectorAll('.delete-db-form').forEach(function(form) {
         form.addEventListener('submit', function(e) {
             e.preventDefault();

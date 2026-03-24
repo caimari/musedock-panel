@@ -24,20 +24,37 @@
                     </div>
 
                     <div class="mb-4">
+                        <label class="form-label">Alcance de archivos</label>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="radio" name="scope" id="scopeFull" value="full" checked>
+                            <label class="form-check-label" for="scopeFull">
+                                <i class="bi bi-house-door me-1"></i> Directorio completo del dominio
+                            </label>
+                            <br><small class="text-muted ms-4">Incluye httpdocs/, configs, certificados SSL y todo el contenido del home del usuario</small>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="scope" id="scopeHttpdocs" value="httpdocs">
+                            <label class="form-check-label" for="scopeHttpdocs">
+                                <i class="bi bi-folder me-1"></i> Solo httpdocs/
+                            </label>
+                            <br><small class="text-muted ms-4">Solo el directorio web publico</small>
+                        </div>
+                    </div>
+
+                    <div class="mb-4">
                         <label class="form-label">Que incluir en el backup</label>
                         <div class="form-check mb-2">
                             <input class="form-check-input" type="checkbox" name="include_files" id="includeFiles" value="1" checked>
                             <label class="form-check-label" for="includeFiles">
-                                <i class="bi bi-folder me-1"></i> Archivos (httpdocs/)
+                                <i class="bi bi-folder me-1"></i> Archivos
                             </label>
-                            <br><small class="text-muted ms-4">Se creara un archivo files.tar.gz con todo el contenido de httpdocs/</small>
                         </div>
                         <div class="form-check">
                             <input class="form-check-input" type="checkbox" name="include_databases" id="includeDatabases" value="1" checked>
                             <label class="form-check-label" for="includeDatabases">
                                 <i class="bi bi-database me-1"></i> Bases de datos
                             </label>
-                            <br><small class="text-muted ms-4">Se hara un dump SQL de todas las bases de datos asociadas a esta cuenta</small>
+                            <br><small class="text-muted ms-4">Dump SQL de todas las bases de datos asociadas a esta cuenta</small>
                         </div>
                     </div>
 
@@ -53,14 +70,129 @@
             </div>
         </div>
 
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- Auto-Backup Settings                                    -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <div class="card mt-4">
+            <div class="card-header d-flex align-items-center justify-content-between">
+                <span><i class="bi bi-clock-history me-2" style="color:#a78bfa;"></i>Backups Automaticos</span>
+                <?php if (!empty($autoBackupEnabled)): ?>
+                    <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Activo</span>
+                <?php else: ?>
+                    <span class="badge bg-secondary">Desactivado</span>
+                <?php endif; ?>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="/backups/auto-backup-settings">
+                    <?= View::csrf() ?>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-3">
+                            <label class="form-label">Estado</label>
+                            <div class="form-check form-switch mt-1">
+                                <input class="form-check-input" type="checkbox" name="auto_backup_enabled" id="autoBackupEnabled" value="1"
+                                    <?= !empty($autoBackupEnabled) ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="autoBackupEnabled">Activar</label>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Frecuencia</label>
+                            <select name="auto_backup_frequency" class="form-select form-select-sm">
+                                <option value="daily" <?= ($autoBackupFrequency ?? 'daily') === 'daily' ? 'selected' : '' ?>>Diario</option>
+                                <option value="weekly" <?= ($autoBackupFrequency ?? '') === 'weekly' ? 'selected' : '' ?>>Semanal</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Hora</label>
+                            <input type="time" name="auto_backup_time" class="form-control form-control-sm"
+                                   value="<?= View::e($autoBackupTime ?? '03:00') ?>">
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label">Alcance</label>
+                            <select name="auto_backup_scope" class="form-select form-select-sm">
+                                <option value="full" <?= ($autoBackupScope ?? 'full') === 'full' ? 'selected' : '' ?>>Directorio completo</option>
+                                <option value="httpdocs" <?= ($autoBackupScope ?? '') === 'httpdocs' ? 'selected' : '' ?>>Solo httpdocs/</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Retener diarios</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" name="auto_backup_retain_daily" class="form-control form-control-sm"
+                                       value="<?= (int)($autoBackupRetainDaily ?? 7) ?>" min="1" max="90">
+                                <span class="input-group-text">dias</span>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Retener semanales</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" name="auto_backup_retain_weekly" class="form-control form-control-sm"
+                                       value="<?= (int)($autoBackupRetainWeekly ?? 4) ?>" min="0" max="52">
+                                <span class="input-group-text">semanas</span>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">Retencion total</label>
+                            <div class="mt-1">
+                                <small class="text-muted">
+                                    Hasta <strong class="text-light"><?= (int)($autoBackupRetainDaily ?? 7) + (int)($autoBackupRetainWeekly ?? 4) ?></strong> backups por cuenta
+                                </small>
+                            </div>
+                        </div>
+                    </div>
+
+                    <?php if (!empty($nodes)): ?>
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">Copia remota</label>
+                            <div class="form-check form-switch mt-1">
+                                <input class="form-check-input" type="checkbox" name="auto_backup_remote_enabled" id="autoBackupRemote" value="1"
+                                    <?= !empty($autoBackupRemoteEnabled) ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="autoBackupRemote">Enviar a nodo</label>
+                            </div>
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label">Nodo destino</label>
+                            <select name="auto_backup_remote_node_id" class="form-select form-select-sm">
+                                <option value="0">-- Seleccionar nodo --</option>
+                                <?php foreach ($nodes as $node): ?>
+                                <option value="<?= (int) $node['id'] ?>" <?= ((int)($autoBackupRemoteNodeId ?? 0)) === (int) $node['id'] ? 'selected' : '' ?>>
+                                    <?= View::e($node['name']) ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="text-muted">Tras cada auto-backup, se transferira al nodo remoto seleccionado</small>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+
+                    <div class="mb-3">
+                        <label class="form-label">Exclusiones <small class="text-muted">(una por linea, aplica a manuales y automaticos)</small></label>
+                        <textarea name="backup_exclusions" class="form-control form-control-sm" rows="3"
+                                  placeholder="node_modules&#10;.git&#10;*.log" style="font-family:monospace;font-size:0.85em;"><?= View::e($backupExclusions ?? '') ?></textarea>
+                        <small class="text-muted">Por defecto ya se excluyen: <code>node_modules</code>, <code>.git</code>, <code>.svn</code>, <code>__pycache__</code>, <code>.cache</code>, <code>.npm</code>, <code>*.log</code>, <code>tmp/</code>, <code>temp/</code></small>
+                    </div>
+
+                    <div class="d-flex justify-content-end">
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="bi bi-check-lg me-1"></i> Guardar Configuracion
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
         <div class="card mt-3">
             <div class="card-body">
                 <h6 class="mb-2"><i class="bi bi-info-circle me-1" style="color: #38bdf8;"></i> Informacion</h6>
                 <ul class="mb-0 small text-muted">
                     <li>Los backups se guardan en <code>/opt/musedock-panel/storage/backups/</code></li>
-                    <li>El nombre del backup sera: <code>{usuario}_{fecha_hora}/</code></li>
-                    <li>Los dumps de MySQL usan el metodo de autenticacion configurado en <code>.env</code></li>
-                    <li>Los dumps de PostgreSQL se ejecutan con <code>pg_dump</code> como usuario postgres</li>
+                    <li><strong>Directorio completo</strong> incluye httpdocs/, certificados SSL, configs y todo el home del usuario</li>
+                    <li>Los backups automaticos se ejecutan via cron y aplican la politica de retencion tras cada ejecucion</li>
+                    <li>La retencion guarda los N mas recientes como diarios, y 1 por semana para las semanas anteriores</li>
+                    <li>Los backups automaticos se nombran con sufijo <code>_auto</code> para distinguirlos de los manuales</li>
                 </ul>
             </div>
         </div>
@@ -78,13 +210,10 @@
                 </h5>
             </div>
             <div class="modal-body">
-                <!-- Account info -->
                 <div class="mb-3">
                     <small class="text-muted">Cuenta:</small>
                     <span id="backupAccount" class="ms-1"></span>
                 </div>
-
-                <!-- Progress bar -->
                 <div class="mb-3">
                     <div class="d-flex justify-content-between mb-1">
                         <small id="backupTask" class="text-muted">Iniciando...</small>
@@ -95,18 +224,12 @@
                              id="backupProgressBar" role="progressbar" style="width: 0%"></div>
                     </div>
                 </div>
-
-                <!-- Steps info -->
                 <div class="mb-3">
                     <small class="text-muted">Paso <span id="backupStep">0</span> de <span id="backupTotalSteps">0</span></small>
                 </div>
-
-                <!-- Time elapsed -->
                 <div class="mb-0">
                     <small class="text-muted"><i class="bi bi-clock me-1"></i>Tiempo: <span id="backupElapsed">0s</span></small>
                 </div>
-
-                <!-- Result (hidden until done) -->
                 <div id="backupResult" class="mt-3" style="display:none"></div>
             </div>
             <div class="modal-footer border-secondary" id="backupModalFooter" style="display:none">
@@ -142,7 +265,6 @@
         return bsModal;
     }
 
-    // Format elapsed time
     function formatElapsed(seconds) {
         if (seconds < 60) return seconds + 's';
         const m = Math.floor(seconds / 60);
@@ -150,7 +272,6 @@
         return m + 'm ' + s + 's';
     }
 
-    // Start elapsed timer
     function startElapsedTimer() {
         startedAt = Date.now();
         elapsedTimer = setInterval(() => {
@@ -163,7 +284,6 @@
         if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
     }
 
-    // Update UI from status data
     function updateProgressUI(data) {
         const step = data.step || 0;
         const total = data.total_steps || 1;
@@ -188,18 +308,14 @@
             document.getElementById('backupModalTitle').textContent = 'Backup Completado';
             document.getElementById('backupModalIcon').className = 'bi bi-check-circle-fill text-success me-2';
 
-            let resultHtml = `<div class="alert alert-success mb-0 py-2">
+            let resultHtml = `<div class="mb-0 py-2 px-3 rounded" style="background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.3);color:#22c55e;">
                 <i class="bi bi-check-circle me-1"></i> Backup creado exitosamente`;
-            if (data.file_size_human) {
-                resultHtml += ` — <b>${data.file_size_human}</b>`;
-            }
-            if (data.db_count > 0) {
-                resultHtml += ` (${data.db_count} BD${data.db_count > 1 ? 's' : ''})`;
-            }
+            if (data.file_size_human) resultHtml += ` — <b>${data.file_size_human}</b>`;
+            if (data.db_count > 0) resultHtml += ` (${data.db_count} BD${data.db_count > 1 ? 's' : ''})`;
             resultHtml += `</div>`;
 
             if (data.errors && data.errors.length > 0) {
-                resultHtml += `<div class="alert alert-warning mt-2 mb-0 py-2 small">
+                resultHtml += `<div class="mt-2 mb-0 py-2 px-3 rounded small" style="background:rgba(251,191,36,0.15);border:1px solid rgba(251,191,36,0.3);color:#fbbf24;">
                     <i class="bi bi-exclamation-triangle me-1"></i> Advertencias:<br>
                     ${data.errors.map(e => '• ' + e).join('<br>')}
                 </div>`;
@@ -209,7 +325,6 @@
             document.getElementById('backupResult').style.display = '';
             document.getElementById('backupModalFooter').style.display = '';
             document.getElementById('btnStartBackup').disabled = false;
-
             stopPolling();
             stopElapsedTimer();
 
@@ -218,32 +333,27 @@
             bar.classList.add('bg-danger');
             document.getElementById('backupModalTitle').textContent = 'Error en Backup';
             document.getElementById('backupModalIcon').className = 'bi bi-x-circle-fill text-danger me-2';
-
             document.getElementById('backupResult').innerHTML = `
-                <div class="alert alert-danger mb-0 py-2">
+                <div class="mb-0 py-2 px-3 rounded" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#ef4444;">
                     <i class="bi bi-x-circle me-1"></i> ${task}
                 </div>`;
             document.getElementById('backupResult').style.display = '';
             document.getElementById('backupModalFooter').style.display = '';
             document.getElementById('btnStartBackup').disabled = false;
-
             stopPolling();
             stopElapsedTimer();
         }
     }
 
-    // Poll backup status
     async function pollStatus() {
         try {
             const resp = await fetch('/backups/status');
             const data = await resp.json();
-
             if (!data.ok || data.status === 'idle') {
                 stopPolling();
                 stopElapsedTimer();
                 return;
             }
-
             updateProgressUI(data);
         } catch (e) {
             console.error('Error polling backup status:', e);
@@ -265,29 +375,20 @@
 
         const accountId = document.getElementById('accountSelect').value;
         if (!accountId) {
-            (typeof SwalDark !== 'undefined' ? SwalDark : Swal).fire({
-                icon: 'warning',
-                title: 'Selecciona una cuenta',
-                text: 'Debes seleccionar una cuenta de hosting.',
-            });
+            (typeof SwalDark !== 'undefined' ? SwalDark : Swal).fire({ icon: 'warning', title: 'Selecciona una cuenta' });
             return false;
         }
 
         const includeFiles = document.getElementById('includeFiles').checked;
         const includeDatabases = document.getElementById('includeDatabases').checked;
         if (!includeFiles && !includeDatabases) {
-            (typeof SwalDark !== 'undefined' ? SwalDark : Swal).fire({
-                icon: 'warning',
-                title: 'Selecciona contenido',
-                text: 'Debes seleccionar al menos archivos o bases de datos.',
-            });
+            (typeof SwalDark !== 'undefined' ? SwalDark : Swal).fire({ icon: 'warning', title: 'Selecciona contenido' });
             return false;
         }
 
-        // Disable button
         document.getElementById('btnStartBackup').disabled = true;
 
-        // Reset modal UI
+        // Reset modal
         const bar = document.getElementById('backupProgressBar');
         bar.style.width = '0%';
         bar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-info';
@@ -301,35 +402,30 @@
         document.getElementById('backupModalIcon').className = 'bi bi-cloud-arrow-up me-2';
         document.getElementById('backupElapsed').textContent = '0s';
 
-        // Set account name
         const sel = document.getElementById('accountSelect');
         document.getElementById('backupAccount').textContent = sel.options[sel.selectedIndex]?.text || '';
 
-        // Show modal
         getModal().show();
         startElapsedTimer();
 
-        // Launch backup via AJAX
         try {
             const form = new FormData();
             form.append('account_id', accountId);
             form.append('include_files', includeFiles ? '1' : '0');
             form.append('include_databases', includeDatabases ? '1' : '0');
+            form.append('scope', document.querySelector('input[name="scope"]:checked')?.value || 'full');
             form.append('_csrf_token', csrfToken);
 
             const resp = await fetch('/backups/store', { method: 'POST', body: form });
             const data = await resp.json();
 
             if (!data.ok) {
-                document.getElementById('backupTask').textContent = data.error || 'Error al iniciar backup';
+                document.getElementById('backupTask').textContent = data.error || 'Error';
                 bar.classList.remove('progress-bar-animated', 'bg-info');
                 bar.classList.add('bg-danger');
                 document.getElementById('backupModalTitle').textContent = 'Error';
                 document.getElementById('backupModalIcon').className = 'bi bi-x-circle-fill text-danger me-2';
-                document.getElementById('backupResult').innerHTML = `
-                    <div class="alert alert-danger mb-0 py-2">
-                        <i class="bi bi-x-circle me-1"></i> ${data.error}
-                    </div>`;
+                document.getElementById('backupResult').innerHTML = `<div class="mb-0 py-2 px-3 rounded" style="background:rgba(239,68,68,0.15);border:1px solid rgba(239,68,68,0.3);color:#ef4444;"><i class="bi bi-x-circle me-1"></i> ${data.error}</div>`;
                 document.getElementById('backupResult').style.display = '';
                 document.getElementById('backupModalFooter').style.display = '';
                 document.getElementById('btnStartBackup').disabled = false;
@@ -337,9 +433,7 @@
                 return false;
             }
 
-            // Start polling
             startPolling();
-
         } catch (e) {
             document.getElementById('backupTask').textContent = 'Error de conexion';
             bar.classList.remove('progress-bar-animated', 'bg-info');
@@ -347,11 +441,9 @@
             document.getElementById('btnStartBackup').disabled = false;
             stopElapsedTimer();
         }
-
         return false;
     };
 
-    // Close modal and clear status
     window.closeBackupModal = async function() {
         stopPolling();
         stopElapsedTimer();
@@ -373,14 +465,11 @@
             const data = await resp.json();
 
             if (data.ok && data.status && data.status !== 'idle') {
-                // There's an active or finished backup — show the modal
                 document.getElementById('btnStartBackup').disabled = (data.status === 'running');
 
-                // Set account info
                 const account = (data.username || '') + (data.domain ? ' — ' + data.domain : '');
                 document.getElementById('backupAccount').textContent = account;
 
-                // Calculate elapsed from started_at
                 if (data.started_at && data.status === 'running') {
                     const started = new Date(data.started_at.replace(' ', 'T'));
                     startedAt = started.getTime();
@@ -390,7 +479,6 @@
                     }, 1000);
                 }
 
-                // Show modal
                 getModal().show();
                 updateProgressUI(data);
 
@@ -398,12 +486,9 @@
                     startPolling();
                 }
             }
-        } catch (e) {
-            // No backup in progress, do nothing
-        }
+        } catch (e) {}
     }
 
-    // Check on page load
     checkExistingBackup();
 })();
 </script>

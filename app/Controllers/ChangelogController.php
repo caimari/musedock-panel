@@ -20,6 +20,49 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.6',
+                'date' => '2026-03-24',
+                'badge' => 'success',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Backups de bases de datos — Backup, restaurar y descargar bases de datos individuales o todas a la vez desde la pagina de Databases. Registro en tabla del panel + filesystem con reconciliacion automatica',
+                            'Backups de hosting completos — Backup de cuentas de hosting con archivos (directorio completo o solo httpdocs/) y bases de datos. Worker en background con progreso en tiempo real via modal',
+                            'Persistencia de progreso — Si el admin recarga la pagina durante un backup, el modal de progreso se recupera automaticamente leyendo el estado del servidor',
+                            'Backups automaticos rotatorios — Cron configurable (diario/semanal, hora, alcance) que respalda TODAS las cuentas activas. Politica de retencion: N diarios + M semanales por cuenta',
+                            'Exclusiones de backup — Lista configurable de directorios/archivos a excluir (node_modules, .git, *.log, etc.). Exclusiones por defecto + personalizadas',
+                            'Backups remotos — Transferir backups locales a nodos remotos del cluster via API HTTPS (multipart upload). Listar, recuperar y eliminar backups en nodos remotos',
+                            'Barra de progreso en transferencias — Worker en background con CURL progress callback que reporta porcentaje real de upload. El frontend hace polling y muestra progreso en tiempo real',
+                            'Copia remota automatica — Opcion en auto-backups para enviar automaticamente cada backup al nodo remoto seleccionado tras completar el backup local',
+                        ],
+                        'en' => [
+                            'Database backups — Backup, restore and download individual databases or all at once from the Databases page. Panel DB table + filesystem tracking with automatic reconciliation',
+                            'Full hosting backups — Backup hosting accounts with files (full directory or httpdocs/ only) and databases. Background worker with real-time progress via modal',
+                            'Progress persistence — If admin reloads the page during a backup, the progress modal automatically recovers by reading server state',
+                            'Automatic rotary backups — Configurable cron (daily/weekly, time, scope) that backs up ALL active accounts. Retention policy: N daily + M weekly per account',
+                            'Backup exclusions — Configurable list of directories/files to exclude (node_modules, .git, *.log, etc.). Default + custom exclusions',
+                            'Remote backups — Transfer local backups to remote cluster nodes via HTTPS API (multipart upload). List, recover and delete backups on remote nodes',
+                            'Transfer progress bar — Background worker with CURL progress callback reporting real upload percentage. Frontend polls and shows real-time progress',
+                            'Automatic remote copy — Option in auto-backups to automatically send each backup to the selected remote node after completing the local backup',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Alertas dark-theme — Todas las alertas de exito, error y advertencia en modales usan estilos compatibles con el tema oscuro (fondo semitransparente + texto brillante) en vez de los alert-success/danger de Bootstrap',
+                            'Icono de backup — Cambiado de bi-download a bi-archive para mejor representacion visual',
+                            'Backup All incluye musedock_panel — El backup masivo de bases de datos ahora incluye la base del panel (puerto 5433), no solo las de hosting',
+                            'Formato de fechas — Fechas en formato espanol (dd/mm/yyyy) en toda la UI de backups',
+                        ],
+                        'en' => [
+                            'Dark-theme alerts — All success, error and warning alerts in modals now use dark-theme compatible styles (semi-transparent background + bright text) instead of Bootstrap alert-success/danger',
+                            'Backup icon — Changed from bi-download to bi-archive for better visual representation',
+                            'Backup All includes musedock_panel — Mass database backup now includes the panel database (port 5433), not just hosting databases',
+                            'Date format — Spanish format dates (dd/mm/yyyy) across all backup UI',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.5',
                 'date' => '2026-03-24',
                 'badge' => 'success',

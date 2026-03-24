@@ -375,6 +375,12 @@ class ClusterApiController
                 'notify-iface-up'   => $this->handleNotifyIfaceUp($payload),
                 'query-local-state' => $this->handleQueryLocalState(),
 
+                // ── Remote backup operations ──────────────────
+                'receive-backup'   => $this->handleReceiveBackup($payload),
+                'list-backups'     => $this->handleListBackups($payload),
+                'download-backup'  => $this->handleDownloadBackup($payload),
+                'delete-backup'    => $this->handleDeleteBackup($payload),
+
                 default            => ['ok' => false, 'message' => "Unknown action: {$action}"],
             };
 
@@ -725,5 +731,146 @@ class ClusterApiController
                 'repl_role'                   => Settings::get('repl_role', 'slave'),
             ],
         ];
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Remote Backup Handlers ──────────────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Receive a backup file from another node.
+     * Accepts multipart upload with 'backup' file field.
+     */
+    private function handleReceiveBackup(array $payload): array
+    {
+        $backupDir = PANEL_ROOT . '/storage/backups';
+        $uploadedFile = $_FILES['backup'] ?? null;
+        $backupName = basename($payload['backup_name'] ?? '');
+
+        if (!$backupName || !$uploadedFile || $uploadedFile['error'] !== UPLOAD_ERR_OK) {
+            return ['ok' => false, 'error' => 'Missing backup_name or backup file upload'];
+        }
+
+        $targetDir = $backupDir . '/' . $backupName;
+        if (!is_dir($targetDir)) {
+            @mkdir($targetDir, 0750, true);
+        }
+
+        // Extract tar.gz into backup directory
+        $tmpFile = $uploadedFile['tmp_name'];
+        $cmd = sprintf('tar xzf %s -C %s 2>&1', escapeshellarg($tmpFile), escapeshellarg($targetDir));
+        $output = shell_exec($cmd);
+
+        if (!file_exists($targetDir . '/metadata.json')) {
+            return ['ok' => false, 'error' => 'Backup extracted but no metadata.json found. Output: ' . ($output ?? '')];
+        }
+
+        $meta = @json_decode(file_get_contents($targetDir . '/metadata.json'), true);
+        LogService::log('backup.receive', $meta['domain'] ?? $backupName, "Remote backup received: {$backupName}");
+
+        return ['ok' => true, 'message' => "Backup {$backupName} received", 'path' => $targetDir];
+    }
+
+    /**
+     * List available backups on this node.
+     */
+    private function handleListBackups(array $payload): array
+    {
+        $backupDir = PANEL_ROOT . '/storage/backups';
+        $backups = [];
+
+        if (is_dir($backupDir)) {
+            foreach (glob("{$backupDir}/*/metadata.json") as $metaFile) {
+                $dir = dirname($metaFile);
+                $meta = @json_decode(file_get_contents($metaFile), true);
+                if (!$meta) continue;
+
+                $meta['dir_name'] = basename($dir);
+                $meta['has_files'] = file_exists($dir . '/files.tar.gz');
+                $dbDir = $dir . '/databases';
+                $meta['db_count'] = is_dir($dbDir) ? count(glob("{$dbDir}/*.sql")) : 0;
+
+                // Calculate total size on disk
+                $totalSize = 0;
+                if ($meta['has_files']) $totalSize += filesize($dir . '/files.tar.gz');
+                if (is_dir($dbDir)) {
+                    foreach (glob("{$dbDir}/*.sql") as $sqlFile) {
+                        $totalSize += filesize($sqlFile);
+                    }
+                }
+                $meta['disk_size'] = $totalSize;
+
+                $backups[] = $meta;
+            }
+        }
+
+        usort($backups, fn($a, $b) => strtotime($b['date'] ?? '0') - strtotime($a['date'] ?? '0'));
+
+        return ['ok' => true, 'backups' => $backups, 'count' => count($backups)];
+    }
+
+    /**
+     * Download a backup — streams the tar.gz back to the caller.
+     */
+    private function handleDownloadBackup(array $payload): array
+    {
+        $backupDir = PANEL_ROOT . '/storage/backups';
+        $backupName = basename($payload['backup_name'] ?? '');
+
+        if (!$backupName) {
+            return ['ok' => false, 'error' => 'Missing backup_name'];
+        }
+
+        $backupPath = $backupDir . '/' . $backupName;
+        if (!is_dir($backupPath) || !file_exists($backupPath . '/metadata.json')) {
+            return ['ok' => false, 'error' => 'Backup not found'];
+        }
+
+        // Create a temporary tar.gz of the entire backup directory
+        $tmpFile = sys_get_temp_dir() . '/backup_download_' . $backupName . '.tar.gz';
+        $cmd = sprintf('tar czf %s -C %s . 2>&1', escapeshellarg($tmpFile), escapeshellarg($backupPath));
+        shell_exec($cmd);
+
+        if (!file_exists($tmpFile)) {
+            return ['ok' => false, 'error' => 'Failed to create archive for download'];
+        }
+
+        // Stream file directly
+        header('Content-Type: application/gzip');
+        header('Content-Disposition: attachment; filename="' . $backupName . '.tar.gz"');
+        header('Content-Length: ' . filesize($tmpFile));
+        readfile($tmpFile);
+        @unlink($tmpFile);
+        exit;
+    }
+
+    /**
+     * Delete a backup on this node.
+     */
+    private function handleDeleteBackup(array $payload): array
+    {
+        $backupDir = PANEL_ROOT . '/storage/backups';
+        $backupName = basename($payload['backup_name'] ?? '');
+
+        if (!$backupName) {
+            return ['ok' => false, 'error' => 'Missing backup_name'];
+        }
+
+        $backupPath = $backupDir . '/' . $backupName;
+        $realPath = realpath($backupPath);
+        $realBackupDir = realpath($backupDir);
+
+        if (!$realPath || !$realBackupDir || !str_starts_with($realPath, $realBackupDir) || $realPath === $realBackupDir) {
+            return ['ok' => false, 'error' => 'Invalid backup path'];
+        }
+
+        if (!is_dir($realPath)) {
+            return ['ok' => false, 'error' => 'Backup not found'];
+        }
+
+        shell_exec(sprintf('rm -rf %s 2>&1', escapeshellarg($realPath)));
+        LogService::log('backup.remote_delete', $backupName, "Remote backup deleted: {$backupName}");
+
+        return ['ok' => true, 'message' => "Backup {$backupName} deleted"];
     }
 }

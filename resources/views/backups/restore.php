@@ -54,10 +54,16 @@
                     <h6 class="mb-3">Que restaurar:</h6>
 
                     <?php if (!empty($backup['has_files'])): ?>
+                    <?php $backupScope = $backup['scope'] ?? 'httpdocs'; ?>
                     <div class="form-check mb-3">
                         <input class="form-check-input" type="checkbox" name="restore_files" id="restoreFiles" value="1" checked>
                         <label class="form-check-label" for="restoreFiles">
                             <i class="bi bi-folder me-1" style="color: #22c55e;"></i> Archivos (files.tar.gz)
+                            <?php if ($backupScope === 'full'): ?>
+                                <span class="badge bg-success ms-1" style="font-size:0.7em;">Directorio completo</span>
+                            <?php else: ?>
+                                <span class="badge bg-secondary ms-1" style="font-size:0.7em;">Solo httpdocs/</span>
+                            <?php endif; ?>
                         </label>
                         <br><small class="text-muted ms-4">Se extraeran los archivos a <code><?= View::e($backup['account']['home_dir'] ?? '') ?>/</code></small>
                     </div>

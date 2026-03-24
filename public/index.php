@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.5');
+define('PANEL_VERSION', '1.0.6');
 
 
 
@@ -152,6 +152,14 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/databases/{id}/delete', 'DatabaseController@delete');
 \MuseDockPanel\Router::post('/databases/associate', 'DatabaseController@associate');
 \MuseDockPanel\Router::get('/databases/accounts-json', 'DatabaseController@getAccounts');
+// Database Backups
+\MuseDockPanel\Router::post('/databases/backup', 'DatabaseController@backup');
+\MuseDockPanel\Router::post('/databases/backup-all', 'DatabaseController@backupAll');
+\MuseDockPanel\Router::get('/databases/backups/{id}/download', 'DatabaseController@downloadBackup');
+\MuseDockPanel\Router::post('/databases/backups/{id}/restore', 'DatabaseController@restoreBackup');
+\MuseDockPanel\Router::post('/databases/backups/{id}/delete', 'DatabaseController@deleteBackup');
+\MuseDockPanel\Router::post('/databases/backups/cleanup', 'DatabaseController@cleanupBackups');
+\MuseDockPanel\Router::post('/databases/backup-settings', 'DatabaseController@saveBackupSettings');
 
 // Customers
 \MuseDockPanel\Router::get('/customers', 'CustomerController@index');
@@ -338,6 +346,14 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/backups/{id}/restore', 'BackupController@restore');
 \MuseDockPanel\Router::post('/backups/{id}/restore', 'BackupController@restoreExecute');
 \MuseDockPanel\Router::post('/backups/{id}/delete', 'BackupController@delete');
+\MuseDockPanel\Router::post('/backups/auto-backup-settings', 'BackupController@saveAutoBackupSettings');
+// Remote Backups (static routes before {id} wildcard)
+\MuseDockPanel\Router::get('/backups/transfer/status', 'BackupController@transferStatus');
+\MuseDockPanel\Router::post('/backups/transfer/clear', 'BackupController@transferClear');
+\MuseDockPanel\Router::get('/backups/remote', 'BackupController@listRemoteBackups');
+\MuseDockPanel\Router::post('/backups/remote/fetch', 'BackupController@fetchFromNode');
+\MuseDockPanel\Router::post('/backups/remote/delete', 'BackupController@deleteRemoteBackup');
+\MuseDockPanel\Router::post('/backups/{id}/transfer', 'BackupController@transferToNode');
 
 // Changelog
 \MuseDockPanel\Router::get('/changelog', 'ChangelogController@index');

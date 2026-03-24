@@ -1,7 +1,7 @@
 <?php
 /**
  * Backup Worker — Runs in background, updates status file with progress.
- * Usage: php backup-worker.php <account_id> <include_files:0|1> <include_databases:0|1> <backup_name>
+ * Usage: php backup-worker.php <account_id> <include_files:0|1> <include_databases:0|1> <backup_name> [scope:full|httpdocs]
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
@@ -17,10 +17,11 @@ spl_autoload_register(function ($class) {
 
 MuseDockPanel\Env::load(PANEL_ROOT . '/.env');
 
-$accountId      = (int)($argv[1] ?? 0);
-$includeFiles   = ($argv[2] ?? '0') === '1';
+$accountId        = (int)($argv[1] ?? 0);
+$includeFiles     = ($argv[2] ?? '0') === '1';
 $includeDatabases = ($argv[3] ?? '0') === '1';
-$backupName     = $argv[4] ?? '';
+$backupName       = $argv[4] ?? '';
+$scope            = $argv[5] ?? 'full'; // 'full' = entire domain dir, 'httpdocs' = only httpdocs/
 
 if (!$accountId || !$backupName) {
     exit(1);
@@ -29,6 +30,29 @@ if (!$accountId || !$backupName) {
 $backupDir  = PANEL_ROOT . '/storage/backups';
 $statusFile = $backupDir . '/.backup_status.json';
 $backupPath = $backupDir . '/' . $backupName;
+
+// Default exclusions (patterns that waste space in backups)
+$defaultExclusions = [
+    'node_modules',
+    '.git',
+    '.svn',
+    'vendor/bin',
+    '__pycache__',
+    '.cache',
+    '.npm',
+    '.composer/cache',
+    'storage/logs/*.log',
+    '*.log',
+    'tmp/',
+    'temp/',
+];
+
+// Load custom exclusions from settings
+$customExclusions = MuseDockPanel\Settings::get('backup_exclusions', '');
+if (!empty($customExclusions)) {
+    $extra = array_filter(array_map('trim', explode("\n", $customExclusions)));
+    $defaultExclusions = array_merge($defaultExclusions, $extra);
+}
 
 // Helper: update status file
 function updateStatus(string $file, array $merge): void
@@ -84,30 +108,50 @@ try {
     // ── Step: Archive files ─────────────────────────────────────
     if ($includeFiles) {
         $step++;
+
+        if ($scope === 'full') {
+            $archiveLabel = 'directorio completo';
+            $sourceDir = $homeDir;
+            $tarTarget = '.';
+        } else {
+            $archiveLabel = 'httpdocs/';
+            $sourceDir = $homeDir;
+            $tarTarget = 'httpdocs/';
+        }
+
         updateStatus($statusFile, [
             'step' => $step,
-            'current_task' => 'Comprimiendo archivos (httpdocs/)...',
+            'current_task' => "Comprimiendo archivos ({$archiveLabel})...",
         ]);
 
-        if (is_dir($homeDir . '/httpdocs')) {
+        $archiveDir = ($scope === 'full') ? $homeDir : $homeDir . '/httpdocs';
+        if (is_dir($archiveDir)) {
             $tarFile = $backupPath . '/files.tar.gz';
+
+            // Build exclusion flags
+            $excludeFlags = '';
+            foreach ($defaultExclusions as $pattern) {
+                $excludeFlags .= ' --exclude=' . escapeshellarg($pattern);
+            }
+
             $cmd = sprintf(
-                'tar czf %s -C %s %s 2>&1',
+                'tar czf %s -C %s %s %s 2>&1',
                 escapeshellarg($tarFile),
-                escapeshellarg($homeDir),
-                'httpdocs/'
+                escapeshellarg($sourceDir),
+                $excludeFlags,
+                escapeshellarg($tarTarget)
             );
             $output = shell_exec($cmd);
             if (file_exists($tarFile)) {
                 $totalSize += filesize($tarFile);
                 updateStatus($statusFile, [
-                    'current_task' => 'Archivos comprimidos (' . fmtSize(filesize($tarFile)) . ')',
+                    'current_task' => "Archivos comprimidos ({$archiveLabel}: " . fmtSize(filesize($tarFile)) . ')',
                 ]);
             } else {
                 $errors[] = "Error al crear tar.gz: {$output}";
             }
         } else {
-            $errors[] = "Directorio httpdocs no encontrado en {$homeDir}";
+            $errors[] = "Directorio no encontrado: {$archiveDir}";
         }
     }
 
@@ -137,7 +181,7 @@ try {
                 if ($dbType === 'mysql') {
                     $mysqlCmd = buildMysqlDumpCmd();
                     if ($mysqlCmd) {
-                        $cmd = sprintf('%s %s > %s 2>&1', $mysqlCmd, escapeshellarg($dbName), escapeshellarg($dumpFile));
+                        $cmd = sprintf('%s --single-transaction --quick %s > %s 2>&1', $mysqlCmd, escapeshellarg($dbName), escapeshellarg($dumpFile));
                         shell_exec($cmd);
                     } else {
                         $errors[] = "No se pudo determinar autenticacion MySQL para {$dbName}";
@@ -183,6 +227,8 @@ try {
         'timestamp' => str_replace($username . '_', '', $backupName),
         'include_files' => $includeFiles,
         'include_databases' => $includeDatabases,
+        'scope' => $scope,
+        'exclusions' => $defaultExclusions,
         'file_size' => $totalSize,
         'databases' => $dbList,
     ];
@@ -195,7 +241,7 @@ try {
     MuseDockPanel\Services\LogService::log(
         'backup.create',
         $domain,
-        "Backup creado: {$backupName} (" . fmtSize($totalSize) . ")"
+        "Backup creado: {$backupName} (" . fmtSize($totalSize) . ") scope={$scope}"
     );
 
     // ── Done ────────────────────────────────────────────────────
