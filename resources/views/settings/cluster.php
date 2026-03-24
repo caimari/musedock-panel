@@ -1628,14 +1628,51 @@
                         </div>
                         <div class="form-text">Load &gt; X×cores → notificar</div>
                     </div>
+                </div>
+
+                <h6 class="text-muted mb-2 mt-2">Severidad por servicio</h6>
+                <p class="text-muted small mb-2">
+                    Elige qué hacer cuando cada servicio cae:
+                    <strong>Critical</strong> = failover,
+                    <strong>Warning</strong> = notificar,
+                    <strong>Ignorar</strong> = solo log.
+                </p>
+                <div class="row g-2 mb-3">
                     <div class="col-md-3">
-                        <label class="form-label small">PG Panel (5433) caído</label>
-                        <select name="failover_pg_panel_severity" class="form-select form-select-sm">
-                            <option value="warning" <?= ($fc['failover_pg_panel_severity'] ?? 'warning') === 'warning' ? 'selected' : '' ?>>Warning — notificar (recomendado)</option>
-                            <option value="critical" <?= ($fc['failover_pg_panel_severity'] ?? '') === 'critical' ? 'selected' : '' ?>>Critical — disparar failover</option>
-                            <option value="ignore" <?= ($fc['failover_pg_panel_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar — solo log</option>
+                        <label class="form-label small">Caddy (web server)</label>
+                        <select name="failover_caddy_severity" class="form-select form-select-sm">
+                            <option value="critical" <?= ($fc['failover_caddy_severity'] ?? 'critical') === 'critical' ? 'selected' : '' ?>>Critical — failover</option>
+                            <option value="warning" <?= ($fc['failover_caddy_severity'] ?? '') === 'warning' ? 'selected' : '' ?>>Warning — notificar</option>
+                            <option value="ignore" <?= ($fc['failover_caddy_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar</option>
                         </select>
-                        <div class="form-text">Las webs funcionan sin PG panel</div>
+                        <div class="form-text">Sin Caddy no hay webs</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">PG Hosting (5432)</label>
+                        <select name="failover_pg_hosting_severity" class="form-select form-select-sm">
+                            <option value="critical" <?= ($fc['failover_pg_hosting_severity'] ?? 'critical') === 'critical' ? 'selected' : '' ?>>Critical — failover</option>
+                            <option value="warning" <?= ($fc['failover_pg_hosting_severity'] ?? '') === 'warning' ? 'selected' : '' ?>>Warning — notificar</option>
+                            <option value="ignore" <?= ($fc['failover_pg_hosting_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar</option>
+                        </select>
+                        <div class="form-text">BD de las webs de clientes</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">PG Panel (5433)</label>
+                        <select name="failover_pg_panel_severity" class="form-select form-select-sm">
+                            <option value="warning" <?= ($fc['failover_pg_panel_severity'] ?? 'warning') === 'warning' ? 'selected' : '' ?>>Warning — notificar</option>
+                            <option value="critical" <?= ($fc['failover_pg_panel_severity'] ?? '') === 'critical' ? 'selected' : '' ?>>Critical — failover</option>
+                            <option value="ignore" <?= ($fc['failover_pg_panel_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar</option>
+                        </select>
+                        <div class="form-text">Solo afecta al panel admin</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">MySQL (3306)</label>
+                        <select name="failover_mysql_severity" class="form-select form-select-sm">
+                            <option value="warning" <?= ($fc['failover_mysql_severity'] ?? 'warning') === 'warning' ? 'selected' : '' ?>>Warning — notificar</option>
+                            <option value="critical" <?= ($fc['failover_mysql_severity'] ?? '') === 'critical' ? 'selected' : '' ?>>Critical — failover</option>
+                            <option value="ignore" <?= ($fc['failover_mysql_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar</option>
+                        </select>
+                        <div class="form-text">BD MySQL de clientes</div>
                     </div>
                 </div>
 

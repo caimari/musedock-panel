@@ -30,41 +30,63 @@ class ClusterApiController
         $diskWarningPct   = (float)(Settings::get('failover_disk_warning_pct', '10') ?: 10);
         $loadCriticalMult = (float)(Settings::get('failover_load_critical_mult', '3') ?: 3);
         $loadWarningMult  = (float)(Settings::get('failover_load_warning_mult', '2') ?: 2);
-        $pgPanelSeverity  = Settings::get('failover_pg_panel_severity', 'warning') ?: 'warning';
+        $pgPanelSeverity    = Settings::get('failover_pg_panel_severity', 'warning') ?: 'warning';
+        $pgHostingSeverity  = Settings::get('failover_pg_hosting_severity', 'critical') ?: 'critical';
+        $mysqlSeverity      = Settings::get('failover_mysql_severity', 'warning') ?: 'warning';
+        $caddySeverity      = Settings::get('failover_caddy_severity', 'critical') ?: 'critical';
 
         $checks = [];
         $hasCritical = false;
         $hasWarning = false;
 
-        // 1. Caddy (port 443) — CRITICAL: webs completely down without it
+        // 1. Caddy (port 443) — configurable severity (default: critical)
         $caddyConn = @fsockopen('127.0.0.1', 443, $errno, $errstr, 2);
         if ($caddyConn) {
             fclose($caddyConn);
-            $checks['caddy'] = ['status' => 'ok'];
+            $checks['caddy'] = ['status' => 'ok', 'configured_severity' => $caddySeverity];
         } else {
-            $checks['caddy'] = ['status' => 'critical', 'error' => $errstr ?: 'Connection refused'];
-            $hasCritical = true;
+            $checks['caddy'] = self::applySeverity('critical', $caddySeverity, $hasCritical, $hasWarning);
+            $checks['caddy']['error'] = $errstr ?: 'Connection refused';
         }
 
-        // 2. PostgreSQL 5432 (hosting databases) — CRITICAL: apps with DB don't work
+        // 2. PostgreSQL 5432 (hosting databases) — configurable severity (default: critical)
         $checks['pg_hosting'] = self::checkPostgres(5432);
-        if ($checks['pg_hosting']['status'] === 'critical') $hasCritical = true;
+        if ($checks['pg_hosting']['status'] === 'critical') {
+            $checks['pg_hosting'] = array_merge($checks['pg_hosting'], self::applySeverity('critical', $pgHostingSeverity, $hasCritical, $hasWarning));
+        }
+        $checks['pg_hosting']['configured_severity'] = $pgHostingSeverity;
 
         // 3. PostgreSQL 5433 (panel database) — configurable severity (default: warning)
         $checks['pg_panel'] = self::checkPostgres(5433);
         if ($checks['pg_panel']['status'] === 'critical') {
-            if ($pgPanelSeverity === 'warning') {
-                $checks['pg_panel']['status'] = 'warning';
-                $hasWarning = true;
-            } elseif ($pgPanelSeverity === 'critical') {
-                $hasCritical = true;
+            $checks['pg_panel'] = array_merge($checks['pg_panel'], self::applySeverity('critical', $pgPanelSeverity, $hasCritical, $hasWarning));
+        }
+        $checks['pg_panel']['configured_severity'] = $pgPanelSeverity;
+
+        // 4. MySQL (port 3306) — configurable severity (default: warning)
+        $mysqlConn = @fsockopen('127.0.0.1', 3306, $errno, $errstr, 2);
+        if ($mysqlConn) {
+            fclose($mysqlConn);
+            // Verify it accepts queries
+            $mysqlTest = trim((string)shell_exec("mysql -e 'SELECT 1' 2>/dev/null | tail -1"));
+            if ($mysqlTest === '1') {
+                $checks['mysql'] = ['status' => 'ok', 'queryable' => true, 'configured_severity' => $mysqlSeverity];
             } else {
-                // 'ignore' — don't count it at all
-                $checks['pg_panel']['status'] = 'info';
+                $checks['mysql'] = self::applySeverity('critical', $mysqlSeverity, $hasCritical, $hasWarning);
+                $checks['mysql']['queryable'] = false;
+            }
+        } else {
+            // MySQL might not be installed — check if it's expected
+            $mysqlInstalled = !empty(trim((string)shell_exec('which mysql 2>/dev/null')));
+            if ($mysqlInstalled) {
+                $checks['mysql'] = self::applySeverity('critical', $mysqlSeverity, $hasCritical, $hasWarning);
+                $checks['mysql']['error'] = $errstr ?: 'Connection refused';
+            } else {
+                $checks['mysql'] = ['status' => 'ok', 'installed' => false, 'configured_severity' => $mysqlSeverity];
             }
         }
 
-        // 4. Disk space — configurable thresholds
+        // 5. Disk space — configurable thresholds
         $diskFree = @disk_free_space('/');
         $diskTotal = @disk_total_space('/');
         if ($diskTotal > 0) {
@@ -88,7 +110,7 @@ class ClusterApiController
             $hasCritical = true;
         }
 
-        // 5. System load — configurable multipliers
+        // 6. System load — configurable multipliers
         $cpuCores = (int)trim((string)shell_exec('nproc 2>/dev/null')) ?: 1;
         $load = sys_getloadavg();
         $load1 = $load[0] ?? 0;
@@ -155,6 +177,30 @@ class ClusterApiController
             return ['status' => 'ok', 'port' => $port, 'queryable' => true];
         }
         return ['status' => 'critical', 'port' => $port, 'queryable' => false];
+    }
+
+    /**
+     * Apply configured severity to a failed check.
+     * Maps a raw 'critical' result to what the admin configured (critical/warning/ignore).
+     * Updates $hasCritical/$hasWarning by reference.
+     */
+    private static function applySeverity(string $rawStatus, string $configuredSeverity, bool &$hasCritical, bool &$hasWarning): array
+    {
+        if ($rawStatus !== 'critical' && $rawStatus !== 'fail') {
+            return ['status' => $rawStatus];
+        }
+
+        switch ($configuredSeverity) {
+            case 'critical':
+                $hasCritical = true;
+                return ['status' => 'critical'];
+            case 'warning':
+                $hasWarning = true;
+                return ['status' => 'warning'];
+            case 'ignore':
+            default:
+                return ['status' => 'info'];
+        }
     }
 
     /**

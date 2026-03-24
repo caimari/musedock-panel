@@ -66,6 +66,9 @@ class FailoverService
         'failover_load_critical_mult' => '3',   // load > 3x cores → critical
         'failover_load_warning_mult'  => '2',   // load > 2x cores → warning
         'failover_pg_panel_severity'  => 'warning', // pg_panel down = warning (not critical)
+        'failover_pg_hosting_severity' => 'critical', // pg_hosting down = critical (failover)
+        'failover_mysql_severity'     => 'warning',   // mysql down = warning (not critical)
+        'failover_caddy_severity'     => 'critical',  // caddy down = critical (failover)
 
         // caddy-l4
         'failover_caddy_l4_bin'     => '/usr/local/bin/caddy-l4',
