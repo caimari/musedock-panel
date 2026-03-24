@@ -88,35 +88,46 @@ $preflight = MuseDockPanel\Services\ClusterService::callNode($nodeId, 'POST', 'a
     'payload' => ['file_size' => $totalSize],
 ]);
 
+$preflightSkipped = false;
 if (!$preflight['ok']) {
     $errMsg = $preflight['error'] ?? '';
-    // Check if it's an "Unknown action" = old panel version
+    // Check if it's an "Unknown action" = old panel version without preflight support
     if (str_contains($errMsg, 'Unknown action') || str_contains($errMsg, 'unknown')) {
-        $errMsg = "El nodo {$node['name']} no soporta backups remotos. Actualiza el panel en ese nodo (v1.0.6+).";
+        // Old panel version — skip preflight and continue with transfer
+        $preflightSkipped = true;
     } elseif (str_contains($errMsg, 'Connection') || str_contains($errMsg, 'timed out') || str_contains($errMsg, 'failed')) {
-        $errMsg = "No se puede conectar con {$node['name']}: {$errMsg}";
+        updateStatus($statusFile, [
+            'status' => 'error',
+            'error' => "No se puede conectar con {$node['name']}: {$errMsg}",
+            'backup_name' => $backupName,
+            'node_name' => $node['name'],
+        ]);
+        exit(1);
+    } else {
+        updateStatus($statusFile, [
+            'status' => 'error',
+            'error' => $errMsg ?: "Error de preflight en {$node['name']}",
+            'backup_name' => $backupName,
+            'node_name' => $node['name'],
+        ]);
+        exit(1);
     }
-    updateStatus($statusFile, [
-        'status' => 'error',
-        'error' => $errMsg,
-        'backup_name' => $backupName,
-        'node_name' => $node['name'],
-    ]);
-    exit(1);
 }
 
-// Check preflight data for errors
-$preflightData = $preflight['data'] ?? [];
-if (!empty($preflightData['errors'])) {
-    $errMsg = "El nodo {$node['name']} no puede recibir el backup:\n" . implode("\n", $preflightData['errors']);
-    updateStatus($statusFile, [
-        'status' => 'error',
-        'error' => $errMsg,
-        'backup_name' => $backupName,
-        'node_name' => $node['name'],
-        'preflight' => $preflightData,
-    ]);
-    exit(1);
+// Check preflight data for errors (only if preflight was not skipped)
+if (!$preflightSkipped) {
+    $preflightData = $preflight['data'] ?? [];
+    if (!empty($preflightData['errors'])) {
+        $errMsg = "El nodo {$node['name']} no puede recibir el backup:\n" . implode("\n", $preflightData['errors']);
+        updateStatus($statusFile, [
+            'status' => 'error',
+            'error' => $errMsg,
+            'backup_name' => $backupName,
+            'node_name' => $node['name'],
+            'preflight' => $preflightData,
+        ]);
+        exit(1);
+    }
 }
 
 updateStatus($statusFile, [

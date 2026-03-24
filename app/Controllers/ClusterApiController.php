@@ -382,7 +382,7 @@ class ClusterApiController
                 'download-backup'  => $this->handleDownloadBackup($payload),
                 'delete-backup'    => $this->handleDeleteBackup($payload),
 
-                default            => ['ok' => false, 'message' => "Unknown action: {$action}"],
+                default            => ['ok' => false, 'error' => "Unknown action: {$action}"],
             };
 
             $httpCode = ($result['ok'] ?? false) ? 200 : 422;

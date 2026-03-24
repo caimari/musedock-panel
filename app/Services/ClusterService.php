@@ -453,7 +453,7 @@ class ClusterService
             'ok'     => $ok,
             'status' => $httpCode,
             'data'   => $decoded,
-            'error'  => $ok ? '' : ($decoded['error'] ?? "HTTP {$httpCode}"),
+            'error'  => $ok ? '' : ($decoded['error'] ?? $decoded['message'] ?? "HTTP {$httpCode}"),
         ];
     }
 
