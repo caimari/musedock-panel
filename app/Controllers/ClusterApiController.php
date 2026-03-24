@@ -13,99 +13,132 @@ class ClusterApiController
      * GET /api/health
      * Lightweight health check for failover monitoring.
      * Verifies: Caddy, PostgreSQL (5432+5433), disk space, panel responsiveness.
-     * Returns HTTP 200 if healthy, 503 if degraded.
+     *
+     * Returns severity levels:
+     *   critical → failover should be triggered (Caddy down, PG hosting down)
+     *   warning  → notify admin but do NOT failover (PG panel down, disk low, high load)
+     *   ok       → everything healthy
+     *
+     * HTTP status: 200 (ok), 503 (critical or warning)
      */
     public function health(): void
     {
         header('Content-Type: application/json');
 
         $checks = [];
-        $healthy = true;
+        $hasCritical = false;
+        $hasWarning = false;
 
-        // 1. Caddy (port 443)
-        $caddyCheck = @fsockopen('127.0.0.1', 443, $errno, $errstr, 2);
-        $checks['caddy'] = ['ok' => (bool)$caddyCheck];
-        if ($caddyCheck) { fclose($caddyCheck); } else { $healthy = false; }
-
-        // 2. PostgreSQL 5432 (hosting databases)
-        $pg5432 = @fsockopen('127.0.0.1', 5432, $errno, $errstr, 2);
-        $checks['pg_5432'] = ['ok' => (bool)$pg5432];
-        if ($pg5432) {
-            fclose($pg5432);
-            // Verify it actually accepts queries
-            try {
-                $result = trim((string)shell_exec("sudo -u postgres psql -p 5432 -tAc 'SELECT 1' 2>/dev/null"));
-                $checks['pg_5432']['queryable'] = ($result === '1');
-                if ($result !== '1') $healthy = false;
-            } catch (\Throwable $e) {
-                $checks['pg_5432']['queryable'] = false;
-                $healthy = false;
-            }
+        // 1. Caddy (port 443) — CRITICAL: webs completely down without it
+        $caddyConn = @fsockopen('127.0.0.1', 443, $errno, $errstr, 2);
+        if ($caddyConn) {
+            fclose($caddyConn);
+            $checks['caddy'] = ['status' => 'ok'];
         } else {
-            $healthy = false;
+            $checks['caddy'] = ['status' => 'critical', 'error' => $errstr ?: 'Connection refused'];
+            $hasCritical = true;
         }
 
-        // 3. PostgreSQL 5433 (panel database)
-        $pg5433 = @fsockopen('127.0.0.1', 5433, $errno, $errstr, 2);
-        $checks['pg_5433'] = ['ok' => (bool)$pg5433];
-        if ($pg5433) {
-            fclose($pg5433);
-            try {
-                $result = trim((string)shell_exec("sudo -u postgres psql -p 5433 -tAc 'SELECT 1' 2>/dev/null"));
-                $checks['pg_5433']['queryable'] = ($result === '1');
-                if ($result !== '1') $healthy = false;
-            } catch (\Throwable $e) {
-                $checks['pg_5433']['queryable'] = false;
-                $healthy = false;
-            }
-        } else {
-            $healthy = false;
+        // 2. PostgreSQL 5432 (hosting databases) — CRITICAL: apps with DB don't work
+        $checks['pg_hosting'] = self::checkPostgres(5432);
+        if ($checks['pg_hosting']['status'] === 'critical') $hasCritical = true;
+
+        // 3. PostgreSQL 5433 (panel database) — WARNING: only panel admin affected, webs still work
+        $checks['pg_panel'] = self::checkPostgres(5433);
+        if ($checks['pg_panel']['status'] === 'critical') {
+            $checks['pg_panel']['status'] = 'warning'; // downgrade: panel DB is not web-critical
+            $hasWarning = true;
         }
 
-        // 4. Disk space (warn <10%, fail <5%)
+        // 4. Disk space
         $diskFree = @disk_free_space('/');
         $diskTotal = @disk_total_space('/');
         if ($diskTotal > 0) {
             $diskPct = round(($diskFree / $diskTotal) * 100, 1);
+            $diskStatus = 'ok';
+            if ($diskPct < 5) {
+                $diskStatus = 'critical';  // imminent failure
+                $hasCritical = true;
+            } elseif ($diskPct < 10) {
+                $diskStatus = 'warning';   // needs attention
+                $hasWarning = true;
+            }
             $checks['disk'] = [
-                'ok' => $diskPct >= 5,
-                'free_pct' => $diskPct,
+                'status' => $diskStatus,
+                'free_percent' => $diskPct,
                 'free_gb' => round($diskFree / 1073741824, 1),
-                'warning' => $diskPct < 10,
             ];
-            if ($diskPct < 5) $healthy = false;
         } else {
-            $checks['disk'] = ['ok' => false, 'error' => 'Cannot read disk'];
-            $healthy = false;
+            $checks['disk'] = ['status' => 'critical', 'error' => 'Cannot read disk'];
+            $hasCritical = true;
         }
 
-        // 5. System load (fail if load > 2x CPU cores)
+        // 5. System load
         $cpuCores = (int)trim((string)shell_exec('nproc 2>/dev/null')) ?: 1;
         $load = sys_getloadavg();
         $load1 = $load[0] ?? 0;
+        $loadStatus = 'ok';
+        if ($load1 >= ($cpuCores * 3)) {
+            $loadStatus = 'critical';  // server barely responsive
+            $hasCritical = true;
+        } elseif ($load1 >= ($cpuCores * 2)) {
+            $loadStatus = 'warning';   // slow but operational
+            $hasWarning = true;
+        }
         $checks['load'] = [
-            'ok' => $load1 < ($cpuCores * 2),
+            'status' => $loadStatus,
             'load_1m' => $load1,
             'cores' => $cpuCores,
-            'warning' => $load1 > $cpuCores,
         ];
-        if ($load1 >= ($cpuCores * 3)) $healthy = false; // only fail on extreme load
 
-        // 6. Panel role info
+        // Determine overall severity
+        $severity = 'ok';
+        $status = 'healthy';
+        if ($hasCritical) {
+            $severity = 'critical';
+            $status = 'unhealthy';
+        } elseif ($hasWarning) {
+            $severity = 'warning';
+            $status = 'degraded';
+        }
+
+        // Role info
         $clusterRole = Settings::get('cluster_role', '');
         $envRole = Env::get('PANEL_ROLE', 'standalone');
         $role = ($clusterRole !== '' && $clusterRole !== 'standalone') ? $clusterRole : $envRole;
 
-        if (!$healthy) http_response_code(503);
+        if ($severity !== 'ok') http_response_code(503);
 
         echo json_encode([
-            'ok' => $healthy,
+            'ok' => ($severity === 'ok'),
+            'status' => $status,
+            'severity' => $severity,
             'timestamp' => date('Y-m-d H:i:s'),
             'role' => $role,
             'version' => defined('PANEL_VERSION') ? PANEL_VERSION : 'unknown',
             'checks' => $checks,
         ], JSON_PRETTY_PRINT);
         exit;
+    }
+
+    /**
+     * Check a PostgreSQL instance by port.
+     * Returns status: 'ok' or 'critical' (caller decides if it's warning-level).
+     */
+    private static function checkPostgres(int $port): array
+    {
+        $conn = @fsockopen('127.0.0.1', $port, $errno, $errstr, 2);
+        if (!$conn) {
+            return ['status' => 'critical', 'port' => $port, 'error' => $errstr ?: 'Connection refused'];
+        }
+        fclose($conn);
+
+        // Verify it actually accepts queries
+        $result = trim((string)shell_exec("sudo -u postgres psql -p {$port} -tAc 'SELECT 1' 2>/dev/null"));
+        if ($result === '1') {
+            return ['status' => 'ok', 'port' => $port, 'queryable' => true];
+        }
+        return ['status' => 'critical', 'port' => $port, 'queryable' => false];
     }
 
     /**

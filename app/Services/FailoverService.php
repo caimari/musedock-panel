@@ -198,6 +198,8 @@ class FailoverService
             if (is_array($data)) {
                 return [
                     'ok' => !empty($data['ok']),
+                    'severity' => $data['severity'] ?? ($data['ok'] ? 'ok' : 'critical'),
+                    'status' => $data['status'] ?? 'unknown',
                     'ms' => $elapsed,
                     'ip' => $ip,
                     'http_code' => $httpCode,
@@ -216,10 +218,12 @@ class FailoverService
 
         if ($conn) {
             fclose($conn);
-            return ['ok' => true, 'ms' => $elapsed2, 'ip' => $ip, 'method' => 'tcp_fallback'];
+            return ['ok' => true, 'severity' => 'ok', 'ms' => $elapsed2, 'ip' => $ip, 'method' => 'tcp_fallback'];
         }
+        // No response at all = critical (server completely unreachable)
         return [
             'ok' => false,
+            'severity' => 'critical',
             'ms' => $elapsed + $elapsed2,
             'ip' => $ip,
             'error' => $curlError ?: ($errstr ?: 'Connection refused'),
