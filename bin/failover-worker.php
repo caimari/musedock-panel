@@ -12,6 +12,26 @@
  *
  * Usage:
  *   php bin/failover-worker.php
+ *
+ * ──────────────────────────────────────────────────────────────────
+ * Fase 4: Election / Cadena de sucesión — IMPLEMENTADO
+ * ──────────────────────────────────────────────────────────────────
+ * - Campo "failover_priority" en cada servidor (1 = más prioritario)
+ * - FailoverService::shouldPromote() determina si este slave debe promoverse
+ * - Solo el slave de mayor prioridad (vivo) se promueve
+ * - Los demás se reconfiguran vía 'reconfigure-replication' automáticamente
+ * - Si el promovido también cae, el siguiente en prioridad asume
+ * - Multi-slave es feature Pro (LicenseService::hasFeature('multi-slave'))
+ *
+ * ──────────────────────────────────────────────────────────────────
+ * Fase 4: Rol "Replica Pasiva" — IMPLEMENTADO
+ * ──────────────────────────────────────────────────────────────────
+ * - Rol "replica" en failover_servers (ROLE_REPLICA)
+ * - Solo replica BD, no sirve tráfico, no tiene Caddy, no aparece en DNS
+ * - Nunca se promueve (excluida de election en shouldPromote())
+ * - Se reconfigura vía 'reconfigure-replication' cuando el master cambia
+ * - En la UI aparece con badge gris, sin opción "Failover a"
+ * ──────────────────────────────────────────────────────────────────
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
@@ -58,6 +78,13 @@ try {
     $foMode = $foConfig['failover_mode'] ?? 'manual';
     $servers = FailoverService::getServers();
 
+    // If this server is in standby, skip everything
+    $selfStandby = Settings::get('cluster_self_standby', '0') === '1';
+    if ($selfStandby) {
+        logMsg("Server in standby mode — skipping all failover checks");
+        goto cleanup;
+    }
+
     // Only run if mode is auto or semiauto
     if ($foMode === 'manual') {
         logMsg("Mode: manual — skipping automatic checks");
@@ -67,6 +94,31 @@ try {
     if (empty($servers)) {
         logMsg("No servers configured — skipping");
         goto cleanup;
+    }
+
+    // ─── 0. Local interface self-check ────────────────────────
+    // Detects if primary ethernet (e.g. ONO) is down, only NAT/backup remains
+    $ifacePrimary = trim($foConfig['failover_iface_primary'] ?? '');
+    if ($ifacePrimary) {
+        $ifaceCheck = FailoverService::checkLocalInterfaces();
+        $prevIfaceMode = Settings::get('failover_iface_mode', 'normal');
+        logMsg("Interface check: {$ifaceCheck['details']} (prev mode: {$prevIfaceMode})");
+
+        if ($ifaceCheck['mode'] === 'nat' && $prevIfaceMode === 'normal') {
+            // Primary interface just went down → trigger interface failover
+            logMsg("*** PRIMARY INTERFACE DOWN — triggering interface failover ***");
+            $ifResult = FailoverService::handleIfaceFailover();
+            logMsg("Interface failover (Camino {$ifResult['path']}): " . implode('; ', $ifResult['actions']));
+
+        } elseif ($ifaceCheck['mode'] === 'normal' && $prevIfaceMode === 'nat') {
+            // Primary interface recovered → restore
+            logMsg("*** PRIMARY INTERFACE RECOVERED — restoring normal mode ***");
+            $ifRecovery = FailoverService::handleIfaceRecovery();
+            logMsg("Interface recovery: " . implode('; ', $ifRecovery['actions']));
+
+        } elseif ($ifaceCheck['mode'] === 'isolated') {
+            logMsg("WARNING: ALL interfaces down — server isolated, no action possible");
+        }
     }
 
     // ─── 1. Health check all servers ───────────────────────────
@@ -242,6 +294,20 @@ try {
             }
         }
 
+        // ─── COOLDOWN: prevent re-failover right after failback ─────
+        if ($isFailover) {
+            $lastFailbackAt = Settings::get('failover_last_failback_at', '');
+            $cooldownMin = (int)($foConfig['failover_cooldown_minutes'] ?? 15) ?: 15;
+            if ($lastFailbackAt) {
+                $cooldownRemaining = ($cooldownMin * 60) - (time() - strtotime($lastFailbackAt));
+                if ($cooldownRemaining > 0) {
+                    logMsg("COOLDOWN active — failback was " . round((time() - strtotime($lastFailbackAt)) / 60) . "min ago, " . ceil($cooldownRemaining / 60) . "min remaining. Skipping failover.");
+                    $isFailover = false;
+                    $stateChanged = false;
+                }
+            }
+        }
+
         if ($isFailover) {
             // ─── FAILOVER (down transition) ──────────────────
             if ($foMode === 'auto') {
@@ -282,6 +348,8 @@ try {
                 autoFailbackDemote($foConfig);
                 Settings::set('failover_resync_status', '');
                 Settings::set('failover_activated_at', '');
+                Settings::set('failover_last_failback_at', date('Y-m-d H:i:s'));
+                logMsg("Cooldown started: " . ($foConfig['failover_cooldown_minutes'] ?? 15) . " min before re-failover allowed");
 
             } elseif ($foMode === 'semiauto') {
                 logMsg("SEMIAUTO mode — resync done, notifying admin to confirm failback");
@@ -371,8 +439,23 @@ function autoPromoteIfNeeded(array $checks, array $foConfig): void
         return;
     }
 
-    // Master is down and we're slave — promote ourselves
-    logMsg("Auto-promote: master ({$masterIp}) is DOWN, promoting this slave to master");
+    // Election: collect down IPs and check if we're the highest-priority candidate
+    $downIps = [];
+    foreach ($checks as $check) {
+        if (empty($check['ok'])) {
+            $downIps[] = $check['ip'] ?? '';
+        }
+    }
+    $downIps[] = $masterIp; // Master is definitely down
+
+    $myIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
+    if ($myIp && !\MuseDockPanel\Services\FailoverService::shouldPromote($myIp, $downIps)) {
+        logMsg("Auto-promote: election — a higher-priority slave is alive, deferring promotion");
+        return;
+    }
+
+    // Master is down and we're the highest-priority slave — promote ourselves
+    logMsg("Auto-promote: master ({$masterIp}) is DOWN, election won — promoting this slave to master");
 
     // Save original master IP for resync during failback
     Settings::set('failover_original_master_ip', $masterIp);

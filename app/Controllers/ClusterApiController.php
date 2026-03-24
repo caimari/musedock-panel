@@ -40,13 +40,19 @@ class ClusterApiController
         $hasWarning = false;
 
         // 1. Caddy (port 443) — configurable severity (default: critical)
-        $caddyConn = @fsockopen('127.0.0.1', 443, $errno, $errstr, 2);
-        if ($caddyConn) {
-            fclose($caddyConn);
-            $checks['caddy'] = ['status' => 'ok', 'configured_severity' => $caddySeverity];
+        //    Skip if Caddy is not installed (DB-only replica nodes)
+        $caddyInstalled = !empty(trim((string)shell_exec('which caddy 2>/dev/null')));
+        if (!$caddyInstalled) {
+            $checks['caddy'] = ['status' => 'ok', 'installed' => false, 'configured_severity' => $caddySeverity];
         } else {
-            $checks['caddy'] = self::applySeverity('critical', $caddySeverity, $hasCritical, $hasWarning);
-            $checks['caddy']['error'] = $errstr ?: 'Connection refused';
+            $caddyConn = @fsockopen('127.0.0.1', 443, $errno, $errstr, 2);
+            if ($caddyConn) {
+                fclose($caddyConn);
+                $checks['caddy'] = ['status' => 'ok', 'configured_severity' => $caddySeverity];
+            } else {
+                $checks['caddy'] = self::applySeverity('critical', $caddySeverity, $hasCritical, $hasWarning);
+                $checks['caddy']['error'] = $errstr ?: 'Connection refused';
+            }
         }
 
         // 2. PostgreSQL 5432 (hosting databases) — configurable severity (default: critical)
@@ -264,6 +270,41 @@ class ClusterApiController
     }
 
     /**
+     * GET /api/domains
+     * Returns list of active domains hosted on this server.
+     * Used by remote servers to configure caddy-l4 proxy (emergency mode).
+     * Authentication: Bearer token (same as cluster API).
+     */
+    public function domains(): void
+    {
+        header('Content-Type: application/json');
+
+        // Authenticate with Bearer token (same as cluster auth)
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+        $providedToken = '';
+        if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
+            $providedToken = $m[1];
+        }
+
+        $localToken = Settings::get('cluster_auth_token', '');
+        if (!$localToken || !$providedToken || !hash_equals($localToken, $providedToken)) {
+            http_response_code(401);
+            echo json_encode(['ok' => false, 'error' => 'Unauthorized']);
+            return;
+        }
+
+        $domains = \MuseDockPanel\Services\FailoverService::getLocalDomains();
+
+        echo json_encode([
+            'ok'      => true,
+            'domains' => $domains,
+            'count'   => count($domains),
+            'server'  => gethostname(),
+            'updated' => date('Y-m-d H:i:s'),
+        ]);
+    }
+
+    /**
      * POST /api/cluster/action
      * Dispatches cluster actions from remote nodes.
      */
@@ -321,6 +362,18 @@ class ClusterApiController
 
                 // ── Standby management ─────────────────────
                 'set-standby' => $this->handleSetStandby($payload),
+
+                // ── Failover config sync ──────────────────
+                'sync-failover-config' => $this->handleSyncFailoverConfig($payload),
+                'pull-failover-config' => $this->handlePullFailoverConfig(),
+
+                // ── Replication reconfiguration ──────────────
+                'reconfigure-replication' => $this->handleReconfigureReplication($payload),
+
+                // ── Interface failover notifications ─────────
+                'notify-iface-down' => $this->handleNotifyIfaceDown($payload),
+                'notify-iface-up'   => $this->handleNotifyIfaceUp($payload),
+                'query-local-state' => $this->handleQueryLocalState(),
 
                 default            => ['ok' => false, 'message' => "Unknown action: {$action}"],
             };
@@ -395,5 +448,282 @@ class ClusterApiController
         }
 
         return ['ok' => true, 'message' => $enabled ? 'Standby activado' : 'Standby desactivado'];
+    }
+
+    /**
+     * Handle incoming failover config from master (push).
+     * Slave receives and stores config locally. Only config keys are written,
+     * never local runtime state (counters, timestamps, current failover state).
+     */
+    private function handleSyncFailoverConfig(array $payload): array
+    {
+        $config = $payload['config'] ?? [];
+        $servers = $payload['servers'] ?? null;
+        $cfAccounts = $payload['cf_accounts'] ?? null;
+        $remoteDomains = $payload['remote_domains'] ?? null;
+
+        if (empty($config) && $servers === null && $cfAccounts === null) {
+            return ['ok' => false, 'error' => 'No config data received'];
+        }
+
+        // Save scalar failover settings (config only, not runtime state)
+        $configKeys = \MuseDockPanel\Services\FailoverService::getSyncableConfigKeys();
+        foreach ($config as $key => $value) {
+            if (in_array($key, $configKeys, true)) {
+                Settings::set($key, (string)$value);
+            }
+        }
+
+        // Save servers list
+        if ($servers !== null && is_array($servers)) {
+            Settings::set('failover_servers', json_encode($servers));
+        }
+
+        // Save Cloudflare accounts
+        if ($cfAccounts !== null && is_array($cfAccounts)) {
+            Settings::set('failover_cf_accounts', json_encode($cfAccounts));
+        }
+
+        // Save remote domains
+        if ($remoteDomains !== null) {
+            Settings::set('failover_remote_domains', (string)$remoteDomains);
+        }
+
+        Settings::set('failover_config_synced_at', date('Y-m-d H:i:s'));
+        LogService::log('failover.sync', 'received', 'Failover config synced from master');
+
+        return ['ok' => true, 'message' => 'Failover config synced', 'synced_at' => date('Y-m-d H:i:s')];
+    }
+
+    /**
+     * Handle pull request from slave: return full failover config.
+     * Called when slave boots/reconnects and wants the latest config.
+     */
+    private function handlePullFailoverConfig(): array
+    {
+        $configKeys = \MuseDockPanel\Services\FailoverService::getSyncableConfigKeys();
+        $config = [];
+        foreach ($configKeys as $key) {
+            $val = Settings::get($key, '');
+            if ($val !== '') {
+                $config[$key] = $val;
+            }
+        }
+
+        $servers = json_decode(Settings::get('failover_servers', '[]'), true) ?: [];
+        $cfAccounts = json_decode(Settings::get('failover_cf_accounts', '[]'), true) ?: [];
+        $remoteDomains = Settings::get('failover_remote_domains', '');
+
+        return [
+            'ok' => true,
+            'config' => $config,
+            'servers' => $servers,
+            'cf_accounts' => $cfAccounts,
+            'remote_domains' => $remoteDomains,
+        ];
+    }
+
+    // ── Reconfigure replication to point to new master ──────────
+
+    private function handleReconfigureReplication(array $payload): array
+    {
+        $newMasterIp = $payload['new_master_ip'] ?? '';
+        if (!$newMasterIp || !filter_var($newMasterIp, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'error' => 'new_master_ip inválido'];
+        }
+
+        $myRole = Settings::get('cluster_role', 'standalone');
+        // Don't reconfigure if this node IS the new master
+        $localIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
+        if ($localIp === $newMasterIp) {
+            return ['ok' => true, 'skipped' => true, 'reason' => 'This node is the new master'];
+        }
+
+        $errors = [];
+        $results = [];
+
+        // Reconfigure PostgreSQL (port 5432 — hosting DB)
+        $pgUser = Settings::get('repl_pg_user', 'replicator');
+        $pgPass = \MuseDockPanel\Services\ReplicationService::decryptPassword(Settings::get('repl_pg_pass', ''));
+        $pgPort = (int)Settings::get('repl_pg_port', '5432');
+
+        if ($pgUser && $pgPass) {
+            try {
+                $pgResult = \MuseDockPanel\Services\ReplicationService::setupPgSlave($newMasterIp, $pgPort, $pgUser, $pgPass);
+                $results['pg'] = $pgResult;
+                if (!$pgResult['ok']) {
+                    $errors[] = 'PG: ' . ($pgResult['error'] ?? 'Unknown');
+                }
+            } catch (\Throwable $e) {
+                $errors[] = 'PG: ' . $e->getMessage();
+            }
+        } else {
+            $results['pg'] = ['skipped' => true, 'reason' => 'No replication credentials configured'];
+        }
+
+        // Reconfigure MySQL
+        $mysqlUser = Settings::get('repl_mysql_user', 'repl_user');
+        $mysqlPass = \MuseDockPanel\Services\ReplicationService::decryptPassword(Settings::get('repl_mysql_pass', ''));
+        $mysqlPort = (int)Settings::get('repl_mysql_port', '3306');
+
+        if ($mysqlUser && $mysqlPass) {
+            try {
+                $mysqlResult = \MuseDockPanel\Services\ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass);
+                $results['mysql'] = $mysqlResult;
+                if (!$mysqlResult['ok']) {
+                    $errors[] = 'MySQL: ' . ($mysqlResult['error'] ?? 'Unknown');
+                }
+            } catch (\Throwable $e) {
+                $errors[] = 'MySQL: ' . $e->getMessage();
+            }
+        } else {
+            $results['mysql'] = ['skipped' => true, 'reason' => 'No replication credentials configured'];
+        }
+
+        // Update stored master IP
+        Settings::set('repl_remote_ip', $newMasterIp);
+
+        LogService::log('cluster.replication', 'reconfigure',
+            "Replicación reconfigurada → nuevo master: {$newMasterIp}" .
+            (empty($errors) ? '' : ' (errores: ' . implode(', ', $errors) . ')')
+        );
+
+        return [
+            'ok' => empty($errors),
+            'results' => $results,
+            'errors' => $errors,
+        ];
+    }
+
+    // ── Interface failover: slave notifies master ───────────
+
+    /**
+     * Slave's primary interface went down — switch DNS to DynDNS/backup IP.
+     * Received on the MASTER from a slave that detected its own iface failure.
+     */
+    private function handleNotifyIfaceDown(array $payload): array
+    {
+        $slaveIp  = $payload['slave_ip'] ?? '';
+        $dyndnsIp = $payload['dyndns_ip'] ?? '';
+
+        if (!$slaveIp) {
+            return ['ok' => false, 'error' => 'slave_ip required'];
+        }
+
+        $actions = [];
+
+        // Find the backup IP to use (DynDNS resolved or backup server IP)
+        $backupIp = $dyndnsIp;
+        if (!$backupIp) {
+            $backupServers = \MuseDockPanel\Services\FailoverService::getServersByRole(
+                \MuseDockPanel\Services\FailoverService::ROLE_BACKUP
+            );
+            $backupIp = !empty($backupServers) ? ($backupServers[0]['ip'] ?? '') : '';
+        }
+
+        if (!$backupIp) {
+            return ['ok' => false, 'error' => 'No backup IP available'];
+        }
+
+        // Update DNS: slave's fixed IP → DynDNS/backup IP
+        $c = \MuseDockPanel\Services\FailoverService::getConfig();
+        $accounts = \MuseDockPanel\Services\CloudflareService::getConfiguredAccounts();
+        $ttl = (int)($c['failover_ttl_failover'] ?: 60);
+
+        // Also update the failover server's IP if it matches the slave
+        $failoverServers = \MuseDockPanel\Services\FailoverService::getServersByRole(
+            \MuseDockPanel\Services\FailoverService::ROLE_FAILOVER
+        );
+        $failoverIp = '';
+        foreach ($failoverServers as $fs) {
+            if ($fs['ip'] === $slaveIp) {
+                $failoverIp = $slaveIp;
+                break;
+            }
+        }
+
+        $ipsToSwitch = array_filter([$slaveIp, $failoverIp]);
+        $ipsToSwitch = array_unique($ipsToSwitch);
+
+        foreach ($ipsToSwitch as $srcIp) {
+            foreach ($accounts as $acct) {
+                foreach ($acct['zones'] ?? [] as $zone) {
+                    $r = \MuseDockPanel\Services\CloudflareService::batchUpdateIp(
+                        $acct['token'], $zone['id'], $srcIp, $backupIp, $ttl
+                    );
+                    if ($r['updated'] > 0) {
+                        $actions[] = "DNS {$srcIp}→{$backupIp}: zone {$zone['name']} — {$r['updated']} records";
+                    }
+                }
+            }
+        }
+
+        LogService::log('failover.iface', 'master-dns-switch',
+            "Slave {$slaveIp} iface down → DNS switched to {$backupIp}: " . implode('; ', $actions));
+
+        return ['ok' => true, 'backup_ip' => $backupIp, 'actions' => $actions];
+    }
+
+    /**
+     * Slave's primary interface recovered — revert DNS to original IP.
+     */
+    private function handleNotifyIfaceUp(array $payload): array
+    {
+        $slaveIp = $payload['slave_ip'] ?? '';
+        if (!$slaveIp) {
+            return ['ok' => false, 'error' => 'slave_ip required'];
+        }
+
+        // Revert DNS: find backup IP currently in use, switch back to slave's fixed IP
+        $c = \MuseDockPanel\Services\FailoverService::getConfig();
+        $accounts = \MuseDockPanel\Services\CloudflareService::getConfiguredAccounts();
+        $ttl = (int)($c['failover_ttl_normal'] ?: 300);
+        $actions = [];
+
+        // The backup IP could be DynDNS or static backup
+        $dyndnsIp = \MuseDockPanel\Services\FailoverService::resolveDynDns();
+        $backupServers = \MuseDockPanel\Services\FailoverService::getServersByRole(
+            \MuseDockPanel\Services\FailoverService::ROLE_BACKUP
+        );
+        $possibleBackupIps = array_filter([$dyndnsIp, !empty($backupServers) ? ($backupServers[0]['ip'] ?? '') : '']);
+
+        foreach ($possibleBackupIps as $backupIp) {
+            foreach ($accounts as $acct) {
+                foreach ($acct['zones'] ?? [] as $zone) {
+                    $r = \MuseDockPanel\Services\CloudflareService::batchUpdateIp(
+                        $acct['token'], $zone['id'], $backupIp, $slaveIp, $ttl
+                    );
+                    if ($r['updated'] > 0) {
+                        $actions[] = "DNS {$backupIp}→{$slaveIp}: zone {$zone['name']} — {$r['updated']} records reverted";
+                    }
+                }
+            }
+        }
+
+        LogService::log('failover.iface', 'master-dns-revert',
+            "Slave {$slaveIp} iface recovered → DNS reverted: " . implode('; ', $actions));
+
+        return ['ok' => true, 'actions' => $actions];
+    }
+
+    // ── Reconciliation: master queries slave state ──────────
+
+    /**
+     * Master asks: "did you change anything while I was down?"
+     * Returns local flags so master can reconcile before taking action.
+     */
+    private function handleQueryLocalState(): array
+    {
+        return [
+            'ok'   => true,
+            'state' => [
+                'failover_state'              => Settings::get('failover_state', 'normal'),
+                'failover_iface_mode'         => Settings::get('failover_iface_mode', 'normal'),
+                'failover_dns_changed_locally' => Settings::get('failover_dns_changed_locally', '0') === '1',
+                'failover_dns_changed_at'     => Settings::get('failover_dns_changed_at', ''),
+                'cluster_role'                => Settings::get('cluster_role', 'slave'),
+                'repl_role'                   => Settings::get('repl_role', 'slave'),
+            ],
+        ];
     }
 }

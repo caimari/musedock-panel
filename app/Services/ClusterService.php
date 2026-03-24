@@ -783,9 +783,10 @@ class ClusterService
             $errors[] = 'MySQL promote: ' . $e->getMessage();
         }
 
-        // Update env and settings
+        // Update env and settings — all three role indicators must be consistent
         self::updateEnvRole('master');
         Settings::set('repl_role', 'master');
+        Settings::set('cluster_role', 'master');
 
         try {
             Database::update('servers', ['role' => 'master'], 'is_local = true');
@@ -810,6 +811,12 @@ class ClusterService
             'Failover: Slave promovido a Master',
             'El servidor ha sido promovido a Master. Puertos HTTP/HTTPS abiertos al publico.'
         );
+
+        // Tell all other nodes to reconfigure replication to point to this (new) master
+        $myIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
+        if ($myIp) {
+            self::broadcastReconfigureReplication($myIp);
+        }
 
         return [
             'ok'      => empty($errors),
@@ -860,9 +867,10 @@ class ClusterService
             $errors[] = 'MySQL demote: ' . $e->getMessage();
         }
 
-        // Update env and settings
+        // Update env and settings — all three role indicators must be consistent
         self::updateEnvRole('slave');
         Settings::set('repl_role', 'slave');
+        Settings::set('cluster_role', 'slave');
         Settings::set('repl_remote_ip', $newMasterIp);
 
         try {
@@ -884,11 +892,57 @@ class ClusterService
             "El servidor ha sido degradado a Slave. Nuevo master: {$newMasterIp}. Puertos HTTP/HTTPS cerrados."
         );
 
+        // Tell all other nodes to reconfigure replication to point to the (restored) master
+        self::broadcastReconfigureReplication($newMasterIp);
+
         return [
             'ok'      => empty($errors),
             'results' => $results,
             'errors'  => $errors,
         ];
+    }
+
+    /**
+     * Broadcast reconfigure-replication to all other active cluster nodes.
+     * Each node will re-run setupPgSlave/setupMysqlSlave pointing to $newMasterIp.
+     * If direct call fails, enqueue for retry.
+     */
+    public static function broadcastReconfigureReplication(string $newMasterIp): void
+    {
+        $nodes = self::getActiveNodes();
+        $myIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
+
+        foreach ($nodes as $node) {
+            $nodeUrl = $node['api_url'] ?? '';
+            // Skip self (the node that just promoted/demoted)
+            if ($myIp && str_contains($nodeUrl, $myIp)) {
+                continue;
+            }
+            // Skip the new master itself (it doesn't need to replicate from itself)
+            if (str_contains($nodeUrl, $newMasterIp)) {
+                continue;
+            }
+
+            try {
+                $result = self::callNode((int)$node['id'], 'POST', 'api/cluster/action', [
+                    'action'  => 'reconfigure-replication',
+                    'payload' => ['new_master_ip' => $newMasterIp],
+                ]);
+
+                if ($result['ok'] ?? false) {
+                    LogService::log('cluster.replication', 'broadcast',
+                        "Nodo {$node['name']} reconfigurado → master {$newMasterIp}");
+                } else {
+                    LogService::log('cluster.replication', 'broadcast-warn',
+                        "Nodo {$node['name']}: " . ($result['error'] ?? json_encode($result['errors'] ?? [])));
+                }
+            } catch (\Throwable $e) {
+                // Enqueue for retry — critical that replication gets reconfigured
+                self::enqueue((int)$node['id'], 'reconfigure-replication', ['new_master_ip' => $newMasterIp], 2);
+                LogService::log('cluster.replication', 'broadcast-enqueue',
+                    "Nodo {$node['name']} inalcanzable, encolado para reintento: " . $e->getMessage());
+            }
+        }
     }
 
     public static function updateEnvRole(string $role): void

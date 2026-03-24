@@ -1175,11 +1175,32 @@ class ClusterController
                 );
             } catch (\Throwable) {} // non-critical
 
+            // Push failover config to the reactivated node so it has the latest settings
+            try {
+                ClusterService::callNodeDirect(
+                    rtrim($node['api_url'], '/'),
+                    \MuseDockPanel\Services\ReplicationService::decryptPassword($node['auth_token']),
+                    'POST', 'api/cluster/action',
+                    ['action' => 'sync-failover-config', 'payload' => [
+                        'config'         => call_user_func(function() {
+                            $keys = \MuseDockPanel\Services\FailoverService::getSyncableConfigKeys();
+                            $c = [];
+                            foreach ($keys as $k) { $v = \MuseDockPanel\Settings::get($k, ''); if ($v !== '') $c[$k] = $v; }
+                            return $c;
+                        }),
+                        'servers'        => \MuseDockPanel\Services\FailoverService::getServers(),
+                        'cf_accounts'    => \MuseDockPanel\Services\CloudflareService::getConfiguredAccounts(),
+                        'remote_domains' => \MuseDockPanel\Settings::get('failover_remote_domains', ''),
+                    ]],
+                    10
+                );
+            } catch (\Throwable) {} // best-effort, worker will pull within 1h anyway
+
             // Regenerate lsyncd config including reactivated node and restart
             FileSyncService::reloadLsyncd();
 
             LogService::log('cluster.standby', $node['name'], 'Nodo reactivado');
-            echo json_encode(['ok' => true, 'message' => "Nodo {$node['name']} reactivado. Sync, cola y alertas reanudadas."]);
+            echo json_encode(['ok' => true, 'message' => "Nodo {$node['name']} reactivado. Config failover sincronizada, sync y alertas reanudadas."]);
         }
         exit;
     }

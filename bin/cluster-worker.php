@@ -103,6 +103,71 @@ try {
     logMsg("ERROR sending heartbeats: " . $e->getMessage());
 }
 
+// ─── Step 2a: Reconciliation — query slaves that may have acted autonomously ──
+// Only runs on master. When a slave reconnects after being on its own,
+// check if it changed DNS locally (Camino B) before the master takes any action.
+$myClusterRole = Settings::get('cluster_role', 'standalone');
+if ($myClusterRole === 'master') {
+    try {
+        $nodes = ClusterService::getActiveNodes();
+        foreach ($nodes as $node) {
+            // Only check nodes that just came back online (status was 'offline' or 'error')
+            $prevStatus = $node['status'] ?? '';
+            if (!in_array($prevStatus, ['offline', 'error'])) continue;
+
+            // Skip if heartbeat just failed (still offline)
+            $justOnline = false;
+            foreach ($heartbeatResults ?? [] as $hb) {
+                if (($hb['id'] ?? 0) == $node['id'] && ($hb['ok'] ?? false)) {
+                    $justOnline = true;
+                    break;
+                }
+            }
+            if (!$justOnline) continue;
+
+            logMsg("  Reconciliation: node #{$node['id']} ({$node['name']}) just reconnected — querying local state...");
+            try {
+                $stateResp = ClusterService::callNode((int)$node['id'], 'POST', 'api/cluster/action', [
+                    'action' => 'query-local-state',
+                    'payload' => [],
+                ]);
+
+                if (($stateResp['ok'] ?? false) && !empty($stateResp['state'])) {
+                    $remoteState = $stateResp['state'];
+                    $dnsChanged = $remoteState['failover_dns_changed_locally'] ?? false;
+                    $ifaceMode = $remoteState['failover_iface_mode'] ?? 'normal';
+                    $remoteRole = $remoteState['cluster_role'] ?? 'slave';
+
+                    logMsg("    Remote state: iface={$ifaceMode}, dns_changed={$dnsChanged}, role={$remoteRole}");
+
+                    if ($dnsChanged) {
+                        // Slave changed DNS autonomously — DON'T touch DNS until resolved
+                        logMsg("    *** SLAVE CHANGED DNS LOCALLY (Camino B) — master will NOT modify DNS ***");
+                        logMsg("    DNS was changed at: " . ($remoteState['failover_dns_changed_at'] ?? '?'));
+                        \MuseDockPanel\Services\LogService::log('cluster.reconcile', $node['name'],
+                            "Slave changed DNS autonomously while master was down. " .
+                            "DNS state deferred to slave. Manual review recommended.");
+                        \MuseDockPanel\Services\NotificationService::send(
+                            "Reconciliación: {$node['name']} cambió DNS autónomamente",
+                            "El nodo {$node['name']} cambió los DNS mientras el master estaba caído (Camino B).\n\n" .
+                            "Estado interfaz: {$ifaceMode}\n" .
+                            "Rol actual: {$remoteRole}\n" .
+                            "DNS cambiado: " . ($remoteState['failover_dns_changed_at'] ?? '?') . "\n\n" .
+                            "Revisa el estado del failover antes de tomar acciones."
+                        );
+                    } elseif ($ifaceMode === 'nat') {
+                        logMsg("    Slave in NAT mode (Camino A already handled or in progress)");
+                    }
+                }
+            } catch (\Throwable $re) {
+                logMsg("    Reconciliation query failed: " . $re->getMessage());
+            }
+        }
+    } catch (\Throwable $e) {
+        logMsg("ERROR in reconciliation: " . $e->getMessage());
+    }
+}
+
 // ─── Step 2b: Mail node health check ────────────────────────────
 if (Settings::get('mail_enabled', '0') === '1') {
     logMsg("Checking mail nodes...");
@@ -275,6 +340,26 @@ try {
 
 } catch (\Throwable $e) {
     logMsg("ERROR checking unreachable: " . $e->getMessage());
+}
+
+// ─── Step 3b: Slave — pull failover config from master ───────
+//     On boot or if config hasn't been synced in 1 hour, pull from master.
+//     This ensures the slave always has the latest failover config.
+$clusterRoleForSync = Settings::get('cluster_role', 'standalone');
+$selfStandbyForSync = Settings::get('cluster_self_standby', '0') === '1';
+if ($clusterRoleForSync === 'slave' && !$selfStandbyForSync) {
+    $lastSync = Settings::get('failover_config_synced_at', '');
+    $syncAge = $lastSync ? (time() - strtotime($lastSync)) : 99999;
+    // Pull every hour, or on first boot (never synced)
+    if ($syncAge > 3600) {
+        logMsg("Pulling failover config from master (last sync: " . ($lastSync ?: 'never') . ")...");
+        try {
+            $pulled = \MuseDockPanel\Services\FailoverService::pullConfigFromMaster();
+            logMsg($pulled ? "  Failover config synced from master." : "  Could not pull config (master unreachable or not configured).");
+        } catch (\Throwable $e) {
+            logMsg("  ERROR pulling failover config: " . $e->getMessage());
+        }
+    }
 }
 
 // ─── Step 4: Slave — detect master down ──────────────────────

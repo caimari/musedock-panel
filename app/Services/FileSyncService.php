@@ -1427,8 +1427,8 @@ class FileSyncService
     public static function generateLsyncdConfig(): array
     {
         $config = self::getConfig();
-        $nodes = ClusterService::getNodes();
-        // Filter out standby nodes — they should not receive any sync
+        $nodes = ClusterService::getWebNodes();
+        // Filter out standby and non-web nodes — DB-only replicas don't need file sync
         $nodes = array_filter($nodes, fn($n) => empty($n['standby']));
         if (empty($nodes)) {
             return ['ok' => false, 'error' => 'No hay nodos slave activos (todos en standby o ninguno configurado)'];

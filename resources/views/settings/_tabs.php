@@ -13,6 +13,7 @@
     <a href="/settings/wireguard" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'WireGuard' ? 'active' : '' ?>"><i class="bi bi-hdd-network me-1"></i>WireGuard</a>
     <a href="/settings/notifications" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Notificaciones' ? 'active' : '' ?>"><i class="bi bi-bell me-1"></i>Notificaciones</a>
     <a href="/settings/cluster" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Cluster' ? 'active' : '' ?>"><i class="bi bi-diagram-3 me-1"></i>Cluster</a>
+    <a href="/settings/proxy-routes" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Proxy Routes' ? 'active' : '' ?>"><i class="bi bi-diagram-2 me-1"></i>Proxy Routes</a>
     <a href="/settings/health" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'System Health' ? 'active' : '' ?>"><i class="bi bi-heart-pulse me-1"></i>System Health</a>
     <a href="/settings/updates" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Updates' ? 'active' : '' ?>"><i class="bi bi-cloud-arrow-down me-1"></i>Updates</a>
 </div>

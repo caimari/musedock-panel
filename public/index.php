@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.4');
+define('PANEL_VERSION', '1.0.5');
 
 
 
@@ -84,6 +84,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // API Routes (token auth via ApiAuthMiddleware)
 // ===============================
 \MuseDockPanel\Router::get('/api/health', 'ClusterApiController@health');
+\MuseDockPanel\Router::get('/api/domains', 'ClusterApiController@domains');
 \MuseDockPanel\Router::get('/api/cluster/status', 'ClusterApiController@status');
 \MuseDockPanel\Router::get('/api/cluster/heartbeat', 'ClusterApiController@heartbeat');
 \MuseDockPanel\Router::post('/api/cluster/action', 'ClusterApiController@action');
@@ -290,6 +291,18 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/failover/caddy-l4-preview', 'FailoverController@caddyL4Preview');
 \MuseDockPanel\Router::get('/settings/failover/status', 'FailoverController@status');
 \MuseDockPanel\Router::get('/settings/failover/domains-not-cf', 'FailoverController@domainsNotCf');
+\MuseDockPanel\Router::post('/settings/failover/install-caddy-l4', 'FailoverController@installCaddyL4');
+\MuseDockPanel\Router::get('/settings/failover/caddy-l4-status', 'FailoverController@caddyL4Status');
+\MuseDockPanel\Router::get('/settings/failover/test-ifaces', 'FailoverController@testIfaces');
+\MuseDockPanel\Router::post('/settings/failover/test-remote-sources', 'FailoverController@testRemoteSources');
+
+// Proxy Routes (permanent SNI proxy via caddy-l4)
+\MuseDockPanel\Router::get('/settings/proxy-routes', 'ProxyRouteController@index');
+\MuseDockPanel\Router::post('/settings/proxy-routes/save', 'ProxyRouteController@save');
+\MuseDockPanel\Router::post('/settings/proxy-routes/delete', 'ProxyRouteController@delete');
+\MuseDockPanel\Router::post('/settings/proxy-routes/toggle', 'ProxyRouteController@toggle');
+\MuseDockPanel\Router::post('/settings/proxy-routes/test', 'ProxyRouteController@test');
+\MuseDockPanel\Router::get('/settings/proxy-routes/preview', 'ProxyRouteController@preview');
 
 // WireGuard
 \MuseDockPanel\Router::get('/settings/wireguard', 'WireGuardController@index');

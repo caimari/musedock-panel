@@ -359,6 +359,15 @@
     <div class="card mb-3">
         <div class="card-header"><i class="bi bi-arrow-left-right me-2"></i>Promote / Demote Cluster</div>
         <div class="card-body">
+            <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);color:#94a3b8;">
+                <i class="bi bi-info-circle text-info me-1"></i>
+                <strong>Cambia el rol de la base de datos</strong> (PostgreSQL/MySQL) y los puertos del firewall (80/443).
+                NO cambia DNS ni la sincronización de archivos (lsyncd).<br>
+                Úsalo para mantenimiento planificado o migraciones donde quieres mover la BD sin redirigir el tráfico web.
+                Tras promover, revisa la configuración de lsyncd en la pestaña <strong>Archivos</strong> si necesitas invertir la dirección de sincronización.<br>
+                <span style="color:#6ea8fe;">Para emergencias reales</span> (master caído, webs offline), usa los botones de la pestaña
+                <strong>Failover</strong> que cambian DNS + BD + firewall en un solo clic.
+            </div>
             <?php if ($failoverRole === 'slave'): ?>
                 <?php
                     $masterIpSaved = $settings['cluster_master_ip'] ?? '';
@@ -1198,8 +1207,22 @@
     $foServers = $failoverServers ?? [];
     $foState = $fs['state'] ?? 'normal';
     $foConfigured = !empty($fs['configured']);
+    $foIsSlave = ($clusterRole === 'slave');
+    $foSyncedAt = \MuseDockPanel\Settings::get('failover_config_synced_at', '');
 ?>
 <div class="tab-pane fade" id="tab-failover" role="tabpanel">
+
+    <?php if ($foIsSlave): ?>
+    <!-- Slave: read-only notice -->
+    <div class="mb-3 p-3 rounded" style="background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.3);color:#fbbf24;">
+        <i class="bi bi-lock me-2"></i>
+        <strong>Modo solo lectura</strong> — La configuración de failover se gestiona desde el servidor Master.
+        Este slave recibe la configuración automáticamente.
+        <?php if ($foSyncedAt): ?>
+            <br><small style="color:#94a3b8;">Última sincronización: <?= \MuseDockPanel\View::e($foSyncedAt) ?></small>
+        <?php endif; ?>
+    </div>
+    <?php endif; ?>
 
     <!-- ── Explicación del sistema ───────────────────────────── -->
     <div class="mb-3 p-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);">
@@ -1271,10 +1294,49 @@
         </div>
         <div class="card-body">
             <?php if (!$foConfigured): ?>
+                <?php
+                    $foHasPrimary  = !empty(array_filter($foServers, fn($s) => ($s['role'] ?? '') === 'primary'));
+                    $foHasFailover = !empty(array_filter($foServers, fn($s) => ($s['role'] ?? '') === 'failover'));
+                    $foHasCf       = !empty(\MuseDockPanel\Services\CloudflareService::getConfiguredAccounts());
+                    $foIsManual    = ($fc['failover_mode'] ?? 'manual') === 'manual';
+                    $foNothingSet  = empty($foServers) && !$foHasCf;
+                ?>
+                <?php if ($foNothingSet): ?>
+                <div class="alert mb-0" style="background:rgba(234,179,8,0.1);border:1px solid rgba(234,179,8,0.3);color:#fbbf24;">
+                    <div class="d-flex align-items-start gap-2">
+                        <i class="bi bi-shield-exclamation" style="font-size:1.5rem;margin-top:2px;"></i>
+                        <div>
+                            <strong>Failover no configurado — sin protección ante caídas</strong>
+                            <div class="mt-1" style="color:#d4a017;font-size:.85rem;">
+                                Tus webs dependen de un solo servidor. Si este servidor cae, todas las webs serán inaccesibles hasta que alguien intervenga manualmente.
+                            </div>
+                            <div class="mt-2" style="font-size:.82rem;color:#94a3b8;">
+                                <strong>Para activar el failover automático necesitas:</strong>
+                            </div>
+                            <ul class="mb-0 mt-1" style="font-size:.82rem;color:#94a3b8;">
+                                <li><i class="bi bi-<?= $foHasPrimary ? 'check-circle text-success' : 'x-circle text-danger' ?> me-1"></i>Al menos un servidor <strong>Primary</strong> (este servidor)</li>
+                                <li><i class="bi bi-<?= $foHasFailover ? 'check-circle text-success' : 'x-circle text-danger' ?> me-1"></i>Al menos un servidor <strong>Failover</strong> (el que toma el relevo)</li>
+                                <li><i class="bi bi-<?= $foHasCf ? 'check-circle text-success' : 'x-circle text-danger' ?> me-1"></i>Una cuenta de <strong>Cloudflare</strong> con los dominios a proteger</li>
+                                <li><i class="bi bi-<?= !$foIsManual ? 'check-circle text-success' : 'dash-circle text-muted' ?> me-1"></i>Modo <strong>Semi-auto</strong> o <strong>Auto</strong> (actualmente: <?= ucfirst($fc['failover_mode'] ?? 'manual') ?>)</li>
+                            </ul>
+                            <div class="mt-2">
+                                <a href="#fo-infra-section" class="btn btn-warning btn-sm" onclick="document.getElementById('fo-infra-section')?.scrollIntoView({behavior:'smooth'})">
+                                    <i class="bi bi-plus-circle me-1"></i>Configurar servidores
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <?php else: ?>
                 <div class="alert mb-0" style="background:rgba(107,114,128,0.1);border:1px solid rgba(107,114,128,0.3);color:#9ca3af;">
                     <i class="bi bi-info-circle me-2"></i>
-                    Añada al menos un servidor <strong>Primary</strong> y un <strong>Failover</strong> en la sección Infraestructura para activar el sistema.
+                    Configuración incompleta:
+                    <?php if (!$foHasPrimary): ?><span class="badge bg-danger me-1">Falta Primary</span><?php endif; ?>
+                    <?php if (!$foHasFailover): ?><span class="badge bg-danger me-1">Falta Failover</span><?php endif; ?>
+                    <?php if (!$foHasCf): ?><span class="badge bg-warning text-dark me-1">Sin Cloudflare</span><?php endif; ?>
+                    — Añada lo necesario en Infraestructura para activar el sistema.
                 </div>
+                <?php endif; ?>
             <?php else: ?>
                 <div class="row g-3 mb-3">
                     <?php foreach ($foServers as $srv): ?>
@@ -1298,14 +1360,27 @@
                     </div>
                     <?php endforeach; ?>
                     <div class="col-md-6 col-lg-4">
-                        <div class="p-3 rounded" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);">
+                        <div class="p-3 rounded" id="caddy-l4-card" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);">
                             <div class="d-flex justify-content-between align-items-center mb-1">
                                 <strong class="small">caddy-l4</strong>
-                                <span class="badge <?= ($fs['caddy_l4_installed'] ?? false) ? 'bg-success' : 'bg-secondary' ?>">
+                                <span class="badge <?= ($fs['caddy_l4_installed'] ?? false) ? 'bg-success' : 'bg-warning text-dark' ?>" id="caddy-l4-badge">
                                     <?= ($fs['caddy_l4_installed'] ?? false) ? 'Instalado' : 'No instalado' ?>
                                 </span>
                             </div>
                             <code class="small text-muted"><?= View::e($fc['failover_caddy_l4_bin'] ?? '/usr/local/bin/caddy-l4') ?></code>
+                            <?php if (!($fs['caddy_l4_installed'] ?? false)): ?>
+                            <div class="mt-2" id="caddy-l4-install-box">
+                                <div class="small mb-2" style="color:#f59e0b;">
+                                    <i class="bi bi-exclamation-triangle me-1"></i>
+                                    Necesario para modo emergencia (backup con IP dinámica).
+                                    Sin caddy-l4, el failover de último recurso no funcionará.
+                                </div>
+                                <button class="btn btn-warning btn-sm" id="btn-install-caddy-l4" onclick="foInstallCaddyL4()">
+                                    <i class="bi bi-download me-1"></i>Instalar caddy-l4
+                                </button>
+                                <div class="small text-muted mt-1" id="caddy-l4-install-status"></div>
+                            </div>
+                            <?php endif; ?>
                         </div>
                     </div>
                 </div>
@@ -1328,28 +1403,44 @@
         </div>
     </div>
 
-    <!-- ── Acciones manuales ────────────────────────────────── -->
-    <?php if ($foConfigured): ?>
+    <!-- ── Acciones manuales (solo master) ──────────────────── -->
+    <?php if ($foConfigured && !$foIsSlave): ?>
+    <?php
+        // Build descriptive names for confirm dialogs
+        $foPrimaries = array_filter($foServers, fn($s) => ($s['role'] ?? '') === 'primary');
+        $foFailovers = array_filter($foServers, fn($s) => ($s['role'] ?? '') === 'failover');
+        $foPrimaryNames = implode(', ', array_map(fn($s) => $s['name'] ?? $s['ip'], $foPrimaries));
+        $foFailoverNames = implode(', ', array_map(fn($s) => $s['name'] ?? $s['ip'], $foFailovers));
+    ?>
     <div class="card mb-3">
         <div class="card-header"><i class="bi bi-lightning me-2"></i>Acciones de Failover</div>
         <div class="card-body">
+            <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.15);color:#94a3b8;">
+                <i class="bi bi-exclamation-triangle text-danger me-1"></i>
+                <strong style="color:#f87171;">Acción atómica</strong> — Cada botón ejecuta todo de golpe en un solo clic:<br>
+                <span class="ms-3">✓ DNS en Cloudflare (redirige tráfico web)</span><br>
+                <span class="ms-3">✓ Promote/Demote del cluster (BD acepta escrituras)</span><br>
+                <span class="ms-3">✓ Firewall (abre/cierra puertos 80/443)</span><br>
+                <span class="ms-3 text-warning">⚠ La sincronización de archivos (lsyncd) no se invierte automáticamente — revisa la pestaña Archivos tras un failover.</span><br>
+                <span style="color:#6ea8fe;">Para operaciones quirúrgicas</span> (cambiar solo la BD sin tocar DNS), usa Promote/Demote en la pestaña <strong>Estado</strong>.
+            </div>
             <div class="d-flex flex-wrap gap-2">
                 <?php if ($foState === 'normal'): ?>
-                    <button class="btn btn-warning btn-sm" onclick="foExecute('failover_degraded', 'Failover parcial: redirigir primarios caídos a sus failover')">
+                    <button class="btn btn-warning btn-sm" onclick="foExecute('failover_degraded', 'Esto cambiará los DNS de los primarios caídos a sus failover asignados.\n\nPrimarios: <?= View::e($foPrimaryNames) ?>\nFailover: <?= View::e($foFailoverNames) ?>')">
                         <i class="bi bi-exclamation-triangle me-1"></i>Failover Parcial
                     </button>
-                    <button class="btn btn-danger btn-sm" onclick="foExecute('failover_primary', 'Todos los primarios caídos: DNS a servidores failover')">
+                    <button class="btn btn-danger btn-sm" onclick="foExecute('failover_primary', 'Esto cambiará TODOS los DNS en Cloudflare y promoverá los slaves a master.\n\n✓ DNS: <?= View::e($foPrimaryNames) ?> → <?= View::e($foFailoverNames) ?>\n✓ Cluster: promote slave a master')">
                         <i class="bi bi-exclamation-octagon me-1"></i>Primarios Caídos
                     </button>
-                    <button class="btn btn-danger btn-sm" onclick="foExecute('failover_emergency', 'Emergencia: todo a backup + caddy-l4')">
+                    <button class="btn btn-danger btn-sm" onclick="foExecute('failover_emergency', 'EMERGENCIA: Todo el tráfico irá al servidor Backup vía caddy-l4.\n\n✓ DNS: todas las IPs → IP backup\n✓ Cluster: promote slave a master\n✓ caddy-l4: activado como proxy SNI')">
                         <i class="bi bi-radioactive me-1"></i>Emergencia
                     </button>
                 <?php else: ?>
-                    <button class="btn btn-success" onclick="foExecute('failback', 'Failback: restaurar DNS a primarios')">
+                    <button class="btn btn-success" onclick="foExecute('failback', 'Esto restaurará los DNS a los primarios y degradará los slaves.\n\n✓ DNS: restaurar IPs originales\n✓ Cluster: demote a slave\n✓ TTL: restaurar a normal')">
                         <i class="bi bi-arrow-counterclockwise me-1"></i>Failback a Normal
                     </button>
                     <?php if ($foState !== 'emergency'): ?>
-                    <button class="btn btn-danger btn-sm" onclick="foExecute('failover_emergency', 'Escalar a emergencia')">
+                    <button class="btn btn-danger btn-sm" onclick="foExecute('failover_emergency', 'Escalar a emergencia: todo el tráfico al backup + caddy-l4')">
                         <i class="bi bi-radioactive me-1"></i>Escalar
                     </button>
                     <?php endif; ?>
@@ -1362,10 +1453,11 @@
     </div>
     <?php endif; ?>
 
+    <?php if (!$foIsSlave): ?>
     <!-- ═══════════════════════════════════════════════════════ -->
-    <!-- SECCIÓN: Infraestructura                                 -->
+    <!-- SECCIÓN: Infraestructura (solo master)                    -->
     <!-- ═══════════════════════════════════════════════════════ -->
-    <hr class="border-secondary my-4">
+    <hr class="border-secondary my-4" id="fo-infra-section">
     <h6 class="text-muted mb-3"><i class="bi bi-hdd-network me-2"></i>Infraestructura</h6>
 
     <!-- ── Servidores (dinámico) ─────────────────────────────── -->
@@ -1394,6 +1486,7 @@
                                 <th>IP</th>
                                 <th>Puerto</th>
                                 <th>Rol</th>
+                                <th style="width:70px;" title="Prioridad de election (1=más alta). Solo para Failover.">Prio</th>
                                 <th>Failover a</th>
                                 <th>DynDNS</th>
                                 <th></th>
@@ -1413,7 +1506,11 @@
                                         <option value="primary" <?= ($srv['role'] ?? '') === 'primary' ? 'selected' : '' ?>>Primary</option>
                                         <option value="failover" <?= ($srv['role'] ?? '') === 'failover' ? 'selected' : '' ?>>Failover</option>
                                         <option value="backup" <?= ($srv['role'] ?? '') === 'backup' ? 'selected' : '' ?>>Backup</option>
+                                        <option value="replica" <?= ($srv['role'] ?? '') === 'replica' ? 'selected' : '' ?>>Replica</option>
                                     </select>
+                                </td>
+                                <td>
+                                    <input type="number" name="srv_priority[]" class="form-control form-control-sm" value="<?= (int)($srv['failover_priority'] ?? 99) ?>" min="1" max="99" style="width:60px;" title="1 = mayor prioridad">
                                 </td>
                                 <td>
                                     <select name="srv_failover_to[]" class="form-select form-select-sm fo-failover-select">
@@ -1445,6 +1542,16 @@
                     <i class="bi bi-info-circle me-1"></i>No hay servidores configurados. Pulse "Añadir servidor" para empezar.
                 </div>
                 <?php endif; ?>
+                <div class="small mt-2 mb-2" style="background:rgba(13,110,253,0.08);border-radius:6px;padding:10px 14px;color:#94a3b8;">
+                    <i class="bi bi-info-circle me-1"></i>
+                    <strong>Roles:</strong>
+                    <b>Primary</b> = servidor principal (DNS target normal).
+                    <b>Failover</b> = slave activo que puede promoverse a master.
+                    <b>Backup</b> = último recurso (caddy-l4, IP dinámica).
+                    <b>Replica</b> = replica pasiva de BD, nunca se promueve ni sirve tráfico.<br>
+                    <i class="bi bi-sort-numeric-up me-1"></i>
+                    <strong>Prioridad (Prio):</strong> Solo aplica a servidores <b>Failover</b>. El de menor número (1 = más alta) se promueve primero. Si hay un solo Failover, dejar en 1.
+                </div>
                 <button type="submit" class="btn btn-success btn-sm mt-2">
                     <i class="bi bi-check-circle me-1"></i>Guardar Servidores
                 </button>
@@ -1524,7 +1631,7 @@
 
                 <!-- Modo de operación -->
                 <h6 class="text-muted mb-2">Modo de operación</h6>
-                <div class="alert alert-light border small mb-3 py-2">
+                <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);color:#94a3b8;">
                     <strong>Manual:</strong> El sistema detecta caídas y muestra el estado, pero el admin pulsa el botón para ejecutar failover/failback.<br>
                     <strong>Semi-auto:</strong> Detecta caídas y envía notificación (email/Telegram) al admin. El admin confirma con un clic.<br>
                     <strong>Auto:</strong> Detecta caídas y ejecuta failover/failback automáticamente sin intervención. Incluye promote/demote del cluster.
@@ -1542,7 +1649,7 @@
 
                 <!-- DynDNS -->
                 <h6 class="text-muted mb-2 mt-3">DynDNS (solo para servidores Backup con IP dinámica)</h6>
-                <div class="alert alert-light border small mb-3 py-2">
+                <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);color:#94a3b8;">
                     Si tienes un servidor Backup con IP dinámica (ej: conexión doméstica), configura aquí el proveedor DynDNS para que el sistema siempre sepa su IP actual.
                     Si todos tus servidores tienen IP fija, déjalo en "Ninguno".
                 </div>
@@ -1567,7 +1674,7 @@
 
                 <!-- TTL -->
                 <h6 class="text-muted mb-2 mt-3">TTL de DNS en Cloudflare</h6>
-                <div class="alert alert-light border small mb-3 py-2">
+                <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);color:#94a3b8;">
                     El TTL controla cuánto tiempo los DNS cachean las IPs. En estado normal se usa un TTL alto (menos consultas).
                     Cuando se detecta un problema, el TTL se baja automáticamente para que el cambio de IP se propague rápido.
                 </div>
@@ -1578,7 +1685,7 @@
                             <input type="number" name="failover_ttl_normal" class="form-control form-control-sm" value="<?= (int)($fc['failover_ttl_normal'] ?? 300) ?>">
                             <span class="input-group-text">seg</span>
                         </div>
-                        <div class="form-text">Todo OK (def: 300 = 5min)</div>
+                        <div class="form-text" style="color:#94a3b8;">Todo OK (def: 300 = 5min)</div>
                     </div>
                     <div class="col-md-2">
                         <label class="form-label small">TTL Alerta</label>
@@ -1586,7 +1693,7 @@
                             <input type="number" name="failover_ttl_alert" class="form-control form-control-sm" value="<?= (int)($fc['failover_ttl_alert'] ?? 60) ?>">
                             <span class="input-group-text">seg</span>
                         </div>
-                        <div class="form-text">Algo va mal (def: 60)</div>
+                        <div class="form-text" style="color:#94a3b8;">Algo va mal (def: 60)</div>
                     </div>
                     <div class="col-md-2">
                         <label class="form-label small">TTL Failover</label>
@@ -1594,13 +1701,13 @@
                             <input type="number" name="failover_ttl_failover" class="form-control form-control-sm" value="<?= (int)($fc['failover_ttl_failover'] ?? 60) ?>">
                             <span class="input-group-text">seg</span>
                         </div>
-                        <div class="form-text">Durante failover (def: 60)</div>
+                        <div class="form-text" style="color:#94a3b8;">Durante failover (def: 60)</div>
                     </div>
                 </div>
 
                 <!-- Health Checks -->
                 <h6 class="text-muted mb-2 mt-3">Health Checks</h6>
-                <div class="alert alert-light border small mb-3 py-2">
+                <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);color:#94a3b8;">
                     El worker (cron cada minuto) llama a <code>/api/health</code> en cada servidor.
                     Para evitar falsos positivos, un servidor no se marca como caído hasta que falle N veces seguidas.
                     Igualmente, un servidor recuperado necesita M checks OK consecutivos antes de considerarse sano.
@@ -1612,7 +1719,7 @@
                             <input type="number" name="failover_check_interval" class="form-control form-control-sm" value="<?= (int)($fc['failover_check_interval'] ?? 60) ?>">
                             <span class="input-group-text">seg</span>
                         </div>
-                        <div class="form-text">Cada cuánto se comprueba (def: 60)</div>
+                        <div class="form-text" style="color:#94a3b8;">Cada cuánto se comprueba (def: 60)</div>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label small">Timeout por servidor</label>
@@ -1620,7 +1727,7 @@
                             <input type="number" name="failover_check_timeout" class="form-control form-control-sm" value="<?= (int)($fc['failover_check_timeout'] ?? 10) ?>">
                             <span class="input-group-text">seg</span>
                         </div>
-                        <div class="form-text">Tiempo máximo de espera (def: 10)</div>
+                        <div class="form-text" style="color:#94a3b8;">Tiempo máximo de espera (def: 10)</div>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label small">Fallos para marcar DOWN</label>
@@ -1628,7 +1735,7 @@
                             <input type="number" name="failover_down_threshold" class="form-control form-control-sm" value="<?= (int)($fc['failover_down_threshold'] ?? 3) ?>" min="1" max="20">
                             <span class="input-group-text">checks</span>
                         </div>
-                        <div class="form-text">Ej: 3 = caído tras 3 minutos</div>
+                        <div class="form-text" style="color:#94a3b8;">Ej: 3 = caído tras 3 minutos</div>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label small">OK para marcar RECOVERED</label>
@@ -1636,13 +1743,23 @@
                             <input type="number" name="failover_up_threshold" class="form-control form-control-sm" value="<?= (int)($fc['failover_up_threshold'] ?? 5) ?>" min="1" max="30">
                             <span class="input-group-text">checks</span>
                         </div>
-                        <div class="form-text">Ej: 5 = recuperado tras 5 minutos</div>
+                        <div class="form-text" style="color:#94a3b8;">Ej: 5 = recuperado tras 5 minutos</div>
+                    </div>
+                </div>
+                <div class="row g-2 mb-3">
+                    <div class="col-md-3">
+                        <label class="form-label small">Cooldown post-failback</label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="failover_cooldown_minutes" class="form-control form-control-sm" value="<?= (int)($fc['failover_cooldown_minutes'] ?? 15) ?>" min="0" max="120">
+                            <span class="input-group-text">min</span>
+                        </div>
+                        <div class="form-text" style="color:#94a3b8;">Tras un failback, no re-disparar failover durante este tiempo. Evita flapping si el servidor es inestable. (def: 15)</div>
                     </div>
                 </div>
 
                 <!-- Umbrales de Severidad -->
                 <h6 class="text-muted mb-2 mt-3">Umbrales de disco y carga</h6>
-                <div class="alert alert-light border small mb-3 py-2">
+                <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);color:#94a3b8;">
                     <span class="badge bg-danger">Critical</span> = dispara failover (tras N checks consecutivos).
                     <span class="badge bg-warning text-dark">Warning</span> = solo notifica al admin, NO dispara failover.
                     <br>El disco se mide en <strong>% usado</strong>. Ej: 95% = disco casi lleno, solo queda 5% libre.
@@ -1700,7 +1817,7 @@
 
                 <!-- Severidad por servicio -->
                 <h6 class="text-muted mb-2 mt-3">Severidad por servicio</h6>
-                <div class="alert alert-light border small mb-3 py-2">
+                <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);color:#94a3b8;">
                     Cada servicio monitorizado puede configurarse independientemente.
                     <span class="badge bg-danger">Critical</span> = si este servicio cae, se dispara failover (tras N checks).
                     <span class="badge bg-warning text-dark">Warning</span> = si cae, se notifica al admin pero las webs pueden seguir funcionando.
@@ -1714,7 +1831,7 @@
                             <option value="warning" <?= ($fc['failover_caddy_severity'] ?? '') === 'warning' ? 'selected' : '' ?>>Warning — notificar</option>
                             <option value="ignore" <?= ($fc['failover_caddy_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar</option>
                         </select>
-                        <div class="form-text">Caddy sirve todas las webs. Sin él, nada funciona.</div>
+                        <div class="form-text" style="color:#94a3b8;">Caddy sirve todas las webs. Sin él, nada funciona.</div>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label small">PostgreSQL Hosting (puerto 5432)</label>
@@ -1723,7 +1840,7 @@
                             <option value="warning" <?= ($fc['failover_pg_hosting_severity'] ?? '') === 'warning' ? 'selected' : '' ?>>Warning — notificar</option>
                             <option value="ignore" <?= ($fc['failover_pg_hosting_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar</option>
                         </select>
-                        <div class="form-text">BD de las webs de clientes (WordPress, etc.).</div>
+                        <div class="form-text" style="color:#94a3b8;">BD de las webs de clientes (WordPress, etc.).</div>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label small">PostgreSQL Panel (puerto 5433)</label>
@@ -1732,7 +1849,7 @@
                             <option value="critical" <?= ($fc['failover_pg_panel_severity'] ?? '') === 'critical' ? 'selected' : '' ?>>Critical — failover</option>
                             <option value="ignore" <?= ($fc['failover_pg_panel_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar</option>
                         </select>
-                        <div class="form-text">Solo afecta al panel admin. Las webs de clientes siguen funcionando sin él.</div>
+                        <div class="form-text" style="color:#94a3b8;">Solo afecta al panel admin. Las webs de clientes siguen funcionando sin él.</div>
                     </div>
                     <div class="col-md-3">
                         <label class="form-label small">MySQL (puerto 3306)</label>
@@ -1741,9 +1858,100 @@
                             <option value="critical" <?= ($fc['failover_mysql_severity'] ?? '') === 'critical' ? 'selected' : '' ?>>Critical — failover</option>
                             <option value="ignore" <?= ($fc['failover_mysql_severity'] ?? '') === 'ignore' ? 'selected' : '' ?>>Ignorar</option>
                         </select>
-                        <div class="form-text">BD MySQL de clientes. Si no usas MySQL, ponlo en "Ignorar".</div>
+                        <div class="form-text" style="color:#94a3b8;">BD MySQL de clientes. Si no usas MySQL, ponlo en "Ignorar".</div>
                     </div>
                 </div>
+
+                <h6 class="text-muted mb-2 mt-3">
+                    <i class="bi bi-ethernet me-1"></i>Detección de interfaces de red (self-check local)
+                </h6>
+                <div class="small mb-2" style="background:rgba(13,110,253,0.08);border-radius:6px;padding:10px 14px;color:#94a3b8;">
+                    <i class="bi bi-info-circle me-1"></i>
+                    <strong>Solo para slaves con dos ISPs.</strong>
+                    Si este servidor tiene una conexión principal (ej: ONO, IP fija) y una de backup (ej: Orange, NAT + DynDNS),
+                    configura aquí las interfaces para que el failover-worker detecte automáticamente cuándo la principal cae
+                    y active caddy-l4 + cambie DNS a la IP dinámica.
+                    <strong>Dejar vacío si no aplica a este servidor.</strong>
+                </div>
+                <?php
+                    // Detect physical network interfaces on this server
+                    $detectedIfaces = [];
+                    $ifaceDir = '/sys/class/net';
+                    if (is_dir($ifaceDir)) {
+                        foreach (scandir($ifaceDir) as $iface) {
+                            if ($iface === '.' || $iface === '..' || $iface === 'lo') continue;
+                            $state = trim(@file_get_contents("{$ifaceDir}/{$iface}/operstate") ?: 'unknown');
+                            $ipAddr = trim((string)shell_exec("ip -4 addr show " . escapeshellarg($iface) . " 2>/dev/null | grep -oP 'inet \\K[\\d.]+'"));
+                            $type = file_exists("{$ifaceDir}/{$iface}/device") ? 'physical' : (str_starts_with($iface, 'wg') ? 'wireguard' : (str_starts_with($iface, 'veth') ? 'virtual' : 'other'));
+                            $detectedIfaces[$iface] = ['state' => $state, 'ip' => $ipAddr, 'type' => $type];
+                        }
+                        // Sort: physical first, then wireguard, then others
+                        uksort($detectedIfaces, function($a, $b) use ($detectedIfaces) {
+                            $order = ['physical' => 0, 'wireguard' => 1, 'other' => 2, 'virtual' => 3];
+                            return ($order[$detectedIfaces[$a]['type']] ?? 9) - ($order[$detectedIfaces[$b]['type']] ?? 9);
+                        });
+                    }
+                    $selectedPrimary = $fc['failover_iface_primary'] ?? '';
+                    $selectedBackup = $fc['failover_iface_backup'] ?? '';
+                ?>
+                <div class="row g-2 mb-2">
+                    <div class="col-md-3">
+                        <label class="form-label small">Interfaz principal</label>
+                        <select name="failover_iface_primary" id="fo-iface-primary" class="form-select form-select-sm font-monospace" onchange="foIfaceChanged(this, 'fo-iface-primary-ip')">
+                            <option value="">-- ninguna --</option>
+                            <?php foreach ($detectedIfaces as $ifName => $ifInfo): ?>
+                            <option value="<?= View::e($ifName) ?>"
+                                    data-ip="<?= View::e($ifInfo['ip']) ?>"
+                                    data-state="<?= View::e($ifInfo['state']) ?>"
+                                    <?= $selectedPrimary === $ifName ? 'selected' : '' ?>>
+                                <?= View::e($ifName) ?> — <?= View::e($ifInfo['ip'] ?: 'sin IP') ?> (<?= View::e($ifInfo['state']) ?>)
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="form-text" style="color:#94a3b8;">Ethernet del ISP principal (IP fija)</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">IP esperada</label>
+                        <input type="text" name="failover_iface_primary_ip" id="fo-iface-primary-ip" class="form-control form-control-sm font-monospace"
+                               value="<?= View::e($fc['failover_iface_primary_ip'] ?? '') ?>"
+                               placeholder="ej: 213.201.21.154">
+                        <div class="form-text" style="color:#94a3b8;">IP que debe tener la interfaz principal</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">Interfaz backup</label>
+                        <select name="failover_iface_backup" id="fo-iface-backup" class="form-select form-select-sm font-monospace">
+                            <option value="">-- ninguna --</option>
+                            <?php foreach ($detectedIfaces as $ifName => $ifInfo): ?>
+                            <option value="<?= View::e($ifName) ?>"
+                                    data-ip="<?= View::e($ifInfo['ip']) ?>"
+                                    data-state="<?= View::e($ifInfo['state']) ?>"
+                                    <?= $selectedBackup === $ifName ? 'selected' : '' ?>>
+                                <?= View::e($ifName) ?> — <?= View::e($ifInfo['ip'] ?: 'sin IP') ?> (<?= View::e($ifInfo['state']) ?>)
+                            </option>
+                            <?php endforeach; ?>
+                        </select>
+                        <div class="form-text" style="color:#94a3b8;">Conexión de backup (NAT/router)</div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small">Estado / Test</label>
+                        <div class="d-flex align-items-center gap-2">
+                            <?php $ifMode = $fc['failover_iface_mode'] ?? 'normal'; ?>
+                            <span id="fo-iface-status-badge">
+                                <?php if ($ifMode === 'nat'): ?>
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>NAT</span>
+                                <?php elseif ($ifMode === 'isolated'): ?>
+                                    <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Aislado</span>
+                                <?php else: ?>
+                                    <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Normal</span>
+                                <?php endif; ?>
+                            </span>
+                            <button type="button" class="btn btn-outline-info btn-sm" onclick="foTestIfaces()" title="Verificar interfaces ahora">
+                                <i class="bi bi-arrow-repeat"></i> Test
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div id="fo-iface-test-result" class="small mb-3" style="display:none;"></div>
 
                 <h6 class="text-muted mb-2 mt-3">caddy-l4 (modo emergencia)</h6>
                 <div class="row g-2 mb-3">
@@ -1769,9 +1977,66 @@
                     </div>
                 </div>
 
-                <h6 class="text-muted mb-2 mt-3">Dominios remotos (caddy-l4 → otro servidor)</h6>
+                <h6 class="text-muted mb-2 mt-3">
+                    <i class="bi bi-globe me-1"></i>Dominios remotos (caddy-l4 → otro servidor)
+                </h6>
+                <div class="small mb-2" style="background:rgba(13,110,253,0.08);border-radius:6px;padding:10px 14px;color:#94a3b8;">
+                    <i class="bi bi-info-circle me-1"></i>
+                    En modo emergencia, caddy-l4 necesita saber qué dominios redirigir a otros servidores.
+                    <strong>Automático:</strong> Añade servidores remotos y sus dominios se obtienen vía <code>/api/domains</code>.
+                    <strong>Manual:</strong> Usa el textarea de abajo como backup o suplemento.
+                </div>
+
+                <?php $remoteSources = \MuseDockPanel\Services\FailoverService::getRemoteDomainSources(); ?>
+                <div class="mb-3">
+                    <label class="form-label small"><i class="bi bi-hdd-network me-1"></i>Servidores remotos (automático)</label>
+                    <table class="table table-sm align-middle mb-2" id="fo-remote-sources-table">
+                        <thead>
+                            <tr>
+                                <th>Nombre</th>
+                                <th>URL del panel</th>
+                                <th>Token API</th>
+                                <th style="width:90px;">Dominios</th>
+                                <th style="width:40px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="fo-remote-sources-body">
+                            <?php foreach ($remoteSources as $rs): ?>
+                            <tr>
+                                <td><input type="text" name="rds_name[]" class="form-control form-control-sm" value="<?= View::e($rs['name'] ?? '') ?>" placeholder="Server-2"></td>
+                                <td><input type="text" name="rds_url[]" class="form-control form-control-sm font-monospace" value="<?= View::e($rs['url'] ?? '') ?>" placeholder="https://192.168.2.155:8444"></td>
+                                <td><input type="password" name="rds_token[]" class="form-control form-control-sm font-monospace" value="<?= View::e($rs['token'] ?? '') ?>" placeholder="token del servidor remoto"></td>
+                                <td class="text-center">
+                                    <?php
+                                        $cacheKey = 'failover_remote_domains_cache_' . md5($rs['url'] ?? '');
+                                        $cached = \MuseDockPanel\Settings::get($cacheKey, '');
+                                        $cachedCount = $cached ? count(json_decode($cached, true) ?: []) : 0;
+                                    ?>
+                                    <span class="badge <?= $cachedCount > 0 ? 'bg-success' : 'bg-secondary' ?>"><?= $cachedCount ?></span>
+                                </td>
+                                <td>
+                                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="foAddRemoteSource()">
+                        <i class="bi bi-plus-circle me-1"></i>Añadir servidor remoto
+                    </button>
+                    <button type="button" class="btn btn-outline-info btn-sm ms-2" onclick="foTestRemoteSources()">
+                        <i class="bi bi-arrow-repeat me-1"></i>Probar conexión
+                    </button>
+                    <span id="fo-remote-test-result" class="small ms-2"></span>
+                </div>
+
+                <label class="form-label small"><i class="bi bi-pencil me-1"></i>Dominios manuales (backup / suplemento)</label>
                 <textarea name="failover_remote_domains" class="form-control form-control-sm font-monospace mb-3" rows="3"
-                          placeholder="dominio1.com&#10;dominio2.com"><?= View::e(\MuseDockPanel\Settings::get('failover_remote_domains', '')) ?></textarea>
+                          placeholder="dominio1.com&#10;dominio2.com"
+                          style="color:#94a3b8;"><?= View::e(\MuseDockPanel\Settings::get('failover_remote_domains', '')) ?></textarea>
+                <div class="form-text mb-2" style="color:#6b7280;">Los dominios manuales se combinan con los automáticos. Usa esto si un servidor no tiene panel o como fallback.</div>
 
                 <button type="submit" class="btn btn-success btn-sm">
                     <i class="bi bi-check-circle me-1"></i>Guardar Configuración
@@ -1833,13 +2098,16 @@ function foCheckHealth() {
 
 function foExecute(action, description) {
     Swal.fire({
-        title: description,
-        html: '<input type="password" id="fo-pwd" class="swal2-input" placeholder="Contraseña admin">',
+        title: 'Confirmar acción',
+        html: '<div class="text-start small mb-3" style="white-space:pre-line;color:#94a3b8;">' + description + '</div>' +
+              '<input type="password" id="fo-pwd" class="swal2-input" placeholder="Contraseña admin">',
         icon: 'warning',
         showCancelButton: true,
         confirmButtonText: 'Ejecutar',
         cancelButtonText: 'Cancelar',
         confirmButtonColor: '#dc3545',
+        background: '#1e1e2e',
+        color: '#fff',
         preConfirm: () => {
             const pwd = document.getElementById('fo-pwd').value;
             if (!pwd) { Swal.showValidationMessage('Introduce la contraseña'); return false; }
@@ -1936,7 +2204,11 @@ function foAddServer() {
                 <option value="primary">Primary</option>
                 <option value="failover">Failover</option>
                 <option value="backup">Backup</option>
+                <option value="replica">Replica</option>
             </select>
+        </td>
+        <td>
+            <input type="number" name="srv_priority[]" class="form-control form-control-sm" value="99" min="1" max="99" style="width:60px;" title="1 = mayor prioridad">
         </td>
         <td>
             <select name="srv_failover_to[]" class="form-select form-select-sm fo-failover-select">
@@ -1956,7 +2228,159 @@ function foAddServer() {
     </tr>`;
     document.getElementById('fo-servers-body').insertAdjacentHTML('beforeend', html);
 }
+
+function foInstallCaddyL4() {
+    const btn = document.getElementById('btn-install-caddy-l4');
+    const status = document.getElementById('caddy-l4-install-status');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Instalando... (puede tardar 1-2 min)';
+    status.textContent = 'Compilando caddy con módulo layer4...';
+
+    fetch('/settings/failover/install-caddy-l4', {
+        method: 'POST',
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.installed) {
+            const badge = document.getElementById('caddy-l4-badge');
+            badge.className = 'badge bg-success';
+            badge.textContent = 'Instalado';
+            const box = document.getElementById('caddy-l4-install-box');
+            if (box) box.innerHTML = '<div class="small mt-1" style="color:#22c55e;"><i class="bi bi-check-circle me-1"></i>caddy-l4 instalado correctamente.</div>';
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar instalación';
+            status.innerHTML = '<span style="color:#ef4444;">Error en la instalación. Revisa los logs.</span>';
+            console.error('caddy-l4 install output:', data.output);
+        }
+    })
+    .catch(err => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
+        status.innerHTML = '<span style="color:#ef4444;">Error de red: ' + err.message + '</span>';
+    });
+}
+
+// Auto-fill IP when selecting a detected interface
+function foIfaceChanged(sel, ipFieldId) {
+    const opt = sel.options[sel.selectedIndex];
+    const ip = opt?.dataset?.ip || '';
+    const ipField = document.getElementById(ipFieldId);
+    if (ipField && ip && !ipField.value) {
+        ipField.value = ip;
+    }
+}
+
+// Test interfaces via AJAX
+function foTestIfaces() {
+    const resultDiv = document.getElementById('fo-iface-test-result');
+    const badge = document.getElementById('fo-iface-status-badge');
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<span class="text-muted"><i class="bi bi-arrow-repeat spin me-1"></i>Verificando interfaces...</span>';
+
+    fetch('/settings/failover/test-ifaces')
+        .then(r => r.json())
+        .then(data => {
+            let html = '';
+
+            // Show each detected interface
+            if (data.interfaces) {
+                html += '<div class="p-2 rounded mb-1" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);">';
+                html += '<strong class="small">Interfaces detectadas:</strong><br>';
+                for (const [name, info] of Object.entries(data.interfaces)) {
+                    const stateColor = info.state === 'up' ? '#22c55e' : (info.state === 'down' ? '#ef4444' : '#94a3b8');
+                    const icon = info.state === 'up' ? 'check-circle' : (info.state === 'down' ? 'x-circle' : 'question-circle');
+                    html += `<span class="me-3"><i class="bi bi-${icon}" style="color:${stateColor}"></i> <code>${name}</code> — ${info.ip || 'sin IP'} <small style="color:${stateColor}">(${info.state})</small></span>`;
+                }
+                html += '</div>';
+            }
+
+            // Show self-check result
+            const modeColors = {normal: '#22c55e', nat: '#f59e0b', isolated: '#ef4444'};
+            const modeIcons = {normal: 'check-circle', nat: 'exclamation-triangle', isolated: 'x-circle'};
+            const color = modeColors[data.mode] || '#94a3b8';
+            const icon = modeIcons[data.mode] || 'question-circle';
+            html += `<div class="mt-1"><i class="bi bi-${icon}" style="color:${color}"></i> <strong style="color:${color}">${data.details}</strong></div>`;
+
+            if (data.primary_iface && !data.primary_up) {
+                html += `<div class="mt-1" style="color:#f59e0b;"><i class="bi bi-exclamation-triangle me-1"></i>Interfaz principal <code>${data.primary_iface}</code> NO tiene la IP esperada o está caída.</div>`;
+            }
+
+            resultDiv.innerHTML = html;
+
+            // Update badge
+            if (data.mode === 'nat') {
+                badge.innerHTML = '<span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>NAT</span>';
+            } else if (data.mode === 'isolated') {
+                badge.innerHTML = '<span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Aislado</span>';
+            } else {
+                badge.innerHTML = '<span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Normal</span>';
+            }
+        })
+        .catch(err => {
+            resultDiv.innerHTML = `<span style="color:#ef4444;">Error: ${err.message}</span>`;
+        });
+}
+
+function foAddRemoteSource() {
+    const html = `<tr>
+        <td><input type="text" name="rds_name[]" class="form-control form-control-sm" placeholder="Server-2"></td>
+        <td><input type="text" name="rds_url[]" class="form-control form-control-sm font-monospace" placeholder="https://192.168.2.155:8444"></td>
+        <td><input type="password" name="rds_token[]" class="form-control form-control-sm font-monospace" placeholder="token del servidor remoto"></td>
+        <td class="text-center"><span class="badge bg-secondary">--</span></td>
+        <td><button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
+    </tr>`;
+    document.getElementById('fo-remote-sources-body').insertAdjacentHTML('beforeend', html);
+}
+
+function foTestRemoteSources() {
+    const result = document.getElementById('fo-remote-test-result');
+    const rows = document.querySelectorAll('#fo-remote-sources-body tr');
+    if (!rows.length) {
+        result.innerHTML = '<span style="color:#94a3b8;">No hay servidores remotos configurados.</span>';
+        return;
+    }
+    result.innerHTML = '<span class="text-muted"><i class="bi bi-arrow-repeat spin me-1"></i>Probando...</span>';
+
+    const sources = [];
+    rows.forEach(row => {
+        const inputs = row.querySelectorAll('input');
+        sources.push({
+            name: inputs[0]?.value || '',
+            url: inputs[1]?.value || '',
+            token: inputs[2]?.value || ''
+        });
+    });
+
+    fetch('/settings/failover/test-remote-sources', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+        body: JSON.stringify({sources})
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.results) {
+            let html = '';
+            const badges = document.querySelectorAll('#fo-remote-sources-body tr td:nth-child(4) .badge');
+            data.results.forEach((r, i) => {
+                const icon = r.ok ? '✓' : '✗';
+                const color = r.ok ? '#22c55e' : '#ef4444';
+                html += `<span style="color:${color}" class="me-2">${icon} ${r.name}: ${r.ok ? r.count + ' dominios' : r.error}</span>`;
+                if (badges[i]) {
+                    badges[i].className = r.ok ? 'badge bg-success' : 'badge bg-danger';
+                    badges[i].textContent = r.ok ? r.count : '✗';
+                }
+            });
+            result.innerHTML = html;
+        }
+    })
+    .catch(err => {
+        result.innerHTML = `<span style="color:#ef4444;">Error: ${err.message}</span>`;
+    });
+}
 </script>
+<?php endif; /* !$foIsSlave */ ?>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- TAB 5 — Configuración                                       -->
