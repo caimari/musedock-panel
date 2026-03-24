@@ -8,7 +8,6 @@
 
 define('PANEL_ROOT', dirname(__DIR__));
 
-// Bootstrap
 spl_autoload_register(function ($class) {
     $prefix = 'MuseDockPanel\\';
     if (strncmp($prefix, $class, strlen($prefix)) !== 0) return;
@@ -43,7 +42,8 @@ function formatBytes(int $bytes): string
     return $bytes . ' B';
 }
 
-// Validate
+// ── Validate backup exists ────────────────────────────────────
+
 if (!is_dir($backupPath) || !file_exists($backupPath . '/metadata.json')) {
     updateStatus($statusFile, ['status' => 'error', 'error' => 'Backup no encontrado', 'backup_name' => $backupName]);
     exit(1);
@@ -57,15 +57,66 @@ if (!$node) {
 
 $meta = @json_decode(file_get_contents($backupPath . '/metadata.json'), true) ?: [];
 
-// Calculate original backup size for compression context
-$originalSize = 0;
+// ── Step 0: Calculate backup size ────────────────────────────
+
+$totalSize = 0;
 foreach (glob("{$backupPath}/*") as $f) {
-    if (is_file($f)) $originalSize += filesize($f);
+    if (is_file($f)) $totalSize += filesize($f);
 }
 if (is_dir($backupPath . '/databases')) {
     foreach (glob("{$backupPath}/databases/*") as $f) {
-        if (is_file($f)) $originalSize += filesize($f);
+        if (is_file($f)) $totalSize += filesize($f);
     }
+}
+
+// ── Step 1: Pre-flight check on remote node ─────────────────
+
+updateStatus($statusFile, [
+    'status' => 'running',
+    'step' => 'validating',
+    'backup_name' => $backupName,
+    'node_name' => $node['name'],
+    'domain' => $meta['domain'] ?? '',
+    'started_at' => date('Y-m-d H:i:s'),
+    'percent' => 2,
+    'message' => "Verificando capacidad de {$node['name']}...",
+    'pid' => getmypid(),
+]);
+
+$preflight = MuseDockPanel\Services\ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', [
+    'action' => 'backup-preflight',
+    'payload' => ['file_size' => $totalSize],
+]);
+
+if (!$preflight['ok']) {
+    $errMsg = $preflight['error'] ?? '';
+    // Check if it's an "Unknown action" = old panel version
+    if (str_contains($errMsg, 'Unknown action') || str_contains($errMsg, 'unknown')) {
+        $errMsg = "El nodo {$node['name']} no soporta backups remotos. Actualiza el panel en ese nodo (v1.0.6+).";
+    } elseif (str_contains($errMsg, 'Connection') || str_contains($errMsg, 'timed out') || str_contains($errMsg, 'failed')) {
+        $errMsg = "No se puede conectar con {$node['name']}: {$errMsg}";
+    }
+    updateStatus($statusFile, [
+        'status' => 'error',
+        'error' => $errMsg,
+        'backup_name' => $backupName,
+        'node_name' => $node['name'],
+    ]);
+    exit(1);
+}
+
+// Check preflight data for errors
+$preflightData = $preflight['data'] ?? [];
+if (!empty($preflightData['errors'])) {
+    $errMsg = "El nodo {$node['name']} no puede recibir el backup:\n" . implode("\n", $preflightData['errors']);
+    updateStatus($statusFile, [
+        'status' => 'error',
+        'error' => $errMsg,
+        'backup_name' => $backupName,
+        'node_name' => $node['name'],
+        'preflight' => $preflightData,
+    ]);
+    exit(1);
 }
 
 updateStatus($statusFile, [
@@ -75,12 +126,11 @@ updateStatus($statusFile, [
     'node_name' => $node['name'],
     'domain' => $meta['domain'] ?? '',
     'started_at' => date('Y-m-d H:i:s'),
-    'percent' => 0,
-    'message' => 'Comprimiendo backup (' . formatBytes($originalSize) . ')...',
+    'percent' => 5,
+    'message' => 'Empaquetando backup (' . formatBytes($totalSize) . ')...',
     'pid' => getmypid(),
 ]);
 
-// Step 1: Create tar.gz
 $packStart = microtime(true);
 $tmpFile = sys_get_temp_dir() . '/backup_transfer_' . $backupName . '_' . time() . '.tar.gz';
 $cmd = sprintf('tar czf %s -C %s . 2>&1', escapeshellarg($tmpFile), escapeshellarg($backupPath));
@@ -109,13 +159,14 @@ updateStatus($statusFile, [
     'domain' => $meta['domain'] ?? '',
     'started_at' => date('Y-m-d H:i:s'),
     'percent' => 10,
-    'message' => "Comprimido en {$packElapsed}s. Conectando a {$node['name']}...",
+    'message' => "Empaquetado en {$packElapsed}s. Enviando {$fileSizeHuman} a {$node['name']}...",
     'file_size' => $fileSize,
     'file_size_human' => $fileSizeHuman,
     'pid' => getmypid(),
 ]);
 
-// Step 2: Upload via CURL with progress callback
+// ── Step 2: Upload via CURL with progress ──────────────────────
+
 $token = MuseDockPanel\Services\ReplicationService::decryptPassword($node['auth_token'] ?? '');
 $url = rtrim($node['api_url'], '/') . '/api/cluster/action';
 $uploadStartTime = microtime(true);
@@ -141,19 +192,18 @@ curl_setopt_array($ch, [
     CURLOPT_PROGRESSFUNCTION => function ($ch, $dlTotal, $dlNow, $ulTotal, $ulNow) use ($statusFile, $backupName, $node, $meta, $fileSizeHuman, $fileSize, $uploadStartTime) {
         static $lastUpdate = 0;
         $now = microtime(true);
-        if ($now - $lastUpdate < 0.8) return 0; // Update ~once per second
+        if ($now - $lastUpdate < 0.8) return 0;
         $lastUpdate = $now;
 
         if ($ulTotal <= 0) return 0;
 
         $uploadPercent = round(($ulNow / $ulTotal) * 100);
-        // Map upload 0-100% to overall 10-95%
         $overallPercent = 10 + round($uploadPercent * 0.85);
 
         $uploaded = formatBytes((int) $ulNow);
         $total = formatBytes((int) $ulTotal);
 
-        // Calculate speed
+        // Speed & ETA
         $elapsed = $now - $uploadStartTime;
         $speed = '';
         $eta = '';
@@ -187,12 +237,10 @@ curl_setopt_array($ch, [
             'file_size_human' => $fileSizeHuman,
             'speed' => $speed,
             'eta' => $eta,
-            'upload_total' => $ulTotal,
-            'upload_now' => $ulNow,
             'pid' => getmypid(),
         ]);
 
-        return 0; // Continue
+        return 0;
     },
 ]);
 
@@ -216,7 +264,10 @@ if ($error) {
 
 $data = @json_decode($response, true);
 if ($httpCode >= 200 && $httpCode < 300 && ($data['ok'] ?? false)) {
-    MuseDockPanel\Services\LogService::log('backup.transfer', $meta['domain'] ?? $backupName, "Backup transferido a nodo: {$node['name']} ({$fileSizeHuman} en {$totalTime}s)");
+    // Calculate avg speed
+    $avgSpeed = $totalTime > 0 ? formatBytes((int) ($fileSize / $totalTime)) . '/s' : '';
+
+    MuseDockPanel\Services\LogService::log('backup.transfer', $meta['domain'] ?? $backupName, "Backup transferido a {$node['name']} ({$fileSizeHuman} en {$totalTime}s, {$avgSpeed})");
 
     updateStatus($statusFile, [
         'status' => 'completed',
@@ -224,20 +275,13 @@ if ($httpCode >= 200 && $httpCode < 300 && ($data['ok'] ?? false)) {
         'node_name' => $node['name'],
         'domain' => $meta['domain'] ?? '',
         'percent' => 100,
-        'message' => "Transferido a {$node['name']} en {$totalTime}s",
+        'message' => "Transferido a {$node['name']} — {$fileSizeHuman} en {$totalTime}s ({$avgSpeed})",
         'file_size' => $fileSize,
         'file_size_human' => $fileSizeHuman,
         'elapsed' => $totalTime,
     ]);
 } else {
-    // Build descriptive error
-    $errMsg = '';
-    if ($httpCode === 422 && isset($data['message']) && str_contains($data['message'], 'Unknown action')) {
-        $errMsg = "El nodo {$node['name']} no soporta backups remotos. Actualiza el panel en ese nodo.";
-    } else {
-        $errMsg = $data['error'] ?? $data['message'] ?? "Error HTTP {$httpCode}";
-    }
-
+    $errMsg = $data['error'] ?? $data['message'] ?? "Error HTTP {$httpCode}";
     updateStatus($statusFile, [
         'status' => 'error',
         'error' => $errMsg,

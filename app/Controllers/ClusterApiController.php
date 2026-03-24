@@ -376,6 +376,7 @@ class ClusterApiController
                 'query-local-state' => $this->handleQueryLocalState(),
 
                 // ── Remote backup operations ──────────────────
+                'backup-preflight' => $this->handleBackupPreflight($payload),
                 'receive-backup'   => $this->handleReceiveBackup($payload),
                 'list-backups'     => $this->handleListBackups($payload),
                 'download-backup'  => $this->handleDownloadBackup($payload),
@@ -741,14 +742,108 @@ class ClusterApiController
      * Receive a backup file from another node.
      * Accepts multipart upload with 'backup' file field.
      */
+    /**
+     * Pre-flight check: disk space, PHP limits, tmp space.
+     * Called before sending a backup to verify the node can receive it.
+     */
+    private function handleBackupPreflight(array $payload): array
+    {
+        $backupDir = PANEL_ROOT . '/storage/backups';
+        if (!is_dir($backupDir)) {
+            @mkdir($backupDir, 0750, true);
+        }
+
+        // Disk free on backup partition
+        $diskFree = disk_free_space($backupDir) ?: 0;
+        $diskTotal = disk_total_space($backupDir) ?: 0;
+
+        // Disk free on /tmp (where uploads land)
+        $tmpFree = disk_free_space(sys_get_temp_dir()) ?: 0;
+
+        // PHP limits
+        $uploadMax = ini_get('upload_max_filesize') ?: '2M';
+        $postMax = ini_get('post_max_size') ?: '8M';
+
+        // Convert to bytes for comparison
+        $uploadMaxBytes = $this->phpSizeToBytes($uploadMax);
+        $postMaxBytes = $this->phpSizeToBytes($postMax);
+
+        // Incoming backup size (sent by caller)
+        $incomingSize = (int) ($payload['file_size'] ?? 0);
+
+        $errors = [];
+        if ($incomingSize > 0) {
+            if ($incomingSize > $uploadMaxBytes) {
+                $errors[] = "El archivo ({$this->formatBytesStatic($incomingSize)}) excede upload_max_filesize ({$uploadMax}). Ajusta el servicio del panel con: -d upload_max_filesize=2G";
+            }
+            if ($incomingSize > $postMaxBytes) {
+                $errors[] = "El archivo ({$this->formatBytesStatic($incomingSize)}) excede post_max_size ({$postMax}). Ajusta el servicio del panel con: -d post_max_size=2G";
+            }
+            if ($incomingSize > $tmpFree) {
+                $errors[] = "Espacio insuficiente en /tmp para recibir el upload ({$this->formatBytesStatic($tmpFree)} disponible)";
+            }
+            // Need ~2x size: upload tmp + extracted
+            if (($incomingSize * 2) > $diskFree) {
+                $errors[] = "Espacio en disco insuficiente: {$this->formatBytesStatic($diskFree)} disponible, se necesitan ~{$this->formatBytesStatic($incomingSize * 2)}";
+            }
+        }
+
+        return [
+            'ok' => empty($errors),
+            'disk_free' => $diskFree,
+            'disk_free_human' => $this->formatBytesStatic($diskFree),
+            'disk_total' => $diskTotal,
+            'tmp_free' => $tmpFree,
+            'tmp_free_human' => $this->formatBytesStatic($tmpFree),
+            'upload_max_filesize' => $uploadMax,
+            'upload_max_bytes' => $uploadMaxBytes,
+            'post_max_size' => $postMax,
+            'post_max_bytes' => $postMaxBytes,
+            'errors' => $errors,
+        ];
+    }
+
+    private function phpSizeToBytes(string $size): int
+    {
+        $size = trim($size);
+        $unit = strtolower(substr($size, -1));
+        $val = (int) $size;
+        return match ($unit) {
+            'g' => $val * 1073741824,
+            'm' => $val * 1048576,
+            'k' => $val * 1024,
+            default => $val,
+        };
+    }
+
+    private function formatBytesStatic(int $bytes): string
+    {
+        if ($bytes >= 1073741824) return round($bytes / 1073741824, 2) . ' GB';
+        if ($bytes >= 1048576) return round($bytes / 1048576, 2) . ' MB';
+        if ($bytes >= 1024) return round($bytes / 1024, 2) . ' KB';
+        return $bytes . ' B';
+    }
+
     private function handleReceiveBackup(array $payload): array
     {
         $backupDir = PANEL_ROOT . '/storage/backups';
         $uploadedFile = $_FILES['backup'] ?? null;
         $backupName = basename($payload['backup_name'] ?? '');
 
-        if (!$backupName || !$uploadedFile || $uploadedFile['error'] !== UPLOAD_ERR_OK) {
-            return ['ok' => false, 'error' => 'Missing backup_name or backup file upload'];
+        if (!$backupName) {
+            return ['ok' => false, 'error' => 'Missing backup_name parameter'];
+        }
+
+        if (!$uploadedFile) {
+            $maxUpload = ini_get('upload_max_filesize');
+            $maxPost = ini_get('post_max_size');
+            return ['ok' => false, 'error' => "No file received. PHP limits: upload_max_filesize={$maxUpload}, post_max_size={$maxPost}. The backup may exceed these limits."];
+        }
+
+        if ($uploadedFile['error'] !== UPLOAD_ERR_OK) {
+            $errors = [1 => 'File exceeds upload_max_filesize', 2 => 'File exceeds MAX_FILE_SIZE', 3 => 'Partial upload', 4 => 'No file sent', 6 => 'Missing tmp dir', 7 => 'Disk write failed', 8 => 'Extension blocked'];
+            $errMsg = $errors[$uploadedFile['error']] ?? "Upload error code {$uploadedFile['error']}";
+            return ['ok' => false, 'error' => "Upload failed: {$errMsg}. Check PHP upload_max_filesize and post_max_size on this node."];
         }
 
         $targetDir = $backupDir . '/' . $backupName;
@@ -756,9 +851,9 @@ class ClusterApiController
             @mkdir($targetDir, 0750, true);
         }
 
-        // Extract tar.gz into backup directory
+        // Extract archive into backup directory (auto-detect compression)
         $tmpFile = $uploadedFile['tmp_name'];
-        $cmd = sprintf('tar xzf %s -C %s 2>&1', escapeshellarg($tmpFile), escapeshellarg($targetDir));
+        $cmd = sprintf('tar xf %s -C %s 2>&1', escapeshellarg($tmpFile), escapeshellarg($targetDir));
         $output = shell_exec($cmd);
 
         if (!file_exists($targetDir . '/metadata.json')) {
