@@ -152,6 +152,121 @@ use MuseDockPanel\Services\CloudflareService;
             </div>
         </div>
 
+        <!-- Cloudflare DNS for this domain -->
+        <?php
+            $cfZone = CloudflareService::findZoneForDomain($account['domain']);
+        ?>
+        <?php if ($cfZone): ?>
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-cloud-fill me-2" style="color:#f97316;"></i>Cloudflare DNS — <?= View::e($cfZone['zone']) ?></span>
+                <a href="/settings/cloudflare-dns" class="btn btn-outline-light btn-sm py-0 px-2" style="font-size:0.75rem;">
+                    <i class="bi bi-box-arrow-up-right me-1"></i>Full Manager
+                </a>
+            </div>
+            <div class="card-body p-0">
+                <div id="cfDnsLoading" class="text-center text-muted py-3">
+                    <div class="spinner-border spinner-border-sm me-1"></div> Loading DNS records...
+                </div>
+                <table class="table table-sm table-hover mb-0" id="cfDnsTable" style="display:none;">
+                    <thead>
+                        <tr>
+                            <th class="ps-3" style="width:55px;">Type</th>
+                            <th>Name</th>
+                            <th>Content</th>
+                            <th style="width:55px;">TTL</th>
+                            <th style="width:65px;">Proxy</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cfDnsBody"></tbody>
+                </table>
+            </div>
+        </div>
+        <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const domain = <?= json_encode($account['domain']) ?>;
+            const zoneId = <?= json_encode($cfZone['zone_id']) ?>;
+            const zoneName = <?= json_encode($cfZone['zone']) ?>;
+
+            // Account index (resolved server-side, no tokens exposed)
+            <?php
+                $cfAccIdx = 0;
+                foreach (CloudflareService::getConfiguredAccounts() as $ci => $ca) {
+                    if (($ca['token'] ?? '') === $cfZone['token']) { $cfAccIdx = $ci; break; }
+                }
+            ?>
+            const accIdx = <?= $cfAccIdx ?>;
+
+            fetch(`/settings/cloudflare-dns/records?account=${accIdx}&zone_id=${zoneId}`)
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('cfDnsLoading').style.display = 'none';
+                    if (!data.ok) {
+                        document.getElementById('cfDnsLoading').style.display = '';
+                        document.getElementById('cfDnsLoading').innerHTML = `<span class="text-danger"><i class="bi bi-exclamation-triangle me-1"></i>${data.error}</span>`;
+                        return;
+                    }
+
+                    // Filter records relevant to this domain (domain itself, www, subdomains)
+                    const relevant = data.records.filter(r =>
+                        r.name === domain || r.name === 'www.' + domain ||
+                        r.name.endsWith('.' + domain) || r.name === zoneName
+                    );
+
+                    const tbody = document.getElementById('cfDnsBody');
+                    if (!relevant.length) {
+                        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-2">No DNS records for this domain</td></tr>';
+                    } else {
+                        tbody.innerHTML = relevant.map(r => {
+                            const isProxyable = ['A', 'AAAA', 'CNAME'].includes(r.type);
+                            const proxyIcon = !isProxyable ? '<span class="text-muted">—</span>' :
+                                (r.proxied
+                                    ? `<i class="bi bi-cloud-fill" style="color:#f97316;cursor:pointer;" title="Proxied (click to toggle)" onclick="cfToggleProxy('${r.id}', false, ${accIdx}, '${zoneId}')"></i>`
+                                    : `<i class="bi bi-cloud" style="color:#94a3b8;cursor:pointer;" title="DNS Only (click to toggle)" onclick="cfToggleProxy('${r.id}', true, ${accIdx}, '${zoneId}')"></i>`);
+                            const shortName = r.name.replace('.' + zoneName, '').replace(zoneName, '@');
+                            const ttl = r.ttl === 1 ? 'Auto' : (r.ttl >= 3600 ? (r.ttl/3600)+'h' : (r.ttl >= 60 ? (r.ttl/60)+'m' : r.ttl+'s'));
+                            const shortContent = r.content.length > 40 ? r.content.substring(0, 37) + '...' : r.content;
+                            const badge = {'A':'bg-info','AAAA':'bg-info','CNAME':'bg-warning text-dark','MX':'bg-success','TXT':'bg-secondary'}[r.type] || 'bg-secondary';
+                            return `<tr>
+                                <td class="ps-3"><span class="badge ${badge}" style="font-size:0.65rem;">${r.type}</span></td>
+                                <td><code style="font-size:0.75rem;">${shortName}</code></td>
+                                <td><small class="text-muted" title="${r.content}">${shortContent}</small></td>
+                                <td><small class="text-muted">${ttl}</small></td>
+                                <td class="text-center">${proxyIcon}</td>
+                            </tr>`;
+                        }).join('');
+                    }
+                    document.getElementById('cfDnsTable').style.display = '';
+                })
+                .catch(err => {
+                    document.getElementById('cfDnsLoading').innerHTML = `<span class="text-danger">Error: ${err.message}</span>`;
+                });
+        });
+
+        function cfToggleProxy(recordId, proxied, accIdx, zoneId) {
+            const csrf = document.querySelector('input[name="_csrf_token"]').value;
+            fetch('/settings/cloudflare-dns/toggle-proxy', {
+                method: 'POST',
+                body: new URLSearchParams({
+                    _csrf_token: csrf,
+                    account: accIdx,
+                    zone_id: zoneId,
+                    record_id: recordId,
+                    proxied: proxied ? '1' : '',
+                }),
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    location.reload();
+                } else {
+                    SwalDark.fire({icon: 'error', title: 'Error', text: data.error});
+                }
+            });
+        }
+        </script>
+        <?php endif; ?>
+
         <!-- Domain Aliases -->
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">

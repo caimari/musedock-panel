@@ -8,8 +8,8 @@
         <i class="bi bi-cloud" style="font-size: 3rem; color: #f97316;"></i>
         <h5 class="mt-3">No hay cuentas de Cloudflare configuradas</h5>
         <p class="text-muted">Para gestionar DNS desde aqui, primero configura tus cuentas de Cloudflare con API Token en:</p>
-        <a href="/settings/cluster" class="btn btn-outline-light btn-sm">
-            <i class="bi bi-gear me-1"></i>Settings &rarr; Failover &rarr; Cloudflare Accounts
+        <a href="/settings/cluster#failover" class="btn btn-outline-light btn-sm">
+            <i class="bi bi-gear me-1"></i>Settings &rarr; Cluster &rarr; Failover &rarr; Cloudflare Accounts
         </a>
     </div>
 </div>

@@ -155,9 +155,9 @@
                     </div>
                 </form>
                 <?php else: ?>
-                <div class="alert alert-warning mb-0 py-2 small">
+                <div class="mb-0 py-2 px-3 small rounded" style="background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.25);color:#fbbf24;">
                     <i class="bi bi-exclamation-triangle me-1"></i>
-                    No se encontró el archivo de pool FPM para esta cuenta. Los ajustes PHP no están disponibles.
+                    No se encontro el archivo de pool FPM para esta cuenta. Los ajustes PHP no estan disponibles.
                 </div>
                 <?php endif; ?>
             </div>
