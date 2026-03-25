@@ -39,8 +39,9 @@ class DashboardController
             ];
         }
 
-        // Offline or standby cluster nodes (for alert banner)
+        // Cluster nodes (offline/standby for alert, online for info)
         $offlineNodes = [];
+        $onlineNodes = [];
         try {
             $allNodes = ClusterService::getNodes();
             $now = time();
@@ -64,6 +65,14 @@ class DashboardController
                         'standby_reason' => $node['standby_reason'] ?? '',
                         'standby_since'  => $node['standby_since'] ?? '',
                     ];
+                } elseif (!$isDown && !$isStandby) {
+                    $lastSeen = $node['last_seen_at'] ? date('Y-m-d H:i:s', strtotime($node['last_seen_at'])) : '';
+                    $onlineNodes[] = [
+                        'id'           => $node['id'],
+                        'name'         => $node['name'],
+                        'api_url'      => $node['api_url'],
+                        'last_seen_at' => $lastSeen,
+                    ];
                 }
             }
         } catch (\Throwable) {}
@@ -85,6 +94,7 @@ class DashboardController
             'recentLog' => $recentLog,
             'clusterInfo' => $clusterInfo,
             'offlineNodes' => $offlineNodes,
+            'onlineNodes' => $onlineNodes,
             'failoverStatus' => $failoverStatus,
         ]);
     }

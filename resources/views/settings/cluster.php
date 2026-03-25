@@ -337,12 +337,18 @@
     <div class="card mb-3 border-success">
         <div class="card-body text-center py-4">
             <h5>Sincronización Completa</h5>
-            <p class="text-muted">Ejecuta todos los pasos en secuencia: crear hostings &rarr; copiar archivos &rarr; copiar certificados SSL</p>
+            <p class="text-muted">Ejecuta todos los pasos en secuencia: provisionar hostings &rarr; copiar archivos web (rsync vía SSH) &rarr; copiar certificados SSL</p>
             <button class="btn btn-success btn-lg" onclick="fullSync(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
                 <i class="bi bi-play-circle me-1"></i>Sincronización Completa a <?= View::e($node['name']) ?>
             </button>
-            <div class="mt-2 small text-muted">
-                Si SSH no está configurado, solo se ejecutará la parte de hostings (API) y avisará.
+            <div class="mt-3 small text-muted text-start mx-auto" style="max-width:600px;">
+                <i class="bi bi-info-circle me-1"></i>
+                <strong>Paso 1 — Hostings (API):</strong> Crea/repara cuentas de sistema, PHP-FPM y Caddy en el nodo remoto.<br>
+                <strong>Paso 2 — Archivos (rsync vía SSH):</strong> Copia el contenido web de <code>/var/www/vhosts/</code> al slave. Requiere SSH configurado.<br>
+                <strong>Paso 3 — SSL (rsync vía SSH):</strong> Copia los certificados de Caddy al slave.<br>
+                <i class="bi bi-shield-check me-1 text-success"></i>Es seguro ejecutar varias veces: los hostings se reparan si ya existen, y rsync es incremental (solo copia lo nuevo o modificado, no borra nada).<br>
+                <span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Si SSH no está configurado, solo se ejecutará el paso 1 y se avisará.</span><br>
+                <span class="mt-1 d-block">La sincronización continua de archivos se gestiona en la pestaña <a href="#archivos" style="color:#6ea8fe;">Archivos</a> (lsyncd en tiempo real o rsync periódico).</span>
             </div>
         </div>
     </div>
@@ -443,7 +449,7 @@
     <div class="mb-3 p-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);">
         <small style="color:#6ea8fe;">
             <i class="bi bi-info-circle me-1"></i>
-            Gestión de servidores vinculados. Añada nodos slave para replicar hostings. El botón 'Sync Todo' encola la creación de cuentas (usuario Linux, PHP-FPM, Caddy) en el nodo — NO copia archivos. Para archivos, vaya a la pestaña 'Archivos'.
+            Nodos slave vinculados. Cada hosting nuevo se replica automáticamente. <strong>Sync Todo</strong> re-provisiona todos los hostings existentes en el nodo (usuario Linux, PHP-FPM, Caddy) — útil al añadir un nodo nuevo o para forzar una re-creación. No copia archivos web; para eso vaya a la pestaña <a href="#archivos" style="color:#6ea8fe;">Archivos</a>.
         </small>
     </div>
 
@@ -556,6 +562,7 @@
                                     <?php endif; ?>
                                 </td>
                                 <td class="text-end">
+                                    <div class="d-flex flex-wrap gap-2 justify-content-end">
                                     <?php if (!empty($node['alerts_muted'])): ?>
                                     <button type="button" class="btn btn-outline-warning btn-sm"
                                             onclick="toggleNodeAlerts(<?= (int)$node['id'] ?>, 'unmute', '<?= View::e($node['name']) ?>')"
@@ -597,6 +604,7 @@
                                             onclick="confirmRemoveNode(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
                                         <i class="bi bi-trash me-1"></i>Eliminar
                                     </button>
+                                    </div>
                                 </td>
                             </tr>
                             <?php endforeach; ?>
@@ -2506,8 +2514,16 @@ function foTestRemoteSources() {
                 </form>
                 <form method="post" action="/settings/cluster/clean-queue" class="d-inline">
                     <?= View::csrf() ?>
-                    <button type="button" class="btn btn-outline-warning btn-sm" onclick="confirmCleanQueue(this.closest('form'))">
+                    <input type="hidden" name="type" value="completed">
+                    <button type="button" class="btn btn-outline-warning btn-sm" onclick="confirmCleanQueue(this.closest('form'), 'completados')">
                         <i class="bi bi-trash me-1"></i>Limpiar Completados
+                    </button>
+                </form>
+                <form method="post" action="/settings/cluster/clean-queue" class="d-inline">
+                    <?= View::csrf() ?>
+                    <input type="hidden" name="type" value="failed">
+                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="confirmCleanQueue(this.closest('form'), 'fallidos')">
+                        <i class="bi bi-trash me-1"></i>Limpiar Fallidos
                     </button>
                 </form>
             </div>
@@ -2599,6 +2615,18 @@ document.addEventListener('DOMContentLoaded', function() {
         el.addEventListener('shown.bs.tab', function(e) {
             history.replaceState(null, '', '#' + e.target.dataset.bsTarget.replace('#tab-', ''));
         });
+    });
+
+    // Internal links like href="#archivos" switch to that tab
+    document.addEventListener('click', function(e) {
+        var link = e.target.closest('a[href^="#"]');
+        if (!link) return;
+        var target = link.getAttribute('href').replace('#', '');
+        var tab = document.querySelector('[data-bs-target="#tab-' + target + '"]');
+        if (tab) {
+            e.preventDefault();
+            new bootstrap.Tab(tab).show();
+        }
     });
 });
 
@@ -3270,10 +3298,10 @@ function confirmSyncAll(nodeId, nodeName) {
     });
 }
 
-function confirmCleanQueue(form) {
+function confirmCleanQueue(form, tipo) {
     Swal.fire({
-        title: 'Limpiar cola',
-        text: 'Se eliminarán todos los elementos completados de la cola. ¿Continuar?',
+        title: 'Limpiar ' + tipo,
+        text: 'Se eliminarán todos los elementos ' + tipo + ' de la cola. ¿Continuar?',
         icon: 'question',
         showCancelButton: true,
         confirmButtonText: 'Sí, limpiar',
@@ -3904,9 +3932,9 @@ function fullSync(nodeId, nodeName) {
         html: '<div class="text-start">' +
               '<p>Se ejecutarán los siguientes pasos en secuencia:</p>' +
               '<ol>' +
-              '<li><strong>Hostings</strong> — Crear/reparar cuentas de sistema, PHP-FPM, Caddy (via API)</li>' +
-              '<li><strong>Archivos</strong> — Copiar contenido web con rsync (requiere SSH)</li>' +
-              '<li><strong>Certificados SSL</strong> — Copiar certs de Caddy al slave</li>' +
+              '<li><strong>Hostings (API)</strong> — Crear/reparar cuentas de sistema, PHP-FPM, Caddy en el nodo</li>' +
+              '<li><strong>Archivos (rsync vía SSH)</strong> — Copiar contenido web de /var/www/vhosts/ al slave</li>' +
+              '<li><strong>SSL (rsync vía SSH)</strong> — Copiar certificados de Caddy al slave</li>' +
               '</ol>' +
               '<p class="text-muted small">Si SSH no está configurado, se ejecutará solo el paso 1 y se avisará.</p>' +
               '</div>',

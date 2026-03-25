@@ -628,10 +628,18 @@ class ClusterController
     {
         View::verifyCsrf();
 
-        $deleted = ClusterService::cleanOldItems(0); // Clean all completed
-        LogService::log('cluster.queue', 'clean', "Eliminados {$deleted} elementos completados");
-        Flash::set('success', "Se eliminaron {$deleted} elementos completados de la cola");
-        header('Location: /settings/cluster');
+        $type = $_POST['type'] ?? 'completed';
+
+        if ($type === 'failed') {
+            $deleted = ClusterService::cleanFailedItems();
+            LogService::log('cluster.queue', 'clean', "Eliminados {$deleted} elementos fallidos");
+            Flash::set('success', "Se eliminaron {$deleted} elementos fallidos de la cola");
+        } else {
+            $deleted = ClusterService::cleanOldItems(0);
+            LogService::log('cluster.queue', 'clean', "Eliminados {$deleted} elementos completados");
+            Flash::set('success', "Se eliminaron {$deleted} elementos completados de la cola");
+        }
+        header('Location: /settings/cluster#cola');
         exit;
     }
 

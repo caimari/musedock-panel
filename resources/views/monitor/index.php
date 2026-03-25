@@ -320,7 +320,7 @@
                     <div class="col-md-4">
                         <label class="form-label">CPU threshold (%)</label>
                         <input type="number" class="form-control form-control-sm" name="alert_cpu" value="<?= View::e($alertSettings['cpu'] ?? '90') ?>" min="0" max="100">
-                        <small class="text-muted">0 = disabled</small>
+                        <small class="text-muted">0 = disabled. Media de todos los cores. Ej: 4 cores al 90% = alerta</small>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label">RAM threshold (%)</label>
@@ -330,7 +330,7 @@
                     <div class="col-md-4">
                         <label class="form-label">Network threshold (Mbps)</label>
                         <input type="number" class="form-control form-control-sm" name="alert_net_mbps" value="<?= View::e($alertSettings['net_mbps'] ?? '800') ?>" min="0" max="100000">
-                        <small class="text-muted">0 = disabled</small>
+                        <small class="text-muted">0 = disabled. Megabits/s (no MegaBytes). Ej: 80 Mbps &asymp; 10 MB/s de descarga</small>
                     </div>
                 </div>
                 <div class="row g-3 mb-3">

@@ -20,6 +20,90 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.8',
+                'date' => '2026-03-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Sync de renombrado de usuario al cluster — Renombrar un usuario en el master ahora se propaga automáticamente a los slaves (usuario Linux, PHP-FPM, Caddy, bases de datos)',
+                            'Sync de contraseña al cluster — Cambiar la contraseña de un hosting en el master sincroniza el hash al slave (nunca envía texto plano)',
+                            'Nodos sincronizados en Dashboard — Cuando no hay alertas, se muestra un banner informativo azul debajo de System Info con los nodos online y su último contacto. Link directo al tab Nodos del cluster',
+                            'Limpiar fallidos en Cola — Nuevo botón "Limpiar Fallidos" en la pestaña Cola del cluster para eliminar elementos con status failed, además del existente para completados',
+                        ],
+                        'en' => [
+                            'User rename sync to cluster — Renaming a user on master now propagates to slaves automatically (Linux user, PHP-FPM, Caddy, databases)',
+                            'Password sync to cluster — Changing a hosting password on master syncs the hash to the slave (never sends plaintext)',
+                            'Synced nodes on Dashboard — When no alerts, an informational blue banner below System Info shows online nodes and their last contact. Direct link to cluster Nodes tab',
+                            'Clean failed items in Queue — New "Clean Failed" button in cluster Queue tab to delete items with failed status, in addition to the existing one for completed items',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'CSRF en peticiones AJAX — El middleware ahora detecta peticiones fetch/AJAX y devuelve JSON con error 401/403 en vez de redirigir a HTML, evitando el error "Unexpected token < is not valid JSON"',
+                            'Token CSRF en Dashboard — Corregido bug: el fallback usaba $_SESSION[\'csrf_token\'] (sin underscore) en vez de $_SESSION[\'_csrf_token\']. Añadido input hidden CSRF al dashboard',
+                            'Notas aclaratorias en Monitor — CPU threshold: indica que es la media de todos los cores. Network threshold: aclara que es Megabits/s con ejemplo (80 Mbps ≈ 10 MB/s)',
+                            'Texto de Sync Todo mejorado — Explicación clara: la replicación es automática, Sync Todo re-provisiona hostings existentes (útil al añadir nodo nuevo). Link directo a pestaña Archivos',
+                            'Texto de Sincronización Completa — Detalle de los 3 pasos (Hostings API, Archivos rsync SSH, SSL rsync SSH) con nota de idempotencia (seguro repetir)',
+                            'Espaciado de botones en Nodos — Botones de acciones con gap-2 y flex-wrap para mejor legibilidad',
+                            'Links internos entre pestañas — Los href="#archivos", "#nodos", etc. dentro del cluster ahora activan el tab correspondiente via Bootstrap',
+                            'Redirección a tab Cola — Limpiar cola redirige a #cola en vez de la raíz del cluster',
+                        ],
+                        'en' => [
+                            'CSRF on AJAX requests — Middleware now detects fetch/AJAX requests and returns JSON with 401/403 error instead of redirecting to HTML, fixing the "Unexpected token < is not valid JSON" error',
+                            'CSRF token on Dashboard — Fixed bug: fallback used $_SESSION[\'csrf_token\'] (no underscore) instead of $_SESSION[\'_csrf_token\']. Added hidden CSRF input to dashboard',
+                            'Clarification notes in Monitor — CPU threshold: indicates it\'s the average across all cores. Network threshold: clarifies it\'s Megabits/s with example (80 Mbps ≈ 10 MB/s)',
+                            'Improved Sync Todo text — Clear explanation: replication is automatic, Sync Todo re-provisions existing hostings (useful when adding new node). Direct link to Files tab',
+                            'Full Sync text improved — Detail of 3 steps (Hostings API, Files rsync SSH, SSL rsync SSH) with idempotency note (safe to repeat)',
+                            'Button spacing in Nodes — Action buttons with gap-2 and flex-wrap for better readability',
+                            'Internal tab links — href="#archivos", "#nodos", etc. inside cluster now activate the corresponding tab via Bootstrap',
+                            'Redirect to Queue tab — Clean queue redirects to #cola instead of cluster root',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Botón Reactivar nodo en Dashboard — Devolvía "Unexpected token < is not valid JSON" porque el CSRF fallaba y el middleware redirigía a HTML. Corregido con detección AJAX + token CSRF correcto',
+                        ],
+                        'en' => [
+                            'Reactivate node button on Dashboard — Returned "Unexpected token < is not valid JSON" because CSRF failed and middleware redirected to HTML. Fixed with AJAX detection + correct CSRF token',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.7',
+                'date' => '2026-03-24',
+                'badge' => 'success',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Proteccion de restauracion con contrasena — Restaurar un backup ahora requiere contrasena de administrador, igual que eliminar',
+                            'Deteccion de nodo en replicacion — Al restaurar un backup, el sistema detecta si la base de datos de hosting (PostgreSQL) esta en modo recovery (slave). Si es asi, bloquea la restauracion de bases de datos y solo permite restaurar archivos',
+                            'Preflight de transferencia — Antes de transferir un backup a un nodo remoto, se valida capacidad de disco, espacio en /tmp y limites PHP (upload_max_filesize, post_max_size) del nodo destino',
+                        ],
+                        'en' => [
+                            'Restore password protection — Restoring a backup now requires admin password confirmation, same as deleting',
+                            'Replication node detection — When restoring a backup, the system detects if the hosting database (PostgreSQL) is in recovery mode (slave). If so, it blocks database restoration and only allows file restoration',
+                            'Transfer preflight check — Before transferring a backup to a remote node, validates disk capacity, /tmp space and PHP limits (upload_max_filesize, post_max_size) on the target node',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Transferencia sin recompresion — El empaquetado para transferencia ahora usa tar sin gzip (tar cf en vez de tar czf), evitando recomprimir archivos ya comprimidos. Mas rapido y mismo resultado',
+                            'Nombre descriptivo en descargas — Los archivos descargados ahora incluyen el nombre de la cuenta y fecha (ej: picaliascom_2026-03-24_files.tar.gz) en vez del generico files.tar.gz',
+                            'Errores de transferencia mas claros — Corregido error "HTTP 422" generico: ahora muestra el mensaje real del nodo. Si el nodo remoto no soporta preflight (version antigua), la transferencia continua sin validacion previa en vez de abortar',
+                            'Compatibilidad con paneles antiguos — callNodeDirect ahora busca tanto el campo error como message en respuestas de la API de cluster, evitando errores genericos "HTTP 422"',
+                        ],
+                        'en' => [
+                            'Transfer without recompression — Transfer packaging now uses tar without gzip (tar cf instead of tar czf), avoiding recompressing already compressed files. Faster with same result',
+                            'Descriptive download names — Downloaded files now include account name and date (e.g. picaliascom_2026-03-24_files.tar.gz) instead of generic files.tar.gz',
+                            'Clearer transfer errors — Fixed generic "HTTP 422" error: now shows the actual node message. If remote node does not support preflight (old version), transfer continues without pre-validation instead of aborting',
+                            'Backwards compatibility with older panels — callNodeDirect now checks both error and message fields in cluster API responses, avoiding generic "HTTP 422" errors',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.6',
                 'date' => '2026-03-24',
                 'badge' => 'success',

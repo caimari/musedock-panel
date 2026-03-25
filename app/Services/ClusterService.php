@@ -370,6 +370,11 @@ class ClusterService
         );
     }
 
+    public static function cleanFailedItems(): int
+    {
+        return Database::delete('cluster_queue', "status = 'failed'", []);
+    }
+
     public static function getQueueStats(): array
     {
         $rows = Database::fetchAll(
@@ -736,6 +741,48 @@ class ClusterService
                         return ['ok' => $result['success'] ?? false, 'message' => $result['error'] ?? 'Account deleted'];
                     }
                     return ['ok' => false, 'message' => 'Username required'];
+
+                case 'rename_user':
+                    $oldUsername = $hostingData['old_username'] ?? '';
+                    $newUsername = $hostingData['new_username'] ?? '';
+                    $domain = $hostingData['domain'] ?? '';
+                    $phpVersion = $hostingData['php_version'] ?? '8.3';
+                    if (empty($oldUsername) || empty($newUsername)) {
+                        return ['ok' => false, 'message' => 'old_username and new_username required'];
+                    }
+                    // Check if user exists on this system
+                    $linuxCheck = trim((string)shell_exec(sprintf('id -u %s 2>/dev/null', escapeshellarg($oldUsername))));
+                    if (empty($linuxCheck)) {
+                        // Old user doesn't exist — maybe already renamed or never created
+                        return ['ok' => true, 'message' => "User {$oldUsername} not found on slave, skipping rename"];
+                    }
+                    $result = SystemService::renameUser($oldUsername, $newUsername, $domain, $phpVersion);
+                    if (!($result['success'] ?? false)) {
+                        return ['ok' => false, 'message' => $result['error'] ?? 'Rename failed'];
+                    }
+                    // Update DB
+                    $existing = Database::fetchOne("SELECT id FROM hosting_accounts WHERE username = :u", ['u' => $oldUsername]);
+                    if ($existing) {
+                        Database::update('hosting_accounts', [
+                            'username'   => $newUsername,
+                            'fpm_socket' => $result['fpm_socket'] ?? '',
+                            'caddy_route_id' => $result['caddy_route_id'] ?? '',
+                            'updated_at' => date('Y-m-d H:i:s'),
+                        ], 'id = :id', ['id' => (int)$existing['id']]);
+                        Database::query("UPDATE hosting_databases SET db_user = :new WHERE db_user = :old", ['new' => $newUsername, 'old' => $oldUsername]);
+                    }
+                    LogService::log('cluster.sync', $domain, "User renamed from master: {$oldUsername} -> {$newUsername}");
+                    return ['ok' => true, 'message' => "User renamed: {$oldUsername} -> {$newUsername}"];
+
+                case 'change_password':
+                    $username = $hostingData['username'] ?? '';
+                    $passwordHash = $hostingData['password_hash'] ?? '';
+                    if (empty($username) || empty($passwordHash)) {
+                        return ['ok' => false, 'message' => 'username and password_hash required'];
+                    }
+                    SystemService::setPasswordHash($username, $passwordHash);
+                    LogService::log('cluster.sync', $username, "Password synced from master");
+                    return ['ok' => true, 'message' => "Password updated for {$username}"];
 
                 default:
                     return ['ok' => false, 'message' => "Unknown hosting action: {$hostingAction}"];

@@ -467,6 +467,22 @@ class AccountController
             $warnings = ' Advertencias: ' . implode(', ', $result['warnings']);
         }
 
+        // Sync rename to cluster slaves
+        if (\MuseDockPanel\Settings::get('cluster_role', 'standalone') === 'master') {
+            $nodes = \MuseDockPanel\Services\ClusterService::getWebNodes();
+            foreach ($nodes as $node) {
+                \MuseDockPanel\Services\ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                    'hosting_action' => 'rename_user',
+                    'hosting_data' => [
+                        'old_username' => $oldUsername,
+                        'new_username' => $newUsername,
+                        'domain'       => $account['domain'],
+                        'php_version'  => $account['php_version'],
+                    ],
+                ]);
+            }
+        }
+
         LogService::log('account.rename', $account['domain'], "User renamed: {$oldUsername} -> {$newUsername}");
         Flash::set('success', "Usuario renombrado: {$oldUsername} -> {$newUsername}. Archivos, FPM y Caddy actualizados.{$warnings}");
         Router::redirect('/accounts/' . $params['id'] . '/edit');
@@ -489,6 +505,24 @@ class AccountController
         }
 
         SystemService::setUserPassword($account['username'], $password);
+
+        // Sync password to cluster slaves (hash, not plaintext)
+        if (\MuseDockPanel\Settings::get('cluster_role', 'standalone') === 'master') {
+            $passwordHash = trim((string)shell_exec(sprintf("getent shadow %s 2>/dev/null | cut -d: -f2", escapeshellarg($account['username']))));
+            if ($passwordHash && $passwordHash !== '!' && $passwordHash !== '*') {
+                $nodes = \MuseDockPanel\Services\ClusterService::getWebNodes();
+                foreach ($nodes as $node) {
+                    \MuseDockPanel\Services\ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                        'hosting_action' => 'change_password',
+                        'hosting_data' => [
+                            'username'      => $account['username'],
+                            'password_hash' => $passwordHash,
+                        ],
+                    ]);
+                }
+            }
+        }
+
         LogService::log('account.password', $account['domain'], "Changed password for user: {$account['username']}");
         Flash::set('success', "Password cambiado para {$account['username']}.");
         Router::redirect('/accounts/' . $params['id'] . '/edit');

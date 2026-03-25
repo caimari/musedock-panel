@@ -1,4 +1,5 @@
 <?php use MuseDockPanel\View; ?>
+<?= View::csrf() ?>
 
 <!-- Offline / Standby Nodes Alert Banner -->
 <?php if (!empty($offlineNodes)):
@@ -26,7 +27,7 @@
                         <strong><?= count($standbyNodes) ?> nodo<?= count($standbyNodes) > 1 ? 's' : '' ?> en standby</strong>
                     <?php endif; ?>
                 </span>
-                <a href="/settings/cluster" class="btn btn-outline-<?= $hasDown ? 'light' : 'dark' ?> btn-sm py-0">
+                <a href="/settings/cluster#nodos" class="btn btn-outline-<?= $hasDown ? 'light' : 'dark' ?> btn-sm py-0">
                     <i class="bi bi-gear me-1"></i>Cluster
                 </a>
             </div>
@@ -424,6 +425,35 @@
     </div>
 </div>
 
+<?php if (empty($offlineNodes) && !empty($onlineNodes)): ?>
+<!-- Synced Nodes (info, no alert) -->
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="card" style="border-color:#0d6efd33 !important;">
+            <div class="card-header d-flex justify-content-between align-items-center py-2" style="background:rgba(13,110,253,0.08);border-bottom:1px solid #0d6efd22;">
+                <span style="color:#6ea8fe;">
+                    <i class="bi bi-arrow-repeat me-2"></i>
+                    <strong><?= count($onlineNodes) ?> nodo<?= count($onlineNodes) > 1 ? 's' : '' ?> sincronizado<?= count($onlineNodes) > 1 ? 's' : '' ?></strong>
+                </span>
+                <a href="/settings/cluster#nodos" class="btn btn-outline-info btn-sm py-0">
+                    <i class="bi bi-gear me-1"></i>Cluster
+                </a>
+            </div>
+            <div class="card-body py-2 px-3">
+                <?php foreach ($onlineNodes as $oNode): ?>
+                <div class="d-flex align-items-center gap-2 <?= count($onlineNodes) > 1 ? 'mb-1' : '' ?>">
+                    <i class="bi bi-circle-fill text-success" style="font-size:0.45rem;"></i>
+                    <strong class="small" style="color:#e2e8f0;"><?= View::e($oNode['name']) ?></strong>
+                    <code class="small text-muted"><?= View::e($oNode['api_url']) ?></code>
+                    <span class="text-muted small ms-auto"><?= View::e($oNode['last_seen_at']) ?></span>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <style>
     .stat-card[role="button"]:hover {
         border-color: rgba(255,255,255,0.3) !important;
@@ -697,7 +727,7 @@
 
     // ─── Kill Process ───────────────────────────────────────
 
-    const csrfToken = document.querySelector('input[name=_csrf_token]')?.value || '<?= $_SESSION['csrf_token'] ?? '' ?>';
+    const csrfToken = document.querySelector('input[name=_csrf_token]')?.value || '<?= $_SESSION['_csrf_token'] ?? '' ?>';
 
     window.killProcess = async function(pid, signal) {
         if (!pid || pid < 2) return;
@@ -753,7 +783,7 @@
 
 // ─── Node Alert Mute/Unmute ──────────────────────────────
 window.toggleNodeAlerts = async function(nodeId, action, nodeName) {
-    const csrfToken = document.querySelector('input[name=_csrf_token]')?.value || '<?= $_SESSION['csrf_token'] ?? '' ?>';
+    const csrfToken = document.querySelector('input[name=_csrf_token]')?.value || '<?= $_SESSION['_csrf_token'] ?? '' ?>';
     const isMute = action === 'mute';
 
     const confirmed = await (typeof SwalDark !== 'undefined' ? SwalDark : Swal).fire({
@@ -801,7 +831,7 @@ window.toggleNodeAlerts = async function(nodeId, action, nodeName) {
 
 window.reactivateNode = async function(nodeId, nodeName) {
     const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
-    const csrfToken = document.querySelector('input[name=_csrf_token]')?.value || '<?= $_SESSION['csrf_token'] ?? '' ?>';
+    const csrfToken = document.querySelector('input[name=_csrf_token]')?.value || '<?= $_SESSION['_csrf_token'] ?? '' ?>';
 
     const result = await S.fire({
         title: 'Reactivar nodo',
