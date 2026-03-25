@@ -1571,9 +1571,14 @@
     <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span><i class="bi bi-cloud me-2"></i>Cuentas Cloudflare</span>
-            <button type="button" class="btn btn-outline-info btn-sm" onclick="foAddCfAccount()">
-                <i class="bi bi-plus me-1"></i>Añadir cuenta
-            </button>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="showCfHelp()">
+                    <i class="bi bi-question-circle me-1"></i>Instrucciones
+                </button>
+                <button type="button" class="btn btn-outline-info btn-sm" onclick="foAddCfAccount()">
+                    <i class="bi bi-plus me-1"></i>Añadir cuenta
+                </button>
+            </div>
         </div>
         <div class="card-body">
             <form method="post" action="/settings/failover/save-cf-accounts" id="form-cf-accounts">
@@ -2145,6 +2150,53 @@ function foExecute(action, description) {
                 }
             })
             .catch(e => { el.querySelector('pre').textContent = 'Error: ' + e.message; });
+    });
+}
+
+function showCfHelp() {
+    SwalDark.fire({
+        title: '<i class="bi bi-cloud-fill" style="color:#f97316;"></i> Cuentas Cloudflare',
+        html: `
+            <div class="text-start" style="font-size:0.9rem; line-height:1.7;">
+                <p class="mb-2">Cada cuenta de Cloudflare se conecta con un <strong>API Token</strong> que permite gestionar DNS automaticamente.</p>
+
+                <h6 class="mt-3 mb-2" style="color:#38bdf8;">Como crear el API Token</h6>
+                <ol class="ps-3 mb-3">
+                    <li>Entra en <strong>dash.cloudflare.com</strong> &rarr; My Profile &rarr; <strong>API Tokens</strong></li>
+                    <li>Click en <strong>"Create Token"</strong></li>
+                    <li>Usa la plantilla <strong>"Edit zone DNS"</strong></li>
+                    <li>En <em>Zone Resources</em> selecciona:
+                        <ul>
+                            <li><strong>All zones</strong> (si quieres que cubra todos los dominios de esa cuenta)</li>
+                            <li>O <strong>Specific zone</strong> para restringir a un dominio concreto</li>
+                        </ul>
+                    </li>
+                    <li>Click en <strong>"Continue to summary"</strong> &rarr; <strong>"Create Token"</strong></li>
+                    <li>Copia el token y pegalo aqui</li>
+                </ol>
+
+                <h6 class="mt-3 mb-2" style="color:#38bdf8;">Multiples cuentas Cloudflare</h6>
+                <p class="mb-2">Si tienes dominios en <strong>distintas cuentas de Cloudflare</strong> (ej: una cuenta personal y otra de empresa), simplemente anade una fila por cada cuenta con su propio token.</p>
+                <p class="mb-2">Cada token solo tiene acceso a las zonas de su cuenta. El panel detecta automaticamente que zonas/dominios pertenecen a cada token.</p>
+
+                <div class="mt-3 p-2 rounded" style="background:rgba(249,115,22,0.1);border:1px solid rgba(249,115,22,0.2);">
+                    <small style="color:#f97316;">
+                        <i class="bi bi-shield-lock me-1"></i>
+                        <strong>Seguridad:</strong> Usa siempre tokens con permisos minimos (solo "Edit zone DNS"). Nunca uses la API Key global de Cloudflare.
+                    </small>
+                </div>
+
+                <h6 class="mt-3 mb-2" style="color:#38bdf8;">Para que se usa?</h6>
+                <ul class="ps-3 mb-0">
+                    <li><strong>Failover automatico:</strong> cambiar DNS A records cuando un servidor cae</li>
+                    <li><strong>Cloudflare DNS Manager:</strong> gestionar registros DNS desde el panel (<a href="/settings/cloudflare-dns" style="color:#38bdf8;">Settings &rarr; Cloudflare DNS</a>)</li>
+                    <li><strong>Toggle proxy:</strong> activar/desactivar el proxy naranja (CDN/DDoS) desde la vista de cada hosting</li>
+                </ul>
+            </div>
+        `,
+        width: 650,
+        showConfirmButton: true,
+        confirmButtonText: 'Entendido',
     });
 }
 
