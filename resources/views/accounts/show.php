@@ -142,6 +142,105 @@
             </div>
         </div>
 
+        <!-- Domain Aliases -->
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-diagram-3 me-2"></i>Alias de Dominio</span>
+                <span class="badge bg-info"><?= count($aliases ?? []) ?></span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-2">
+                    <i class="bi bi-info-circle me-1"></i>Dominios que sirven el <strong>mismo contenido</strong> que <?= View::e($account['domain']) ?>. Caddy genera SSL para cada alias.
+                </p>
+                <?php if (!empty($aliases)): ?>
+                <table class="table table-sm mb-3">
+                    <thead><tr><th>Dominio</th><th class="text-end">Acciones</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($aliases as $alias): ?>
+                        <tr>
+                            <td>
+                                <i class="bi bi-circle-fill text-success me-1" style="font-size:0.4rem;vertical-align:middle;"></i>
+                                <?= View::e($alias['domain']) ?>
+                                <span class="text-muted small ms-1">+ www</span>
+                            </td>
+                            <td class="text-end">
+                                <form method="post" action="/accounts/<?= (int)$account['id'] ?>/aliases/<?= (int)$alias['id'] ?>/delete" class="d-inline" onsubmit="return confirm('Eliminar alias <?= View::e($alias['domain']) ?>?')">
+                                    <?= View::csrf() ?>
+                                    <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-2"><i class="bi bi-trash"></i></button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <?php endif; ?>
+                <form method="post" action="/accounts/<?= (int)$account['id'] ?>/aliases/add" class="d-flex gap-2 align-items-end">
+                    <?= View::csrf() ?>
+                    <div class="flex-grow-1">
+                        <label class="form-label small text-muted mb-1">Nuevo alias</label>
+                        <input type="text" name="domain" class="form-control form-control-sm" placeholder="ejemplo.net" required pattern="[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-plus-circle me-1"></i>Añadir</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Domain Redirects -->
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-signpost me-2"></i>Redirecciones de Dominio</span>
+                <span class="badge bg-warning text-dark"><?= count($redirects ?? []) ?></span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-2">
+                    <i class="bi bi-info-circle me-1"></i>Dominios que <strong>redirigen (301/302)</strong> a <?= View::e($account['domain']) ?>. Google transfiere el posicionamiento SEO con 301.
+                </p>
+                <?php if (!empty($redirects)): ?>
+                <table class="table table-sm mb-3">
+                    <thead><tr><th>Dominio</th><th>Código</th><th>Ruta</th><th class="text-end">Acciones</th></tr></thead>
+                    <tbody>
+                    <?php foreach ($redirects as $redir): ?>
+                        <tr>
+                            <td>
+                                <i class="bi bi-arrow-right-circle text-warning me-1"></i>
+                                <?= View::e($redir['domain']) ?>
+                                <span class="text-muted small">→ <?= View::e($account['domain']) ?></span>
+                            </td>
+                            <td><span class="badge <?= $redir['redirect_code'] == 301 ? 'bg-success' : 'bg-info' ?>"><?= (int)$redir['redirect_code'] ?></span></td>
+                            <td><?= $redir['preserve_path'] ? '<i class="bi bi-check-lg text-success"></i> Conserva' : '<i class="bi bi-x-lg text-muted"></i> Raíz' ?></td>
+                            <td class="text-end">
+                                <form method="post" action="/accounts/<?= (int)$account['id'] ?>/redirects/<?= (int)$redir['id'] ?>/delete" class="d-inline" onsubmit="return confirm('Eliminar redirección <?= View::e($redir['domain']) ?>?')">
+                                    <?= View::csrf() ?>
+                                    <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-2"><i class="bi bi-trash"></i></button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <?php endif; ?>
+                <form method="post" action="/accounts/<?= (int)$account['id'] ?>/redirects/add" class="d-flex gap-2 align-items-end flex-wrap">
+                    <?= View::csrf() ?>
+                    <div class="flex-grow-1">
+                        <label class="form-label small text-muted mb-1">Dominio a redirigir</label>
+                        <input type="text" name="domain" class="form-control form-control-sm" placeholder="musedock.net" required pattern="[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}">
+                    </div>
+                    <div>
+                        <label class="form-label small text-muted mb-1">Código</label>
+                        <select name="redirect_code" class="form-select form-select-sm">
+                            <option value="301">301 Permanente (SEO)</option>
+                            <option value="302">302 Temporal</option>
+                        </select>
+                    </div>
+                    <div class="d-flex align-items-center gap-1 pb-1">
+                        <input type="checkbox" name="preserve_path" value="1" checked class="form-check-input" id="preserve-path-<?= (int)$account['id'] ?>">
+                        <label class="form-check-label small" for="preserve-path-<?= (int)$account['id'] ?>">Conservar ruta</label>
+                    </div>
+                    <button type="submit" class="btn btn-warning btn-sm"><i class="bi bi-plus-circle me-1"></i>Añadir</button>
+                </form>
+            </div>
+        </div>
+
         <!-- Mail -->
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">

@@ -440,11 +440,49 @@
                 </a>
             </div>
             <div class="card-body py-2 px-3">
-                <?php foreach ($onlineNodes as $oNode): ?>
-                <div class="d-flex align-items-center gap-2 <?= count($onlineNodes) > 1 ? 'mb-1' : '' ?>">
+                <?php foreach ($onlineNodes as $oNode):
+                    $svc = $oNode['services'] ?? ['web'];
+                    $replRole = $oNode['repl_role'] ?? 'standalone';
+                    $pgRepl = $oNode['pg_repl'] ?? null;
+                    $mysqlRepl = $oNode['mysql_repl'] ?? null;
+                    // PG replication status
+                    $pgOk = $pgRepl && (($pgRepl['streaming'] ?? false) || ($pgRepl['state'] ?? '') === 'streaming');
+                    // MySQL replication status
+                    $mysqlOk = $mysqlRepl && (($mysqlRepl['running'] ?? false) || (($mysqlRepl['io_running'] ?? '') === 'Yes' && ($mysqlRepl['sql_running'] ?? '') === 'Yes'));
+                ?>
+                <div class="d-flex align-items-center gap-2 <?= count($onlineNodes) > 1 ? 'mb-2' : '' ?> flex-wrap">
                     <i class="bi bi-circle-fill text-success" style="font-size:0.45rem;"></i>
                     <strong class="small" style="color:#e2e8f0;"><?= View::e($oNode['name']) ?></strong>
-                    <code class="small text-muted"><?= View::e($oNode['api_url']) ?></code>
+                    <div class="d-flex gap-1">
+                        <?php if (in_array('web', $svc)): ?>
+                            <span class="badge" style="font-size:0.65rem;background:#1a5c2a;color:#4ade80;">web</span>
+                        <?php endif; ?>
+                        <?php if (in_array('mail', $svc)): ?>
+                            <span class="badge" style="font-size:0.65rem;background:#1a3a5c;color:#60a5fa;">mail</span>
+                        <?php endif; ?>
+                        <?php if ($replRole !== 'standalone'): ?>
+                            <?php if ($pgOk): ?>
+                                <span class="badge" style="font-size:0.65rem;background:#1a3a5c;color:#60a5fa;" title="PostgreSQL streaming">
+                                    <i class="bi bi-database me-1"></i>PG <i class="bi bi-check-lg"></i>
+                                </span>
+                            <?php elseif ($pgRepl !== null): ?>
+                                <span class="badge" style="font-size:0.65rem;background:#5c1a1a;color:#f87171;" title="PostgreSQL no replicando">
+                                    <i class="bi bi-database me-1"></i>PG <i class="bi bi-x-lg"></i>
+                                </span>
+                            <?php endif; ?>
+                            <?php if ($mysqlOk): ?>
+                                <span class="badge" style="font-size:0.65rem;background:#1a3a5c;color:#60a5fa;" title="MySQL replicando">
+                                    <i class="bi bi-database me-1"></i>MySQL <i class="bi bi-check-lg"></i>
+                                </span>
+                            <?php elseif ($mysqlRepl !== null): ?>
+                                <span class="badge" style="font-size:0.65rem;background:#5c1a1a;color:#f87171;" title="MySQL no replicando">
+                                    <i class="bi bi-database me-1"></i>MySQL <i class="bi bi-x-lg"></i>
+                                </span>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <span class="badge" style="font-size:0.65rem;background:#3a3a3a;color:#9ca3af;" title="Sin replicación de BD">standalone</span>
+                        <?php endif; ?>
+                    </div>
                     <span class="text-muted small ms-auto"><?= View::e($oNode['last_seen_at']) ?></span>
                 </div>
                 <?php endforeach; ?>

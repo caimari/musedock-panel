@@ -67,11 +67,20 @@ class DashboardController
                     ];
                 } elseif (!$isDown && !$isStandby) {
                     $lastSeen = $node['last_seen_at'] ? date('Y-m-d H:i:s', strtotime($node['last_seen_at'])) : '';
+                    $meta = json_decode($node['metadata'] ?? '{}', true) ?: [];
+                    $nodeServices = json_decode($node['services'] ?? '["web"]', true) ?: ['web'];
+                    $replRole = $meta['repl_role'] ?? 'standalone';
+                    $pgRepl = $meta['pg_replication'] ?? null;
+                    $mysqlRepl = $meta['mysql_replication'] ?? null;
                     $onlineNodes[] = [
                         'id'           => $node['id'],
                         'name'         => $node['name'],
                         'api_url'      => $node['api_url'],
                         'last_seen_at' => $lastSeen,
+                        'services'     => $nodeServices,
+                        'repl_role'    => $replRole,
+                        'pg_repl'      => $pgRepl,
+                        'mysql_repl'   => $mysqlRepl,
                     ];
                 }
             }

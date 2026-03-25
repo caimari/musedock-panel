@@ -475,10 +475,22 @@ class ClusterService
 
         if ($result['ok']) {
             $remoteData = $result['data'] ?? [];
+
+            // Merge heartbeat info into metadata (preserve existing fields like alerts_muted)
+            $existingMeta = json_decode($node['metadata'] ?? '{}', true) ?: [];
+            $existingMeta['repl_role']         = $remoteData['repl_role'] ?? 'standalone';
+            $existingMeta['pg_replication']     = $remoteData['pg_replication'] ?? null;
+            $existingMeta['mysql_replication']  = $remoteData['mysql_replication'] ?? null;
+            $existingMeta['pg_5432_status']     = $remoteData['pg_5432_status'] ?? null;
+            $existingMeta['mysql_status']       = $remoteData['mysql_status'] ?? null;
+            $existingMeta['hosting_count']      = $remoteData['hosting_count'] ?? 0;
+            $existingMeta['panel_version']      = $remoteData['panel_version'] ?? '';
+
             Database::update('cluster_nodes', [
                 'status'       => 'online',
                 'last_seen_at' => date('Y-m-d H:i:s'),
                 'role'         => $remoteData['role'] ?? 'unknown',
+                'metadata'     => json_encode($existingMeta),
                 'updated_at'   => date('Y-m-d H:i:s'),
             ], 'id = :id', ['id' => $nodeId]);
         } else {
@@ -736,7 +748,18 @@ class ClusterService
 
                 case 'delete_hosting':
                     $username = $hostingData['username'] ?? '';
+                    $domain = $hostingData['domain'] ?? '';
                     if ($username) {
+                        // Clean up redirect routes before deleting
+                        if ($domain) {
+                            $acc = Database::fetchOne("SELECT id FROM hosting_accounts WHERE domain = :d", ['d' => $domain]);
+                            if ($acc) {
+                                $redirects = DomainAliasService::getRedirects((int)$acc['id']);
+                                foreach ($redirects as $r) {
+                                    SystemService::removeCaddyRedirectRoute($r['domain']);
+                                }
+                            }
+                        }
                         $result = SystemService::deleteAccount($username);
                         return ['ok' => $result['success'] ?? false, 'message' => $result['error'] ?? 'Account deleted'];
                     }
@@ -783,6 +806,52 @@ class ClusterService
                     SystemService::setPasswordHash($username, $passwordHash);
                     LogService::log('cluster.sync', $username, "Password synced from master");
                     return ['ok' => true, 'message' => "Password updated for {$username}"];
+
+                case 'add_domain_alias':
+                    $mainDomain = $hostingData['main_domain'] ?? '';
+                    $aliasDomain = $hostingData['alias_domain'] ?? '';
+                    $type = $hostingData['type'] ?? 'alias';
+                    if (empty($mainDomain) || empty($aliasDomain)) {
+                        return ['ok' => false, 'message' => 'main_domain and alias_domain required'];
+                    }
+                    $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE domain = :d", ['d' => $mainDomain]);
+                    if (!$account) {
+                        return ['ok' => false, 'message' => "Hosting {$mainDomain} not found on slave"];
+                    }
+                    if ($type === 'alias') {
+                        $result = DomainAliasService::addAlias((int)$account['id'], $aliasDomain);
+                    } else {
+                        $code = (int)($hostingData['redirect_code'] ?? 301);
+                        $preservePath = (bool)($hostingData['preserve_path'] ?? true);
+                        $result = DomainAliasService::addRedirect((int)$account['id'], $aliasDomain, $code, $preservePath);
+                    }
+                    LogService::log('cluster.sync', $mainDomain, "Domain {$type} synced from master: {$aliasDomain}");
+                    return $result;
+
+                case 'remove_domain_alias':
+                    $mainDomain = $hostingData['main_domain'] ?? '';
+                    $aliasDomain = $hostingData['alias_domain'] ?? '';
+                    if (empty($aliasDomain)) {
+                        return ['ok' => false, 'message' => 'alias_domain required'];
+                    }
+                    $row = Database::fetchOne("SELECT id FROM hosting_domain_aliases WHERE domain = :d", ['d' => $aliasDomain]);
+                    if ($row) {
+                        $result = DomainAliasService::remove((int)$row['id']);
+                        LogService::log('cluster.sync', $mainDomain, "Domain alias/redirect removed from master: {$aliasDomain}");
+                        return $result;
+                    }
+                    return ['ok' => true, 'message' => "Alias {$aliasDomain} not found on slave, skipping"];
+
+                case 'sync_domain_aliases':
+                    $mainDomain = $hostingData['main_domain'] ?? '';
+                    $aliases = $hostingData['aliases'] ?? [];
+                    $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE domain = :d", ['d' => $mainDomain]);
+                    if (!$account) {
+                        return ['ok' => false, 'message' => "Hosting {$mainDomain} not found on slave"];
+                    }
+                    DomainAliasService::importFromMaster((int)$account['id'], $account, $aliases);
+                    LogService::log('cluster.sync', $mainDomain, "Domain aliases synced from master: " . count($aliases) . " entries");
+                    return ['ok' => true, 'message' => "Aliases synced for {$mainDomain}"];
 
                 default:
                     return ['ok' => false, 'message' => "Unknown hosting action: {$hostingAction}"];

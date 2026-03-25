@@ -206,6 +206,10 @@ class AccountController
         $mailLocalConfigured = Settings::get('mail_local_configured', '') === '1';
         $hasMailNodes = !empty(MailService::getMailNodes()) || $mailLocalConfigured;
 
+        // Domain aliases & redirects
+        $aliases = \MuseDockPanel\Services\DomainAliasService::getAliases((int)$account['id']);
+        $redirects = \MuseDockPanel\Services\DomainAliasService::getRedirects((int)$account['id']);
+
         View::render('accounts/show', [
             'layout' => 'main',
             'pageTitle' => $account['domain'],
@@ -216,6 +220,8 @@ class AccountController
             'mailAccounts' => $mailAccounts,
             'mailEnabled' => $mailEnabled,
             'hasMailNodes' => $hasMailNodes,
+            'aliases' => $aliases,
+            'redirects' => $redirects,
         ]);
     }
 
@@ -542,14 +548,8 @@ class AccountController
         $caddyApi = $config['caddy']['api_url'];
         $routeId = $account['caddy_route_id'] ?? "hosting-{$account['username']}";
 
-        // Delete existing route
-        $ch = curl_init("{$caddyApi}/id/{$routeId}");
-        curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
-        curl_exec($ch);
-        curl_close($ch);
-
-        // Re-add the route (this triggers new certificate)
-        $newRouteId = SystemService::addCaddyRoute($account['domain'], $account['document_root'], $account['username'], $account['php_version']);
+        // Re-add the route including aliases (this triggers new certificates)
+        $newRouteId = \MuseDockPanel\Services\DomainAliasService::rebuildCaddyRoute($account) ? $routeId : null;
 
         if ($newRouteId) {
             LogService::log('account.ssl', $account['domain'], "SSL certificate renewal triggered");
@@ -559,6 +559,93 @@ class AccountController
         }
 
         Router::redirect('/accounts/' . $params['id']);
+    }
+
+    // ─── Domain Aliases ──────────────────────────────────────
+
+    public function addAlias(array $params): void
+    {
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
+
+        $domain = strtolower(trim($_POST['domain'] ?? ''));
+        $result = \MuseDockPanel\Services\DomainAliasService::addAlias((int)$account['id'], $domain);
+
+        if (!$result['ok']) {
+            Flash::set('error', $result['error']);
+        } else {
+            // Cluster sync
+            if (Settings::get('cluster_role', 'standalone') === 'master') {
+                $this->syncAliasToCluster($account, $domain, 'alias', 'add');
+            }
+            LogService::log('account.alias', $account['domain'], "Alias añadido: {$domain}");
+            Flash::set('success', "Alias '{$domain}' añadido. Caddy: " . ($result['caddy'] ? 'OK' : 'pendiente'));
+        }
+        Router::redirect('/accounts/' . $params['id']);
+    }
+
+    public function removeAlias(array $params): void
+    {
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
+
+        $result = \MuseDockPanel\Services\DomainAliasService::remove((int)$params['alias_id']);
+
+        if (!$result['ok']) {
+            Flash::set('error', $result['error']);
+        } else {
+            if (Settings::get('cluster_role', 'standalone') === 'master') {
+                $this->syncAliasToCluster($account, $result['domain'], $result['type'], 'remove');
+            }
+            LogService::log('account.alias', $account['domain'], ucfirst($result['type']) . " eliminado: {$result['domain']}");
+            Flash::set('success', ucfirst($result['type']) . " '{$result['domain']}' eliminado.");
+        }
+        Router::redirect('/accounts/' . $params['id']);
+    }
+
+    public function addRedirect(array $params): void
+    {
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
+
+        $domain = strtolower(trim($_POST['domain'] ?? ''));
+        $code = (int)($_POST['redirect_code'] ?? 301);
+        $preservePath = !empty($_POST['preserve_path']);
+
+        if (!in_array($code, [301, 302])) $code = 301;
+
+        $result = \MuseDockPanel\Services\DomainAliasService::addRedirect((int)$account['id'], $domain, $code, $preservePath);
+
+        if (!$result['ok']) {
+            Flash::set('error', $result['error']);
+        } else {
+            if (Settings::get('cluster_role', 'standalone') === 'master') {
+                $this->syncAliasToCluster($account, $domain, 'redirect', 'add', $code, $preservePath);
+            }
+            LogService::log('account.redirect', $account['domain'], "Redirección {$code} añadida: {$domain}");
+            Flash::set('success', "Redirección {$code} '{$domain}' → '{$account['domain']}' añadida.");
+        }
+        Router::redirect('/accounts/' . $params['id']);
+    }
+
+    private function syncAliasToCluster(array $account, string $domain, string $type, string $action, int $code = 301, bool $preservePath = true): void
+    {
+        $nodes = \MuseDockPanel\Services\ClusterService::getWebNodes();
+        foreach ($nodes as $node) {
+            \MuseDockPanel\Services\ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                'hosting_action' => $action === 'add' ? 'add_domain_alias' : 'remove_domain_alias',
+                'hosting_data' => [
+                    'main_domain'   => $account['domain'],
+                    'alias_domain'  => $domain,
+                    'type'          => $type,
+                    'redirect_code' => $code,
+                    'preserve_path' => $preservePath,
+                    'username'      => $account['username'],
+                    'document_root' => $account['document_root'],
+                    'php_version'   => $account['php_version'],
+                ],
+            ]);
+        }
     }
 
     public function suspend(array $params): void
@@ -1114,6 +1201,12 @@ class AccountController
             Flash::set('error', 'Solo se pueden eliminar cuentas suspendidas. Suspende primero.');
             Router::redirect('/accounts/' . $params['id']);
             return;
+        }
+
+        // Clean up Caddy redirect routes before account deletion (aliases cascade in DB)
+        $redirects = \MuseDockPanel\Services\DomainAliasService::getRedirects((int)$account['id']);
+        foreach ($redirects as $r) {
+            SystemService::removeCaddyRedirectRoute($r['domain']);
         }
 
         SystemService::deleteAccount($account['username'], $account['domain'], $account['home_dir']);

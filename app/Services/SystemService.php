@@ -473,6 +473,149 @@ CONF;
     }
 
     /**
+     * Add a Caddy route matching multiple domains (main + aliases).
+     * Deletes existing route first, then creates with all domains.
+     */
+    public static function rebuildCaddyRouteWithAliases(string $mainDomain, array $aliasDomains, string $documentRoot, string $username, string $phpVersion = '8.3'): ?string
+    {
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = $config['caddy']['api_url'];
+        $routeId = "hosting-{$username}";
+
+        // Build full host list: main + www.main + each alias + www.alias
+        $hosts = [$mainDomain, "www.{$mainDomain}"];
+        foreach ($aliasDomains as $alias) {
+            $alias = trim($alias);
+            if ($alias && !in_array($alias, $hosts)) {
+                $hosts[] = $alias;
+                $hosts[] = "www.{$alias}";
+            }
+        }
+
+        // Delete existing route
+        $ch = curl_init("{$caddyApi}/id/{$routeId}");
+        curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
+        curl_exec($ch);
+        curl_close($ch);
+
+        // Ensure TLS catch-all policy
+        self::ensureTlsCatchAllPolicy($caddyApi);
+
+        $socketPath = "/run/php/php{$phpVersion}-fpm-{$username}.sock";
+        $caddyConfig = [
+            '@id' => $routeId,
+            'match' => [['host' => $hosts]],
+            'handle' => [
+                [
+                    'handler' => 'subroute',
+                    'routes' => [
+                        [
+                            'handle' => [['handler' => 'vars', 'root' => $documentRoot]]
+                        ],
+                        [
+                            'match' => [['path' => ['*.jpg', '*.jpeg', '*.png', '*.gif', '*.webp', '*.svg', '*.ico', '*.css', '*.js', '*.woff', '*.woff2']]],
+                            'handle' => [['handler' => 'headers', 'response' => ['set' => ['Cache-Control' => ['public, max-age=2592000']]]]]
+                        ],
+                        [
+                            'match' => [['file' => ['try_files' => ['{http.request.uri.path}', '{http.request.uri.path}/index.php', '/index.php']]]],
+                            'handle' => [['handler' => 'rewrite', 'uri' => '{http.matchers.file.relative}']]
+                        ],
+                        [
+                            'match' => [['path' => ['*.php']]],
+                            'handle' => [
+                                [
+                                    'handler' => 'reverse_proxy',
+                                    'transport' => ['protocol' => 'fastcgi', 'root' => $documentRoot, 'split_path' => ['.php']],
+                                    'upstreams' => [['dial' => "unix/{$socketPath}"]]
+                                ]
+                            ]
+                        ],
+                        [
+                            'handle' => [['handler' => 'file_server', 'root' => $documentRoot, 'hide' => ['.git', '.env', '.htaccess']]]
+                        ]
+                    ]
+                ]
+            ],
+            'terminal' => true,
+        ];
+
+        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($caddyConfig),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        return ($httpCode >= 200 && $httpCode < 300) ? $routeId : null;
+    }
+
+    /**
+     * Add a Caddy redirect route (301/302) for a domain pointing to another domain.
+     */
+    public static function addCaddyRedirectRoute(string $fromDomain, string $toDomain, int $code = 301, bool $preservePath = true): ?string
+    {
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = $config['caddy']['api_url'];
+        $routeId = 'redirect-' . str_replace('.', '-', $fromDomain);
+
+        self::ensureTlsCatchAllPolicy($caddyApi);
+
+        $location = $preservePath
+            ? "https://{$toDomain}{http.request.uri}"
+            : "https://{$toDomain}/";
+
+        $caddyConfig = [
+            '@id' => $routeId,
+            'match' => [['host' => [$fromDomain, "www.{$fromDomain}"]]],
+            'handle' => [
+                [
+                    'handler' => 'static_response',
+                    'status_code' => (string)$code,
+                    'headers' => ['Location' => [$location]],
+                ]
+            ],
+            'terminal' => true,
+        ];
+
+        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($caddyConfig),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        return ($httpCode >= 200 && $httpCode < 300) ? $routeId : null;
+    }
+
+    /**
+     * Remove a Caddy redirect route by domain.
+     */
+    public static function removeCaddyRedirectRoute(string $fromDomain): bool
+    {
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = $config['caddy']['api_url'];
+        $routeId = 'redirect-' . str_replace('.', '-', $fromDomain);
+
+        $ch = curl_init("{$caddyApi}/id/{$routeId}");
+        curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
+        curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        return $httpCode >= 200 && $httpCode < 300;
+    }
+
+    /**
      * Update just the document root on an existing Caddy route (delete + recreate)
      */
     public static function updateCaddyDocumentRoot(string $domain, string $newDocRoot, string $username, string $phpVersion = '8.3'): bool

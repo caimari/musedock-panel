@@ -130,6 +130,12 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/rename-user', 'AccountController@renameUser');
 \MuseDockPanel\Router::post('/accounts/{id}/php', 'AccountController@updatePhp');
 
+// Domain Aliases & Redirects
+\MuseDockPanel\Router::post('/accounts/{id}/aliases/add', 'AccountController@addAlias');
+\MuseDockPanel\Router::post('/accounts/{id}/aliases/{alias_id}/delete', 'AccountController@removeAlias');
+\MuseDockPanel\Router::post('/accounts/{id}/redirects/add', 'AccountController@addRedirect');
+\MuseDockPanel\Router::post('/accounts/{id}/redirects/{alias_id}/delete', 'AccountController@removeAlias');
+
 // Migration
 \MuseDockPanel\Router::get('/accounts/{id}/migrate', 'MigrationController@index');
 \MuseDockPanel\Router::post('/accounts/{id}/migrate/url', 'MigrationController@fromUrl');

@@ -698,6 +698,22 @@ class ClusterController
                     'description' => $acc['description'] ?? '',
                 ],
             ], 5);
+
+            // Also sync domain aliases & redirects for this account
+            $aliases = \MuseDockPanel\Services\DomainAliasService::exportForSync((int)$acc['id']);
+            if (!empty($aliases)) {
+                ClusterService::enqueue($nodeId, 'sync-hosting', [
+                    'hosting_action' => 'sync_domain_aliases',
+                    'hosting_data' => [
+                        'main_domain' => $acc['domain'],
+                        'aliases'     => $aliases,
+                        'username'    => $acc['username'],
+                        'document_root' => $acc['document_root'],
+                        'php_version' => $acc['php_version'] ?? '8.3',
+                    ],
+                ], 6); // Lower priority than create_hosting (5) — runs after
+            }
+
             $count++;
         }
 
