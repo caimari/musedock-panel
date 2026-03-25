@@ -1,4 +1,7 @@
-<?php use MuseDockPanel\View; ?>
+<?php
+use MuseDockPanel\View;
+use MuseDockPanel\Services\CloudflareService;
+?>
 
 <div class="row g-3">
     <!-- Account Info -->
@@ -87,24 +90,19 @@
                         ?>
                         <?php foreach ($domains as $d): ?>
                         <?php
-                            $dnsRecords = @dns_get_record($d['domain'], DNS_A);
-                            $dnsIps = [];
-                            $pointsHere = false;
-                            if ($dnsRecords) {
-                                foreach ($dnsRecords as $r) {
-                                    $ip = $r['ip'] ?? '';
-                                    $dnsIps[] = $ip;
-                                    if ($ip === $serverIp) $pointsHere = true;
-                                }
-                            }
+                            $dns = CloudflareService::checkDomainDns($d['domain'], $serverIp);
+                            $pointsHere = $dns['status'] === 'ok';
+                            $isCf = $dns['status'] === 'cloudflare';
                         ?>
                         <tr>
                             <td class="ps-3"><?= View::e($d['domain']) ?></td>
                             <td>
                                 <?php if ($pointsHere): ?>
                                     <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;"><i class="bi bi-check-circle"></i> OK</span>
-                                <?php elseif (!empty($dnsIps)): ?>
-                                    <span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;" title="Points to <?= implode(', ', $dnsIps) ?>"><i class="bi bi-exclamation-triangle"></i> <?= implode(', ', $dnsIps) ?></span>
+                                <?php elseif ($isCf): ?>
+                                    <span class="badge" style="background:rgba(249,115,22,0.15);color:#f97316;"><i class="bi bi-cloud-fill"></i> Cloudflare</span>
+                                <?php elseif (!empty($dns['ips'])): ?>
+                                    <span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;" title="Points to <?= implode(', ', $dns['ips']) ?>"><i class="bi bi-exclamation-triangle"></i> <?= implode(', ', $dns['ips']) ?></span>
                                 <?php else: ?>
                                     <span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;"><i class="bi bi-x-circle"></i> No DNS</span>
                                 <?php endif; ?>
@@ -112,14 +110,15 @@
                             <td><?= $d['is_primary'] ? '<span class="badge bg-info">Primary</span>' : '' ?></td>
                             <td>
                                 <?php
-                                    // Check if cert exists via Caddy admin API or filesystem
                                     $hasCertOnDisk = false;
-                                    if (!$pointsHere) {
+                                    if (!$pointsHere && !$isCf) {
                                         $hasCertOnDisk = \MuseDockPanel\Services\FileSyncService::hasCertForDomain($d['domain']);
                                     }
                                 ?>
                                 <?php if ($pointsHere): ?>
                                     <i class="bi bi-lock-fill text-success" title="SSL activo"></i>
+                                <?php elseif ($isCf): ?>
+                                    <i class="bi bi-lock-fill" style="color:#f97316;" title="SSL via Cloudflare"></i>
                                 <?php elseif ($hasCertOnDisk): ?>
                                     <i class="bi bi-lock-fill text-info" title="SSL copiado del master (cert en disco)"></i>
                                 <?php else: ?>
@@ -130,11 +129,22 @@
                         <?php endforeach; ?>
                     </tbody>
                 </table>
-                <?php if (!$pointsHere && !$hasCertOnDisk): ?>
+                <?php
+                    // Use last domain's DNS for the info box
+                    $lastDns = $dns ?? ['status' => 'none'];
+                    $lastPointsHere = ($lastDns['status'] === 'ok');
+                    $lastIsCf = ($lastDns['status'] === 'cloudflare');
+                    $lastHasCert = $hasCertOnDisk ?? false;
+                ?>
+                <?php if ($lastIsCf): ?>
+                <div class="p-2 m-2 rounded" style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.2);">
+                    <small style="color:#f97316;"><i class="bi bi-cloud-fill me-1"></i>Dominio a traves de Cloudflare Proxy. SSL lo proporciona Cloudflare. Si desactivas el proxy (DNS Only), Caddy generara el certificado automaticamente.</small>
+                </div>
+                <?php elseif (!$lastPointsHere && !$lastHasCert): ?>
                 <div class="p-2 m-2 rounded" style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);">
                     <small style="color:#fbbf24;"><i class="bi bi-info-circle me-1"></i>El certificado SSL se obtendra automaticamente cuando el DNS A apunte a <code><?= $serverIp ?></code>. Actualiza tu proveedor DNS y pulsa "Renew SSL".</small>
                 </div>
-                <?php elseif (!$pointsHere && $hasCertOnDisk): ?>
+                <?php elseif (!$lastPointsHere && $lastHasCert): ?>
                 <div class="p-2 m-2 rounded" style="background:rgba(13,202,240,0.08);border:1px solid rgba(13,202,240,0.2);">
                     <small style="color:#0dcaf0;"><i class="bi bi-info-circle me-1"></i>El certificado SSL fue copiado del master. HTTPS funciona aunque el DNS no apunte a este servidor. Cuando el DNS cambie, Caddy renovara el certificado automaticamente.</small>
                 </div>
@@ -164,10 +174,10 @@
                                 <span class="text-muted small ms-1">+ www</span>
                             </td>
                             <td class="text-end">
-                                <form method="post" action="/accounts/<?= (int)$account['id'] ?>/aliases/<?= (int)$alias['id'] ?>/delete" class="d-inline" onsubmit="return confirm('Eliminar alias <?= View::e($alias['domain']) ?>?')">
-                                    <?= View::csrf() ?>
-                                    <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-2"><i class="bi bi-trash"></i></button>
-                                </form>
+                                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2"
+                                    onclick="confirmDeleteAlias(<?= (int)$account['id'] ?>, <?= (int)$alias['id'] ?>, '<?= View::e($alias['domain']) ?>', 'aliases')">
+                                    <i class="bi bi-trash"></i>
+                                </button>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -207,12 +217,12 @@
                                 <span class="text-muted small">→ <?= View::e($account['domain']) ?></span>
                             </td>
                             <td><span class="badge <?= $redir['redirect_code'] == 301 ? 'bg-success' : 'bg-info' ?>"><?= (int)$redir['redirect_code'] ?></span></td>
-                            <td><?= $redir['preserve_path'] ? '<i class="bi bi-check-lg text-success"></i> Conserva' : '<i class="bi bi-x-lg text-muted"></i> Raíz' ?></td>
+                            <td><?= $redir['preserve_path'] ? '<i class="bi bi-check-lg text-success"></i> Conserva ruta' : '<i class="bi bi-x-lg text-muted"></i> Solo raíz' ?></td>
                             <td class="text-end">
-                                <form method="post" action="/accounts/<?= (int)$account['id'] ?>/redirects/<?= (int)$redir['id'] ?>/delete" class="d-inline" onsubmit="return confirm('Eliminar redirección <?= View::e($redir['domain']) ?>?')">
-                                    <?= View::csrf() ?>
-                                    <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-2"><i class="bi bi-trash"></i></button>
-                                </form>
+                                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2"
+                                    onclick="confirmDeleteAlias(<?= (int)$account['id'] ?>, <?= (int)$redir['id'] ?>, '<?= View::e($redir['domain']) ?>', 'redirects')">
+                                    <i class="bi bi-trash"></i>
+                                </button>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -232,9 +242,9 @@
                             <option value="302">302 Temporal</option>
                         </select>
                     </div>
-                    <div class="d-flex align-items-center gap-1 pb-1">
+                    <div class="d-flex align-items-center gap-1 pb-1" title="Si está marcado: .net/blog/articulo → .com/blog/articulo. Si no: .net/blog/articulo → .com/">
                         <input type="checkbox" name="preserve_path" value="1" checked class="form-check-input" id="preserve-path-<?= (int)$account['id'] ?>">
-                        <label class="form-check-label small" for="preserve-path-<?= (int)$account['id'] ?>">Conservar ruta</label>
+                        <label class="form-check-label small" for="preserve-path-<?= (int)$account['id'] ?>">Conservar ruta <i class="bi bi-question-circle text-muted" style="font-size:0.7rem;"></i></label>
                     </div>
                     <button type="submit" class="btn btn-warning btn-sm"><i class="bi bi-plus-circle me-1"></i>Añadir</button>
                 </form>
@@ -374,3 +384,46 @@
         <?php endif; ?>
     </div>
 </div>
+
+<script>
+function confirmDeleteAlias(accountId, aliasId, domain, type) {
+    const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+    const label = type === 'aliases' ? 'alias' : 'redirección';
+
+    S.fire({
+        title: 'Eliminar ' + label,
+        html: '<p>Eliminar ' + label + ' <strong>' + domain + '</strong>?</p>' +
+              '<p class="small text-muted">Se eliminará la ruta de Caddy y el registro DNS deberá gestionarse manualmente.</p>' +
+              '<div class="mb-2"><label class="form-label small">Contraseña de administrador</label>' +
+              '<input type="password" id="alias-delete-pw" class="form-control" placeholder="Confirmar con tu contraseña" style="background:#2a2a3e;color:#fff;border-color:#444;"></div>',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Eliminar',
+        confirmButtonColor: '#dc3545',
+        cancelButtonText: 'Cancelar',
+        preConfirm: function() {
+            var pw = document.getElementById('alias-delete-pw').value;
+            if (!pw) { Swal.showValidationMessage('La contraseña es obligatoria'); return false; }
+            return pw;
+        }
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/accounts/' + accountId + '/' + type + '/' + aliasId + '/delete';
+
+        var csrf = document.querySelector('input[name=_csrf_token]').value;
+        var csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden'; csrfInput.name = '_csrf_token'; csrfInput.value = csrf;
+        form.appendChild(csrfInput);
+
+        var pwInput = document.createElement('input');
+        pwInput.type = 'hidden'; pwInput.name = 'admin_password'; pwInput.value = result.value;
+        form.appendChild(pwInput);
+
+        document.body.appendChild(form);
+        form.submit();
+    });
+}
+</script>

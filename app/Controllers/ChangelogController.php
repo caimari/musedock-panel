@@ -20,6 +20,41 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.9',
+                'date' => '2026-03-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Cloudflare DNS Manager — Nueva seccion en Settings para gestionar registros DNS de Cloudflare directamente desde el panel. Crear, editar, eliminar registros (A, AAAA, CNAME, MX, TXT, SRV) y activar/desactivar el proxy naranja (CDN/DDoS) con un click',
+                            'Deteccion de Cloudflare Proxy en DNS — Los checks DNS ahora detectan si un dominio pasa por Cloudflare Proxy y muestran un badge naranja especifico en vez del warning generico amarillo. Aplica en /domains y en la vista de cada hosting',
+                            'Domain Aliases & Redirects en /domains — Los alias y redirecciones ahora aparecen en una tabla dedicada en la pagina de dominios con tipo, DNS status, cuenta destino y fecha de creacion',
+                        ],
+                        'en' => [
+                            'Cloudflare DNS Manager — New section in Settings to manage Cloudflare DNS records directly from the panel. Create, edit, delete records (A, AAAA, CNAME, MX, TXT, SRV) and toggle the orange proxy cloud (CDN/DDoS) with one click',
+                            'Cloudflare Proxy detection in DNS — DNS checks now detect if a domain goes through Cloudflare Proxy and show a specific orange badge instead of the generic yellow warning. Applies in /domains and in each hosting detail view',
+                            'Domain Aliases & Redirects on /domains — Aliases and redirects now appear in a dedicated table on the domains page with type, DNS status, target account and creation date',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'SSL status con Cloudflare — En la vista de hosting, si el dominio esta detras de Cloudflare Proxy se muestra icono naranja de SSL indicando que el certificado lo proporciona CF. Al desactivar el proxy, Caddy genera certificado automaticamente',
+                            'Info box contextual — Nuevo mensaje informativo naranja cuando el dominio usa Cloudflare Proxy, explicando que SSL lo cubre CF y que Caddy genera cert al desactivar proxy',
+                            'Leyenda DNS mejorada — La leyenda de la pagina /domains ahora incluye explicacion del badge Cloudflare Proxy y la diferencia entre Alias y Redirect',
+                        ],
+                        'en' => [
+                            'SSL status with Cloudflare — In hosting detail view, if domain is behind Cloudflare Proxy, shows orange SSL icon indicating certificate is provided by CF. When proxy is disabled, Caddy auto-generates certificate',
+                            'Contextual info box — New orange info message when domain uses Cloudflare Proxy, explaining that SSL is covered by CF and Caddy generates cert when proxy is disabled',
+                            'Improved DNS legend — The /domains page legend now includes Cloudflare Proxy badge explanation and the difference between Alias and Redirect',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [],
+                        'en' => [],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.8',
                 'date' => '2026-03-25',
                 'badge' => 'primary',

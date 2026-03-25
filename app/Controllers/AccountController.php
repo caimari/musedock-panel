@@ -589,6 +589,16 @@ class AccountController
         $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
         if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
 
+        // Verify admin password
+        $password = $_POST['admin_password'] ?? '';
+        $adminId = $_SESSION['admin_id'] ?? $_SESSION['panel_user']['id'] ?? 0;
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        if (!$admin || !password_verify($password, $admin['password_hash'])) {
+            Flash::set('error', 'Contraseña incorrecta.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
         $result = \MuseDockPanel\Services\DomainAliasService::remove((int)$params['alias_id']);
 
         if (!$result['ok']) {

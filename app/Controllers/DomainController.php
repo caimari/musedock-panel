@@ -29,11 +29,22 @@ class DomainController
              ORDER BY h.domain ASC"
         );
 
+        // Domain aliases & redirects
+        $aliasesAndRedirects = Database::fetchAll(
+            "SELECT da.*, h.domain AS account_domain, h.username, h.status AS account_status,
+                    c.name AS customer_name
+             FROM hosting_domain_aliases da
+             JOIN hosting_accounts h ON h.id = da.hosting_account_id
+             LEFT JOIN customers c ON c.id = h.customer_id
+             ORDER BY da.type, da.domain ASC"
+        );
+
         View::render('domains/index', [
             'layout' => 'main',
             'pageTitle' => 'Domains',
             'domains' => $domains,
             'accountDomains' => $accountDomains,
+            'aliasesAndRedirects' => $aliasesAndRedirects,
         ]);
     }
 

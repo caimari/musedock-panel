@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.8');
+define('PANEL_VERSION', '1.0.9');
 
 
 
@@ -309,6 +309,15 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/failover/caddy-l4-status', 'FailoverController@caddyL4Status');
 \MuseDockPanel\Router::get('/settings/failover/test-ifaces', 'FailoverController@testIfaces');
 \MuseDockPanel\Router::post('/settings/failover/test-remote-sources', 'FailoverController@testRemoteSources');
+
+// Cloudflare DNS Manager
+\MuseDockPanel\Router::get('/settings/cloudflare-dns', 'CloudflareDnsController@index');
+\MuseDockPanel\Router::get('/settings/cloudflare-dns/zones', 'CloudflareDnsController@listZones');
+\MuseDockPanel\Router::get('/settings/cloudflare-dns/records', 'CloudflareDnsController@listRecords');
+\MuseDockPanel\Router::post('/settings/cloudflare-dns/create-record', 'CloudflareDnsController@createRecord');
+\MuseDockPanel\Router::post('/settings/cloudflare-dns/update-record', 'CloudflareDnsController@updateRecord');
+\MuseDockPanel\Router::post('/settings/cloudflare-dns/delete-record', 'CloudflareDnsController@deleteRecord');
+\MuseDockPanel\Router::post('/settings/cloudflare-dns/toggle-proxy', 'CloudflareDnsController@toggleProxy');
 
 // Proxy Routes (permanent SNI proxy via caddy-l4)
 \MuseDockPanel\Router::get('/settings/proxy-routes', 'ProxyRouteController@index');
