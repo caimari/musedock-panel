@@ -20,6 +20,35 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.16',
+                'date' => '2026-03-26',
+                'badge' => 'danger',
+                'changes' => [
+                    'new' => [
+                        'es' => [],
+                        'en' => [],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Actualizacion del panel — El polling de progreso ahora se inicia inmediatamente via AJAX sin depender del reload de la pagina, solucionando el problema en slaves donde la pagina no se recargaba tras la actualizacion',
+                            'Resultados de transferencia masiva — Muestra detalle de errores individuales y mensaje informativo cuando no hay transferencias',
+                        ],
+                        'en' => [
+                            'Panel update — Progress polling now starts immediately via AJAX without depending on page reload, fixing the issue on slaves where the page did not reload after update',
+                            'Bulk transfer results — Shows individual error details and informative message when no transfers occur',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Transferencia de backups de BD a nodos remotos fallaba silenciosamente — Faltaba el import de Database en ClusterApiController, causando error 500 en list-db-backups y receive-db-backup',
+                        ],
+                        'en' => [
+                            'DB backup transfer to remote nodes was silently failing — Missing Database import in ClusterApiController caused error 500 on list-db-backups and receive-db-backup',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.15',
                 'date' => '2026-03-26',
                 'badge' => 'primary',
