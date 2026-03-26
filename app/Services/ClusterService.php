@@ -471,7 +471,18 @@ class ClusterService
         $node = self::getNode($nodeId);
         $isStandby = !empty($node['standby']) ? '1' : '0';
 
-        $result = self::callNode($nodeId, 'GET', "api/cluster/heartbeat?standby={$isStandby}");
+        // Build DB associations hash to send with heartbeat (master only)
+        $clusterRole = \MuseDockPanel\Settings::get('cluster_role', 'standalone');
+        $dbHash = '';
+        if ($clusterRole === 'master') {
+            $dbHash = self::computeDbAssociationsHash();
+        }
+        $queryParams = "standby={$isStandby}";
+        if ($dbHash) {
+            $queryParams .= "&db_hash={$dbHash}";
+        }
+
+        $result = self::callNode($nodeId, 'GET', "api/cluster/heartbeat?{$queryParams}");
 
         if ($result['ok']) {
             $remoteData = $result['data'] ?? [];
@@ -493,6 +504,11 @@ class ClusterService
                 'metadata'     => json_encode($existingMeta),
                 'updated_at'   => date('Y-m-d H:i:s'),
             ], 'id = :id', ['id' => $nodeId]);
+
+            // If slave reported db_hash mismatch, push full DB associations
+            if (!empty($remoteData['db_hash_mismatch'])) {
+                self::pushDbAssociationsToNode($nodeId);
+            }
         } else {
             Database::update('cluster_nodes', [
                 'status'     => 'offline',
@@ -501,6 +517,52 @@ class ClusterService
         }
 
         return $result;
+    }
+
+    /**
+     * Compute a hash of all DB associations (hosting_databases) for comparison.
+     * Returns a short md5 hash of the sorted db_name→domain mapping.
+     */
+    public static function computeDbAssociationsHash(): string
+    {
+        $rows = Database::fetchAll(
+            "SELECT d.db_name, d.db_user, d.db_type, a.domain
+             FROM hosting_databases d
+             JOIN hosting_accounts a ON a.id = d.account_id
+             WHERE a.status != 'deleted'
+             ORDER BY d.db_name"
+        );
+        return md5(json_encode($rows));
+    }
+
+    /**
+     * Push full DB associations to a slave node via the queue.
+     * Groups by hosting account to send one sync_databases per account.
+     */
+    private static function pushDbAssociationsToNode(int $nodeId): void
+    {
+        $accounts = Database::fetchAll(
+            "SELECT id, domain FROM hosting_accounts WHERE status != 'deleted'"
+        );
+
+        foreach ($accounts as $acc) {
+            $databases = Database::fetchAll(
+                "SELECT db_name, db_user, db_type, created_at FROM hosting_databases WHERE account_id = :aid",
+                ['aid' => (int)$acc['id']]
+            );
+
+            // Always send — even empty list means "no databases for this account"
+            // so the slave can remove stale entries
+            self::enqueue($nodeId, 'sync-hosting', [
+                'hosting_action' => 'sync_databases',
+                'hosting_data' => [
+                    'main_domain' => $acc['domain'],
+                    'databases'   => $databases,
+                ],
+            ], 8); // Low priority — background reconciliation
+        }
+
+        LogService::log('cluster.sync', 'heartbeat', "DB associations push triggered for node #{$nodeId} (hash mismatch)");
     }
 
     public static function checkAllNodes(): array
@@ -852,6 +914,51 @@ class ClusterService
                     DomainAliasService::importFromMaster((int)$account['id'], $account, $aliases);
                     LogService::log('cluster.sync', $mainDomain, "Domain aliases synced from master: " . count($aliases) . " entries");
                     return ['ok' => true, 'message' => "Aliases synced for {$mainDomain}"];
+
+                case 'sync_databases':
+                    $mainDomain = $hostingData['main_domain'] ?? '';
+                    $databases = $hostingData['databases'] ?? [];
+                    $account = Database::fetchOne("SELECT id FROM hosting_accounts WHERE domain = :d", ['d' => $mainDomain]);
+                    if (!$account) {
+                        return ['ok' => false, 'message' => "Hosting {$mainDomain} not found on slave"];
+                    }
+                    $accountId = (int)$account['id'];
+
+                    // Get currently registered databases for this account on slave
+                    $existing = Database::fetchAll(
+                        "SELECT db_name FROM hosting_databases WHERE account_id = :aid",
+                        ['aid' => $accountId]
+                    );
+                    $existingNames = array_column($existing, 'db_name');
+
+                    $added = 0;
+                    foreach ($databases as $db) {
+                        if (in_array($db['db_name'], $existingNames, true)) continue;
+                        Database::insert('hosting_databases', [
+                            'account_id' => $accountId,
+                            'db_name'    => $db['db_name'],
+                            'db_user'    => $db['db_user'],
+                            'db_type'    => $db['db_type'],
+                            'created_at' => $db['created_at'] ?? date('Y-m-d H:i:s'),
+                        ]);
+                        $added++;
+                    }
+
+                    // Remove databases on slave that no longer exist on master
+                    $masterNames = array_column($databases, 'db_name');
+                    $removed = 0;
+                    foreach ($existingNames as $name) {
+                        if (!in_array($name, $masterNames, true)) {
+                            Database::query(
+                                "DELETE FROM hosting_databases WHERE account_id = :aid AND db_name = :n",
+                                ['aid' => $accountId, 'n' => $name]
+                            );
+                            $removed++;
+                        }
+                    }
+
+                    LogService::log('cluster.sync', $mainDomain, "Databases synced: +{$added} -{$removed} for {$mainDomain}");
+                    return ['ok' => true, 'message' => "Databases synced for {$mainDomain}: +{$added} -{$removed}"];
 
                 default:
                     return ['ok' => false, 'message' => "Unknown hosting action: {$hostingAction}"];

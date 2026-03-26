@@ -714,6 +714,21 @@ class ClusterController
                 ], 6); // Lower priority than create_hosting (5) — runs after
             }
 
+            // Also sync database registrations for this account
+            $databases = Database::fetchAll(
+                "SELECT db_name, db_user, db_type, created_at FROM hosting_databases WHERE account_id = :aid",
+                ['aid' => (int)$acc['id']]
+            );
+            if (!empty($databases)) {
+                ClusterService::enqueue($nodeId, 'sync-hosting', [
+                    'hosting_action' => 'sync_databases',
+                    'hosting_data' => [
+                        'main_domain' => $acc['domain'],
+                        'databases'   => $databases,
+                    ],
+                ], 7); // After aliases (6), after create_hosting (5)
+            }
+
             $count++;
         }
 

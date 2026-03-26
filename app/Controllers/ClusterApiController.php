@@ -260,11 +260,20 @@ class ClusterApiController
                 : 'Standby desactivado via heartbeat del master');
         }
 
+        // Check DB associations hash from master
+        $dbHashMismatch = false;
+        $masterDbHash = $_GET['db_hash'] ?? '';
+        if ($masterDbHash !== '') {
+            $localDbHash = ClusterService::computeDbAssociationsHash();
+            $dbHashMismatch = ($masterDbHash !== $localDbHash);
+        }
+
         echo json_encode([
-            'ok'           => true,
-            'timestamp'    => date('Y-m-d H:i:s'),
-            'role'         => $effectiveRole,
-            'cluster_role' => $clusterRole ?: $envRole,
+            'ok'                => true,
+            'timestamp'         => date('Y-m-d H:i:s'),
+            'role'              => $effectiveRole,
+            'cluster_role'      => $clusterRole ?: $envRole,
+            'db_hash_mismatch'  => $dbHashMismatch,
         ]);
         exit;
     }

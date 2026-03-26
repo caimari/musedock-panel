@@ -372,6 +372,9 @@ class DatabaseController
 
         LogService::log('database.create', $fullDbName, "Created {$logType} database: {$fullDbName}, user: {$fullDbUser} for account {$username}");
 
+        // Sync database registration to slaves
+        $this->syncDatabasesForAccount($accountId, $account['domain']);
+
         Flash::set('success', "Base de datos '{$fullDbName}' creada exitosamente. Las credenciales se muestran abajo.");
         Flash::set('db_credentials', json_encode([
             'db_name' => $fullDbName,
@@ -398,7 +401,7 @@ class DatabaseController
         $id = (int) ($params['id'] ?? 0);
 
         $db = Database::fetchOne("
-            SELECT d.*, a.username
+            SELECT d.*, a.username, a.domain AS account_domain
             FROM hosting_databases d
             JOIN hosting_accounts a ON a.id = d.account_id
             WHERE d.id = :id
@@ -478,6 +481,9 @@ class DatabaseController
 
         Database::delete('hosting_databases', 'id = :id', ['id' => $id]);
 
+        // Sync database removal to slaves
+        $this->syncDatabasesForAccount((int)$db['account_id'], $db['account_domain']);
+
         LogService::log('database.delete', $db['db_name'], "Deleted {$logType} database: {$db['db_name']}, user: {$db['db_user']} from account {$db['username']}");
         Flash::set('success', "Base de datos '{$db['db_name']}' eliminada exitosamente.");
         Router::redirect('/databases');
@@ -541,6 +547,10 @@ class DatabaseController
         ]);
 
         LogService::log('database.associate', $dbName, "Associated {$dbType} database '{$dbName}' to hosting {$account['domain']} ({$account['username']})");
+
+        // Sync database association to slaves
+        $this->syncDatabasesForAccount((int)$account['id'], $account['domain']);
+
         Flash::set('success', "Base de datos '{$dbName}' asociada correctamente al hosting {$account['domain']}.");
         Router::redirect('/databases');
     }
@@ -987,6 +997,37 @@ class DatabaseController
         if ($bytes < 1048576) return round($bytes / 1024, 1) . ' KB';
         if ($bytes < 1073741824) return round($bytes / 1048576, 1) . ' MB';
         return round($bytes / 1073741824, 2) . ' GB';
+    }
+
+    // ─── Cluster Sync ────────────────────────────────────────────────
+
+    /**
+     * Sync all database registrations for a hosting account to slave nodes.
+     * This only syncs the panel record (hosting_databases table), not the actual
+     * database data — that is handled by streaming replication or dump sync.
+     */
+    private function syncDatabasesForAccount(int $accountId, string $domain): void
+    {
+        if (Settings::get('cluster_role', 'standalone') !== 'master') return;
+
+        $nodes = ClusterService::getNodes();
+        if (empty($nodes)) return;
+
+        $databases = Database::fetchAll(
+            "SELECT db_name, db_user, db_type, created_at FROM hosting_databases WHERE account_id = :aid",
+            ['aid' => $accountId]
+        );
+
+        foreach ($nodes as $node) {
+            if (($node['role'] ?? '') !== 'slave') continue;
+            ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                'hosting_action' => 'sync_databases',
+                'hosting_data' => [
+                    'main_domain' => $domain,
+                    'databases'   => $databases,
+                ],
+            ]);
+        }
     }
 
     // ─── MySQL Helpers ──────────────────────────────────────────────

@@ -20,6 +20,37 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.11',
+                'date' => '2026-03-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Auto-reconciliacion de bases de datos via heartbeat — El master envia un hash de las asociaciones de BD en cada heartbeat. Si el slave detecta diferencias, responde con db_hash_mismatch y el master encola automaticamente la sincronizacion completa de asociaciones de BD. No requiere accion manual',
+                        ],
+                        'en' => [
+                            'Auto-reconciliation of databases via heartbeat — Master sends a hash of DB associations in each heartbeat. If slave detects differences, it responds with db_hash_mismatch and master auto-enqueues full DB association sync. No manual action required',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Texto de Sincronizacion Completa mejorado — Ahora incluye paso 3 (Bases de datos: dump + restore) y explicacion detallada de cuando se usa replicacion streaming vs copia periodica. Paso 1 tambien menciona la sincronizacion de alias, redirecciones y bases de datos',
+                        ],
+                        'en' => [
+                            'Improved Full Sync description — Now includes step 3 (Databases: dump + restore) and detailed explanation of when streaming replication vs periodic copy is used. Step 1 also mentions sync of aliases, redirects and databases',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Fecha en formato espanol en /databases — La fecha de ultima sincronizacion de BD en el slave ahora se muestra en formato dd/mm/aaaa en vez de aaaa-mm-dd',
+                        ],
+                        'en' => [
+                            'Spanish date format on /databases — The last DB sync date on slave now shows in dd/mm/yyyy format instead of yyyy-mm-dd',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.10',
                 'date' => '2026-03-26',
                 'badge' => 'primary',
@@ -28,10 +59,12 @@ class ChangelogController
                         'es' => [
                             'Modal de instrucciones Cloudflare — Boton "Instrucciones" en Cuentas Cloudflare con guia paso a paso para crear API Token, explicacion de multiples cuentas y permisos minimos',
                             'Encriptacion de tokens Cloudflare — Los API tokens de Cloudflare ahora se almacenan encriptados con AES-256-CBC en la base de datos. Compatible con tokens legacy en texto plano',
+                            'Sync de bases de datos al cluster — Crear, asociar o eliminar bases de datos en el master ahora sincroniza el registro al slave. El Sync Todo tambien incluye todas las bases de datos asociadas a cada hosting (prioridad 7, despues de hostings y aliases)',
                         ],
                         'en' => [
                             'Cloudflare instructions modal — "Instructions" button in Cloudflare Accounts with step-by-step guide to create API Token, multi-account explanation and minimum permissions',
                             'Cloudflare token encryption — Cloudflare API tokens are now stored encrypted with AES-256-CBC in the database. Backward compatible with legacy plain-text tokens',
+                            'Database sync to cluster — Creating, associating or deleting databases on master now syncs the registration to slaves. Sync Todo also includes all databases associated to each hosting (priority 7, after hostings and aliases)',
                         ],
                     ],
                     'improved' => [

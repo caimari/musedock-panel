@@ -64,7 +64,7 @@ function formatDbSize(int $bytes): string {
                     else $agoText = floor($ago / 86400) . ' dias';
                 ?>
                 <span class="text-muted">
-                    — Ultima sincronizacion de BD: <strong class="text-light"><?= View::e($dbSyncStatus['last_sync']) ?></strong>
+                    — Ultima sincronizacion de BD: <strong class="text-light"><?= date('d/m/Y H:i:s', strtotime($dbSyncStatus['last_sync'])) ?></strong>
                     <span class="ms-1">(hace <?= $agoText ?>)</span>
                 </span>
                 <?php if (count($dbSyncStatus['databases']) > 0): ?>

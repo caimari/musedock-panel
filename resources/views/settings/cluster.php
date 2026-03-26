@@ -337,17 +337,19 @@
     <div class="card mb-3 border-success">
         <div class="card-body text-center py-4">
             <h5>Sincronización Completa</h5>
-            <p class="text-muted">Ejecuta todos los pasos en secuencia: provisionar hostings &rarr; copiar archivos web (rsync vía SSH) &rarr; copiar certificados SSL</p>
+            <p class="text-muted">Ejecuta todos los pasos en secuencia: provisionar hostings &rarr; sincronizar metadatos &rarr; copiar archivos web &rarr; copiar certificados SSL</p>
             <button class="btn btn-success btn-lg" onclick="fullSync(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
                 <i class="bi bi-play-circle me-1"></i>Sincronización Completa a <?= View::e($node['name']) ?>
             </button>
             <div class="mt-3 small text-muted text-start mx-auto" style="max-width:600px;">
                 <i class="bi bi-info-circle me-1"></i>
-                <strong>Paso 1 — Hostings (API):</strong> Crea/repara cuentas de sistema, PHP-FPM y Caddy en el nodo remoto.<br>
+                <strong>Paso 1 — Hostings (API):</strong> Crea/repara cuentas de sistema, PHP-FPM y Caddy en el nodo remoto. Tambien sincroniza alias de dominio, redirecciones y <strong>asociaciones de bases de datos</strong> registradas en el panel.<br>
                 <strong>Paso 2 — Archivos (rsync vía SSH):</strong> Copia el contenido web de <code>/var/www/vhosts/</code> al slave. Requiere SSH configurado.<br>
-                <strong>Paso 3 — SSL (rsync vía SSH):</strong> Copia los certificados de Caddy al slave.<br>
-                <i class="bi bi-shield-check me-1 text-success"></i>Es seguro ejecutar varias veces: los hostings se reparan si ya existen, y rsync es incremental (solo copia lo nuevo o modificado, no borra nada).<br>
-                <span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Si SSH no está configurado, solo se ejecutará el paso 1 y se avisará.</span><br>
+                <strong>Paso 3 — Bases de datos (dump + restore):</strong> Si la copia periodica de BD esta activada en <a href="#archivos" style="color:#6ea8fe;">Archivos</a> y no hay replicacion streaming activa, vuelca las bases de datos del master y las restaura en el slave.<br>
+                <strong>Paso 4 — SSL (rsync vía SSH):</strong> Copia los certificados de Caddy al slave.<br>
+                <i class="bi bi-shield-check me-1 text-success"></i>Es seguro ejecutar varias veces: los hostings se reparan si ya existen, rsync es incremental (solo copia lo nuevo o modificado), y las bases de datos se reimportan sin perder datos.<br>
+                <span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Si SSH no está configurado, solo se ejecutará el paso 1 (hostings + metadatos) y se avisará.</span><br>
+                <span class="mt-1 d-block"><i class="bi bi-database me-1"></i><strong>Bases de datos:</strong> Si tienes replicacion streaming (PostgreSQL/MySQL) activa, las BD se replican automaticamente en tiempo real y el paso 3 se omite. Si no, puedes activar la copia periodica en <a href="#archivos" style="color:#6ea8fe;">Archivos</a> para que se copien cada X minutos via dump/restore.</span><br>
                 <span class="mt-1 d-block">La sincronización continua de archivos se gestiona en la pestaña <a href="#archivos" style="color:#6ea8fe;">Archivos</a> (lsyncd en tiempo real o rsync periódico).</span>
             </div>
         </div>
