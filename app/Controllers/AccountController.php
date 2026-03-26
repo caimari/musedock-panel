@@ -222,6 +222,8 @@ class AccountController
         $aliases = \MuseDockPanel\Services\DomainAliasService::getAliases((int)$account['id']);
         $redirects = \MuseDockPanel\Services\DomainAliasService::getRedirects((int)$account['id']);
 
+        $isSlave = Settings::get('cluster_role', 'standalone') === 'slave';
+
         View::render('accounts/show', [
             'layout' => 'main',
             'pageTitle' => $account['domain'],
@@ -234,6 +236,7 @@ class AccountController
             'hasMailNodes' => $hasMailNodes,
             'aliases' => $aliases,
             'redirects' => $redirects,
+            'isSlave' => $isSlave,
         ]);
     }
 

@@ -3,6 +3,13 @@ use MuseDockPanel\View;
 use MuseDockPanel\Services\CloudflareService;
 ?>
 
+<?php if ($isSlave ?? false): ?>
+<div class="alert mb-3 py-2 px-3 small d-flex align-items-center" style="background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.2);color:#94a3b8;">
+    <i class="bi bi-lock me-2" style="color:#38bdf8;"></i>
+    <span><strong style="color:#38bdf8;">Servidor Slave</strong> — Modo solo lectura. Los cambios deben realizarse en el Master.</span>
+</div>
+<?php endif; ?>
+
 <div class="row g-3">
     <!-- Account Info -->
     <div class="col-md-8">
@@ -10,6 +17,7 @@ use MuseDockPanel\Services\CloudflareService;
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-server me-2"></i>Account Details</span>
                 <div class="d-flex gap-2">
+                    <?php if (!($isSlave ?? false)): ?>
                     <a href="/accounts/<?= $account['id'] ?>/migrate" class="btn btn-outline-light btn-sm"><i class="bi bi-cloud-download me-1"></i>Migrate</a>
                     <a href="/accounts/<?= $account['id'] ?>/edit" class="btn btn-outline-light btn-sm"><i class="bi bi-pencil"></i> Edit</a>
                     <?php if ($account['status'] === 'active'): ?>
@@ -35,6 +43,7 @@ use MuseDockPanel\Services\CloudflareService;
                             })"><i class="bi bi-play-circle"></i> Activate</button>
                         </form>
                     <?php endif; ?>
+                    <?php endif; /* isSlave */ ?>
                 </div>
             </div>
             <div class="card-body p-0">
@@ -50,13 +59,20 @@ use MuseDockPanel\Services\CloudflareService;
                     <tr>
                         <td class="ps-3 text-muted">Disk Usage</td>
                         <td>
-                            <?php $diskPercent = $account['disk_quota_mb'] > 0 ? round(($account['disk_used_mb'] / $account['disk_quota_mb']) * 100) : 0; ?>
-                            <div class="d-flex align-items-center gap-2">
-                                <div class="progress" style="width: 120px;">
-                                    <div class="progress-bar bg-<?= $diskPercent > 85 ? 'danger' : 'info' ?>" style="width: <?= $diskPercent ?>%"></div>
+                            <?php if ($account['disk_quota_mb'] > 0): ?>
+                                <?php $diskPercent = round(($account['disk_used_mb'] / $account['disk_quota_mb']) * 100); ?>
+                                <div class="d-flex align-items-center gap-2">
+                                    <div class="progress" style="width: 120px;">
+                                        <div class="progress-bar bg-<?= $diskPercent > 85 ? 'danger' : 'info' ?>" style="width: <?= min($diskPercent, 100) ?>%"></div>
+                                    </div>
+                                    <?= number_format($account['disk_used_mb']) ?> MB / <?= number_format($account['disk_quota_mb']) ?> MB (<?= $diskPercent ?>%)
                                 </div>
-                                <?= $account['disk_used_mb'] ?> MB / <?= $account['disk_quota_mb'] ?> MB (<?= $diskPercent ?>%)
-                            </div>
+                            <?php else: ?>
+                                <div class="d-flex align-items-center gap-2">
+                                    <?= number_format($account['disk_used_mb']) ?> MB
+                                    <span class="badge bg-dark" style="font-size:0.75rem;">&#8734; Ilimitado</span>
+                                </div>
+                            <?php endif; ?>
                         </td>
                     </tr>
                     <?php if ($account['description']): ?>
@@ -71,6 +87,7 @@ use MuseDockPanel\Services\CloudflareService;
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-globe me-2"></i>Domains & SSL</span>
+                <?php if (!($isSlave ?? false)): ?>
                 <form id="renewSslForm" method="POST" action="/accounts/<?= $account['id'] ?>/renew-ssl" style="display:inline;">
                     <?= \MuseDockPanel\View::csrf() ?>
                     <button type="button" class="btn btn-outline-light btn-sm" onclick="confirmAction(document.getElementById('renewSslForm'), {
@@ -80,6 +97,7 @@ use MuseDockPanel\Services\CloudflareService;
                         confirmText: 'Renew SSL'
                     })" title="Force SSL certificate renewal"><i class="bi bi-arrow-clockwise me-1"></i> Renew SSL</button>
                 </form>
+                <?php endif; ?>
             </div>
             <div class="card-body p-0">
                 <table class="table table-sm mb-0">
@@ -279,7 +297,7 @@ use MuseDockPanel\Services\CloudflareService;
                 </p>
                 <?php if (!empty($aliases)): ?>
                 <table class="table table-sm mb-3">
-                    <thead><tr><th>Dominio</th><th class="text-end">Acciones</th></tr></thead>
+                    <thead><tr><th>Dominio</th><?php if (!($isSlave ?? false)): ?><th class="text-end">Acciones</th><?php endif; ?></tr></thead>
                     <tbody>
                     <?php foreach ($aliases as $alias): ?>
                         <tr>
@@ -288,17 +306,20 @@ use MuseDockPanel\Services\CloudflareService;
                                 <?= View::e($alias['domain']) ?>
                                 <span class="text-muted small ms-1">+ www</span>
                             </td>
+                            <?php if (!($isSlave ?? false)): ?>
                             <td class="text-end">
                                 <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2"
                                     onclick="confirmDeleteAlias(<?= (int)$account['id'] ?>, <?= (int)$alias['id'] ?>, '<?= View::e($alias['domain']) ?>', 'aliases')">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </td>
+                            <?php endif; ?>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>
                 </table>
                 <?php endif; ?>
+                <?php if (!($isSlave ?? false)): ?>
                 <form method="post" action="/accounts/<?= (int)$account['id'] ?>/aliases/add" class="d-flex gap-2 align-items-end">
                     <?= View::csrf() ?>
                     <div class="flex-grow-1">
@@ -307,6 +328,9 @@ use MuseDockPanel\Services\CloudflareService;
                     </div>
                     <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-plus-circle me-1"></i>Añadir</button>
                 </form>
+                <?php elseif (empty($aliases)): ?>
+                <p class="text-muted small mb-0"><i class="bi bi-lock me-1"></i>Servidor Slave — los alias se gestionan desde el Master.</p>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -322,7 +346,7 @@ use MuseDockPanel\Services\CloudflareService;
                 </p>
                 <?php if (!empty($redirects)): ?>
                 <table class="table table-sm mb-3">
-                    <thead><tr><th>Dominio</th><th>Código</th><th>Ruta</th><th class="text-end">Acciones</th></tr></thead>
+                    <thead><tr><th>Dominio</th><th>Código</th><th>Ruta</th><?php if (!($isSlave ?? false)): ?><th class="text-end">Acciones</th><?php endif; ?></tr></thead>
                     <tbody>
                     <?php foreach ($redirects as $redir): ?>
                         <tr>
@@ -333,17 +357,20 @@ use MuseDockPanel\Services\CloudflareService;
                             </td>
                             <td><span class="badge <?= $redir['redirect_code'] == 301 ? 'bg-success' : 'bg-info' ?>"><?= (int)$redir['redirect_code'] ?></span></td>
                             <td><?= $redir['preserve_path'] ? '<i class="bi bi-check-lg text-success"></i> Conserva ruta' : '<i class="bi bi-x-lg text-muted"></i> Solo raíz' ?></td>
+                            <?php if (!($isSlave ?? false)): ?>
                             <td class="text-end">
                                 <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2"
                                     onclick="confirmDeleteAlias(<?= (int)$account['id'] ?>, <?= (int)$redir['id'] ?>, '<?= View::e($redir['domain']) ?>', 'redirects')">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </td>
+                            <?php endif; ?>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>
                 </table>
                 <?php endif; ?>
+                <?php if (!($isSlave ?? false)): ?>
                 <form method="post" action="/accounts/<?= (int)$account['id'] ?>/redirects/add" class="d-flex gap-2 align-items-end flex-wrap">
                     <?= View::csrf() ?>
                     <div class="flex-grow-1">
@@ -363,6 +390,9 @@ use MuseDockPanel\Services\CloudflareService;
                     </div>
                     <button type="submit" class="btn btn-warning btn-sm"><i class="bi bi-plus-circle me-1"></i>Añadir</button>
                 </form>
+                <?php else: ?>
+                <p class="text-muted small mb-0"><i class="bi bi-lock me-1"></i>Servidor Slave — los alias y redirecciones se gestionan desde el Master.</p>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -478,7 +508,7 @@ use MuseDockPanel\Services\CloudflareService;
         </div>
 
         <!-- Danger Zone -->
-        <?php if ($account['status'] === 'suspended'): ?>
+        <?php if ($account['status'] === 'suspended' && !($isSlave ?? false)): ?>
         <div class="card border-danger">
             <div class="card-header text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Danger Zone</div>
             <div class="card-body">

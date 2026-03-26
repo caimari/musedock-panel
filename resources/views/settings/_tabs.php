@@ -1,3 +1,9 @@
+<?php if (\MuseDockPanel\Settings::get('cluster_role', 'standalone') === 'slave'): ?>
+<div class="alert mb-3 py-2 px-3 small d-flex align-items-center" style="background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.2);color:#94a3b8;">
+    <i class="bi bi-lock me-2" style="color:#38bdf8;"></i>
+    <span><strong style="color:#38bdf8;">Servidor Slave</strong> — Los ajustes se pueden consultar pero no editar. Los cambios deben realizarse en el Master.</span>
+</div>
+<?php endif; ?>
 <div class="mb-3 d-flex gap-2 flex-wrap">
     <a href="/settings/services" class="btn btn-outline-light btn-sm <?= str_contains($pageTitle ?? '', 'Servicio') ? 'active' : '' ?>"><i class="bi bi-hdd-rack me-1"></i>Servicios</a>
     <a href="/settings/server" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Servidor' ? 'active' : '' ?>"><i class="bi bi-server me-1"></i>Servidor</a>

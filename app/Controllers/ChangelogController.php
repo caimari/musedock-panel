@@ -20,6 +20,35 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.12',
+                'date' => '2026-03-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Modo solo lectura en Slave — La vista de hosting en servidores Slave oculta botones de edicion, eliminacion, alias/redirecciones y acciones. Muestra banner "Servidor Slave — Modo solo lectura"',
+                            'Banner Slave en Settings — Todas las paginas de Settings muestran un aviso cuando el servidor es Slave indicando que los ajustes son de solo consulta',
+                        ],
+                        'en' => [
+                            'Read-only mode on Slave — Hosting detail view on Slave servers hides edit, delete, alias/redirect and action buttons. Shows "Slave Server — Read-only mode" banner',
+                            'Slave banner in Settings — All Settings pages show a notice when server is Slave indicating settings are read-only',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Cuota ilimitada en vista de hosting — Cuando disk_quota_mb es 0 (ilimitado), muestra el uso real con simbolo infinito en vez de barra de progreso vacia y "0 MB"',
+                        ],
+                        'en' => [
+                            'Unlimited quota in hosting detail — When disk_quota_mb is 0 (unlimited), shows actual usage with infinity symbol instead of empty progress bar and "0 MB"',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [],
+                        'en' => [],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.11',
                 'date' => '2026-03-26',
                 'badge' => 'primary',
