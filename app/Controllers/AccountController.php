@@ -242,8 +242,6 @@ class AccountController
 
     public function edit(array $params): void
     {
-        if ($this->slaveGuard('La edicion de hostings')) return;
-
         $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
         if (!$account) {
             Flash::set('error', 'Cuenta no encontrada.');
@@ -278,12 +276,15 @@ class AccountController
             }
         }
 
+        $isSlave = Settings::get('cluster_role', 'standalone') === 'slave';
+
         View::render('accounts/edit', [
             'layout' => 'main',
             'pageTitle' => 'Editar: ' . $account['domain'],
             'account' => $account,
             'phpSettings' => $phpSettings,
             'poolFileExists' => file_exists($poolFile),
+            'isSlave' => $isSlave,
         ]);
     }
 

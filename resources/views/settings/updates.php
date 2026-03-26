@@ -2,6 +2,13 @@
 
 <?php include __DIR__ . '/_tabs.php'; ?>
 
+<?php if (!empty($_GET['updated'])): ?>
+<div class="alert py-2 px-3 small d-flex align-items-center" style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.25);color:#22c55e;">
+    <i class="bi bi-check-circle-fill me-2"></i>
+    <span>Panel actualizado correctamente a <strong>v<?= View::e(PANEL_VERSION) ?></strong></span>
+</div>
+<?php endif; ?>
+
 <div class="row g-3 mb-4">
     <!-- Current Version -->
     <div class="col-md-4">
@@ -175,35 +182,66 @@ function confirmUpdate(e) {
 (function() {
     let polls = 0;
     let catchCount = 0;
-    const maxPolls = 60; // 60 * 3s = 3 minutes max
+    let sawComplete = false;
+    let sawRestart = false;
+    const maxPolls = 90; // 90 * 2s = 3 minutes max
+    const out = document.getElementById('updateOutput');
+
+    function tryReload() {
+        // Try to fetch the page — if panel is up, reload; if not, retry
+        fetch('/settings/updates/api/status', {cache: 'no-store'})
+            .then(r => {
+                if (r.ok) {
+                    // Panel is back — hard reload to pick up new version
+                    window.location.href = '/settings/updates?updated=1';
+                } else {
+                    setTimeout(tryReload, 2000);
+                }
+            })
+            .catch(() => setTimeout(tryReload, 2000));
+    }
+
     const timer = setInterval(function() {
         polls++;
-        if (polls > maxPolls) { clearInterval(timer); return; }
+        if (polls > maxPolls) {
+            clearInterval(timer);
+            tryReload();
+            return;
+        }
 
-        fetch('/settings/updates/api/status')
+        fetch('/settings/updates/api/status', {cache: 'no-store'})
             .then(r => r.json())
             .then(data => {
-                catchCount = 0; // Reset on success
+                catchCount = 0;
                 if (data.output) {
-                    document.getElementById('updateOutput').textContent = data.output;
-                    document.getElementById('updateOutput').scrollTop = 999999;
+                    out.textContent = data.output;
+                    out.scrollTop = out.scrollHeight;
+
+                    // Detect completion or restart in output
+                    if (data.output.includes('Update complete') || data.output.includes('Restarting panel')) {
+                        sawComplete = true;
+                    }
                 }
                 if (!data.in_progress) {
                     clearInterval(timer);
-                    setTimeout(() => location.reload(), 2000);
+                    // Small delay then reload
+                    setTimeout(tryReload, 1500);
                 }
             })
             .catch(() => {
-                // Panel probably restarting — keep polling until it comes back
                 catchCount++;
-                if (catchCount >= 10) {
-                    // 10 consecutive failures (30s) — force reload, panel should be up
-                    clearInterval(timer);
-                    location.reload();
+                if (!sawRestart && catchCount >= 2) {
+                    sawRestart = true;
+                    out.textContent += '\n\n  Reiniciando panel... espere...';
+                    out.scrollTop = out.scrollHeight;
                 }
-                // Otherwise keep polling — panel is still restarting
+                if (catchCount >= 8) {
+                    // Panel has been down for ~16s — start trying to reload
+                    clearInterval(timer);
+                    tryReload();
+                }
             });
-    }, 3000);
+    }, 2000);
 })();
 <?php endif; ?>
 </script>

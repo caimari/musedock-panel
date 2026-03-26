@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.13',
+                'date' => '2026-03-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Vista de edicion en Slave — El slave puede acceder a /accounts/{id}/edit para ver los ajustes actuales (PHP, cuota, document root) pero con todos los formularios deshabilitados. Banner informativo y sin opciones de renombrar/contraseña',
+                        ],
+                        'en' => [
+                            'Edit view on Slave — Slave can access /accounts/{id}/edit to view current settings (PHP, quota, document root) but with all forms disabled. Info banner and no rename/password options',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Recarga post-actualizacion — Mejorado el polling del actualizador: detecta restart del panel, muestra "Reiniciando panel...", reintenta reload hasta que el panel responda, y muestra confirmacion verde al completar',
+                        ],
+                        'en' => [
+                            'Post-update reload — Improved updater polling: detects panel restart, shows "Restarting panel...", retries reload until panel responds, and shows green confirmation on completion',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [],
+                        'en' => [],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.12',
                 'date' => '2026-03-26',
                 'badge' => 'primary',

@@ -4,6 +4,13 @@
     <a href="/accounts/<?= $account['id'] ?>" class="btn btn-outline-light btn-sm"><i class="bi bi-arrow-left me-1"></i> Volver a <?= View::e($account['domain']) ?></a>
 </div>
 
+<?php if ($isSlave ?? false): ?>
+<div class="alert mb-3 py-2 px-3 small d-flex align-items-center" style="background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.2);color:#94a3b8;">
+    <i class="bi bi-lock me-2" style="color:#38bdf8;"></i>
+    <span><strong style="color:#38bdf8;">Servidor Slave</strong> — Modo solo lectura. Los cambios deben realizarse en el Master.</span>
+</div>
+<?php endif; ?>
+
 <div class="row g-3">
     <div class="col-md-8">
         <!-- Ajustes de cuenta -->
@@ -12,6 +19,7 @@
             <div class="card-body">
                 <form method="POST" action="/accounts/<?= $account['id'] ?>/update">
                     <?= \MuseDockPanel\View::csrf() ?>
+                    <fieldset <?= ($isSlave ?? false) ? 'disabled' : '' ?>>
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label">Dominio</label>
@@ -103,6 +111,7 @@
                     <div class="mt-4 d-flex gap-2">
                         <button type="button" class="btn btn-primary" onclick="submitSettings(event)"><i class="bi bi-check-lg me-1"></i> Guardar ajustes</button>
                     </div>
+                    </fieldset>
                 </form>
             </div>
         </div>
@@ -114,6 +123,7 @@
                 <?php if (!empty($poolFileExists)): ?>
                 <form method="POST" action="/accounts/<?= $account['id'] ?>/php">
                     <?= \MuseDockPanel\View::csrf() ?>
+                    <fieldset <?= ($isSlave ?? false) ? 'disabled' : '' ?>>
                     <p class="text-muted small mb-3">Configuración PHP-FPM individual para <code><?= View::e($account['username']) ?></code> (PHP <?= View::e($account['php_version']) ?>)</p>
                     <div class="row g-3">
                         <div class="col-md-4">
@@ -153,6 +163,7 @@
                     <div class="mt-4">
                         <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i> Guardar ajustes PHP</button>
                     </div>
+                    </fieldset>
                 </form>
                 <?php else: ?>
                 <div class="mb-0 py-2 px-3 small rounded" style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);color:#94a3b8;">
@@ -164,6 +175,7 @@
         </div>
 
         <!-- Renombrar usuario del sistema -->
+        <?php if (!($isSlave ?? false)): ?>
         <div class="card mb-3">
             <div class="card-header"><i class="bi bi-person-gear me-2"></i>Usuario del sistema</div>
             <div class="card-body">
@@ -202,10 +214,12 @@
                 </div>
             </div>
         </div>
+        <?php endif; /* isSlave renombrar */ ?>
 
         <!-- Cambiar contraseña -->
         <div class="card">
             <div class="card-header"><i class="bi bi-key me-2"></i>Cambiar contraseña</div>
+            <?php if (!($isSlave ?? false)): ?>
             <div class="card-body">
                 <form method="POST" action="/accounts/<?= $account['id'] ?>/change-password">
                     <?= \MuseDockPanel\View::csrf() ?>
@@ -225,7 +239,11 @@
                         <button type="submit" class="btn btn-warning"><i class="bi bi-shield-lock me-1"></i> Cambiar contraseña</button>
                     </div>
                 </form>
+            <?php else: ?>
+            <div class="card-body">
+                <p class="text-muted small mb-0"><i class="bi bi-lock me-1"></i>Servidor Slave — la contraseña se gestiona desde el Master.</p>
             </div>
+            <?php endif; ?>
         </div>
     </div>
 
