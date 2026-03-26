@@ -63,11 +63,16 @@ $clusterRole = \MuseDockPanel\Settings::get('cluster_role', 'standalone');
                         <td><?= View::e($acc['php_version']) ?></td>
                         <td>
                             <div class="d-flex align-items-center gap-2">
-                                <div class="progress" style="width: 60px;">
-                                    <?php $diskPercent = $acc['disk_quota_mb'] > 0 ? round(($acc['disk_used_mb'] / $acc['disk_quota_mb']) * 100) : 0; ?>
-                                    <div class="progress-bar bg-<?= $diskPercent > 85 ? 'danger' : 'info' ?>" style="width: <?= $diskPercent ?>%"></div>
-                                </div>
-                                <small class="text-muted"><?= $acc['disk_used_mb'] ?>MB / <?= $acc['disk_quota_mb'] ?>MB</small>
+                                <?php if ($acc['disk_quota_mb'] > 0): ?>
+                                    <?php $diskPercent = round(($acc['disk_used_mb'] / $acc['disk_quota_mb']) * 100); ?>
+                                    <div class="progress" style="width: 60px;">
+                                        <div class="progress-bar bg-<?= $diskPercent > 85 ? 'danger' : 'info' ?>" style="width: <?= min($diskPercent, 100) ?>%"></div>
+                                    </div>
+                                    <small class="text-muted"><?= $acc['disk_used_mb'] ?>MB / <?= $acc['disk_quota_mb'] ?>MB</small>
+                                <?php else: ?>
+                                    <small class="text-muted"><?= number_format($acc['disk_used_mb']) ?>MB</small>
+                                    <span class="badge bg-dark ms-1" style="font-size:0.65rem;">&#8734;</span>
+                                <?php endif; ?>
                             </div>
                         </td>
                         <td>

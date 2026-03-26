@@ -155,8 +155,8 @@
                     </div>
                 </form>
                 <?php else: ?>
-                <div class="mb-0 py-2 px-3 small rounded" style="background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.25);color:#fbbf24;">
-                    <i class="bi bi-exclamation-triangle me-1"></i>
+                <div class="mb-0 py-2 px-3 small rounded" style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.2);color:#94a3b8;">
+                    <i class="bi bi-exclamation-triangle me-1" style="color:#fbbf24;"></i>
                     No se encontro el archivo de pool FPM para esta cuenta. Los ajustes PHP no estan disponibles.
                 </div>
                 <?php endif; ?>

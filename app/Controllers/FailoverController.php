@@ -134,7 +134,11 @@ class FailoverController
                 }
             }
 
-            $accounts[] = ['name' => $name, 'token' => $token, 'zones' => $zones];
+            $accounts[] = [
+                'name'  => $name,
+                'token' => \MuseDockPanel\Services\ReplicationService::encryptPassword($token),
+                'zones' => $zones,
+            ];
         }
 
         CloudflareService::saveAccounts($accounts);

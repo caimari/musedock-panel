@@ -33,9 +33,21 @@ class AccountController
              ORDER BY h.created_at DESC"
         );
 
-        // Update disk usage for each account
+        // Update disk usage in a single du call for performance
+        $homeDirs = array_filter(array_column($accounts, 'home_dir'), fn($d) => is_dir($d));
+        $diskMap = [];
+        if ($homeDirs) {
+            $cmd = 'du -sm ' . implode(' ', array_map('escapeshellarg', $homeDirs)) . ' 2>/dev/null';
+            $output = shell_exec($cmd) ?: '';
+            foreach (explode("\n", trim($output)) as $line) {
+                if (preg_match('/^(\d+)\s+(.+)$/', $line, $m)) {
+                    $diskMap[rtrim($m[2], '/')] = (int)$m[1];
+                }
+            }
+        }
         foreach ($accounts as &$acc) {
-            $acc['disk_used_mb'] = SystemService::getDiskUsage($acc['home_dir']);
+            $key = rtrim($acc['home_dir'], '/');
+            $acc['disk_used_mb'] = $diskMap[$key] ?? 0;
         }
 
         View::render('accounts/index', [

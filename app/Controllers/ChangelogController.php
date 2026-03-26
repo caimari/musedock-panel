@@ -20,6 +20,41 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.10',
+                'date' => '2026-03-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Modal de instrucciones Cloudflare — Boton "Instrucciones" en Cuentas Cloudflare con guia paso a paso para crear API Token, explicacion de multiples cuentas y permisos minimos',
+                            'Encriptacion de tokens Cloudflare — Los API tokens de Cloudflare ahora se almacenan encriptados con AES-256-CBC en la base de datos. Compatible con tokens legacy en texto plano',
+                        ],
+                        'en' => [
+                            'Cloudflare instructions modal — "Instructions" button in Cloudflare Accounts with step-by-step guide to create API Token, multi-account explanation and minimum permissions',
+                            'Cloudflare token encryption — Cloudflare API tokens are now stored encrypted with AES-256-CBC in the database. Backward compatible with legacy plain-text tokens',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Rendimiento en /accounts — El calculo de uso de disco ahora se hace en una sola llamada du -sm para todos los hostings en vez de una por hosting, reduciendo significativamente el tiempo de carga',
+                            'Cuota ilimitada (0MB) — Cuando un hosting tiene cuota 0 (ilimitada) ahora muestra el uso real con simbolo de infinito en vez de una barra de progreso vacia',
+                            'Aviso PHP FPM legible — El mensaje "No se encontro el archivo de pool FPM" ahora tiene texto gris claro sobre fondo sutil en vez de texto amarillo sobre fondo crema que era ilegible',
+                            'Link a Cloudflare Accounts — El estado vacio del DNS Manager enlaza directamente al tab Failover (#failover) en vez de la raiz de cluster',
+                        ],
+                        'en' => [
+                            'Performance on /accounts — Disk usage calculation now uses a single du -sm call for all hostings instead of one per hosting, significantly reducing page load time',
+                            'Unlimited quota (0MB) — When a hosting has quota 0 (unlimited), now shows actual usage with infinity symbol instead of an empty progress bar',
+                            'Readable PHP FPM warning — The "Pool FPM file not found" message now has light gray text on subtle background instead of yellow text on cream background which was unreadable',
+                            'Link to Cloudflare Accounts — DNS Manager empty state now links directly to the Failover tab (#failover) instead of cluster root',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [],
+                        'en' => [],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.9',
                 'date' => '2026-03-25',
                 'badge' => 'primary',

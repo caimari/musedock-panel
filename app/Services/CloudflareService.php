@@ -251,12 +251,24 @@ class CloudflareService
      */
     public static function getConfiguredAccounts(): array
     {
-        $accounts = [];
         $raw = Settings::get('failover_cf_accounts', '');
         if (!$raw) return [];
 
         $decoded = json_decode($raw, true);
-        return is_array($decoded) ? $decoded : [];
+        if (!is_array($decoded)) return [];
+
+        // Decrypt tokens (they are stored encrypted with AES-256-CBC)
+        foreach ($decoded as &$acct) {
+            if (!empty($acct['token'])) {
+                $decrypted = ReplicationService::decryptPassword($acct['token']);
+                // If decryption succeeds, use it; otherwise token was stored in plain text (legacy)
+                if ($decrypted !== '') {
+                    $acct['token'] = $decrypted;
+                }
+            }
+        }
+
+        return $decoded;
     }
 
     /**
