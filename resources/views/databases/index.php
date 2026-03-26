@@ -893,7 +893,7 @@ function formatDbSize(int $bytes): string {
         var formData = new FormData();
         formData.append('node_id', nodeId);
         formData.append('backup_ids', JSON.stringify(ids));
-        formData.append('_token', csrfToken);
+        formData.append('_csrf_token', csrfToken);
         if (overwrite) formData.append('overwrite', '1');
 
         fetch('/databases/backups/bulk-transfer', { method: 'POST', body: formData })
@@ -1000,7 +1000,7 @@ function formatDbSize(int $bytes): string {
 
                 var formData = new FormData();
                 formData.append('backup_ids', JSON.stringify(ids));
-                formData.append('_token', csrfToken);
+                formData.append('_csrf_token', csrfToken);
 
                 fetch('/databases/backups/bulk-delete', { method: 'POST', body: formData })
                     .then(function(r) { return r.json(); })
@@ -1072,7 +1072,7 @@ function formatDbSize(int $bytes): string {
 
                 var formData = new FormData();
                 formData.append('node_id', nodeId);
-                formData.append('_token', '<?= View::csrfToken() ?>');
+                formData.append('_csrf_token', '<?= View::csrfToken() ?>');
 
                 fetch('/databases/backups/' + backupId + '/transfer', {
                     method: 'POST',

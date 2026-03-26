@@ -199,13 +199,11 @@ function startUpdatePolling() {
     var out = document.getElementById('updateOutput');
 
     function tryReload() {
-        fetch('/settings/updates/api/status', {cache: 'no-store'})
+        // Just check if the panel responds at all (any HTTP status = panel is up)
+        fetch('/settings/updates', {cache: 'no-store', redirect: 'follow'})
             .then(function(r) {
-                if (r.ok) {
-                    window.location.href = '/settings/updates?updated=1';
-                } else {
-                    setTimeout(tryReload, 2000);
-                }
+                // Panel is responding — reload the page
+                window.location.href = '/settings/updates?updated=1';
             })
             .catch(function() { setTimeout(tryReload, 2000); });
     }
@@ -259,15 +257,10 @@ function startUpdatePolling() {
     const out = document.getElementById('updateOutput');
 
     function tryReload() {
-        // Try to fetch the page — if panel is up, reload; if not, retry
-        fetch('/settings/updates/api/status', {cache: 'no-store'})
-            .then(r => {
-                if (r.ok) {
-                    // Panel is back — hard reload to pick up new version
-                    window.location.href = '/settings/updates?updated=1';
-                } else {
-                    setTimeout(tryReload, 2000);
-                }
+        // Check if panel responds at all (any HTTP status = panel is up)
+        fetch('/settings/updates', {cache: 'no-store', redirect: 'follow'})
+            .then(() => {
+                window.location.href = '/settings/updates?updated=1';
             })
             .catch(() => setTimeout(tryReload, 2000));
     }

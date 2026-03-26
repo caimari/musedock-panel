@@ -20,6 +20,31 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.17',
+                'date' => '2026-03-26',
+                'badge' => 'danger',
+                'changes' => [
+                    'new' => [
+                        'es' => [],
+                        'en' => [],
+                    ],
+                    'improved' => [
+                        'es' => [],
+                        'en' => [],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Transferencia de backups de BD (individual y masiva) — El token CSRF se enviaba como _token en vez de _csrf_token, causando rechazo 403 silencioso. Las transferencias ahora funcionan correctamente',
+                            'Recarga de pagina tras actualizar panel — El polling verificaba /api/status que requiere sesion activa; si la sesion expira al reiniciar, el panel respondía 401 y nunca se recargaba. Ahora verifica la URL principal que responde con cualquier codigo HTTP',
+                        ],
+                        'en' => [
+                            'DB backup transfer (single and bulk) — CSRF token was sent as _token instead of _csrf_token, causing silent 403 rejection. Transfers now work correctly',
+                            'Page reload after panel update — Polling checked /api/status which requires active session; if session expires on restart, panel returned 401 and never reloaded. Now checks main URL which responds with any HTTP code',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.16',
                 'date' => '2026-03-26',
                 'badge' => 'danger',
