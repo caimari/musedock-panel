@@ -20,7 +20,7 @@ class ChangelogController
     {
         return [
             [
-                'version' => '1.0.17',
+                'version' => '1.0.18',
                 'date' => '2026-03-26',
                 'badge' => 'danger',
                 'changes' => [
@@ -34,12 +34,14 @@ class ChangelogController
                     ],
                     'fixed' => [
                         'es' => [
-                            'Transferencia de backups de BD (individual y masiva) — El token CSRF se enviaba como _token en vez de _csrf_token, causando rechazo 403 silencioso. Las transferencias ahora funcionan correctamente',
-                            'Recarga de pagina tras actualizar panel — El polling verificaba /api/status que requiere sesion activa; si la sesion expira al reiniciar, el panel respondía 401 y nunca se recargaba. Ahora verifica la URL principal que responde con cualquier codigo HTTP',
+                            'Sobreescritura de backups de BD en nodo remoto — Database::execute() no existe, cambiado a Database::update() que es el metodo correcto',
+                            'Transferencia de backups de BD (individual y masiva) — El token CSRF se enviaba como _token en vez de _csrf_token, causando rechazo 403 silencioso',
+                            'Recarga de pagina tras actualizar panel — El polling verificaba /api/status que requiere sesion activa; si la sesion expira al reiniciar, nunca se recargaba. Ahora verifica la URL principal',
                         ],
                         'en' => [
-                            'DB backup transfer (single and bulk) — CSRF token was sent as _token instead of _csrf_token, causing silent 403 rejection. Transfers now work correctly',
-                            'Page reload after panel update — Polling checked /api/status which requires active session; if session expires on restart, panel returned 401 and never reloaded. Now checks main URL which responds with any HTTP code',
+                            'DB backup overwrite on remote node — Database::execute() does not exist, changed to Database::update()',
+                            'DB backup transfer (single and bulk) — CSRF token was sent as _token instead of _csrf_token, causing silent 403 rejection',
+                            'Page reload after panel update — Polling checked /api/status which requires active session; now checks main URL which responds with any HTTP code',
                         ],
                     ],
                 ],
