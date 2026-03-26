@@ -920,9 +920,10 @@ class ClusterApiController
 
         if ($existing) {
             // Overwrite: update existing record
-            Database::execute("UPDATE database_backups SET file_size = :s, created_at = :d WHERE id = :id", [
-                's' => $fileSize, 'd' => date('Y-m-d H:i:s'), 'id' => $existing['id'],
-            ]);
+            Database::update('database_backups', [
+                'file_size'  => $fileSize,
+                'created_at' => date('Y-m-d H:i:s'),
+            ], 'id = :id', ['id' => $existing['id']]);
         } else {
             Database::insert('database_backups', [
                 'db_name'    => $dbName,
