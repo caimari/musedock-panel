@@ -43,9 +43,13 @@ class ChangelogController
                     'fixed' => [
                         'es' => [
                             'Fecha en formato espanol en /databases — La fecha de ultima sincronizacion de BD en el slave ahora se muestra en formato dd/mm/aaaa en vez de aaaa-mm-dd',
+                            'Codigos ANSI en actualizador web — Eliminados caracteres de escape de color ([0;32m, etc.) en migrate.php y en la lectura del log. migrate.php ahora detecta si es terminal; UpdateService limpia ANSI como fallback',
+                            'Recarga automatica tras actualizar — El polling del actualizador ahora reintenta hasta 10 veces consecutivas si el panel se reinicia, en vez de intentar recargar una sola vez y quedarse colgado',
                         ],
                         'en' => [
                             'Spanish date format on /databases — The last DB sync date on slave now shows in dd/mm/yyyy format instead of yyyy-mm-dd',
+                            'ANSI codes in web updater — Removed color escape characters ([0;32m, etc.) in migrate.php and log reading. migrate.php now detects terminal; UpdateService strips ANSI as fallback',
+                            'Auto-reload after update — Update poller now retries up to 10 consecutive failures if panel restarts, instead of trying to reload once and getting stuck',
                         ],
                     ],
                 ],

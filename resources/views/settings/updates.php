@@ -174,7 +174,8 @@ function confirmUpdate(e) {
 // Poll for update progress
 (function() {
     let polls = 0;
-    const maxPolls = 40; // 40 * 3s = 2 minutes max
+    let catchCount = 0;
+    const maxPolls = 60; // 60 * 3s = 3 minutes max
     const timer = setInterval(function() {
         polls++;
         if (polls > maxPolls) { clearInterval(timer); return; }
@@ -182,20 +183,25 @@ function confirmUpdate(e) {
         fetch('/settings/updates/api/status')
             .then(r => r.json())
             .then(data => {
+                catchCount = 0; // Reset on success
                 if (data.output) {
                     document.getElementById('updateOutput').textContent = data.output;
                     document.getElementById('updateOutput').scrollTop = 999999;
                 }
                 if (!data.in_progress) {
                     clearInterval(timer);
-                    // Reload after a short delay to pick up new version
                     setTimeout(() => location.reload(), 2000);
                 }
             })
             .catch(() => {
-                // Panel probably restarting — try reloading
-                clearInterval(timer);
-                setTimeout(() => location.reload(), 5000);
+                // Panel probably restarting — keep polling until it comes back
+                catchCount++;
+                if (catchCount >= 10) {
+                    // 10 consecutive failures (30s) — force reload, panel should be up
+                    clearInterval(timer);
+                    location.reload();
+                }
+                // Otherwise keep polling — panel is still restarting
             });
     }, 3000);
 })();

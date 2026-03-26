@@ -22,13 +22,17 @@ spl_autoload_register(function ($class) {
 // Load .env
 \MuseDockPanel\Env::load(PANEL_ROOT . '/.env');
 
-// Colors
-$green  = "\033[0;32m";
-$red    = "\033[0;31m";
-$yellow = "\033[1;33m";
-$cyan   = "\033[0;36m";
-$bold   = "\033[1m";
-$nc     = "\033[0m";
+// Colors — disable when not running in a terminal (e.g. called from web panel)
+if (defined('STDOUT') && function_exists('posix_isatty') && posix_isatty(STDOUT)) {
+    $green  = "\033[0;32m";
+    $red    = "\033[0;31m";
+    $yellow = "\033[1;33m";
+    $cyan   = "\033[0;36m";
+    $bold   = "\033[1m";
+    $nc     = "\033[0m";
+} else {
+    $green = $red = $yellow = $cyan = $bold = $nc = '';
+}
 
 $arg = $argv[1] ?? '';
 

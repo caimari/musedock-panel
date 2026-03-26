@@ -106,6 +106,8 @@ class UpdateService
         $startedAt = (int) Settings::get('update_started_at', '0');
         $logFile = PANEL_ROOT . '/storage/logs/update.log';
         $output = file_exists($logFile) ? file_get_contents($logFile) : '';
+        // Strip ANSI escape codes (color, bold, etc.) for web display
+        $output = preg_replace('/\033\[[0-9;]*m/', '', $output);
 
         // If started more than 2 minutes ago, assume it finished
         if ($inProgress && (time() - $startedAt) > 120) {
