@@ -171,10 +171,81 @@ function confirmUpdate(e) {
         cancelButtonText: 'Cancelar'
     }).then(function(result) {
         if (result.isConfirmed) {
-            document.getElementById('updateForm').submit();
+            // Launch update via AJAX and start polling immediately
+            var fd = new FormData(document.getElementById('updateForm'));
+            fetch('/settings/updates/run', { method: 'POST', body: fd })
+                .catch(function() {}); // Ignore — panel may restart before response
+            startUpdatePolling();
         }
     });
     return false;
+}
+
+function startUpdatePolling() {
+    // Show progress UI inline
+    var container = document.querySelector('.card-body .d-flex.gap-3');
+    if (container) {
+        container.closest('.card').innerHTML =
+            '<div class="card-header" style="background:rgba(251,191,36,0.1);border-bottom-color:#fbbf24;">' +
+            '<i class="bi bi-hourglass-split me-2 text-warning"></i>' +
+            '<span class="text-warning">Actualizacion en progreso...</span></div>' +
+            '<div class="card-body">' +
+            '<div class="progress mb-3"><div class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width:100%"></div></div>' +
+            '<pre class="bg-dark text-light p-3 rounded mb-0" style="max-height:300px;overflow-y:auto;font-size:0.85rem" id="updateOutput">Iniciando actualizacion...</pre></div>';
+    }
+
+    var polls = 0, catchCount = 0, sawRestart = false;
+    var maxPolls = 90;
+    var out = document.getElementById('updateOutput');
+
+    function tryReload() {
+        fetch('/settings/updates/api/status', {cache: 'no-store'})
+            .then(function(r) {
+                if (r.ok) {
+                    window.location.href = '/settings/updates?updated=1';
+                } else {
+                    setTimeout(tryReload, 2000);
+                }
+            })
+            .catch(function() { setTimeout(tryReload, 2000); });
+    }
+
+    var timer = setInterval(function() {
+        polls++;
+        if (polls > maxPolls) {
+            clearInterval(timer);
+            tryReload();
+            return;
+        }
+
+        fetch('/settings/updates/api/status', {cache: 'no-store'})
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                catchCount = 0;
+                if (data.output && out) {
+                    out.textContent = data.output;
+                    out.scrollTop = out.scrollHeight;
+                }
+                if (!data.in_progress) {
+                    clearInterval(timer);
+                    setTimeout(tryReload, 1500);
+                }
+            })
+            .catch(function() {
+                catchCount++;
+                if (!sawRestart && catchCount >= 2) {
+                    sawRestart = true;
+                    if (out) {
+                        out.textContent += '\n\n  Reiniciando panel... espere...';
+                        out.scrollTop = out.scrollHeight;
+                    }
+                }
+                if (catchCount >= 8) {
+                    clearInterval(timer);
+                    tryReload();
+                }
+            });
+    }, 2000);
 }
 
 <?php if ($updateStatus['in_progress']): ?>

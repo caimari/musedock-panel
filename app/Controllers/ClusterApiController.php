@@ -1,6 +1,7 @@
 <?php
 namespace MuseDockPanel\Controllers;
 
+use MuseDockPanel\Database;
 use MuseDockPanel\Env;
 use MuseDockPanel\Settings;
 use MuseDockPanel\Services\ClusterService;

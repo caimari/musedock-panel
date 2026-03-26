@@ -949,10 +949,25 @@ function formatDbSize(int $bytes): string {
         var html = '';
         if (data.transferred > 0) html += '<p class="text-success"><i class="bi bi-check-circle me-1"></i><strong>' + data.transferred + '</strong> transferidos a <strong>' + (data.node_name || '') + '</strong></p>';
         if (data.skipped > 0) html += '<p class="text-muted"><i class="bi bi-dash-circle me-1"></i>' + data.skipped + ' omitidos (duplicados)</p>';
-        if (data.errors > 0) html += '<p class="text-danger"><i class="bi bi-x-circle me-1"></i>' + data.errors + ' con error</p>';
+        if (data.errors > 0) {
+            html += '<p class="text-danger"><i class="bi bi-x-circle me-1"></i>' + data.errors + ' con error</p>';
+            // Show error details
+            if (data.results) {
+                var errDetails = data.results.filter(function(r) { return r.status === 'error'; });
+                if (errDetails.length > 0) {
+                    html += '<div style="max-height:120px;overflow-y:auto;text-align:left;font-size:0.8em;" class="mt-2">';
+                    errDetails.forEach(function(r) {
+                        html += '<p class="mb-1"><code>' + (r.filename || r.id) + '</code>: ' + (r.error || 'Error desconocido') + '</p>';
+                    });
+                    html += '</div>';
+                }
+            }
+        }
+        if (!html) html = '<p class="text-muted">No se transfirieron backups.</p>';
+        var icon = data.errors > 0 ? 'warning' : (data.transferred > 0 ? 'success' : 'info');
         SwalDark.fire({
-            icon: data.errors > 0 ? 'warning' : 'success',
-            title: 'Transferencia completada',
+            icon: icon,
+            title: data.transferred > 0 ? 'Transferencia completada' : 'Sin transferencias',
             html: html,
             confirmButtonColor: '#22c55e'
         });
