@@ -497,6 +497,19 @@ function formatDbSize(int $bytes): string {
                 <i class="bi bi-folder me-1"></i>Directorio: <code><?= View::e($backupDir ?? '/opt/musedock-panel/storage/db-backups') ?></code>
             </small>
         </div>
+        <?php if (!empty($dbBackups) && !empty($nodes)): ?>
+        <div class="px-3 py-2 border-bottom d-none" id="bulkActionBar" style="background: rgba(56,189,248,0.05);">
+            <div class="d-flex align-items-center gap-3">
+                <span class="text-info"><i class="bi bi-check2-square me-1"></i><strong id="bulkCount">0</strong> seleccionados</span>
+                <button type="button" class="btn btn-outline-info btn-sm" id="btnBulkTransfer">
+                    <i class="bi bi-cloud-upload me-1"></i> Transferir seleccionados
+                </button>
+                <button type="button" class="btn btn-outline-danger btn-sm" id="btnBulkDelete">
+                    <i class="bi bi-trash me-1"></i> Eliminar seleccionados
+                </button>
+            </div>
+        </div>
+        <?php endif; ?>
         <?php if (empty($dbBackups)): ?>
             <div class="p-4 text-center text-muted">
                 <i class="bi bi-archive" style="font-size: 2rem;"></i>
@@ -507,7 +520,12 @@ function formatDbSize(int $bytes): string {
                 <table class="table table-hover mb-0">
                     <thead>
                         <tr>
-                            <th class="ps-3">Base de Datos</th>
+                            <?php if (!empty($nodes)): ?>
+                            <th class="ps-3" style="width:40px;">
+                                <input type="checkbox" class="form-check-input" id="selectAllBackups" title="Seleccionar todos">
+                            </th>
+                            <?php endif; ?>
+                            <th class="<?= empty($nodes) ? 'ps-3' : '' ?>">Base de Datos</th>
                             <th>Tipo</th>
                             <th>Archivo</th>
                             <th>Tamano</th>
@@ -519,7 +537,15 @@ function formatDbSize(int $bytes): string {
                     <tbody>
                         <?php foreach ($dbBackups as $bk): ?>
                             <tr>
-                                <td class="ps-3"><code><?= View::e($bk['db_name']) ?></code></td>
+                                <?php if (!empty($nodes)): ?>
+                                <td class="ps-3">
+                                    <input type="checkbox" class="form-check-input backup-checkbox"
+                                           value="<?= $bk['id'] ?>"
+                                           data-filename="<?= View::e($bk['filename']) ?>"
+                                           data-db-name="<?= View::e($bk['db_name']) ?>">
+                                </td>
+                                <?php endif; ?>
+                                <td class="<?= empty($nodes) ? 'ps-3' : '' ?>"><code><?= View::e($bk['db_name']) ?></code></td>
                                 <td>
                                     <span class="badge <?= $bk['db_type'] === 'pgsql' ? 'bg-success' : '' ?>" style="<?= $bk['db_type'] === 'mysql' ? 'background:rgba(56,189,248,0.15);color:#38bdf8;' : '' ?>">
                                         <?= strtoupper(View::e($bk['db_type'])) ?>
@@ -542,6 +568,15 @@ function formatDbSize(int $bytes): string {
                                             <i class="bi bi-arrow-counterclockwise"></i>
                                         </button>
                                     </form>
+                                    <?php if (!empty($nodes)): ?>
+                                        <button type="button" class="btn btn-outline-info btn-sm btn-transfer-db-backup"
+                                                title="Transferir a nodo remoto"
+                                                data-backup-id="<?= $bk['id'] ?>"
+                                                data-filename="<?= View::e($bk['filename']) ?>"
+                                                data-db-name="<?= View::e($bk['db_name']) ?>">
+                                            <i class="bi bi-cloud-upload"></i>
+                                        </button>
+                                    <?php endif; ?>
                                     <form method="POST" action="/databases/backups/<?= $bk['id'] ?>/delete" class="d-inline delete-backup-form">
                                         <?= View::csrf() ?>
                                         <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar backup"
@@ -773,6 +808,277 @@ function formatDbSize(int $bytes): string {
                     form.appendChild(input);
                     form.submit();
                 }
+            });
+        });
+    });
+
+    // ─── Bulk selection ──────────────────────────────────────
+    var selectAll = document.getElementById('selectAllBackups');
+    var bulkBar = document.getElementById('bulkActionBar');
+    var bulkCount = document.getElementById('bulkCount');
+
+    function updateBulkBar() {
+        var checked = document.querySelectorAll('.backup-checkbox:checked');
+        if (bulkBar) {
+            if (checked.length > 0) {
+                bulkBar.classList.remove('d-none');
+                bulkCount.textContent = checked.length;
+            } else {
+                bulkBar.classList.add('d-none');
+            }
+        }
+        if (selectAll) {
+            var all = document.querySelectorAll('.backup-checkbox');
+            selectAll.checked = all.length > 0 && checked.length === all.length;
+            selectAll.indeterminate = checked.length > 0 && checked.length < all.length;
+        }
+    }
+
+    if (selectAll) {
+        selectAll.addEventListener('change', function() {
+            document.querySelectorAll('.backup-checkbox').forEach(function(cb) { cb.checked = selectAll.checked; });
+            updateBulkBar();
+        });
+    }
+    document.querySelectorAll('.backup-checkbox').forEach(function(cb) {
+        cb.addEventListener('change', updateBulkBar);
+    });
+
+    function getSelectedBackupIds() {
+        return Array.from(document.querySelectorAll('.backup-checkbox:checked')).map(function(cb) { return cb.value; });
+    }
+
+    // ─── Bulk Transfer ────────────────────────────────────────
+    var clusterNodes = <?= json_encode(array_map(fn($n) => ['id' => $n['id'], 'name' => $n['name'], 'role' => $n['role'] ?? ''], $nodes ?? [])) ?>;
+    var csrfToken = '<?= View::csrfToken() ?>';
+
+    var btnBulkTransfer = document.getElementById('btnBulkTransfer');
+    if (btnBulkTransfer) {
+        btnBulkTransfer.addEventListener('click', function() {
+            var ids = getSelectedBackupIds();
+            if (ids.length === 0) return;
+
+            var nodeOptions = {};
+            clusterNodes.forEach(function(n) { nodeOptions[n.id] = n.name + ' (' + (n.role || 'unknown') + ')'; });
+
+            SwalDark.fire({
+                title: 'Transferir ' + ids.length + ' backup(s)',
+                html: '<p>Selecciona el nodo destino:</p>',
+                input: 'select',
+                inputOptions: nodeOptions,
+                inputPlaceholder: 'Seleccionar nodo...',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '<i class="bi bi-cloud-upload me-1"></i> Transferir',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#0ea5e9',
+                inputValidator: function(v) { if (!v) return 'Selecciona un nodo'; }
+            }).then(function(result) {
+                if (!result.isConfirmed) return;
+                doBulkTransfer(ids, result.value, nodeOptions[result.value], false);
+            });
+        });
+    }
+
+    function doBulkTransfer(ids, nodeId, nodeName, overwrite) {
+        SwalDark.fire({
+            title: 'Transfiriendo...',
+            html: '<p>Enviando <strong>' + ids.length + '</strong> backup(s) a <strong>' + nodeName + '</strong></p><p class="text-muted" style="font-size:0.85em;">Esto puede tardar dependiendo del tamano.</p>',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            showConfirmButton: false,
+            didOpen: function() { Swal.showLoading(); }
+        });
+
+        var formData = new FormData();
+        formData.append('node_id', nodeId);
+        formData.append('backup_ids', JSON.stringify(ids));
+        formData.append('_token', csrfToken);
+        if (overwrite) formData.append('overwrite', '1');
+
+        fetch('/databases/backups/bulk-transfer', { method: 'POST', body: formData })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.duplicates && data.duplicates.length > 0 && !overwrite) {
+                    // Some already exist — ask overwrite
+                    var dupList = data.duplicates.map(function(f) { return '<code>' + f + '</code>'; }).join('<br>');
+                    var msg = '';
+                    if (data.transferred > 0) {
+                        msg += '<p class="text-success"><i class="bi bi-check-circle me-1"></i>' + data.transferred + ' transferidos correctamente.</p>';
+                    }
+                    if (data.errors > 0) {
+                        msg += '<p class="text-danger"><i class="bi bi-x-circle me-1"></i>' + data.errors + ' con error.</p>';
+                    }
+                    msg += '<p><strong>' + data.duplicates.length + '</strong> ya existen en <strong>' + (data.node_name || nodeName) + '</strong>:</p>';
+                    msg += '<div style="max-height:150px;overflow-y:auto;text-align:left;font-size:0.85em;">' + dupList + '</div>';
+                    msg += '<p class="mt-2">Quieres sobreescribirlos?</p>';
+
+                    // Get only the duplicate IDs
+                    var dupIds = data.results.filter(function(r) { return r.status === 'duplicate'; }).map(function(r) { return String(r.id); });
+
+                    SwalDark.fire({
+                        title: 'Backups duplicados',
+                        html: msg,
+                        icon: 'warning',
+                        showCancelButton: true,
+                        showDenyButton: true,
+                        confirmButtonText: '<i class="bi bi-arrow-repeat me-1"></i> Sobreescribir todos',
+                        denyButtonText: 'Omitir duplicados',
+                        cancelButtonText: 'Cancelar',
+                        confirmButtonColor: '#f59e0b',
+                        denyButtonColor: '#6b7280',
+                    }).then(function(result2) {
+                        if (result2.isConfirmed) {
+                            // Resend only duplicates with overwrite
+                            doBulkTransfer(dupIds, nodeId, nodeName, true);
+                        } else if (result2.isDenied) {
+                            // Done — show summary
+                            showBulkResult(data);
+                        }
+                    });
+                } else {
+                    showBulkResult(data);
+                }
+            })
+            .catch(function(err) {
+                SwalDark.fire({ icon: 'error', title: 'Error', text: 'Error de conexion: ' + err.message });
+            });
+    }
+
+    function showBulkResult(data) {
+        var html = '';
+        if (data.transferred > 0) html += '<p class="text-success"><i class="bi bi-check-circle me-1"></i><strong>' + data.transferred + '</strong> transferidos a <strong>' + (data.node_name || '') + '</strong></p>';
+        if (data.skipped > 0) html += '<p class="text-muted"><i class="bi bi-dash-circle me-1"></i>' + data.skipped + ' omitidos (duplicados)</p>';
+        if (data.errors > 0) html += '<p class="text-danger"><i class="bi bi-x-circle me-1"></i>' + data.errors + ' con error</p>';
+        SwalDark.fire({
+            icon: data.errors > 0 ? 'warning' : 'success',
+            title: 'Transferencia completada',
+            html: html,
+            confirmButtonColor: '#22c55e'
+        });
+    }
+
+    // ─── Bulk Delete ──────────────────────────────────────────
+    var btnBulkDelete = document.getElementById('btnBulkDelete');
+    if (btnBulkDelete) {
+        btnBulkDelete.addEventListener('click', function() {
+            var ids = getSelectedBackupIds();
+            if (ids.length === 0) return;
+
+            SwalDark.fire({
+                title: 'Eliminar ' + ids.length + ' backup(s)',
+                html: '<p style="color:#ef4444;">Se eliminaran <strong>' + ids.length + '</strong> backups seleccionados.</p><p>Esta accion es irreversible.</p>',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Eliminar todos',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#ef4444'
+            }).then(function(result) {
+                if (!result.isConfirmed) return;
+
+                SwalDark.fire({
+                    title: 'Eliminando...',
+                    allowOutsideClick: false,
+                    showConfirmButton: false,
+                    didOpen: function() { Swal.showLoading(); }
+                });
+
+                var formData = new FormData();
+                formData.append('backup_ids', JSON.stringify(ids));
+                formData.append('_token', csrfToken);
+
+                fetch('/databases/backups/bulk-delete', { method: 'POST', body: formData })
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.ok) {
+                            SwalDark.fire({
+                                icon: 'success',
+                                title: data.deleted + ' backup(s) eliminados',
+                                confirmButtonColor: '#22c55e'
+                            }).then(function() { location.reload(); });
+                        } else {
+                            SwalDark.fire({ icon: 'error', title: 'Error', text: data.error });
+                        }
+                    })
+                    .catch(function(err) {
+                        SwalDark.fire({ icon: 'error', title: 'Error', text: err.message });
+                    });
+            });
+        });
+    }
+
+    // ─── Transfer single DB backup to node ────────────────────
+    document.querySelectorAll('.btn-transfer-db-backup').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var backupId = btn.dataset.backupId;
+            var filename = btn.dataset.filename;
+            var dbName = btn.dataset.dbName;
+
+            if (clusterNodes.length === 0) {
+                SwalDark.fire('Sin nodos', 'No hay nodos configurados en el cluster.', 'info');
+                return;
+            }
+
+            var nodeOptions = {};
+            clusterNodes.forEach(function(n) {
+                nodeOptions[n.id] = n.name + ' (' + (n.role || 'unknown') + ')';
+            });
+
+            SwalDark.fire({
+                title: 'Transferir backup',
+                html: '<p>Transferir <strong><code>' + dbName + '</code></strong> a un nodo remoto.</p>' +
+                      '<p class="text-muted" style="font-size:0.85em;"><code>' + filename + '</code></p>',
+                input: 'select',
+                inputOptions: nodeOptions,
+                inputPlaceholder: 'Seleccionar nodo...',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '<i class="bi bi-cloud-upload me-1"></i> Transferir',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#0ea5e9',
+                inputValidator: function(value) {
+                    if (!value) return 'Selecciona un nodo';
+                }
+            }).then(function(result) {
+                if (!result.isConfirmed) return;
+
+                var nodeId = result.value;
+                var nodeName = nodeOptions[nodeId] || '';
+
+                SwalDark.fire({
+                    title: 'Transfiriendo...',
+                    html: '<p>Enviando <strong><code>' + dbName + '</code></strong> a <strong>' + nodeName + '</strong></p>' +
+                          '<p class="text-muted" style="font-size:0.85em;">Esto puede tardar unos segundos.</p>',
+                    allowOutsideClick: false,
+                    allowEscapeKey: false,
+                    showConfirmButton: false,
+                    didOpen: function() { Swal.showLoading(); }
+                });
+
+                var formData = new FormData();
+                formData.append('node_id', nodeId);
+                formData.append('_token', '<?= View::csrfToken() ?>');
+
+                fetch('/databases/backups/' + backupId + '/transfer', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.ok) {
+                        SwalDark.fire({
+                            icon: 'success',
+                            title: 'Transferido',
+                            html: '<p>' + (data.message || 'Backup transferido correctamente.') + '</p>',
+                            confirmButtonColor: '#22c55e'
+                        });
+                    } else {
+                        SwalDark.fire({ icon: 'error', title: 'Error', text: data.error || 'Error desconocido' });
+                    }
+                })
+                .catch(function(err) {
+                    SwalDark.fire({ icon: 'error', title: 'Error', text: 'Error de conexion: ' + err.message });
+                });
             });
         });
     });

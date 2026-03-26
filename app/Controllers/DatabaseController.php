@@ -178,6 +178,7 @@ class DatabaseController
                 LIMIT 100
             "),
             'backupDir'           => Settings::get('db_backup_path', '/opt/musedock-panel/storage/db-backups'),
+            'nodes'               => ClusterService::getNodes(),
         ]);
     }
 
@@ -617,7 +618,7 @@ class DatabaseController
                 escapeshellarg($filepath)
             );
         } else {
-            $mysqlCmd = $this->buildMysqlCommand();
+            $mysqlCmd = $this->buildMysqlDumpCommand();
             if ($mysqlCmd === null) {
                 Flash::set('error', 'No se pudo determinar el método de autenticación de MySQL.');
                 Router::redirect('/databases');
@@ -713,7 +714,7 @@ class DatabaseController
         try {
             $mysqlPdo = ReplicationService::getMysqlPdo();
             if ($mysqlPdo) {
-                $mysqlCmd = $this->buildMysqlCommand();
+                $mysqlCmd = $this->buildMysqlDumpCommand();
                 if ($mysqlCmd) {
                     $rows = $mysqlPdo->query("SHOW DATABASES")->fetchAll(\PDO::FETCH_COLUMN);
                     foreach ($rows as $dbName) {
@@ -990,6 +991,39 @@ class DatabaseController
         Router::redirect('/databases');
     }
 
+    /**
+     * POST /databases/backups/bulk-delete — Delete multiple DB backups (JSON)
+     */
+    public function bulkDeleteBackups(): void
+    {
+        header('Content-Type: application/json');
+
+        $backupIds = json_decode($_POST['backup_ids'] ?? '[]', true);
+        if (empty($backupIds)) {
+            echo json_encode(['ok' => false, 'error' => 'No se seleccionaron backups.']);
+            exit;
+        }
+
+        $backupDir = $this->getBackupDir();
+        $deleted = 0;
+
+        foreach ($backupIds as $id) {
+            $backup = Database::fetchOne("SELECT * FROM database_backups WHERE id = :id", ['id' => (int)$id]);
+            if (!$backup) continue;
+
+            $filepath = $backupDir . '/' . $backup['filename'];
+            if (file_exists($filepath)) {
+                @unlink($filepath);
+            }
+            Database::delete('database_backups', 'id = :id', ['id' => (int)$id]);
+            $deleted++;
+        }
+
+        LogService::log('database.backup.bulk_delete', 'all', "Bulk delete: {$deleted} DB backups removed");
+        echo json_encode(['ok' => true, 'deleted' => $deleted]);
+        exit;
+    }
+
     private function formatBytes(int $bytes): string
     {
         if ($bytes <= 0) return '0 B';
@@ -1030,6 +1064,219 @@ class DatabaseController
         }
     }
 
+    // ─── Transfer DB backup to remote node ─────────────────────────
+
+    /**
+     * POST /databases/backups/{id}/transfer — Transfer a DB backup to a remote node (JSON)
+     */
+    public function transferBackup(array $params): void
+    {
+        header('Content-Type: application/json');
+
+        $id = (int)($params['id'] ?? 0);
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        $overwrite = !empty($_POST['overwrite']);
+
+        if (!$nodeId) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no especificado.']);
+            exit;
+        }
+
+        $backup = Database::fetchOne("SELECT * FROM database_backups WHERE id = :id", ['id' => $id]);
+        if (!$backup) {
+            echo json_encode(['ok' => false, 'error' => 'Backup no encontrado.']);
+            exit;
+        }
+
+        $filepath = $this->getBackupDir() . '/' . $backup['filename'];
+        if (!file_exists($filepath)) {
+            echo json_encode(['ok' => false, 'error' => 'El archivo de backup no existe en disco.']);
+            exit;
+        }
+
+        $node = ClusterService::getNode($nodeId);
+        if (!$node) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado.']);
+            exit;
+        }
+
+        // Send file via cluster API
+        $token = ReplicationService::decryptPassword($node['auth_token'] ?? '');
+        $url = rtrim($node['api_url'], '/') . '/api/cluster/action';
+
+        $fields = [
+            'action'    => 'receive-db-backup',
+            'filename'  => $backup['filename'],
+            'db_name'   => $backup['db_name'],
+            'db_type'   => $backup['db_type'],
+            'db_backup' => new \CURLFile($filepath, 'application/gzip', $backup['filename']),
+        ];
+        if ($overwrite) {
+            $fields['overwrite'] = '1';
+        }
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST           => true,
+            CURLOPT_TIMEOUT        => 300,
+            CURLOPT_CONNECTTIMEOUT => 15,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => false,
+            CURLOPT_HTTPHEADER     => [
+                'Authorization: Bearer ' . $token,
+                'Accept: application/json',
+            ],
+            CURLOPT_POSTFIELDS => $fields,
+        ]);
+
+        $response = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($error) {
+            echo json_encode(['ok' => false, 'error' => "Error de conexion: {$error}"]);
+            exit;
+        }
+
+        $data = @json_decode($response, true);
+        if ($httpCode >= 200 && $httpCode < 300 && ($data['ok'] ?? false)) {
+            LogService::log('database.backup.transfer', $backup['db_name'], "DB backup transferred to {$node['name']}: {$backup['filename']}");
+            echo json_encode(['ok' => true, 'message' => "Backup transferido a {$node['name']}"]);
+        } else {
+            $errMsg = $data['error'] ?? "Error HTTP {$httpCode}";
+            echo json_encode(['ok' => false, 'error' => $errMsg]);
+        }
+        exit;
+    }
+
+    /**
+     * POST /databases/backups/bulk-transfer — Transfer multiple DB backups to a remote node (JSON)
+     */
+    public function bulkTransferBackups(): void
+    {
+        header('Content-Type: application/json');
+
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        $backupIds = json_decode($_POST['backup_ids'] ?? '[]', true);
+        $overwrite = !empty($_POST['overwrite']);
+
+        if (!$nodeId || empty($backupIds)) {
+            echo json_encode(['ok' => false, 'error' => 'Faltan parametros.']);
+            exit;
+        }
+
+        $node = ClusterService::getNode($nodeId);
+        if (!$node) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado.']);
+            exit;
+        }
+
+        // First, get remote backup list to detect duplicates
+        $remoteFilenames = [];
+        if (!$overwrite) {
+            $result = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'list-db-backups']);
+            if ($result['ok'] ?? false) {
+                $remoteFilenames = $result['data']['filenames'] ?? [];
+            }
+        }
+
+        $backupDir = $this->getBackupDir();
+        $token = ReplicationService::decryptPassword($node['auth_token'] ?? '');
+        $url = rtrim($node['api_url'], '/') . '/api/cluster/action';
+
+        $results = [];
+        $transferred = 0;
+        $skipped = 0;
+        $errors = 0;
+        $duplicates = [];
+
+        foreach ($backupIds as $id) {
+            $backup = Database::fetchOne("SELECT * FROM database_backups WHERE id = :id", ['id' => (int)$id]);
+            if (!$backup) {
+                $results[] = ['id' => $id, 'status' => 'error', 'error' => 'No encontrado'];
+                $errors++;
+                continue;
+            }
+
+            $filepath = $backupDir . '/' . $backup['filename'];
+            if (!file_exists($filepath)) {
+                $results[] = ['id' => $id, 'status' => 'error', 'error' => 'Archivo no existe', 'filename' => $backup['filename']];
+                $errors++;
+                continue;
+            }
+
+            // Check duplicate (skip if not overwrite)
+            if (!$overwrite && in_array($backup['filename'], $remoteFilenames)) {
+                $results[] = ['id' => $id, 'status' => 'duplicate', 'filename' => $backup['filename'], 'db_name' => $backup['db_name']];
+                $duplicates[] = $backup['filename'];
+                $skipped++;
+                continue;
+            }
+
+            $fields = [
+                'action'    => 'receive-db-backup',
+                'filename'  => $backup['filename'],
+                'db_name'   => $backup['db_name'],
+                'db_type'   => $backup['db_type'],
+                'overwrite'  => $overwrite ? '1' : '0',
+                'db_backup' => new \CURLFile($filepath, 'application/gzip', $backup['filename']),
+            ];
+
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST           => true,
+                CURLOPT_TIMEOUT        => 300,
+                CURLOPT_CONNECTTIMEOUT => 15,
+                CURLOPT_SSL_VERIFYPEER => false,
+                CURLOPT_SSL_VERIFYHOST => false,
+                CURLOPT_HTTPHEADER     => [
+                    'Authorization: Bearer ' . $token,
+                    'Accept: application/json',
+                ],
+                CURLOPT_POSTFIELDS => $fields,
+            ]);
+
+            $response = curl_exec($ch);
+            $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $error = curl_error($ch);
+            curl_close($ch);
+
+            if ($error) {
+                $results[] = ['id' => $id, 'status' => 'error', 'error' => $error, 'filename' => $backup['filename']];
+                $errors++;
+                continue;
+            }
+
+            $data = @json_decode($response, true);
+            if ($httpCode >= 200 && $httpCode < 300 && ($data['ok'] ?? false)) {
+                $results[] = ['id' => $id, 'status' => 'ok', 'filename' => $backup['filename'], 'db_name' => $backup['db_name']];
+                $transferred++;
+            } else {
+                $errMsg = $data['error'] ?? "HTTP {$httpCode}";
+                $results[] = ['id' => $id, 'status' => 'error', 'error' => $errMsg, 'filename' => $backup['filename']];
+                $errors++;
+            }
+        }
+
+        if ($transferred > 0) {
+            LogService::log('database.backup.bulk_transfer', $node['name'], "Bulk transfer: {$transferred} backups to {$node['name']}" . ($skipped > 0 ? ", {$skipped} skipped (duplicates)" : ''));
+        }
+
+        echo json_encode([
+            'ok' => true,
+            'transferred' => $transferred,
+            'skipped' => $skipped,
+            'errors' => $errors,
+            'duplicates' => $duplicates,
+            'results' => $results,
+            'node_name' => $node['name'],
+        ]);
+        exit;
+    }
+
     // ─── MySQL Helpers ──────────────────────────────────────────────
 
     private function buildMysqlCommand(): ?string
@@ -1042,6 +1289,20 @@ class DatabaseController
             $pass = Env::get('MYSQL_ROOT_PASS', '');
             if (empty($pass)) return null;
             return 'mysql -u root -p' . escapeshellarg($pass);
+        }
+        return null;
+    }
+
+    private function buildMysqlDumpCommand(): ?string
+    {
+        $authMethod = Env::get('MYSQL_AUTH_METHOD', 'socket');
+        if ($authMethod === 'socket') {
+            return 'mysqldump -u root';
+        }
+        if ($authMethod === 'password') {
+            $pass = Env::get('MYSQL_ROOT_PASS', '');
+            if (empty($pass)) return null;
+            return 'mysqldump -u root -p' . escapeshellarg($pass);
         }
         return null;
     }

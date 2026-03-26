@@ -385,11 +385,13 @@ class ClusterApiController
                 'query-local-state' => $this->handleQueryLocalState(),
 
                 // ── Remote backup operations ──────────────────
-                'backup-preflight' => $this->handleBackupPreflight($payload),
-                'receive-backup'   => $this->handleReceiveBackup($payload),
-                'list-backups'     => $this->handleListBackups($payload),
-                'download-backup'  => $this->handleDownloadBackup($payload),
-                'delete-backup'    => $this->handleDeleteBackup($payload),
+                'backup-preflight'   => $this->handleBackupPreflight($payload),
+                'receive-backup'     => $this->handleReceiveBackup($payload),
+                'receive-db-backup'  => $this->handleReceiveDbBackup($payload),
+                'list-db-backups'    => $this->handleListDbBackups(),
+                'list-backups'       => $this->handleListBackups($payload),
+                'download-backup'    => $this->handleDownloadBackup($payload),
+                'delete-backup'      => $this->handleDeleteBackup($payload),
 
                 default            => ['ok' => false, 'error' => "Unknown action: {$action}"],
             };
@@ -873,6 +875,78 @@ class ClusterApiController
         LogService::log('backup.receive', $meta['domain'] ?? $backupName, "Remote backup received: {$backupName}");
 
         return ['ok' => true, 'message' => "Backup {$backupName} received", 'path' => $targetDir];
+    }
+
+    /**
+     * Receive a single database backup file (.sql.gz) from another node.
+     */
+    private function handleReceiveDbBackup(array $payload): array
+    {
+        $filename  = basename($payload['filename'] ?? '');
+        $dbName    = $payload['db_name'] ?? '';
+        $dbType    = $payload['db_type'] ?? 'pgsql';
+        $overwrite = !empty($payload['overwrite']);
+
+        if (!$filename || !$dbName) {
+            return ['ok' => false, 'error' => 'Missing filename or db_name'];
+        }
+
+        $uploadedFile = $_FILES['db_backup'] ?? null;
+        if (!$uploadedFile || $uploadedFile['error'] !== UPLOAD_ERR_OK) {
+            $maxUpload = ini_get('upload_max_filesize');
+            $maxPost = ini_get('post_max_size');
+            return ['ok' => false, 'error' => "No file received or upload error. PHP limits: upload_max_filesize={$maxUpload}, post_max_size={$maxPost}"];
+        }
+
+        $backupDir = Settings::get('db_backup_path', PANEL_ROOT . '/storage/db-backups');
+        if (!is_dir($backupDir)) {
+            @mkdir($backupDir, 0750, true);
+        }
+
+        $targetPath = $backupDir . '/' . $filename;
+
+        // Check if already exists
+        $existing = Database::fetchOne("SELECT id FROM database_backups WHERE filename = :f", ['f' => $filename]);
+        if ($existing && !$overwrite) {
+            return ['ok' => false, 'error' => 'exists', 'message' => "Backup {$filename} already exists on this node"];
+        }
+
+        if (!move_uploaded_file($uploadedFile['tmp_name'], $targetPath)) {
+            return ['ok' => false, 'error' => 'Failed to move uploaded file'];
+        }
+
+        $fileSize = filesize($targetPath);
+
+        if ($existing) {
+            // Overwrite: update existing record
+            Database::execute("UPDATE database_backups SET file_size = :s, created_at = :d WHERE id = :id", [
+                's' => $fileSize, 'd' => date('Y-m-d H:i:s'), 'id' => $existing['id'],
+            ]);
+        } else {
+            Database::insert('database_backups', [
+                'db_name'    => $dbName,
+                'db_type'    => $dbType,
+                'filename'   => $filename,
+                'file_size'  => $fileSize,
+                'status'     => 'completed',
+                'created_by' => null,
+                'created_at' => date('Y-m-d H:i:s'),
+            ]);
+        }
+
+        LogService::log('database.backup.receive', $dbName, "DB backup received from remote: {$filename}" . ($existing ? ' (overwritten)' : ''));
+
+        return ['ok' => true, 'message' => "DB backup {$filename} received", 'file_size' => $fileSize, 'overwritten' => (bool)$existing];
+    }
+
+    /**
+     * List DB backups registered on this node (filenames).
+     */
+    private function handleListDbBackups(): array
+    {
+        $rows = Database::fetchAll("SELECT filename FROM database_backups ORDER BY created_at DESC");
+        $filenames = array_column($rows, 'filename');
+        return ['ok' => true, 'filenames' => $filenames];
     }
 
     /**

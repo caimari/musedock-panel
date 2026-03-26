@@ -95,13 +95,13 @@ class ClusterController
 
         if ($name === '' || $apiUrl === '' || $token === '') {
             Flash::set('error', 'Todos los campos son obligatorios');
-            header('Location: /settings/cluster');
+            header('Location: /settings/cluster#nodos');
             exit;
         }
 
         if (!filter_var($apiUrl, FILTER_VALIDATE_URL)) {
             Flash::set('error', 'URL de API no valida');
-            header('Location: /settings/cluster');
+            header('Location: /settings/cluster#nodos');
             exit;
         }
 
@@ -112,7 +112,7 @@ class ClusterController
 
         if (!$testResult['ok']) {
             Flash::set('error', 'No se pudo conectar al nodo: ' . ($testResult['error'] ?? 'Error desconocido'));
-            header('Location: /settings/cluster');
+            header('Location: /settings/cluster#nodos');
             exit;
         }
 
@@ -124,7 +124,7 @@ class ClusterController
         $id = ClusterService::addNode($name, $apiUrl, $token, array_values($validServices));
         LogService::log('cluster.node', 'add', "Nodo anadido: {$name} ({$apiUrl}), servicios: " . implode(',', $validServices) . ", ID: {$id}");
         Flash::set('success', "Nodo '{$name}' anadido correctamente");
-        header('Location: /settings/cluster');
+        header('Location: /settings/cluster#nodos');
         exit;
     }
 
@@ -142,14 +142,14 @@ class ClusterController
 
         if ($id < 1) {
             Flash::set('error', 'ID de nodo no valido');
-            header('Location: /settings/cluster');
+            header('Location: /settings/cluster#nodos');
             exit;
         }
 
         $node = ClusterService::getNode($id);
         if (!$node) {
             Flash::set('error', 'Nodo no encontrado');
-            header('Location: /settings/cluster');
+            header('Location: /settings/cluster#nodos');
             exit;
         }
 
@@ -164,7 +164,7 @@ class ClusterController
             Flash::set('success', 'Nodo actualizado correctamente');
         }
 
-        header('Location: /settings/cluster');
+        header('Location: /settings/cluster#nodos');
         exit;
     }
 
@@ -273,14 +273,29 @@ class ClusterController
         $id = (int)($_REQUEST['id'] ?? $_POST['node_id'] ?? 0);
         if ($id < 1) {
             Flash::set('error', 'ID de nodo no valido');
-            header('Location: /settings/cluster');
+            header('Location: /settings/cluster#nodos');
+            exit;
+        }
+
+        // Verify admin password
+        $password = $_POST['password'] ?? '';
+        $adminId = $_SESSION['panel_user']['id'] ?? 0;
+        if (!$adminId || !$password) {
+            Flash::set('error', 'Contraseña requerida para eliminar un nodo');
+            header('Location: /settings/cluster#nodos');
+            exit;
+        }
+        $admin = Database::fetchOne("SELECT password_hash FROM panel_admins WHERE id = :id", ['id' => $adminId]);
+        if (!$admin || !password_verify($password, $admin['password_hash'])) {
+            Flash::set('error', 'Contraseña incorrecta');
+            header('Location: /settings/cluster#nodos');
             exit;
         }
 
         $node = ClusterService::getNode($id);
         if (!$node) {
             Flash::set('error', 'Nodo no encontrado');
-            header('Location: /settings/cluster');
+            header('Location: /settings/cluster#nodos');
             exit;
         }
 
@@ -288,7 +303,7 @@ class ClusterController
         ClusterService::removeNode($id);
         LogService::log('cluster.node', 'remove', "Nodo eliminado: {$name}, ID: {$id}");
         Flash::set('success', "Nodo '{$name}' eliminado correctamente");
-        header('Location: /settings/cluster');
+        header('Location: /settings/cluster#nodos');
         exit;
     }
 
@@ -480,7 +495,7 @@ class ClusterController
             Flash::set('info', 'No habia elementos pendientes en la cola');
         }
 
-        header('Location: /settings/cluster');
+        header('Location: /settings/cluster#cola');
         exit;
     }
 
@@ -571,7 +586,7 @@ class ClusterController
 
         LogService::log('cluster.settings', 'save', 'Configuracion del cluster guardada');
         Flash::set('success', 'Configuracion del cluster guardada');
-        header('Location: /settings/cluster');
+        header('Location: /settings/cluster#configuracion');
         exit;
     }
 
@@ -770,7 +785,7 @@ class ClusterController
 
         LogService::log('cluster.filesync', 'save', 'Configuracion de sincronizacion de archivos guardada');
         Flash::set('success', 'Configuracion de sincronizacion de archivos guardada');
-        header('Location: /settings/cluster');
+        header('Location: /settings/cluster#archivos');
         exit;
     }
 

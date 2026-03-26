@@ -20,6 +20,74 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.15',
+                'date' => '2026-03-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Transferencia de backups de BD a nodos remotos — Boton individual y transferencia masiva con seleccion multiple, deteccion de duplicados y opcion de sobreescribir',
+                            'Seleccion masiva en backups de BD — Checkboxes, seleccionar todos, barra de acciones masivas (transferir/eliminar)',
+                            'Eliminacion masiva de backups de BD via AJAX',
+                        ],
+                        'en' => [
+                            'DB backup transfer to remote nodes — Individual button and bulk transfer with multi-select, duplicate detection, and overwrite option',
+                            'Bulk selection for DB backups — Checkboxes, select all, bulk action bar (transfer/delete)',
+                            'Bulk delete DB backups via AJAX',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Confirmacion modal al eliminar servidores failover y cuentas Cloudflare en cluster',
+                            'Persistencia de tabs en cluster — Al guardar configuracion, la pagina vuelve al tab correspondiente (failover, nodos, archivos, configuracion, cola)',
+                            'Verificacion de contraseña de admin al eliminar nodos del cluster',
+                        ],
+                        'en' => [
+                            'Confirmation modal when deleting failover servers and Cloudflare accounts in cluster',
+                            'Tab persistence in cluster — After saving, the page returns to the corresponding tab (failover, nodes, files, config, queue)',
+                            'Admin password verification when removing cluster nodes',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Backups de BD MySQL fallaban — Se usaba el cliente mysql en vez de mysqldump para generar dumps',
+                            'Redirect de tabs en cluster apuntaba a #tab-failover que no coincidia con el hash del tab (#failover)',
+                        ],
+                        'en' => [
+                            'MySQL DB backups were failing — mysql client was used instead of mysqldump for generating dumps',
+                            'Cluster tab redirect pointed to #tab-failover which did not match the tab hash (#failover)',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.14',
+                'date' => '2026-03-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Exclusiones integradas en rsync — Los directorios de herramientas AI/IDE (.claude/, .codex/, .cline/, .vscode-server/, .git/) se excluyen automaticamente de la sincronizacion periodica rsync y HTTPS, igual que en lsyncd',
+                        ],
+                        'en' => [
+                            'Built-in rsync exclusions — AI/IDE tool directories (.claude/, .codex/, .cline/, .vscode-server/, .git/) are now automatically excluded from periodic rsync and HTTPS sync, matching lsyncd behavior',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Exclusiones lsyncd ampliadas — Añadidos .codex/ y .cline/ a las exclusiones por defecto de lsyncd',
+                        ],
+                        'en' => [
+                            'Expanded lsyncd exclusions — Added .codex/ and .cline/ to lsyncd default exclusions',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [],
+                        'en' => [],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.13',
                 'date' => '2026-03-26',
                 'badge' => 'primary',

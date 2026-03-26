@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.13');
+define('PANEL_VERSION', '1.0.15');
 
 
 
@@ -161,10 +161,13 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // Database Backups
 \MuseDockPanel\Router::post('/databases/backup', 'DatabaseController@backup');
 \MuseDockPanel\Router::post('/databases/backup-all', 'DatabaseController@backupAll');
+\MuseDockPanel\Router::post('/databases/backups/bulk-transfer', 'DatabaseController@bulkTransferBackups');
+\MuseDockPanel\Router::post('/databases/backups/bulk-delete', 'DatabaseController@bulkDeleteBackups');
+\MuseDockPanel\Router::post('/databases/backups/cleanup', 'DatabaseController@cleanupBackups');
 \MuseDockPanel\Router::get('/databases/backups/{id}/download', 'DatabaseController@downloadBackup');
 \MuseDockPanel\Router::post('/databases/backups/{id}/restore', 'DatabaseController@restoreBackup');
 \MuseDockPanel\Router::post('/databases/backups/{id}/delete', 'DatabaseController@deleteBackup');
-\MuseDockPanel\Router::post('/databases/backups/cleanup', 'DatabaseController@cleanupBackups');
+\MuseDockPanel\Router::post('/databases/backups/{id}/transfer', 'DatabaseController@transferBackup');
 \MuseDockPanel\Router::post('/databases/backup-settings', 'DatabaseController@saveBackupSettings');
 
 // Customers

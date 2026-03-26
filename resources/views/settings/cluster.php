@@ -745,6 +745,7 @@
     <form method="post" id="form-remove-node" style="display:none;">
         <?= View::csrf() ?>
         <input type="hidden" name="node_id" id="remove-node-id">
+        <input type="hidden" name="password" id="remove-node-pass">
     </form>
 
     <!-- Hidden form for sync-all-hostings -->
@@ -1538,7 +1539,7 @@
                                            onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
                                 </td>
                                 <td>
-                                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()">
+                                    <button type="button" class="btn btn-outline-danger btn-sm btn-remove-fo-server" data-name="<?= View::e($srv['name'] ?? '') ?>">
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </td>
@@ -1611,7 +1612,7 @@
                                 </span>
                             </div>
                             <div class="col-md-1 text-end">
-                                <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('.cf-account-row').remove()">
+                                <button type="button" class="btn btn-outline-danger btn-sm btn-remove-cf-account" data-name="<?= View::e($acct['name'] ?? '') ?>">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </div>
@@ -2213,9 +2214,10 @@ function foAddCfAccount() {
                     <button type="button" class="btn btn-outline-info" onclick="foVerifyCfToken(this)"><i class="bi bi-check-circle"></i></button>
                 </div></div>
             <div class="col-md-3"><span class="small text-muted cf-zone-info"></span></div>
-            <div class="col-md-1 text-end"><button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('.cf-account-row').remove()"><i class="bi bi-trash"></i></button></div>
+            <div class="col-md-1 text-end"><button type="button" class="btn btn-outline-danger btn-sm btn-remove-cf-account" data-name="Nueva cuenta"><i class="bi bi-trash"></i></button></div>
         </div></div>`;
     document.getElementById('cf-accounts-list').insertAdjacentHTML('beforeend', html);
+    bindRemoveButtons();
 }
 
 function foVerifyCfToken(btn) {
@@ -2283,13 +2285,63 @@ function foAddServer() {
                    onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
         </td>
         <td>
-            <button type="button" class="btn btn-outline-danger btn-sm" onclick="this.closest('tr').remove()">
+            <button type="button" class="btn btn-outline-danger btn-sm btn-remove-fo-server" data-name="Nuevo servidor">
                 <i class="bi bi-trash"></i>
             </button>
         </td>
     </tr>`;
     document.getElementById('fo-servers-body').insertAdjacentHTML('beforeend', html);
+    bindRemoveButtons();
 }
+
+// ─── Confirmation modals for removing failover servers / CF accounts ──────
+function bindRemoveButtons() {
+    document.querySelectorAll('.btn-remove-fo-server').forEach(function(btn) {
+        if (btn._bound) return;
+        btn._bound = true;
+        btn.addEventListener('click', function() {
+            var name = btn.dataset.name || btn.closest('tr').querySelector('input[name="srv_name[]"]')?.value || 'este servidor';
+            SwalDark.fire({
+                title: 'Eliminar servidor',
+                html: '<p>Se eliminara <strong>' + name + '</strong> de la lista.</p>' +
+                      '<p class="text-muted small">Recuerda pulsar "Guardar Servidores" para confirmar los cambios.</p>',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Eliminar',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#ef4444'
+            }).then(function(result) {
+                if (result.isConfirmed) {
+                    btn.closest('tr').remove();
+                }
+            });
+        });
+    });
+
+    document.querySelectorAll('.btn-remove-cf-account').forEach(function(btn) {
+        if (btn._bound) return;
+        btn._bound = true;
+        btn.addEventListener('click', function() {
+            var name = btn.dataset.name || btn.closest('.cf-account-row').querySelector('input[name="cf_name[]"]')?.value || 'esta cuenta';
+            SwalDark.fire({
+                title: 'Eliminar cuenta Cloudflare',
+                html: '<p>Se eliminara <strong>' + name + '</strong> de la lista.</p>' +
+                      '<p class="text-muted small">Recuerda pulsar "Guardar Cuentas CF" para confirmar los cambios.</p>',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Eliminar',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#ef4444'
+            }).then(function(result) {
+                if (result.isConfirmed) {
+                    btn.closest('.cf-account-row').remove();
+                }
+            });
+        });
+    });
+}
+// Bind on page load
+document.addEventListener('DOMContentLoaded', bindRemoveButtons);
 
 function foInstallCaddyL4() {
     const btn = document.getElementById('btn-install-caddy-l4');
@@ -2990,28 +3042,13 @@ function confirmRemoveNode(nodeId, nodeName) {
                 Swal.showValidationMessage('Introduce tu contraseña');
                 return false;
             }
-            // Verify password via API
-            const fd = new FormData();
-            fd.append('password', pass);
-            fd.append('_csrf_token', document.querySelector('[name=_csrf_token]').value);
-            return fetch('/settings/cluster/verify-admin-password', { method: 'POST', body: fd })
-                .then(r => r.json())
-                .then(data => {
-                    if (!data.ok) {
-                        Swal.showValidationMessage('Contraseña incorrecta');
-                        return false;
-                    }
-                    return true;
-                })
-                .catch(() => {
-                    Swal.showValidationMessage('Error al verificar contraseña');
-                    return false;
-                });
+            return pass;
         },
     }).then(function(result) {
-        if (result.isConfirmed) {
+        if (result.isConfirmed && result.value) {
             const form = document.getElementById('form-remove-node');
             document.getElementById('remove-node-id').value = nodeId;
+            document.getElementById('remove-node-pass').value = result.value;
             form.action = '/settings/cluster/remove-node/' + nodeId;
             form.submit();
         }

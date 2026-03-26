@@ -201,6 +201,11 @@ class FileSyncService
             $cmd .= ' --bwlimit=' . (int)$bwLimit;
         }
 
+        // Built-in excludes (AI tools, IDE dirs — large, machine-specific)
+        foreach (self::RSYNC_DEFAULT_EXCLUDES as $builtIn) {
+            $cmd .= ' --exclude=' . escapeshellarg($builtIn);
+        }
+
         // Exclude patterns (glob-style from config)
         foreach ($excludes as $pattern) {
             $cmd .= ' --exclude=' . escapeshellarg($pattern);
@@ -287,6 +292,10 @@ class FileSyncService
         $specificExclusions = array_filter(array_map('trim', explode("\n", Settings::get('filesync_exclusions_list', ''))));
 
         $excludeArgs = '';
+        // Built-in excludes (AI tools, IDE dirs)
+        foreach (self::RSYNC_DEFAULT_EXCLUDES as $builtIn) {
+            $excludeArgs .= ' --exclude=' . escapeshellarg($builtIn);
+        }
         foreach ($excludes as $pattern) {
             $excludeArgs .= ' --exclude=' . escapeshellarg($pattern);
         }
@@ -1413,9 +1422,23 @@ class FileSyncService
      * These are volatile or non-essential paths that cause excessive CPU
      * when synced in real-time (IDE files, conversation logs, caches, etc.).
      */
+    /**
+     * Default exclusion patterns always applied to periodic rsync.
+     * IDE/AI tool directories that are large, machine-specific, and auto-recreate.
+     */
+    private const RSYNC_DEFAULT_EXCLUDES = [
+        '.claude',
+        '.codex',
+        '.cline',
+        '.vscode-server',
+        '.git',
+    ];
+
     private const LSYNCD_DEFAULT_EXCLUDES = [
         '.vscode-server',
         '.claude',
+        '.codex',
+        '.cline',
         '.git',
         'node_modules',
         'storage/logs',

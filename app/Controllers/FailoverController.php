@@ -65,7 +65,7 @@ class FailoverController
         FailoverService::pushConfigToSlaves();
         LogService::log('failover.config', null, 'Failover settings updated');
         Flash::set('success', 'Configuración de failover guardada y sincronizada con slaves.');
-        Router::redirect('/settings/cluster#tab-failover');
+        Router::redirect('/settings/cluster#failover');
     }
 
     // ─── Save servers (dynamic list) ─────────────────────────
@@ -107,7 +107,7 @@ class FailoverController
         FailoverService::pushConfigToSlaves();
         LogService::log('failover.servers', null, count($servers) . ' servers saved');
         Flash::set('success', count($servers) . ' servidor(es) guardado(s) y sincronizado(s) con slaves.');
-        Router::redirect('/settings/cluster#tab-failover');
+        Router::redirect('/settings/cluster#failover');
     }
 
     // ─── Cloudflare accounts ─────────────────────────────────
@@ -145,7 +145,7 @@ class FailoverController
         FailoverService::pushConfigToSlaves();
         LogService::log('failover.cloudflare', null, count($accounts) . ' CF accounts saved');
         Flash::set('success', count($accounts) . ' cuenta(s) Cloudflare guardada(s) y sincronizada(s) con slaves.');
-        Router::redirect('/settings/cluster#tab-failover');
+        Router::redirect('/settings/cluster#failover');
     }
 
     /**
