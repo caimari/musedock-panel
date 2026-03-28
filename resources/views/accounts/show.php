@@ -178,7 +178,7 @@ use MuseDockPanel\Services\CloudflareService;
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-cloud-fill me-2" style="color:#f97316;"></i>Cloudflare DNS — <?= View::e($cfZone['zone']) ?></span>
-                <a href="/settings/cloudflare-dns" class="btn btn-outline-light btn-sm py-0 px-2" style="font-size:0.75rem;">
+                <a href="/settings/cloudflare-dns?domain=<?= urlencode($cfZone['zone']) ?>" class="btn btn-outline-light btn-sm py-0 px-2" style="font-size:0.75rem;">
                     <i class="bi bi-box-arrow-up-right me-1"></i>Full Manager
                 </a>
             </div>

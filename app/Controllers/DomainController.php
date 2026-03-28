@@ -29,6 +29,18 @@ class DomainController
              ORDER BY h.domain ASC"
         );
 
+        // Subdomains grouped by account_id
+        $subdomainsAll = Database::fetchAll(
+            "SELECT s.*, h.domain AS account_domain
+             FROM hosting_subdomains s
+             JOIN hosting_accounts h ON h.id = s.account_id
+             ORDER BY s.subdomain ASC"
+        );
+        $subdomainsByAccount = [];
+        foreach ($subdomainsAll as $sub) {
+            $subdomainsByAccount[(int)$sub['account_id']][] = $sub;
+        }
+
         // Domain aliases & redirects
         $aliasesAndRedirects = Database::fetchAll(
             "SELECT da.*, h.domain AS account_domain, h.username, h.status AS account_status,
@@ -45,6 +57,7 @@ class DomainController
             'domains' => $domains,
             'accountDomains' => $accountDomains,
             'aliasesAndRedirects' => $aliasesAndRedirects,
+            'subdomainsByAccount' => $subdomainsByAccount,
         ]);
     }
 

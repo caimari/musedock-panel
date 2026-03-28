@@ -20,6 +20,37 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.28',
+                'date' => '2026-03-28',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Politicas TLS multi-cuenta Cloudflare — Caddy genera certificados SSL usando el token correcto segun la cuenta CF donde este cada dominio, soportando multiples cuentas CF simultaneas',
+                            'Refresco automatico de zonas Cloudflare — Al crear un hosting, alias o redirect con un dominio no conocido, el panel consulta la API de CF y actualiza la lista de zonas automaticamente',
+                            'Subdominios en pagina de dominios ��� La vista /domains ahora muestra los subdominios debajo de cada dominio principal con badge y estado DNS',
+                            'Full Manager con dominio preseleccionado — Al hacer clic en "Full Manager" desde la ficha de un hosting, la pagina de Cloudflare DNS abre con la zona del dominio ya seleccionada',
+                        ],
+                        'en' => [
+                            'Multi-account Cloudflare TLS policies — Caddy generates SSL certificates using the correct token for each domain based on which CF account it belongs to, supporting multiple CF accounts simultaneously',
+                            'Automatic Cloudflare zone refresh — When creating a hosting, alias or redirect with an unknown domain, the panel queries the CF API and updates the zone list automatically',
+                            'Subdomains in domains page — The /domains view now shows subdomains below each main domain with badge and DNS status',
+                            'Full Manager with preselected domain — Clicking "Full Manager" from a hosting account page opens Cloudflare DNS with the domain zone already selected',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Corregido error SSL 525 en dominios de cuentas CF secundarias ��� Los certificados fallaban porque Caddy usaba un unico token para todos los dominios; ahora cada cuenta CF tiene su propia politica TLS',
+                            'Corregido nombre duplicado de subdominios en /domains — Se mostraba sub.dominio.com.dominio.com en vez de sub.dominio.com',
+                        ],
+                        'en' => [
+                            'Fixed SSL 525 error for domains in secondary CF accounts — Certificates failed because Caddy used a single token for all domains; now each CF account has its own TLS policy',
+                            'Fixed duplicated subdomain name in /domains — Was showing sub.domain.com.domain.com instead of sub.domain.com',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.27',
                 'date' => '2026-03-28',
                 'badge' => 'primary',

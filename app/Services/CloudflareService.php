@@ -279,6 +279,55 @@ class CloudflareService
         Settings::set('failover_cf_accounts', json_encode($accounts));
     }
 
+    /**
+     * Refresh zone lists from Cloudflare API for all configured accounts.
+     * Updates stored zones and regenerates TLS policies so new domains get the right token.
+     * Returns true if any zones were added or removed.
+     */
+    public static function refreshZones(): bool
+    {
+        $raw = Settings::get('failover_cf_accounts', '');
+        if (!$raw) return false;
+
+        $accounts = json_decode($raw, true);
+        if (!is_array($accounts) || empty($accounts)) return false;
+
+        $changed = false;
+        foreach ($accounts as &$acct) {
+            $token = $acct['token'] ?? '';
+            if (!$token) continue;
+
+            // Decrypt token if encrypted
+            $decrypted = ReplicationService::decryptPassword($token);
+            $plainToken = ($decrypted !== '') ? $decrypted : $token;
+
+            $resp = self::listZones($plainToken);
+            if (!($resp['ok'] ?? false) || empty($resp['result'])) continue;
+
+            $newZones = [];
+            foreach ($resp['result'] as $z) {
+                $newZones[] = ['id' => $z['id'], 'name' => $z['name']];
+            }
+
+            // Compare with stored zones
+            $oldNames = array_column($acct['zones'] ?? [], 'name');
+            $newNames = array_column($newZones, 'name');
+            sort($oldNames);
+            sort($newNames);
+            if ($oldNames !== $newNames) {
+                $acct['zones'] = $newZones;
+                $changed = true;
+            }
+        }
+        unset($acct);
+
+        if ($changed) {
+            Settings::set('failover_cf_accounts', json_encode($accounts));
+        }
+
+        return $changed;
+    }
+
     // --- DNS / IP detection -----------------------------------------------
 
     /**

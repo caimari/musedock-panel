@@ -368,7 +368,7 @@ CONF;
             true
         ) ?: [];
 
-        // Read Cloudflare API token
+        // Read primary Cloudflare API token (for catch-all)
         $cfToken = trim(getenv('CLOUDFLARE_API_TOKEN') ?: '');
         if (!$cfToken) {
             $caddyEnv = @file_get_contents('/etc/default/caddy');
@@ -377,27 +377,81 @@ CONF;
             }
         }
 
-        // Check if a catch-all policy (no subjects) already exists
-        foreach ($policies as $idx => $p) {
-            if (!isset($p['subjects']) || empty($p['subjects'])) {
-                // Verify it has DNS-01 with real token and resolvers
-                $existingToken = $p['issuers'][0]['challenges']['dns']['provider']['api_token'] ?? '';
-                $existingResolvers = $p['issuers'][0]['challenges']['dns']['resolvers'] ?? [];
-                if ($cfToken && ($existingToken !== $cfToken || empty($existingResolvers) || str_contains($existingToken, '{env.'))) {
-                    // Fix: replace with correct DNS-01 config
-                    $policies[$idx] = self::buildCatchAllPolicy($cfToken);
-                    self::patchTlsPolicies($caddyApi, $policies);
-                }
-                return;
+        // Get all configured Cloudflare accounts to create per-account TLS policies
+        // This ensures each domain gets its certificate via the correct CF token
+        $cfAccounts = CloudflareService::getConfiguredAccounts();
+
+        // Collect all zone names from all additional CF accounts (skip the first/primary)
+        // The primary account's domains are covered by the catch-all policy
+        $additionalPolicies = [];
+        foreach ($cfAccounts as $idx => $acct) {
+            $token = $acct['token'] ?? '';
+            if (!$token) continue;
+
+            // Skip if this token matches the primary catch-all token
+            if ($token === $cfToken) continue;
+
+            $zones = $acct['zones'] ?? [];
+            if (empty($zones)) continue;
+
+            $subjects = [];
+            foreach ($zones as $zone) {
+                $zoneName = $zone['name'] ?? '';
+                if (!$zoneName) continue;
+                $subjects[] = $zoneName;
+                $subjects[] = '*.' . $zoneName;
+            }
+            if (!empty($subjects)) {
+                $additionalPolicies[$token] = $subjects;
             }
         }
 
-        // No catch-all exists — create one
-        $policies[] = self::buildCatchAllPolicy($cfToken);
-        self::patchTlsPolicies($caddyApi, $policies);
+        // Rebuild policies: keep existing with subjects, update/add per-account and catch-all
+        $newPolicies = [];
+        $handledTokens = [];
+
+        foreach ($policies as $p) {
+            $subjects = $p['subjects'] ?? [];
+
+            if (empty($subjects)) {
+                // Catch-all — will be re-added at the end
+                continue;
+            }
+
+            // Check if this policy's subjects belong to an additional CF account
+            $isAdditionalCf = false;
+            foreach ($additionalPolicies as $addToken => $addSubjects) {
+                if (!empty(array_intersect($subjects, $addSubjects))) {
+                    // This is one of our per-account policies — rebuild it
+                    $isAdditionalCf = true;
+                    if (!isset($handledTokens[$addToken])) {
+                        $newPolicies[] = self::buildCfPolicy($addToken, $addSubjects);
+                        $handledTokens[$addToken] = true;
+                    }
+                    break;
+                }
+            }
+
+            if (!$isAdditionalCf) {
+                // Keep existing policy as-is (musedock.com, mortadelo, etc.)
+                $newPolicies[] = $p;
+            }
+        }
+
+        // Add policies for additional accounts not yet handled
+        foreach ($additionalPolicies as $addToken => $addSubjects) {
+            if (!isset($handledTokens[$addToken])) {
+                $newPolicies[] = self::buildCfPolicy($addToken, $addSubjects);
+            }
+        }
+
+        // Add catch-all policy with primary token as fallback
+        $newPolicies[] = self::buildCfPolicy($cfToken, []);
+
+        self::patchTlsPolicies($caddyApi, $newPolicies);
     }
 
-    private static function buildCatchAllPolicy(string $cfToken): array
+    private static function buildCfPolicy(string $cfToken, array $subjects = []): array
     {
         $acmeIssuer = ['email' => 'admin@musedock.com', 'module' => 'acme'];
 
@@ -410,7 +464,11 @@ CONF;
             ];
         }
 
-        return ['issuers' => [$acmeIssuer]];
+        $policy = ['issuers' => [$acmeIssuer]];
+        if (!empty($subjects)) {
+            $policy['subjects'] = $subjects;
+        }
+        return $policy;
     }
 
     private static function patchTlsPolicies(string $caddyApi, array $policies): void
@@ -437,7 +495,12 @@ CONF;
         $routeId = "hosting-{$username}";
         $socketPath = "/run/php/php{$phpVersion}-fpm-{$username}.sock";
 
-        // Ensure TLS catch-all policy exists for external hosting domains
+        // Refresh CF zones if this domain isn't in any known zone, then rebuild TLS policies
+        $rootDomain = implode('.', array_slice(explode('.', $domain), -2));
+        $knownZone = CloudflareService::findZoneForDomain($rootDomain);
+        if (!$knownZone) {
+            CloudflareService::refreshZones();
+        }
         self::ensureTlsCatchAllPolicy($caddyApi);
 
         $caddyConfig = [
@@ -535,7 +598,15 @@ CONF;
         curl_exec($ch);
         curl_close($ch);
 
-        // Ensure TLS catch-all policy
+        // Refresh CF zones for new alias domains, then rebuild TLS policies
+        $allDomains = array_merge([$mainDomain], $aliasDomains);
+        foreach ($allDomains as $d) {
+            $rootD = implode('.', array_slice(explode('.', trim($d)), -2));
+            if ($rootD && !CloudflareService::findZoneForDomain($rootD)) {
+                CloudflareService::refreshZones();
+                break;
+            }
+        }
         self::ensureTlsCatchAllPolicy($caddyApi);
 
         $socketPath = "/run/php/php{$phpVersion}-fpm-{$username}.sock";
@@ -600,6 +671,11 @@ CONF;
         $caddyApi = $config['caddy']['api_url'];
         $routeId = 'redirect-' . str_replace('.', '-', $fromDomain);
 
+        // Refresh CF zones if redirect domain is unknown
+        $rootFrom = implode('.', array_slice(explode('.', $fromDomain), -2));
+        if ($rootFrom && !CloudflareService::findZoneForDomain($rootFrom)) {
+            CloudflareService::refreshZones();
+        }
         self::ensureTlsCatchAllPolicy($caddyApi);
 
         $location = $preservePath

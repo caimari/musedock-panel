@@ -183,14 +183,46 @@
 let currentZoneId = '';
 let currentZoneName = '';
 let currentAccountIdx = 0;
+const autoSelectDomain = new URLSearchParams(window.location.search).get('domain') || '';
 
 document.addEventListener('DOMContentLoaded', () => {
-    loadZones();
-    document.getElementById('cfAccount').addEventListener('change', loadZones);
+    if (autoSelectDomain) {
+        autoSelectAccount();
+    } else {
+        loadZones();
+    }
+    document.getElementById('cfAccount').addEventListener('change', () => { loadZones(); });
     document.getElementById('filterType').addEventListener('change', () => {
         if (currentZoneId) loadRecords(currentZoneId, currentZoneName);
     });
 });
+
+function autoSelectAccount() {
+    const select = document.getElementById('cfAccount');
+    const totalAccounts = select.options.length;
+    let tried = 0;
+
+    function tryAccount(idx) {
+        select.value = idx;
+        currentAccountIdx = idx;
+        fetch(`/settings/cloudflare-dns/zones?account=${idx}`)
+            .then(r => r.json())
+            .then(data => {
+                tried++;
+                if (data.ok && data.zones.find(z => z.name === autoSelectDomain)) {
+                    loadZones();
+                } else if (tried < totalAccounts) {
+                    tryAccount(tried);
+                } else {
+                    select.value = 0;
+                    currentAccountIdx = 0;
+                    loadZones();
+                }
+            })
+            .catch(() => { loadZones(); });
+    }
+    tryAccount(0);
+}
 
 function loadZones() {
     currentAccountIdx = document.getElementById('cfAccount').value;
@@ -211,6 +243,7 @@ function loadZones() {
             list.innerHTML = data.zones.map(z => `
                 <a href="#" class="list-group-item list-group-item-action bg-transparent d-flex justify-content-between align-items-center py-2"
                    style="border-color:#334155;color:#e2e8f0;"
+                   data-zone-id="${z.id}" data-zone-name="${z.name}"
                    onclick="event.preventDefault(); selectZone('${z.id}', '${z.name}', this)">
                     <div>
                         <i class="bi bi-globe me-1 text-info"></i>${z.name}
@@ -221,6 +254,15 @@ function loadZones() {
                     </div>
                 </a>
             `).join('');
+
+            // Auto-select domain if passed via ?domain= parameter
+            if (autoSelectDomain) {
+                const match = data.zones.find(z => z.name === autoSelectDomain);
+                if (match) {
+                    const el = list.querySelector(`[data-zone-name="${autoSelectDomain}"]`);
+                    selectZone(match.id, match.name, el);
+                }
+            }
         })
         .catch(err => {
             list.innerHTML = `<div class="text-danger p-3">Error: ${err.message}</div>`;

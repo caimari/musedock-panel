@@ -94,6 +94,27 @@ function renderDnsBadge(array $dns): string {
                     </tr>
                     <?php endforeach; ?>
 
+                    <?php
+                        // Show subdomains for this account
+                        $accSubs = $subdomainsByAccount[(int)$acc['id']] ?? [];
+                        foreach ($accSubs as $sub):
+                            $subDomain = $sub['subdomain'];
+                            $subDns = CloudflareService::checkDomainDns($subDomain, $serverIp);
+                    ?>
+                    <tr style="background: rgba(168,85,247,0.03);">
+                        <td class="ps-3">
+                            <span class="text-muted me-2" style="margin-left:0.5rem;">&rdsh;</span>
+                            <a href="/accounts/<?= $acc['id'] ?>/subdomains" class="text-info text-decoration-none">
+                                <?= View::e($subDomain) ?>
+                            </a>
+                            <a href="https://<?= View::e($subDomain) ?>" target="_blank" class="ms-1" style="color:#64748b;font-size:0.75rem;" title="Open site"><i class="bi bi-box-arrow-up-right"></i></a>
+                            <span class="badge ms-1" style="background: rgba(168,85,247,0.15); color: #a855f7; font-size:0.65rem;">subdomain</span>
+                        </td>
+                        <td><?= renderDnsBadge($subDns) ?></td>
+                        <td colspan="4"></td>
+                    </tr>
+                    <?php endforeach; ?>
+
                     <?php endforeach; ?>
                 </tbody>
             </table>
