@@ -142,12 +142,11 @@ class FailoverController
         }
 
         CloudflareService::saveAccounts($accounts);
-        FailoverService::pushConfigToSlaves();
-        LogService::log('failover.cloudflare', null, count($accounts) . ' CF accounts saved');
 
         // Propagate first token to /etc/default/caddy for SSL certificates (DNS-01)
         $caddyTokenUpdated = false;
-        if (!empty($_POST['update_caddy_token']) && !empty($accounts)) {
+        $updateCaddyToken = !empty($_POST['update_caddy_token']) && !empty($accounts);
+        if ($updateCaddyToken) {
             $firstToken = \MuseDockPanel\Services\ReplicationService::decryptPassword($accounts[0]['token']);
             if ($firstToken && file_exists('/usr/local/bin/update-caddy-token.sh')) {
                 $escapedToken = escapeshellarg($firstToken);
@@ -159,9 +158,13 @@ class FailoverController
             }
         }
 
+        // Push config to slaves (include caddy token flag so slaves also update their /etc/default/caddy)
+        FailoverService::pushConfigToSlaves($updateCaddyToken);
+        LogService::log('failover.cloudflare', null, count($accounts) . ' CF accounts saved');
+
         $msg = count($accounts) . ' cuenta(s) Cloudflare guardada(s) y sincronizada(s) con slaves.';
         if ($caddyTokenUpdated) {
-            $msg .= ' Token propagado a Caddy para certificados SSL.';
+            $msg .= ' Token propagado a Caddy (master y slaves) para certificados SSL.';
         }
         Flash::set('success', $msg);
         Router::redirect('/settings/cluster#failover');

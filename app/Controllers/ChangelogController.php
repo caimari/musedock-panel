@@ -20,6 +20,39 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.24',
+                'date' => '2026-03-28',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Propagacion de token Cloudflare a slaves — Al marcar "Actualizar token de Caddy" en el master, el token se propaga automaticamente a /etc/default/caddy de todos los slaves via sync de cluster',
+                        ],
+                        'en' => [
+                            'Cloudflare token propagation to slaves — When checking "Update Caddy token" on master, the token is automatically propagated to /etc/default/caddy on all slaves via cluster sync',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Dashboard SSL: aviso mejorado con contexto segun rol — Slave muestra instrucciones para configurar desde el master; Master/standalone muestra link directo a Settings; todos muestran nota sobre importancia para slaves',
+                        ],
+                        'en' => [
+                            'Dashboard SSL: improved warning with role-specific context — Slave shows instructions to configure from master; Master/standalone shows direct link to Settings; all show note about importance for slaves',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Slaves sin token Cloudflare — Los slaves no tenian forma de obtener el token de Caddy ya que /etc/default/caddy no se replica por BD ni por lsyncd. Ahora se propaga desde el master al sincronizar cuentas Cloudflare',
+                            'Dashboard: notas informativas con fondo blanco ilegible en tema oscuro — Cambiado a fondo oscuro semitransparente consistente',
+                        ],
+                        'en' => [
+                            'Slaves without Cloudflare token — Slaves had no way to get the Caddy token since /etc/default/caddy is not replicated via DB or lsyncd. Now propagated from master when syncing Cloudflare accounts',
+                            'Dashboard: informational notes with white background unreadable in dark theme — Changed to consistent semi-transparent dark background',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.23',
                 'date' => '2026-03-28',
                 'badge' => 'primary',

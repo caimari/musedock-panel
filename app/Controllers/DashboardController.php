@@ -109,6 +109,7 @@ class DashboardController
             'onlineNodes' => $onlineNodes,
             'failoverStatus' => $failoverStatus,
             'caddyTokenStatus' => $caddyTokenStatus,
+            'clusterRole' => $clusterRole,
         ]);
     }
 

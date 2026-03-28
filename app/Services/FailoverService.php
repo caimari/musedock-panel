@@ -1172,7 +1172,7 @@ class FailoverService
      * Called after any config save on the master.
      * If a slave is unreachable, the action is enqueued with 3 retries.
      */
-    public static function pushConfigToSlaves(): array
+    public static function pushConfigToSlaves(bool $updateCaddyToken = false): array
     {
         $clusterRole = Settings::get('cluster_role', '');
         if ($clusterRole !== 'master') {
@@ -1190,10 +1190,11 @@ class FailoverService
         }
 
         $payload = [
-            'config'         => $config,
-            'servers'        => self::getServers(),
-            'cf_accounts'    => CloudflareService::getConfiguredAccounts(),
-            'remote_domains' => Settings::get('failover_remote_domains', ''),
+            'config'            => $config,
+            'servers'           => self::getServers(),
+            'cf_accounts'       => CloudflareService::getConfiguredAccounts(),
+            'remote_domains'    => Settings::get('failover_remote_domains', ''),
+            'update_caddy_token' => $updateCaddyToken,
         ];
 
         // Push to all active cluster nodes

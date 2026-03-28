@@ -17,7 +17,7 @@
             <span class="badge bg-<?= View::e($v['badge']) ?> me-2">v<?= View::e($v['version']) ?></span>
             <strong>v<?= View::e($v['version']) ?></strong>
         </span>
-        <small class="text-muted"><?= View::e($v['date']) ?></small>
+        <small class="text-muted changelog-date" data-date="<?= View::e($v['date']) ?>"><?= View::e($v['date']) ?></small>
     </div>
     <div class="card-body">
         <?php
@@ -49,16 +49,32 @@
 <?php endforeach; ?>
 
 <script>
+var mesesEs = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+
+function formatDates(lang) {
+    document.querySelectorAll('.changelog-date').forEach(function(el) {
+        var d = el.dataset.date; // "2026-03-28"
+        var parts = d.split('-');
+        var y = parts[0], m = parseInt(parts[1], 10), day = parseInt(parts[2], 10);
+        if (lang === 'es') {
+            el.textContent = day + ' de ' + mesesEs[m - 1] + ' de ' + y;
+        } else {
+            el.textContent = d; // YYYY-MM-DD for English
+        }
+    });
+}
+
 function setLang(lang) {
     document.querySelectorAll('.lang-es').forEach(el => el.style.display = lang === 'es' ? '' : 'none');
     document.querySelectorAll('.lang-en').forEach(el => el.style.display = lang === 'en' ? '' : 'none');
     document.getElementById('btn-es').classList.toggle('active', lang === 'es');
     document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+    formatDates(lang);
     localStorage.setItem('changelog_lang', lang);
 }
 // Restore preference
 (function() {
-    var saved = localStorage.getItem('changelog_lang');
-    if (saved) setLang(saved);
+    var saved = localStorage.getItem('changelog_lang') || 'es';
+    setLang(saved);
 })();
 </script>

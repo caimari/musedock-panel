@@ -145,22 +145,34 @@
                     <strong>¿Por que es importante?</strong> Caddy necesita un token de Cloudflare con permisos de <em>DNS:Edit (All zones)</em>
                     para completar el desafio DNS-01 de Let's Encrypt. Sin el, los dominios de hosting mostraran errores de certificado (ERR_SSL, 526, etc.).
                 </p>
-                <?php if ($caddyTokenStatus['cms_manages']): ?>
+                <div class="mb-2 py-2 px-3 rounded" style="background:rgba(100,116,139,0.15);color:#94a3b8;">
+                    <i class="bi bi-exclamation-circle me-1"></i>
+                    <strong>Importante para slaves:</strong> Cada servidor (master y slave) necesita el token en su propio <code>/etc/default/caddy</code> para generar certificados SSL y gestionar DNS.
+                    La base de datos replicada no incluye este archivo del sistema.
+                </div>
+                <?php if (($clusterRole ?? 'standalone') === 'slave'): ?>
+                <div class="mb-2 py-2 px-3 rounded" style="background:rgba(56,189,248,0.1);color:#38bdf8;">
+                    <i class="bi bi-arrow-repeat me-1"></i>
+                    <strong>Servidor Slave:</strong> Este token se configura desde el <strong>Master</strong>.
+                    Ve a <em>Settings &rarr; Cluster &rarr; Failover &rarr; Cuentas Cloudflare</em> en el master y marca
+                    <strong>&laquo;Actualizar token de Caddy&raquo;</strong> al guardar. El token se propagara automaticamente a todos los slaves.
+                </div>
+                <?php elseif ($caddyTokenStatus['cms_manages']): ?>
                 <div class="mb-2 py-2 px-3 rounded" style="background:rgba(100,116,139,0.15);color:#94a3b8;">
                     <i class="bi bi-info-circle me-1"></i>
                     Parece que MuseDock CMS esta instalado en este servidor. Normalmente el CMS gestiona este token.
                     Comprueba la configuracion de Cloudflare en el CMS (<em>Superadmin &rarr; Domain Manager &rarr; Guia Cloudflare</em>).
                 </div>
                 <?php else: ?>
-                <div class="alert alert-light border mb-2 py-2">
-                    <strong><i class="bi bi-terminal me-1"></i> Para configurarlo manualmente:</strong>
-                    <ol class="mb-0 mt-1">
-                        <li>Crea un token en <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">Cloudflare API Tokens</a> con permiso <code>DNS:Edit</code> para <strong>All zones</strong></li>
-                        <li>Ejecuta como root:
+                <div class="mb-2 py-2 px-3 rounded" style="background:rgba(100,116,139,0.15);color:#94a3b8;">
+                    <strong><i class="bi bi-terminal me-1"></i> Para configurarlo:</strong>
+                    <ul class="mb-0 mt-1" style="color:#cbd5e1;">
+                        <li><strong>Desde el panel:</strong> <a href="/settings/cluster#failover" style="color:#38bdf8;">Settings &rarr; Cluster &rarr; Failover &rarr; Cuentas Cloudflare</a> — Marca &laquo;Actualizar token de Caddy&raquo; al guardar (se propaga tambien a slaves)</li>
+                        <li><strong>Manualmente:</strong>
                             <pre class="mb-0 mt-1 p-2 bg-dark text-light rounded" style="font-size:0.85em;">echo "CLOUDFLARE_API_TOKEN=tu-token-aqui" > /etc/default/caddy
 systemctl restart caddy</pre>
                         </li>
-                    </ol>
+                    </ul>
                 </div>
                 <?php endif; ?>
                 <?php if (file_exists('/usr/local/bin/update-caddy-token.sh')): ?>
