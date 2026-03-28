@@ -299,6 +299,13 @@ function formatDbSize(int $bytes): string {
                                         </form>
                                     <?php endif; ?>
                                     <?php if ($isManaged && !$isSystem): ?>
+                                        <button type="button" class="btn btn-outline-warning btn-sm btn-edit-db" title="Editar credenciales"
+                                                data-db-id="<?= $managedInfo['id'] ?>"
+                                                data-db-name="<?= View::e($dbName) ?>"
+                                                data-db-user="<?= View::e($managedInfo['db_user']) ?>"
+                                                data-db-type="PGSQL">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
                                         <form method="POST" action="/databases/<?= $managedInfo['id'] ?>/delete" class="d-inline delete-db-form">
                                             <?= View::csrf() ?>
                                             <input type="hidden" name="password" class="delete-password-field" value="">
@@ -439,6 +446,13 @@ function formatDbSize(int $bytes): string {
                                         </form>
                                     <?php endif; ?>
                                     <?php if ($isManaged && !$isSystem): ?>
+                                        <button type="button" class="btn btn-outline-warning btn-sm btn-edit-db" title="Editar credenciales"
+                                                data-db-id="<?= $managedInfo['id'] ?>"
+                                                data-db-name="<?= View::e($dbName) ?>"
+                                                data-db-user="<?= View::e($managedInfo['db_user']) ?>"
+                                                data-db-type="MYSQL">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
                                         <form method="POST" action="/databases/<?= $managedInfo['id'] ?>/delete" class="d-inline delete-db-form">
                                             <?= View::csrf() ?>
                                             <input type="hidden" name="password" class="delete-password-field" value="">
@@ -607,9 +621,17 @@ function formatDbSize(int $bytes): string {
     <input type="hidden" name="db_backup_path" id="backupPathField" value="">
 </form>
 
+<!-- Hidden form for edit DB credentials -->
+<form method="POST" id="edit-db-form" action="" style="display:none;">
+    <?= View::csrf() ?>
+    <input type="hidden" name="new_db_user" value="">
+    <input type="hidden" name="new_db_pass" value="">
+    <input type="hidden" name="admin_password" value="">
+</form>
+
 <script>
 (function() {
-    // ─── Backup single DB confirmation ────────────────────────
+    // ─── Backup single DB confirmation ──���─────────────────��───
     document.querySelectorAll('.backup-db-form').forEach(function(form) {
         form.addEventListener('submit', function(e) {
             e.preventDefault();
@@ -1094,6 +1116,68 @@ function formatDbSize(int $bytes): string {
                 .catch(function(err) {
                     SwalDark.fire({ icon: 'error', title: 'Error', text: 'Error de conexion: ' + err.message });
                 });
+            });
+        });
+    });
+
+    // ─── Edit DB credentials ────────────────────────────────────
+    document.querySelectorAll('.btn-edit-db').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var dbId = btn.dataset.dbId;
+            var dbName = btn.dataset.dbName;
+            var dbUser = btn.dataset.dbUser;
+            var dbType = btn.dataset.dbType;
+
+            SwalDark.fire({
+                title: 'Editar credenciales',
+                html: '<p>Base de datos: <strong>' + dbName + '</strong> (' + dbType + ')</p>' +
+                      '<div class="text-start" style="max-width:380px;margin:0 auto;">' +
+                      '<label class="form-label small mb-1">Usuario (dejar vacio para no cambiar)</label>' +
+                      '<input type="text" id="swal-edit-user" class="swal2-input" style="background:#0f172a;color:#e2e8f0;border:1px solid #334155;" placeholder="' + dbUser + '" value="' + dbUser + '">' +
+                      '<label class="form-label small mb-1 mt-2">Nueva contrasena (dejar vacio para no cambiar)</label>' +
+                      '<div style="position:relative;">' +
+                      '<input type="text" id="swal-edit-pass" class="swal2-input" style="background:#0f172a;color:#e2e8f0;border:1px solid #334155;" placeholder="Nueva contrasena">' +
+                      '<button type="button" id="swal-gen-pass" class="btn btn-sm btn-outline-info" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);" title="Generar contrasena">Generar</button>' +
+                      '</div>' +
+                      '<label class="form-label small mb-1 mt-2">Contrasena de admin</label>' +
+                      '<input type="password" id="swal-edit-admin-pass" class="swal2-input" style="background:#0f172a;color:#e2e8f0;border:1px solid #334155;" placeholder="Contrasena admin">' +
+                      '</div>',
+                icon: 'info',
+                showCancelButton: true,
+                confirmButtonText: 'Guardar',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#f59e0b',
+                didOpen: function() {
+                    document.getElementById('swal-gen-pass').addEventListener('click', function() {
+                        var chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+                        var pass = '';
+                        for (var i = 0; i < 24; i++) pass += chars.charAt(Math.floor(Math.random() * chars.length));
+                        document.getElementById('swal-edit-pass').value = pass;
+                    });
+                },
+                preConfirm: function() {
+                    var newUser = document.getElementById('swal-edit-user').value.trim();
+                    var newPass = document.getElementById('swal-edit-pass').value.trim();
+                    var adminPass = document.getElementById('swal-edit-admin-pass').value;
+                    if (!adminPass) {
+                        Swal.showValidationMessage('Debes ingresar tu contrasena de admin');
+                        return false;
+                    }
+                    if (!newUser && !newPass) {
+                        Swal.showValidationMessage('Debes cambiar al menos el usuario o la contrasena');
+                        return false;
+                    }
+                    return { newUser: newUser, newPass: newPass, adminPass: adminPass };
+                }
+            }).then(function(result) {
+                if (result.isConfirmed && result.value) {
+                    var form = document.getElementById('edit-db-form');
+                    form.action = '/databases/' + dbId + '/edit-credentials';
+                    form.querySelector('[name="new_db_user"]').value = result.value.newUser;
+                    form.querySelector('[name="new_db_pass"]').value = result.value.newPass;
+                    form.querySelector('[name="admin_password"]').value = result.value.adminPass;
+                    form.submit();
+                }
             });
         });
     });

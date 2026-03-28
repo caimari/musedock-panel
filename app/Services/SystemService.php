@@ -67,6 +67,9 @@ class SystemService
         // 6. Final chown to ensure all files belong to the user
         shell_exec(sprintf('chown -R %s:www-data %s 2>&1', escapeshellarg($username), escapeshellarg($homeDir)));
 
+        // 7. Restart lsyncd so it picks up the new vhost directory
+        self::restartLsyncd();
+
         return [
             'success' => true,
             'uid' => $uid,
@@ -823,8 +826,16 @@ p{color:#94a3b8;line-height:1.6;margin-bottom:0.5rem}
         // Remove system user (keeps home dir for safety - manual cleanup)
         shell_exec(sprintf('userdel %s 2>&1', escapeshellarg($username)));
 
-        // NOTE: Home directory is NOT deleted automatically for safety.
-        // Admin can manually rm -rf after confirming backup.
+        // Restart lsyncd so it stops watching the deleted vhost
+        self::restartLsyncd();
+    }
+
+    /**
+     * Restart lsyncd so it re-scans /var/www/vhosts/ for new or removed directories.
+     */
+    public static function restartLsyncd(): void
+    {
+        shell_exec('systemctl restart lsyncd 2>&1');
     }
 
     /**

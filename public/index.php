@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.21');
+define('PANEL_VERSION', '1.0.22');
 
 
 
@@ -162,6 +162,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/databases/create', 'DatabaseController@create');
 \MuseDockPanel\Router::post('/databases/store', 'DatabaseController@store');
 \MuseDockPanel\Router::post('/databases/{id}/delete', 'DatabaseController@delete');
+\MuseDockPanel\Router::post('/databases/{id}/edit-credentials', 'DatabaseController@editCredentials');
 \MuseDockPanel\Router::post('/databases/associate', 'DatabaseController@associate');
 \MuseDockPanel\Router::get('/databases/accounts-json', 'DatabaseController@getAccounts');
 // Database Backups

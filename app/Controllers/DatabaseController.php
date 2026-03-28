@@ -491,6 +491,152 @@ class DatabaseController
     }
 
     /**
+     * Edit DB user credentials (change username and/or password)
+     */
+    public function editCredentials(array $params = []): void
+    {
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es Slave. Editar credenciales solo esta permitido en el Master.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        $id = (int)($params['id'] ?? 0);
+        $db = Database::fetchOne("
+            SELECT d.*, a.username, a.domain AS account_domain
+            FROM hosting_databases d
+            JOIN hosting_accounts a ON a.id = d.account_id
+            WHERE d.id = :id
+        ", ['id' => $id]);
+
+        if (!$db) {
+            Flash::set('error', 'Base de datos no encontrada.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        $password = $_POST['admin_password'] ?? '';
+        if (empty($password)) {
+            Flash::set('error', 'Debes ingresar tu contrasena de administrador para confirmar.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        $admin = Database::fetchOne("SELECT password_hash FROM panel_admins WHERE id = :id", ['id' => $_SESSION['panel_user']['id'] ?? 0]);
+        if (!$admin || !password_verify($password, $admin['password_hash'])) {
+            Flash::set('error', 'Contrasena de administrador incorrecta.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        $newDbUser = trim($_POST['new_db_user'] ?? '');
+        $newDbPass = trim($_POST['new_db_pass'] ?? '');
+
+        if (empty($newDbUser) && empty($newDbPass)) {
+            Flash::set('error', 'Debes especificar al menos un nuevo usuario o contrasena.');
+            Router::redirect('/databases');
+            return;
+        }
+
+        $dbType = $db['db_type'] ?? 'mysql';
+        $oldDbUser = $db['db_user'];
+        $dbName = $db['db_name'];
+        $changes = [];
+
+        if ($dbType === 'pgsql') {
+            // PostgreSQL: rename user and/or change password
+            if (!empty($newDbUser) && $newDbUser !== $oldDbUser) {
+                $sql = sprintf("ALTER USER %s RENAME TO %s;", escapeshellarg($oldDbUser), escapeshellarg($newDbUser));
+                $cmd = 'sudo -u postgres psql -c ' . escapeshellarg($sql) . ' 2>&1';
+                $output = shell_exec($cmd);
+                if ($output !== null && stripos($output, 'ERROR') !== false) {
+                    Flash::set('error', 'Error al renombrar usuario PostgreSQL: ' . $output);
+                    Router::redirect('/databases');
+                    return;
+                }
+                $changes[] = "usuario: {$oldDbUser} → {$newDbUser}";
+            }
+
+            $effectiveUser = (!empty($newDbUser) && $newDbUser !== $oldDbUser) ? $newDbUser : $oldDbUser;
+
+            if (!empty($newDbPass)) {
+                $sql = sprintf("ALTER USER %s WITH PASSWORD %s;", escapeshellarg($effectiveUser), escapeshellarg($newDbPass));
+                $cmd = 'sudo -u postgres psql -c ' . escapeshellarg($sql) . ' 2>&1';
+                $output = shell_exec($cmd);
+                if ($output !== null && stripos($output, 'ERROR') !== false) {
+                    Flash::set('error', 'Error al cambiar contrasena PostgreSQL: ' . $output);
+                    Router::redirect('/databases');
+                    return;
+                }
+                $changes[] = 'contrasena actualizada';
+            }
+        } else {
+            // MySQL: rename user and/or change password
+            $mysqlCmd = $this->buildMysqlCommand();
+            if ($mysqlCmd === null) {
+                Flash::set('error', 'No se pudo determinar el metodo de autenticacion de MySQL.');
+                Router::redirect('/databases');
+                return;
+            }
+
+            if (!empty($newDbUser) && $newDbUser !== $oldDbUser) {
+                $sql = sprintf(
+                    "RENAME USER %s@'localhost' TO %s@'localhost'; FLUSH PRIVILEGES;",
+                    $this->quoteLiteral($oldDbUser),
+                    $this->quoteLiteral($newDbUser)
+                );
+                $output = shell_exec($mysqlCmd . ' -e ' . escapeshellarg($sql) . ' 2>&1');
+                if ($output !== null && stripos($output, 'ERROR') !== false) {
+                    Flash::set('error', 'Error al renombrar usuario MySQL: ' . $output);
+                    Router::redirect('/databases');
+                    return;
+                }
+                $changes[] = "usuario: {$oldDbUser} → {$newDbUser}";
+            }
+
+            $effectiveUser = (!empty($newDbUser) && $newDbUser !== $oldDbUser) ? $newDbUser : $oldDbUser;
+
+            if (!empty($newDbPass)) {
+                $sql = sprintf(
+                    "ALTER USER %s@'localhost' IDENTIFIED BY %s; FLUSH PRIVILEGES;",
+                    $this->quoteLiteral($effectiveUser),
+                    $this->quoteLiteral($newDbPass)
+                );
+                $output = shell_exec($mysqlCmd . ' -e ' . escapeshellarg($sql) . ' 2>&1');
+                if ($output !== null && stripos($output, 'ERROR') !== false) {
+                    Flash::set('error', 'Error al cambiar contrasena MySQL: ' . $output);
+                    Router::redirect('/databases');
+                    return;
+                }
+                $changes[] = 'contrasena actualizada';
+            }
+        }
+
+        // Update panel record
+        $updatedUser = (!empty($newDbUser) && $newDbUser !== $oldDbUser) ? $newDbUser : $oldDbUser;
+        Database::update('hosting_databases', ['db_user' => $updatedUser], 'id = :id', ['id' => $id]);
+
+        // Sync to cluster
+        $this->syncDatabasesForAccount((int)$db['account_id'], $db['account_domain']);
+
+        $changeStr = implode(', ', $changes);
+        LogService::log('database.edit', $dbName, "Edited credentials for {$dbName}: {$changeStr}");
+
+        $flashMsg = "Credenciales de '{$dbName}' actualizadas: {$changeStr}.";
+        if (!empty($newDbPass)) {
+            Flash::set('db_credentials', json_encode([
+                'db_name' => $dbName,
+                'db_user' => $updatedUser,
+                'db_pass' => $newDbPass,
+                'db_host' => 'localhost',
+                'db_type' => $dbType,
+            ]));
+        }
+        Flash::set('success', $flashMsg);
+        Router::redirect('/databases');
+    }
+
+    /**
      * Associate an external/orphan database to a hosting account
      */
     public function associate(): void

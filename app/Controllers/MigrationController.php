@@ -830,8 +830,37 @@ class MigrationController
                 );
                 $sqlTmp = tempnam('/tmp', 'mdp_sql_');
                 file_put_contents($sqlTmp, $sqlSetup);
-                shell_exec(sprintf('mysql < %s 2>&1', escapeshellarg($sqlTmp)));
+                $mysqlOutput = shell_exec(sprintf('mysql < %s 2>&1', escapeshellarg($sqlTmp)));
                 @unlink($sqlTmp);
+
+                if ($mysqlOutput !== null && stripos($mysqlOutput, 'ERROR') !== false) {
+                    $this->sendSSE('log', 'ERROR al crear BD/usuario MySQL: ' . trim($mysqlOutput), $st);
+                    $this->sendSSE('error', 'Error creando base de datos MySQL. Revisa los logs.', $st);
+                    @unlink($dumpFile);
+                    return;
+                }
+
+                // Verify the user can actually connect with the new password
+                $verifyCmd = sprintf(
+                    'mysql -u %s -p%s -e "SELECT 1" %s 2>&1',
+                    escapeshellarg($localDbUser),
+                    escapeshellarg($localDbPass),
+                    escapeshellarg($localDbName)
+                );
+                $verifyOutput = shell_exec($verifyCmd);
+                if ($verifyOutput !== null && (stripos($verifyOutput, 'ERROR') !== false || stripos($verifyOutput, 'Access denied') !== false)) {
+                    $this->sendSSE('log', 'WARN: Verificacion de credenciales fallo, reintentando ALTER USER...', $st);
+                    $retryCmd = sprintf(
+                        "mysql -e %s 2>&1",
+                        escapeshellarg(sprintf(
+                            "ALTER USER '%s'@'localhost' IDENTIFIED BY '%s'; FLUSH PRIVILEGES;",
+                            str_replace("'", "''", $localDbUser),
+                            str_replace("'", "''", $localDbPass)
+                        ))
+                    );
+                    shell_exec($retryCmd);
+                }
+
                 $this->sendSSE('log', 'Base de datos y usuario creados.', $st);
 
                 // Save DB record and update config files BEFORE import
@@ -855,11 +884,18 @@ class MigrationController
                     $this->sendSSE('log', 'Actualizado .env con credenciales locales.', $st);
                 } elseif ($projectType === 'wordpress' && file_exists($targetDir . '/wp-config.php')) {
                     $wpContent = file_get_contents($targetDir . '/wp-config.php');
-                    $wpContent = preg_replace("/define\(\s*'DB_NAME'\s*,\s*'[^']*'\)/", "define('DB_NAME', '{$localDbName}')", $wpContent);
-                    $wpContent = preg_replace("/define\(\s*'DB_USER'\s*,\s*'[^']*'\)/", "define('DB_USER', '{$localDbUser}')", $wpContent);
-                    $wpContent = preg_replace("/define\(\s*'DB_PASSWORD'\s*,\s*'[^']*'\)/", "define('DB_PASSWORD', '{$localDbPass}')", $wpContent);
-                    $wpContent = preg_replace("/define\(\s*'DB_HOST'\s*,\s*'[^']*'\)/", "define('DB_HOST', 'localhost')", $wpContent);
+                    // Handle both single and double quotes: define('DB_NAME', 'val'), define( "DB_NAME", "val" ), mixed
+                    $wpContent = preg_replace("/define\(\s*['\"]DB_NAME['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_NAME', '{$localDbName}')", $wpContent);
+                    $wpContent = preg_replace("/define\(\s*['\"]DB_USER['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_USER', '{$localDbUser}')", $wpContent);
+                    $wpContent = preg_replace("/define\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_PASSWORD', '{$localDbPass}')", $wpContent);
+                    $wpContent = preg_replace("/define\(\s*['\"]DB_HOST['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_HOST', 'localhost')", $wpContent);
                     file_put_contents($targetDir . '/wp-config.php', $wpContent);
+
+                    // Verify the replacements actually took effect
+                    $wpCheck = file_get_contents($targetDir . '/wp-config.php');
+                    if (strpos($wpCheck, $localDbName) === false) {
+                        $this->sendSSE('log', 'WARN: wp-config.php no contiene el nombre de BD esperado. Posible formato no reconocido.', $st);
+                    }
                     $this->sendSSE('log', 'Actualizado wp-config.php con credenciales locales.', $st);
                 }
 
@@ -870,7 +906,10 @@ class MigrationController
                 $this->sendSSE('step', 'Importando BD (' . $dumpSize . ' MB)', $st);
                 $this->sendSSE('progress', json_encode(['type' => 'import', 'indeterminate' => true]), $st);
 
-                shell_exec(sprintf('mysql %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
+                $importOutput = shell_exec(sprintf('mysql %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
+                if ($importOutput !== null && stripos($importOutput, 'ERROR') !== false) {
+                    $this->sendSSE('log', 'WARN al importar dump: ' . trim(substr($importOutput, 0, 500)), $st);
+                }
                 $this->sendSSE('log', 'Dump importado (' . $dumpSize . ' MB).', $st);
 
                 @unlink($dumpFile);

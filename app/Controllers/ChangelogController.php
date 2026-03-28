@@ -20,6 +20,43 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.22',
+                'date' => '2026-03-28',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Editar credenciales de base de datos — Permite cambiar usuario y/o contrasena de bases de datos MySQL y PostgreSQL desde el panel, con generador de contrasenas y sincronizacion al cluster',
+                        ],
+                        'en' => [
+                            'Edit database credentials — Change MySQL/PostgreSQL database user and/or password from the panel, with password generator and cluster sync',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Migracion WordPress: regex wp-config.php mejorado — Ahora soporta comillas simples, dobles y mixtas en define(). Verifica que el reemplazo se aplico correctamente',
+                            'Migracion: verificacion de credenciales MySQL — Tras crear usuario/BD, verifica que las credenciales funcionan y reintenta ALTER USER si falla',
+                            'Migracion: deteccion de errores MySQL — Se verifica la salida de todos los comandos MySQL (creacion de BD, usuario e importacion de dump) y se informa al usuario si hay errores',
+                        ],
+                        'en' => [
+                            'WordPress migration: improved wp-config.php regex — Now supports single, double and mixed quotes in define(). Verifies replacement was applied correctly',
+                            'Migration: MySQL credential verification — After creating user/DB, verifies credentials work and retries ALTER USER if they fail',
+                            'Migration: MySQL error detection — All MySQL commands (DB creation, user creation, dump import) are checked for errors and reported to the user',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Migracion WordPress: nombre de BD no actualizado en wp-config.php — El regex no coincidía con formatos como define( \'DB_NAME\', \'valor\' ) con espacios. Corregido con regex flexible',
+                            'Migracion WordPress: contrasena MySQL no aplicada — La creacion del usuario no verificaba el resultado ni la conectividad. Ahora se verifica y reintenta',
+                        ],
+                        'en' => [
+                            'WordPress migration: DB name not updated in wp-config.php — Regex did not match formats like define( \'DB_NAME\', \'value\' ) with spaces. Fixed with flexible regex',
+                            'WordPress migration: MySQL password not applied — User creation did not verify result or connectivity. Now verified and retried',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.20',
                 'date' => '2026-03-28',
                 'badge' => 'primary',
