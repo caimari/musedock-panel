@@ -11,6 +11,7 @@ use MuseDockPanel\Services\ClusterService;
 use MuseDockPanel\Services\SystemService;
 use MuseDockPanel\Services\LogService;
 use MuseDockPanel\Services\MailService;
+use MuseDockPanel\Services\SubdomainService;
 
 class AccountController
 {
@@ -222,6 +223,10 @@ class AccountController
         $aliases = \MuseDockPanel\Services\DomainAliasService::getAliases((int)$account['id']);
         $redirects = \MuseDockPanel\Services\DomainAliasService::getRedirects((int)$account['id']);
 
+        // Subdomains
+        $subdomains = SubdomainService::getAll((int)$account['id']);
+        $adoptableAccounts = SubdomainService::getAdoptableAccounts($account['domain']);
+
         $isSlave = Settings::get('cluster_role', 'standalone') === 'slave';
 
         View::render('accounts/show', [
@@ -236,6 +241,8 @@ class AccountController
             'hasMailNodes' => $hasMailNodes,
             'aliases' => $aliases,
             'redirects' => $redirects,
+            'subdomains' => $subdomains,
+            'adoptableAccounts' => $adoptableAccounts,
             'isSlave' => $isSlave,
         ]);
     }
@@ -672,6 +679,116 @@ class AccountController
                 ],
             ]);
         }
+    }
+
+    // ─── Subdomains ─────────────────────────────────────────
+
+    public function addSubdomain(array $params): void
+    {
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
+
+        $subdomain = strtolower(trim($_POST['subdomain'] ?? ''));
+        $result = SubdomainService::create((int)$account['id'], $subdomain);
+
+        if (!$result['ok']) {
+            Flash::set('error', $result['error']);
+        } else {
+            // Cluster sync
+            if (Settings::get('cluster_role', 'standalone') === 'master') {
+                $this->syncSubdomainToCluster($account, $subdomain, 'add', $result['document_root']);
+            }
+            Flash::set('success', "Subdominio '{$subdomain}' creado. Document root: {$result['document_root']}");
+        }
+        Router::redirect('/accounts/' . $params['id']);
+    }
+
+    public function removeSubdomain(array $params): void
+    {
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
+
+        // Verify admin password
+        $password = $_POST['admin_password'] ?? '';
+        $adminId = $_SESSION['admin_id'] ?? $_SESSION['panel_user']['id'] ?? 0;
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        if (!$admin || !password_verify($password, $admin['password_hash'])) {
+            Flash::set('error', 'Contraseña incorrecta.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
+        $sub = SubdomainService::getById((int)$params['sub_id']);
+        $deleteFiles = !empty($_POST['delete_files']);
+        $result = SubdomainService::delete((int)$params['sub_id'], $deleteFiles);
+
+        if (!$result['ok']) {
+            Flash::set('error', $result['error']);
+        } else {
+            if (Settings::get('cluster_role', 'standalone') === 'master' && $sub) {
+                $this->syncSubdomainToCluster($account, $sub['subdomain'], 'remove');
+            }
+            Flash::set('success', "Subdominio '{$sub['subdomain']}' eliminado." . ($deleteFiles ? ' Archivos borrados.' : ''));
+        }
+        Router::redirect('/accounts/' . $params['id']);
+    }
+
+    private function syncSubdomainToCluster(array $account, string $subdomain, string $action, ?string $documentRoot = null): void
+    {
+        $nodes = ClusterService::getWebNodes();
+        foreach ($nodes as $node) {
+            ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                'hosting_action' => $action === 'add' ? 'add_subdomain' : 'remove_subdomain',
+                'hosting_data' => [
+                    'main_domain'   => $account['domain'],
+                    'subdomain'     => $subdomain,
+                    'document_root' => $documentRoot,
+                    'username'      => $account['username'],
+                    'php_version'   => $account['php_version'],
+                ],
+            ]);
+        }
+    }
+
+    public function adoptSubdomain(array $params): void
+    {
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
+
+        // Verify admin password
+        $password = $_POST['admin_password'] ?? '';
+        $adminId = $_SESSION['admin_id'] ?? $_SESSION['panel_user']['id'] ?? 0;
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        if (!$admin || !password_verify($password, $admin['password_hash'])) {
+            Flash::set('error', 'Contraseña incorrecta.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
+        $childAccountId = (int)($_POST['child_account_id'] ?? 0);
+        if (!$childAccountId) {
+            Flash::set('error', 'Selecciona una cuenta a adoptar.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
+        $child = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $childAccountId]);
+        $result = SubdomainService::adopt((int)$account['id'], $childAccountId);
+
+        if (!$result['ok']) {
+            Flash::set('error', $result['error']);
+        } else {
+            $msg = "Cuenta '{$child['domain']}' adoptada como subdominio. Archivos movidos a {$result['document_root']}.";
+            if (!empty($result['old_home'])) {
+                $msg .= " La carpeta original ({$result['old_home']}) se conserva por seguridad — puedes borrarla manualmente.";
+            }
+            // Cluster sync
+            if (Settings::get('cluster_role', 'standalone') === 'master') {
+                $this->syncSubdomainToCluster($account, $child['domain'], 'add', $result['document_root']);
+            }
+            Flash::set('success', $msg);
+        }
+        Router::redirect('/accounts/' . $params['id']);
     }
 
     public function suspend(array $params): void

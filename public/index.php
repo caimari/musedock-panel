@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.18');
+define('PANEL_VERSION', '1.0.19');
 
 
 
@@ -135,6 +135,11 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/aliases/{alias_id}/delete', 'AccountController@removeAlias');
 \MuseDockPanel\Router::post('/accounts/{id}/redirects/add', 'AccountController@addRedirect');
 \MuseDockPanel\Router::post('/accounts/{id}/redirects/{alias_id}/delete', 'AccountController@removeAlias');
+
+// Subdomains
+\MuseDockPanel\Router::post('/accounts/{id}/subdomains/add', 'AccountController@addSubdomain');
+\MuseDockPanel\Router::post('/accounts/{id}/subdomains/adopt', 'AccountController@adoptSubdomain');
+\MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/delete', 'AccountController@removeSubdomain');
 
 // Migration
 \MuseDockPanel\Router::get('/accounts/{id}/migrate', 'MigrationController@index');
@@ -272,6 +277,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/save-setting', 'ClusterController@saveSetting');
 \MuseDockPanel\Router::post('/settings/cluster/verify-admin-password', 'ClusterController@verifyAdminPassword');
 \MuseDockPanel\Router::post('/settings/cluster/clean-queue', 'ClusterController@cleanQueue');
+\MuseDockPanel\Router::post('/settings/cluster/retry-queue', 'ClusterController@retryQueue');
 \MuseDockPanel\Router::post('/settings/cluster/sync-all-hostings', 'ClusterController@syncAllHostings');
 \MuseDockPanel\Router::post('/settings/cluster/filesync-settings', 'ClusterController@saveFileSyncSettings');
 \MuseDockPanel\Router::post('/settings/cluster/generate-ssh-key', 'ClusterController@generateSshKey');

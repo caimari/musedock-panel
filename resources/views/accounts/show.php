@@ -396,6 +396,75 @@ use MuseDockPanel\Services\CloudflareService;
             </div>
         </div>
 
+        <!-- Subdomains -->
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-layers me-2"></i>Subdominios</span>
+                <span class="badge bg-primary"><?= count($subdomains ?? []) ?></span>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-2">
+                    <i class="bi bi-info-circle me-1"></i>Subdominios con su propia carpeta y ruta Caddy. Comparten usuario y PHP-FPM con la cuenta principal.
+                </p>
+                <?php if (!empty($subdomains)): ?>
+                <table class="table table-sm mb-3">
+                    <thead><tr><th>Subdominio</th><th>Document Root</th><th>Estado</th><?php if (!($isSlave ?? false)): ?><th class="text-end">Acciones</th><?php endif; ?></tr></thead>
+                    <tbody>
+                    <?php foreach ($subdomains as $sub): ?>
+                        <tr>
+                            <td>
+                                <i class="bi bi-globe2 text-primary me-1"></i>
+                                <a href="https://<?= View::e($sub['subdomain']) ?>" target="_blank" class="text-decoration-none"><?= View::e($sub['subdomain']) ?></a>
+                            </td>
+                            <td><code class="small"><?= View::e($sub['document_root']) ?></code></td>
+                            <td><span class="badge badge-<?= $sub['status'] === 'active' ? 'active' : 'suspended' ?>"><?= View::e($sub['status']) ?></span></td>
+                            <?php if (!($isSlave ?? false)): ?>
+                            <td class="text-end">
+                                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2"
+                                    onclick="confirmDeleteSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, '<?= View::e($sub['subdomain']) ?>')">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                            <?php endif; ?>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                <?php endif; ?>
+                <?php if (!($isSlave ?? false)): ?>
+                <form method="post" action="/accounts/<?= (int)$account['id'] ?>/subdomains/add" class="d-flex gap-2 align-items-end">
+                    <?= View::csrf() ?>
+                    <div class="flex-grow-1">
+                        <label class="form-label small text-muted mb-1">Nuevo subdominio</label>
+                        <input type="text" name="subdomain" class="form-control form-control-sm" placeholder="blog.<?= View::e($account['domain']) ?>" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-plus-circle me-1"></i>Crear</button>
+                </form>
+                <?php if (!empty($adoptableAccounts)): ?>
+                <div class="mt-2 pt-2" style="border-top: 1px solid #334155;">
+                    <small class="text-muted d-block mb-1"><i class="bi bi-box-arrow-in-down me-1"></i>Cuentas independientes que son subdominios de <?= View::e($account['domain']) ?>:</small>
+                    <?php foreach ($adoptableAccounts as $adoptable): ?>
+                    <div class="d-flex justify-content-between align-items-center mb-1 p-1 rounded" style="background:rgba(56,189,248,0.05);">
+                        <span class="small">
+                            <i class="bi bi-globe2 text-info me-1"></i>
+                            <a href="/accounts/<?= (int)$adoptable['id'] ?>" class="text-decoration-none"><?= View::e($adoptable['domain']) ?></a>
+                            <span class="text-muted">(<?= View::e($adoptable['username']) ?>)</span>
+                            <span class="badge badge-<?= $adoptable['status'] === 'active' ? 'active' : 'suspended' ?> ms-1"><?= View::e($adoptable['status']) ?></span>
+                        </span>
+                        <button type="button" class="btn btn-outline-info btn-sm py-0 px-2"
+                            onclick="confirmAdoptSubdomain(<?= (int)$account['id'] ?>, <?= (int)$adoptable['id'] ?>, '<?= View::e($adoptable['domain']) ?>', '<?= View::e($account['domain']) ?>')">
+                            <i class="bi bi-box-arrow-in-down me-1"></i>Adoptar
+                        </button>
+                    </div>
+                    <?php endforeach; ?>
+                </div>
+                <?php endif; ?>
+                <?php else: ?>
+                <p class="text-muted small mb-0"><i class="bi bi-lock me-1"></i>Servidor Slave — los subdominios se gestionan desde el Master.</p>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <!-- Mail -->
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -566,6 +635,105 @@ function confirmDeleteAlias(accountId, aliasId, domain, type) {
         var pwInput = document.createElement('input');
         pwInput.type = 'hidden'; pwInput.name = 'admin_password'; pwInput.value = result.value;
         form.appendChild(pwInput);
+
+        document.body.appendChild(form);
+        form.submit();
+    });
+}
+
+function confirmAdoptSubdomain(parentId, childId, childDomain, parentDomain) {
+    const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+
+    S.fire({
+        title: 'Adoptar como subdominio',
+        html: '<p>Convertir la cuenta independiente <strong>' + childDomain + '</strong> en subdominio de <strong>' + parentDomain + '</strong>?</p>' +
+              '<div class="text-start small" style="color:#94a3b8;">' +
+              '<p class="mb-1"><strong>Esto hara:</strong></p>' +
+              '<ul style="padding-left:1.2rem;">' +
+              '<li>Mover archivos a la carpeta del dominio padre</li>' +
+              '<li>Eliminar el usuario Linux y FPM pool independiente</li>' +
+              '<li>Crear ruta Caddy usando el FPM pool del padre</li>' +
+              '<li>Reasignar las bases de datos a la cuenta padre</li>' +
+              '</ul>' +
+              '<p class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>La carpeta original se conserva por seguridad.</p>' +
+              '</div>' +
+              '<div class="mb-2"><label class="form-label small">Contrasena de administrador</label>' +
+              '<input type="password" id="adopt-pw" class="form-control" placeholder="Confirmar con tu contrasena" style="background:#2a2a3e;color:#fff;border-color:#444;"></div>',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-box-arrow-in-down me-1"></i>Adoptar',
+        confirmButtonColor: '#0ea5e9',
+        cancelButtonText: 'Cancelar',
+        preConfirm: function() {
+            var pw = document.getElementById('adopt-pw').value;
+            if (!pw) { Swal.showValidationMessage('La contrasena es obligatoria'); return false; }
+            return pw;
+        }
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/accounts/' + parentId + '/subdomains/adopt';
+
+        var csrf = document.querySelector('input[name=_csrf_token]').value;
+        var fields = {
+            '_csrf_token': csrf,
+            'admin_password': result.value,
+            'child_account_id': childId
+        };
+        for (var key in fields) {
+            var input = document.createElement('input');
+            input.type = 'hidden'; input.name = key; input.value = fields[key];
+            form.appendChild(input);
+        }
+
+        document.body.appendChild(form);
+        form.submit();
+    });
+}
+
+function confirmDeleteSubdomain(accountId, subId, subdomain) {
+    const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+
+    S.fire({
+        title: 'Eliminar subdominio',
+        html: '<p>Eliminar subdominio <strong>' + subdomain + '</strong>?</p>' +
+              '<p class="small text-muted">Se eliminará la ruta Caddy. Los archivos se pueden conservar o eliminar.</p>' +
+              '<div class="form-check mb-2"><input type="checkbox" class="form-check-input" id="sub-delete-files"><label class="form-check-label small" for="sub-delete-files">Eliminar también los archivos del subdominio</label></div>' +
+              '<div class="mb-2"><label class="form-label small">Contraseña de administrador</label>' +
+              '<input type="password" id="sub-delete-pw" class="form-control" placeholder="Confirmar con tu contraseña" style="background:#2a2a3e;color:#fff;border-color:#444;"></div>',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Eliminar',
+        confirmButtonColor: '#dc3545',
+        cancelButtonText: 'Cancelar',
+        preConfirm: function() {
+            var pw = document.getElementById('sub-delete-pw').value;
+            if (!pw) { Swal.showValidationMessage('La contraseña es obligatoria'); return false; }
+            return { password: pw, deleteFiles: document.getElementById('sub-delete-files').checked };
+        }
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/accounts/' + accountId + '/subdomains/' + subId + '/delete';
+
+        var csrf = document.querySelector('input[name=_csrf_token]').value;
+        var csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden'; csrfInput.name = '_csrf_token'; csrfInput.value = csrf;
+        form.appendChild(csrfInput);
+
+        var pwInput = document.createElement('input');
+        pwInput.type = 'hidden'; pwInput.name = 'admin_password'; pwInput.value = result.value.password;
+        form.appendChild(pwInput);
+
+        if (result.value.deleteFiles) {
+            var delInput = document.createElement('input');
+            delInput.type = 'hidden'; delInput.name = 'delete_files'; delInput.value = '1';
+            form.appendChild(delInput);
+        }
 
         document.body.appendChild(form);
         form.submit();

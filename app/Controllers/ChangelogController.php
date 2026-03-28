@@ -20,8 +20,39 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.19',
+                'date' => '2026-03-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Sistema de subdominios — Crear y eliminar subdominios con carpeta propia (/vhosts/dominio.com/sub.dominio.com/) y ruta Caddy independiente, compartiendo usuario Linux y PHP-FPM de la cuenta padre',
+                            'Adoptar cuenta como subdominio — Si existe una cuenta independiente (ej: api.dominio.com), se puede adoptar como subdominio de dominio.com: mueve archivos, elimina usuario/FPM independiente, reasigna BDs y crea ruta Caddy bajo el padre',
+                            'Migracion SSH: deteccion de subdominios Plesk — Al probar conexion SSH, detecta automaticamente carpetas tipo subdominio en el vhost remoto, con deteccion de proyecto (Laravel/WordPress) y tamano, tanto con httpdocs como sin el',
+                            'Migracion SSH: selector de subdominios y carpetas — Checkboxes para seleccionar subdominios a migrar (marcados por defecto) y carpetas adicionales del vhost. Cada subdominio se migra de forma completa e independiente (archivos + BD + .env/wp-config)',
+                            'Sincronizacion cluster de subdominios — Operaciones add_subdomain, remove_subdomain y sync_subdomains para mantener subdominios sincronizados entre master y slave',
+                        ],
+                        'en' => [
+                            'Subdomain system — Create and delete subdomains with own folder (/vhosts/domain.com/sub.domain.com/) and independent Caddy route, sharing parent account Linux user and PHP-FPM pool',
+                            'Adopt account as subdomain — If an independent account exists (e.g., api.domain.com), it can be adopted as subdomain of domain.com: moves files, removes independent user/FPM, reassigns DBs and creates Caddy route under parent',
+                            'SSH Migration: Plesk subdomain detection — SSH test auto-detects subdomain folders in remote vhost, with project detection (Laravel/WordPress) and size, with or without httpdocs',
+                            'SSH Migration: subdomain and folder selector — Checkboxes to select subdomains to migrate (checked by default) and additional vhost folders. Each subdomain is fully migrated independently (files + DB + .env/wp-config)',
+                            'Cluster subdomain sync — add_subdomain, remove_subdomain and sync_subdomains operations to keep subdomains in sync between master and slave',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [],
+                        'en' => [],
+                    ],
+                    'fixed' => [
+                        'es' => [],
+                        'en' => [],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.18',
-                'date' => '2026-03-26',
+                'date' => '2026-03-27',
                 'badge' => 'danger',
                 'changes' => [
                     'new' => [
@@ -34,20 +65,20 @@ class ChangelogController
                     ],
                     'fixed' => [
                         'es' => [
-                            'Sobreescritura de backups de BD en nodo remoto — Database::execute() no existe, cambiado a Database::update() que es el metodo correcto',
-                            'Transferencia de backups de BD (individual y masiva) — El token CSRF se enviaba como _token en vez de _csrf_token, causando rechazo 403 silencioso',
-                            'Recarga de pagina tras actualizar panel — El polling verificaba /api/status que requiere sesion activa; si la sesion expira al reiniciar, nunca se recargaba. Ahora verifica la URL principal',
+                            'Sobreescritura de backups de BD en nodo remoto — Database::execute() no existe, cambiado a Database::update()',
+                            'Transferencia de backups de BD (individual y masiva) — El token CSRF se enviaba como _token en vez de _csrf_token, causando rechazo 403 silencioso. Las transferencias ahora funcionan correctamente',
+                            'Recarga de pagina tras actualizar panel — El polling verificaba /api/status que requiere sesion activa; si la sesion expira al reiniciar, nunca se recargaba. Ahora verifica la URL principal que responde con cualquier codigo HTTP',
                         ],
                         'en' => [
                             'DB backup overwrite on remote node — Database::execute() does not exist, changed to Database::update()',
-                            'DB backup transfer (single and bulk) — CSRF token was sent as _token instead of _csrf_token, causing silent 403 rejection',
-                            'Page reload after panel update — Polling checked /api/status which requires active session; now checks main URL which responds with any HTTP code',
+                            'DB backup transfer (single and bulk) — CSRF token was sent as _token instead of _csrf_token, causing silent 403 rejection. Transfers now work correctly',
+                            'Page reload after panel update — Polling checked /api/status which requires active session; if session expires on restart, panel returned 401 and never reloaded. Now checks main URL which responds with any HTTP code',
                         ],
                     ],
                 ],
             ],
             [
-                'version' => '1.0.16',
+                'version' => '1.0.17',
                 'date' => '2026-03-26',
                 'badge' => 'danger',
                 'changes' => [
@@ -76,7 +107,7 @@ class ChangelogController
                 ],
             ],
             [
-                'version' => '1.0.15',
+                'version' => '1.0.16',
                 'date' => '2026-03-26',
                 'badge' => 'primary',
                 'changes' => [
@@ -94,12 +125,12 @@ class ChangelogController
                     ],
                     'improved' => [
                         'es' => [
-                            'Confirmacion modal al eliminar servidores failover y cuentas Cloudflare en cluster',
+                            'Confirmacion modal al eliminar servidores failover y cuentas Cloudflare en configuracion cluster',
                             'Persistencia de tabs en cluster — Al guardar configuracion, la pagina vuelve al tab correspondiente (failover, nodos, archivos, configuracion, cola)',
                             'Verificacion de contraseña de admin al eliminar nodos del cluster',
                         ],
                         'en' => [
-                            'Confirmation modal when deleting failover servers and Cloudflare accounts in cluster',
+                            'Confirmation modal when deleting failover servers and Cloudflare accounts in cluster settings',
                             'Tab persistence in cluster — After saving, the page returns to the corresponding tab (failover, nodes, files, config, queue)',
                             'Admin password verification when removing cluster nodes',
                         ],
@@ -107,17 +138,17 @@ class ChangelogController
                     'fixed' => [
                         'es' => [
                             'Backups de BD MySQL fallaban — Se usaba el cliente mysql en vez de mysqldump para generar dumps',
-                            'Redirect de tabs en cluster apuntaba a #tab-failover que no coincidia con el hash del tab (#failover)',
+                            'Redirect de tabs en cluster apuntaba a #tab-failover que no coincidia con el hash del JS (#failover)',
                         ],
                         'en' => [
                             'MySQL DB backups were failing — mysql client was used instead of mysqldump for generating dumps',
-                            'Cluster tab redirect pointed to #tab-failover which did not match the tab hash (#failover)',
+                            'Cluster tab redirect pointed to #tab-failover which did not match the JS tab hash (#failover)',
                         ],
                     ],
                 ],
             ],
             [
-                'version' => '1.0.14',
+                'version' => '1.0.15',
                 'date' => '2026-03-26',
                 'badge' => 'primary',
                 'changes' => [

@@ -659,6 +659,33 @@ class ClusterController
     }
 
     /**
+     * POST /settings/cluster/retry-queue
+     */
+    public function retryQueue(): void
+    {
+        View::verifyCsrf();
+
+        $itemId = (int)($_POST['item_id'] ?? 0);
+
+        if ($itemId > 0) {
+            $ok = ClusterService::retryQueueItem($itemId);
+            if ($ok) {
+                LogService::log('cluster.queue', 'retry', "Reintento elemento #{$itemId}");
+                Flash::set('success', "Elemento #{$itemId} reencolado para reintento");
+            } else {
+                Flash::set('error', "No se pudo reintentar el elemento #{$itemId} (no existe o no está fallido)");
+            }
+        } else {
+            $count = ClusterService::retryAllFailed();
+            LogService::log('cluster.queue', 'retry-all', "Reencolados {$count} elementos fallidos");
+            Flash::set('success', "Se reencolaron {$count} elementos fallidos para reintento");
+        }
+
+        header('Location: /settings/cluster#cola');
+        exit;
+    }
+
+    /**
      * POST /settings/cluster/sync-all-hostings
      * Enqueue all existing hostings to a specific node
      */

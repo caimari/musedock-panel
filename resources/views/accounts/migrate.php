@@ -167,12 +167,35 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                         <small class="d-block text-muted">Solo si las dependencias estan disponibles en packagist. Si es proyecto antiguo, dejalo desmarcado.</small>
                     </div>
 
+                    <!-- Subdomain selector (populated after SSH test) -->
+                    <div id="subdomainSelector" style="display:none;" class="mb-2 p-2 rounded" style="border: 1px solid #334155;">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <small class="text-info fw-bold"><i class="bi bi-layers me-1"></i>Subdominios detectados en el vhost remoto</small>
+                            <div>
+                                <button type="button" class="btn btn-outline-info btn-sm py-0 px-1" style="font-size:0.7rem;" onclick="toggleAllSubdomains(true)">Todos</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1" style="font-size:0.7rem;" onclick="toggleAllSubdomains(false)">Ninguno</button>
+                            </div>
+                        </div>
+                        <div id="subdomainList"></div>
+                        <small class="text-muted d-block mt-1">Los subdominios seleccionados se migraran como subdominios independientes en el sistema, incluyendo archivos y BD si se detectan.</small>
+                    </div>
+
+                    <!-- Vhost folders browser (non-subdomain folders) -->
+                    <div id="vhostFolderSelector" style="display:none;" class="mb-2 p-2 rounded" style="border: 1px solid #334155;">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <small class="text-warning fw-bold"><i class="bi bi-folder me-1"></i>Otras carpetas en el vhost</small>
+                        </div>
+                        <div id="vhostFolderList"></div>
+                        <small class="text-muted d-block mt-1">Carpetas adicionales (no subdominios). Selecciona las que quieras incluir en la copia.</small>
+                    </div>
+
                     <div class="p-2 rounded mb-2" style="background: rgba(56,189,248,0.05); border: 1px solid #334155;">
                         <small class="text-muted">
                             <i class="bi bi-list-check me-1"></i><strong>El sistema hara todo automaticamente:</strong><br>
                             Conectar SSH &rarr; Detectar proyecto &rarr; Comprimir archivos &rarr;
                             Descargar por HTTPS &rarr; Descomprimir &rarr;
                             mysqldump &rarr; Crear BD local &rarr; Importar &rarr; Actualizar .env/wp-config &rarr; Limpiar
+                            <?php if (true): ?><br><i class="bi bi-layers me-1"></i>Subdominios: se crean como hosting independiente + migracion completa de cada uno<?php endif; ?>
                         </small>
                     </div>
 
@@ -252,6 +275,46 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                             <div class="p-3 mb-3 rounded" style="background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.2);">
                                 <p class="mb-1" style="color:#22c55e;"><i class="bi bi-magic me-1"></i><strong>Modo auto-deteccion</strong></p>
                                 <small class="text-muted">Las credenciales se leeran automaticamente de <code id="autoDetectFile"></code> en<br><code><?= View::e($account['document_root']) ?></code></small>
+                            </div>
+                        </div>
+
+                        <!-- SSH for remote mysqldump -->
+                        <div class="p-2 mb-3 rounded" style="background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.2);">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="dbSshToggle" onchange="document.getElementById('dbSshFields').style.display = this.checked ? '' : 'none';">
+                                <label class="form-check-label" for="dbSshToggle">
+                                    <i class="bi bi-hdd-network me-1" style="color:#fbbf24;"></i><strong>Ejecutar mysqldump via SSH</strong>
+                                </label>
+                            </div>
+                            <small class="text-muted d-block mt-1 ms-4">Conecta por SSH al servidor remoto para ejecutar mysqldump. <strong>Necesario</strong> si MySQL no acepta conexiones externas (lo habitual en Plesk/cPanel).</small>
+                        </div>
+                        <div id="dbSshFields" style="display:none;">
+                            <div class="row g-2 mb-2">
+                                <div class="col-md-4">
+                                    <label class="form-label">SSH Host</label>
+                                    <input type="text" name="ssh_host" id="dbSshHost" class="form-control" placeholder="servidor-remoto.com">
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label">Puerto SSH</label>
+                                    <input type="number" name="ssh_port" id="dbSshPort" class="form-control" value="22">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Usuario SSH</label>
+                                    <input type="text" name="ssh_user" id="dbSshUser" class="form-control" placeholder="root">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Password SSH</label>
+                                    <input type="password" name="ssh_password" id="dbSshPassword" class="form-control">
+                                </div>
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col-12">
+                                    <label class="form-label">Ruta remota del proyecto <small class="text-muted">(donde esta wp-config.php o .env en el servidor remoto)</small></label>
+                                    <input type="text" name="ssh_remote_path" class="form-control" placeholder="<?= View::e($account['document_root']) ?>" value="">
+                                </div>
+                            </div>
+                            <div class="p-2 mb-2 rounded" style="background: rgba(34,197,94,0.06); border: 1px solid rgba(34,197,94,0.2);">
+                                <small style="color:#22c55e;"><i class="bi bi-info-circle me-1"></i>Con SSH + WordPress/Laravel: las credenciales de BD se leeran del <strong>servidor remoto</strong>, no del local. Asi se obtienen las credenciales originales aunque el archivo local ya haya sido modificado.</small>
                             </div>
                         </div>
 
@@ -362,6 +425,9 @@ document.getElementById('sshTestBtn').addEventListener('click', function() {
                 '<tr><td style="color:#64748b;padding:1px 8px 1px 0;">Tamano:</td><td style="color:#e2e8f0;">' + data.size + '</td></tr>' +
                 '<tr><td style="color:#64748b;padding:1px 8px 1px 0;">Proyecto:</td><td style="color:#e2e8f0;">' + data.project + '</td></tr>' +
                 '</table></div>';
+
+            // Populate subdomain/folder selectors
+            populateVhostFolders(data.vhost_folders || []);
         }
     })
     .catch(function() {
@@ -911,4 +977,66 @@ document.querySelectorAll('input[name="db_source_toggle"]').forEach(function(rad
         }
     });
 });
+
+// ================================================================
+// Subdomain / Vhost folder selector
+// ================================================================
+function populateVhostFolders(folders) {
+    var subSelector = document.getElementById('subdomainSelector');
+    var subList = document.getElementById('subdomainList');
+    var folderSelector = document.getElementById('vhostFolderSelector');
+    var folderList = document.getElementById('vhostFolderList');
+
+    var subdomains = folders.filter(function(f) { return f.is_subdomain; });
+    var otherFolders = folders.filter(function(f) { return !f.is_subdomain; });
+
+    // Populate subdomains
+    if (subdomains.length > 0) {
+        subSelector.style.display = '';
+        var html = '';
+        subdomains.forEach(function(f) {
+            var projectBadge = '';
+            if (f.project) {
+                var color = f.project === 'Laravel' ? '#ef4444' : '#3b82f6';
+                projectBadge = ' <span class="badge" style="background:' + color + ';font-size:0.65rem;">' + f.project + '</span>';
+            }
+            var httpdocsBadge = f.has_httpdocs ? ' <span class="badge bg-secondary" style="font-size:0.65rem;">httpdocs</span>' : '';
+            html += '<div class="form-check mb-1">' +
+                '<input type="checkbox" class="form-check-input migrate-subdomain-cb" name="migrate_subdomains[]" value="' + f.name + '" id="sub-' + f.name.replace(/\./g, '-') + '" checked>' +
+                '<label class="form-check-label small" for="sub-' + f.name.replace(/\./g, '-') + '">' +
+                '<i class="bi bi-globe2 text-info me-1"></i><strong>' + f.name + '</strong>' +
+                ' <span class="text-muted">(' + f.size + ')</span>' +
+                projectBadge + httpdocsBadge +
+                '</label></div>';
+        });
+        subList.innerHTML = html;
+    } else {
+        subSelector.style.display = 'none';
+        subList.innerHTML = '';
+    }
+
+    // Populate other folders
+    if (otherFolders.length > 0) {
+        folderSelector.style.display = '';
+        var html2 = '';
+        otherFolders.forEach(function(f) {
+            html2 += '<div class="form-check mb-1">' +
+                '<input type="checkbox" class="form-check-input migrate-folder-cb" name="migrate_folders[]" value="' + f.name + '" id="folder-' + f.name.replace(/[^a-zA-Z0-9]/g, '-') + '">' +
+                '<label class="form-check-label small" for="folder-' + f.name.replace(/[^a-zA-Z0-9]/g, '-') + '">' +
+                '<i class="bi bi-folder text-warning me-1"></i>' + f.name +
+                ' <span class="text-muted">(' + f.size + ')</span>' +
+                '</label></div>';
+        });
+        folderList.innerHTML = html2;
+    } else {
+        folderSelector.style.display = 'none';
+        folderList.innerHTML = '';
+    }
+}
+
+function toggleAllSubdomains(checked) {
+    document.querySelectorAll('.migrate-subdomain-cb').forEach(function(cb) {
+        cb.checked = checked;
+    });
+}
 </script>

@@ -95,6 +95,9 @@ class DashboardController
             }
         } catch (\Throwable) {}
 
+        // Check if Caddy has a Cloudflare token configured for SSL certificates
+        $caddyTokenStatus = $this->checkCaddyCloudflareToken();
+
         View::render('dashboard/index', [
             'layout' => 'main',
             'pageTitle' => 'Dashboard',
@@ -105,6 +108,7 @@ class DashboardController
             'offlineNodes' => $offlineNodes,
             'onlineNodes' => $onlineNodes,
             'failoverStatus' => $failoverStatus,
+            'caddyTokenStatus' => $caddyTokenStatus,
         ]);
     }
 
@@ -151,6 +155,31 @@ class DashboardController
             'used_gb' => round($used / 1073741824, 1),
             'free_gb' => round($free / 1073741824, 1),
             'percent' => $total > 0 ? round(($used / $total) * 100, 1) : 0,
+        ];
+    }
+
+    private function checkCaddyCloudflareToken(): array
+    {
+        $caddyEnvFile = '/etc/default/caddy';
+        $hasToken = false;
+        $tokenPreview = '';
+        $cmsManages = file_exists('/var/www/vhosts/musedock.com/httpdocs/.env');
+
+        if (is_readable($caddyEnvFile)) {
+            $contents = file_get_contents($caddyEnvFile);
+            if (preg_match('/^CLOUDFLARE_API_TOKEN=(.+)$/m', $contents, $m)) {
+                $token = trim($m[1]);
+                if ($token !== '') {
+                    $hasToken = true;
+                    $tokenPreview = substr($token, 0, 6) . '...' . substr($token, -4);
+                }
+            }
+        }
+
+        return [
+            'has_token'   => $hasToken,
+            'preview'     => $tokenPreview,
+            'cms_manages' => $cmsManages,
         ];
     }
 

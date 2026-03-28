@@ -375,6 +375,30 @@ class ClusterService
         return Database::delete('cluster_queue', "status = 'failed'", []);
     }
 
+    public static function retryQueueItem(int $id): bool
+    {
+        $item = Database::fetchOne(
+            "SELECT id, status FROM cluster_queue WHERE id = :id",
+            ['id' => $id]
+        );
+        if (!$item || $item['status'] !== 'failed') {
+            return false;
+        }
+        Database::query(
+            "UPDATE cluster_queue SET status = 'pending', attempts = 0, error_message = NULL, started_at = NULL, completed_at = NULL WHERE id = :id",
+            ['id' => $id]
+        );
+        return true;
+    }
+
+    public static function retryAllFailed(): int
+    {
+        $stmt = Database::query(
+            "UPDATE cluster_queue SET status = 'pending', attempts = 0, error_message = NULL, started_at = NULL, completed_at = NULL WHERE status = 'failed'"
+        );
+        return $stmt->rowCount();
+    }
+
     public static function getQueueStats(): array
     {
         $rows = Database::fetchAll(
@@ -959,6 +983,44 @@ class ClusterService
 
                     LogService::log('cluster.sync', $mainDomain, "Databases synced: +{$added} -{$removed} for {$mainDomain}");
                     return ['ok' => true, 'message' => "Databases synced for {$mainDomain}: +{$added} -{$removed}"];
+
+                case 'add_subdomain':
+                    $mainDomain = $hostingData['main_domain'] ?? '';
+                    $subdomain = $hostingData['subdomain'] ?? '';
+                    if (empty($mainDomain) || empty($subdomain)) {
+                        return ['ok' => false, 'message' => 'main_domain and subdomain required'];
+                    }
+                    $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE domain = :d", ['d' => $mainDomain]);
+                    if (!$account) {
+                        return ['ok' => false, 'message' => "Hosting {$mainDomain} not found on slave"];
+                    }
+                    $result = SubdomainService::create((int)$account['id'], $subdomain, $hostingData['document_root'] ?? null);
+                    LogService::log('cluster.sync', $mainDomain, "Subdomain synced from master: {$subdomain}");
+                    return $result;
+
+                case 'remove_subdomain':
+                    $subdomain = $hostingData['subdomain'] ?? '';
+                    if (empty($subdomain)) {
+                        return ['ok' => false, 'message' => 'subdomain required'];
+                    }
+                    $row = Database::fetchOne("SELECT id FROM hosting_subdomains WHERE subdomain = :s", ['s' => $subdomain]);
+                    if ($row) {
+                        $result = SubdomainService::delete((int)$row['id']);
+                        LogService::log('cluster.sync', $subdomain, "Subdomain removed from master");
+                        return $result;
+                    }
+                    return ['ok' => true, 'message' => "Subdomain {$subdomain} not found on slave, skipping"];
+
+                case 'sync_subdomains':
+                    $mainDomain = $hostingData['main_domain'] ?? '';
+                    $subdomains = $hostingData['subdomains'] ?? [];
+                    $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE domain = :d", ['d' => $mainDomain]);
+                    if (!$account) {
+                        return ['ok' => false, 'message' => "Hosting {$mainDomain} not found on slave"];
+                    }
+                    SubdomainService::importFromMaster((int)$account['id'], $account, $subdomains);
+                    LogService::log('cluster.sync', $mainDomain, "Subdomains synced from master: " . count($subdomains) . " entries");
+                    return ['ok' => true, 'message' => "Subdomains synced for {$mainDomain}"];
 
                 default:
                     return ['ok' => false, 'message' => "Unknown hosting action: {$hostingAction}"];

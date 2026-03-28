@@ -1625,7 +1625,13 @@
                     <i class="bi bi-info-circle me-1"></i>Sin cuentas Cloudflare. Añada al menos una para que el failover pueda cambiar DNS automáticamente.
                 </div>
                 <?php endif; ?>
-                <button type="submit" class="btn btn-success btn-sm mt-2">
+                <div class="form-check mt-2 mb-2">
+                    <input class="form-check-input" type="checkbox" id="update_caddy_token" name="update_caddy_token" value="1">
+                    <label class="form-check-label small" for="update_caddy_token">
+                        <strong>Propagar token a Caddy</strong> — Escribir el primer token en <code>/etc/default/caddy</code> para que Caddy pueda generar certificados SSL via DNS-01
+                    </label>
+                </div>
+                <button type="submit" class="btn btn-success btn-sm">
                     <i class="bi bi-check-circle me-1"></i>Guardar Cuentas CF
                 </button>
             </form>
@@ -2625,6 +2631,12 @@ function foTestRemoteSources() {
                         <i class="bi bi-trash me-1"></i>Limpiar Completados
                     </button>
                 </form>
+                <form method="post" action="/settings/cluster/retry-queue" class="d-inline">
+                    <?= View::csrf() ?>
+                    <button type="submit" class="btn btn-outline-info btn-sm" title="Reencolar todos los elementos fallidos">
+                        <i class="bi bi-arrow-repeat me-1"></i>Reintentar Todos
+                    </button>
+                </form>
                 <form method="post" action="/settings/cluster/clean-queue" class="d-inline">
                     <?= View::csrf() ?>
                     <input type="hidden" name="type" value="failed">
@@ -2662,33 +2674,60 @@ function foTestRemoteSources() {
                         <thead>
                             <tr>
                                 <th>Acción</th>
-                                <th>Nodo Destino</th>
+                                <th>Detalle</th>
+                                <th>Nodo</th>
                                 <th>Estado</th>
                                 <th>Intentos</th>
                                 <th>Creado</th>
                                 <th>Error</th>
+                                <th></th>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ($recentQueue as $item): ?>
+                            <?php foreach ($recentQueue as $item):
+                                $qStatus = $item['status'] ?? 'pending';
+                                $qBadge = match($qStatus) {
+                                    'completed'  => 'bg-success',
+                                    'processing' => 'bg-info',
+                                    'failed'     => 'bg-danger',
+                                    default      => 'bg-secondary',
+                                };
+                                $payload = is_string($item['payload'] ?? null) ? json_decode($item['payload'], true) : ($item['payload'] ?? []);
+                                $hData = $payload['hosting_data'] ?? [];
+                                $hAction = $payload['hosting_action'] ?? '';
+                                $detail = '';
+                                if (!empty($hData['alias_domain'])) {
+                                    $detail = View::e($hData['alias_domain']) . ' → ' . View::e($hData['main_domain'] ?? '');
+                                } elseif (!empty($hData['domain'])) {
+                                    $detail = View::e($hData['domain']);
+                                } elseif (!empty($hData['main_domain'])) {
+                                    $detail = View::e($hData['main_domain']);
+                                }
+                            ?>
                             <tr>
-                                <td><code><?= View::e($item['action']) ?></code></td>
-                                <td><?= View::e($item['node_name'] ?? 'N/A') ?></td>
                                 <td>
-                                    <?php
-                                        $qStatus = $item['status'] ?? 'pending';
-                                        $qBadge = match($qStatus) {
-                                            'completed'  => 'bg-success',
-                                            'processing' => 'bg-info',
-                                            'failed'     => 'bg-danger',
-                                            default      => 'bg-secondary',
-                                        };
-                                    ?>
-                                    <span class="badge <?= $qBadge ?>"><?= View::e(ucfirst($qStatus)) ?></span>
+                                    <code><?= View::e($item['action']) ?></code>
+                                    <?php if ($hAction): ?>
+                                        <br><small class="text-muted"><?= View::e($hAction) ?></small>
+                                    <?php endif; ?>
                                 </td>
+                                <td class="small"><?= $detail ?></td>
+                                <td><?= View::e($item['node_name'] ?? 'N/A') ?></td>
+                                <td><span class="badge <?= $qBadge ?>"><?= View::e(ucfirst($qStatus)) ?></span></td>
                                 <td><?= (int)$item['attempts'] ?>/<?= (int)$item['max_attempts'] ?></td>
                                 <td class="small"><?= View::e($item['created_at'] ?? '') ?></td>
                                 <td class="small text-danger"><?= View::e($item['error_message'] ?? '') ?></td>
+                                <td>
+                                    <?php if ($qStatus === 'failed'): ?>
+                                    <form method="post" action="/settings/cluster/retry-queue" class="d-inline">
+                                        <?= View::csrf() ?>
+                                        <input type="hidden" name="item_id" value="<?= (int)$item['id'] ?>">
+                                        <button type="submit" class="btn btn-outline-info btn-sm py-0 px-1" title="Reintentar este elemento">
+                                            <i class="bi bi-arrow-repeat"></i>
+                                        </button>
+                                    </form>
+                                    <?php endif; ?>
+                                </td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>

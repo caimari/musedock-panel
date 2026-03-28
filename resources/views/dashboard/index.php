@@ -127,6 +127,53 @@
 </div>
 <?php endif; ?>
 
+<!-- Caddy Cloudflare Token Warning -->
+<?php if (!empty($caddyTokenStatus) && !$caddyTokenStatus['has_token']): ?>
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <div class="card border-warning">
+            <div class="card-header bg-warning text-dark py-2">
+                <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong>Certificados SSL: Token de Cloudflare no configurado</strong>
+            </div>
+            <div class="card-body">
+                <p class="mb-2">
+                    El archivo <code>/etc/default/caddy</code> no contiene la variable <code>CLOUDFLARE_API_TOKEN</code>.
+                    Sin este token, Caddy <strong>no puede generar certificados SSL</strong> para dominios con proxy de Cloudflare (nube naranja) ni para dominios que usan DNS-01.
+                </p>
+                <p class="mb-2">
+                    <strong>¿Por que es importante?</strong> Caddy necesita un token de Cloudflare con permisos de <em>DNS:Edit (All zones)</em>
+                    para completar el desafio DNS-01 de Let's Encrypt. Sin el, los dominios de hosting mostraran errores de certificado (ERR_SSL, 526, etc.).
+                </p>
+                <?php if ($caddyTokenStatus['cms_manages']): ?>
+                <div class="alert alert-info mb-2 py-2">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Parece que MuseDock CMS esta instalado en este servidor. Normalmente el CMS gestiona este token.
+                    Comprueba la configuracion de Cloudflare en el CMS (<em>Superadmin &rarr; Domain Manager &rarr; Guia Cloudflare</em>).
+                </div>
+                <?php else: ?>
+                <div class="alert alert-light border mb-2 py-2">
+                    <strong><i class="bi bi-terminal me-1"></i> Para configurarlo manualmente:</strong>
+                    <ol class="mb-0 mt-1">
+                        <li>Crea un token en <a href="https://dash.cloudflare.com/profile/api-tokens" target="_blank" rel="noopener">Cloudflare API Tokens</a> con permiso <code>DNS:Edit</code> para <strong>All zones</strong></li>
+                        <li>Ejecuta como root:
+                            <pre class="mb-0 mt-1 p-2 bg-dark text-light rounded" style="font-size:0.85em;">echo "CLOUDFLARE_API_TOKEN=tu-token-aqui" > /etc/default/caddy
+systemctl restart caddy</pre>
+                        </li>
+                    </ol>
+                </div>
+                <?php endif; ?>
+                <?php if (file_exists('/usr/local/bin/update-caddy-token.sh')): ?>
+                <p class="mb-0 text-muted small">
+                    <i class="bi bi-gear me-1"></i> Tambien puedes usar el script: <code>sudo /usr/local/bin/update-caddy-token.sh TU_TOKEN</code>
+                </p>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- System Stats -->
 <div class="row g-3 mb-4">
     <div class="col-md-3 d-flex">

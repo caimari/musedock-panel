@@ -355,7 +355,8 @@ CONF;
 
     /**
      * Ensure Caddy has a default TLS automation policy for non-musedock hosting domains.
-     * This allows Let's Encrypt HTTP-01 challenge for external domains like picalias.com.
+     * Supports both HTTP-01 (direct domains) and DNS-01 (Cloudflare proxied domains).
+     * DNS-01 uses IPv4 resolvers because IPv6 is disabled on this server.
      */
     public static function ensureTlsCatchAllPolicy(string $caddyApi): void
     {
@@ -364,20 +365,53 @@ CONF;
             true
         ) ?: [];
 
-        // Check if a catch-all policy (no subjects) already exists
-        foreach ($policies as $p) {
-            if (!isset($p['subjects']) || empty($p['subjects'])) {
-                return; // Already have a catch-all
+        // Read Cloudflare API token
+        $cfToken = trim(getenv('CLOUDFLARE_API_TOKEN') ?: '');
+        if (!$cfToken) {
+            $caddyEnv = @file_get_contents('/etc/default/caddy');
+            if ($caddyEnv && preg_match('/^CLOUDFLARE_API_TOKEN=(.+)$/m', $caddyEnv, $m)) {
+                $cfToken = trim($m[1]);
             }
         }
 
-        // Add catch-all policy for hosting domains (HTTP-01 challenge)
-        $policies[] = [
-            'issuers' => [
-                ['email' => 'admin@musedock.com', 'module' => 'acme']
-            ]
-        ];
+        // Check if a catch-all policy (no subjects) already exists
+        foreach ($policies as $idx => $p) {
+            if (!isset($p['subjects']) || empty($p['subjects'])) {
+                // Verify it has DNS-01 with real token and resolvers
+                $existingToken = $p['issuers'][0]['challenges']['dns']['provider']['api_token'] ?? '';
+                $existingResolvers = $p['issuers'][0]['challenges']['dns']['resolvers'] ?? [];
+                if ($cfToken && ($existingToken !== $cfToken || empty($existingResolvers) || str_contains($existingToken, '{env.'))) {
+                    // Fix: replace with correct DNS-01 config
+                    $policies[$idx] = self::buildCatchAllPolicy($cfToken);
+                    self::patchTlsPolicies($caddyApi, $policies);
+                }
+                return;
+            }
+        }
 
+        // No catch-all exists — create one
+        $policies[] = self::buildCatchAllPolicy($cfToken);
+        self::patchTlsPolicies($caddyApi, $policies);
+    }
+
+    private static function buildCatchAllPolicy(string $cfToken): array
+    {
+        $acmeIssuer = ['email' => 'admin@musedock.com', 'module' => 'acme'];
+
+        if ($cfToken) {
+            $acmeIssuer['challenges'] = [
+                'dns' => [
+                    'provider' => ['name' => 'cloudflare', 'api_token' => $cfToken],
+                    'resolvers' => ['1.1.1.1:53', '8.8.8.8:53']
+                ]
+            ];
+        }
+
+        return ['issuers' => [$acmeIssuer]];
+    }
+
+    private static function patchTlsPolicies(string $caddyApi, array $policies): void
+    {
         $ch = curl_init("{$caddyApi}/config/apps/tls/automation/policies");
         curl_setopt_array($ch, [
             CURLOPT_CUSTOMREQUEST => 'PATCH',

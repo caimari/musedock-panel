@@ -204,10 +204,59 @@ class MigrationController
         if (strpos($envCheck, 'LARAVEL') !== false) $projectInfo = 'Laravel (detectado .env)';
         elseif (strpos($wpCheck, 'WORDPRESS') !== false) $projectInfo = 'WordPress (detectado wp-config.php)';
 
+        // List directories in vhost root to detect Plesk-style subdomains
+        // Plesk stores subdomains as folders like: sub.domain.com/ alongside httpdocs/
+        $vhostFolders = [];
+        $lsOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+            "ls -1d " . escapeshellarg($remotePath) . "/*/ 2>/dev/null | xargs -I{} basename {}"
+        );
+        if (!empty(trim($lsOutput))) {
+            $allFolders = array_filter(array_map('trim', explode("\n", trim($lsOutput))));
+            $systemFolders = ['httpdocs', 'httpsdocs', 'logs', 'tmp', 'sessions', 'error_docs', 'statistics', 'private', 'cgi-bin', 'anon_ftp', 'conf', 'pd', 'web_users'];
+            foreach ($allFolders as $folder) {
+                $isSubdomain = str_contains($folder, '.') && preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i', $folder);
+                $isSystem = in_array($folder, $systemFolders, true);
+                if (!$isSystem || $isSubdomain) {
+                    // Get folder size and detect project type
+                    $folderPath = $remotePath . '/' . $folder;
+                    $folderInfo = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                        "du -sh " . escapeshellarg($folderPath) . " 2>/dev/null | cut -f1"
+                    );
+                    $folderSize = trim($folderInfo) ?: '?';
+
+                    // Check for httpdocs subfolder (Plesk subdomains usually have it)
+                    $hasHttpdocs = false;
+                    $subProject = null;
+                    $htCheck = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                        "test -d " . escapeshellarg($folderPath . '/httpdocs') . " && echo 'HAS_HTTPDOCS'"
+                    );
+                    // Detect project type: check httpdocs first, then root folder
+                    $docPath = str_contains($htCheck, 'HAS_HTTPDOCS') ? $folderPath . '/httpdocs' : $folderPath;
+                    if (str_contains($htCheck, 'HAS_HTTPDOCS')) {
+                        $hasHttpdocs = true;
+                    }
+                    $subEnv = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                        "test -f " . escapeshellarg($docPath . '/.env') . " && echo 'LARAVEL' || (test -f " . escapeshellarg($docPath . '/wp-config.php') . " && echo 'WORDPRESS')"
+                    );
+                    if (str_contains($subEnv, 'LARAVEL')) $subProject = 'Laravel';
+                    elseif (str_contains($subEnv, 'WORDPRESS')) $subProject = 'WordPress';
+
+                    $vhostFolders[] = [
+                        'name'         => $folder,
+                        'is_subdomain' => $isSubdomain,
+                        'size'         => $folderSize,
+                        'has_httpdocs' => $hasHttpdocs,
+                        'project'      => $subProject,
+                    ];
+                }
+            }
+        }
+
         echo json_encode([
             'ok' => true, 'message' => 'Conexion SSH OK',
             'files' => $fileCount, 'size' => $dirSize,
             'project' => $projectInfo, 'path' => $fullRemotePath,
+            'vhost_folders' => $vhostFolders,
         ]);
     }
 
@@ -256,6 +305,8 @@ class MigrationController
             'local_target' => trim($_POST['local_target'] ?? ''),
             'include_db' => isset($_POST['include_db']),
             'exclude_vendor' => isset($_POST['exclude_vendor']),
+            'migrate_subdomains' => $_POST['migrate_subdomains'] ?? [],
+            'migrate_folders' => $_POST['migrate_folders'] ?? [],
         ];
 
         $streamToken = bin2hex(random_bytes(16));
@@ -639,20 +690,86 @@ class MigrationController
             $this->sendSSE('log', 'Ejecutando mysqldump en servidor remoto...', $st);
             $this->sendSSE('progress', json_encode(['type' => 'mysqldump', 'indeterminate' => true]), $st);
 
-            $remoteMysqldumpCmd = sprintf('mysqldump -h %s -P %s -u %s -p%s %s 2>/dev/null',
-                escapeshellarg($dbCredentials['host']), escapeshellarg($dbCredentials['port']),
+            $dumpErrFile = "/tmp/mdpdb_{$dumpToken}.err";
+
+            // WordPress DB_HOST can be "localhost:3306" — split host and port
+            $dumpHost = $dbCredentials['host'];
+            $dumpPort = $dbCredentials['port'];
+            if (str_contains($dumpHost, ':')) {
+                [$dumpHost, $parsedPort] = explode(':', $dumpHost, 2);
+                if (is_numeric($parsedPort)) $dumpPort = $parsedPort;
+            }
+
+            $remoteMysqldumpCmd = sprintf('mysqldump -h %s -P %s -u %s -p%s %s',
+                escapeshellarg($dumpHost), escapeshellarg($dumpPort),
                 escapeshellarg($dbCredentials['username']), escapeshellarg($dbCredentials['password']),
                 escapeshellarg($dbCredentials['database'])
             );
 
-            shell_exec(sprintf('sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -p %d %s@%s %s > %s 2>&1',
+            // Execute mysqldump remotely: dump SQL to stdout, stderr to temp file on remote
+            $remoteErrFile = '/tmp/mdp_dump_err_' . bin2hex(random_bytes(4));
+            $fullRemoteCmd = $remoteMysqldumpCmd . ' 2>' . escapeshellarg($remoteErrFile);
+
+            shell_exec(sprintf(
+                'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=30 -p %d %s@%s %s > %s 2>%s',
                 escapeshellarg($sshPassword), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
-                escapeshellarg($remoteMysqldumpCmd), escapeshellarg($dumpFile)
+                escapeshellarg($fullRemoteCmd),
+                escapeshellarg($dumpFile), escapeshellarg($dumpErrFile)
             ));
 
+            // Fetch remote error log if dump failed
             if (!file_exists($dumpFile) || filesize($dumpFile) < 50) {
+                $remoteErr = shell_exec(sprintf(
+                    'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d %s@%s %s 2>/dev/null',
+                    escapeshellarg($sshPassword), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                    escapeshellarg('cat ' . escapeshellarg($remoteErrFile) . ' 2>/dev/null; rm -f ' . escapeshellarg($remoteErrFile))
+                ));
+                if ($remoteErr) {
+                    file_put_contents($dumpErrFile, trim($remoteErr));
+                }
+            } else {
+                // Cleanup remote error file
+                shell_exec(sprintf(
+                    'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p %d %s@%s %s 2>/dev/null &',
+                    escapeshellarg($sshPassword), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                    escapeshellarg('rm -f ' . escapeshellarg($remoteErrFile))
+                ));
+            }
+
+            // Check for errors — also detect dump files that contain error text instead of SQL
+            $dumpOk = file_exists($dumpFile) && filesize($dumpFile) >= 50;
+            if ($dumpOk) {
+                // Quick check: if the dump starts with an error message instead of SQL
+                $head = file_get_contents($dumpFile, false, null, 0, 200);
+                if (preg_match('/^(mysqldump:|error:|Access denied)/i', trim($head))) {
+                    $dumpOk = false;
+                }
+            }
+
+            $dumpErrMsg = '';
+            if (file_exists($dumpErrFile) && filesize($dumpErrFile) > 0) {
+                $dumpErrMsg = trim(file_get_contents($dumpErrFile, false, null, 0, 500));
+            }
+            @unlink($dumpErrFile);
+
+            if (!$dumpOk) {
+                $errDetail = $dumpErrMsg ?: (isset($head) ? trim($head) : 'sin detalles');
                 $errors[] = 'mysqldump fallo';
-                $this->sendSSE('error', 'mysqldump fallo. Se migraron solo los archivos.', $st);
+                $this->sendSSE('error', "ERROR: mysqldump fallo: {$errDetail}", $st);
+                $this->sendSSE('log', 'Se migraron solo los archivos. Usa "Opcion 3: Solo Base de Datos" para reintentar.', $st);
+
+                // Save SSH credentials to status so the retry UI can pre-fill them
+                $this->appendStatus($st, 'db_retry', json_encode([
+                    'host' => $dbCredentials['host'],
+                    'port' => $dbCredentials['port'],
+                    'database' => $dbCredentials['database'],
+                    'username' => $dbCredentials['username'],
+                    'project_type' => $projectType,
+                    'ssh_host' => $sshHost,
+                    'ssh_port' => $sshPort,
+                    'ssh_user' => $sshUser,
+                ]));
+
                 @unlink($dumpFile);
             } else {
                 $dumpSize = round(filesize($dumpFile) / 1048576, 1);
@@ -665,8 +782,10 @@ class MigrationController
                 $this->sendSSE('log', 'Creando base de datos local: ' . $localDbName, $st);
 
                 $sqlSetup = sprintf(
-                    "CREATE DATABASE IF NOT EXISTS `%s`;\nCREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\nGRANT ALL ON `%s`.* TO '%s'@'localhost';\nFLUSH PRIVILEGES;\n",
+                    "CREATE DATABASE IF NOT EXISTS `%s`;\nCREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\nALTER USER '%s'@'localhost' IDENTIFIED BY '%s';\nGRANT ALL ON `%s`.* TO '%s'@'localhost';\nFLUSH PRIVILEGES;\n",
                     str_replace('`', '``', $localDbName),
+                    str_replace("'", "''", $localDbUser),
+                    str_replace("'", "''", $localDbPass),
                     str_replace("'", "''", $localDbUser),
                     str_replace("'", "''", $localDbPass),
                     str_replace('`', '``', $localDbName),
@@ -724,8 +843,234 @@ class MigrationController
         // --- STEP 8: Cleanup ---
         @unlink($localBackup);
 
+        // --- STEP 9: Migrate subdomains ---
+        $migrateSubdomains = $data['migrate_subdomains'] ?? [];
+        $subdomainResults = [];
+        if (!empty($migrateSubdomains)) {
+            $this->sendSSE('step', 'Migrando subdominios (' . count($migrateSubdomains) . ')', $st);
+            $this->sendSSE('log', '═══ Migrando ' . count($migrateSubdomains) . ' subdominios ═══', $st);
+
+            foreach ($migrateSubdomains as $subName) {
+                $subName = basename(trim($subName)); // Safety
+                if (empty($subName)) continue;
+
+                $this->sendSSE('log', "── Subdominio: {$subName} ──", $st);
+
+                // Determine remote path for this subdomain
+                $subRemotePath = $remotePath . '/' . $subName;
+                // Check if subdomain has httpdocs subfolder
+                $subHtCheck = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                    "test -d " . escapeshellarg($subRemotePath . '/httpdocs') . " && echo 'HAS_HT' || echo 'NO_HT'"
+                );
+                $subDocRoot = str_contains($subHtCheck, 'HAS_HT') ? '/httpdocs' : '';
+                $subFullPath = $subRemotePath . $subDocRoot;
+
+                // Create local subdomain via SubdomainService
+                $subResult = \MuseDockPanel\Services\SubdomainService::create((int)$account['id'], $subName);
+                if (!$subResult['ok']) {
+                    $this->sendSSE('error', "No se pudo crear subdominio {$subName}: " . ($subResult['error'] ?? 'error'), $st);
+                    $errors[] = "Subdomain {$subName}: " . ($subResult['error'] ?? 'error');
+                    $subdomainResults[] = ['subdomain' => $subName, 'ok' => false, 'error' => $subResult['error']];
+                    continue;
+                }
+
+                $subTargetDir = $subResult['document_root'];
+                $this->sendSSE('log', "Subdominio creado. Document root: {$subTargetDir}", $st);
+
+                // Compress remote subdomain files
+                $subFileToken = bin2hex(random_bytes(8));
+                $subBackupName = "mdp_sub_{$subFileToken}.tar.gz";
+                $subRemoteBackupPath = $subFullPath . '/' . $subBackupName;
+                $subLocalBackup = "/tmp/{$subBackupName}";
+
+                $this->sendSSE('log', "Comprimiendo archivos de {$subName}...", $st);
+                $subExcludeArgs = "--exclude=" . escapeshellarg($subBackupName);
+                if ($excludeVendor) {
+                    $subExcludeArgs .= " --exclude='vendor'";
+                }
+                $subTarCmd = "cd " . escapeshellarg($subFullPath) . " && tar czf " . escapeshellarg($subRemoteBackupPath) . " {$subExcludeArgs} . 2>&1; echo TAR_EXIT_\$?";
+                $subTarOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, $subTarCmd);
+
+                if (!preg_match('/TAR_EXIT_0/', $subTarOutput)) {
+                    $this->sendSSE('error', "Error comprimiendo {$subName}: " . substr($subTarOutput, 0, 200), $st);
+                    $errors[] = "Subdomain {$subName}: tar failed";
+                    $subdomainResults[] = ['subdomain' => $subName, 'ok' => false, 'error' => 'tar failed'];
+                    continue;
+                }
+
+                // Download via SCP (most reliable for subdomains)
+                $this->sendSSE('log', "Descargando archivos de {$subName}...", $st);
+                $subScpCmd = sprintf(
+                    'sshpass -p %s scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -P %d %s@%s:%s %s 2>&1',
+                    escapeshellarg($sshPassword), $sshPort,
+                    escapeshellarg($sshUser), escapeshellarg($sshHost),
+                    escapeshellarg($subRemoteBackupPath), escapeshellarg($subLocalBackup)
+                );
+                shell_exec("timeout 600 {$subScpCmd}");
+
+                // Clean remote backup
+                $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                    "rm -f " . escapeshellarg($subRemoteBackupPath)
+                );
+
+                if (!file_exists($subLocalBackup) || filesize($subLocalBackup) < 100) {
+                    // Try HTTPS fallback
+                    $subHttpsUrl = "https://{$subName}/{$subBackupName}";
+                    $this->sendSSE('log', "SCP fallo, intentando HTTPS: {$subHttpsUrl}", $st);
+                    $this->downloadWithProgress($subHttpsUrl, $subLocalBackup, 0, $st);
+                }
+
+                if (!file_exists($subLocalBackup) || filesize($subLocalBackup) < 100) {
+                    $this->sendSSE('error', "No se pudo descargar {$subName}.", $st);
+                    $errors[] = "Subdomain {$subName}: download failed";
+                    $subdomainResults[] = ['subdomain' => $subName, 'ok' => false, 'error' => 'download failed'];
+                    continue;
+                }
+
+                // Extract
+                $this->sendSSE('log', "Descomprimiendo {$subName}...", $st);
+                shell_exec(sprintf('tar xzf %s -C %s 2>&1', escapeshellarg($subLocalBackup), escapeshellarg($subTargetDir)));
+                shell_exec(sprintf('chown -R %s:www-data %s 2>&1', escapeshellarg($account['username']), escapeshellarg($subTargetDir)));
+                @unlink($subLocalBackup);
+                $this->sendSSE('log', "Archivos de {$subName} extraidos.", $st);
+
+                // Detect and migrate database for this subdomain
+                $subDbResult = null;
+                if ($includeDb) {
+                    // Check for Laravel .env or WordPress wp-config.php
+                    $subEnvCheck = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                        "test -f " . escapeshellarg($subFullPath . '/.env') . " && echo 'LARAVEL' || (test -f " . escapeshellarg($subFullPath . '/wp-config.php') . " && echo 'WORDPRESS')"
+                    );
+
+                    $subDbCreds = null;
+                    if (str_contains($subEnvCheck, 'LARAVEL')) {
+                        $envContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                            "cat " . escapeshellarg($subFullPath . '/.env')
+                        );
+                        $subDbCreds = $this->parseLaravelEnv($envContent);
+                        $this->sendSSE('log', "Laravel detectado en {$subName}. BD: " . ($subDbCreds['database'] ?? '?'), $st);
+                    } elseif (str_contains($subEnvCheck, 'WORDPRESS')) {
+                        $wpContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                            "cat " . escapeshellarg($subFullPath . '/wp-config.php')
+                        );
+                        $subDbCreds = $this->parseWpConfig($wpContent);
+                        $this->sendSSE('log', "WordPress detectado en {$subName}. BD: " . ($subDbCreds['database'] ?? '?'), $st);
+                    }
+
+                    if ($subDbCreds && !empty($subDbCreds['database'])) {
+                        $this->sendSSE('log', "Volcando BD de {$subName}: {$subDbCreds['database']}...", $st);
+
+                        // Remote mysqldump
+                        $subDumpFile = "/tmp/mdp_sub_db_{$subFileToken}.sql";
+                        $subMysqlDump = sprintf(
+                            'mysqldump -h%s -u%s -p%s %s',
+                            escapeshellarg($subDbCreds['host'] ?? '127.0.0.1'),
+                            escapeshellarg($subDbCreds['username'] ?? ''),
+                            escapeshellarg($subDbCreds['password'] ?? ''),
+                            escapeshellarg($subDbCreds['database'])
+                        );
+                        $subDumpOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                            "{$subMysqlDump} > /tmp/{$subBackupName}.sql 2>&1; echo DUMP_EXIT_\$?; wc -c < /tmp/{$subBackupName}.sql"
+                        );
+
+                        if (str_contains($subDumpOutput, 'DUMP_EXIT_0')) {
+                            // Download dump
+                            $subDumpScpCmd = sprintf(
+                                'sshpass -p %s scp -o StrictHostKeyChecking=no -P %d %s@%s:/tmp/%s.sql %s 2>&1',
+                                escapeshellarg($sshPassword), $sshPort,
+                                escapeshellarg($sshUser), escapeshellarg($sshHost),
+                                escapeshellarg($subBackupName), escapeshellarg($subDumpFile)
+                            );
+                            shell_exec("timeout 300 {$subDumpScpCmd}");
+
+                            // Clean remote dump
+                            $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                                "rm -f /tmp/" . escapeshellarg($subBackupName) . ".sql"
+                            );
+
+                            if (file_exists($subDumpFile) && filesize($subDumpFile) > 100) {
+                                // Create local database
+                                $safeSubName = preg_replace('/[^a-z0-9_]/', '_', strtolower(str_replace(['.', '-'], '_', $subName)));
+                                $subLocalDbName = substr($safeSubName, 0, 60) . '_db';
+                                $subLocalDbUser = substr($safeSubName, 0, 28) . '_usr';
+                                $subLocalDbPass = bin2hex(random_bytes(12));
+
+                                $this->sendSSE('log', "Creando BD local: {$subLocalDbName}...", $st);
+                                shell_exec("mysql -u root -e " . escapeshellarg("CREATE DATABASE IF NOT EXISTS `{$subLocalDbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci") . " 2>&1");
+                                shell_exec("mysql -u root -e " . escapeshellarg("CREATE USER IF NOT EXISTS '{$subLocalDbUser}'@'localhost' IDENTIFIED BY '{$subLocalDbPass}'") . " 2>&1");
+                                shell_exec("mysql -u root -e " . escapeshellarg("GRANT ALL PRIVILEGES ON `{$subLocalDbName}`.* TO '{$subLocalDbUser}'@'localhost'") . " 2>&1");
+                                shell_exec("mysql -u root -e 'FLUSH PRIVILEGES' 2>&1");
+
+                                // Import dump
+                                $this->sendSSE('log', "Importando BD de {$subName}...", $st);
+                                shell_exec(sprintf('mysql %s < %s 2>&1', escapeshellarg($subLocalDbName), escapeshellarg($subDumpFile)));
+                                @unlink($subDumpFile);
+
+                                // Register in hosting_databases
+                                Database::insert('hosting_databases', [
+                                    'account_id' => (int)$account['id'],
+                                    'db_name'    => $subLocalDbName,
+                                    'db_user'    => $subLocalDbUser,
+                                    'db_type'    => 'mysql',
+                                ]);
+
+                                // Update local .env or wp-config.php
+                                if (str_contains($subEnvCheck, 'LARAVEL') && file_exists($subTargetDir . '/.env')) {
+                                    $localEnv = file_get_contents($subTargetDir . '/.env');
+                                    $localEnv = preg_replace('/^DB_HOST=.*/m', 'DB_HOST=127.0.0.1', $localEnv);
+                                    $localEnv = preg_replace('/^DB_DATABASE=.*/m', "DB_DATABASE={$subLocalDbName}", $localEnv);
+                                    $localEnv = preg_replace('/^DB_USERNAME=.*/m', "DB_USERNAME={$subLocalDbUser}", $localEnv);
+                                    $localEnv = preg_replace('/^DB_PASSWORD=.*/m', "DB_PASSWORD={$subLocalDbPass}", $localEnv);
+                                    file_put_contents($subTargetDir . '/.env', $localEnv);
+                                    $this->sendSSE('log', ".env de {$subName} actualizado con credenciales locales.", $st);
+                                } elseif (str_contains($subEnvCheck, 'WORDPRESS') && file_exists($subTargetDir . '/wp-config.php')) {
+                                    $wpConfig = file_get_contents($subTargetDir . '/wp-config.php');
+                                    $wpConfig = preg_replace("/define\s*\(\s*'DB_NAME'\s*,.*/", "define('DB_NAME', '{$subLocalDbName}');", $wpConfig);
+                                    $wpConfig = preg_replace("/define\s*\(\s*'DB_USER'\s*,.*/", "define('DB_USER', '{$subLocalDbUser}');", $wpConfig);
+                                    $wpConfig = preg_replace("/define\s*\(\s*'DB_PASSWORD'\s*,.*/", "define('DB_PASSWORD', '{$subLocalDbPass}');", $wpConfig);
+                                    $wpConfig = preg_replace("/define\s*\(\s*'DB_HOST'\s*,.*/", "define('DB_HOST', 'localhost');", $wpConfig);
+                                    file_put_contents($subTargetDir . '/wp-config.php', $wpConfig);
+                                    $this->sendSSE('log', "wp-config.php de {$subName} actualizado con credenciales locales.", $st);
+                                }
+
+                                $subDbResult = ['db_name' => $subLocalDbName, 'db_pass' => $subLocalDbPass];
+                                $this->sendSSE('log', "BD de {$subName} migrada: {$subDbCreds['database']} → {$subLocalDbName}", $st);
+                            } else {
+                                $this->sendSSE('error', "No se pudo descargar el dump de BD de {$subName}.", $st);
+                                $errors[] = "Subdomain {$subName}: DB dump download failed";
+                            }
+                        } else {
+                            $this->sendSSE('error', "mysqldump fallo para {$subName}.", $st);
+                            $errors[] = "Subdomain {$subName}: mysqldump failed";
+                        }
+                    }
+                }
+
+                // Composer install if needed
+                if ($excludeVendor && file_exists($subTargetDir . '/composer.json') && !is_dir($subTargetDir . '/vendor')) {
+                    $this->sendSSE('log', "Ejecutando composer install en {$subName}...", $st);
+                    shell_exec(sprintf('cd %s && composer install --no-dev --no-interaction 2>&1', escapeshellarg($subTargetDir)));
+                    $this->sendSSE('log', "composer install completado para {$subName}.", $st);
+                }
+
+                $subdomainResults[] = [
+                    'subdomain' => $subName,
+                    'ok' => true,
+                    'document_root' => $subTargetDir,
+                    'db' => $subDbResult,
+                ];
+                $this->sendSSE('log', "✓ Subdominio {$subName} migrado correctamente.", $st);
+            }
+
+            $this->sendSSE('log', '═══ Migracion de subdominios finalizada ═══', $st);
+        }
+
         // --- Done ---
         $summary = "Migracion completada desde {$sshUser}@{$sshHost} ({$localSize} MB via HTTPS)";
+        if (!empty($migrateSubdomains)) {
+            $okSubs = count(array_filter($subdomainResults, fn($r) => $r['ok']));
+            $summary .= " | Subdominios: {$okSubs}/" . count($migrateSubdomains);
+        }
         if ($includeDb && $localDbName) {
             $summary .= " | BD: {$dbCredentials['database']} -> {$localDbName}";
         }
@@ -913,6 +1258,8 @@ class MigrationController
             $status['result'] = json_decode($data, true);
         } elseif ($event === 'db_pass_saved') {
             $status['db_pass'] = $data;
+        } elseif ($event === 'db_retry') {
+            $status['db_retry'] = json_decode($data, true);
         }
 
         file_put_contents($file, json_encode($status, JSON_UNESCAPED_UNICODE));
@@ -944,7 +1291,58 @@ class MigrationController
         $dbSource = $_POST['db_source'] ?? 'manual';
         $targetDir = $account['document_root'];
 
-        if ($dbSource === 'laravel') {
+        // SSH mode: execute mysqldump remotely (needed when MySQL only listens on localhost)
+        $sshHost = trim($_POST['ssh_host'] ?? '');
+        $sshUser = trim($_POST['ssh_user'] ?? '');
+        $sshPass = $_POST['ssh_password'] ?? '';
+        $sshPort = (int) ($_POST['ssh_port'] ?? 22) ?: 22;
+        $useSSH = !empty($sshHost) && !empty($sshUser) && !empty($sshPass);
+
+        // Determine remote path for reading config files via SSH
+        $sshRemotePath = trim($_POST['ssh_remote_path'] ?? '');
+        if (!$sshRemotePath) {
+            // Default: same vhosts structure as local
+            $sshRemotePath = $targetDir;
+        }
+
+        if (($dbSource === 'laravel' || $dbSource === 'wordpress') && $useSSH) {
+            // Read config file from REMOTE server via SSH (the local copy may already be modified)
+            $configFileName = $dbSource === 'laravel' ? '.env' : 'wp-config.php';
+            $remoteConfigPath = rtrim($sshRemotePath, '/') . '/' . $configFileName;
+
+            $content = shell_exec(sprintf(
+                'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -p %d %s@%s %s 2>/dev/null',
+                escapeshellarg($sshPass), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                escapeshellarg('cat ' . escapeshellarg($remoteConfigPath))
+            ));
+
+            if (empty($content)) {
+                Flash::set('error', "No se pudo leer {$configFileName} del servidor remoto ({$remoteConfigPath}). Verifica la ruta y credenciales SSH.");
+                Router::redirect('/accounts/' . $params['id'] . '/migrate');
+                return;
+            }
+
+            if ($dbSource === 'laravel') {
+                $lines = [];
+                foreach (explode("\n", $content) as $line) {
+                    if (preg_match('/^([A-Z_]+)=(.*)$/', trim($line), $m)) {
+                        $lines[$m[1]] = trim($m[2], '"\'');
+                    }
+                }
+                $remoteHost = $lines['DB_HOST'] ?? '127.0.0.1';
+                $remotePort = $lines['DB_PORT'] ?? '3306';
+                $remoteDb = $lines['DB_DATABASE'] ?? '';
+                $remoteUser = $lines['DB_USERNAME'] ?? '';
+                $remotePass = $lines['DB_PASSWORD'] ?? '';
+            } else {
+                preg_match("/define\(\s*'DB_NAME'\s*,\s*'([^']+)'/", $content, $m); $remoteDb = $m[1] ?? '';
+                preg_match("/define\(\s*'DB_USER'\s*,\s*'([^']+)'/", $content, $m); $remoteUser = $m[1] ?? '';
+                preg_match("/define\(\s*'DB_PASSWORD'\s*,\s*'([^']+)'/", $content, $m); $remotePass = $m[1] ?? '';
+                preg_match("/define\(\s*'DB_HOST'\s*,\s*'([^']+)'/", $content, $m); $remoteHost = $m[1] ?? 'localhost';
+                $remotePort = '3306';
+            }
+        } elseif ($dbSource === 'laravel') {
+            // Read from local .env
             $envFile = $targetDir . '/.env';
             if (!file_exists($envFile)) {
                 Flash::set('error', 'No se encontro .env en ' . $targetDir);
@@ -958,6 +1356,7 @@ class MigrationController
             $remoteUser = $env['DB_USERNAME'] ?? '';
             $remotePass = $env['DB_PASSWORD'] ?? '';
         } elseif ($dbSource === 'wordpress') {
+            // Read from local wp-config.php
             $wpConfig = $targetDir . '/wp-config.php';
             if (!file_exists($wpConfig)) {
                 Flash::set('error', 'No se encontro wp-config.php en ' . $targetDir);
@@ -978,6 +1377,14 @@ class MigrationController
             $remotePass = $_POST['db_password'] ?? '';
         }
 
+        // WordPress DB_HOST can be "localhost:3306" or "127.0.0.1:3307" — split host and port
+        if (str_contains($remoteHost, ':')) {
+            [$remoteHost, $parsedPort] = explode(':', $remoteHost, 2);
+            if (is_numeric($parsedPort)) {
+                $remotePort = $parsedPort;
+            }
+        }
+
         if (empty($remoteDb) || empty($remoteUser)) {
             Flash::set('error', 'Nombre de BD y usuario son obligatorios.');
             Router::redirect('/accounts/' . $params['id'] . '/migrate');
@@ -986,15 +1393,67 @@ class MigrationController
 
         $dumpToken = bin2hex(random_bytes(8));
         $dumpFile = "/tmp/mdpdb_{$dumpToken}.sql";
+        $dumpErrFile = "/tmp/mdpdb_{$dumpToken}.err";
 
-        shell_exec(sprintf('mysqldump -h %s -P %s -u %s -p%s %s > %s 2>&1',
+        $remoteMysqldumpCmd = sprintf('mysqldump -h %s -P %s -u %s -p%s %s',
             escapeshellarg($remoteHost), escapeshellarg($remotePort),
             escapeshellarg($remoteUser), escapeshellarg($remotePass),
-            escapeshellarg($remoteDb), escapeshellarg($dumpFile)
-        ));
+            escapeshellarg($remoteDb)
+        );
 
-        if (!file_exists($dumpFile) || filesize($dumpFile) < 50) {
-            Flash::set('error', 'mysqldump fallo. Verifica credenciales.');
+        if ($useSSH) {
+            // Execute mysqldump remotely via SSH — stderr goes to remote temp file
+            $remoteErrFile = '/tmp/mdp_dump_err_' . bin2hex(random_bytes(4));
+            $fullRemoteCmd = $remoteMysqldumpCmd . ' 2>' . escapeshellarg($remoteErrFile);
+
+            shell_exec(sprintf(
+                'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=30 -p %d %s@%s %s > %s 2>%s',
+                escapeshellarg($sshPass), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                escapeshellarg($fullRemoteCmd),
+                escapeshellarg($dumpFile), escapeshellarg($dumpErrFile)
+            ));
+
+            // Fetch remote error log if dump failed
+            if (!file_exists($dumpFile) || filesize($dumpFile) < 50) {
+                $remoteErr = shell_exec(sprintf(
+                    'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d %s@%s %s 2>/dev/null',
+                    escapeshellarg($sshPass), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                    escapeshellarg('cat ' . escapeshellarg($remoteErrFile) . ' 2>/dev/null; rm -f ' . escapeshellarg($remoteErrFile))
+                ));
+                if ($remoteErr) {
+                    file_put_contents($dumpErrFile, trim($remoteErr));
+                }
+            } else {
+                // Cleanup remote error file in background
+                shell_exec(sprintf(
+                    'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p %d %s@%s %s 2>/dev/null &',
+                    escapeshellarg($sshPass), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                    escapeshellarg('rm -f ' . escapeshellarg($remoteErrFile))
+                ));
+            }
+        } else {
+            // Direct mysqldump connection (only works if remote MySQL allows external connections)
+            shell_exec(sprintf('%s > %s 2>%s', $remoteMysqldumpCmd, escapeshellarg($dumpFile), escapeshellarg($dumpErrFile)));
+        }
+
+        // Validate dump
+        $dumpOk = file_exists($dumpFile) && filesize($dumpFile) >= 50;
+        if ($dumpOk) {
+            $head = file_get_contents($dumpFile, false, null, 0, 200);
+            if (preg_match('/^(mysqldump:|error:|Access denied)/i', trim($head))) {
+                $dumpOk = false;
+            }
+        }
+
+        $errMsg = '';
+        if (file_exists($dumpErrFile) && filesize($dumpErrFile) > 0) {
+            $errMsg = trim(file_get_contents($dumpErrFile, false, null, 0, 500));
+        }
+        @unlink($dumpErrFile);
+
+        if (!$dumpOk) {
+            $detail = $errMsg ?: (isset($head) ? trim($head) : 'sin detalles');
+            Flash::set('error', "mysqldump fallo: {$detail}");
             @unlink($dumpFile);
             Router::redirect('/accounts/' . $params['id'] . '/migrate');
             return;
@@ -1005,8 +1464,10 @@ class MigrationController
         $localDbPass = bin2hex(random_bytes(12));
 
         $sqlSetup = sprintf(
-            "CREATE DATABASE IF NOT EXISTS `%s`;\nCREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\nGRANT ALL ON `%s`.* TO '%s'@'localhost';\nFLUSH PRIVILEGES;\n",
+            "CREATE DATABASE IF NOT EXISTS `%s`;\nCREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\nALTER USER '%s'@'localhost' IDENTIFIED BY '%s';\nGRANT ALL ON `%s`.* TO '%s'@'localhost';\nFLUSH PRIVILEGES;\n",
             str_replace('`', '``', $localDbName),
+            str_replace("'", "''", $localDbUser),
+            str_replace("'", "''", $localDbPass),
             str_replace("'", "''", $localDbUser),
             str_replace("'", "''", $localDbPass),
             str_replace('`', '``', $localDbName),
@@ -1020,10 +1481,17 @@ class MigrationController
 
         $dumpSize = round(filesize($dumpFile) / 1048576, 1);
 
-        Database::insert('hosting_databases', [
-            'account_id' => (int)$params['id'],
-            'db_name' => $localDbName, 'db_user' => $localDbUser, 'db_type' => 'mysql',
-        ]);
+        // Only insert DB record if not already created by a previous migration attempt
+        $existingDb = Database::fetchOne(
+            "SELECT id FROM hosting_databases WHERE account_id = :aid AND db_name = :db",
+            ['aid' => (int)$params['id'], 'db' => $localDbName]
+        );
+        if (!$existingDb) {
+            Database::insert('hosting_databases', [
+                'account_id' => (int)$params['id'],
+                'db_name' => $localDbName, 'db_user' => $localDbUser, 'db_type' => 'mysql',
+            ]);
+        }
 
         if ($dbSource === 'laravel' && file_exists($targetDir . '/.env')) {
             $envContent = file_get_contents($targetDir . '/.env');
