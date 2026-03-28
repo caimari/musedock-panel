@@ -26,13 +26,15 @@ class MonitorController
         $disks = MonitorService::getDiskUsage();
 
         $alertSettings = [
-            'enabled'      => Settings::get('monitor_enabled', '1'),
-            'cpu'          => Settings::get('monitor_alert_cpu', '90'),
-            'ram'          => Settings::get('monitor_alert_ram', '90'),
-            'net_mbps'     => Settings::get('monitor_alert_net_mbps', '800'),
-            'disk'         => Settings::get('monitor_alert_disk', '90'),
-            'gpu_temp'     => Settings::get('monitor_alert_gpu_temp', '85'),
-            'gpu_util'     => Settings::get('monitor_alert_gpu_util', '95'),
+            'enabled'          => Settings::get('monitor_enabled', '1'),
+            'cpu'              => Settings::get('monitor_alert_cpu', '90'),
+            'ram'              => Settings::get('monitor_alert_ram', '90'),
+            'net_mbps'         => Settings::get('monitor_alert_net_mbps', '800'),
+            'disk'             => Settings::get('monitor_alert_disk', '90'),
+            'gpu_temp'         => Settings::get('monitor_alert_gpu_temp', '85'),
+            'gpu_util'         => Settings::get('monitor_alert_gpu_util', '95'),
+            'notify_email'     => Settings::get('monitor_notify_email', '1'),
+            'notify_telegram'  => Settings::get('monitor_notify_telegram', '1'),
         ];
 
         View::render('monitor/index', [
@@ -154,13 +156,15 @@ class MonitorController
         View::verifyCsrf();
 
         $fields = [
-            'monitor_enabled'        => $_POST['monitor_enabled'] ?? '1',
-            'monitor_alert_cpu'      => $_POST['alert_cpu'] ?? '90',
-            'monitor_alert_ram'      => $_POST['alert_ram'] ?? '90',
-            'monitor_alert_net_mbps' => $_POST['alert_net_mbps'] ?? '800',
-            'monitor_alert_disk'     => $_POST['alert_disk'] ?? '90',
-            'monitor_alert_gpu_temp' => $_POST['alert_gpu_temp'] ?? '85',
-            'monitor_alert_gpu_util' => $_POST['alert_gpu_util'] ?? '95',
+            'monitor_enabled'          => isset($_POST['monitor_enabled']) ? '1' : '0',
+            'monitor_alert_cpu'        => $_POST['alert_cpu'] ?? '90',
+            'monitor_alert_ram'        => $_POST['alert_ram'] ?? '90',
+            'monitor_alert_net_mbps'   => $_POST['alert_net_mbps'] ?? '800',
+            'monitor_alert_disk'       => $_POST['alert_disk'] ?? '90',
+            'monitor_alert_gpu_temp'   => $_POST['alert_gpu_temp'] ?? '85',
+            'monitor_alert_gpu_util'   => $_POST['alert_gpu_util'] ?? '95',
+            'monitor_notify_email'     => isset($_POST['notify_email']) ? '1' : '0',
+            'monitor_notify_telegram'  => isset($_POST['notify_telegram']) ? '1' : '0',
         ];
 
         foreach ($fields as $key => $value) {

@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.24');
+define('PANEL_VERSION', '1.0.25');
 
 
 
@@ -140,6 +140,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/add', 'AccountController@addSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/adopt', 'AccountController@adoptSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/delete', 'AccountController@removeSubdomain');
+\MuseDockPanel\Router::post('/accounts/{id}/toggle-wp-cron', 'AccountController@toggleWpCron');
+\MuseDockPanel\Router::post('/accounts/bulk-disable-wp-cron', 'AccountController@bulkDisableWpCron');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/promote', 'AccountController@promoteSubdomain');
 
 // Migration

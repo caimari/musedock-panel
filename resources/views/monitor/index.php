@@ -308,11 +308,23 @@
         <div class="card-body">
             <form method="POST" action="/monitor/settings">
                 <?= View::csrf() ?>
-                <div class="row g-3">
+                <div class="row g-3 mb-3">
                     <div class="col-md-4">
-                        <div class="form-check form-switch mb-3">
+                        <div class="form-check form-switch mb-2">
                             <input class="form-check-input" type="checkbox" id="monitorEnabled" name="monitor_enabled" value="1" <?= ($alertSettings['enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
                             <label class="form-check-label" for="monitorEnabled">Alerts enabled</label>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="notifyEmail" name="notify_email" value="1" <?= ($alertSettings['notify_email'] ?? '1') === '1' ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="notifyEmail"><i class="bi bi-envelope me-1"></i>Notificar por Email</label>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" id="notifyTelegram" name="notify_telegram" value="1" <?= ($alertSettings['notify_telegram'] ?? '1') === '1' ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="notifyTelegram"><i class="bi bi-telegram me-1"></i>Notificar por Telegram</label>
                         </div>
                     </div>
                 </div>

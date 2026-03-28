@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.25',
+                'date' => '2026-03-28',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Toggles Email/Telegram en alertas — En Monitor > Alert Settings se puede activar o desactivar independientemente el envio de alertas por email y por Telegram',
+                            'Gestion de WP-Cron — Deteccion automatica de WordPress en cada cuenta. Card con estado de WP-Cron (activo/desactivado) y boton para activar/desactivar',
+                            'Desactivar WP-Cron masivo — Boton en el listado de hostings para desactivar WP-Cron en todos los WordPress activos de una vez',
+                        ],
+                        'en' => [
+                            'Email/Telegram toggles for alerts — In Monitor > Alert Settings you can independently enable or disable alert notifications via email and Telegram',
+                            'WP-Cron management — Automatic WordPress detection per account. Card showing WP-Cron status (active/disabled) with toggle button',
+                            'Bulk disable WP-Cron — Button in hosting list to disable WP-Cron in all active WordPress accounts at once',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [],
+                        'en' => [],
+                    ],
+                    'fixed' => [
+                        'es' => [],
+                        'en' => [],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.24',
                 'date' => '2026-03-28',
                 'badge' => 'primary',

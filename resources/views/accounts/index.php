@@ -31,6 +31,10 @@ $totalSuspended = $totalAccounts - $totalActive;
         </div>
         <?php endif; ?>
         <?php if ($clusterRole !== 'slave'): ?>
+        <form method="POST" action="/accounts/bulk-disable-wp-cron" class="d-inline" id="bulkWpCronForm">
+            <?= View::csrf() ?>
+            <button type="button" class="btn btn-outline-warning btn-sm" onclick="confirmBulkWpCron()" title="Desactivar WP-Cron en todos los WordPress"><i class="bi bi-wordpress me-1"></i>Desactivar WP-Cron</button>
+        </form>
         <a href="/accounts/import" class="btn btn-outline-light btn-sm"><i class="bi bi-box-arrow-in-down me-1"></i>Importar Existente</a>
         <a href="/accounts/create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i> New Account</a>
         <?php endif; ?>
@@ -230,4 +234,28 @@ $totalSuspended = $totalAccounts - $totalActive;
         });
     });
 })();
+
+function confirmBulkWpCron() {
+    if (typeof SwalDark === 'undefined') {
+        if (confirm('Desactivar WP-Cron en todos los WordPress?')) {
+            document.getElementById('bulkWpCronForm').submit();
+        }
+        return;
+    }
+    SwalDark.fire({
+        title: 'Desactivar WP-Cron',
+        html: '<p>Se anadira <code>DISABLE_WP_CRON</code> en el <code>wp-config.php</code> de <strong>todos los WordPress</strong> activos.</p>' +
+              '<p style="color:#94a3b8;">WordPress dejara de ejecutar tareas programadas en cada visita, reduciendo el consumo de CPU.</p>' +
+              '<p style="color:#fbbf24;font-size:0.85rem;"><i class="bi bi-info-circle me-1"></i>Las cuentas que ya lo tengan desactivado no se modificaran.</p>',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: 'Desactivar todos',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#f59e0b'
+    }).then(function(result) {
+        if (result.isConfirmed) {
+            document.getElementById('bulkWpCronForm').submit();
+        }
+    });
+}
 </script>

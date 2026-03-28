@@ -541,6 +541,45 @@ use MuseDockPanel\Services\CloudflareService;
             </div>
         </div>
 
+        <!-- WordPress Info -->
+        <?php if (!empty($wpInfo) && $wpInfo['is_wordpress']): ?>
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-wordpress me-2"></i>WordPress</span>
+                <?php if ($wpInfo['wp_cron_disabled']): ?>
+                    <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>WP-Cron desactivado</span>
+                <?php else: ?>
+                    <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>WP-Cron activo</span>
+                <?php endif; ?>
+            </div>
+            <div class="card-body py-2">
+                <?php if (!$wpInfo['wp_cron_disabled']): ?>
+                <div class="mb-2 py-2 px-3 rounded" style="background:rgba(251,191,36,0.1);color:#fbbf24;font-size:0.85rem;">
+                    <i class="bi bi-info-circle me-1"></i>
+                    <strong>WP-Cron activo:</strong> WordPress ejecuta tareas programadas (actualizaciones, emails, limpieza) en cada visita web.
+                    Esto consume CPU innecesariamente. Recomendado: desactivar WP-Cron y usar un cron del sistema.
+                </div>
+                <?php else: ?>
+                <div class="mb-2 py-2 px-3 rounded" style="background:rgba(34,197,94,0.1);color:#22c55e;font-size:0.85rem;">
+                    <i class="bi bi-check-circle me-1"></i>
+                    WP-Cron desactivado. WordPress no ejecuta tareas en cada visita. Si necesitas tareas programadas, configura un cron del sistema:
+                    <code style="color:#38bdf8;">*/15 * * * * php <?= View::e($wpInfo['wp_config_path'] ? dirname($wpInfo['wp_config_path']) : '') ?>/wp-cron.php</code>
+                </div>
+                <?php endif; ?>
+                <?php if (!($isSlave ?? false)): ?>
+                <form method="POST" action="/accounts/<?= $account['id'] ?>/toggle-wp-cron" class="d-inline">
+                    <?= View::csrf() ?>
+                    <?php if ($wpInfo['wp_cron_disabled']): ?>
+                        <button type="submit" class="btn btn-outline-warning btn-sm"><i class="bi bi-play-circle me-1"></i>Reactivar WP-Cron</button>
+                    <?php else: ?>
+                        <button type="submit" class="btn btn-outline-success btn-sm"><i class="bi bi-pause-circle me-1"></i>Desactivar WP-Cron</button>
+                    <?php endif; ?>
+                </form>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <!-- Databases -->
         <div class="card">
             <div class="card-header"><i class="bi bi-database me-2"></i>Databases</div>

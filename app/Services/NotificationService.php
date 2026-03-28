@@ -17,8 +17,12 @@ class NotificationService
      */
     public static function send(string $subject, string $message): void
     {
-        self::sendEmail($subject, $message);
-        self::sendTelegram("{$subject}\n\n{$message}");
+        if (Settings::get('monitor_notify_email', '1') === '1') {
+            self::sendEmail($subject, $message);
+        }
+        if (Settings::get('monitor_notify_telegram', '1') === '1') {
+            self::sendTelegram("{$subject}\n\n{$message}");
+        }
     }
 
     // ─── Email ──────────────────────────────────────────────

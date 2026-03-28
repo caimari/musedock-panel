@@ -266,6 +266,20 @@ class AccountController
 
         $isSlave = Settings::get('cluster_role', 'standalone') === 'slave';
 
+        // WordPress detection + WP-Cron status
+        $wpInfo = null;
+        $docRoot = rtrim($account['home_dir'], '/') . '/' . ltrim($account['document_root'] ?? 'httpdocs', '/');
+        $wpConfigPath = $docRoot . '/wp-config.php';
+        if (file_exists($wpConfigPath)) {
+            $wpContent = file_get_contents($wpConfigPath);
+            $wpCronDisabled = preg_match("/define\s*\(\s*['\"]DISABLE_WP_CRON['\"]\s*,\s*true\s*\)/i", $wpContent);
+            $wpInfo = [
+                'is_wordpress' => true,
+                'wp_cron_disabled' => (bool)$wpCronDisabled,
+                'wp_config_path' => $wpConfigPath,
+            ];
+        }
+
         View::render('accounts/show', [
             'layout' => 'main',
             'pageTitle' => $account['domain'],
@@ -281,6 +295,7 @@ class AccountController
             'subdomains' => $subdomains,
             'adoptableAccounts' => $adoptableAccounts,
             'isSlave' => $isSlave,
+            'wpInfo' => $wpInfo,
         ]);
     }
 
@@ -826,6 +841,102 @@ class AccountController
             Flash::set('success', $msg);
         }
         Router::redirect('/accounts/' . $params['id']);
+    }
+
+    /**
+     * POST /accounts/{id}/toggle-wp-cron — Enable/disable WP-Cron for a WordPress account
+     */
+    public function toggleWpCron(array $params): void
+    {
+        if ($this->slaveGuard('Modificar WP-Cron')) return;
+        View::verifyCsrf();
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) {
+            Flash::set('error', 'Cuenta no encontrada.');
+            Router::redirect('/accounts');
+            return;
+        }
+
+        $docRoot = rtrim($account['home_dir'], '/') . '/' . ltrim($account['document_root'] ?? 'httpdocs', '/');
+        $wpConfigPath = $docRoot . '/wp-config.php';
+
+        if (!file_exists($wpConfigPath)) {
+            Flash::set('error', 'No se encontro wp-config.php en esta cuenta.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
+        $content = file_get_contents($wpConfigPath);
+        $isDisabled = preg_match("/define\s*\(\s*['\"]DISABLE_WP_CRON['\"]\s*,\s*true\s*\)/i", $content);
+
+        if ($isDisabled) {
+            // Re-enable: remove the DISABLE_WP_CRON line
+            $content = preg_replace("/\n?define\s*\(\s*['\"]DISABLE_WP_CRON['\"]\s*,\s*true\s*\);\s*\n?/i", "\n", $content);
+            file_put_contents($wpConfigPath, $content);
+            Flash::set('success', "WP-Cron reactivado para {$account['domain']}.");
+        } else {
+            // Disable: add DISABLE_WP_CRON before the first require/include or "That's all"
+            $line = "\ndefine('DISABLE_WP_CRON', true);\n";
+            if (preg_match("/^(<\?php)/m", $content, $m, PREG_OFFSET_MATCH)) {
+                $pos = $m[0][1] + strlen($m[0][0]);
+                $content = substr($content, 0, $pos) . $line . substr($content, $pos);
+            } else {
+                $content = "<?php\n" . $line . "?>\n" . $content;
+            }
+            file_put_contents($wpConfigPath, $content);
+            Flash::set('success', "WP-Cron desactivado para {$account['domain']}. WordPress ya no ejecutara tareas programadas en cada visita.");
+        }
+
+        LogService::log('account.wp_cron', $account['domain'], ($isDisabled ? 'Enabled' : 'Disabled') . " WP-Cron for {$account['domain']}");
+        Router::redirect('/accounts/' . $params['id']);
+    }
+
+    /**
+     * POST /accounts/bulk-disable-wp-cron — Disable WP-Cron in all WordPress accounts
+     */
+    public function bulkDisableWpCron(): void
+    {
+        if ($this->slaveGuard('Modificar WP-Cron')) return;
+        View::verifyCsrf();
+
+        $accounts = Database::fetchAll("SELECT id, domain, home_dir, document_root FROM hosting_accounts WHERE status = 'active'");
+        $disabled = 0;
+        $alreadyDisabled = 0;
+        $notWp = 0;
+
+        foreach ($accounts as $acc) {
+            $docRoot = rtrim($acc['home_dir'], '/') . '/' . ltrim($acc['document_root'] ?? 'httpdocs', '/');
+            $wpConfigPath = $docRoot . '/wp-config.php';
+
+            if (!file_exists($wpConfigPath)) {
+                $notWp++;
+                continue;
+            }
+
+            $content = file_get_contents($wpConfigPath);
+            if (preg_match("/define\s*\(\s*['\"]DISABLE_WP_CRON['\"]\s*,\s*true\s*\)/i", $content)) {
+                $alreadyDisabled++;
+                continue;
+            }
+
+            $line = "\ndefine('DISABLE_WP_CRON', true);\n";
+            if (preg_match("/^(<\?php)/m", $content, $m, PREG_OFFSET_MATCH)) {
+                $pos = $m[0][1] + strlen($m[0][0]);
+                $content = substr($content, 0, $pos) . $line . substr($content, $pos);
+            } else {
+                $content = "<?php\n" . $line . "?>\n" . $content;
+            }
+            file_put_contents($wpConfigPath, $content);
+            $disabled++;
+            LogService::log('account.wp_cron', $acc['domain'], "Disabled WP-Cron for {$acc['domain']} (bulk action)");
+        }
+
+        $msg = "WP-Cron desactivado en {$disabled} WordPress.";
+        if ($alreadyDisabled > 0) $msg .= " {$alreadyDisabled} ya estaban desactivados.";
+        if ($notWp > 0) $msg .= " {$notWp} cuentas no son WordPress.";
+        Flash::set('success', $msg);
+        Router::redirect('/accounts');
     }
 
     public function promoteSubdomain(array $params): void
