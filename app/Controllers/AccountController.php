@@ -791,6 +791,61 @@ class AccountController
         Router::redirect('/accounts/' . $params['id']);
     }
 
+    public function promoteSubdomain(array $params): void
+    {
+        if ($this->slaveGuard('Promover subdominios')) return;
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
+
+        // Verify admin password
+        $password = $_POST['admin_password'] ?? '';
+        $adminId = $_SESSION['admin_id'] ?? $_SESSION['panel_user']['id'] ?? 0;
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        if (!$admin || !password_verify($password, $admin['password_hash'])) {
+            Flash::set('error', 'Contraseña incorrecta.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
+        $sub = SubdomainService::getById((int)$params['sub_id']);
+        if (!$sub) {
+            Flash::set('error', 'Subdominio no encontrado.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
+        $result = SubdomainService::promote((int)$params['sub_id']);
+
+        if (!$result['ok']) {
+            Flash::set('error', $result['error']);
+        } else {
+            // Sync to cluster: remove subdomain + create new account
+            if (Settings::get('cluster_role', 'standalone') === 'master') {
+                // Remove subdomain on slaves
+                $this->syncSubdomainToCluster($account, $sub['subdomain'], 'remove');
+
+                // Create new account on slaves
+                foreach (ClusterService::getWebNodes() as $node) {
+                    ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                        'hosting_action' => 'create_hosting',
+                        'hosting_data' => [
+                            'domain'        => $sub['subdomain'],
+                            'username'      => $result['username'],
+                            'home_dir'      => $result['home_dir'],
+                            'document_root' => $result['doc_root'],
+                            'php_version'   => $account['php_version'] ?? '8.3',
+                            'status'        => 'active',
+                            'customer_id'   => $account['customer_id'] ?? null,
+                        ],
+                    ]);
+                }
+            }
+            Flash::set('success', "Subdominio '{$sub['subdomain']}' promovido a cuenta independiente. Nuevo usuario: {$result['username']}");
+        }
+        Router::redirect('/accounts/' . $params['id']);
+    }
+
     public function suspend(array $params): void
     {
         if ($this->slaveGuard('Suspender hostings')) return;
@@ -1346,16 +1401,64 @@ class AccountController
             return;
         }
 
+        // Verify admin password
+        $password = $_POST['admin_password'] ?? '';
+        $adminId = $_SESSION['admin_id'] ?? $_SESSION['panel_user']['id'] ?? 0;
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        if (!$admin || !password_verify($password, $admin['password_hash'])) {
+            Flash::set('error', 'Contraseña incorrecta.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
+        $deleteFiles = ($_POST['delete_files'] ?? '0') === '1';
+        $deleteDatabases = ($_POST['delete_databases'] ?? '0') === '1';
+        $deleteMail = ($_POST['delete_mail'] ?? '0') === '1';
+
         // Clean up Caddy redirect routes before account deletion (aliases cascade in DB)
         $redirects = \MuseDockPanel\Services\DomainAliasService::getRedirects((int)$account['id']);
         foreach ($redirects as $r) {
             SystemService::removeCaddyRedirectRoute($r['domain']);
         }
 
+        // Delete subdomains (Caddy routes, optionally files)
+        $subdomains = SubdomainService::getAll((int)$account['id']);
+        foreach ($subdomains as $sub) {
+            SubdomainService::delete((int)$sub['id'], $deleteFiles);
+        }
+
+        // Delete databases if requested
+        $databases = Database::fetchAll("SELECT * FROM hosting_databases WHERE account_id = :id", ['id' => $account['id']]);
+        if ($deleteDatabases) {
+            foreach ($databases as $db) {
+                $dbType = $db['db_type'] ?? 'mysql';
+                if ($dbType === 'pgsql') {
+                    shell_exec(sprintf('sudo -u postgres psql -c %s 2>&1', escapeshellarg("DROP DATABASE IF EXISTS \"{$db['db_name']}\" WITH (FORCE);")));
+                    shell_exec(sprintf('sudo -u postgres psql -c %s 2>&1', escapeshellarg("DROP USER IF EXISTS \"{$db['db_user']}\";")));
+                } else {
+                    $mysqlCmd = 'mysql';
+                    if (file_exists('/etc/mysql/debian.cnf')) {
+                        $mysqlCmd = 'mysql --defaults-file=/etc/mysql/debian.cnf';
+                    }
+                    $sql = "DROP DATABASE IF EXISTS `{$db['db_name']}`; DROP USER IF EXISTS '{$db['db_user']}'@'localhost'; FLUSH PRIVILEGES;";
+                    shell_exec(sprintf('%s -e %s 2>&1', $mysqlCmd, escapeshellarg($sql)));
+                }
+            }
+            LogService::log('database.delete', $account['domain'], "Deleted " . count($databases) . " database(s) with hosting account");
+        }
+
         SystemService::deleteAccount($account['username'], $account['domain'], $account['home_dir']);
 
-        // Delete associated mail domain if requested or always (with logging)
-        $deleteMail = ($_POST['delete_mail'] ?? '0') === '1';
+        // Delete files if requested
+        if ($deleteFiles) {
+            $homeDir = rtrim($account['home_dir'], '/');
+            if (str_contains($homeDir, '/var/www/vhosts/') && substr_count($homeDir, '/') >= 4) {
+                shell_exec(sprintf('rm -rf %s 2>&1', escapeshellarg($homeDir)));
+                LogService::log('account.delete', $account['domain'], "Home directory deleted: {$homeDir}");
+            }
+        }
+
+        // Delete associated mail domain if requested
         $mailDomain = Database::fetchOne(
             "SELECT id, domain FROM mail_domains WHERE domain = :d",
             ['d' => $account['domain']]
@@ -1369,7 +1472,11 @@ class AccountController
 
         Database::delete('hosting_accounts', 'id = :id', ['id' => $params['id']]);
 
-        LogService::log('account.delete', $account['domain'], "Deleted account and system user: {$account['username']}");
+        $logParts = ["Deleted account and system user: {$account['username']}"];
+        if ($deleteFiles) $logParts[] = 'files removed';
+        if ($deleteDatabases) $logParts[] = count($databases) . ' DB(s) dropped';
+        if ($deleteMail && $mailDomain) $logParts[] = 'mail domain removed';
+        LogService::log('account.delete', $account['domain'], implode(', ', $logParts));
 
         // Sync deletion to cluster nodes (only web nodes)
         if (Settings::get('cluster_role', 'standalone') === 'master') {
@@ -1377,15 +1484,18 @@ class AccountController
                 ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
                     'hosting_action' => 'delete_hosting',
                     'hosting_data' => [
-                        'username' => $account['username'],
-                        'domain' => $account['domain'],
-                        'home_dir' => $account['home_dir'],
+                        'username'         => $account['username'],
+                        'domain'           => $account['domain'],
+                        'home_dir'         => $account['home_dir'],
+                        'delete_files'     => $deleteFiles,
+                        'delete_databases' => $deleteDatabases,
+                        'delete_mail'      => $deleteMail,
                     ],
                 ]);
             }
         }
 
-        Flash::set('success', "Cuenta {$account['domain']} eliminada.");
+        Flash::set('success', "Cuenta {$account['domain']} eliminada correctamente.");
         Router::redirect('/accounts');
     }
 }

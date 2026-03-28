@@ -20,6 +20,43 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.20',
+                'date' => '2026-03-28',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Eliminacion completa de cuentas — Modal de confirmacion con contrasena admin, opciones para eliminar archivos, bases de datos y correo. Aviso de propagacion al cluster',
+                            'Promover subdominio a cuenta independiente — Convierte un subdominio en cuenta de hosting con su propio usuario Linux, FPM pool, vhost y ruta Caddy',
+                        ],
+                        'en' => [
+                            'Full account deletion — Confirmation modal with admin password, options to delete files, databases and mail. Cluster propagation warning',
+                            'Promote subdomain to independent account — Converts a subdomain into a hosting account with its own Linux user, FPM pool, vhost and Caddy route',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Eliminacion de cuenta sincronizada al cluster — Los nodos slave ahora reciben y ejecutan la eliminacion completa: archivos, BDs, correo, subdominios y rutas Caddy',
+                            'Modal de eliminacion con opciones detalladas — Muestra contador de BDs, subdominios, cuentas de correo afectadas e indicador de propagacion al cluster',
+                        ],
+                        'en' => [
+                            'Account deletion synced to cluster — Slave nodes now receive and execute full deletion: files, DBs, mail, subdomains and Caddy routes',
+                            'Delete modal with detailed options — Shows DB count, subdomains, mail accounts affected and cluster propagation indicator',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Sincronizacion de eliminacion de hosting al slave — SystemService::deleteAccount() se llamaba con 1 parametro en vez de 3, causando error en el slave. Ahora se pasan username, domain y home_dir correctamente',
+                            'Tabla hosting_subdomains no creada — La migracion se registro como ejecutada pero la tabla no existia. Corregido',
+                        ],
+                        'en' => [
+                            'Hosting deletion sync to slave — SystemService::deleteAccount() was called with 1 parameter instead of 3, causing slave error. Now passes username, domain and home_dir correctly',
+                            'hosting_subdomains table not created — Migration was recorded as executed but table did not exist. Fixed',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.19',
                 'date' => '2026-03-27',
                 'badge' => 'primary',

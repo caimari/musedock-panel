@@ -327,6 +327,99 @@ class SubdomainService
     }
 
     /**
+     * Promote a subdomain to an independent hosting account.
+     *
+     * This:
+     * 1. Creates a new Linux user, FPM pool, and Caddy route
+     * 2. Moves files from parent_home/subdomain/ to /var/www/vhosts/subdomain/httpdocs/
+     * 3. Creates a hosting_accounts record
+     * 4. Removes the subdomain record and its Caddy route
+     *
+     * @return array ['ok' => bool, 'error' => string, 'account_id' => int]
+     */
+    public static function promote(int $subdomainId): array
+    {
+        $sub = self::getById($subdomainId);
+        if (!$sub) {
+            return ['ok' => false, 'error' => 'Subdominio no encontrado.'];
+        }
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $sub['account_id']]);
+        if (!$account) {
+            return ['ok' => false, 'error' => 'Cuenta padre no encontrada.'];
+        }
+
+        $subDomain = $sub['subdomain'];
+        $subDocRoot = $sub['document_root'];
+
+        // Check domain doesn't already exist as hosting account
+        $exists = Database::fetchOne("SELECT id FROM hosting_accounts WHERE domain = :d", ['d' => $subDomain]);
+        if ($exists) {
+            return ['ok' => false, 'error' => "'{$subDomain}' ya existe como cuenta de hosting."];
+        }
+
+        // Generate username from domain (same logic as account creation)
+        $username = preg_replace('/[^a-z0-9]/', '', str_replace('.', '', $subDomain));
+        $username = substr($username, 0, 28);
+        // Check if user exists
+        $existingUser = shell_exec(sprintf('id %s 2>&1', escapeshellarg($username)));
+        if (strpos($existingUser, 'no such user') === false) {
+            $username .= rand(10, 99);
+        }
+
+        $newHomeDir = "/var/www/vhosts/{$subDomain}";
+        $newDocRoot = "{$newHomeDir}/httpdocs";
+        $phpVersion = $account['php_version'] ?? '8.3';
+
+        // 1. Create the new hosting account at system level
+        $sysResult = SystemService::createAccount($username, $subDomain, $newHomeDir, $newDocRoot, $phpVersion);
+        if (!$sysResult['success']) {
+            return ['ok' => false, 'error' => 'Error creando cuenta: ' . ($sysResult['error'] ?? 'unknown')];
+        }
+
+        // 2. Move files from subdomain folder to new document root
+        if (is_dir($subDocRoot) && $subDocRoot !== $newDocRoot) {
+            shell_exec(sprintf('rsync -a %s/ %s/ 2>&1', escapeshellarg($subDocRoot), escapeshellarg($newDocRoot)));
+            shell_exec(sprintf('chown -R %s:www-data %s 2>&1', escapeshellarg($username), escapeshellarg($newHomeDir)));
+        }
+
+        // 3. Remove old subdomain Caddy route
+        if (!empty($sub['caddy_route_id'])) {
+            $config = require PANEL_ROOT . '/config/panel.php';
+            $caddyApi = $config['caddy']['api_url'];
+            $ch = curl_init("{$caddyApi}/id/{$sub['caddy_route_id']}");
+            curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
+            curl_exec($ch);
+            curl_close($ch);
+        }
+
+        // 4. Insert into hosting_accounts
+        $newAccountId = Database::insert('hosting_accounts', [
+            'domain'        => $subDomain,
+            'username'      => $username,
+            'home_dir'      => $newHomeDir,
+            'document_root' => $newDocRoot,
+            'php_version'   => $phpVersion,
+            'status'        => 'active',
+            'caddy_route_id' => $sysResult['caddy_route_id'] ?? null,
+            'customer_id'   => $account['customer_id'] ?? null,
+        ]);
+
+        // 5. Remove subdomain record
+        Database::delete('hosting_subdomains', 'id = :id', ['id' => $subdomainId]);
+
+        LogService::log('subdomain.promote', $subDomain, "Subdomain promoted to independent account from {$account['domain']}. New user: {$username}");
+
+        return [
+            'ok'         => true,
+            'account_id' => $newAccountId,
+            'username'   => $username,
+            'home_dir'   => $newHomeDir,
+            'doc_root'   => $newDocRoot,
+        ];
+    }
+
+    /**
      * Export subdomains for cluster sync.
      */
     public static function exportForSync(int $accountId): array

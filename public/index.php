@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.19');
+define('PANEL_VERSION', '1.0.20');
 
 
 
@@ -140,6 +140,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/add', 'AccountController@addSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/adopt', 'AccountController@adoptSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/delete', 'AccountController@removeSubdomain');
+\MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/promote', 'AccountController@promoteSubdomain');
 
 // Migration
 \MuseDockPanel\Router::get('/accounts/{id}/migrate', 'MigrationController@index');

@@ -835,21 +835,80 @@ class ClusterService
                 case 'delete_hosting':
                     $username = $hostingData['username'] ?? '';
                     $domain = $hostingData['domain'] ?? '';
-                    if ($username) {
-                        // Clean up redirect routes before deleting
-                        if ($domain) {
-                            $acc = Database::fetchOne("SELECT id FROM hosting_accounts WHERE domain = :d", ['d' => $domain]);
-                            if ($acc) {
-                                $redirects = DomainAliasService::getRedirects((int)$acc['id']);
-                                foreach ($redirects as $r) {
-                                    SystemService::removeCaddyRedirectRoute($r['domain']);
+                    $homeDir = $hostingData['home_dir'] ?? '';
+                    $deleteFiles = !empty($hostingData['delete_files']);
+                    $deleteDatabases = !empty($hostingData['delete_databases']);
+                    $deleteMail = !empty($hostingData['delete_mail']);
+
+                    if (!$username) {
+                        return ['ok' => false, 'message' => 'Username required'];
+                    }
+
+                    // Get account info from local DB
+                    $acc = null;
+                    if ($domain) {
+                        $acc = Database::fetchOne("SELECT * FROM hosting_accounts WHERE domain = :d", ['d' => $domain]);
+                    }
+
+                    // Clean up redirect routes
+                    if ($acc) {
+                        $redirects = DomainAliasService::getRedirects((int)$acc['id']);
+                        foreach ($redirects as $r) {
+                            SystemService::removeCaddyRedirectRoute($r['domain']);
+                        }
+
+                        // Delete subdomains (Caddy routes)
+                        $subdomains = SubdomainService::getAll((int)$acc['id']);
+                        foreach ($subdomains as $sub) {
+                            SubdomainService::delete((int)$sub['id'], $deleteFiles);
+                        }
+                    }
+
+                    // Delete databases on slave
+                    if ($deleteDatabases && $acc) {
+                        $dbs = Database::fetchAll("SELECT * FROM hosting_databases WHERE account_id = :id", ['id' => $acc['id']]);
+                        foreach ($dbs as $db) {
+                            $dbType = $db['db_type'] ?? 'mysql';
+                            if ($dbType === 'pgsql') {
+                                shell_exec(sprintf('sudo -u postgres psql -c %s 2>&1', escapeshellarg("DROP DATABASE IF EXISTS \"{$db['db_name']}\" WITH (FORCE);")));
+                                shell_exec(sprintf('sudo -u postgres psql -c %s 2>&1', escapeshellarg("DROP USER IF EXISTS \"{$db['db_user']}\";")));
+                            } else {
+                                $mysqlCmd = 'mysql';
+                                if (file_exists('/etc/mysql/debian.cnf')) {
+                                    $mysqlCmd = 'mysql --defaults-file=/etc/mysql/debian.cnf';
                                 }
+                                $sql = "DROP DATABASE IF EXISTS `{$db['db_name']}`; DROP USER IF EXISTS '{$db['db_user']}'@'localhost'; FLUSH PRIVILEGES;";
+                                shell_exec(sprintf('%s -e %s 2>&1', $mysqlCmd, escapeshellarg($sql)));
                             }
                         }
-                        $result = SystemService::deleteAccount($username);
-                        return ['ok' => $result['success'] ?? false, 'message' => $result['error'] ?? 'Account deleted'];
                     }
-                    return ['ok' => false, 'message' => 'Username required'];
+
+                    // Delete mail domain on slave
+                    if ($deleteMail && $domain) {
+                        $mailDomain = Database::fetchOne("SELECT id FROM mail_domains WHERE domain = :d", ['d' => $domain]);
+                        if ($mailDomain) {
+                            MailService::deleteDomain((int)$mailDomain['id']);
+                        }
+                    }
+
+                    // Delete system account (user, FPM, Caddy route)
+                    SystemService::deleteAccount($username, $domain, $homeDir ?: "/var/www/vhosts/{$domain}");
+
+                    // Delete files on slave
+                    if ($deleteFiles && $homeDir) {
+                        $safeHome = rtrim($homeDir, '/');
+                        if (str_contains($safeHome, '/var/www/vhosts/') && substr_count($safeHome, '/') >= 4) {
+                            shell_exec(sprintf('rm -rf %s 2>&1', escapeshellarg($safeHome)));
+                        }
+                    }
+
+                    // Remove from local DB
+                    if ($acc) {
+                        Database::delete('hosting_accounts', 'id = :id', ['id' => $acc['id']]);
+                    }
+
+                    LogService::log('cluster.sync', $domain, "Account deleted from master sync" . ($deleteFiles ? ' (files removed)' : '') . ($deleteDatabases ? ' (DBs removed)' : ''));
+                    return ['ok' => true, 'message' => 'Account deleted'];
 
                 case 'rename_user':
                     $oldUsername = $hostingData['old_username'] ?? '';

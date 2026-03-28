@@ -419,7 +419,11 @@ use MuseDockPanel\Services\CloudflareService;
                             <td><code class="small"><?= View::e($sub['document_root']) ?></code></td>
                             <td><span class="badge badge-<?= $sub['status'] === 'active' ? 'active' : 'suspended' ?>"><?= View::e($sub['status']) ?></span></td>
                             <?php if (!($isSlave ?? false)): ?>
-                            <td class="text-end">
+                            <td class="text-end text-nowrap">
+                                <button type="button" class="btn btn-outline-warning btn-sm py-0 px-2 me-1" title="Promover a cuenta independiente"
+                                    onclick="confirmPromoteSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, '<?= View::e($sub['subdomain']) ?>')">
+                                    <i class="bi bi-box-arrow-up"></i>
+                                </button>
                                 <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2"
                                     onclick="confirmDeleteSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, '<?= View::e($sub['subdomain']) ?>')">
                                     <i class="bi bi-trash"></i>
@@ -578,20 +582,23 @@ use MuseDockPanel\Services\CloudflareService;
 
         <!-- Danger Zone -->
         <?php if ($account['status'] === 'suspended' && !($isSlave ?? false)): ?>
+        <?php
+            $hasMailForDelete = !empty($mailDomain);
+            $dbCount = count($databases ?? []);
+            $subCount = count($subdomains ?? []);
+            $isMaster = \MuseDockPanel\Settings::get('cluster_role', 'standalone') === 'master';
+        ?>
         <div class="card border-danger">
-            <div class="card-header text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Danger Zone</div>
+            <div class="card-header text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Zona de peligro</div>
             <div class="card-body">
-                <p class="small text-muted">Delete this account permanently. This removes the system user, FPM pool, and Caddy route. The home directory is kept for manual backup.</p>
-                <?php $hasMailForDelete = !empty($mailDomain); ?>
+                <p class="small text-muted">Eliminar esta cuenta permanentemente. Se eliminara el usuario del sistema, FPM pool y ruta Caddy.</p>
                 <form id="deleteForm" method="POST" action="/accounts/<?= $account['id'] ?>/delete">
                     <?= \MuseDockPanel\View::csrf() ?>
+                    <input type="hidden" name="admin_password" id="delete-admin-pw" value="">
+                    <input type="hidden" name="delete_files" id="delete-files-input" value="0">
+                    <input type="hidden" name="delete_databases" id="delete-dbs-input" value="0">
                     <input type="hidden" name="delete_mail" id="delete-mail-input" value="0">
-                    <button type="button" class="btn btn-danger btn-sm w-100" onclick="confirmAction(document.getElementById('deleteForm'), {
-                        title: 'Delete <?= View::e($account['domain']) ?>?',
-                        html: '<p style=\'color:#ef4444;font-weight:600;\'>This action is PERMANENT and cannot be undone!</p><p style=\'color:#94a3b8;font-size:0.9rem;\'>This will remove:<br>&bull; System user<br>&bull; PHP-FPM pool<br>&bull; Caddy route<br><br>The home directory is kept for manual backup.</p><?= $hasMailForDelete ? "<div style=\"margin-top:12px;padding:10px;background:rgba(239,68,68,0.1);border-radius:6px;text-align:left;\"><label style=\"color:#ef4444;font-size:0.85rem;cursor:pointer;\"><input type=\"checkbox\" id=\"swal-delete-mail\" style=\"margin-right:6px;\">Eliminar tambien el correo (" . count($mailAccounts) . " cuenta/s, buzones, DKIM)</label></div>" : "" ?>',
-                        icon: 'error',
-                        confirmText: 'Yes, DELETE permanently'
-                    }, function() { <?= $hasMailForDelete ? "document.getElementById('delete-mail-input').value = document.getElementById('swal-delete-mail')?.checked ? '1' : '0';" : "" ?> })"><i class="bi bi-trash me-1"></i> Delete Account</button>
+                    <button type="button" class="btn btn-danger btn-sm w-100" onclick="confirmDeleteAccount()"><i class="bi bi-trash me-1"></i> Eliminar cuenta</button>
                 </form>
             </div>
         </div>
@@ -737,6 +744,136 @@ function confirmDeleteSubdomain(accountId, subId, subdomain) {
 
         document.body.appendChild(form);
         form.submit();
+    });
+}
+
+function confirmPromoteSubdomain(accountId, subId, subdomain) {
+    var S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+
+    S.fire({
+        title: 'Promover a cuenta independiente',
+        html: '<p>Convertir <strong>' + subdomain + '</strong> en una cuenta de hosting independiente?</p>' +
+              '<div class="text-start small" style="color:#94a3b8;">' +
+              '<p class="mb-1"><strong>Esto hara:</strong></p>' +
+              '<ul style="padding-left:1.2rem;">' +
+              '<li>Crear un nuevo usuario Linux para el subdominio</li>' +
+              '<li>Crear un nuevo PHP-FPM pool independiente</li>' +
+              '<li>Mover archivos a su propia carpeta vhost</li>' +
+              '<li>Crear nueva ruta Caddy independiente</li>' +
+              '<li>Eliminar el registro de subdominio</li>' +
+              '</ul>' +
+              '</div>' +
+              '<div class="mb-2"><label class="form-label small">Contrasena de administrador</label>' +
+              '<input type="password" id="promote-pw" class="form-control" placeholder="Confirmar con tu contrasena" style="background:#2a2a3e;color:#fff;border-color:#444;"></div>',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-box-arrow-up me-1"></i>Promover',
+        confirmButtonColor: '#eab308',
+        cancelButtonText: 'Cancelar',
+        preConfirm: function() {
+            var pw = document.getElementById('promote-pw').value;
+            if (!pw) { Swal.showValidationMessage('La contrasena es obligatoria'); return false; }
+            return pw;
+        }
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/accounts/' + accountId + '/subdomains/' + subId + '/promote';
+
+        var csrf = document.querySelector('input[name=_csrf_token]').value;
+        var fields = {
+            '_csrf_token': csrf,
+            'admin_password': result.value
+        };
+        for (var key in fields) {
+            var input = document.createElement('input');
+            input.type = 'hidden'; input.name = key; input.value = fields[key];
+            form.appendChild(input);
+        }
+
+        document.body.appendChild(form);
+        form.submit();
+    });
+}
+
+function confirmDeleteAccount() {
+    var S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+    var domain = <?= json_encode($account['domain']) ?>;
+    var dbCount = <?= $dbCount ?? 0 ?>;
+    var subCount = <?= $subCount ?? 0 ?>;
+    var hasMail = <?= $hasMailForDelete ? 'true' : 'false' ?>;
+    var mailCount = <?= count($mailAccounts ?? []) ?>;
+    var isMaster = <?= ($isMaster ?? false) ? 'true' : 'false' ?>;
+
+    var optionsHtml = '<div style="text-align:left;margin-top:10px;">';
+
+    // Files option
+    optionsHtml += '<div style="padding:8px 10px;background:rgba(239,68,68,0.08);border-radius:6px;margin-bottom:8px;">' +
+        '<label style="color:#f87171;font-size:0.85rem;cursor:pointer;display:flex;align-items:center;">' +
+        '<input type="checkbox" id="swal-delete-files" style="margin-right:8px;"> Eliminar archivos (home directory completo)</label></div>';
+
+    // Databases option
+    if (dbCount > 0) {
+        optionsHtml += '<div style="padding:8px 10px;background:rgba(239,68,68,0.08);border-radius:6px;margin-bottom:8px;">' +
+            '<label style="color:#f87171;font-size:0.85rem;cursor:pointer;display:flex;align-items:center;">' +
+            '<input type="checkbox" id="swal-delete-dbs" style="margin-right:8px;"> Eliminar ' + dbCount + ' base(s) de datos y usuarios DB</label></div>';
+    }
+
+    // Subdomains info
+    if (subCount > 0) {
+        optionsHtml += '<div style="padding:8px 10px;background:rgba(251,191,36,0.1);border-radius:6px;margin-bottom:8px;">' +
+            '<span style="color:#fbbf24;font-size:0.85rem;"><i class="bi bi-info-circle me-1"></i>' + subCount + ' subdominio(s) seran eliminados automaticamente</span></div>';
+    }
+
+    // Mail option
+    if (hasMail) {
+        optionsHtml += '<div style="padding:8px 10px;background:rgba(239,68,68,0.08);border-radius:6px;margin-bottom:8px;">' +
+            '<label style="color:#f87171;font-size:0.85rem;cursor:pointer;display:flex;align-items:center;">' +
+            '<input type="checkbox" id="swal-delete-mail" style="margin-right:8px;"> Eliminar correo (' + mailCount + ' cuenta/s, buzones, DKIM)</label></div>';
+    }
+
+    // Cluster warning
+    if (isMaster) {
+        optionsHtml += '<div style="padding:8px 10px;background:rgba(14,165,233,0.1);border-radius:6px;margin-bottom:8px;">' +
+            '<span style="color:#38bdf8;font-size:0.85rem;"><i class="bi bi-hdd-network me-1"></i>La eliminacion se propagara a todos los nodos slave del cluster</span></div>';
+    }
+
+    optionsHtml += '</div>';
+
+    // Password field
+    optionsHtml += '<div class="mb-2 mt-3"><label class="form-label small">Contrasena de administrador</label>' +
+        '<input type="password" id="swal-delete-pw" class="form-control" placeholder="Confirmar con tu contrasena" style="background:#2a2a3e;color:#fff;border-color:#444;"></div>';
+
+    S.fire({
+        title: 'Eliminar ' + domain + '?',
+        html: '<p style="color:#ef4444;font-weight:600;">Esta accion es PERMANENTE y no se puede deshacer.</p>' +
+              '<p style="color:#94a3b8;font-size:0.9rem;">Se eliminara: usuario del sistema, PHP-FPM pool, ruta Caddy, aliases y redirecciones.</p>' +
+              optionsHtml,
+        icon: 'error',
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-trash me-1"></i>Eliminar permanentemente',
+        confirmButtonColor: '#dc2626',
+        cancelButtonText: 'Cancelar',
+        preConfirm: function() {
+            var pw = document.getElementById('swal-delete-pw').value;
+            if (!pw) { Swal.showValidationMessage('La contrasena es obligatoria'); return false; }
+            return pw;
+        }
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+
+        document.getElementById('delete-admin-pw').value = result.value;
+        document.getElementById('delete-files-input').value = document.getElementById('swal-delete-files')?.checked ? '1' : '0';
+        if (document.getElementById('swal-delete-dbs')) {
+            document.getElementById('delete-dbs-input').value = document.getElementById('swal-delete-dbs').checked ? '1' : '0';
+        }
+        if (document.getElementById('swal-delete-mail')) {
+            document.getElementById('delete-mail-input').value = document.getElementById('swal-delete-mail').checked ? '1' : '0';
+        }
+
+        document.getElementById('deleteForm').submit();
     });
 }
 </script>
