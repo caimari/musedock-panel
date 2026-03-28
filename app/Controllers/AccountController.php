@@ -46,9 +46,46 @@ class AccountController
                 }
             }
         }
+
+        // Fetch alias/redirect details per account
+        $aliasCounts = [];
+        $redirectCounts = [];
+        $aliasDetails = []; // grouped by account_id
+        try {
+            $aliasRows = Database::fetchAll(
+                "SELECT hosting_account_id, domain, type, redirect_code, preserve_path
+                 FROM hosting_domain_aliases
+                 ORDER BY hosting_account_id, type, domain"
+            );
+            foreach ($aliasRows as $row) {
+                $aid = (int)$row['hosting_account_id'];
+                $aliasDetails[$aid][] = $row;
+                if ($row['type'] === 'alias') {
+                    $aliasCounts[$aid] = ($aliasCounts[$aid] ?? 0) + 1;
+                } else {
+                    $redirectCounts[$aid] = ($redirectCounts[$aid] ?? 0) + 1;
+                }
+            }
+        } catch (\Throwable $e) {}
+
+        // Fetch subdomain counts per account
+        $subCounts = [];
+        try {
+            $subRows = Database::fetchAll(
+                "SELECT account_id, COUNT(*) as cnt FROM hosting_subdomains GROUP BY account_id"
+            );
+            foreach ($subRows as $row) {
+                $subCounts[(int)$row['account_id']] = (int)$row['cnt'];
+            }
+        } catch (\Throwable $e) {}
+
         foreach ($accounts as &$acc) {
             $key = rtrim($acc['home_dir'], '/');
             $acc['disk_used_mb'] = $diskMap[$key] ?? 0;
+            $acc['alias_count'] = $aliasCounts[(int)$acc['id']] ?? 0;
+            $acc['redirect_count'] = $redirectCounts[(int)$acc['id']] ?? 0;
+            $acc['alias_details'] = $aliasDetails[(int)$acc['id']] ?? [];
+            $acc['subdomain_count'] = $subCounts[(int)$acc['id']] ?? 0;
         }
 
         View::render('accounts/index', [

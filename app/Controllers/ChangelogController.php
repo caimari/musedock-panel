@@ -20,6 +20,39 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.23',
+                'date' => '2026-03-28',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Listado de hostings: contador total con badges de activos/suspendidos, buscador en tiempo real (Ctrl+K) y columna de alias/redirecciones/subdominios',
+                            'Modal de alias y redirecciones — Al pulsar los badges se muestra un modal con el detalle de cada alias (dominio clicable) y redireccion (codigo 301/302, preservar ruta)',
+                        ],
+                        'en' => [
+                            'Hosting list: total counter with active/suspended badges, real-time search (Ctrl+K) and alias/redirect/subdomain column',
+                            'Alias and redirect modal — Clicking badges shows a modal with alias details (clickable domain) and redirects (301/302 code, preserve path)',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Botones de accion en listado de hostings — Rueda de configuracion + ojo para visitar el sitio en nueva pestana',
+                        ],
+                        'en' => [
+                            'Hosting list action buttons — Settings gear + eye to visit site in new tab',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Dashboard: nota de MuseDock CMS sobre token Cloudflare con fondo blanco ilegible en tema oscuro — Cambiado a fondo oscuro semitransparente',
+                        ],
+                        'en' => [
+                            'Dashboard: MuseDock CMS Cloudflare token note had white background unreadable in dark theme — Changed to semi-transparent dark background',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.22',
                 'date' => '2026-03-28',
                 'badge' => 'primary',

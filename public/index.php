@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.22');
+define('PANEL_VERSION', '1.0.23');
 
 
 

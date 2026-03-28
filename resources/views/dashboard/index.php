@@ -146,7 +146,7 @@
                     para completar el desafio DNS-01 de Let's Encrypt. Sin el, los dominios de hosting mostraran errores de certificado (ERR_SSL, 526, etc.).
                 </p>
                 <?php if ($caddyTokenStatus['cms_manages']): ?>
-                <div class="alert alert-light border mb-2 py-2">
+                <div class="mb-2 py-2 px-3 rounded" style="background:rgba(100,116,139,0.15);color:#94a3b8;">
                     <i class="bi bi-info-circle me-1"></i>
                     Parece que MuseDock CMS esta instalado en este servidor. Normalmente el CMS gestiona este token.
                     Comprueba la configuracion de Cloudflare en el CMS (<em>Superadmin &rarr; Domain Manager &rarr; Guia Cloudflare</em>).
