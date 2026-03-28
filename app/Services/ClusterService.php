@@ -857,10 +857,14 @@ class ClusterService
                             SystemService::removeCaddyRedirectRoute($r['domain']);
                         }
 
-                        // Delete subdomains (Caddy routes)
-                        $subdomains = SubdomainService::getAll((int)$acc['id']);
-                        foreach ($subdomains as $sub) {
-                            SubdomainService::delete((int)$sub['id'], $deleteFiles);
+                        // Delete subdomains (Caddy routes) — graceful if table doesn't exist yet
+                        try {
+                            $subdomains = SubdomainService::getAll((int)$acc['id']);
+                            foreach ($subdomains as $sub) {
+                                SubdomainService::delete((int)$sub['id'], $deleteFiles);
+                            }
+                        } catch (\Exception $e) {
+                            // hosting_subdomains table may not exist on this node yet
                         }
                     }
 

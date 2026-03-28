@@ -602,6 +602,12 @@ use MuseDockPanel\Services\CloudflareService;
                 </form>
             </div>
         </div>
+        <?php else: ?>
+        <?php if (!($isSlave ?? false)): ?>
+        <div class="small mb-0 py-2 px-3 rounded" style="background:rgba(100,116,139,0.15);color:#94a3b8;">
+            <i class="bi bi-info-circle me-1"></i>El boton de eliminar solo aparece cuando la cuenta esta suspendida — es una medida de seguridad para evitar borrar cuentas activas por accidente.
+        </div>
+        <?php endif; ?>
         <?php endif; ?>
     </div>
 </div>

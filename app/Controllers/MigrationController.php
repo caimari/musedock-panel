@@ -89,11 +89,11 @@ class MigrationController
     // SSH Helpers
     // ================================================================
 
-    private function sshExec(string $password, string $user, string $host, int $port, string $remoteCmd): string
+    private function sshExec(string $password, string $user, string $host, int $port, string $remoteCmd, int $timeout = 30): string
     {
         $cmd = sprintf(
-            'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -p %d %s@%s %s 2>&1',
-            escapeshellarg($password), $port, escapeshellarg($user), escapeshellarg($host), escapeshellarg($remoteCmd)
+            'timeout %d sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=5 -p %d %s@%s %s 2>&1',
+            $timeout, escapeshellarg($password), $port, escapeshellarg($user), escapeshellarg($host), escapeshellarg($remoteCmd)
         );
         return shell_exec($cmd) ?? '';
     }
@@ -183,13 +183,56 @@ class MigrationController
             "test -d " . escapeshellarg($fullRemotePath) . " && echo 'PATH_OK' || echo 'PATH_FAIL'"
         );
 
-        if (strpos($pathCheck, 'PATH_OK') === false) {
-            echo json_encode(['ok' => false, 'message' => "Ruta remota no existe: {$fullRemotePath}"]);
+        $pathResolved = false;
+        $triedPaths = [$fullRemotePath];
+
+        if (strpos($pathCheck, 'PATH_OK') !== false) {
+            $pathResolved = true;
+        } else {
+            // Auto-detect: if domain is a subdomain (e.g. develop.laraflex.org),
+            // try Plesk structure: /var/www/vhosts/laraflex.org/develop.laraflex.org/
+            $domain = basename($remotePath);
+            $parts = explode('.', $domain);
+            if (count($parts) > 2) {
+                // Try parent domain path with subdomain as subfolder
+                $parentDomain = implode('.', array_slice($parts, 1));
+                $altPaths = [];
+
+                // Plesk style: /vhosts/parent.com/sub.parent.com/ (no httpdocs for subdomains)
+                $altPaths[] = "/var/www/vhosts/{$parentDomain}/{$domain}";
+                // Plesk style with httpdocs: /vhosts/parent.com/sub.parent.com/httpdocs/
+                $altPaths[] = "/var/www/vhosts/{$parentDomain}/{$domain}/httpdocs";
+                // Direct vhost without docroot subfolder
+                if ($remoteDocRoot !== '') {
+                    $altPaths[] = $remotePath;
+                }
+
+                foreach ($altPaths as $altPath) {
+                    if (in_array($altPath, $triedPaths)) continue;
+                    $triedPaths[] = $altPath;
+                    $altCheck = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                        "test -d " . escapeshellarg($altPath) . " && echo 'PATH_OK' || echo 'PATH_FAIL'"
+                    );
+                    if (strpos($altCheck, 'PATH_OK') !== false) {
+                        $fullRemotePath = $altPath;
+                        // Update remotePath for vhost folder scanning
+                        // If we found it inside parent, the vhost root is the parent
+                        $remotePath = "/var/www/vhosts/{$parentDomain}";
+                        $pathResolved = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!$pathResolved) {
+            $triedList = implode(', ', $triedPaths);
+            echo json_encode(['ok' => false, 'message' => "Ruta remota no encontrada. Rutas probadas: {$triedList}. Ajusta la ruta manualmente en 'Ajustar'."]);
             return;
         }
 
         $statsOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
-            "cd " . escapeshellarg($fullRemotePath) . " && echo FILES:\$(find . -type f | wc -l) && echo SIZE:\$(du -sh . 2>/dev/null | cut -f1)"
+            "cd " . escapeshellarg($fullRemotePath) . " && echo FILES:\$(ls -1qA 2>/dev/null | wc -l) && echo SIZE:\$(du -sh . 2>/dev/null | cut -f1)"
         );
 
         $fileCount = 0;
@@ -197,56 +240,49 @@ class MigrationController
         if (preg_match('/FILES:(\d+)/', $statsOutput, $m)) $fileCount = (int) $m[1];
         if (preg_match('/SIZE:(\S+)/', $statsOutput, $m)) $dirSize = $m[1];
 
+        // Detect project type + list vhost folders in ONE SSH call
+        // This avoids N+1 SSH connections per subfolder
+        $scanScript = 'P=' . escapeshellarg($fullRemotePath) . '; '
+            . 'test -f "$P/.env" && echo "MAIN_PROJECT:Laravel" || (test -f "$P/wp-config.php" && echo "MAIN_PROJECT:WordPress" || echo "MAIN_PROJECT:Unknown"); '
+            . 'R=' . escapeshellarg($remotePath) . '; '
+            . 'for d in "$R"/*/; do '
+            . '  [ -d "$d" ] || continue; '
+            . '  name=$(basename "$d"); '
+            . '  sz=$(du -sh "$d" 2>/dev/null | cut -f1); '
+            . '  ht="no"; [ -d "$d/httpdocs" ] && ht="yes"; '
+            . '  proj="none"; '
+            . '  dp="$d"; [ "$ht" = "yes" ] && dp="$d/httpdocs"; '
+            . '  [ -f "$dp/.env" ] && proj="Laravel" || { [ -f "$dp/wp-config.php" ] && proj="WordPress"; }; '
+            . '  echo "VFOLDER:${name}|${sz}|${ht}|${proj}"; '
+            . 'done';
+        $scanOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, $scanScript, 60);
+
         $projectInfo = 'Desconocido';
-        $envCheck = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "test -f " . escapeshellarg($fullRemotePath . '/.env') . " && echo 'LARAVEL'");
-        $wpCheck = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "test -f " . escapeshellarg($fullRemotePath . '/wp-config.php') . " && echo 'WORDPRESS'");
+        if (preg_match('/MAIN_PROJECT:(\S+)/', $scanOutput, $mp)) {
+            $pType = $mp[1];
+            if ($pType === 'Laravel') $projectInfo = 'Laravel (detectado .env)';
+            elseif ($pType === 'WordPress') $projectInfo = 'WordPress (detectado wp-config.php)';
+        }
 
-        if (strpos($envCheck, 'LARAVEL') !== false) $projectInfo = 'Laravel (detectado .env)';
-        elseif (strpos($wpCheck, 'WORDPRESS') !== false) $projectInfo = 'WordPress (detectado wp-config.php)';
-
-        // List directories in vhost root to detect Plesk-style subdomains
-        // Plesk stores subdomains as folders like: sub.domain.com/ alongside httpdocs/
+        // Parse vhost folders from scan output
         $vhostFolders = [];
-        $lsOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
-            "ls -1d " . escapeshellarg($remotePath) . "/*/ 2>/dev/null | xargs -I{} basename {}"
-        );
-        if (!empty(trim($lsOutput))) {
-            $allFolders = array_filter(array_map('trim', explode("\n", trim($lsOutput))));
-            $systemFolders = ['httpdocs', 'httpsdocs', 'logs', 'tmp', 'sessions', 'error_docs', 'statistics', 'private', 'cgi-bin', 'anon_ftp', 'conf', 'pd', 'web_users'];
-            foreach ($allFolders as $folder) {
+        $systemFolders = ['httpdocs', 'httpsdocs', 'logs', 'tmp', 'sessions', 'error_docs', 'statistics', 'private', 'cgi-bin', 'anon_ftp', 'conf', 'pd', 'web_users'];
+        if (preg_match_all('/VFOLDER:(.+)/', $scanOutput, $matches)) {
+            foreach ($matches[1] as $line) {
+                $parts = explode('|', trim($line));
+                if (count($parts) < 4) continue;
+                [$folder, $folderSize, $hasHt, $subProject] = $parts;
+
                 $isSubdomain = str_contains($folder, '.') && preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i', $folder);
                 $isSystem = in_array($folder, $systemFolders, true);
+
                 if (!$isSystem || $isSubdomain) {
-                    // Get folder size and detect project type
-                    $folderPath = $remotePath . '/' . $folder;
-                    $folderInfo = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
-                        "du -sh " . escapeshellarg($folderPath) . " 2>/dev/null | cut -f1"
-                    );
-                    $folderSize = trim($folderInfo) ?: '?';
-
-                    // Check for httpdocs subfolder (Plesk subdomains usually have it)
-                    $hasHttpdocs = false;
-                    $subProject = null;
-                    $htCheck = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
-                        "test -d " . escapeshellarg($folderPath . '/httpdocs') . " && echo 'HAS_HTTPDOCS'"
-                    );
-                    // Detect project type: check httpdocs first, then root folder
-                    $docPath = str_contains($htCheck, 'HAS_HTTPDOCS') ? $folderPath . '/httpdocs' : $folderPath;
-                    if (str_contains($htCheck, 'HAS_HTTPDOCS')) {
-                        $hasHttpdocs = true;
-                    }
-                    $subEnv = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
-                        "test -f " . escapeshellarg($docPath . '/.env') . " && echo 'LARAVEL' || (test -f " . escapeshellarg($docPath . '/wp-config.php') . " && echo 'WORDPRESS')"
-                    );
-                    if (str_contains($subEnv, 'LARAVEL')) $subProject = 'Laravel';
-                    elseif (str_contains($subEnv, 'WORDPRESS')) $subProject = 'WordPress';
-
                     $vhostFolders[] = [
                         'name'         => $folder,
                         'is_subdomain' => $isSubdomain,
-                        'size'         => $folderSize,
-                        'has_httpdocs' => $hasHttpdocs,
-                        'project'      => $subProject,
+                        'size'         => $folderSize ?: '?',
+                        'has_httpdocs' => $hasHt === 'yes',
+                        'project'      => $subProject !== 'none' ? $subProject : null,
                     ];
                 }
             }
@@ -256,6 +292,7 @@ class MigrationController
             'ok' => true, 'message' => 'Conexion SSH OK',
             'files' => $fileCount, 'size' => $dirSize,
             'project' => $projectInfo, 'path' => $fullRemotePath,
+            'remote_path' => $remotePath,
             'vhost_folders' => $vhostFolders,
         ]);
     }

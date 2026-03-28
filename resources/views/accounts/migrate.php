@@ -87,6 +87,16 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
             </div>
             <div class="card-body">
                 <p class="text-muted small">Migracion completa en un click: archivos + BD + composer. Solo necesitas las credenciales SSH del servidor remoto.</p>
+                <?php
+                $domainParts = explode('.', $account['domain']);
+                $isSubdomain = count($domainParts) > 2;
+                $parentDomain = $isSubdomain ? implode('.', array_slice($domainParts, 1)) : null;
+                ?>
+                <?php if ($isSubdomain): ?>
+                <div class="p-2 mb-2 rounded" style="background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.2);">
+                    <small style="color:#38bdf8;"><i class="bi bi-info-circle me-1"></i><strong><?= View::e($account['domain']) ?></strong> es un subdominio. En Plesk estara dentro de <code>/var/www/vhosts/<?= View::e($parentDomain) ?>/<?= View::e($account['domain']) ?>/</code>. El sistema lo detectara automaticamente al probar la conexion SSH.</small>
+                </div>
+                <?php endif; ?>
                 <form method="POST" action="/accounts/<?= $account['id'] ?>/migrate/ssh" id="sshMigrateForm">
                     <?= \MuseDockPanel\View::csrf() ?>
                     <div class="mb-2">
@@ -134,13 +144,13 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                                 </div>
                                 <div class="col-6">
                                     <label class="form-label" style="font-size:0.8rem;">Ruta remota completa</label>
-                                    <input type="text" name="remote_path" id="sshRemotePath" class="form-control form-control-sm" value="/var/www/vhosts/<?= View::e($account['domain']) ?>">
+                                    <input type="text" name="remote_path" id="sshRemotePath" class="form-control form-control-sm" value="/var/www/vhosts/<?= View::e($isSubdomain ? $parentDomain : $account['domain']) ?>">
                                 </div>
                             </div>
                             <div class="mt-1">
                                 <label class="form-label" style="font-size:0.8rem;">Subcarpeta web (document root)</label>
-                                <input type="text" name="remote_docroot" id="sshDocRoot" class="form-control form-control-sm" value="/httpdocs">
-                                <small class="text-muted" style="font-size:0.75rem;">Carpeta dentro del vhost que contiene los archivos web. En Plesk siempre es /httpdocs</small>
+                                <input type="text" name="remote_docroot" id="sshDocRoot" class="form-control form-control-sm" value="<?= $isSubdomain ? '/' . View::e($account['domain']) : '/httpdocs' ?>">
+                                <small class="text-muted" style="font-size:0.75rem;">Carpeta dentro del vhost que contiene los archivos web. En Plesk: /httpdocs para dominios principales, /sub.dominio.com para subdominios</small>
                             </div>
                             <div class="mt-2">
                                 <label class="form-label" style="font-size:0.8rem;">Destino local</label>
@@ -150,8 +160,8 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                         </div>
                         <div id="sshAutoInfo">
                             <small class="text-muted" style="font-size:0.8rem;">
-                                Dominio: <code><?= View::e($account['domain']) ?></code> &bull;
-                                Ruta: <code>/var/www/vhosts/<?= View::e($account['domain']) ?>/httpdocs</code>
+                                Remoto: <code>/var/www/vhosts/<?= View::e($isSubdomain ? $parentDomain . '/' . $account['domain'] : $account['domain'] . '/httpdocs') ?></code> &rarr; Local:
+                                <code><?= View::e($account['document_root']) ?></code>
                             </small>
                         </div>
                     </div>
@@ -425,6 +435,21 @@ document.getElementById('sshTestBtn').addEventListener('click', function() {
                 '<tr><td style="color:#64748b;padding:1px 8px 1px 0;">Tamano:</td><td style="color:#e2e8f0;">' + data.size + '</td></tr>' +
                 '<tr><td style="color:#64748b;padding:1px 8px 1px 0;">Proyecto:</td><td style="color:#e2e8f0;">' + data.project + '</td></tr>' +
                 '</table></div>';
+
+            // Update paths if server resolved to a different location
+            if (data.remote_path) {
+                document.getElementById('sshRemotePath').value = data.remote_path;
+            }
+            if (data.path) {
+                // Extract docroot relative to remote_path
+                var rp = data.remote_path || '';
+                if (data.path.startsWith(rp + '/')) {
+                    document.getElementById('sshDocRoot').value = '/' + data.path.substring(rp.length + 1);
+                } else if (data.path === rp) {
+                    document.getElementById('sshDocRoot').value = '';
+                }
+            }
+            updateAutoInfo();
 
             // Populate subdomain/folder selectors
             populateVhostFolders(data.vhost_folders || []);

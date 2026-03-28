@@ -12,7 +12,7 @@
 <?php endif; ?>
 
 <div class="row g-3">
-    <div class="col-md-8">
+    <div class="col-12">
         <!-- Ajustes de cuenta -->
         <div class="card mb-3">
             <div class="card-header"><i class="bi bi-gear me-2"></i>Ajustes de la cuenta</div>
@@ -245,67 +245,72 @@
             </div>
             <?php endif; ?>
         </div>
-    </div>
-
-    <div class="col-md-4">
-        <!-- Info -->
-        <div class="card mb-3">
-            <div class="card-header"><i class="bi bi-info-circle me-2"></i>Información</div>
-            <div class="card-body">
-                <div class="mb-2">
-                    <small class="text-muted">Directorio raíz</small><br>
-                    <code><?= View::e($account['home_dir']) ?></code>
-                </div>
-                <div class="mb-2">
-                    <small class="text-muted">Document Root</small><br>
-                    <code><?= View::e($account['document_root']) ?></code>
-                </div>
-                <div class="mb-2">
-                    <small class="text-muted">Socket FPM</small><br>
-                    <code style="font-size: 0.75rem;"><?= View::e($account['fpm_socket'] ?? 'N/A') ?></code>
-                </div>
-                <div class="mb-2">
-                    <small class="text-muted">Estado</small><br>
-                    <span class="badge badge-<?= $account['status'] === 'active' ? 'active' : 'suspended' ?>"><?= $account['status'] ?></span>
-                </div>
-                <div>
-                    <small class="text-muted">Creado</small><br>
-                    <?= date('d/m/Y H:i', strtotime($account['created_at'])) ?>
+        <!-- Info + Datos de conexión -->
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header"><i class="bi bi-info-circle me-2"></i>Información</div>
+                    <div class="card-body">
+                        <div class="row g-2">
+                            <div class="col-sm-6 mb-1">
+                                <small class="text-muted">Directorio raíz</small><br>
+                                <code class="small"><?= View::e($account['home_dir']) ?></code>
+                            </div>
+                            <div class="col-sm-6 mb-1">
+                                <small class="text-muted">Document Root</small><br>
+                                <code class="small"><?= View::e($account['document_root']) ?></code>
+                            </div>
+                            <div class="col-sm-6 mb-1">
+                                <small class="text-muted">Socket FPM</small><br>
+                                <code class="small"><?= View::e($account['fpm_socket'] ?? 'N/A') ?></code>
+                            </div>
+                            <div class="col-sm-3 mb-1">
+                                <small class="text-muted">Estado</small><br>
+                                <span class="badge badge-<?= $account['status'] === 'active' ? 'active' : 'suspended' ?>"><?= $account['status'] ?></span>
+                            </div>
+                            <div class="col-sm-3 mb-1">
+                                <small class="text-muted">Creado</small><br>
+                                <span class="small"><?= date('d/m/Y H:i', strtotime($account['created_at'])) ?></span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
-        </div>
-
-        <!-- Datos de conexión -->
-        <div class="card">
-            <div class="card-header"><i class="bi bi-plug me-2"></i>Datos de conexión</div>
-            <div class="card-body">
-                <?php
-                $shellLabel = match($account['shell'] ?? '/usr/sbin/nologin') {
-                    '/bin/bash' => '<span class="badge bg-success">SSH + SFTP</span>',
-                    '/usr/sbin/nologin' => '<span class="badge bg-info">Solo SFTP</span>',
-                    '/bin/false' => '<span class="badge bg-danger">Sin acceso</span>',
-                    default => '<span class="badge bg-secondary">Desconocido</span>',
-                };
-                ?>
-                <div class="mb-2">
-                    <small class="text-muted">Acceso</small><br>
-                    <?= $shellLabel ?>
-                </div>
-                <div class="mb-2">
-                    <small class="text-muted">Servidor</small><br>
-                    <code><?= View::e($account['domain']) ?></code>
-                </div>
-                <div class="mb-2">
-                    <small class="text-muted">Puerto SSH/SFTP</small><br>
-                    <code>22</code>
-                </div>
-                <div class="mb-2">
-                    <small class="text-muted">Usuario</small><br>
-                    <code><?= View::e($account['username']) ?></code>
-                </div>
-                <div>
-                    <small class="text-muted">Directorio</small><br>
-                    <code><?= View::e($account['document_root']) ?></code>
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header"><i class="bi bi-plug me-2"></i>Datos de conexión</div>
+                    <div class="card-body">
+                        <?php
+                        $shellLabel = match($account['shell'] ?? '/usr/sbin/nologin') {
+                            '/bin/bash' => '<span class="badge bg-success">SSH + SFTP</span>',
+                            '/usr/sbin/nologin' => '<span class="badge bg-info">Solo SFTP</span>',
+                            '/bin/false' => '<span class="badge bg-danger">Sin acceso</span>',
+                            default => '<span class="badge bg-secondary">Desconocido</span>',
+                        };
+                        ?>
+                        <div class="row g-2">
+                            <div class="col-sm-4 mb-1">
+                                <small class="text-muted">Acceso</small><br>
+                                <?= $shellLabel ?>
+                            </div>
+                            <div class="col-sm-4 mb-1">
+                                <small class="text-muted">Servidor</small><br>
+                                <code><?= View::e($account['domain']) ?></code>
+                            </div>
+                            <div class="col-sm-4 mb-1">
+                                <small class="text-muted">Puerto SSH/SFTP</small><br>
+                                <code>22</code>
+                            </div>
+                            <div class="col-sm-6 mb-1">
+                                <small class="text-muted">Usuario</small><br>
+                                <code><?= View::e($account['username']) ?></code>
+                            </div>
+                            <div class="col-sm-6 mb-1">
+                                <small class="text-muted">Directorio</small><br>
+                                <code class="small"><?= View::e($account['document_root']) ?></code>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
