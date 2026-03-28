@@ -169,7 +169,7 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                     <div class="form-check mb-1 mt-2">
                         <input type="checkbox" name="include_db" id="includeDb" class="form-check-input" checked>
                         <label for="includeDb" class="form-check-label">Incluir migracion de base de datos</label>
-                        <small class="d-block text-muted">Auto-detecta credenciales de Laravel (.env) o WordPress (wp-config.php)</small>
+                        <small class="d-block text-muted">Auto-detecta credenciales de MuseDock (.env), Laravel (.env) o WordPress (wp-config.php)</small>
                     </div>
                     <div class="form-check mb-1">
                         <input type="checkbox" name="exclude_vendor" id="excludeVendor" class="form-check-input">
@@ -235,18 +235,24 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                     <div class="mb-3">
                         <label class="form-label">Fuente de credenciales</label>
                         <div class="btn-group w-100" role="group">
-                            <input type="radio" class="btn-check" name="db_source_toggle" id="srcManual" value="manual" checked>
+                            <input type="radio" class="btn-check" name="db_source_toggle" id="srcAuto" value="auto" checked>
+                            <label class="btn btn-outline-success" for="srcAuto"><i class="bi bi-magic me-1"></i>Auto</label>
+                            <input type="radio" class="btn-check" name="db_source_toggle" id="srcManual" value="manual">
                             <label class="btn btn-outline-light" for="srcManual"><i class="bi bi-keyboard me-1"></i>Manual</label>
+                            <input type="radio" class="btn-check" name="db_source_toggle" id="srcMusedock" value="musedock">
+                            <label class="btn btn-outline-light" for="srcMusedock"><i class="bi bi-box me-1"></i>MuseDock</label>
                             <input type="radio" class="btn-check" name="db_source_toggle" id="srcLaravel" value="laravel">
-                            <label class="btn btn-outline-light" for="srcLaravel"><i class="bi bi-file-code me-1"></i>Laravel .env</label>
+                            <label class="btn btn-outline-light" for="srcLaravel"><i class="bi bi-file-code me-1"></i>Laravel</label>
                             <input type="radio" class="btn-check" name="db_source_toggle" id="srcWordpress" value="wordpress">
                             <label class="btn btn-outline-light" for="srcWordpress"><i class="bi bi-wordpress me-1"></i>WordPress</label>
+                            <input type="radio" class="btn-check" name="db_source_toggle" id="srcZend" value="zend">
+                            <label class="btn btn-outline-light" for="srcZend"><i class="bi bi-filetype-php me-1"></i>Zend</label>
                         </div>
                     </div>
 
                     <form method="POST" action="/accounts/<?= $account['id'] ?>/migrate/db" onsubmit="this.querySelector('button[type=submit]').disabled=true; this.querySelector('button[type=submit]').innerHTML='<span class=\'spinner-border spinner-border-sm me-1\'></span>Migrando BD...';">
                     <?= \MuseDockPanel\View::csrf() ?>
-                        <input type="hidden" name="db_source" id="dbSourceInput" value="manual">
+                        <input type="hidden" name="db_source" id="dbSourceInput" value="auto">
 
                         <div id="manualFields">
                             <div class="row g-2 mb-2">
@@ -995,13 +1001,27 @@ document.querySelectorAll('input[name="db_source_toggle"]').forEach(function(rad
         if (val === 'manual') {
             document.getElementById('manualFields').style.display = '';
             document.getElementById('autoDetectInfo').style.display = 'none';
+        } else if (val === 'auto') {
+            document.getElementById('manualFields').style.display = 'none';
+            document.getElementById('autoDetectInfo').style.display = '';
+            document.getElementById('autoDetectFile').textContent = 'auto (detecta MuseDock, Laravel, WordPress, Zend)';
         } else {
             document.getElementById('manualFields').style.display = 'none';
             document.getElementById('autoDetectInfo').style.display = '';
-            document.getElementById('autoDetectFile').textContent = val === 'laravel' ? '.env' : 'wp-config.php';
+            var fileNames = {musedock: '.env', laravel: '.env', wordpress: 'wp-config.php', zend: 'application/settings/database.php'};
+            document.getElementById('autoDetectFile').textContent = fileNames[val] || val;
         }
     });
 });
+// Trigger initial state for auto
+(function() {
+    var autoRadio = document.getElementById('srcAuto');
+    if (autoRadio && autoRadio.checked) {
+        document.getElementById('manualFields').style.display = 'none';
+        document.getElementById('autoDetectInfo').style.display = '';
+        document.getElementById('autoDetectFile').textContent = 'auto (detecta MuseDock, Laravel, WordPress, Zend)';
+    }
+})();
 
 // ================================================================
 // Subdomain / Vhost folder selector
@@ -1022,7 +1042,8 @@ function populateVhostFolders(folders) {
         subdomains.forEach(function(f) {
             var projectBadge = '';
             if (f.project) {
-                var color = f.project === 'Laravel' ? '#ef4444' : '#3b82f6';
+                var colors = {Laravel: '#ef4444', MuseDock: '#a855f7', WordPress: '#3b82f6', Zend: '#22c55e'};
+                var color = colors[f.project] || '#6b7280';
                 projectBadge = ' <span class="badge" style="background:' + color + ';font-size:0.65rem;">' + f.project + '</span>';
             }
             var httpdocsBadge = f.has_httpdocs ? ' <span class="badge bg-secondary" style="font-size:0.65rem;">httpdocs</span>' : '';

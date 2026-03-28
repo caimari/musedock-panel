@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.25');
+define('PANEL_VERSION', '1.0.27');
 
 
 
@@ -117,6 +117,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/accounts', 'AccountController@index');
 \MuseDockPanel\Router::get('/accounts/create', 'AccountController@create');
 \MuseDockPanel\Router::post('/accounts/store', 'AccountController@store');
+\MuseDockPanel\Router::post('/accounts/bulk-disable-wp-cron', 'AccountController@bulkDisableWpCron');
 \MuseDockPanel\Router::get('/accounts/import', 'AccountController@importList');
 \MuseDockPanel\Router::post('/accounts/import', 'AccountController@importStore');
 \MuseDockPanel\Router::get('/accounts/{id}', 'AccountController@show');
@@ -141,7 +142,6 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/adopt', 'AccountController@adoptSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/delete', 'AccountController@removeSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/toggle-wp-cron', 'AccountController@toggleWpCron');
-\MuseDockPanel\Router::post('/accounts/bulk-disable-wp-cron', 'AccountController@bulkDisableWpCron');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/promote', 'AccountController@promoteSubdomain');
 
 // Migration

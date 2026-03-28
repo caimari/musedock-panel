@@ -119,6 +119,48 @@ class MigrationController
         ];
     }
 
+    private function parseMuseDockEnv(string $content): ?array
+    {
+        $values = [];
+        foreach (explode("\n", $content) as $line) {
+            $line = trim($line);
+            if (empty($line) || $line[0] === '#' || strpos($line, '=') === false) continue;
+            [$key, $val] = explode('=', $line, 2);
+            $values[trim($key)] = trim($val, " \t\n\r\0\x0B\"'");
+        }
+        $db = $values['DB_NAME'] ?? '';
+        $user = $values['DB_USER'] ?? '';
+        if (empty($db) || empty($user)) return null;
+        $driver = $values['DB_DRIVER'] ?? 'mysql';
+        return [
+            'host' => $values['DB_HOST'] ?? '127.0.0.1',
+            'port' => $values['DB_PORT'] ?? ($driver === 'pgsql' ? '5432' : '3306'),
+            'database' => $db,
+            'username' => $user,
+            'password' => $values['DB_PASS'] ?? '',
+            'driver' => $driver,
+        ];
+    }
+
+    private function parseZendDbConfig(string $content): ?array
+    {
+        $extract = function (string $key) use ($content): string {
+            if (preg_match("/'" . preg_quote($key) . "'\s*=>\s*'([^']*)'/", $content, $m)) return $m[1];
+            return '';
+        };
+        $db = $extract('dbname');
+        $user = $extract('username');
+        if (empty($db) || empty($user)) return null;
+        $port = $extract('port');
+        return [
+            'host' => $extract('host') ?: 'localhost',
+            'port' => $port ?: '3306',
+            'database' => $db,
+            'username' => $user,
+            'password' => $extract('password'),
+        ];
+    }
+
     private function parseWpConfig(string $content): ?array
     {
         $extract = function (string $name) use ($content): string {
@@ -242,8 +284,14 @@ class MigrationController
 
         // Detect project type + list vhost folders in ONE SSH call
         // This avoids N+1 SSH connections per subfolder
+        // Detection order: MuseDock > WordPress > Zend > Laravel (last because .env can be non-Laravel)
         $scanScript = 'P=' . escapeshellarg($fullRemotePath) . '; '
-            . 'test -f "$P/.env" && echo "MAIN_PROJECT:Laravel" || (test -f "$P/wp-config.php" && echo "MAIN_PROJECT:WordPress" || echo "MAIN_PROJECT:Unknown"); '
+            . 'if [ -f "$P/muse" ] && [ -f "$P/.env" ]; then echo "MAIN_PROJECT:MuseDock"; '
+            . 'elif [ -f "$P/wp-config.php" ]; then echo "MAIN_PROJECT:WordPress"; '
+            . 'elif [ -f "$P/application/settings/database.php" ]; then echo "MAIN_PROJECT:Zend"; '
+            . 'elif [ -f "$P/.env" ] && grep -q "DB_DATABASE" "$P/.env" 2>/dev/null; then echo "MAIN_PROJECT:Laravel"; '
+            . 'elif [ -f "$P/.env" ]; then echo "MAIN_PROJECT:EnvNoDb"; '
+            . 'else echo "MAIN_PROJECT:Unknown"; fi; '
             . 'R=' . escapeshellarg($remotePath) . '; '
             . 'for d in "$R"/*/; do '
             . '  [ -d "$d" ] || continue; '
@@ -252,7 +300,10 @@ class MigrationController
             . '  ht="no"; [ -d "$d/httpdocs" ] && ht="yes"; '
             . '  proj="none"; '
             . '  dp="$d"; [ "$ht" = "yes" ] && dp="$d/httpdocs"; '
-            . '  [ -f "$dp/.env" ] && proj="Laravel" || { [ -f "$dp/wp-config.php" ] && proj="WordPress"; }; '
+            . '  if [ -f "$dp/muse" ] && [ -f "$dp/.env" ]; then proj="MuseDock"; '
+            . '  elif [ -f "$dp/wp-config.php" ]; then proj="WordPress"; '
+            . '  elif [ -f "$dp/application/settings/database.php" ]; then proj="Zend"; '
+            . '  elif [ -f "$dp/.env" ] && grep -q "DB_DATABASE" "$dp/.env" 2>/dev/null; then proj="Laravel"; fi; '
             . '  echo "VFOLDER:${name}|${sz}|${ht}|${proj}"; '
             . 'done';
         $scanOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, $scanScript, 60);
@@ -260,13 +311,18 @@ class MigrationController
         $projectInfo = 'Desconocido';
         if (preg_match('/MAIN_PROJECT:(\S+)/', $scanOutput, $mp)) {
             $pType = $mp[1];
-            if ($pType === 'Laravel') $projectInfo = 'Laravel (detectado .env)';
+            if ($pType === 'MuseDock') $projectInfo = 'MuseDock CMS (detectado muse + .env)';
+            elseif ($pType === 'Laravel') $projectInfo = 'Laravel (detectado .env)';
             elseif ($pType === 'WordPress') $projectInfo = 'WordPress (detectado wp-config.php)';
+            elseif ($pType === 'Zend') $projectInfo = 'Zend/SocialEngine (detectado application/settings/database.php)';
+            elseif ($pType === 'EnvNoDb') $projectInfo = '.env sin credenciales BD (no es Laravel)';
         }
 
         // Parse vhost folders from scan output
         $vhostFolders = [];
         $systemFolders = ['httpdocs', 'httpsdocs', 'logs', 'tmp', 'sessions', 'error_docs', 'statistics', 'private', 'cgi-bin', 'anon_ftp', 'conf', 'pd', 'web_users'];
+        $accountRow = Database::fetchOne("SELECT domain FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        $accountDomain = $accountRow ? strtolower($accountRow['domain']) : '';
         if (preg_match_all('/VFOLDER:(.+)/', $scanOutput, $matches)) {
             foreach ($matches[1] as $line) {
                 $parts = explode('|', trim($line));
@@ -276,7 +332,10 @@ class MigrationController
                 $isSubdomain = str_contains($folder, '.') && preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i', $folder);
                 $isSystem = in_array($folder, $systemFolders, true);
 
-                if (!$isSystem || $isSubdomain) {
+                // Exclude the account's own domain from the subdomain list
+                $isDomainItself = $accountDomain && strtolower($folder) === $accountDomain;
+
+                if ((!$isSystem || $isSubdomain) && !$isDomainItself) {
                     $vhostFolders[] = [
                         'name'         => $folder,
                         'is_subdomain' => $isSubdomain,
@@ -515,38 +574,88 @@ class MigrationController
             $this->sendSSE('log', 'Detectando tipo de proyecto...', $st);
             $this->sendSSE('step', 'Detectando proyecto', $st);
 
-            $envCheck = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "test -f " . escapeshellarg($fullRemotePath . '/.env') . " && echo 'ENV_EXISTS'");
-            $wpCheck = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "test -f " . escapeshellarg($fullRemotePath . '/wp-config.php') . " && echo 'WP_EXISTS'");
+            // Detect project type — check all config files in one batch
+            $detectScript = 'P=' . escapeshellarg($fullRemotePath) . '; '
+                . 'test -f "$P/.env" && echo "ENV_EXISTS"; '
+                . 'test -f "$P/muse" && echo "MUSE_EXISTS"; '
+                . 'test -f "$P/wp-config.php" && echo "WP_EXISTS"; '
+                . 'test -f "$P/application/settings/database.php" && echo "ZEND_EXISTS"';
+            $detectOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, $detectScript);
 
-            if (strpos($envCheck, 'ENV_EXISTS') !== false) {
-                $projectType = 'laravel';
-                $this->sendSSE('log', 'Proyecto detectado: Laravel (.env)', $st);
+            $hasEnv = strpos($detectOutput, 'ENV_EXISTS') !== false;
+            $hasMuse = strpos($detectOutput, 'MUSE_EXISTS') !== false;
+            $hasWp = strpos($detectOutput, 'WP_EXISTS') !== false;
+            $hasZend = strpos($detectOutput, 'ZEND_EXISTS') !== false;
+
+            // Try each project type in priority order, with fallback if credentials fail
+            $envContent = null;
+            if ($hasEnv) {
                 $envContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "cat " . escapeshellarg($fullRemotePath . '/.env'));
+            }
+
+            if ($hasEnv && $hasMuse) {
+                $projectType = 'musedock';
+                $dbCredentials = $this->parseMuseDockEnv($envContent);
+                if ($dbCredentials) {
+                    $driver = $dbCredentials['driver'] ?? 'mysql';
+                    $this->sendSSE('log', "Proyecto detectado: MuseDock CMS. BD: Driver={$driver}, DB={$dbCredentials['database']}, User={$dbCredentials['username']}", $st);
+                } else {
+                    $this->sendSSE('log', 'MuseDock detectado pero sin credenciales BD validas en .env.', $st);
+                }
+            }
+
+            if (!$dbCredentials && $hasEnv) {
+                // Try Laravel .env (DB_DATABASE, DB_USERNAME, DB_PASSWORD)
                 $dbCredentials = $this->parseLaravelEnv($envContent);
                 if ($dbCredentials) {
-                    $this->sendSSE('log', 'Credenciales BD: DB=' . $dbCredentials['database'] . ', User=' . $dbCredentials['username'], $st);
-                } else {
-                    $this->sendSSE('log', 'No se pudieron extraer credenciales del .env.', $st);
-                    $includeDb = false;
+                    $projectType = 'laravel';
+                    $this->sendSSE('log', "Proyecto detectado: Laravel. BD: DB={$dbCredentials['database']}, User={$dbCredentials['username']}", $st);
                 }
-            } elseif (strpos($wpCheck, 'WP_EXISTS') !== false) {
-                $projectType = 'wordpress';
-                $this->sendSSE('log', 'Proyecto detectado: WordPress (wp-config.php)', $st);
+                // If .env exists but has no DB credentials, fall through to other types
+            }
+
+            if (!$dbCredentials && $hasWp) {
                 $wpContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "cat " . escapeshellarg($fullRemotePath . '/wp-config.php'));
                 $dbCredentials = $this->parseWpConfig($wpContent);
                 if ($dbCredentials) {
-                    $this->sendSSE('log', 'Credenciales BD: DB=' . $dbCredentials['database'] . ', User=' . $dbCredentials['username'], $st);
-                } else {
-                    $this->sendSSE('log', 'No se pudieron extraer credenciales del wp-config.php.', $st);
-                    $includeDb = false;
+                    $projectType = 'wordpress';
+                    $this->sendSSE('log', "Proyecto detectado: WordPress. BD: DB={$dbCredentials['database']}, User={$dbCredentials['username']}", $st);
                 }
-            } else {
-                $this->sendSSE('log', 'No se detecto Laravel ni WordPress. Solo archivos.', $st);
+            }
+
+            if (!$dbCredentials && $hasZend) {
+                $zendContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "cat " . escapeshellarg($fullRemotePath . '/application/settings/database.php'));
+                $dbCredentials = $this->parseZendDbConfig($zendContent);
+                if ($dbCredentials) {
+                    $projectType = 'zend';
+                    $this->sendSSE('log', "Proyecto detectado: Zend/SocialEngine. BD: DB={$dbCredentials['database']}, User={$dbCredentials['username']}", $st);
+                }
+            }
+
+            if (!$dbCredentials) {
+                if ($projectType === 'unknown') {
+                    $this->sendSSE('log', 'No se detecto proyecto conocido. Solo archivos.', $st);
+                } else {
+                    $this->sendSSE('log', 'Proyecto detectado pero sin credenciales BD validas. Solo archivos.', $st);
+                }
                 $includeDb = false;
             }
         } else {
-            $envCheck = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "test -f " . escapeshellarg($fullRemotePath . '/.env') . " && echo 'ENV_EXISTS'");
-            if (strpos($envCheck, 'ENV_EXISTS') !== false) $projectType = 'laravel';
+            $detectScript = 'P=' . escapeshellarg($fullRemotePath) . '; '
+                . 'test -f "$P/.env" && echo "ENV_EXISTS"; '
+                . 'test -f "$P/muse" && echo "MUSE_EXISTS"; '
+                . 'test -f "$P/wp-config.php" && echo "WP_EXISTS"; '
+                . 'test -f "$P/application/settings/database.php" && echo "ZEND_EXISTS"';
+            $detectOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, $detectScript);
+            if (strpos($detectOutput, 'MUSE_EXISTS') !== false && strpos($detectOutput, 'ENV_EXISTS') !== false) {
+                $projectType = 'musedock';
+            } elseif (strpos($detectOutput, 'WP_EXISTS') !== false) {
+                $projectType = 'wordpress';
+            } elseif (strpos($detectOutput, 'ZEND_EXISTS') !== false) {
+                $projectType = 'zend';
+            } elseif (strpos($detectOutput, 'ENV_EXISTS') !== false) {
+                $projectType = 'laravel';
+            }
         }
 
         if ($excludeVendor && !$hasComposer) {
@@ -724,12 +833,14 @@ class MigrationController
             $dumpToken = bin2hex(random_bytes(8));
             $dumpFile = "/tmp/mdpdb_{$dumpToken}.sql";
 
-            $this->sendSSE('log', 'Ejecutando mysqldump en servidor remoto...', $st);
+            $isPostgres = ($dbCredentials['driver'] ?? 'mysql') === 'pgsql';
+            $dumpToolName = $isPostgres ? 'pg_dump' : 'mysqldump';
+            $this->sendSSE('log', "Ejecutando {$dumpToolName} en servidor remoto...", $st);
             $this->sendSSE('progress', json_encode(['type' => 'mysqldump', 'indeterminate' => true]), $st);
 
             $dumpErrFile = "/tmp/mdpdb_{$dumpToken}.err";
 
-            // WordPress DB_HOST can be "localhost:3306" — split host and port
+            // DB_HOST can be "localhost:3306" — split host and port
             $dumpHost = $dbCredentials['host'];
             $dumpPort = $dbCredentials['port'];
             if (str_contains($dumpHost, ':')) {
@@ -737,15 +848,24 @@ class MigrationController
                 if (is_numeric($parsedPort)) $dumpPort = $parsedPort;
             }
 
-            $remoteMysqldumpCmd = sprintf('mysqldump -h %s -P %s -u %s -p%s %s',
-                escapeshellarg($dumpHost), escapeshellarg($dumpPort),
-                escapeshellarg($dbCredentials['username']), escapeshellarg($dbCredentials['password']),
-                escapeshellarg($dbCredentials['database'])
-            );
+            if ($isPostgres) {
+                $remoteDumpCmd = sprintf('PGPASSWORD=%s pg_dump -h %s -p %s -U %s %s',
+                    escapeshellarg($dbCredentials['password']),
+                    escapeshellarg($dumpHost), escapeshellarg($dumpPort),
+                    escapeshellarg($dbCredentials['username']),
+                    escapeshellarg($dbCredentials['database'])
+                );
+            } else {
+                $remoteDumpCmd = sprintf('mysqldump -h %s -P %s -u %s -p%s %s',
+                    escapeshellarg($dumpHost), escapeshellarg($dumpPort),
+                    escapeshellarg($dbCredentials['username']), escapeshellarg($dbCredentials['password']),
+                    escapeshellarg($dbCredentials['database'])
+                );
+            }
 
-            // Execute mysqldump remotely: dump SQL to stdout, stderr to temp file on remote
+            // Execute dump remotely: dump SQL to stdout, stderr to temp file on remote
             $remoteErrFile = '/tmp/mdp_dump_err_' . bin2hex(random_bytes(4));
-            $fullRemoteCmd = $remoteMysqldumpCmd . ' 2>' . escapeshellarg($remoteErrFile);
+            $fullRemoteCmd = $remoteDumpCmd . ' 2>' . escapeshellarg($remoteErrFile);
 
             shell_exec(sprintf(
                 'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=30 -p %d %s@%s %s > %s 2>%s',
@@ -778,7 +898,7 @@ class MigrationController
             if ($dumpOk) {
                 // Quick check: if the dump starts with an error message instead of SQL
                 $head = file_get_contents($dumpFile, false, null, 0, 200);
-                if (preg_match('/^(mysqldump:|error:|Access denied)/i', trim($head))) {
+                if (preg_match('/^(mysqldump:|pg_dump:|error:|Access denied|FATAL:)/i', trim($head))) {
                     $dumpOk = false;
                 }
             }
@@ -791,8 +911,8 @@ class MigrationController
 
             if (!$dumpOk) {
                 $errDetail = $dumpErrMsg ?: (isset($head) ? trim($head) : 'sin detalles');
-                $errors[] = 'mysqldump fallo';
-                $this->sendSSE('error', "ERROR: mysqldump fallo: {$errDetail}", $st);
+                $errors[] = "{$dumpToolName} fallo";
+                $this->sendSSE('error', "ERROR: {$dumpToolName} fallo: {$errDetail}", $st);
                 $this->sendSSE('log', 'Se migraron solo los archivos. Usa "Opcion 3: Solo Base de Datos" para reintentar.', $st);
 
                 // Save SSH credentials to status so the retry UI can pre-fill them
@@ -815,50 +935,69 @@ class MigrationController
                 $localDbName = str_replace(['.', '-'], '_', $account['username']) . '_db';
                 $localDbUser = $account['username'];
                 $localDbPass = bin2hex(random_bytes(12));
+                $localDbType = $isPostgres ? 'pgsql' : 'mysql';
 
-                $this->sendSSE('log', 'Creando base de datos local: ' . $localDbName, $st);
+                $this->sendSSE('log', "Creando base de datos local ({$localDbType}): {$localDbName}", $st);
 
-                $sqlSetup = sprintf(
-                    "CREATE DATABASE IF NOT EXISTS `%s`;\nCREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\nALTER USER '%s'@'localhost' IDENTIFIED BY '%s';\nGRANT ALL ON `%s`.* TO '%s'@'localhost';\nFLUSH PRIVILEGES;\n",
-                    str_replace('`', '``', $localDbName),
-                    str_replace("'", "''", $localDbUser),
-                    str_replace("'", "''", $localDbPass),
-                    str_replace("'", "''", $localDbUser),
-                    str_replace("'", "''", $localDbPass),
-                    str_replace('`', '``', $localDbName),
-                    str_replace("'", "''", $localDbUser)
-                );
-                $sqlTmp = tempnam('/tmp', 'mdp_sql_');
-                file_put_contents($sqlTmp, $sqlSetup);
-                $mysqlOutput = shell_exec(sprintf('mysql < %s 2>&1', escapeshellarg($sqlTmp)));
-                @unlink($sqlTmp);
-
-                if ($mysqlOutput !== null && stripos($mysqlOutput, 'ERROR') !== false) {
-                    $this->sendSSE('log', 'ERROR al crear BD/usuario MySQL: ' . trim($mysqlOutput), $st);
-                    $this->sendSSE('error', 'Error creando base de datos MySQL. Revisa los logs.', $st);
-                    @unlink($dumpFile);
-                    return;
-                }
-
-                // Verify the user can actually connect with the new password
-                $verifyCmd = sprintf(
-                    'mysql -u %s -p%s -e "SELECT 1" %s 2>&1',
-                    escapeshellarg($localDbUser),
-                    escapeshellarg($localDbPass),
-                    escapeshellarg($localDbName)
-                );
-                $verifyOutput = shell_exec($verifyCmd);
-                if ($verifyOutput !== null && (stripos($verifyOutput, 'ERROR') !== false || stripos($verifyOutput, 'Access denied') !== false)) {
-                    $this->sendSSE('log', 'WARN: Verificacion de credenciales fallo, reintentando ALTER USER...', $st);
-                    $retryCmd = sprintf(
-                        "mysql -e %s 2>&1",
-                        escapeshellarg(sprintf(
-                            "ALTER USER '%s'@'localhost' IDENTIFIED BY '%s'; FLUSH PRIVILEGES;",
-                            str_replace("'", "''", $localDbUser),
-                            str_replace("'", "''", $localDbPass)
-                        ))
+                if ($isPostgres) {
+                    // PostgreSQL: create user and database
+                    $pgCmds = [
+                        sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE USER \"{$localDbUser}\" WITH PASSWORD '{$localDbPass}'")),
+                        sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("ALTER USER \"{$localDbUser}\" WITH PASSWORD '{$localDbPass}'")),
+                        sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$localDbName}\" OWNER \"{$localDbUser}\"")),
+                        sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$localDbName}\" TO \"{$localDbUser}\"")),
+                    ];
+                    foreach ($pgCmds as $pgCmd) {
+                        $pgOutput = shell_exec($pgCmd);
+                        // Ignore "already exists" errors, fail on others
+                        if ($pgOutput !== null && stripos($pgOutput, 'ERROR') !== false && stripos($pgOutput, 'already exists') === false) {
+                            $this->sendSSE('log', 'WARN PostgreSQL: ' . trim($pgOutput), $st);
+                        }
+                    }
+                } else {
+                    // MySQL: create user and database
+                    $sqlSetup = sprintf(
+                        "CREATE DATABASE IF NOT EXISTS `%s`;\nCREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\nALTER USER '%s'@'localhost' IDENTIFIED BY '%s';\nGRANT ALL ON `%s`.* TO '%s'@'localhost';\nFLUSH PRIVILEGES;\n",
+                        str_replace('`', '``', $localDbName),
+                        str_replace("'", "''", $localDbUser),
+                        str_replace("'", "''", $localDbPass),
+                        str_replace("'", "''", $localDbUser),
+                        str_replace("'", "''", $localDbPass),
+                        str_replace('`', '``', $localDbName),
+                        str_replace("'", "''", $localDbUser)
                     );
-                    shell_exec($retryCmd);
+                    $sqlTmp = tempnam('/tmp', 'mdp_sql_');
+                    file_put_contents($sqlTmp, $sqlSetup);
+                    $mysqlOutput = shell_exec(sprintf('mysql < %s 2>&1', escapeshellarg($sqlTmp)));
+                    @unlink($sqlTmp);
+
+                    if ($mysqlOutput !== null && stripos($mysqlOutput, 'ERROR') !== false) {
+                        $this->sendSSE('log', 'ERROR al crear BD/usuario MySQL: ' . trim($mysqlOutput), $st);
+                        $this->sendSSE('error', 'Error creando base de datos MySQL. Revisa los logs.', $st);
+                        @unlink($dumpFile);
+                        return;
+                    }
+
+                    // Verify the user can actually connect with the new password
+                    $verifyCmd = sprintf(
+                        'mysql -u %s -p%s -e "SELECT 1" %s 2>&1',
+                        escapeshellarg($localDbUser),
+                        escapeshellarg($localDbPass),
+                        escapeshellarg($localDbName)
+                    );
+                    $verifyOutput = shell_exec($verifyCmd);
+                    if ($verifyOutput !== null && (stripos($verifyOutput, 'ERROR') !== false || stripos($verifyOutput, 'Access denied') !== false)) {
+                        $this->sendSSE('log', 'WARN: Verificacion de credenciales fallo, reintentando ALTER USER...', $st);
+                        $retryCmd = sprintf(
+                            "mysql -e %s 2>&1",
+                            escapeshellarg(sprintf(
+                                "ALTER USER '%s'@'localhost' IDENTIFIED BY '%s'; FLUSH PRIVILEGES;",
+                                str_replace("'", "''", $localDbUser),
+                                str_replace("'", "''", $localDbPass)
+                            ))
+                        );
+                        shell_exec($retryCmd);
+                    }
                 }
 
                 $this->sendSSE('log', 'Base de datos y usuario creados.', $st);
@@ -869,17 +1008,27 @@ class MigrationController
                     'account_id' => (int)$data['account_id'],
                     'db_name' => $localDbName,
                     'db_user' => $localDbUser,
-                    'db_type' => 'mysql',
+                    'db_type' => $localDbType,
                 ]);
 
                 // Update config files immediately (critical — must happen before potential crash)
-                if ($projectType === 'laravel' && file_exists($targetDir . '/.env')) {
+                if ($projectType === 'musedock' && file_exists($targetDir . '/.env')) {
                     $envContent = file_get_contents($targetDir . '/.env');
-                    $envContent = preg_replace('/DB_HOST=.*/', 'DB_HOST=127.0.0.1', $envContent);
-                    $envContent = preg_replace('/DB_PORT=.*/', 'DB_PORT=3306', $envContent);
-                    $envContent = preg_replace('/DB_DATABASE=.*/', "DB_DATABASE={$localDbName}", $envContent);
-                    $envContent = preg_replace('/DB_USERNAME=.*/', "DB_USERNAME={$localDbUser}", $envContent);
-                    $envContent = preg_replace('/DB_PASSWORD=.*/', "DB_PASSWORD={$localDbPass}", $envContent);
+                    $envContent = preg_replace('/^DB_DRIVER=.*/m', "DB_DRIVER=" . ($isPostgres ? 'pgsql' : 'mysql'), $envContent);
+                    $envContent = preg_replace('/^DB_HOST=.*/m', 'DB_HOST=localhost', $envContent);
+                    $envContent = preg_replace('/^DB_PORT=.*/m', "DB_PORT=" . ($isPostgres ? '5432' : '3306'), $envContent);
+                    $envContent = preg_replace('/^DB_NAME=.*/m', "DB_NAME={$localDbName}", $envContent);
+                    $envContent = preg_replace('/^DB_USER=.*/m', "DB_USER={$localDbUser}", $envContent);
+                    $envContent = preg_replace('/^DB_PASS=.*/m', "DB_PASS={$localDbPass}", $envContent);
+                    file_put_contents($targetDir . '/.env', $envContent);
+                    $this->sendSSE('log', 'Actualizado .env (MuseDock) con credenciales locales.', $st);
+                } elseif ($projectType === 'laravel' && file_exists($targetDir . '/.env')) {
+                    $envContent = file_get_contents($targetDir . '/.env');
+                    $envContent = preg_replace('/^DB_HOST=.*/m', 'DB_HOST=127.0.0.1', $envContent);
+                    $envContent = preg_replace('/^DB_PORT=.*/m', 'DB_PORT=3306', $envContent);
+                    $envContent = preg_replace('/^DB_DATABASE=.*/m', "DB_DATABASE={$localDbName}", $envContent);
+                    $envContent = preg_replace('/^DB_USERNAME=.*/m', "DB_USERNAME={$localDbUser}", $envContent);
+                    $envContent = preg_replace('/^DB_PASSWORD=.*/m', "DB_PASSWORD={$localDbPass}", $envContent);
                     file_put_contents($targetDir . '/.env', $envContent);
                     $this->sendSSE('log', 'Actualizado .env con credenciales locales.', $st);
                 } elseif ($projectType === 'wordpress' && file_exists($targetDir . '/wp-config.php')) {
@@ -897,6 +1046,15 @@ class MigrationController
                         $this->sendSSE('log', 'WARN: wp-config.php no contiene el nombre de BD esperado. Posible formato no reconocido.', $st);
                     }
                     $this->sendSSE('log', 'Actualizado wp-config.php con credenciales locales.', $st);
+                } elseif ($projectType === 'zend' && file_exists($targetDir . '/application/settings/database.php')) {
+                    $zendFile = $targetDir . '/application/settings/database.php';
+                    $zendContent = file_get_contents($zendFile);
+                    $zendContent = preg_replace("/'host'\s*=>\s*'[^']*'/", "'host' => 'localhost'", $zendContent);
+                    $zendContent = preg_replace("/'username'\s*=>\s*'[^']*'/", "'username' => '{$localDbUser}'", $zendContent);
+                    $zendContent = preg_replace("/'password'\s*=>\s*'[^']*'/", "'password' => '{$localDbPass}'", $zendContent);
+                    $zendContent = preg_replace("/'dbname'\s*=>\s*'[^']*'/", "'dbname' => '{$localDbName}'", $zendContent);
+                    file_put_contents($zendFile, $zendContent);
+                    $this->sendSSE('log', 'Actualizado application/settings/database.php con credenciales locales.', $st);
                 }
 
                 // Persist db_pass to status file immediately (in case process dies during import)
@@ -906,9 +1064,19 @@ class MigrationController
                 $this->sendSSE('step', 'Importando BD (' . $dumpSize . ' MB)', $st);
                 $this->sendSSE('progress', json_encode(['type' => 'import', 'indeterminate' => true]), $st);
 
-                $importOutput = shell_exec(sprintf('mysql %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
-                if ($importOutput !== null && stripos($importOutput, 'ERROR') !== false) {
-                    $this->sendSSE('log', 'WARN al importar dump: ' . trim(substr($importOutput, 0, 500)), $st);
+                if ($isPostgres) {
+                    $importOutput = shell_exec(sprintf(
+                        'sudo -u postgres psql -d %s < %s 2>&1',
+                        escapeshellarg($localDbName), escapeshellarg($dumpFile)
+                    ));
+                    if ($importOutput !== null && stripos($importOutput, 'ERROR') !== false) {
+                        $this->sendSSE('log', 'WARN al importar dump PostgreSQL: ' . trim(substr($importOutput, 0, 500)), $st);
+                    }
+                } else {
+                    $importOutput = shell_exec(sprintf('mysql %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
+                    if ($importOutput !== null && stripos($importOutput, 'ERROR') !== false) {
+                        $this->sendSSE('log', 'WARN al importar dump: ' . trim(substr($importOutput, 0, 500)), $st);
+                    }
                 }
                 $this->sendSSE('log', 'Dump importado (' . $dumpSize . ' MB).', $st);
 
@@ -941,17 +1109,24 @@ class MigrationController
                 $subDocRoot = str_contains($subHtCheck, 'HAS_HT') ? '/httpdocs' : '';
                 $subFullPath = $subRemotePath . $subDocRoot;
 
-                // Create local subdomain via SubdomainService
+                // Create local subdomain via SubdomainService (or reuse if already exists)
                 $subResult = \MuseDockPanel\Services\SubdomainService::create((int)$account['id'], $subName);
                 if (!$subResult['ok']) {
-                    $this->sendSSE('error', "No se pudo crear subdominio {$subName}: " . ($subResult['error'] ?? 'error'), $st);
-                    $errors[] = "Subdomain {$subName}: " . ($subResult['error'] ?? 'error');
-                    $subdomainResults[] = ['subdomain' => $subName, 'ok' => false, 'error' => $subResult['error']];
-                    continue;
+                    // Check if it already exists — reuse it for re-migration
+                    $existingSub = \MuseDockPanel\Services\SubdomainService::getByDomain($subName);
+                    if ($existingSub && !empty($existingSub['document_root'])) {
+                        $subTargetDir = $existingSub['document_root'];
+                        $this->sendSSE('log', "Subdominio {$subName} ya existe, reutilizando. Document root: {$subTargetDir}", $st);
+                    } else {
+                        $this->sendSSE('error', "No se pudo crear subdominio {$subName}: " . ($subResult['error'] ?? 'error'), $st);
+                        $errors[] = "Subdomain {$subName}: " . ($subResult['error'] ?? 'error');
+                        $subdomainResults[] = ['subdomain' => $subName, 'ok' => false, 'error' => $subResult['error']];
+                        continue;
+                    }
+                } else {
+                    $subTargetDir = $subResult['document_root'];
+                    $this->sendSSE('log', "Subdominio creado. Document root: {$subTargetDir}", $st);
                 }
-
-                $subTargetDir = $subResult['document_root'];
-                $this->sendSSE('log', "Subdominio creado. Document root: {$subTargetDir}", $st);
 
                 // Compress remote subdomain files
                 $subFileToken = bin2hex(random_bytes(8));
@@ -967,7 +1142,14 @@ class MigrationController
                 $subTarCmd = "cd " . escapeshellarg($subFullPath) . " && tar czf " . escapeshellarg($subRemoteBackupPath) . " {$subExcludeArgs} . 2>&1; echo TAR_EXIT_\$?";
                 $subTarOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, $subTarCmd);
 
-                if (!preg_match('/TAR_EXIT_0/', $subTarOutput)) {
+                if (preg_match('/TAR_EXIT_(\d+)/', $subTarOutput, $tarM)) {
+                    $tarExit = (int) $tarM[1];
+                } else {
+                    $tarExit = 99;
+                }
+                if ($tarExit === 1) {
+                    $this->sendSSE('log', "AVISO: Algunos archivos de {$subName} cambiaron durante la compresion (normal en sitios activos).", $st);
+                } elseif ($tarExit > 1) {
                     $this->sendSSE('error', "Error comprimiendo {$subName}: " . substr($subTarOutput, 0, 200), $st);
                     $errors[] = "Subdomain {$subName}: tar failed";
                     $subdomainResults[] = ['subdomain' => $subName, 'ok' => false, 'error' => 'tar failed'];
@@ -1012,41 +1194,74 @@ class MigrationController
 
                 // Detect and migrate database for this subdomain
                 $subDbResult = null;
+                $subProjectType = 'unknown';
                 if ($includeDb) {
-                    // Check for Laravel .env or WordPress wp-config.php
+                    // Check for MuseDock, Laravel, WordPress or Zend
                     $subEnvCheck = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
-                        "test -f " . escapeshellarg($subFullPath . '/.env') . " && echo 'LARAVEL' || (test -f " . escapeshellarg($subFullPath . '/wp-config.php') . " && echo 'WORDPRESS')"
+                        "if [ -f " . escapeshellarg($subFullPath . '/muse') . " ] && [ -f " . escapeshellarg($subFullPath . '/.env') . " ]; then echo 'MUSEDOCK'; "
+                        . "elif [ -f " . escapeshellarg($subFullPath . '/.env') . " ]; then echo 'LARAVEL'; "
+                        . "elif [ -f " . escapeshellarg($subFullPath . '/wp-config.php') . " ]; then echo 'WORDPRESS'; "
+                        . "elif [ -f " . escapeshellarg($subFullPath . '/application/settings/database.php') . " ]; then echo 'ZEND'; fi"
                     );
 
                     $subDbCreds = null;
-                    if (str_contains($subEnvCheck, 'LARAVEL')) {
+                    $subIsPostgres = false;
+                    if (str_contains($subEnvCheck, 'MUSEDOCK')) {
+                        $subProjectType = 'musedock';
+                        $envContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                            "cat " . escapeshellarg($subFullPath . '/.env')
+                        );
+                        $subDbCreds = $this->parseMuseDockEnv($envContent);
+                        $subIsPostgres = ($subDbCreds['driver'] ?? 'mysql') === 'pgsql';
+                        $this->sendSSE('log', "MuseDock detectado en {$subName}. BD: " . ($subDbCreds['database'] ?? '?') . " ({$subDbCreds['driver']})", $st);
+                    } elseif (str_contains($subEnvCheck, 'LARAVEL')) {
+                        $subProjectType = 'laravel';
                         $envContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
                             "cat " . escapeshellarg($subFullPath . '/.env')
                         );
                         $subDbCreds = $this->parseLaravelEnv($envContent);
                         $this->sendSSE('log', "Laravel detectado en {$subName}. BD: " . ($subDbCreds['database'] ?? '?'), $st);
                     } elseif (str_contains($subEnvCheck, 'WORDPRESS')) {
+                        $subProjectType = 'wordpress';
                         $wpContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
                             "cat " . escapeshellarg($subFullPath . '/wp-config.php')
                         );
                         $subDbCreds = $this->parseWpConfig($wpContent);
                         $this->sendSSE('log', "WordPress detectado en {$subName}. BD: " . ($subDbCreds['database'] ?? '?'), $st);
+                    } elseif (str_contains($subEnvCheck, 'ZEND')) {
+                        $subProjectType = 'zend';
+                        $zendContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                            "cat " . escapeshellarg($subFullPath . '/application/settings/database.php')
+                        );
+                        $subDbCreds = $this->parseZendDbConfig($zendContent);
+                        $this->sendSSE('log', "Zend/SocialEngine detectado en {$subName}. BD: " . ($subDbCreds['database'] ?? '?'), $st);
                     }
 
                     if ($subDbCreds && !empty($subDbCreds['database'])) {
                         $this->sendSSE('log', "Volcando BD de {$subName}: {$subDbCreds['database']}...", $st);
 
-                        // Remote mysqldump
+                        // Remote dump (pg_dump or mysqldump)
                         $subDumpFile = "/tmp/mdp_sub_db_{$subFileToken}.sql";
-                        $subMysqlDump = sprintf(
-                            'mysqldump -h%s -u%s -p%s %s',
-                            escapeshellarg($subDbCreds['host'] ?? '127.0.0.1'),
-                            escapeshellarg($subDbCreds['username'] ?? ''),
-                            escapeshellarg($subDbCreds['password'] ?? ''),
-                            escapeshellarg($subDbCreds['database'])
-                        );
+                        if ($subIsPostgres) {
+                            $subDumpCmd = sprintf(
+                                'PGPASSWORD=%s pg_dump -h %s -p %s -U %s %s',
+                                escapeshellarg($subDbCreds['password'] ?? ''),
+                                escapeshellarg($subDbCreds['host'] ?? '127.0.0.1'),
+                                escapeshellarg($subDbCreds['port'] ?? '5432'),
+                                escapeshellarg($subDbCreds['username'] ?? ''),
+                                escapeshellarg($subDbCreds['database'])
+                            );
+                        } else {
+                            $subDumpCmd = sprintf(
+                                'mysqldump -h%s -u%s -p%s %s',
+                                escapeshellarg($subDbCreds['host'] ?? '127.0.0.1'),
+                                escapeshellarg($subDbCreds['username'] ?? ''),
+                                escapeshellarg($subDbCreds['password'] ?? ''),
+                                escapeshellarg($subDbCreds['database'])
+                            );
+                        }
                         $subDumpOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
-                            "{$subMysqlDump} > /tmp/{$subBackupName}.sql 2>&1; echo DUMP_EXIT_\$?; wc -c < /tmp/{$subBackupName}.sql"
+                            "{$subDumpCmd} > /tmp/{$subBackupName}.sql 2>&1; echo DUMP_EXIT_\$?; wc -c < /tmp/{$subBackupName}.sql"
                         );
 
                         if (str_contains($subDumpOutput, 'DUMP_EXIT_0')) {
@@ -1070,16 +1285,29 @@ class MigrationController
                                 $subLocalDbName = substr($safeSubName, 0, 60) . '_db';
                                 $subLocalDbUser = substr($safeSubName, 0, 28) . '_usr';
                                 $subLocalDbPass = bin2hex(random_bytes(12));
+                                $subLocalDbType = $subIsPostgres ? 'pgsql' : 'mysql';
 
-                                $this->sendSSE('log', "Creando BD local: {$subLocalDbName}...", $st);
-                                shell_exec("mysql -u root -e " . escapeshellarg("CREATE DATABASE IF NOT EXISTS `{$subLocalDbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci") . " 2>&1");
-                                shell_exec("mysql -u root -e " . escapeshellarg("CREATE USER IF NOT EXISTS '{$subLocalDbUser}'@'localhost' IDENTIFIED BY '{$subLocalDbPass}'") . " 2>&1");
-                                shell_exec("mysql -u root -e " . escapeshellarg("GRANT ALL PRIVILEGES ON `{$subLocalDbName}`.* TO '{$subLocalDbUser}'@'localhost'") . " 2>&1");
-                                shell_exec("mysql -u root -e 'FLUSH PRIVILEGES' 2>&1");
+                                $this->sendSSE('log', "Creando BD local ({$subLocalDbType}): {$subLocalDbName}...", $st);
+
+                                if ($subIsPostgres) {
+                                    shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE USER \"{$subLocalDbUser}\" WITH PASSWORD '{$subLocalDbPass}'")));
+                                    shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("ALTER USER \"{$subLocalDbUser}\" WITH PASSWORD '{$subLocalDbPass}'")));
+                                    shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$subLocalDbName}\" OWNER \"{$subLocalDbUser}\"")));
+                                    shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$subLocalDbName}\" TO \"{$subLocalDbUser}\"")));
+                                } else {
+                                    shell_exec("mysql -u root -e " . escapeshellarg("CREATE DATABASE IF NOT EXISTS `{$subLocalDbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci") . " 2>&1");
+                                    shell_exec("mysql -u root -e " . escapeshellarg("CREATE USER IF NOT EXISTS '{$subLocalDbUser}'@'localhost' IDENTIFIED BY '{$subLocalDbPass}'") . " 2>&1");
+                                    shell_exec("mysql -u root -e " . escapeshellarg("GRANT ALL PRIVILEGES ON `{$subLocalDbName}`.* TO '{$subLocalDbUser}'@'localhost'") . " 2>&1");
+                                    shell_exec("mysql -u root -e 'FLUSH PRIVILEGES' 2>&1");
+                                }
 
                                 // Import dump
                                 $this->sendSSE('log', "Importando BD de {$subName}...", $st);
-                                shell_exec(sprintf('mysql %s < %s 2>&1', escapeshellarg($subLocalDbName), escapeshellarg($subDumpFile)));
+                                if ($subIsPostgres) {
+                                    shell_exec(sprintf('sudo -u postgres psql -d %s < %s 2>&1', escapeshellarg($subLocalDbName), escapeshellarg($subDumpFile)));
+                                } else {
+                                    shell_exec(sprintf('mysql %s < %s 2>&1', escapeshellarg($subLocalDbName), escapeshellarg($subDumpFile)));
+                                }
                                 @unlink($subDumpFile);
 
                                 // Register in hosting_databases
@@ -1087,11 +1315,21 @@ class MigrationController
                                     'account_id' => (int)$account['id'],
                                     'db_name'    => $subLocalDbName,
                                     'db_user'    => $subLocalDbUser,
-                                    'db_type'    => 'mysql',
+                                    'db_type'    => $subLocalDbType,
                                 ]);
 
-                                // Update local .env or wp-config.php
-                                if (str_contains($subEnvCheck, 'LARAVEL') && file_exists($subTargetDir . '/.env')) {
+                                // Update local config file
+                                if ($subProjectType === 'musedock' && file_exists($subTargetDir . '/.env')) {
+                                    $localEnv = file_get_contents($subTargetDir . '/.env');
+                                    $localEnv = preg_replace('/^DB_DRIVER=.*/m', "DB_DRIVER=" . ($subIsPostgres ? 'pgsql' : 'mysql'), $localEnv);
+                                    $localEnv = preg_replace('/^DB_HOST=.*/m', 'DB_HOST=localhost', $localEnv);
+                                    $localEnv = preg_replace('/^DB_PORT=.*/m', "DB_PORT=" . ($subIsPostgres ? '5432' : '3306'), $localEnv);
+                                    $localEnv = preg_replace('/^DB_NAME=.*/m', "DB_NAME={$subLocalDbName}", $localEnv);
+                                    $localEnv = preg_replace('/^DB_USER=.*/m', "DB_USER={$subLocalDbUser}", $localEnv);
+                                    $localEnv = preg_replace('/^DB_PASS=.*/m', "DB_PASS={$subLocalDbPass}", $localEnv);
+                                    file_put_contents($subTargetDir . '/.env', $localEnv);
+                                    $this->sendSSE('log', ".env (MuseDock) de {$subName} actualizado con credenciales locales.", $st);
+                                } elseif ($subProjectType === 'laravel' && file_exists($subTargetDir . '/.env')) {
                                     $localEnv = file_get_contents($subTargetDir . '/.env');
                                     $localEnv = preg_replace('/^DB_HOST=.*/m', 'DB_HOST=127.0.0.1', $localEnv);
                                     $localEnv = preg_replace('/^DB_DATABASE=.*/m', "DB_DATABASE={$subLocalDbName}", $localEnv);
@@ -1099,7 +1337,7 @@ class MigrationController
                                     $localEnv = preg_replace('/^DB_PASSWORD=.*/m', "DB_PASSWORD={$subLocalDbPass}", $localEnv);
                                     file_put_contents($subTargetDir . '/.env', $localEnv);
                                     $this->sendSSE('log', ".env de {$subName} actualizado con credenciales locales.", $st);
-                                } elseif (str_contains($subEnvCheck, 'WORDPRESS') && file_exists($subTargetDir . '/wp-config.php')) {
+                                } elseif ($subProjectType === 'wordpress' && file_exists($subTargetDir . '/wp-config.php')) {
                                     $wpConfig = file_get_contents($subTargetDir . '/wp-config.php');
                                     $wpConfig = preg_replace("/define\s*\(\s*'DB_NAME'\s*,.*/", "define('DB_NAME', '{$subLocalDbName}');", $wpConfig);
                                     $wpConfig = preg_replace("/define\s*\(\s*'DB_USER'\s*,.*/", "define('DB_USER', '{$subLocalDbUser}');", $wpConfig);
@@ -1107,6 +1345,15 @@ class MigrationController
                                     $wpConfig = preg_replace("/define\s*\(\s*'DB_HOST'\s*,.*/", "define('DB_HOST', 'localhost');", $wpConfig);
                                     file_put_contents($subTargetDir . '/wp-config.php', $wpConfig);
                                     $this->sendSSE('log', "wp-config.php de {$subName} actualizado con credenciales locales.", $st);
+                                } elseif ($subProjectType === 'zend' && file_exists($subTargetDir . '/application/settings/database.php')) {
+                                    $zendFile = $subTargetDir . '/application/settings/database.php';
+                                    $zendContent = file_get_contents($zendFile);
+                                    $zendContent = preg_replace("/'host'\s*=>\s*'[^']*'/", "'host' => 'localhost'", $zendContent);
+                                    $zendContent = preg_replace("/'username'\s*=>\s*'[^']*'/", "'username' => '{$subLocalDbUser}'", $zendContent);
+                                    $zendContent = preg_replace("/'password'\s*=>\s*'[^']*'/", "'password' => '{$subLocalDbPass}'", $zendContent);
+                                    $zendContent = preg_replace("/'dbname'\s*=>\s*'[^']*'/", "'dbname' => '{$subLocalDbName}'", $zendContent);
+                                    file_put_contents($zendFile, $zendContent);
+                                    $this->sendSSE('log', "database.php de {$subName} actualizado con credenciales locales.", $st);
                                 }
 
                                 $subDbResult = ['db_name' => $subLocalDbName, 'db_pass' => $subLocalDbPass];
@@ -1116,8 +1363,9 @@ class MigrationController
                                 $errors[] = "Subdomain {$subName}: DB dump download failed";
                             }
                         } else {
-                            $this->sendSSE('error', "mysqldump fallo para {$subName}.", $st);
-                            $errors[] = "Subdomain {$subName}: mysqldump failed";
+                            $dumpTool = $subIsPostgres ? 'pg_dump' : 'mysqldump';
+                            $this->sendSSE('error', "{$dumpTool} fallo para {$subName}.", $st);
+                            $errors[] = "Subdomain {$subName}: {$dumpTool} failed";
                         }
                     }
                 }
@@ -1381,9 +1629,38 @@ class MigrationController
             $sshRemotePath = $targetDir;
         }
 
-        if (($dbSource === 'laravel' || $dbSource === 'wordpress') && $useSSH) {
+        $remoteDriver = 'mysql'; // Default; may be overridden by MuseDock detection
+
+        // Auto-detect: resolve 'auto' to the actual project type
+        if ($dbSource === 'auto') {
+            if ($useSSH) {
+                $autoDetect = $this->sshExec($sshPass, $sshUser, $sshHost, $sshPort,
+                    'P=' . escapeshellarg(rtrim($sshRemotePath, '/')) . '; '
+                    . 'if [ -f "$P/muse" ] && [ -f "$P/.env" ]; then echo "musedock"; '
+                    . 'elif [ -f "$P/.env" ]; then echo "laravel"; '
+                    . 'elif [ -f "$P/wp-config.php" ]; then echo "wordpress"; '
+                    . 'elif [ -f "$P/application/settings/database.php" ]; then echo "zend"; '
+                    . 'else echo "unknown"; fi'
+                );
+            } else {
+                if (file_exists($targetDir . '/muse') && file_exists($targetDir . '/.env')) $autoDetect = 'musedock';
+                elseif (file_exists($targetDir . '/.env')) $autoDetect = 'laravel';
+                elseif (file_exists($targetDir . '/wp-config.php')) $autoDetect = 'wordpress';
+                elseif (file_exists($targetDir . '/application/settings/database.php')) $autoDetect = 'zend';
+                else $autoDetect = 'unknown';
+            }
+            $dbSource = trim($autoDetect);
+            if ($dbSource === 'unknown') {
+                Flash::set('error', 'No se detecto ningun proyecto conocido (MuseDock, Laravel, WordPress, Zend). Usa la opcion Manual.');
+                Router::redirect('/accounts/' . $params['id'] . '/migrate');
+                return;
+            }
+        }
+
+        if (($dbSource === 'laravel' || $dbSource === 'wordpress' || $dbSource === 'musedock' || $dbSource === 'zend') && $useSSH) {
             // Read config file from REMOTE server via SSH (the local copy may already be modified)
-            $configFileName = $dbSource === 'laravel' ? '.env' : 'wp-config.php';
+            $configFileNames = ['musedock' => '.env', 'laravel' => '.env', 'wordpress' => 'wp-config.php', 'zend' => 'application/settings/database.php'];
+            $configFileName = $configFileNames[$dbSource] ?? '.env';
             $remoteConfigPath = rtrim($sshRemotePath, '/') . '/' . $configFileName;
 
             $content = shell_exec(sprintf(
@@ -1398,7 +1675,20 @@ class MigrationController
                 return;
             }
 
-            if ($dbSource === 'laravel') {
+            if ($dbSource === 'musedock') {
+                $parsed = $this->parseMuseDockEnv($content);
+                if (!$parsed) {
+                    Flash::set('error', 'No se pudieron extraer credenciales MuseDock del .env remoto.');
+                    Router::redirect('/accounts/' . $params['id'] . '/migrate');
+                    return;
+                }
+                $remoteHost = $parsed['host'];
+                $remotePort = $parsed['port'];
+                $remoteDb = $parsed['database'];
+                $remoteUser = $parsed['username'];
+                $remotePass = $parsed['password'];
+                $remoteDriver = $parsed['driver'] ?? 'mysql';
+            } elseif ($dbSource === 'laravel') {
                 $lines = [];
                 foreach (explode("\n", $content) as $line) {
                     if (preg_match('/^([A-Z_]+)=(.*)$/', trim($line), $m)) {
@@ -1410,6 +1700,18 @@ class MigrationController
                 $remoteDb = $lines['DB_DATABASE'] ?? '';
                 $remoteUser = $lines['DB_USERNAME'] ?? '';
                 $remotePass = $lines['DB_PASSWORD'] ?? '';
+            } elseif ($dbSource === 'zend') {
+                $parsed = $this->parseZendDbConfig($content);
+                if (!$parsed) {
+                    Flash::set('error', 'No se pudieron extraer credenciales Zend del database.php remoto.');
+                    Router::redirect('/accounts/' . $params['id'] . '/migrate');
+                    return;
+                }
+                $remoteHost = $parsed['host'];
+                $remotePort = $parsed['port'];
+                $remoteDb = $parsed['database'];
+                $remoteUser = $parsed['username'];
+                $remotePass = $parsed['password'];
             } else {
                 preg_match("/define\(\s*'DB_NAME'\s*,\s*'([^']+)'/", $content, $m); $remoteDb = $m[1] ?? '';
                 preg_match("/define\(\s*'DB_USER'\s*,\s*'([^']+)'/", $content, $m); $remoteUser = $m[1] ?? '';
@@ -1417,6 +1719,26 @@ class MigrationController
                 preg_match("/define\(\s*'DB_HOST'\s*,\s*'([^']+)'/", $content, $m); $remoteHost = $m[1] ?? 'localhost';
                 $remotePort = '3306';
             }
+        } elseif ($dbSource === 'musedock') {
+            // Read from local .env (MuseDock format)
+            $envFile = $targetDir . '/.env';
+            if (!file_exists($envFile)) {
+                Flash::set('error', 'No se encontro .env en ' . $targetDir);
+                Router::redirect('/accounts/' . $params['id'] . '/migrate');
+                return;
+            }
+            $parsed = $this->parseMuseDockEnv(file_get_contents($envFile));
+            if (!$parsed) {
+                Flash::set('error', 'No se pudieron extraer credenciales MuseDock del .env local.');
+                Router::redirect('/accounts/' . $params['id'] . '/migrate');
+                return;
+            }
+            $remoteHost = $parsed['host'];
+            $remotePort = $parsed['port'];
+            $remoteDb = $parsed['database'];
+            $remoteUser = $parsed['username'];
+            $remotePass = $parsed['password'];
+            $remoteDriver = $parsed['driver'] ?? 'mysql';
         } elseif ($dbSource === 'laravel') {
             // Read from local .env
             $envFile = $targetDir . '/.env';
@@ -1445,6 +1767,25 @@ class MigrationController
             preg_match("/define\(\s*'DB_PASSWORD'\s*,\s*'([^']+)'/", $content, $m); $remotePass = $m[1] ?? '';
             preg_match("/define\(\s*'DB_HOST'\s*,\s*'([^']+)'/", $content, $m); $remoteHost = $m[1] ?? 'localhost';
             $remotePort = '3306';
+        } elseif ($dbSource === 'zend') {
+            // Read from local application/settings/database.php
+            $zendFile = $targetDir . '/application/settings/database.php';
+            if (!file_exists($zendFile)) {
+                Flash::set('error', 'No se encontro application/settings/database.php en ' . $targetDir);
+                Router::redirect('/accounts/' . $params['id'] . '/migrate');
+                return;
+            }
+            $parsed = $this->parseZendDbConfig(file_get_contents($zendFile));
+            if (!$parsed) {
+                Flash::set('error', 'No se pudieron extraer credenciales Zend del database.php local.');
+                Router::redirect('/accounts/' . $params['id'] . '/migrate');
+                return;
+            }
+            $remoteHost = $parsed['host'];
+            $remotePort = $parsed['port'];
+            $remoteDb = $parsed['database'];
+            $remoteUser = $parsed['username'];
+            $remotePass = $parsed['password'];
         } else {
             $remoteHost = trim($_POST['db_host'] ?? '');
             $remotePort = trim($_POST['db_port'] ?? '3306');
@@ -1453,7 +1794,7 @@ class MigrationController
             $remotePass = $_POST['db_password'] ?? '';
         }
 
-        // WordPress DB_HOST can be "localhost:3306" or "127.0.0.1:3307" — split host and port
+        // DB_HOST can be "localhost:3306" or "127.0.0.1:3307" — split host and port
         if (str_contains($remoteHost, ':')) {
             [$remoteHost, $parsedPort] = explode(':', $remoteHost, 2);
             if (is_numeric($parsedPort)) {
@@ -1467,20 +1808,30 @@ class MigrationController
             return;
         }
 
+        $isPostgresDb = $remoteDriver === 'pgsql';
         $dumpToken = bin2hex(random_bytes(8));
         $dumpFile = "/tmp/mdpdb_{$dumpToken}.sql";
         $dumpErrFile = "/tmp/mdpdb_{$dumpToken}.err";
 
-        $remoteMysqldumpCmd = sprintf('mysqldump -h %s -P %s -u %s -p%s %s',
-            escapeshellarg($remoteHost), escapeshellarg($remotePort),
-            escapeshellarg($remoteUser), escapeshellarg($remotePass),
-            escapeshellarg($remoteDb)
-        );
+        if ($isPostgresDb) {
+            $remoteDumpCmd = sprintf('PGPASSWORD=%s pg_dump -h %s -p %s -U %s %s',
+                escapeshellarg($remotePass),
+                escapeshellarg($remoteHost), escapeshellarg($remotePort),
+                escapeshellarg($remoteUser),
+                escapeshellarg($remoteDb)
+            );
+        } else {
+            $remoteDumpCmd = sprintf('mysqldump -h %s -P %s -u %s -p%s %s',
+                escapeshellarg($remoteHost), escapeshellarg($remotePort),
+                escapeshellarg($remoteUser), escapeshellarg($remotePass),
+                escapeshellarg($remoteDb)
+            );
+        }
 
         if ($useSSH) {
-            // Execute mysqldump remotely via SSH — stderr goes to remote temp file
+            // Execute dump remotely via SSH — stderr goes to remote temp file
             $remoteErrFile = '/tmp/mdp_dump_err_' . bin2hex(random_bytes(4));
-            $fullRemoteCmd = $remoteMysqldumpCmd . ' 2>' . escapeshellarg($remoteErrFile);
+            $fullRemoteCmd = $remoteDumpCmd . ' 2>' . escapeshellarg($remoteErrFile);
 
             shell_exec(sprintf(
                 'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=30 -p %d %s@%s %s > %s 2>%s',
@@ -1508,15 +1859,16 @@ class MigrationController
                 ));
             }
         } else {
-            // Direct mysqldump connection (only works if remote MySQL allows external connections)
-            shell_exec(sprintf('%s > %s 2>%s', $remoteMysqldumpCmd, escapeshellarg($dumpFile), escapeshellarg($dumpErrFile)));
+            // Direct dump connection (only works if remote DB allows external connections)
+            shell_exec(sprintf('%s > %s 2>%s', $remoteDumpCmd, escapeshellarg($dumpFile), escapeshellarg($dumpErrFile)));
         }
 
         // Validate dump
+        $dumpToolName = $isPostgresDb ? 'pg_dump' : 'mysqldump';
         $dumpOk = file_exists($dumpFile) && filesize($dumpFile) >= 50;
         if ($dumpOk) {
             $head = file_get_contents($dumpFile, false, null, 0, 200);
-            if (preg_match('/^(mysqldump:|error:|Access denied)/i', trim($head))) {
+            if (preg_match('/^(mysqldump:|pg_dump:|error:|Access denied|FATAL:)/i', trim($head))) {
                 $dumpOk = false;
             }
         }
@@ -1529,7 +1881,7 @@ class MigrationController
 
         if (!$dumpOk) {
             $detail = $errMsg ?: (isset($head) ? trim($head) : 'sin detalles');
-            Flash::set('error', "mysqldump fallo: {$detail}");
+            Flash::set('error', "{$dumpToolName} fallo: {$detail}");
             @unlink($dumpFile);
             Router::redirect('/accounts/' . $params['id'] . '/migrate');
             return;
@@ -1538,22 +1890,31 @@ class MigrationController
         $localDbName = str_replace(['.', '-'], '_', $account['username']) . '_db';
         $localDbUser = $account['username'];
         $localDbPass = bin2hex(random_bytes(12));
+        $localDbType = $isPostgresDb ? 'pgsql' : 'mysql';
 
-        $sqlSetup = sprintf(
-            "CREATE DATABASE IF NOT EXISTS `%s`;\nCREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\nALTER USER '%s'@'localhost' IDENTIFIED BY '%s';\nGRANT ALL ON `%s`.* TO '%s'@'localhost';\nFLUSH PRIVILEGES;\n",
-            str_replace('`', '``', $localDbName),
-            str_replace("'", "''", $localDbUser),
-            str_replace("'", "''", $localDbPass),
-            str_replace("'", "''", $localDbUser),
-            str_replace("'", "''", $localDbPass),
-            str_replace('`', '``', $localDbName),
-            str_replace("'", "''", $localDbUser)
-        );
-        $sqlTmp = tempnam('/tmp', 'mdp_sql_');
-        file_put_contents($sqlTmp, $sqlSetup);
-        shell_exec(sprintf('mysql < %s 2>&1', escapeshellarg($sqlTmp)));
-        @unlink($sqlTmp);
-        shell_exec(sprintf('mysql %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
+        if ($isPostgresDb) {
+            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE USER \"{$localDbUser}\" WITH PASSWORD '{$localDbPass}'")));
+            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("ALTER USER \"{$localDbUser}\" WITH PASSWORD '{$localDbPass}'")));
+            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$localDbName}\" OWNER \"{$localDbUser}\"")));
+            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$localDbName}\" TO \"{$localDbUser}\"")));
+            shell_exec(sprintf('sudo -u postgres psql -d %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
+        } else {
+            $sqlSetup = sprintf(
+                "CREATE DATABASE IF NOT EXISTS `%s`;\nCREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\nALTER USER '%s'@'localhost' IDENTIFIED BY '%s';\nGRANT ALL ON `%s`.* TO '%s'@'localhost';\nFLUSH PRIVILEGES;\n",
+                str_replace('`', '``', $localDbName),
+                str_replace("'", "''", $localDbUser),
+                str_replace("'", "''", $localDbPass),
+                str_replace("'", "''", $localDbUser),
+                str_replace("'", "''", $localDbPass),
+                str_replace('`', '``', $localDbName),
+                str_replace("'", "''", $localDbUser)
+            );
+            $sqlTmp = tempnam('/tmp', 'mdp_sql_');
+            file_put_contents($sqlTmp, $sqlSetup);
+            shell_exec(sprintf('mysql < %s 2>&1', escapeshellarg($sqlTmp)));
+            @unlink($sqlTmp);
+            shell_exec(sprintf('mysql %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
+        }
 
         $dumpSize = round(filesize($dumpFile) / 1048576, 1);
 
@@ -1565,16 +1926,25 @@ class MigrationController
         if (!$existingDb) {
             Database::insert('hosting_databases', [
                 'account_id' => (int)$params['id'],
-                'db_name' => $localDbName, 'db_user' => $localDbUser, 'db_type' => 'mysql',
+                'db_name' => $localDbName, 'db_user' => $localDbUser, 'db_type' => $localDbType,
             ]);
         }
 
-        if ($dbSource === 'laravel' && file_exists($targetDir . '/.env')) {
+        if ($dbSource === 'musedock' && file_exists($targetDir . '/.env')) {
             $envContent = file_get_contents($targetDir . '/.env');
-            $envContent = preg_replace('/DB_HOST=.*/', 'DB_HOST=127.0.0.1', $envContent);
-            $envContent = preg_replace('/DB_DATABASE=.*/', "DB_DATABASE={$localDbName}", $envContent);
-            $envContent = preg_replace('/DB_USERNAME=.*/', "DB_USERNAME={$localDbUser}", $envContent);
-            $envContent = preg_replace('/DB_PASSWORD=.*/', "DB_PASSWORD={$localDbPass}", $envContent);
+            $envContent = preg_replace('/^DB_DRIVER=.*/m', "DB_DRIVER=" . ($isPostgresDb ? 'pgsql' : 'mysql'), $envContent);
+            $envContent = preg_replace('/^DB_HOST=.*/m', 'DB_HOST=localhost', $envContent);
+            $envContent = preg_replace('/^DB_PORT=.*/m', "DB_PORT=" . ($isPostgresDb ? '5432' : '3306'), $envContent);
+            $envContent = preg_replace('/^DB_NAME=.*/m', "DB_NAME={$localDbName}", $envContent);
+            $envContent = preg_replace('/^DB_USER=.*/m', "DB_USER={$localDbUser}", $envContent);
+            $envContent = preg_replace('/^DB_PASS=.*/m', "DB_PASS={$localDbPass}", $envContent);
+            file_put_contents($targetDir . '/.env', $envContent);
+        } elseif ($dbSource === 'laravel' && file_exists($targetDir . '/.env')) {
+            $envContent = file_get_contents($targetDir . '/.env');
+            $envContent = preg_replace('/^DB_HOST=.*/m', 'DB_HOST=127.0.0.1', $envContent);
+            $envContent = preg_replace('/^DB_DATABASE=.*/m', "DB_DATABASE={$localDbName}", $envContent);
+            $envContent = preg_replace('/^DB_USERNAME=.*/m', "DB_USERNAME={$localDbUser}", $envContent);
+            $envContent = preg_replace('/^DB_PASSWORD=.*/m', "DB_PASSWORD={$localDbPass}", $envContent);
             file_put_contents($targetDir . '/.env', $envContent);
         } elseif ($dbSource === 'wordpress' && file_exists($targetDir . '/wp-config.php')) {
             $wpContent = file_get_contents($targetDir . '/wp-config.php');
@@ -1583,6 +1953,14 @@ class MigrationController
             $wpContent = preg_replace("/define\(\s*'DB_PASSWORD'\s*,\s*'[^']+'\)/", "define('DB_PASSWORD', '{$localDbPass}')", $wpContent);
             $wpContent = preg_replace("/define\(\s*'DB_HOST'\s*,\s*'[^']+'\)/", "define('DB_HOST', 'localhost')", $wpContent);
             file_put_contents($targetDir . '/wp-config.php', $wpContent);
+        } elseif ($dbSource === 'zend' && file_exists($targetDir . '/application/settings/database.php')) {
+            $zendFile = $targetDir . '/application/settings/database.php';
+            $zendContent = file_get_contents($zendFile);
+            $zendContent = preg_replace("/'host'\s*=>\s*'[^']*'/", "'host' => 'localhost'", $zendContent);
+            $zendContent = preg_replace("/'username'\s*=>\s*'[^']*'/", "'username' => '{$localDbUser}'", $zendContent);
+            $zendContent = preg_replace("/'password'\s*=>\s*'[^']*'/", "'password' => '{$localDbPass}'", $zendContent);
+            $zendContent = preg_replace("/'dbname'\s*=>\s*'[^']*'/", "'dbname' => '{$localDbName}'", $zendContent);
+            file_put_contents($zendFile, $zendContent);
         }
 
         @unlink($dumpFile);

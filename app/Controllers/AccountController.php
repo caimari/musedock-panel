@@ -268,10 +268,10 @@ class AccountController
 
         // WordPress detection + WP-Cron status
         $wpInfo = null;
-        $docRoot = rtrim($account['home_dir'], '/') . '/' . ltrim($account['document_root'] ?? 'httpdocs', '/');
-        $wpConfigPath = $docRoot . '/wp-config.php';
+        $docRoot = !empty($account['document_root']) ? $account['document_root'] : (rtrim($account['home_dir'], '/') . '/httpdocs');
+        $wpConfigPath = rtrim($docRoot, '/') . '/wp-config.php';
         if (file_exists($wpConfigPath)) {
-            $wpContent = file_get_contents($wpConfigPath);
+            $wpContent = file_get_contents($wpConfigPath) ?: '';
             $wpCronDisabled = preg_match("/define\s*\(\s*['\"]DISABLE_WP_CRON['\"]\s*,\s*true\s*\)/i", $wpContent);
             $wpInfo = [
                 'is_wordpress' => true,
@@ -858,8 +858,8 @@ class AccountController
             return;
         }
 
-        $docRoot = rtrim($account['home_dir'], '/') . '/' . ltrim($account['document_root'] ?? 'httpdocs', '/');
-        $wpConfigPath = $docRoot . '/wp-config.php';
+        $docRoot = !empty($account['document_root']) ? $account['document_root'] : (rtrim($account['home_dir'], '/') . '/httpdocs');
+        $wpConfigPath = rtrim($docRoot, '/') . '/wp-config.php';
 
         if (!file_exists($wpConfigPath)) {
             Flash::set('error', 'No se encontro wp-config.php en esta cuenta.');
@@ -868,17 +868,21 @@ class AccountController
         }
 
         $content = file_get_contents($wpConfigPath);
+        if ($content === false) {
+            Flash::set('error', 'No se pudo leer wp-config.php.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
         $isDisabled = preg_match("/define\s*\(\s*['\"]DISABLE_WP_CRON['\"]\s*,\s*true\s*\)/i", $content);
 
         if ($isDisabled) {
-            // Re-enable: remove the DISABLE_WP_CRON line
             $content = preg_replace("/\n?define\s*\(\s*['\"]DISABLE_WP_CRON['\"]\s*,\s*true\s*\);\s*\n?/i", "\n", $content);
             file_put_contents($wpConfigPath, $content);
             Flash::set('success', "WP-Cron reactivado para {$account['domain']}.");
         } else {
-            // Disable: add DISABLE_WP_CRON before the first require/include or "That's all"
             $line = "\ndefine('DISABLE_WP_CRON', true);\n";
-            if (preg_match("/^(<\?php)/m", $content, $m, PREG_OFFSET_MATCH)) {
+            if (preg_match("/^(<\?php)/m", $content, $m, \PREG_OFFSET_CAPTURE)) {
                 $pos = $m[0][1] + strlen($m[0][0]);
                 $content = substr($content, 0, $pos) . $line . substr($content, $pos);
             } else {
@@ -906,8 +910,8 @@ class AccountController
         $notWp = 0;
 
         foreach ($accounts as $acc) {
-            $docRoot = rtrim($acc['home_dir'], '/') . '/' . ltrim($acc['document_root'] ?? 'httpdocs', '/');
-            $wpConfigPath = $docRoot . '/wp-config.php';
+            $docRoot = !empty($acc['document_root']) ? $acc['document_root'] : (rtrim($acc['home_dir'], '/') . '/httpdocs');
+            $wpConfigPath = rtrim($docRoot, '/') . '/wp-config.php';
 
             if (!file_exists($wpConfigPath)) {
                 $notWp++;
@@ -915,13 +919,18 @@ class AccountController
             }
 
             $content = file_get_contents($wpConfigPath);
+            if ($content === false) {
+                $notWp++;
+                continue;
+            }
+
             if (preg_match("/define\s*\(\s*['\"]DISABLE_WP_CRON['\"]\s*,\s*true\s*\)/i", $content)) {
                 $alreadyDisabled++;
                 continue;
             }
 
             $line = "\ndefine('DISABLE_WP_CRON', true);\n";
-            if (preg_match("/^(<\?php)/m", $content, $m, PREG_OFFSET_MATCH)) {
+            if (preg_match("/^(<\?php)/m", $content, $m, \PREG_OFFSET_CAPTURE)) {
                 $pos = $m[0][1] + strlen($m[0][0]);
                 $content = substr($content, 0, $pos) . $line . substr($content, $pos);
             } else {

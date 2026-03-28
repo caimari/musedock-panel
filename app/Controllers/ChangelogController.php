@@ -20,6 +20,54 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.27',
+                'date' => '2026-03-28',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Deteccion automatica de proyectos en migracion — El migrador ahora detecta automaticamente MuseDock CMS, Laravel, WordPress y Zend/SocialEngine sin necesidad de seleccionar manualmente el tipo',
+                            'Soporte Zend/SocialEngine — Detecta application/settings/database.php y extrae credenciales (host, username, password, dbname) automaticamente',
+                            'Soporte MuseDock CMS — Detecta archivo muse + .env con credenciales DB_NAME, DB_USER, DB_PASS y DB_DRIVER',
+                            'Soporte PostgreSQL en migracion — Cuando el proyecto usa DB_DRIVER=pgsql, se usa pg_dump/psql en lugar de mysqldump/mysql',
+                            'Modo Auto en migracion de BD standalone — Nuevo boton "Auto" que detecta el tipo de proyecto sin seleccion manual',
+                        ],
+                        'en' => [
+                            'Automatic project detection in migration — The migrator now automatically detects MuseDock CMS, Laravel, WordPress and Zend/SocialEngine without manual selection',
+                            'Zend/SocialEngine support — Detects application/settings/database.php and extracts credentials (host, username, password, dbname) automatically',
+                            'MuseDock CMS support — Detects muse file + .env with DB_NAME, DB_USER, DB_PASS and DB_DRIVER credentials',
+                            'PostgreSQL support in migration — When the project uses DB_DRIVER=pgsql, pg_dump/psql are used instead of mysqldump/mysql',
+                            'Auto mode in standalone DB migration — New "Auto" button that detects the project type without manual selection',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Deteccion de proyectos en subdominios — Ahora detecta MuseDock, Laravel, WordPress y Zend en subdominios migrados',
+                            'Menos conexiones SSH — La deteccion de proyecto se hace en una sola llamada SSH en vez de multiples',
+                        ],
+                        'en' => [
+                            'Project detection in subdomains — Now detects MuseDock, Laravel, WordPress and Zend in migrated subdomains',
+                            'Fewer SSH connections — Project detection now uses a single SSH call instead of multiple',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Corregido error PREG_OFFSET_CAPTURE en WP-Cron — La constante PHP estaba mal referenciada dentro del namespace, causando error 500 al desactivar WP-Cron',
+                            'Corregida falsa deteccion Laravel — Archivos .env sin DB_DATABASE (como los de SocialEngine) ya no se detectan como Laravel, se continua con la cascada de deteccion',
+                            'Excluido dominio principal de lista de subdominios — El propio dominio de la cuenta ya no aparece como subdominio a migrar',
+                            'Corregido tar exit code 1 en subdominios — Archivos que cambian durante compresion se tratan como warning, no como error fatal',
+                            'Corregida re-migracion de subdominios — Si un subdominio ya existe de un intento anterior, se reutiliza en vez de fallar',
+                        ],
+                        'en' => [
+                            'Fixed false Laravel detection — .env files without DB_DATABASE (like SocialEngine ones) are no longer detected as Laravel, detection cascade continues',
+                            'Excluded main domain from subdomain list — The account own domain no longer appears as a subdomain to migrate',
+                            'Fixed tar exit code 1 for subdomains — Files changed during compression are treated as warning, not fatal error',
+                            'Fixed subdomain re-migration — If a subdomain already exists from a previous attempt, it is reused instead of failing',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.25',
                 'date' => '2026-03-28',
                 'badge' => 'primary',
