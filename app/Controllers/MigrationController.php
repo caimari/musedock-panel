@@ -439,8 +439,171 @@ class MigrationController
             echo json_encode(['active' => false]);
             return;
         }
-        $status = json_decode(file_get_contents($statusFile), true);
-        echo json_encode($status ?: ['active' => false]);
+        $status = json_decode(file_get_contents($statusFile), true) ?: ['active' => false];
+
+        // Check if there's a pending DB dump that can be resumed
+        if (!empty($status['active']) && empty($status['done'])) {
+            $pendingDumps = glob('/tmp/mdpdb_*.sql');
+            $status['has_pending_dump'] = !empty($pendingDumps);
+            if ($status['has_pending_dump']) {
+                $status['pending_dump_file'] = $pendingDumps[0];
+                $status['pending_dump_size'] = round(filesize($pendingDumps[0]) / 1048576, 1);
+            }
+        }
+
+        echo json_encode($status);
+    }
+
+    /**
+     * POST: Cancel/dismiss a stale migration status (clears the status file)
+     */
+    public function sshCancel(array $params): void
+    {
+        header('Content-Type: application/json');
+        $token = $_POST['token'] ?? '';
+        if (!empty($token)) {
+            $statusFile = $this->statusFilePath($token);
+            if (file_exists($statusFile)) {
+                @unlink($statusFile);
+            }
+        }
+        echo json_encode(['ok' => true]);
+    }
+
+    /**
+     * POST: Resume a stalled migration — imports pending DB dump if available
+     * Returns JSON with result
+     */
+    public function sshResume(array $params): void
+    {
+        header('Content-Type: application/json');
+
+        $token = $_POST['token'] ?? '';
+        $accountId = (int)($params['id'] ?? 0);
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $accountId]);
+        $logs = [];
+
+        if (!$account) {
+            echo json_encode(['ok' => false, 'error' => 'Cuenta no encontrada', 'logs' => []]);
+            return;
+        }
+
+        $statusFile = $this->statusFilePath($token);
+        $status = file_exists($statusFile) ? (json_decode(file_get_contents($statusFile), true) ?: []) : [];
+
+        // Find pending dump
+        $pendingDumps = glob('/tmp/mdpdb_*.sql');
+        if (empty($pendingDumps)) {
+            @unlink($statusFile);
+            echo json_encode(['ok' => false, 'error' => 'No hay dump SQL pendiente.', 'logs' => []]);
+            return;
+        }
+
+        $dumpFile = $pendingDumps[0];
+        $dumpSize = round(filesize($dumpFile) / 1048576, 1);
+        $localDbName = str_replace(['.', '-'], '_', $account['username']) . '_db';
+        $localDbUser = $account['username'];
+        $localDbPass = $status['db_pass'] ?? bin2hex(random_bytes(12));
+
+        $logs[] = "Retomando — dump pendiente: {$dumpSize} MB";
+
+        // Detect DB type
+        $head = file_get_contents($dumpFile, false, null, 0, 200);
+        $isPostgres = str_contains($head, 'PostgreSQL') || str_contains($head, 'pg_dump');
+        $dbType = $isPostgres ? 'pgsql' : 'mysql';
+
+        // Ensure DB and user exist
+        if ($isPostgres) {
+            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE USER \"{$localDbUser}\" WITH PASSWORD '{$localDbPass}'")));
+            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("ALTER USER \"{$localDbUser}\" WITH PASSWORD '{$localDbPass}'")));
+            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$localDbName}\" OWNER \"{$localDbUser}\"")));
+        } else {
+            $sqlSetup = sprintf(
+                "CREATE DATABASE IF NOT EXISTS `%s`; CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s'; ALTER USER '%s'@'localhost' IDENTIFIED BY '%s'; GRANT ALL ON `%s`.* TO '%s'@'localhost'; FLUSH PRIVILEGES;",
+                $localDbName, $localDbUser, $localDbPass, $localDbUser, $localDbPass, $localDbName, $localDbUser
+            );
+            $sqlTmp = tempnam('/tmp', 'mdp_sql_');
+            file_put_contents($sqlTmp, $sqlSetup);
+            $out = shell_exec(sprintf('mysql < %s 2>&1', escapeshellarg($sqlTmp)));
+            @unlink($sqlTmp);
+            if ($out && stripos($out, 'ERROR') !== false) {
+                $logs[] = 'ERROR MySQL setup: ' . trim($out);
+            }
+        }
+        $logs[] = "BD {$localDbName} y usuario listos.";
+
+        // Import
+        $logs[] = 'Importando dump SQL...';
+        if ($isPostgres) {
+            $importOut = shell_exec(sprintf('sudo -u postgres psql -d %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
+        } else {
+            $importOut = shell_exec(sprintf('mysql %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
+        }
+        if ($importOut && stripos($importOut, 'ERROR') !== false) {
+            $logs[] = 'WARN: ' . substr(trim($importOut), 0, 300);
+        }
+        $logs[] = "Dump importado ({$dumpSize} MB).";
+        @unlink($dumpFile);
+
+        // Update .env / wp-config
+        $targetDir = $account['document_root'];
+        if (str_ends_with($targetDir, '/public') && file_exists(dirname($targetDir) . '/.env')) {
+            $targetDir = dirname($targetDir);
+        }
+
+        $configUpdated = false;
+        if (file_exists($targetDir . '/.env')) {
+            $env = file_get_contents($targetDir . '/.env');
+            if (str_contains($env, 'DB_DATABASE')) {
+                $env = preg_replace('/^DB_HOST=.*/m', 'DB_HOST=127.0.0.1', $env);
+                $env = preg_replace('/^DB_DATABASE=.*/m', "DB_DATABASE={$localDbName}", $env);
+                $env = preg_replace('/^DB_USERNAME=.*/m', "DB_USERNAME={$localDbUser}", $env);
+                $env = preg_replace('/^DB_PASSWORD=.*/m', "DB_PASSWORD={$localDbPass}", $env);
+                $configUpdated = true;
+            } elseif (str_contains($env, 'DB_NAME')) {
+                $env = preg_replace('/^DB_HOST=.*/m', 'DB_HOST=localhost', $env);
+                $env = preg_replace('/^DB_NAME=.*/m', "DB_NAME={$localDbName}", $env);
+                $env = preg_replace('/^DB_USER=.*/m', "DB_USER={$localDbUser}", $env);
+                $env = preg_replace('/^DB_PASS=.*/m', "DB_PASS={$localDbPass}", $env);
+                $configUpdated = true;
+            }
+            if ($configUpdated) {
+                file_put_contents($targetDir . '/.env', $env);
+                $logs[] = '.env actualizado con credenciales locales.';
+            }
+        }
+        if (!$configUpdated && file_exists($targetDir . '/wp-config.php')) {
+            $wp = file_get_contents($targetDir . '/wp-config.php');
+            $wp = preg_replace("/define\(\s*['\"]DB_NAME['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_NAME', '{$localDbName}')", $wp);
+            $wp = preg_replace("/define\(\s*['\"]DB_USER['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_USER', '{$localDbUser}')", $wp);
+            $wp = preg_replace("/define\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_PASSWORD', '{$localDbPass}')", $wp);
+            $wp = preg_replace("/define\(\s*['\"]DB_HOST['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_HOST', 'localhost')", $wp);
+            file_put_contents($targetDir . '/wp-config.php', $wp);
+            $logs[] = 'wp-config.php actualizado.';
+        }
+
+        // Save to hosting_databases
+        $existing = Database::fetchOne("SELECT id FROM hosting_databases WHERE account_id = :aid AND db_name = :db", ['aid' => $accountId, 'db' => $localDbName]);
+        if (!$existing) {
+            Database::insert('hosting_databases', [
+                'account_id' => $accountId,
+                'db_name' => $localDbName,
+                'db_user' => $localDbUser,
+                'db_type' => $dbType,
+            ]);
+        }
+
+        $logs[] = 'Migracion de BD completada!';
+
+        // Clean status file
+        @unlink($statusFile);
+
+        echo json_encode([
+            'ok' => true,
+            'logs' => $logs,
+            'summary' => "BD importada: {$localDbName} ({$dumpSize} MB)",
+            'db_pass' => $localDbPass,
+        ]);
     }
 
     /**
@@ -674,7 +837,7 @@ class MigrationController
         }
 
         $tarCmd = "cd " . escapeshellarg($fullRemotePath) . " && tar czf " . escapeshellarg($remoteBackupPath) . " {$excludeArgs} . 2>&1; echo TAR_EXIT_\$?";
-        $tarOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, $tarCmd);
+        $tarOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, $tarCmd, 900);
 
         // tar exit code 1 = "file changed as we read it" — this is a warning, not an error
         // Only exit code 2+ is a real failure
@@ -762,12 +925,53 @@ class MigrationController
         }
 
         $this->sendSSE('progress', json_encode(['type' => 'download', 'total' => $remoteSizeBytes, 'current' => $remoteSizeBytes, 'percent' => 100]), $st);
-        $localSize = round(filesize($localBackup) / 1048576, 1);
+        clearstatcache(true, $localBackup);
+        $localSizeBytes = filesize($localBackup);
+        $localSize = round($localSizeBytes / 1048576, 1);
         $this->sendSSE('log', 'Backup descargado: ' . $localSize . ' MB', $st);
 
-        // Delete from remote immediately
+        // Verify download integrity: compare size with remote
+        if ($remoteSizeBytes > 0 && $localSizeBytes < $remoteSizeBytes * 0.95) {
+            $pct = round($localSizeBytes / $remoteSizeBytes * 100, 1);
+            $this->sendSSE('error', "Descarga incompleta: {$localSize}MB de {$remoteSize}MB ({$pct}%). Reintentando por SCP...", $st);
+            @unlink($localBackup);
+
+            // Force SCP retry for incomplete downloads
+            $scpCmd = sprintf(
+                'sshpass -p %s scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -P %d %s@%s:%s %s 2>&1',
+                escapeshellarg($sshPassword), $sshPort,
+                escapeshellarg($sshUser), escapeshellarg($sshHost),
+                escapeshellarg($remoteBackupPath), escapeshellarg($localBackup)
+            );
+            shell_exec("timeout 900 {$scpCmd}");
+            clearstatcache(true, $localBackup);
+
+            if (file_exists($localBackup) && filesize($localBackup) >= $remoteSizeBytes * 0.95) {
+                $localSizeBytes = filesize($localBackup);
+                $localSize = round($localSizeBytes / 1048576, 1);
+                $this->sendSSE('log', "SCP completado: {$localSize} MB. Descarga verificada.", $st);
+            } else {
+                $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "rm -f " . escapeshellarg($remoteBackupPath));
+                @unlink($localBackup);
+                $this->sendSSE('error', 'Descarga incompleta incluso por SCP. Verifica conexion y espacio.', $st);
+                $this->sendSSE('done', json_encode(['ok' => false]), $st);
+                return;
+            }
+        }
+
+        // Delete from remote
         $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "rm -f " . escapeshellarg($remoteBackupPath));
         $this->sendSSE('log', 'Backup eliminado del servidor remoto.', $st);
+
+        // Verify tar integrity before extracting
+        $tarTestOutput = shell_exec(sprintf('tar tzf %s > /dev/null 2>&1; echo $?', escapeshellarg($localBackup)));
+        $tarTestExit = (int) trim($tarTestOutput ?? '1');
+        if ($tarTestExit !== 0) {
+            @unlink($localBackup);
+            $this->sendSSE('error', 'El archivo tar.gz esta corrupto (descarga incompleta o error de compresion). Intenta migrar de nuevo.', $st);
+            $this->sendSSE('done', json_encode(['ok' => false]), $st);
+            return;
+        }
 
         // --- STEP 6: Extract ---
         $this->sendSSE('log', 'Descomprimiendo en ' . $targetDir . '...', $st);
@@ -1087,6 +1291,27 @@ class MigrationController
         // --- STEP 8: Cleanup ---
         @unlink($localBackup);
 
+        // --- STEP 8b: Auto-detect public/ directory for Laravel/MuseDock ---
+        if (in_array($projectType, ['laravel', 'musedock']) && file_exists($targetDir . '/public/index.php')) {
+            $publicDocRoot = $targetDir . '/public';
+            $this->sendSSE('log', "Proyecto {$projectType} detectado con public/. Cambiando document root a {$publicDocRoot}", $st);
+
+            $updated = \MuseDockPanel\Services\SystemService::updateCaddyDocumentRoot(
+                $account['domain'], $publicDocRoot, $account['username'], $account['php_version'] ?? '8.3'
+            );
+
+            if ($updated) {
+                Database::query(
+                    "UPDATE hosting_accounts SET document_root = :dr WHERE id = :id",
+                    ['dr' => $publicDocRoot, 'id' => $account['id']]
+                );
+                $this->sendSSE('log', 'Document root actualizado a public/. Archivos sensibles (.env, config, vendor) ya no son accesibles.', $st);
+            } else {
+                $this->sendSSE('error', 'No se pudo actualizar el document root a public/. Cambialo manualmente desde el panel.', $st);
+                $errors[] = 'Document root update to public/ failed';
+            }
+        }
+
         // --- STEP 9: Migrate subdomains ---
         $migrateSubdomains = $data['migrate_subdomains'] ?? [];
         $subdomainResults = [];
@@ -1140,7 +1365,7 @@ class MigrationController
                     $subExcludeArgs .= " --exclude='vendor'";
                 }
                 $subTarCmd = "cd " . escapeshellarg($subFullPath) . " && tar czf " . escapeshellarg($subRemoteBackupPath) . " {$subExcludeArgs} . 2>&1; echo TAR_EXIT_\$?";
-                $subTarOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, $subTarCmd);
+                $subTarOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, $subTarCmd, 600);
 
                 if (preg_match('/TAR_EXIT_(\d+)/', $subTarOutput, $tarM)) {
                     $tarExit = (int) $tarM[1];

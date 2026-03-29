@@ -20,6 +20,57 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.29',
+                'date' => '2026-03-29',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Standalone Redirects — Crear redirecciones de dominio sin necesidad de cuenta de hosting, asignables a cliente, desde la pagina de Dominios',
+                            'Auto document root public/ — La migracion detecta automaticamente proyectos Laravel/MuseDock con public/index.php y cambia el document root a public/',
+                            'Verificacion de integridad en migraciones — Compara tamano de descarga con el remoto, test de tar.gz antes de extraer, reintento SCP automatico si descarga HTTP incompleta',
+                            'Botones Cancelar/Reintentar en migraciones — Cuando una migracion se queda colgada, aparecen botones para cancelar, reintentar todo o continuar solo la importacion de BD pendiente',
+                            'Endpoint Resume BD — Si la migracion murio durante la importacion, se puede retomar solo la BD sin volver a descargar archivos',
+                        ],
+                        'en' => [
+                            'Standalone Redirects — Create domain redirects without a hosting account, assignable to customers, from the Domains page',
+                            'Auto document root public/ — Migration automatically detects Laravel/MuseDock projects with public/index.php and changes document root to public/',
+                            'Integrity verification in migrations — Compares download size with remote, tar.gz test before extraction, automatic SCP retry if HTTP download incomplete',
+                            'Cancel/Retry buttons in migrations — When a migration stalls, buttons appear to cancel, retry all, or continue only the pending DB import',
+                            'Resume DB endpoint — If migration died during import, DB can be resumed without re-downloading files',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Timeout de migracion aumentado a 1 hora — El panel PHP ya no mata migraciones de sitios grandes (antes: 10 min)',
+                            'Timeout de tar remoto aumentado a 15 min — Sitios grandes ya no generan backups truncados (antes: 30 seg)',
+                            'Exclusiones lsyncd mejoradas — Cachees de imagenes (.glide_cache, proxy_cache) y herramientas de desarrollo (.copilot, .cache) excluidas de la replicacion',
+                            'Pagina de Dominios separada — Aliases/redirects de hosting y standalone redirects en secciones diferentes para mayor claridad',
+                            'Campos SSH siempre visibles en migracion BD standalone — Eliminada casilla innecesaria, SSH es el metodo por defecto',
+                            'Confirmacion con password de admin para eliminar redirects standalone',
+                        ],
+                        'en' => [
+                            'Migration timeout increased to 1 hour — Panel PHP no longer kills large site migrations (was: 10 min)',
+                            'Remote tar timeout increased to 15 min — Large sites no longer generate truncated backups (was: 30 sec)',
+                            'Improved lsyncd exclusions — Image caches (.glide_cache, proxy_cache) and dev tools (.copilot, .cache) excluded from replication',
+                            'Domains page separated — Hosting aliases/redirects and standalone redirects in different sections for clarity',
+                            'SSH fields always visible in standalone DB migration — Removed unnecessary checkbox, SSH is the default method',
+                            'Admin password confirmation required to delete standalone redirects',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Corregido tar truncado en migraciones — El timeout de 30s del SSH causaba que el tar se cortara en sitios grandes, resultando en archivos faltantes',
+                            'Corregida descarga incompleta sin deteccion — Ahora se verifica el tamano y la integridad del tar antes de extraer',
+                        ],
+                        'en' => [
+                            'Fixed truncated tar in migrations — The 30s SSH timeout caused tar to be cut off on large sites, resulting in missing files',
+                            'Fixed undetected incomplete downloads — Size and tar integrity are now verified before extraction',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.28',
                 'date' => '2026-03-28',
                 'badge' => 'primary',

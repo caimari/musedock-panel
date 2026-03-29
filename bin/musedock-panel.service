@@ -8,7 +8,7 @@ Type=simple
 User=root
 Group=root
 WorkingDirectory=__PANEL_DIR__
-ExecStart=/usr/bin/php -d upload_max_filesize=2G -d post_max_size=2G -d max_execution_time=600 -S 127.0.0.1:__PANEL_INTERNAL_PORT__ -t __PANEL_DIR__/public __PANEL_DIR__/public/router.php
+ExecStart=/usr/bin/php -d upload_max_filesize=2G -d post_max_size=2G -d max_execution_time=3600 -S 127.0.0.1:__PANEL_INTERNAL_PORT__ -t __PANEL_DIR__/public __PANEL_DIR__/public/router.php
 Restart=always
 RestartSec=5
 StandardOutput=append:__PANEL_DIR__/storage/logs/panel.log

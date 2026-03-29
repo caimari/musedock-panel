@@ -294,17 +294,12 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                             </div>
                         </div>
 
-                        <!-- SSH for remote mysqldump -->
-                        <div class="p-2 mb-3 rounded" style="background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.2);">
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="dbSshToggle" onchange="document.getElementById('dbSshFields').style.display = this.checked ? '' : 'none';">
-                                <label class="form-check-label" for="dbSshToggle">
-                                    <i class="bi bi-hdd-network me-1" style="color:#fbbf24;"></i><strong>Ejecutar mysqldump via SSH</strong>
-                                </label>
-                            </div>
-                            <small class="text-muted d-block mt-1 ms-4">Conecta por SSH al servidor remoto para ejecutar mysqldump. <strong>Necesario</strong> si MySQL no acepta conexiones externas (lo habitual en Plesk/cPanel).</small>
+                        <!-- SSH connection for remote mysqldump -->
+                        <input type="hidden" id="dbSshToggle" checked>
+                        <div class="p-2 mb-3 rounded" style="background: rgba(56,189,248,0.08); border: 1px solid rgba(56,189,248,0.2);">
+                            <small class="text-muted"><i class="bi bi-hdd-network me-1" style="color:#38bdf8;"></i>Conecta por SSH al servidor remoto para ejecutar mysqldump.</small>
                         </div>
-                        <div id="dbSshFields" style="display:none;">
+                        <div id="dbSshFields">
                             <div class="row g-2 mb-2">
                                 <div class="col-md-4">
                                     <label class="form-label">SSH Host</label>
@@ -858,7 +853,13 @@ function resetSshBtn() {
             // Migration still running — show log so far and reconnect SSE
             SwalDark.fire({
                 title: '<i class="bi bi-rocket-takeoff me-2"></i>Migracion en curso (reconectando)',
-                html: buildMigrationModalHtml(),
+                html: buildMigrationModalHtml() +
+                    '<div id="migStaleActions" style="margin-top:12px;">' +
+                        (status.has_pending_dump ?
+                            '<button onclick="resumeMigration()" class="btn btn-outline-success btn-sm me-2"><i class="bi bi-play-circle me-1"></i>Continuar importacion BD (' + status.pending_dump_size + ' MB)</button>' : '') +
+                        '<button onclick="cancelMigration()" class="btn btn-outline-danger btn-sm me-2"><i class="bi bi-x-circle me-1"></i>Cancelar y cerrar</button>' +
+                        '<button onclick="cancelMigration(); setTimeout(function(){ location.reload(); }, 300);" class="btn btn-outline-warning btn-sm"><i class="bi bi-arrow-clockwise me-1"></i>Reintentar todo</button>' +
+                    '</div>',
                 showConfirmButton: false,
                 showCancelButton: false,
                 allowOutsideClick: false,
@@ -898,10 +899,97 @@ function resetSshBtn() {
     });
 })();
 
+function resumeMigration() {
+    var token = localStorage.getItem('mdp_migration_token') || 'none';
+    var accountId = localStorage.getItem('mdp_migration_account') || '<?= $account['id'] ?? '' ?>';
+    if (!accountId) return;
+
+    var staleEl = document.getElementById('migStaleActions');
+    if (staleEl) staleEl.style.display = 'none';
+
+    var logEl = document.getElementById('migLog');
+    if (!logEl) {
+        // No modal open — create a simple one
+        SwalDark.fire({ title: 'Importando BD...', html: buildMigrationModalHtml(), showConfirmButton: false, width: 620 });
+        logEl = document.getElementById('migLog');
+    }
+    var stepEl = document.getElementById('migStepBadge');
+    if (stepEl) stepEl.innerHTML = '<span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;font-size:0.85rem;"><span class="spinner-border spinner-border-sm me-1"></span>Importando BD...</span>';
+
+    var div = document.createElement('div');
+    div.style.color = '#38bdf8';
+    div.textContent = 'Retomando importacion de base de datos...';
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+
+    var formData = new FormData();
+    formData.append('token', token);
+
+    fetch('/accounts/' + accountId + '/migrate/ssh-resume', { method: 'POST', body: formData })
+    .then(function(r) { return r.json(); })
+    .then(function(result) {
+        localStorage.removeItem('mdp_migration_token');
+        localStorage.removeItem('mdp_migration_account');
+
+        // Show logs
+        if (result.logs) {
+            result.logs.forEach(function(line) {
+                var d = document.createElement('div');
+                d.style.color = line.indexOf('ERROR') !== -1 ? '#ef4444' : '#94a3b8';
+                d.textContent = line;
+                logEl.appendChild(d);
+            });
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        if (result.ok) {
+            stepEl.innerHTML = '<span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;font-size:0.85rem;"><i class="bi bi-check-circle me-1"></i>BD importada</span>';
+        } else {
+            stepEl.innerHTML = '<span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;font-size:0.85rem;"><i class="bi bi-x-circle me-1"></i>Error</span>';
+        }
+
+        var resultEl = document.getElementById('migResult');
+        if (resultEl) {
+            resultEl.innerHTML = buildResultInnerHtml(result);
+            resultEl.style.display = '';
+            var closeBtn = document.createElement('button');
+            closeBtn.className = 'btn btn-outline-light btn-sm mt-3';
+            closeBtn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Cerrar';
+            closeBtn.onclick = function() { Swal.close(); resetSshBtn(); };
+            resultEl.appendChild(closeBtn);
+        }
+    })
+    .catch(function(err) {
+        var d = document.createElement('div');
+        d.style.color = '#ef4444';
+        d.textContent = 'Error: ' + err.message;
+        logEl.appendChild(d);
+        if (staleEl) staleEl.style.display = '';
+    });
+}
+
+function cancelMigration() {
+    var token = localStorage.getItem('mdp_migration_token');
+    var accountId = localStorage.getItem('mdp_migration_account');
+    if (token && accountId) {
+        fetch('/accounts/' + accountId + '/migrate/ssh-cancel', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-TOKEN': document.querySelector('meta[name=csrf-token]')?.content || ''},
+            body: 'token=' + encodeURIComponent(token) + '&_csrf=' + encodeURIComponent(document.querySelector('input[name=_csrf]')?.value || '')
+        });
+    }
+    localStorage.removeItem('mdp_migration_token');
+    localStorage.removeItem('mdp_migration_account');
+    Swal.close();
+    if (typeof resetSshBtn === 'function') resetSshBtn();
+}
+
 function pollMigrationStatus(accountId, token) {
     var logEl = document.getElementById('migLog');
     var stepEl = document.getElementById('migStepBadge');
     var lastLogCount = logEl ? logEl.children.length : 0;
+    var lastActivityTime = Date.now();
+    var staleShown = false;
 
     var interval = setInterval(function() {
         fetch('/accounts/' + accountId + '/migrate/ssh-status?token=' + token)
@@ -920,10 +1008,21 @@ function pollMigrationStatus(accountId, token) {
                 }
                 logEl.scrollTop = logEl.scrollHeight;
                 lastLogCount = status.logs.length;
+                lastActivityTime = Date.now();
+                staleShown = false;
+                var staleEl = document.getElementById('migStaleActions');
+                if (staleEl) staleEl.style.display = 'none';
             }
             if (status.step) {
                 stepEl.innerHTML = '<span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;font-size:0.85rem;">' +
                     '<span class="spinner-border spinner-border-sm me-1"></span>' + status.step + '</span>';
+            }
+
+            // Show stale actions if no activity for 30 seconds
+            if (!staleShown && (Date.now() - lastActivityTime) > 30000) {
+                staleShown = true;
+                var staleEl = document.getElementById('migStaleActions');
+                if (staleEl) staleEl.style.display = '';
             }
 
             if (status.done) {
@@ -939,6 +1038,9 @@ function pollMigrationStatus(accountId, token) {
                     stepEl.innerHTML = '<span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;font-size:0.85rem;">' +
                         '<i class="bi bi-exclamation-triangle me-1"></i>Completado con advertencias</span>';
                 }
+
+                var staleEl = document.getElementById('migStaleActions');
+                if (staleEl) staleEl.style.display = 'none';
 
                 var resultEl = document.getElementById('migResult');
                 if (resultEl) {

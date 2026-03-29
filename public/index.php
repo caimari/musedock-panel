@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.28');
+define('PANEL_VERSION', '1.0.29');
 
 
 
@@ -154,10 +154,14 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/migrate/ssh-prepare', 'MigrationController@sshPrepare');
 \MuseDockPanel\Router::get('/accounts/{id}/migrate/ssh-stream', 'MigrationController@sshStream');
 \MuseDockPanel\Router::get('/accounts/{id}/migrate/ssh-status', 'MigrationController@sshStatus');
+\MuseDockPanel\Router::post('/accounts/{id}/migrate/ssh-cancel', 'MigrationController@sshCancel');
+\MuseDockPanel\Router::post('/accounts/{id}/migrate/ssh-resume', 'MigrationController@sshResume');
 
 // Domains
 \MuseDockPanel\Router::get('/domains', 'DomainController@index');
 \MuseDockPanel\Router::post('/domains/check-dns', 'DomainController@checkDns');
+\MuseDockPanel\Router::post('/domains/add-redirect', 'DomainController@addRedirect');
+\MuseDockPanel\Router::post('/domains/delete-redirect', 'DomainController@deleteRedirect');
 
 // Databases
 \MuseDockPanel\Router::get('/databases', 'DatabaseController@index');

@@ -453,22 +453,39 @@ CONF;
 
     private static function buildCfPolicy(string $cfToken, array $subjects = []): array
     {
-        $acmeIssuer = ['email' => 'admin@musedock.com', 'module' => 'acme'];
+        if (!empty($subjects)) {
+            // Per-account policy: DNS-01 only (domains behind Cloudflare proxy)
+            $acmeIssuer = ['email' => 'admin@musedock.com', 'module' => 'acme'];
+            if ($cfToken) {
+                $acmeIssuer['challenges'] = [
+                    'dns' => [
+                        'provider' => ['name' => 'cloudflare', 'api_token' => $cfToken],
+                        'resolvers' => ['1.1.1.1:53', '8.8.8.8:53']
+                    ]
+                ];
+            }
+            return ['subjects' => $subjects, 'issuers' => [$acmeIssuer]];
+        }
+
+        // Catch-all policy: HTTP-01 first (direct domains), then DNS-01 as fallback
+        $httpIssuer = ['email' => 'admin@musedock.com', 'module' => 'acme'];
+        $issuers = [$httpIssuer];
 
         if ($cfToken) {
-            $acmeIssuer['challenges'] = [
-                'dns' => [
-                    'provider' => ['name' => 'cloudflare', 'api_token' => $cfToken],
-                    'resolvers' => ['1.1.1.1:53', '8.8.8.8:53']
+            $dnsIssuer = [
+                'email' => 'admin@musedock.com',
+                'module' => 'acme',
+                'challenges' => [
+                    'dns' => [
+                        'provider' => ['name' => 'cloudflare', 'api_token' => $cfToken],
+                        'resolvers' => ['1.1.1.1:53', '8.8.8.8:53']
+                    ]
                 ]
             ];
+            $issuers[] = $dnsIssuer;
         }
 
-        $policy = ['issuers' => [$acmeIssuer]];
-        if (!empty($subjects)) {
-            $policy['subjects'] = $subjects;
-        }
-        return $policy;
+        return ['issuers' => $issuers];
     }
 
     private static function patchTlsPolicies(string $caddyApi, array $policies): void

@@ -123,16 +123,17 @@ function renderDnsBadge(array $dns): string {
 </div>
 
 <?php
-    // Split aliases and redirects
-    $aliasList = array_filter($aliasesAndRedirects, fn($r) => $r['type'] === 'alias');
-    $redirectList = array_filter($aliasesAndRedirects, fn($r) => $r['type'] === 'redirect');
+    // Split: hosting-linked vs standalone
+    $hostingLinked = array_filter($aliasesAndRedirects, fn($r) => !empty($r['hosting_account_id']));
+    $standaloneRedirects = array_filter($aliasesAndRedirects, fn($r) => empty($r['hosting_account_id']));
 ?>
 
-<?php if (!empty($aliasList) || !empty($redirectList)): ?>
+<!-- Hosting Aliases & Redirects (linked to accounts) -->
+<?php if (!empty($hostingLinked)): ?>
 <div class="card mt-4">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-diagram-3 me-2"></i>Domain Aliases & Redirects</span>
-        <small class="text-muted"><?= count($aliasList) ?> alias(es), <?= count($redirectList) ?> redirect(s)</small>
+    <div class="card-header">
+        <i class="bi bi-diagram-3 me-2"></i>Hosting Aliases & Redirects
+        <small class="text-muted ms-2">(vinculados a cuentas de hosting)</small>
     </div>
     <div class="card-body p-0">
         <table class="table table-hover mb-0">
@@ -147,7 +148,7 @@ function renderDnsBadge(array $dns): string {
                 </tr>
             </thead>
             <tbody>
-                <?php foreach ($aliasesAndRedirects as $item):
+                <?php foreach ($hostingLinked as $item):
                     $itemDns = CloudflareService::checkDomainDns($item['domain'], $serverIp);
                 ?>
                 <tr>
@@ -170,8 +171,8 @@ function renderDnsBadge(array $dns): string {
                     <td><?= renderDnsBadge($itemDns) ?></td>
                     <td>
                         <a href="/accounts/<?= $item['hosting_account_id'] ?>" class="text-decoration-none text-light">
-                            <i class="bi bi-arrow-right me-1 text-muted"></i><?= View::e($item['account_domain']) ?>
-                            <code class="ms-1"><?= View::e($item['username']) ?></code>
+                            <i class="bi bi-arrow-right me-1 text-muted"></i><?= View::e($item['account_domain'] ?? '') ?>
+                            <code class="ms-1"><?= View::e($item['username'] ?? '') ?></code>
                         </a>
                     </td>
                     <td><?= View::e($item['customer_name'] ?? '-') ?></td>
@@ -183,6 +184,164 @@ function renderDnsBadge(array $dns): string {
     </div>
 </div>
 <?php endif; ?>
+
+<!-- Standalone Redirects (not linked to hosting) -->
+<div class="card mt-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-arrow-right-circle me-2" style="color:#fb923c;"></i>Standalone Redirects</span>
+        <div>
+            <small class="text-muted me-3"><?= count($standaloneRedirects) ?> redirect(s)</small>
+            <button class="btn btn-danger btn-sm py-0 px-2" onclick="document.getElementById('addRedirectForm').style.display = document.getElementById('addRedirectForm').style.display === 'none' ? '' : 'none'">
+                <i class="bi bi-plus-lg me-1"></i>Redirect
+            </button>
+        </div>
+    </div>
+
+    <!-- Add redirect form -->
+    <div id="addRedirectForm" style="display:none;" class="card-body" style="border-bottom:1px solid #334155;">
+        <form action="/domains/add-redirect" method="POST">
+            <?= View::csrf() ?>
+            <div class="row g-2 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label small text-muted">Dominio</label>
+                    <input type="text" name="domain" class="form-control form-control-sm" placeholder="ejemplo.com" required style="background:#1e293b;border-color:#334155;color:#e2e8f0;">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small text-muted">Redirigir a</label>
+                    <input type="text" name="target_url" class="form-control form-control-sm" placeholder="https://destino.com" required style="background:#1e293b;border-color:#334155;color:#e2e8f0;">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small text-muted">Cliente</label>
+                    <select name="customer_id" class="form-select form-select-sm" style="background:#1e293b;border-color:#334155;color:#e2e8f0;">
+                        <option value="">— Sin asignar —</option>
+                        <?php foreach ($customers as $cust): ?>
+                        <option value="<?= $cust['id'] ?>"><?= View::e($cust['name']) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-md-1">
+                    <label class="form-label small text-muted">Codigo</label>
+                    <select name="redirect_code" class="form-select form-select-sm" style="background:#1e293b;border-color:#334155;color:#e2e8f0;">
+                        <option value="301">301</option>
+                        <option value="302">302</option>
+                    </select>
+                </div>
+                <div class="col-md-1">
+                    <div class="form-check mt-1">
+                        <input class="form-check-input" type="checkbox" name="preserve_path" checked>
+                        <label class="form-check-label small text-muted">Path</label>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <button type="submit" class="btn btn-success btn-sm w-100"><i class="bi bi-plus-lg me-1"></i>Crear</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <?php if (!empty($standaloneRedirects)): ?>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead>
+                <tr>
+                    <th class="ps-3">Domain</th>
+                    <th>Code</th>
+                    <th>DNS Status</th>
+                    <th>Target</th>
+                    <th>Customer</th>
+                    <th>Created</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php foreach ($standaloneRedirects as $item):
+                    $itemDns = CloudflareService::checkDomainDns($item['domain'], $serverIp);
+                ?>
+                <tr>
+                    <td class="ps-3">
+                        <a href="https://<?= View::e($item['domain']) ?>" target="_blank" class="text-info text-decoration-none">
+                            <?= View::e($item['domain']) ?> <i class="bi bi-box-arrow-up-right small"></i>
+                        </a>
+                    </td>
+                    <td>
+                        <span class="badge" style="background: rgba(251,146,60,0.15); color: #fb923c;">
+                            <?= $item['redirect_code'] ?>
+                        </span>
+                    </td>
+                    <td><?= renderDnsBadge($itemDns) ?></td>
+                    <td>
+                        <i class="bi bi-arrow-right me-1 text-muted"></i>
+                        <a href="<?= View::e($item['target_url'] ?? '#') ?>" target="_blank" class="text-decoration-none text-light">
+                            <?= View::e($item['target_url'] ?? '-') ?>
+                        </a>
+                    </td>
+                    <td><?= View::e($item['customer_name'] ?? '-') ?></td>
+                    <td><small class="text-muted"><?= date('d/m/Y', strtotime($item['created_at'])) ?></small></td>
+                    <td class="text-end">
+                        <button type="button" class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:0.7rem;" title="Eliminar"
+                            onclick="confirmDeleteRedirect(<?= (int)$item['id'] ?>, '<?= View::e($item['domain']) ?>')">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+    </div>
+    <?php else: ?>
+    <div class="card-body text-center text-muted py-3">
+        <small>No hay redirects standalone. Usa el boton "+ Redirect" para crear uno.</small>
+    </div>
+    <?php endif; ?>
+</div>
+
+<script>
+function confirmDeleteRedirect(id, domain) {
+    Swal.fire({
+        title: '<i class="bi bi-exclamation-triangle me-2" style="color:#ef4444;"></i>Eliminar redirect',
+        html: '<p style="color:#e2e8f0;">Vas a eliminar el redirect <strong>' + domain + '</strong>.</p>' +
+              '<p style="color:#94a3b8;font-size:0.85rem;">Se eliminara la ruta de Caddy y el certificado SSL.</p>' +
+              '<input type="password" id="redirectDeletePw" class="form-control form-control-sm mt-3" placeholder="Password de administrador" ' +
+              'style="background:#1e293b;border-color:#334155;color:#e2e8f0;">',
+        background: '#0f172a',
+        color: '#e2e8f0',
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-trash me-1"></i>Eliminar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#ef4444',
+        focusConfirm: false,
+        preConfirm: function() {
+            var pw = document.getElementById('redirectDeletePw').value;
+            if (!pw) { Swal.showValidationMessage('Password requerido'); return false; }
+            return pw;
+        }
+    }).then(function(result) {
+        if (result.isConfirmed) {
+            var form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/domains/delete-redirect';
+
+            var csrf = document.querySelector('input[name=_csrf_token]');
+            if (csrf) {
+                var ci = document.createElement('input');
+                ci.type = 'hidden'; ci.name = '_csrf_token'; ci.value = csrf.value;
+                form.appendChild(ci);
+            }
+
+            var idInput = document.createElement('input');
+            idInput.type = 'hidden'; idInput.name = 'id'; idInput.value = id;
+            form.appendChild(idInput);
+
+            var pwInput = document.createElement('input');
+            pwInput.type = 'hidden'; pwInput.name = 'admin_password'; pwInput.value = result.value;
+            form.appendChild(pwInput);
+
+            document.body.appendChild(form);
+            form.submit();
+        }
+    });
+}
+</script>
 
 <div class="mt-3 p-3 rounded" style="background: rgba(56,189,248,0.05); border: 1px solid #334155;">
     <small class="text-muted">

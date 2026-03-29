@@ -1431,7 +1431,9 @@ class FileSyncService
         '.codex',
         '.cline',
         '.vscode-server',
+        '.copilot',
         '.git',
+        '.cache',
     ];
 
     private const LSYNCD_DEFAULT_EXCLUDES = [
@@ -1439,12 +1441,17 @@ class FileSyncService
         '.claude',
         '.codex',
         '.cline',
+        '.copilot',
         '.git',
+        '.cache',
         'node_modules',
         'storage/logs',
         'storage/framework/cache',
         'storage/framework/sessions',
         'storage/framework/views',
+        '.glide_cache',
+        'glide_cache',
+        'proxy_cache',
     ];
 
     public static function generateLsyncdConfig(): array
