@@ -2004,17 +2004,18 @@ class MigrationController
                 $remotePass = $parsed['password'];
                 $remoteDriver = $parsed['driver'] ?? 'mysql';
             } elseif ($dbSource === 'laravel') {
-                $lines = [];
-                foreach (explode("\n", $content) as $line) {
-                    if (preg_match('/^([A-Z_]+)=(.*)$/', trim($line), $m)) {
-                        $lines[$m[1]] = trim($m[2], '"\'');
-                    }
+                $parsed = $this->parseLaravelEnv($content);
+                if (!$parsed) {
+                    Flash::set('error', 'No se pudieron extraer credenciales Laravel del .env remoto.');
+                    Router::redirect('/accounts/' . $params['id'] . '/migrate');
+                    return;
                 }
-                $remoteHost = $lines['DB_HOST'] ?? '127.0.0.1';
-                $remotePort = $lines['DB_PORT'] ?? '3306';
-                $remoteDb = $lines['DB_DATABASE'] ?? '';
-                $remoteUser = $lines['DB_USERNAME'] ?? '';
-                $remotePass = $lines['DB_PASSWORD'] ?? '';
+                $remoteHost = $parsed['host'];
+                $remotePort = $parsed['port'];
+                $remoteDb = $parsed['database'];
+                $remoteUser = $parsed['username'];
+                $remotePass = $parsed['password'];
+                $remoteDriver = $parsed['driver'] ?? 'mysql';
             } elseif ($dbSource === 'zend') {
                 $parsed = $this->parseZendDbConfig($content);
                 if (!$parsed) {

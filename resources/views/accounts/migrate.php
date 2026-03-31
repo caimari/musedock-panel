@@ -321,7 +321,14 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                             <div class="row g-2 mb-3">
                                 <div class="col-12">
                                     <label class="form-label">Ruta remota del proyecto <small class="text-muted">(donde esta wp-config.php o .env en el servidor remoto)</small></label>
-                                    <input type="text" name="ssh_remote_path" class="form-control" placeholder="<?= View::e($account['document_root']) ?>" value="">
+                                    <?php
+                                        // Pre-fill with likely remote path (strip /public suffix added locally)
+                                        $remotePath = $account['document_root'];
+                                        if (str_ends_with($remotePath, '/public')) {
+                                            $remotePath = substr($remotePath, 0, -7);
+                                        }
+                                    ?>
+                                    <input type="text" name="ssh_remote_path" class="form-control" value="<?= View::e($remotePath) ?>">
                                 </div>
                             </div>
                             <div class="p-2 mb-2 rounded" style="background: rgba(34,197,94,0.06); border: 1px solid rgba(34,197,94,0.2);">
