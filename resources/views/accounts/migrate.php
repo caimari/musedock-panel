@@ -176,6 +176,18 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                         <label for="excludeVendor" class="form-check-label">Omitir vendor/ y ejecutar <code>composer install</code></label>
                         <small class="d-block text-muted">Solo si las dependencias estan disponibles en packagist. Si es proyecto antiguo, dejalo desmarcado.</small>
                     </div>
+                    <div class="form-check mb-1">
+                        <input type="checkbox" name="copy_everything" id="copyEverything" class="form-check-input" onchange="
+                            var folders = document.getElementById('vhostFolderSelector');
+                            if (this.checked) {
+                                if (folders) folders.style.display = 'none';
+                            } else {
+                                if (folders) folders.style.display = '';
+                            }
+                        ">
+                        <label for="copyEverything" class="form-check-label">Copiar absolutamente todo <small style="color:#fbbf24;">(sin exclusiones)</small></label>
+                        <small class="d-block text-muted">Copia el 100% del directorio remoto sin excluir nada. No necesitas seleccionar carpetas manualmente.</small>
+                    </div>
 
                     <!-- Subdomain selector (populated after SSH test) -->
                     <div id="subdomainSelector" style="display:none;" class="mb-2 p-2 rounded" style="border: 1px solid #334155;">
@@ -376,15 +388,27 @@ document.getElementById('sshDocRoot').addEventListener('input', updateAutoInfo);
 document.getElementById('sshLocalTarget').addEventListener('input', updateAutoInfo);
 
 function updateAutoInfo() {
-    var remotePath = document.getElementById('sshRemotePath').value;
+    var remotePath = document.getElementById('sshRemotePath').value.replace(/\/+$/, '');
     var docRoot = document.getElementById('sshDocRoot').value;
-    var localTarget = document.getElementById('sshLocalTarget').value;
+    var localTarget = document.getElementById('sshLocalTarget');
     var match = remotePath.match(/\/vhosts\/([^\/]+)/);
     var domain = match ? match[1] : '<?= View::e($account['domain']) ?>';
     var fullRemote = remotePath + (docRoot ? '/' + docRoot.replace(/^\//, '') : '');
+
+    // Auto-adjust local target based on remote path
+    var homeDir = '<?= View::e($account['home_dir']) ?>';
+    var docRoot = '<?= View::e($account['document_root']) ?>';
+    if (remotePath.match(/\/httpdocs\/?$/) || fullRemote.match(/\/httpdocs\/?$/)) {
+        // Remote points to httpdocs — extract to document_root
+        localTarget.value = docRoot;
+    } else if (remotePath.match(/\/vhosts\/[^\/]+\/?$/)) {
+        // Remote is vhost root — extract to home_dir
+        localTarget.value = homeDir;
+    }
+
     document.getElementById('sshAutoInfo').innerHTML =
         '<small class="text-muted" style="font-size:0.8rem;">' +
-        'Remoto: <code>' + fullRemote + '</code> &rarr; Local: <code>' + localTarget + '</code></small>';
+        'Remoto: <code>' + fullRemote + '</code> &rarr; Local: <code>' + localTarget.value + '</code></small>';
 }
 
 // ================================================================

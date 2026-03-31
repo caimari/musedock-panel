@@ -98,6 +98,97 @@ class MigrationController
         return shell_exec($cmd) ?? '';
     }
 
+    /**
+     * Create PostgreSQL user + database, import dump, fix ownership and grants.
+     * Returns ['ok' => bool, 'logs' => [...], 'password' => string]
+     */
+    private function setupPostgresDb(string $dbName, string $dbUser, string $dbPass, string $dumpFile): array
+    {
+        $logs = [];
+        $port = '5432'; // Hosting DBs go to cluster main
+
+        // Create user (ignore "already exists")
+        shell_exec(sprintf("sudo -u postgres psql -p %s -c %s 2>&1", $port,
+            escapeshellarg("CREATE USER \"{$dbUser}\" WITH PASSWORD '{$dbPass}'")));
+        // Always update password (in case user already existed with different password)
+        shell_exec(sprintf("sudo -u postgres psql -p %s -c %s 2>&1", $port,
+            escapeshellarg("ALTER USER \"{$dbUser}\" WITH PASSWORD '{$dbPass}'")));
+
+        // Create database (ignore "already exists")
+        shell_exec(sprintf("sudo -u postgres psql -p %s -c %s 2>&1", $port,
+            escapeshellarg("CREATE DATABASE \"{$dbName}\" OWNER \"{$dbUser}\"")));
+
+        // Grant connect
+        shell_exec(sprintf("sudo -u postgres psql -p %s -c %s 2>&1", $port,
+            escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$dbName}\" TO \"{$dbUser}\"")));
+
+        $logs[] = "BD {$dbName} y usuario {$dbUser} creados.";
+
+        // Import dump (suppress "already exists" and "does not exist" noise)
+        if (file_exists($dumpFile) && filesize($dumpFile) > 50) {
+            $importOut = shell_exec(sprintf(
+                'sudo -u postgres psql -p %s -d %s < %s 2>&1',
+                $port, escapeshellarg($dbName), escapeshellarg($dumpFile)
+            ));
+            // Count real errors (not "already exists" or "does not exist")
+            $realErrors = 0;
+            if ($importOut) {
+                foreach (explode("\n", $importOut) as $line) {
+                    if (stripos($line, 'ERROR') !== false
+                        && stripos($line, 'already exists') === false
+                        && stripos($line, 'does not exist') === false) {
+                        $realErrors++;
+                        if ($realErrors <= 3) $logs[] = 'WARN: ' . trim(substr($line, 0, 200));
+                    }
+                }
+            }
+            $dumpSize = round(filesize($dumpFile) / 1048576, 1);
+            $logs[] = "Dump importado ({$dumpSize} MB)" . ($realErrors > 0 ? " con {$realErrors} warning(s)." : '.');
+        }
+
+        // Fix ownership: transfer ALL tables, sequences, views to the local user
+        $fixOwnership = "
+            DO \$\$
+            DECLARE r RECORD;
+            BEGIN
+                FOR r IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' LOOP
+                    EXECUTE 'ALTER TABLE public.' || quote_ident(r.tablename) || ' OWNER TO \"{$dbUser}\"';
+                END LOOP;
+                FOR r IN SELECT sequence_name FROM information_schema.sequences WHERE sequence_schema = 'public' LOOP
+                    EXECUTE 'ALTER SEQUENCE public.' || quote_ident(r.sequence_name) || ' OWNER TO \"{$dbUser}\"';
+                END LOOP;
+            END \$\$;
+        ";
+        shell_exec(sprintf("sudo -u postgres psql -p %s -d %s -c %s 2>&1",
+            $port, escapeshellarg($dbName), escapeshellarg($fixOwnership)));
+
+        // Grant all privileges on existing objects
+        shell_exec(sprintf("sudo -u postgres psql -p %s -d %s -c %s 2>&1", $port, escapeshellarg($dbName),
+            escapeshellarg("GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"{$dbUser}\"; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"{$dbUser}\"; GRANT USAGE ON SCHEMA public TO \"{$dbUser}\";")));
+
+        // Set default privileges for future objects
+        shell_exec(sprintf("sudo -u postgres psql -p %s -d %s -c %s 2>&1", $port, escapeshellarg($dbName),
+            escapeshellarg("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"{$dbUser}\"; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \"{$dbUser}\";")));
+
+        $logs[] = 'Ownership y permisos corregidos.';
+
+        // Verify connection with the actual user/password
+        $verifyCmd = sprintf(
+            'PGPASSWORD=%s psql -h 127.0.0.1 -p %s -U %s -d %s -c "SELECT COUNT(*) FROM pg_tables WHERE schemaname=\'public\';" -t 2>&1',
+            escapeshellarg($dbPass), $port, escapeshellarg($dbUser), escapeshellarg($dbName)
+        );
+        $verifyOut = trim(shell_exec($verifyCmd) ?? '');
+        $tableCount = (int)$verifyOut;
+
+        if ($tableCount > 0) {
+            $logs[] = "Verificacion OK: {$tableCount} tablas accesibles por {$dbUser}.";
+        } else {
+            $logs[] = "WARN: Verificacion de conexion fallo. Output: " . substr($verifyOut, 0, 200);
+        }
+
+        return ['ok' => $tableCount > 0, 'logs' => $logs, 'password' => $dbPass];
+    }
+
     private function parseLaravelEnv(string $content): ?array
     {
         $values = [];
@@ -295,9 +386,10 @@ class MigrationController
             . 'elif [ -f "$P/.env" ]; then echo "MAIN_PROJECT:EnvNoDb"; '
             . 'else echo "MAIN_PROJECT:Unknown"; fi; '
             . 'R=' . escapeshellarg($remotePath) . '; '
-            . 'for d in "$R"/*/; do '
+            . 'for d in "$R"/*/ "$R"/.*/; do '
             . '  [ -d "$d" ] || continue; '
             . '  name=$(basename "$d"); '
+            . '  [ "$name" = "." ] || [ "$name" = ".." ] && continue; '
             . '  sz=$(du -sh "$d" 2>/dev/null | cut -f1); '
             . '  ht="no"; [ -d "$d/httpdocs" ] && ht="yes"; '
             . '  proj="none"; '
@@ -322,7 +414,7 @@ class MigrationController
 
         // Parse vhost folders from scan output
         $vhostFolders = [];
-        $systemFolders = ['httpdocs', 'httpsdocs', 'logs', 'tmp', 'sessions', 'error_docs', 'statistics', 'private', 'cgi-bin', 'anon_ftp', 'conf', 'pd', 'web_users'];
+        $systemFolders = ['httpdocs', 'httpsdocs', 'error_docs', 'statistics', 'cgi-bin', 'anon_ftp', 'conf', 'pd', 'web_users'];
         $accountRow = Database::fetchOne("SELECT domain FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
         $accountDomain = $accountRow ? strtolower($accountRow['domain']) : '';
         if (preg_match_all('/VFOLDER:(.+)/', $scanOutput, $matches)) {
@@ -403,6 +495,7 @@ class MigrationController
             'local_target' => trim($_POST['local_target'] ?? ''),
             'include_db' => isset($_POST['include_db']),
             'exclude_vendor' => isset($_POST['exclude_vendor']),
+            'copy_everything' => isset($_POST['copy_everything']),
             'migrate_subdomains' => $_POST['migrate_subdomains'] ?? [],
             'migrate_folders' => $_POST['migrate_folders'] ?? [],
         ];
@@ -493,7 +586,7 @@ class MigrationController
         $statusFile = $this->statusFilePath($token);
         $status = file_exists($statusFile) ? (json_decode(file_get_contents($statusFile), true) ?: []) : [];
 
-        // Find pending dump
+        // Find pending dump (use most recent one)
         $pendingDumps = glob('/tmp/mdpdb_*.sql');
         if (empty($pendingDumps)) {
             @unlink($statusFile);
@@ -501,6 +594,8 @@ class MigrationController
             return;
         }
 
+        // Sort by modification time, newest first
+        usort($pendingDumps, fn($a, $b) => filemtime($b) - filemtime($a));
         $dumpFile = $pendingDumps[0];
         $dumpSize = round(filesize($dumpFile) / 1048576, 1);
         $localDbName = str_replace(['.', '-'], '_', $account['username']) . '_db';
@@ -514,11 +609,9 @@ class MigrationController
         $isPostgres = str_contains($head, 'PostgreSQL') || str_contains($head, 'pg_dump');
         $dbType = $isPostgres ? 'pgsql' : 'mysql';
 
-        // Ensure DB and user exist
         if ($isPostgres) {
-            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE USER \"{$localDbUser}\" WITH PASSWORD '{$localDbPass}'")));
-            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("ALTER USER \"{$localDbUser}\" WITH PASSWORD '{$localDbPass}'")));
-            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$localDbName}\" OWNER \"{$localDbUser}\"")));
+            $pgResult = $this->setupPostgresDb($localDbName, $localDbUser, $localDbPass, $dumpFile);
+            $logs = array_merge($logs, $pgResult['logs']);
         } else {
             $sqlSetup = sprintf(
                 "CREATE DATABASE IF NOT EXISTS `%s`; CREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s'; ALTER USER '%s'@'localhost' IDENTIFIED BY '%s'; GRANT ALL ON `%s`.* TO '%s'@'localhost'; FLUSH PRIVILEGES;",
@@ -531,20 +624,14 @@ class MigrationController
             if ($out && stripos($out, 'ERROR') !== false) {
                 $logs[] = 'ERROR MySQL setup: ' . trim($out);
             }
-        }
-        $logs[] = "BD {$localDbName} y usuario listos.";
-
-        // Import
-        $logs[] = 'Importando dump SQL...';
-        if ($isPostgres) {
-            $importOut = shell_exec(sprintf('sudo -u postgres psql -d %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
-        } else {
+            $logs[] = "BD {$localDbName} y usuario listos.";
+            $logs[] = 'Importando dump SQL...';
             $importOut = shell_exec(sprintf('mysql %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
+            if ($importOut && stripos($importOut, 'ERROR') !== false) {
+                $logs[] = 'WARN: ' . substr(trim($importOut), 0, 300);
+            }
+            $logs[] = "Dump importado ({$dumpSize} MB).";
         }
-        if ($importOut && stripos($importOut, 'ERROR') !== false) {
-            $logs[] = 'WARN: ' . substr(trim($importOut), 0, 300);
-        }
-        $logs[] = "Dump importado ({$dumpSize} MB).";
         @unlink($dumpFile);
 
         // Update .env / wp-config
@@ -659,6 +746,7 @@ class MigrationController
         $remoteDomain = $data['remote_domain'];
         $includeDb = $data['include_db'];
         $excludeVendor = $data['exclude_vendor'];
+        $copyEverything = $data['copy_everything'] ?? false;
         $targetDir = !empty($data['local_target']) ? $data['local_target'] : $account['document_root'];
 
         // Security: ensure target is within the hosting home directory
@@ -725,13 +813,30 @@ class MigrationController
         }
         $this->sendSSE('log', 'Ruta verificada.', $st);
 
+        // --- STEP 2b: Detect if this is a vhost root (contains httpdocs/) or the project dir itself ---
+        // If the remote path doesn't end in httpdocs and has an httpdocs/ subfolder, it's the vhost root.
+        // The project config files (.env, wp-config.php) will be inside httpdocs/.
+        $isVhostRoot = false;
+        $projectSearchPath = $fullRemotePath;
+
+        if (!preg_match('#/httpdocs/?$#', $fullRemotePath)) {
+            $htCheck = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
+                "test -d " . escapeshellarg($fullRemotePath . '/httpdocs') . " && echo 'HAS_HTTPDOCS'"
+            );
+            if (str_contains($htCheck, 'HAS_HTTPDOCS')) {
+                $isVhostRoot = true;
+                $projectSearchPath = rtrim($fullRemotePath, '/') . '/httpdocs';
+                $this->sendSSE('log', 'Ruta es vhost root. Proyecto buscado en httpdocs/.', $st);
+            }
+        }
+
         // --- STEP 3: Detect project ---
         $projectType = 'unknown';
         $dbCredentials = null;
         $hasComposer = false;
 
         $composerCheck = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
-            "test -f " . escapeshellarg($fullRemotePath . '/composer.json') . " && echo 'COMPOSER_EXISTS'"
+            "test -f " . escapeshellarg($projectSearchPath . '/composer.json') . " && echo 'COMPOSER_EXISTS'"
         );
         $hasComposer = strpos($composerCheck, 'COMPOSER_EXISTS') !== false;
 
@@ -740,7 +845,7 @@ class MigrationController
             $this->sendSSE('step', 'Detectando proyecto', $st);
 
             // Detect project type — check all config files in one batch
-            $detectScript = 'P=' . escapeshellarg($fullRemotePath) . '; '
+            $detectScript = 'P=' . escapeshellarg($projectSearchPath) . '; '
                 . 'test -f "$P/.env" && echo "ENV_EXISTS"; '
                 . 'test -f "$P/muse" && echo "MUSE_EXISTS"; '
                 . 'test -f "$P/wp-config.php" && echo "WP_EXISTS"; '
@@ -755,7 +860,7 @@ class MigrationController
             // Try each project type in priority order, with fallback if credentials fail
             $envContent = null;
             if ($hasEnv) {
-                $envContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "cat " . escapeshellarg($fullRemotePath . '/.env'));
+                $envContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "cat " . escapeshellarg($projectSearchPath . '/.env'));
             }
 
             if ($hasEnv && $hasMuse) {
@@ -780,7 +885,7 @@ class MigrationController
             }
 
             if (!$dbCredentials && $hasWp) {
-                $wpContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "cat " . escapeshellarg($fullRemotePath . '/wp-config.php'));
+                $wpContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "cat " . escapeshellarg($projectSearchPath . '/wp-config.php'));
                 $dbCredentials = $this->parseWpConfig($wpContent);
                 if ($dbCredentials) {
                     $projectType = 'wordpress';
@@ -789,7 +894,7 @@ class MigrationController
             }
 
             if (!$dbCredentials && $hasZend) {
-                $zendContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "cat " . escapeshellarg($fullRemotePath . '/application/settings/database.php'));
+                $zendContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "cat " . escapeshellarg($projectSearchPath . '/application/settings/database.php'));
                 $dbCredentials = $this->parseZendDbConfig($zendContent);
                 if ($dbCredentials) {
                     $projectType = 'zend';
@@ -829,13 +934,25 @@ class MigrationController
         }
 
         // --- STEP 4: Create backup ---
+        // If vhost root mode, adjust the local target to home_dir so httpdocs/ extracts correctly
+        if ($isVhostRoot) {
+            $targetDir = $homeDir;
+            $this->sendSSE('log', 'Modo vhost root: extraccion en ' . $targetDir, $st);
+        }
+
         $this->sendSSE('log', 'Creando backup en servidor remoto...', $st);
         $this->sendSSE('step', 'Creando backup', $st);
 
         $excludeArgs = "--exclude=" . escapeshellarg($backupName);
-        if ($excludeVendor) {
-            $excludeArgs .= " --exclude='./vendor'";
-            $this->sendSSE('log', 'Excluyendo vendor/ del backup.', $st);
+        if ($copyEverything) {
+            $this->sendSSE('log', 'Modo copia completa: sin exclusiones (todo se copiara).', $st);
+        } else {
+            // Exclude dev/IDE directories by default
+            $excludeArgs .= " --exclude='./.claude' --exclude='./.vscode-server' --exclude='./.codex' --exclude='./.cline' --exclude='./.copilot'";
+            if ($excludeVendor) {
+                $excludeArgs .= " --exclude='./vendor' --exclude='./httpdocs/vendor'";
+                $this->sendSSE('log', 'Excluyendo vendor/ del backup.', $st);
+            }
         }
 
         $tarCmd = "cd " . escapeshellarg($fullRemotePath) . " && tar czf " . escapeshellarg($remoteBackupPath) . " {$excludeArgs} . 2>&1; echo TAR_EXIT_\$?";
@@ -892,50 +1009,52 @@ class MigrationController
         $remoteSize = round($remoteSizeBytes / 1048576, 1);
         $this->sendSSE('log', 'Backup creado: ' . $remoteSize . ' MB', $st);
 
-        // --- STEP 5: Download via HTTPS (with progress) ---
-        // Try multiple download URLs: domain HTTPS, domain HTTP, SSH host HTTPS, SSH host HTTP, SCP fallback
-        $downloadUrls = [
-            "https://{$remoteDomain}/{$backupName}",
-        ];
-        // Add SSH host as fallback if different from domain
-        if ($sshHost !== $remoteDomain) {
-            $downloadUrls[] = "https://{$sshHost}/{$backupName}";
-        }
-        // Add HTTP variants
-        $downloadUrls[] = "http://{$remoteDomain}/{$backupName}";
-        if ($sshHost !== $remoteDomain) {
-            $downloadUrls[] = "http://{$sshHost}/{$backupName}";
-        }
-
+        // --- STEP 5: Download via SCP (priority) then HTTP fallback ---
         $downloaded = false;
-        foreach ($downloadUrls as $i => $downloadUrl) {
-            $label = ($i === 0) ? 'Descargando por HTTPS' : 'Intentando: ' . $downloadUrl;
-            $this->sendSSE('log', $label . ': ' . $downloadUrl, $st);
-            $this->sendSSE('step', 'Descargando (' . $remoteSize . ' MB)', $st);
-            $this->sendSSE('progress', json_encode(['type' => 'download', 'total' => $remoteSizeBytes, 'current' => 0]), $st);
 
-            @unlink($localBackup); // Clean before retry
-            $downloaded = $this->downloadWithProgress($downloadUrl, $localBackup, $remoteSizeBytes, $st);
-            if ($downloaded) break;
+        // Try SCP first (most reliable for large files and non-public paths)
+        $this->sendSSE('log', 'Descargando por SCP...', $st);
+        $this->sendSSE('step', 'Descargando por SCP (' . $remoteSize . ' MB)', $st);
+        $this->sendSSE('progress', json_encode(['type' => 'download', 'total' => $remoteSizeBytes, 'current' => 0]), $st);
 
-            $this->sendSSE('log', 'Fallo descarga desde ' . parse_url($downloadUrl, PHP_URL_HOST) . '. Probando siguiente...', $st);
+        $scpCmd = sprintf(
+            'sshpass -p %s scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -P %d %s@%s:%s %s 2>&1',
+            escapeshellarg($sshPassword), $sshPort,
+            escapeshellarg($sshUser), escapeshellarg($sshHost),
+            escapeshellarg($remoteBackupPath), escapeshellarg($localBackup)
+        );
+        shell_exec("timeout 900 {$scpCmd}");
+        clearstatcache(true, $localBackup);
+        $downloaded = file_exists($localBackup) && filesize($localBackup) > 0;
+        if ($downloaded) {
+            $localScp = round(filesize($localBackup) / 1048576, 1);
+            $this->sendSSE('log', "SCP completado: {$localScp} MB.", $st);
         }
 
-        // Last resort: SCP via SSH
+        // HTTP fallback if SCP failed
         if (!$downloaded) {
-            $this->sendSSE('log', 'Todas las descargas HTTP fallaron. Intentando SCP directo...', $st);
-            $this->sendSSE('step', 'Descargando por SCP (' . $remoteSize . ' MB)', $st);
-            $scpCmd = sprintf(
-                'sshpass -p %s scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -P %d %s@%s:%s %s 2>&1',
-                escapeshellarg($sshPassword), $sshPort,
-                escapeshellarg($sshUser), escapeshellarg($sshHost),
-                escapeshellarg($remoteBackupPath), escapeshellarg($localBackup)
-            );
-            shell_exec("timeout 600 {$scpCmd}");
-            clearstatcache(true, $localBackup);
-            $downloaded = file_exists($localBackup) && filesize($localBackup) > 0;
-            if ($downloaded) {
-                $this->sendSSE('log', 'SCP completado.', $st);
+            $this->sendSSE('log', 'SCP fallo. Intentando descarga HTTP...', $st);
+            $downloadUrls = [
+                "https://{$remoteDomain}/{$backupName}",
+            ];
+            if ($sshHost !== $remoteDomain) {
+                $downloadUrls[] = "https://{$sshHost}/{$backupName}";
+            }
+            $downloadUrls[] = "http://{$remoteDomain}/{$backupName}";
+            if ($sshHost !== $remoteDomain) {
+                $downloadUrls[] = "http://{$sshHost}/{$backupName}";
+            }
+
+            foreach ($downloadUrls as $i => $downloadUrl) {
+                $this->sendSSE('log', 'Intentando: ' . $downloadUrl, $st);
+                $this->sendSSE('step', 'Descargando (' . $remoteSize . ' MB)', $st);
+                $this->sendSSE('progress', json_encode(['type' => 'download', 'total' => $remoteSizeBytes, 'current' => 0]), $st);
+
+                @unlink($localBackup);
+                $downloaded = $this->downloadWithProgress($downloadUrl, $localBackup, $remoteSizeBytes, $st);
+                if ($downloaded) break;
+
+                $this->sendSSE('log', 'Fallo descarga desde ' . parse_url($downloadUrl, PHP_URL_HOST) . '. Probando siguiente...', $st);
             }
         }
 
@@ -1234,19 +1353,11 @@ class MigrationController
                 $this->sendSSE('log', "Creando base de datos local ({$localDbType}): {$localDbName}", $st);
 
                 if ($isPostgres) {
-                    // PostgreSQL: create user and database
-                    $pgCmds = [
-                        sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE USER \"{$localDbUser}\" WITH PASSWORD '{$localDbPass}'")),
-                        sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("ALTER USER \"{$localDbUser}\" WITH PASSWORD '{$localDbPass}'")),
-                        sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$localDbName}\" OWNER \"{$localDbUser}\"")),
-                        sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$localDbName}\" TO \"{$localDbUser}\"")),
-                    ];
-                    foreach ($pgCmds as $pgCmd) {
-                        $pgOutput = shell_exec($pgCmd);
-                        // Ignore "already exists" errors, fail on others
-                        if ($pgOutput !== null && stripos($pgOutput, 'ERROR') !== false && stripos($pgOutput, 'already exists') === false) {
-                            $this->sendSSE('log', 'WARN PostgreSQL: ' . trim($pgOutput), $st);
-                        }
+                    // PostgreSQL: create user, database, import, fix ownership — all in one
+                    // Don't import yet — just setup user/db. Import happens below.
+                    $pgSetup = $this->setupPostgresDb($localDbName, $localDbUser, $localDbPass, '');
+                    foreach ($pgSetup['logs'] as $pgLog) {
+                        $this->sendSSE('log', $pgLog, $st);
                     }
                 } else {
                     // MySQL: create user and database
@@ -1306,42 +1417,45 @@ class MigrationController
                 ]);
 
                 // Update config files immediately (critical — must happen before potential crash)
-                if ($projectType === 'musedock' && file_exists($targetDir . '/.env')) {
-                    $envContent = file_get_contents($targetDir . '/.env');
+                // In vhost root mode, config files are in httpdocs/ subfolder
+                $cfgDir = $targetDir;
+                if ($isVhostRoot && is_dir($targetDir . '/httpdocs')) {
+                    $cfgDir = $targetDir . '/httpdocs';
+                }
+                if ($projectType === 'musedock' && file_exists($cfgDir . '/.env')) {
+                    $envContent = file_get_contents($cfgDir . '/.env');
                     $envContent = preg_replace('/^DB_DRIVER=.*/m', "DB_DRIVER=" . ($isPostgres ? 'pgsql' : 'mysql'), $envContent);
                     $envContent = preg_replace('/^DB_HOST=.*/m', 'DB_HOST=localhost', $envContent);
                     $envContent = preg_replace('/^DB_PORT=.*/m', "DB_PORT=" . ($isPostgres ? '5432' : '3306'), $envContent);
                     $envContent = preg_replace('/^DB_NAME=.*/m', "DB_NAME={$localDbName}", $envContent);
                     $envContent = preg_replace('/^DB_USER=.*/m', "DB_USER={$localDbUser}", $envContent);
                     $envContent = preg_replace('/^DB_PASS=.*/m', "DB_PASS={$localDbPass}", $envContent);
-                    file_put_contents($targetDir . '/.env', $envContent);
+                    file_put_contents($cfgDir . '/.env', $envContent);
                     $this->sendSSE('log', 'Actualizado .env (MuseDock) con credenciales locales.', $st);
-                } elseif ($projectType === 'laravel' && file_exists($targetDir . '/.env')) {
-                    $envContent = file_get_contents($targetDir . '/.env');
+                } elseif ($projectType === 'laravel' && file_exists($cfgDir . '/.env')) {
+                    $envContent = file_get_contents($cfgDir . '/.env');
                     $envContent = preg_replace('/^DB_HOST=.*/m', 'DB_HOST=127.0.0.1', $envContent);
-                    $envContent = preg_replace('/^DB_PORT=.*/m', 'DB_PORT=3306', $envContent);
+                    $envContent = preg_replace('/^DB_PORT=.*/m', 'DB_PORT=' . ($isPostgres ? '5432' : '3306'), $envContent);
                     $envContent = preg_replace('/^DB_DATABASE=.*/m', "DB_DATABASE={$localDbName}", $envContent);
                     $envContent = preg_replace('/^DB_USERNAME=.*/m', "DB_USERNAME={$localDbUser}", $envContent);
                     $envContent = preg_replace('/^DB_PASSWORD=.*/m', "DB_PASSWORD={$localDbPass}", $envContent);
-                    file_put_contents($targetDir . '/.env', $envContent);
+                    file_put_contents($cfgDir . '/.env', $envContent);
                     $this->sendSSE('log', 'Actualizado .env con credenciales locales.', $st);
-                } elseif ($projectType === 'wordpress' && file_exists($targetDir . '/wp-config.php')) {
-                    $wpContent = file_get_contents($targetDir . '/wp-config.php');
-                    // Handle both single and double quotes: define('DB_NAME', 'val'), define( "DB_NAME", "val" ), mixed
+                } elseif ($projectType === 'wordpress' && file_exists($cfgDir . '/wp-config.php')) {
+                    $wpContent = file_get_contents($cfgDir . '/wp-config.php');
                     $wpContent = preg_replace("/define\(\s*['\"]DB_NAME['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_NAME', '{$localDbName}')", $wpContent);
                     $wpContent = preg_replace("/define\(\s*['\"]DB_USER['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_USER', '{$localDbUser}')", $wpContent);
                     $wpContent = preg_replace("/define\(\s*['\"]DB_PASSWORD['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_PASSWORD', '{$localDbPass}')", $wpContent);
                     $wpContent = preg_replace("/define\(\s*['\"]DB_HOST['\"]\s*,\s*['\"][^'\"]*['\"]\s*\)/", "define('DB_HOST', 'localhost')", $wpContent);
-                    file_put_contents($targetDir . '/wp-config.php', $wpContent);
+                    file_put_contents($cfgDir . '/wp-config.php', $wpContent);
 
-                    // Verify the replacements actually took effect
-                    $wpCheck = file_get_contents($targetDir . '/wp-config.php');
+                    $wpCheck = file_get_contents($cfgDir . '/wp-config.php');
                     if (strpos($wpCheck, $localDbName) === false) {
                         $this->sendSSE('log', 'WARN: wp-config.php no contiene el nombre de BD esperado. Posible formato no reconocido.', $st);
                     }
                     $this->sendSSE('log', 'Actualizado wp-config.php con credenciales locales.', $st);
-                } elseif ($projectType === 'zend' && file_exists($targetDir . '/application/settings/database.php')) {
-                    $zendFile = $targetDir . '/application/settings/database.php';
+                } elseif ($projectType === 'zend' && file_exists($cfgDir . '/application/settings/database.php')) {
+                    $zendFile = $cfgDir . '/application/settings/database.php';
                     $zendContent = file_get_contents($zendFile);
                     $zendContent = preg_replace("/'host'\s*=>\s*'[^']*'/", "'host' => 'localhost'", $zendContent);
                     $zendContent = preg_replace("/'username'\s*=>\s*'[^']*'/", "'username' => '{$localDbUser}'", $zendContent);
@@ -1359,20 +1473,22 @@ class MigrationController
                 $this->sendSSE('progress', json_encode(['type' => 'import', 'indeterminate' => true]), $st);
 
                 if ($isPostgres) {
-                    $importOutput = shell_exec(sprintf(
-                        'sudo -u postgres psql -d %s < %s 2>&1',
-                        escapeshellarg($localDbName), escapeshellarg($dumpFile)
-                    ));
-                    if ($importOutput !== null && stripos($importOutput, 'ERROR') !== false) {
-                        $this->sendSSE('log', 'WARN al importar dump PostgreSQL: ' . trim(substr($importOutput, 0, 500)), $st);
+                    // Import + fix ownership + grants + verify (all in setupPostgresDb)
+                    $pgImport = $this->setupPostgresDb($localDbName, $localDbUser, $localDbPass, $dumpFile);
+                    foreach ($pgImport['logs'] as $pgLog) {
+                        $this->sendSSE('log', $pgLog, $st);
+                    }
+                    if (!$pgImport['ok']) {
+                        $this->sendSSE('error', 'La importacion de PostgreSQL tuvo problemas. Revisa los logs.', $st);
+                        $errors[] = 'PostgreSQL import issues';
                     }
                 } else {
                     $importOutput = shell_exec(sprintf('mysql %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
                     if ($importOutput !== null && stripos($importOutput, 'ERROR') !== false) {
                         $this->sendSSE('log', 'WARN al importar dump: ' . trim(substr($importOutput, 0, 500)), $st);
                     }
+                    $this->sendSSE('log', 'Dump importado (' . $dumpSize . ' MB).', $st);
                 }
-                $this->sendSSE('log', 'Dump importado (' . $dumpSize . ' MB).', $st);
 
                 @unlink($dumpFile);
             }
@@ -1382,8 +1498,14 @@ class MigrationController
         @unlink($localBackup);
 
         // --- STEP 8b: Auto-detect public/ directory for Laravel/MuseDock ---
-        if (in_array($projectType, ['laravel', 'musedock']) && file_exists($targetDir . '/public/index.php')) {
-            $publicDocRoot = $targetDir . '/public';
+        // When vhost root mode, project files are in targetDir/httpdocs/
+        $projectLocalDir = $targetDir;
+        if ($isVhostRoot && is_dir($targetDir . '/httpdocs')) {
+            $projectLocalDir = $targetDir . '/httpdocs';
+        }
+        $publicIndex = $projectLocalDir . '/public/index.php';
+        if (in_array($projectType, ['laravel', 'musedock']) && file_exists($publicIndex) && filesize($publicIndex) > 50) {
+            $publicDocRoot = $projectLocalDir . '/public';
             $this->sendSSE('log', "Proyecto {$projectType} detectado con public/. Cambiando document root a {$publicDocRoot}", $st);
 
             $updated = \MuseDockPanel\Services\SystemService::updateCaddyDocumentRoot(

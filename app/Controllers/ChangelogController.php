@@ -20,6 +20,55 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.32',
+                'date' => '2026-03-31',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Modo vhost root en migracion — Poner la ruta del vhost (sin httpdocs) copia todo el directorio incluyendo .git y carpetas hermanas. Detecta automaticamente el proyecto dentro de httpdocs/',
+                            'Checkbox "Copiar absolutamente todo" — Sin exclusiones de ningún tipo, oculta el selector de carpetas',
+                            'Funcion setupPostgresDb() centralizada — Crea usuario, BD, importa dump, corrige ownership de todas las tablas/secuencias, aplica GRANT ALL y verifica conexion. Usada por Opcion 2, Opcion 3 y Resume',
+                            'Listado completo de carpetas remotas — Ahora lista carpetas ocultas (.git, .claude, etc.) y carpetas de sistema (logs, tmp) en el selector de carpetas',
+                        ],
+                        'en' => [
+                            'Vhost root mode in migration — Entering the vhost path (without httpdocs) copies the entire directory including .git and sibling folders. Automatically detects the project inside httpdocs/',
+                            'Copy absolutely everything checkbox — No exclusions of any kind, hides the folder selector',
+                            'Centralized setupPostgresDb() function — Creates user, DB, imports dump, fixes ownership of all tables/sequences, applies GRANT ALL and verifies connection. Used by Option 2, Option 3 and Resume',
+                            'Complete remote folder listing — Now lists hidden folders (.git, .claude, etc.) and system folders (logs, tmp) in the folder selector',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'SCP como metodo de descarga prioritario — Mas fiable para archivos grandes. HTTP como fallback',
+                            'Destino local se auto-ajusta — Si la ruta remota es vhost root, el destino local cambia a home_dir automaticamente',
+                            'Ruta remota pre-rellenada — El campo de ruta remota en Opcion 3 viene con el valor correcto (sin /public)',
+                            'Exclusion automatica de .claude, .vscode-server, .codex, .cline, .copilot en el tar (salvo con "copiar todo")',
+                            'PostgreSQL: ownership y permisos corregidos automaticamente tras importar — Elimina errores de "permission denied" y "role does not exist"',
+                        ],
+                        'en' => [
+                            'SCP as priority download method — More reliable for large files. HTTP as fallback',
+                            'Local target auto-adjusts — If remote path is vhost root, local target changes to home_dir automatically',
+                            'Remote path pre-filled — The remote path field in Option 3 comes with the correct value (without /public)',
+                            'Automatic exclusion of .claude, .vscode-server, .codex, .cline, .copilot in tar (unless "copy everything")',
+                            'PostgreSQL: ownership and permissions automatically fixed after import — Eliminates "permission denied" and "role does not exist" errors',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Corregida deteccion DB_CONNECTION en Laravel para Opcion 3 — La Opcion 3 tenia logica inline duplicada que no leia el driver. Ahora reutiliza parseLaravelEnv()',
+                            'Corregido resume usando dump equivocado — Ahora usa el dump mas reciente en vez del primero alfabeticamente',
+                            'Corregido .env no actualizado tras Opcion 3 — Las credenciales locales se escriben correctamente con el puerto adecuado (5432 para pgsql, 3306 para mysql)',
+                        ],
+                        'en' => [
+                            'Fixed DB_CONNECTION detection in Laravel for Option 3 — Option 3 had duplicated inline logic that did not read the driver. Now reuses parseLaravelEnv()',
+                            'Fixed resume using wrong dump file — Now uses the most recent dump instead of the first alphabetically',
+                            'Fixed .env not updated after Option 3 — Local credentials are correctly written with the appropriate port (5432 for pgsql, 3306 for mysql)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.30',
                 'date' => '2026-03-30',
                 'badge' => 'primary',
