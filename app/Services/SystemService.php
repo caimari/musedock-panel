@@ -331,6 +331,7 @@ pm = ondemand
 pm.max_children = 5
 pm.process_idle_timeout = 10s
 pm.max_requests = 500
+request_terminate_timeout = 120
 
 php_admin_value[open_basedir] = {$homeDir}/:/tmp/:/usr/share/php/
 php_admin_value[upload_tmp_dir] = {$homeDir}/tmp
@@ -739,15 +740,28 @@ CONF;
     /**
      * Suspend an account (stop FPM pool, replace Caddy route with maintenance page)
      */
-    public static function suspendAccount(string $username, string $fpmSocket, string $domain = ''): void
+    public static function suspendAccount(string $username, string $fpmSocket, string $domain = '', string $phpVersion = ''): void
     {
         // Lock the user
         shell_exec(sprintf('usermod -L %s 2>&1', escapeshellarg($username)));
 
-        // Rename FPM pool to disable it
-        $config = require PANEL_ROOT . '/config/panel.php';
-        $phpVersion = $config['fpm']['php_version'];
+        // Rename FPM pool to disable it — use the account's PHP version, not the global default
+        if (empty($phpVersion)) {
+            $config = require PANEL_ROOT . '/config/panel.php';
+            $phpVersion = $config['fpm']['php_version'];
+        }
         $poolFile = "/etc/php/{$phpVersion}/fpm/pool.d/{$username}.conf";
+        // Also check other PHP versions in case the pool is there
+        if (!file_exists($poolFile)) {
+            foreach (['8.3', '8.2', '8.1', '8.0'] as $ver) {
+                $altPool = "/etc/php/{$ver}/fpm/pool.d/{$username}.conf";
+                if (file_exists($altPool)) {
+                    $poolFile = $altPool;
+                    $phpVersion = $ver;
+                    break;
+                }
+            }
+        }
         shell_exec(sprintf('mv %s %s.disabled 2>&1', escapeshellarg($poolFile), escapeshellarg($poolFile)));
         shell_exec(sprintf('systemctl reload php%s-fpm 2>&1', self::safePhpVersion($phpVersion)));
 
@@ -769,6 +783,17 @@ CONF;
         $config = require PANEL_ROOT . '/config/panel.php';
         $phpVer = $phpVersion ?: $config['fpm']['php_version'];
         $poolFile = "/etc/php/{$phpVer}/fpm/pool.d/{$username}.conf";
+        // Search other PHP versions if disabled pool not found
+        if (!file_exists($poolFile . '.disabled')) {
+            foreach (['8.3', '8.2', '8.1', '8.0'] as $ver) {
+                $altPool = "/etc/php/{$ver}/fpm/pool.d/{$username}.conf";
+                if (file_exists($altPool . '.disabled')) {
+                    $poolFile = $altPool;
+                    $phpVer = $ver;
+                    break;
+                }
+            }
+        }
         shell_exec(sprintf('mv %s.disabled %s 2>&1', escapeshellarg($poolFile), escapeshellarg($poolFile)));
         shell_exec(sprintf('systemctl reload php%s-fpm 2>&1', self::safePhpVersion($phpVer)));
 

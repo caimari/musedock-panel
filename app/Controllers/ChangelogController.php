@@ -20,6 +20,29 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.33',
+                'date' => '2026-03-31',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'request_terminate_timeout en todos los pools FPM — Mata scripts PHP que tarden mas de 120s, evitando que loops infinitos saturen la CPU. Aplicado a todos los pools existentes y por defecto en nuevos hostings',
+                        ],
+                        'en' => [
+                            'request_terminate_timeout on all FPM pools — Kills PHP scripts running longer than 120s, preventing infinite loops from saturating CPU. Applied to all existing pools and by default on new hostings',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Corregido suspendAccount/activateAccount con PHP multi-version — Ahora recibe la version PHP del hosting en vez de usar el default global. Busca el pool en todas las versiones instaladas si no lo encuentra',
+                        ],
+                        'en' => [
+                            'Fixed suspendAccount/activateAccount with multi-PHP — Now receives the hosting PHP version instead of using the global default. Searches all installed PHP versions if pool not found',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.32',
                 'date' => '2026-03-31',
                 'badge' => 'primary',

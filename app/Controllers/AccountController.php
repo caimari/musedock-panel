@@ -1338,7 +1338,7 @@ class AccountController
             return;
         }
 
-        SystemService::suspendAccount($account['username'], $account['fpm_socket'], $account['domain']);
+        SystemService::suspendAccount($account['username'], $account['fpm_socket'], $account['domain'], $account['php_version']);
         Database::update('hosting_accounts', ['status' => 'suspended', 'updated_at' => date('Y-m-d H:i:s')], 'id = :id', ['id' => $params['id']]);
 
         // Suspend mail domain if requested
