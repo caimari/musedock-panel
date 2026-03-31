@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.34',
+                'date' => '2026-03-31',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Corregida suspension de hostings — Al suspender, la ruta de mantenimiento se duplicaba con la ruta PHP original, permitiendo que el sitio siguiera accesible. Ahora usa PUT por ID que reemplaza la ruta directamente sin duplicados',
+                        ],
+                        'en' => [
+                            'Fixed hosting suspension — When suspending, the maintenance route was duplicated with the original PHP route, allowing the site to remain accessible. Now uses PUT by ID which replaces the route directly without duplicates',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.33',
                 'date' => '2026-03-31',
                 'badge' => 'primary',

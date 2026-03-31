@@ -818,15 +818,8 @@ CONF;
     {
         $routeId = "hosting-{$username}";
 
-        // Delete existing route
-        $ch = curl_init("{$caddyApi}/id/{$routeId}");
-        curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
-        curl_exec($ch);
-        curl_close($ch);
-
         $html = self::getMaintenanceHtml($domain);
 
-        // Create maintenance route (static response, no PHP needed)
         $maintenanceRoute = [
             '@id' => $routeId,
             'match' => [['host' => [$domain, "www.{$domain}"]]],
@@ -844,9 +837,10 @@ CONF;
             'terminal' => true,
         ];
 
-        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        // Use PUT by ID to REPLACE the existing route (not DELETE + POST which can leave duplicates)
+        $ch = curl_init("{$caddyApi}/id/{$routeId}");
         curl_setopt_array($ch, [
-            CURLOPT_POST => true,
+            CURLOPT_CUSTOMREQUEST => 'PUT',
             CURLOPT_POSTFIELDS => json_encode($maintenanceRoute),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true,
