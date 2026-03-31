@@ -23,4 +23,5 @@
     <a href="/settings/cloudflare-dns" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Cloudflare DNS' ? 'active' : '' ?>" style="<?= ($pageTitle ?? '') === 'Cloudflare DNS' ? '' : 'border-color:#f97316;color:#f97316;' ?>"><i class="bi bi-cloud-fill me-1"></i>Cloudflare DNS</a>
     <a href="/settings/health" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'System Health' ? 'active' : '' ?>"><i class="bi bi-heart-pulse me-1"></i>System Health</a>
     <a href="/settings/updates" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Updates' ? 'active' : '' ?>"><i class="bi bi-cloud-arrow-down me-1"></i>Updates</a>
+    <a href="/settings/portal" class="btn btn-sm <?= ($pageTitle ?? '') === 'Portal Clientes' ? 'active btn-outline-light' : '' ?>" style="<?= ($pageTitle ?? '') === 'Portal Clientes' ? '' : 'border-color:#a855f7;color:#a855f7;' ?>"><i class="bi bi-people me-1"></i>Portal Clientes</a>
 </div>

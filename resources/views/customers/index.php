@@ -22,6 +22,7 @@
                         <th>Company</th>
                         <th>Accounts</th>
                         <th>Disk Used</th>
+                        <th>Portal</th>
                         <th>Status</th>
                         <th></th>
                     </tr>
@@ -37,6 +38,17 @@
                         <td><?= $c['account_count'] ?></td>
                         <td><?= $c['total_disk_used'] ?> MB</td>
                         <td>
+                            <?php $hasPortal = !empty($c['password_hash']); ?>
+                            <?php if ($hasPortal): ?>
+                                <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;font-size:0.65rem;"><i class="bi bi-check-circle"></i></span>
+                            <?php else: ?>
+                                <button type="button" class="btn py-0 px-1" style="font-size:0.65rem;background:rgba(168,85,247,0.15);color:#a855f7;border:1px solid rgba(168,85,247,0.3);"
+                                    onclick="sendPortalInvitation(<?= $c['id'] ?>, '<?= View::e(addslashes($c['name'])) ?>', '<?= View::e($c['email']) ?>', false)">
+                                    <i class="bi bi-send"></i>
+                                </button>
+                            <?php endif; ?>
+                        </td>
+                        <td>
                             <span class="badge badge-<?= $c['status'] === 'active' ? 'active' : 'suspended' ?>">
                                 <?= $c['status'] ?>
                             </span>
@@ -51,3 +63,34 @@
         <?php endif; ?>
     </div>
 </div>
+
+<script>
+function sendPortalInvitation(customerId, name, email, hasAccess) {
+    Swal.fire({
+        title: hasAccess
+            ? '<i class="bi bi-arrow-clockwise me-2" style="color:#a855f7;"></i>Reset password'
+            : '<i class="bi bi-send me-2" style="color:#a855f7;"></i>Invitar al Portal',
+        html: '<p style="color:#e2e8f0;">' + (hasAccess
+            ? 'Se enviara un link para que <strong>' + name + '</strong> cree una nueva contraseña.'
+            : 'Se enviara una invitacion a <strong>' + name + '</strong> para acceder al portal.') + '</p>' +
+              '<p style="color:#64748b;font-size:0.8rem;"><i class="bi bi-envelope me-1"></i>' + email + '</p>' +
+              '<p style="color:#94a3b8;font-size:0.78rem;margin-top:8px;">El link caduca en 48 horas.</p>',
+        background: '#0f172a', color: '#e2e8f0',
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-send me-1"></i>Enviar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#a855f7',
+    }).then(function(result) {
+        if (result.isConfirmed) {
+            var form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/settings/portal/send-invitation';
+            var csrf = document.querySelector('input[name=_csrf_token]');
+            if (csrf) { var ci = document.createElement('input'); ci.type = 'hidden'; ci.name = '_csrf_token'; ci.value = csrf.value; form.appendChild(ci); }
+            var idI = document.createElement('input'); idI.type = 'hidden'; idI.name = 'customer_id'; idI.value = customerId; form.appendChild(idI);
+            document.body.appendChild(form);
+            form.submit();
+        }
+    });
+}
+</script>

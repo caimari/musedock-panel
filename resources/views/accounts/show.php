@@ -921,4 +921,24 @@ function confirmDeleteAccount() {
         document.getElementById('deleteForm').submit();
     });
 }
+
+// Show loading modal when adding alias, redirect or subdomain
+document.querySelectorAll(
+    'form[action*="/aliases/add"], form[action*="/redirects/add"], form[action*="/subdomains/add"]'
+).forEach(function(form) {
+    form.addEventListener('submit', function() {
+        var label = 'Procesando...';
+        if (form.action.indexOf('aliases') !== -1) label = 'Configurando alias...';
+        else if (form.action.indexOf('redirects') !== -1) label = 'Configurando redireccion...';
+        else if (form.action.indexOf('subdomains') !== -1) label = 'Creando subdominio...';
+        S.fire({
+            title: label,
+            html: '<div class="py-3"><span class="spinner-border text-info"></span><div class="mt-2" style="color:#94a3b8;font-size:0.9rem;">Configurando Caddy + SSL...</div></div>',
+            showConfirmButton: false,
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+        });
+        // Form submits normally (no preventDefault) — page reloads after server redirect
+    });
+});
 </script>

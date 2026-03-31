@@ -110,12 +110,14 @@ class MigrationController
         $db = $values['DB_DATABASE'] ?? '';
         $user = $values['DB_USERNAME'] ?? '';
         if (empty($db) || empty($user)) return null;
+        $driver = $values['DB_CONNECTION'] ?? 'mysql';
         return [
             'host' => $values['DB_HOST'] ?? '127.0.0.1',
-            'port' => $values['DB_PORT'] ?? '3306',
+            'port' => $values['DB_PORT'] ?? ($driver === 'pgsql' ? '5432' : '3306'),
             'database' => $db,
             'username' => $user,
             'password' => $values['DB_PASSWORD'] ?? '',
+            'driver' => $driver,
         ];
     }
 
@@ -847,7 +849,23 @@ class MigrationController
         }
 
         if ($tarExitCode === 1) {
-            $this->sendSSE('log', 'AVISO: Algunos archivos cambiaron durante la compresion (normal en sitios activos). Backup creado correctamente.', $st);
+            // Log specific tar warnings (permission denied, cannot read, etc.)
+            $cleanTarOutput = preg_replace('/TAR_EXIT_\d+/', '', $tarOutput);
+            $tarLines = array_filter(array_map('trim', explode("\n", $cleanTarOutput)));
+            $permDenied = array_filter($tarLines, fn($l) => stripos($l, 'Permission denied') !== false || stripos($l, 'Cannot open') !== false);
+            if (!empty($permDenied)) {
+                $skippedCount = count($permDenied);
+                $this->sendSSE('log', "AVISO: {$skippedCount} archivo(s) no se pudieron leer por permisos en el servidor remoto.", $st);
+                // Show first few for diagnosis
+                foreach (array_slice($permDenied, 0, 5) as $line) {
+                    $this->sendSSE('log', '  > ' . substr($line, 0, 200), $st);
+                }
+                if ($skippedCount > 5) {
+                    $this->sendSSE('log', "  > ... y " . ($skippedCount - 5) . " mas.", $st);
+                }
+            } else {
+                $this->sendSSE('log', 'AVISO: Algunos archivos cambiaron durante la compresion (normal en sitios activos). Backup creado correctamente.', $st);
+            }
         } elseif ($tarExitCode >= 2) {
             // Verify backup file exists and has size on remote
             $checkBackup = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
@@ -860,8 +878,13 @@ class MigrationController
                 $this->sendSSE('done', json_encode(['ok' => false]), $st);
                 return;
             }
-            // File exists despite exit code — proceed with warning
-            $this->sendSSE('log', 'AVISO: tar reporto errores pero el backup se creo. Continuando...', $st);
+            // File exists despite exit code — proceed with warning, log details
+            $cleanTarOutput2 = preg_replace('/TAR_EXIT_\d+/', '', $tarOutput);
+            $tarErrLines = array_filter(array_map('trim', explode("\n", $cleanTarOutput2)));
+            $this->sendSSE('log', 'AVISO: tar reporto errores (exit ' . $tarExitCode . ') pero el backup se creo. Continuando...', $st);
+            foreach (array_slice($tarErrLines, 0, 5) as $errLine) {
+                if (!empty($errLine)) $this->sendSSE('log', '  > ' . substr($errLine, 0, 200), $st);
+            }
         }
 
         $remoteSizeOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "stat -c%s " . escapeshellarg($remoteBackupPath) . " 2>/dev/null || echo 0");
@@ -999,6 +1022,73 @@ class MigrationController
         if ($extractedCount === 0) {
             $errors[] = 'Extraccion posiblemente fallida (0 archivos nuevos)';
             $this->sendSSE('error', 'AVISO: No se detectaron archivos nuevos tras la extraccion. Revisa manualmente.', $st);
+        }
+
+        // --- STEP 6a: WordPress core integrity check ---
+        if ($projectType === 'wordpress' && file_exists($targetDir . '/wp-config.php')) {
+            $wpCoreFiles = ['index.php', 'wp-load.php', 'wp-login.php', 'wp-settings.php', 'wp-blog-header.php', 'wp-cron.php'];
+            $wpCoreDirs = ['wp-includes', 'wp-admin'];
+            $missingFiles = [];
+            $missingDirs = [];
+
+            foreach ($wpCoreFiles as $f) {
+                if (!file_exists($targetDir . '/' . $f)) $missingFiles[] = $f;
+            }
+            foreach ($wpCoreDirs as $d) {
+                if (!is_dir($targetDir . '/' . $d)) $missingDirs[] = $d . '/';
+            }
+
+            if (!empty($missingFiles) || !empty($missingDirs)) {
+                $allMissing = array_merge($missingFiles, $missingDirs);
+                $this->sendSSE('log', 'AVISO: Faltan archivos core de WordPress: ' . implode(', ', $allMissing), $st);
+                $this->sendSSE('step', 'Reparando WordPress core', $st);
+
+                // Download fresh WordPress and restore missing core files
+                $wpTmpDir = '/tmp/wp_core_' . bin2hex(random_bytes(4));
+                $wpTarball = $wpTmpDir . '.tar.gz';
+                $wpDownloaded = false;
+
+                shell_exec(sprintf('wget -q --timeout=30 -O %s https://wordpress.org/latest.tar.gz 2>/dev/null', escapeshellarg($wpTarball)));
+                if (file_exists($wpTarball) && filesize($wpTarball) > 1000000) {
+                    shell_exec(sprintf('mkdir -p %s && tar xzf %s -C %s 2>/dev/null', escapeshellarg($wpTmpDir), escapeshellarg($wpTarball), escapeshellarg($wpTmpDir)));
+                    $wpSrc = $wpTmpDir . '/wordpress';
+                    if (is_dir($wpSrc)) {
+                        $wpDownloaded = true;
+                        // rsync core files (excluding wp-config.php and wp-content)
+                        shell_exec(sprintf('rsync -a --exclude=wp-config.php --exclude=wp-content %s/ %s/ 2>&1',
+                            escapeshellarg($wpSrc), escapeshellarg($targetDir)));
+                        shell_exec(sprintf('chown -R %s:www-data %s 2>&1',
+                            escapeshellarg($account['username']), escapeshellarg($targetDir)));
+
+                        // Verify repair
+                        $stillMissing = [];
+                        foreach ($wpCoreFiles as $f) {
+                            if (!file_exists($targetDir . '/' . $f)) $stillMissing[] = $f;
+                        }
+                        foreach ($wpCoreDirs as $d) {
+                            if (!is_dir($targetDir . '/' . $d)) $stillMissing[] = $d . '/';
+                        }
+
+                        if (empty($stillMissing)) {
+                            $this->sendSSE('log', 'WordPress core reparado automaticamente. Archivos restaurados: ' . implode(', ', $allMissing), $st);
+                        } else {
+                            $errors[] = 'WordPress core incompleto tras reparacion';
+                            $this->sendSSE('error', 'No se pudieron restaurar todos los archivos core. Faltan: ' . implode(', ', $stillMissing), $st);
+                        }
+                    }
+                }
+
+                if (!$wpDownloaded) {
+                    $errors[] = 'WordPress core incompleto y no se pudo descargar WP para reparar';
+                    $this->sendSSE('error', 'No se pudo descargar WordPress para reparar archivos core faltantes. Repara manualmente.', $st);
+                }
+
+                // Cleanup
+                @unlink($wpTarball);
+                shell_exec(sprintf('rm -rf %s 2>/dev/null', escapeshellarg($wpTmpDir)));
+            } else {
+                $this->sendSSE('log', 'WordPress core verificado: todos los archivos esenciales presentes.', $st);
+            }
         }
 
         // --- STEP 6b: Composer install ---

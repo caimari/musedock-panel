@@ -1,0 +1,20 @@
+[Unit]
+Description=MuseDock Portal - Customer Self-Service
+After=network.target postgresql.service musedock-panel.service
+Wants=musedock-panel.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=__PORTAL_DIR__
+ExecStart=/usr/bin/php -d upload_max_filesize=512M -d post_max_size=512M -d max_execution_time=300 -S 127.0.0.1:__PORTAL_INTERNAL_PORT__ -t __PORTAL_DIR__/public __PORTAL_DIR__/public/router.php
+Restart=always
+RestartSec=5
+StandardOutput=append:__PORTAL_DIR__/storage/logs/portal.log
+StandardError=append:__PORTAL_DIR__/storage/logs/portal-error.log
+
+Environment=HOME=/root
+
+[Install]
+WantedBy=multi-user.target

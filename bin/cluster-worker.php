@@ -506,6 +506,36 @@ if (file_exists($regenFlag)) {
     }
 }
 
+// ─── Step 7: Ensure TLS policies are correct (auto-heal after caddy reload) ─────
+try {
+    $config = require PANEL_ROOT . '/config/panel.php';
+    $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
+    $policies = json_decode(@file_get_contents("{$caddyApi}/config/apps/tls/automation/policies") ?: '[]', true) ?: [];
+
+    // Check if our catch-all has HTTP-01 (sign that policies are correctly set by us)
+    $hasCorrectCatchAll = false;
+    foreach ($policies as $p) {
+        if (empty($p['subjects'])) {
+            // Catch-all found — check if it has HTTP-01 issuer (our signature)
+            foreach ($p['issuers'] ?? [] as $iss) {
+                if (empty($iss['challenges'])) {
+                    $hasCorrectCatchAll = true;
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
+    if (!$hasCorrectCatchAll) {
+        logMsg("TLS policies missing or incorrect — regenerating...");
+        \MuseDockPanel\Services\SystemService::ensureTlsCatchAllPolicy($caddyApi);
+        logMsg("  TLS policies regenerated.");
+    }
+} catch (\Throwable $e) {
+    logMsg("ERROR checking TLS policies: " . $e->getMessage());
+}
+
 cleanup:
 
 $elapsed = round((microtime(true) - $startTime) * 1000, 1);

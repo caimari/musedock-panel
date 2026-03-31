@@ -20,6 +20,69 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.30',
+                'date' => '2026-03-30',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Portal de Clientes (Fase 0-3) — Nuevo portal independiente en puerto 8446 para que los clientes gestionen sus hostings, archivos y perfil',
+                            'File Manager — Navegador de archivos con subida, descarga, editor de codigo, crear carpetas y eliminar. Ejecuta operaciones como el usuario del hosting via wrapper seguro',
+                            'Sistema de invitaciones por email — El admin invita al cliente con un link seguro para que cree su propia contraseña. Token SHA-256 con caducidad 48h',
+                            'Sistema de templates — Temas Light y Dark intercambiables desde Settings, con color de sidebar personalizable (10 presets + color picker)',
+                            'Settings > Portal Clientes — Tabs de Acceso Clientes y Apariencia, gestion de acceso con invitar/reset/revocar, estado del portal y licencia',
+                            'Perfil del cliente — Editar nombre, email, empresa, telefono y cambiar contraseña desde el portal',
+                            'Dashboard con acordeon estilo Plesk — Cada hosting se despliega inline con tabs Info, Dominios, BD y Archivos',
+                            'Vista detalle de hosting — Cabecera reutilizable con tabs Dashboard, Dominios, Archivos, y pagina completa',
+                            'Router group() — Soporte para registrar rutas externas con prefijo y middleware independiente (para el portal)',
+                            'LicenseService con JWT — Constantes de features del portal, verificacion JWT skeleton, portal stub para instalaciones sin licencia',
+                            'Interfaces PortalProviderInterface y FileManagerInterface — Contratos para el modulo portal externo',
+                            'Auto-heal TLS en cluster-worker — Regenera politicas TLS automaticamente cada minuto si detecta que faltan o estan incorrectas',
+                        ],
+                        'en' => [
+                            'Customer Portal (Phase 0-3) — New independent portal on port 8446 for customers to manage their hostings, files and profile',
+                            'File Manager — File browser with upload, download, code editor, create folders and delete. Runs operations as hosting user via secure wrapper',
+                            'Email invitation system — Admin invites customer with secure link to create their own password. SHA-256 token with 48h expiry',
+                            'Template system — Light and Dark themes switchable from Settings, with customizable sidebar color (10 presets + color picker)',
+                            'Settings > Portal Clients — Customer Access and Appearance tabs, access management with invite/reset/revoke, portal status and license',
+                            'Customer profile — Edit name, email, company, phone and change password from the portal',
+                            'Plesk-style accordion dashboard — Each hosting expands inline with Info, Domains, DB and Files tabs',
+                            'Hosting detail view — Reusable header with Dashboard, Domains, Files tabs, and full page view',
+                            'Router group() — Support for external route registration with prefix and independent middleware (for portal)',
+                            'LicenseService with JWT — Portal feature constants, JWT verification skeleton, portal stub for unlicensed installs',
+                            'PortalProviderInterface and FileManagerInterface — Contracts for external portal module',
+                            'TLS auto-heal in cluster-worker — Automatically regenerates TLS policies every minute if missing or incorrect',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Politicas TLS idempotentes — ensureTlsCatchAllPolicy() ahora genera el estado correcto desde cero, sin depender de lo que haya en Caddy',
+                            'patchTlsPolicies() usa DELETE + PATCH — Reemplaza completamente las politicas en vez de mezclar con las del Caddyfile',
+                            'max_execution_time del panel subido a 3600s — Migraciones de sitios grandes ya no mueren por timeout',
+                            'Exclusiones lsyncd ampliadas — .copilot, .cache, .glide_cache, glide_cache, proxy_cache excluidos de la replicacion',
+                            'CSP del portal con unsafe-inline para scripts — Necesario para onclick y scripts inline en el file manager',
+                        ],
+                        'en' => [
+                            'Idempotent TLS policies — ensureTlsCatchAllPolicy() now builds correct state from scratch regardless of current Caddy state',
+                            'patchTlsPolicies() uses DELETE + PATCH — Fully replaces policies instead of merging with Caddyfile ones',
+                            'Panel max_execution_time raised to 3600s — Large site migrations no longer die from timeout',
+                            'Extended lsyncd exclusions — .copilot, .cache, .glide_cache, glide_cache, proxy_cache excluded from replication',
+                            'Portal CSP with unsafe-inline for scripts — Required for onclick and inline scripts in file manager',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Corregida deteccion PostgreSQL en Laravel — parseLaravelEnv() no leia DB_CONNECTION, causando que proyectos pgsql usaran mysqldump. Ahora detecta el driver correctamente',
+                            'Corregido caddy reload borrando politicas TLS — El cluster-worker ahora detecta y regenera politicas perdidas automaticamente',
+                        ],
+                        'en' => [
+                            'Fixed PostgreSQL detection in Laravel — parseLaravelEnv() was not reading DB_CONNECTION, causing pgsql projects to use mysqldump. Now detects driver correctly',
+                            'Fixed caddy reload wiping TLS policies — Cluster-worker now detects and regenerates lost policies automatically',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.29',
                 'date' => '2026-03-29',
                 'badge' => 'primary',

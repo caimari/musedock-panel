@@ -227,6 +227,330 @@ class AccountController
         }
     }
 
+    // ── Async provisioning with SSE progress ──
+
+    private function provisionStatusFile(string $token): string
+    {
+        return "/tmp/provision_status_{$token}.json";
+    }
+
+    private function provisionSendSSE(string $event, string $data, ?string $token = null): void
+    {
+        echo "event: {$event}\n";
+        echo "data: {$data}\n\n";
+        if (ob_get_level()) ob_flush();
+        @flush();
+
+        if ($token) {
+            $this->provisionAppendStatus($token, $event, $data);
+        }
+    }
+
+    private function provisionAppendStatus(string $token, string $event, string $data): void
+    {
+        $file = $this->provisionStatusFile($token);
+        $status = [];
+        if (file_exists($file)) {
+            $status = json_decode(file_get_contents($file), true) ?: [];
+        }
+        if (!isset($status['logs'])) $status['logs'] = [];
+
+        if ($event === 'log') {
+            $status['logs'][] = $data;
+        } elseif ($event === 'step') {
+            $status['step'] = $data;
+        } elseif ($event === 'progress') {
+            $decoded = json_decode($data, true);
+            if ($decoded) $status['progress'] = $decoded;
+        } elseif ($event === 'error') {
+            $status['logs'][] = 'ERROR: ' . $data;
+        } elseif ($event === 'done') {
+            $status['done'] = true;
+            $status['active'] = false;
+            $status['result'] = json_decode($data, true);
+        }
+
+        file_put_contents($file, json_encode($status, JSON_UNESCAPED_UNICODE));
+    }
+
+    /**
+     * POST /accounts/store-async — validate + prepare SSE token, return JSON
+     */
+    public function storeAsync(): void
+    {
+        header('Content-Type: application/json');
+
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            echo json_encode(['ok' => false, 'error' => 'La creacion de hostings solo se puede hacer en el nodo master.']);
+            return;
+        }
+
+        $domain = trim($_POST['domain'] ?? '');
+        $username = trim($_POST['username'] ?? '');
+        $password = $_POST['password'] ?? '';
+        $shell = $_POST['shell'] ?? '/usr/sbin/nologin';
+        $customerId = !empty($_POST['customer_id']) ? (int) $_POST['customer_id'] : null;
+        $description = trim($_POST['description'] ?? '');
+        $diskQuota = (int) ($_POST['disk_quota_mb'] ?? 1024);
+        $phpVersion = $_POST['php_version'] ?? '8.3';
+
+        // Validation
+        if (empty($domain) || empty($username) || empty($password)) {
+            echo json_encode(['ok' => false, 'error' => 'Dominio, usuario y password son obligatorios.']);
+            return;
+        }
+        if (!preg_match('/^[a-z][a-z0-9_]{2,30}$/', $username)) {
+            echo json_encode(['ok' => false, 'error' => 'El usuario debe empezar por letra minuscula, solo a-z, 0-9 y _ (3-31 caracteres).']);
+            return;
+        }
+        $existing = Database::fetchOne("SELECT id FROM hosting_accounts WHERE domain = :d OR username = :u", ['d' => $domain, 'u' => $username]);
+        if ($existing) {
+            echo json_encode(['ok' => false, 'error' => 'El dominio o usuario ya existe.']);
+            return;
+        }
+        if (strlen($password) < 8) {
+            echo json_encode(['ok' => false, 'error' => 'El password debe tener al menos 8 caracteres.']);
+            return;
+        }
+        if (!in_array($shell, ['/bin/bash', '/usr/sbin/nologin'])) {
+            $shell = '/usr/sbin/nologin';
+        }
+
+        // Store data in session for SSE stream to pick up
+        $token = bin2hex(random_bytes(16));
+        $sessionKey = 'provision_stream_' . $token;
+        $_SESSION[$sessionKey] = [
+            'domain' => $domain,
+            'username' => $username,
+            'password' => $password,
+            'shell' => $shell,
+            'customer_id' => $customerId,
+            'description' => $description,
+            'disk_quota_mb' => $diskQuota,
+            'php_version' => $phpVersion,
+        ];
+
+        echo json_encode(['ok' => true, 'token' => $token]);
+    }
+
+    /**
+     * GET /accounts/provision-stream?token=xxx — SSE stream for provisioning
+     */
+    public function provisionStream(): void
+    {
+        $token = $_GET['token'] ?? '';
+        $sessionKey = 'provision_stream_' . $token;
+
+        if (empty($token) || empty($_SESSION[$sessionKey])) {
+            header('Content-Type: text/plain');
+            echo 'Invalid token';
+            return;
+        }
+
+        $data = $_SESSION[$sessionKey];
+        unset($_SESSION[$sessionKey]);
+        session_write_close();
+
+        ignore_user_abort(true);
+        set_time_limit(120);
+
+        // SSE headers
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('Connection: keep-alive');
+        header('X-Accel-Buffering: no');
+
+        while (ob_get_level()) ob_end_flush();
+        ini_set('output_buffering', 'off');
+        ini_set('zlib.output_compression', false);
+
+        $st = $token;
+        $domain = $data['domain'];
+        $username = $data['username'];
+        $password = $data['password'];
+        $phpVersion = $data['php_version'];
+        $shell = $data['shell'];
+        $customerId = $data['customer_id'];
+        $description = $data['description'];
+        $diskQuota = $data['disk_quota_mb'];
+
+        $homeDir = "/var/www/vhosts/{$domain}";
+        $documentRoot = "{$homeDir}/httpdocs";
+        $fpmSocket = "unix//run/php/php{$phpVersion}-fpm-{$username}.sock";
+
+        // Initialize status file
+        file_put_contents($this->provisionStatusFile($st), json_encode([
+            'active' => true, 'step' => 'Iniciando', 'logs' => [],
+            'done' => false, 'result' => null, 'domain' => $domain,
+        ], JSON_UNESCAPED_UNICODE));
+
+        $this->provisionSendSSE('log', "Creando hosting para {$domain}...", $st);
+        $this->provisionSendSSE('progress', json_encode(['step' => 1, 'total' => 7, 'percent' => 0]), $st);
+
+        $errors = [];
+
+        // ── Step 1: Create system user ──
+        $this->provisionSendSSE('step', 'Creando usuario del sistema', $st);
+        $this->provisionSendSSE('log', "Creando usuario: {$username}", $st);
+        $this->provisionSendSSE('progress', json_encode(['step' => 1, 'total' => 7, 'percent' => 10]), $st);
+
+        $uid = SystemService::createSystemUser($username, $homeDir, $shell);
+        if ($uid === null) {
+            $this->provisionSendSSE('error', "Error critico: no se pudo crear el usuario del sistema: {$username}", $st);
+            $this->provisionSendSSE('done', json_encode(['ok' => false]), $st);
+            return;
+        }
+        $this->provisionSendSSE('log', "Usuario creado (UID: {$uid})", $st);
+
+        if (!empty($password)) {
+            SystemService::setUserPassword($username, $password);
+            $this->provisionSendSSE('log', 'Password configurado', $st);
+        }
+
+        // ── Step 2: Create directories ──
+        $this->provisionSendSSE('step', 'Creando directorios', $st);
+        $this->provisionSendSSE('progress', json_encode(['step' => 2, 'total' => 7, 'percent' => 25]), $st);
+        $this->provisionSendSSE('log', "Creando estructura: {$homeDir}/httpdocs, logs, tmp, sessions", $st);
+
+        if (!SystemService::createDirectories($username, $homeDir, $documentRoot)) {
+            $this->provisionSendSSE('error', "Error critico: no se pudieron crear los directorios para {$domain}", $st);
+            $this->provisionSendSSE('done', json_encode(['ok' => false]), $st);
+            return;
+        }
+        $this->provisionSendSSE('log', 'Directorios creados correctamente', $st);
+
+        // ── Step 3: Create default page ──
+        $this->provisionSendSSE('step', 'Creando pagina por defecto', $st);
+        $this->provisionSendSSE('progress', json_encode(['step' => 3, 'total' => 7, 'percent' => 40]), $st);
+
+        SystemService::createDefaultPage($documentRoot, $domain);
+        $this->provisionSendSSE('log', 'index.html creado', $st);
+
+        // ── Step 4: Create PHP-FPM pool ──
+        $this->provisionSendSSE('step', 'Configurando PHP-FPM', $st);
+        $this->provisionSendSSE('progress', json_encode(['step' => 4, 'total' => 7, 'percent' => 55]), $st);
+        $this->provisionSendSSE('log', "Creando pool PHP {$phpVersion} para {$username}", $st);
+
+        $fpmSocketPath = SystemService::createFpmPool($username, $phpVersion, $homeDir);
+        if (!$fpmSocketPath) {
+            $errors[] = 'PHP-FPM pool creation failed';
+            $this->provisionSendSSE('error', 'AVISO: No se pudo crear el pool PHP-FPM. Crear manualmente.', $st);
+        } else {
+            $this->provisionSendSSE('log', "Pool PHP-FPM creado: {$fpmSocketPath}", $st);
+        }
+
+        // ── Step 5: Add Caddy route ──
+        $this->provisionSendSSE('step', 'Configurando servidor web', $st);
+        $this->provisionSendSSE('progress', json_encode(['step' => 5, 'total' => 7, 'percent' => 70]), $st);
+        $this->provisionSendSSE('log', "Configurando Caddy para {$domain} + www.{$domain}", $st);
+
+        $caddyRouteId = SystemService::addCaddyRoute($domain, $documentRoot, $username, $phpVersion);
+        if (!$caddyRouteId) {
+            $errors[] = 'Caddy route creation failed';
+            $this->provisionSendSSE('error', 'AVISO: No se pudo crear la ruta en Caddy. Configurar manualmente.', $st);
+        } else {
+            $this->provisionSendSSE('log', "Ruta Caddy configurada (ID: {$caddyRouteId}). SSL se configurara automaticamente.", $st);
+        }
+
+        // ── Step 6: Final permissions + lsyncd ──
+        $this->provisionSendSSE('step', 'Ajustando permisos', $st);
+        $this->provisionSendSSE('progress', json_encode(['step' => 6, 'total' => 7, 'percent' => 85]), $st);
+
+        shell_exec(sprintf('chown -R %s:www-data %s 2>&1', escapeshellarg($username), escapeshellarg($homeDir)));
+        $this->provisionSendSSE('log', 'Permisos ajustados', $st);
+
+        SystemService::restartLsyncd();
+        $this->provisionSendSSE('log', 'lsyncd reiniciado', $st);
+
+        // ── Step 7: Save to database ──
+        $this->provisionSendSSE('step', 'Guardando en base de datos', $st);
+        $this->provisionSendSSE('progress', json_encode(['step' => 7, 'total' => 7, 'percent' => 95]), $st);
+
+        try {
+            $id = Database::insert('hosting_accounts', [
+                'customer_id' => $customerId,
+                'domain' => $domain,
+                'username' => $username,
+                'system_uid' => $uid,
+                'home_dir' => $homeDir,
+                'document_root' => $documentRoot,
+                'php_version' => $phpVersion,
+                'fpm_socket' => $fpmSocket,
+                'disk_quota_mb' => $diskQuota,
+                'caddy_route_id' => $caddyRouteId,
+                'description' => $description,
+                'shell' => $shell,
+            ]);
+
+            Database::insert('hosting_domains', [
+                'account_id' => $id,
+                'domain' => $domain,
+                'is_primary' => true,
+            ]);
+
+            LogService::log('account.create', $domain, "Created hosting account: {$username}@{$domain}");
+
+            // Sync to cluster nodes if master
+            if (Settings::get('cluster_role', 'standalone') === 'master') {
+                $nodes = ClusterService::getWebNodes();
+                foreach ($nodes as $node) {
+                    ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                        'hosting_action' => 'create_hosting',
+                        'hosting_data' => [
+                            'username' => $username,
+                            'domain' => $domain,
+                            'home_dir' => $homeDir,
+                            'document_root' => $documentRoot,
+                            'php_version' => $phpVersion,
+                            'password' => $password,
+                            'password_hash' => SystemService::getPasswordHash($username),
+                            'shell' => $shell,
+                            'system_uid' => $uid,
+                            'caddy_route_id' => $caddyRouteId,
+                            'customer_id' => $customerId,
+                            'disk_quota_mb' => $diskQuota,
+                            'description' => $description,
+                        ],
+                    ]);
+                }
+                $this->provisionSendSSE('log', 'Sincronizacion con nodos del cluster encolada', $st);
+            }
+
+            $this->provisionSendSSE('log', "Cuenta registrada en base de datos (ID: {$id})", $st);
+        } catch (\Throwable $e) {
+            $this->provisionSendSSE('error', 'Error guardando en BD: ' . $e->getMessage(), $st);
+            $this->provisionSendSSE('done', json_encode(['ok' => false]), $st);
+            return;
+        }
+
+        // ── Done ──
+        $this->provisionSendSSE('progress', json_encode(['step' => 7, 'total' => 7, 'percent' => 100]), $st);
+        $this->provisionSendSSE('log', 'Hosting creado correctamente!', $st);
+        $this->provisionSendSSE('done', json_encode([
+            'ok' => true,
+            'account_id' => $id,
+            'domain' => $domain,
+            'username' => $username,
+            'warnings' => $errors,
+        ]), $st);
+    }
+
+    /**
+     * GET /accounts/provision-status?token=xxx — poll status for reconnection
+     */
+    public function provisionStatus(): void
+    {
+        header('Content-Type: application/json');
+        $token = $_GET['token'] ?? '';
+        $statusFile = $this->provisionStatusFile($token);
+        if (empty($token) || !file_exists($statusFile)) {
+            echo json_encode(['active' => false]);
+            return;
+        }
+        $status = json_decode(file_get_contents($statusFile), true) ?: ['active' => false];
+        echo json_encode($status);
+    }
+
     public function show(array $params): void
     {
         $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);

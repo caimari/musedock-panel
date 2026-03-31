@@ -361,14 +361,18 @@ CONF;
      * Supports both HTTP-01 (direct domains) and DNS-01 (Cloudflare proxied domains).
      * DNS-01 uses IPv4 resolvers because IPv6 is disabled on this server.
      */
+    /**
+     * Ensure Caddy TLS policies are complete and correct.
+     * This method is IDEMPOTENT — it always builds the full correct state from scratch,
+     * regardless of what's currently in Caddy. Safe to call after caddy reload, restart, etc.
+     *
+     * Policy structure:
+     * 1. Per-account policies: each CF account's domains get DNS-01 with their specific token
+     * 2. Catch-all: HTTP-01 first (for non-CF domains), DNS-01 with primary token as fallback
+     */
     public static function ensureTlsCatchAllPolicy(string $caddyApi): void
     {
-        $policies = json_decode(
-            @file_get_contents("{$caddyApi}/config/apps/tls/automation/policies") ?: '[]',
-            true
-        ) ?: [];
-
-        // Read primary Cloudflare API token (for catch-all)
+        // Read primary Cloudflare API token
         $cfToken = trim(getenv('CLOUDFLARE_API_TOKEN') ?: '');
         if (!$cfToken) {
             $caddyEnv = @file_get_contents('/etc/default/caddy');
@@ -377,19 +381,14 @@ CONF;
             }
         }
 
-        // Get all configured Cloudflare accounts to create per-account TLS policies
-        // This ensures each domain gets its certificate via the correct CF token
+        // Build policies from scratch (idempotent — doesn't depend on current state)
+        $newPolicies = [];
+
+        // Per-account policies for each CF account with a different token
         $cfAccounts = CloudflareService::getConfiguredAccounts();
-
-        // Collect all zone names from all additional CF accounts (skip the first/primary)
-        // The primary account's domains are covered by the catch-all policy
-        $additionalPolicies = [];
-        foreach ($cfAccounts as $idx => $acct) {
+        foreach ($cfAccounts as $acct) {
             $token = $acct['token'] ?? '';
-            if (!$token) continue;
-
-            // Skip if this token matches the primary catch-all token
-            if ($token === $cfToken) continue;
+            if (!$token || $token === $cfToken) continue;
 
             $zones = $acct['zones'] ?? [];
             if (empty($zones)) continue;
@@ -402,50 +401,11 @@ CONF;
                 $subjects[] = '*.' . $zoneName;
             }
             if (!empty($subjects)) {
-                $additionalPolicies[$token] = $subjects;
+                $newPolicies[] = self::buildCfPolicy($token, $subjects);
             }
         }
 
-        // Rebuild policies: keep existing with subjects, update/add per-account and catch-all
-        $newPolicies = [];
-        $handledTokens = [];
-
-        foreach ($policies as $p) {
-            $subjects = $p['subjects'] ?? [];
-
-            if (empty($subjects)) {
-                // Catch-all — will be re-added at the end
-                continue;
-            }
-
-            // Check if this policy's subjects belong to an additional CF account
-            $isAdditionalCf = false;
-            foreach ($additionalPolicies as $addToken => $addSubjects) {
-                if (!empty(array_intersect($subjects, $addSubjects))) {
-                    // This is one of our per-account policies — rebuild it
-                    $isAdditionalCf = true;
-                    if (!isset($handledTokens[$addToken])) {
-                        $newPolicies[] = self::buildCfPolicy($addToken, $addSubjects);
-                        $handledTokens[$addToken] = true;
-                    }
-                    break;
-                }
-            }
-
-            if (!$isAdditionalCf) {
-                // Keep existing policy as-is (musedock.com, mortadelo, etc.)
-                $newPolicies[] = $p;
-            }
-        }
-
-        // Add policies for additional accounts not yet handled
-        foreach ($additionalPolicies as $addToken => $addSubjects) {
-            if (!isset($handledTokens[$addToken])) {
-                $newPolicies[] = self::buildCfPolicy($addToken, $addSubjects);
-            }
-        }
-
-        // Add catch-all policy with primary token as fallback
+        // Catch-all: HTTP-01 first (non-CF domains), DNS-01 fallback (CF domains with primary token)
         $newPolicies[] = self::buildCfPolicy($cfToken, []);
 
         self::patchTlsPolicies($caddyApi, $newPolicies);
@@ -490,10 +450,21 @@ CONF;
 
     private static function patchTlsPolicies(string $caddyApi, array $policies): void
     {
+        // Use DELETE + POST to fully replace (PATCH merges and can leave stale policies)
         $ch = curl_init("{$caddyApi}/config/apps/tls/automation/policies");
         curl_setopt_array($ch, [
+            CURLOPT_CUSTOMREQUEST => 'DELETE',
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+        ]);
+        curl_exec($ch);
+        curl_close($ch);
+
+        // Set the complete policy list
+        $ch = curl_init("{$caddyApi}/config/apps/tls/automation");
+        curl_setopt_array($ch, [
             CURLOPT_CUSTOMREQUEST => 'PATCH',
-            CURLOPT_POSTFIELDS => json_encode($policies),
+            CURLOPT_POSTFIELDS => json_encode(['policies' => $policies]),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 10,

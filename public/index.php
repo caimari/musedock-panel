@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.29');
+define('PANEL_VERSION', '1.0.30');
 
 
 
@@ -60,6 +60,17 @@ try {
 \MuseDockPanel\View::share('currentUser', \MuseDockPanel\Auth::user());
 
 // ===============================
+// Portal module discovery
+// ===============================
+// If the portal package is installed and licensed, let it register its routes.
+// The portal runs on a separate port with its own entry point, but can also
+// register routes under /portal/* prefix on the admin panel for cross-linking.
+if (file_exists('/opt/musedock-portal/bootstrap.php')
+    && \MuseDockPanel\Services\LicenseService::hasFeature(\MuseDockPanel\Services\LicenseService::FEATURE_PORTAL)) {
+    require_once '/opt/musedock-portal/bootstrap.php';
+}
+
+// ===============================
 // First-run setup (no admin exists)
 // ===============================
 if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
@@ -93,6 +104,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // Routes
 // ===============================
 
+// Portal stub (shows "not activated" or redirects to portal if licensed)
+\MuseDockPanel\Router::get('/portal', 'PortalStubController@index');
+
 // Auth
 \MuseDockPanel\Router::get('/login', 'AuthController@loginForm');
 \MuseDockPanel\Router::post('/login/submit', 'AuthController@login');
@@ -117,6 +131,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/accounts', 'AccountController@index');
 \MuseDockPanel\Router::get('/accounts/create', 'AccountController@create');
 \MuseDockPanel\Router::post('/accounts/store', 'AccountController@store');
+\MuseDockPanel\Router::post('/accounts/store-async', 'AccountController@storeAsync');
+\MuseDockPanel\Router::get('/accounts/provision-stream', 'AccountController@provisionStream');
+\MuseDockPanel\Router::get('/accounts/provision-status', 'AccountController@provisionStatus');
 \MuseDockPanel\Router::post('/accounts/bulk-disable-wp-cron', 'AccountController@bulkDisableWpCron');
 \MuseDockPanel\Router::get('/accounts/import', 'AccountController@importList');
 \MuseDockPanel\Router::post('/accounts/import', 'AccountController@importStore');
@@ -233,6 +250,12 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/health', 'SettingsController@health');
 \MuseDockPanel\Router::post('/settings/health/repair-cron', 'SettingsController@healthRepairCron');
 \MuseDockPanel\Router::post('/settings/health/fix-timezone', 'SettingsController@healthFixTimezone');
+
+// Portal Settings
+\MuseDockPanel\Router::get('/settings/portal', 'PortalSettingsController@index');
+\MuseDockPanel\Router::post('/settings/portal/save', 'PortalSettingsController@save');
+\MuseDockPanel\Router::post('/settings/portal/send-invitation', 'PortalSettingsController@sendInvitation');
+\MuseDockPanel\Router::post('/settings/portal/revoke-access', 'PortalSettingsController@revokeAccess');
 
 // Updates
 \MuseDockPanel\Router::get('/settings/updates', 'UpdateController@index');
