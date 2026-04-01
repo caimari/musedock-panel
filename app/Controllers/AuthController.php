@@ -29,12 +29,23 @@ class AuthController
         }
 
         if (Auth::attempt($username, $password)) {
+            $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+            self::writeAuthLog($ip, $username, true);
             Flash::set('success', 'Bienvenido al panel.');
             Router::redirect('/');
         } else {
+            $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+            self::writeAuthLog($ip, $username, false);
             Flash::set('error', 'Credenciales incorrectas.');
             Router::redirect('/login');
         }
+    }
+
+    private static function writeAuthLog(string $ip, string $username, bool $success): void
+    {
+        $status = $success ? 'OK' : 'FAIL';
+        $line = date('Y-m-d H:i:s') . " {$status} login from {$ip} user {$username}\n";
+        @file_put_contents('/var/log/musedock-panel-auth.log', $line, FILE_APPEND | LOCK_EX);
     }
 
     public function logout(): void

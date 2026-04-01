@@ -18,7 +18,7 @@ class PortalSettingsController
         if ($portalInstalled && file_exists('/opt/musedock-portal/bootstrap.php')) {
             // Read version from bootstrap
             $content = file_get_contents('/opt/musedock-portal/bootstrap.php');
-            if (preg_match("/PORTAL_VERSION.*?'([^']+)'/", $content, $m)) {
+            if (preg_match("/PORTAL_VERSION['\"],\s*['\"]([^'\"]+)/", $content, $m)) {
                 $portalVersion = $m[1];
             }
         }

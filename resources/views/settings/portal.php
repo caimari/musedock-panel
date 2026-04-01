@@ -59,14 +59,6 @@
                     <small class="text-muted">Licencia <?= ($licenseStatus['active'] ?? false) ? 'activa' : 'dev mode' ?></small>
                 </div>
             </div>
-            <?php if ($portalServiceActive): ?>
-                <div class="mt-3 text-center">
-                    <a href="https://<?= preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? 'localhost') ?>:<?= View::e($portalPort) ?>/"
-                       target="_blank" class="btn btn-sm" style="background:rgba(168,85,247,0.15);color:#a855f7;border:1px solid rgba(168,85,247,0.3);">
-                        <i class="bi bi-box-arrow-up-right me-1"></i>Abrir portal
-                    </a>
-                </div>
-            <?php endif; ?>
         <?php endif; ?>
     </div>
 </div>
@@ -82,6 +74,12 @@
     <a href="/settings/portal?tab=appearance" class="btn btn-sm <?= $portalTab === 'appearance' ? 'btn-light' : 'btn-outline-light' ?>">
         <i class="bi bi-palette me-1"></i>Apariencia
     </a>
+    <?php if ($portalServiceActive): ?>
+    <a href="https://<?= preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? 'localhost') ?>:<?= View::e($portalPort) ?>/"
+       target="_blank" class="btn btn-sm btn-outline-light ms-auto" style="border-color:#a855f7;color:#a855f7;">
+        <i class="bi bi-box-arrow-up-right me-1"></i>Abrir portal
+    </a>
+    <?php endif; ?>
 </div>
 
 <?php if ($portalTab === 'access'): ?>
