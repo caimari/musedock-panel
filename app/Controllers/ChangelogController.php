@@ -20,6 +20,45 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.36',
+                'date' => '2026-04-01',
+                'badge' => 'danger',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Fail2Ban integrado — Proteccion contra fuerza bruta para panel admin, portal de clientes y WordPress, gestionado desde el panel sin plugins',
+                            'Jail musedock-panel — Banea IPs tras 5 intentos fallidos de login al panel admin en 10 min (ban 1h)',
+                            'Jail musedock-portal — Banea IPs tras 10 intentos fallidos de login al portal en 10 min (ban 30min)',
+                            'Jail musedock-wordpress — Banea IPs tras 10 POSTs a wp-login.php o xmlrpc.php en 5 min (ban 1h). Automatico para todos los hostings sin plugin en WordPress',
+                            'Auth logging — Intentos de login del panel y portal se escriben a /var/log/ con IP real del cliente (X-Forwarded-For tras Caddy)',
+                            'Caddy access logging — Los hostings se registran automaticamente en el logger de Caddy al crear o reparar rutas',
+                            'Banear IP manualmente — Nuevo boton en Settings > Fail2Ban para banear una IP en cualquier jail',
+                            'Whitelist (ignoreip) — Gestion de IPs que nunca se banean, con soporte para CIDR. Boton rapido en cada IP baneada',
+                            'Configs distribuidos via git — Filtros, jails y logrotate en config/fail2ban/, se instalan automaticamente con install.sh y update.sh',
+                        ],
+                        'en' => [
+                            'Integrated Fail2Ban — Brute force protection for admin panel, customer portal and WordPress, managed from panel without plugins',
+                            'musedock-panel jail — Bans IPs after 5 failed panel login attempts in 10 min (1h ban)',
+                            'musedock-portal jail — Bans IPs after 10 failed portal login attempts in 10 min (30min ban)',
+                            'musedock-wordpress jail — Bans IPs after 10 POSTs to wp-login.php or xmlrpc.php in 5 min (1h ban). Automatic for all hostings, no WordPress plugin needed',
+                            'Auth logging — Panel and portal login attempts written to /var/log/ with real client IP (X-Forwarded-For behind Caddy)',
+                            'Caddy access logging — Hostings auto-registered in Caddy logger when creating or repairing routes',
+                            'Manual IP ban — New button in Settings > Fail2Ban to ban an IP in any jail',
+                            'Whitelist (ignoreip) — Manage IPs that never get banned, with CIDR support. Quick button on each banned IP',
+                            'Configs distributed via git — Filters, jails and logrotate in config/fail2ban/, auto-installed by install.sh and update.sh',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Portal IP siempre 127.0.0.1 — RateLimiter y auth log ahora usan la IP real del cliente en vez de la IP de Caddy',
+                        ],
+                        'en' => [
+                            'Portal IP always 127.0.0.1 — RateLimiter and auth log now use real client IP instead of Caddy proxy IP',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.35',
                 'date' => '2026-03-31',
                 'badge' => 'primary',
