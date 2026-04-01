@@ -475,6 +475,72 @@ CONF;
     }
 
     /**
+     * Ensure the 'hosting-access' logger exists in Caddy and register domains to use it.
+     * Writes all hosting access logs to /var/log/caddy/hosting-access.log for Fail2Ban.
+     */
+    public static function ensureHostingAccessLog(string $caddyApi, array $domains): void
+    {
+        // 1) Ensure the logger definition exists
+        $loggerConfig = [
+            'encoder' => ['format' => 'json'],
+            'include' => ['http.log.access.hosting-access'],
+            'writer' => [
+                'output' => 'file',
+                'filename' => '/var/log/caddy/hosting-access.log',
+                'roll_size_mb' => 100,
+                'roll_keep' => 5,
+            ],
+        ];
+        $ch = curl_init("{$caddyApi}/config/logging/logs/hosting-access");
+        curl_setopt_array($ch, [
+            CURLOPT_CUSTOMREQUEST => 'PUT',
+            CURLOPT_POSTFIELDS => json_encode($loggerConfig),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 5,
+        ]);
+        curl_exec($ch);
+        curl_close($ch);
+
+        // 2) Exclude hosting-access from default log to avoid duplicates
+        $ch = curl_init("{$caddyApi}/config/logging/logs/default/exclude");
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
+        $resp = curl_exec($ch);
+        curl_close($ch);
+        $excludes = json_decode($resp, true) ?: [];
+        if (!in_array('http.log.access.hosting-access', $excludes)) {
+            $excludes[] = 'http.log.access.hosting-access';
+            $ch = curl_init("{$caddyApi}/config/logging/logs/default/exclude");
+            curl_setopt_array($ch, [
+                CURLOPT_CUSTOMREQUEST => 'PUT',
+                CURLOPT_POSTFIELDS => json_encode($excludes),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 5,
+            ]);
+            curl_exec($ch);
+            curl_close($ch);
+        }
+
+        // 3) Map each domain to the hosting-access logger
+        foreach ($domains as $d) {
+            $d = trim($d);
+            if (empty($d)) continue;
+            $encoded = urlencode($d);
+            $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/logs/logger_names/{$encoded}");
+            curl_setopt_array($ch, [
+                CURLOPT_CUSTOMREQUEST => 'PUT',
+                CURLOPT_POSTFIELDS => json_encode(['hosting-access']),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 5,
+            ]);
+            curl_exec($ch);
+            curl_close($ch);
+        }
+    }
+
+    /**
      * Add a Caddy route via API for this domain
      */
     public static function addCaddyRoute(string $domain, string $documentRoot, string $username, string $phpVersion = '8.3'): ?string
@@ -558,7 +624,12 @@ CONF;
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        return ($httpCode >= 200 && $httpCode < 300) ? $routeId : null;
+        if ($httpCode >= 200 && $httpCode < 300) {
+            // Register domains for access logging (Fail2Ban wp-login protection)
+            self::ensureHostingAccessLog($caddyApi, [$domain, "www.{$domain}"]);
+            return $routeId;
+        }
+        return null;
     }
 
     /**
@@ -648,7 +719,12 @@ CONF;
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        return ($httpCode >= 200 && $httpCode < 300) ? $routeId : null;
+        if ($httpCode >= 200 && $httpCode < 300) {
+            // Register all domains for access logging (Fail2Ban wp-login protection)
+            self::ensureHostingAccessLog($caddyApi, $hosts);
+            return $routeId;
+        }
+        return null;
     }
 
     /**

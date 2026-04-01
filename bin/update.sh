@@ -174,6 +174,46 @@ CRONEOF
     ok "Monitor cron installed"
 fi
 
+# Sync Fail2Ban configs if fail2ban is installed
+if command -v fail2ban-client >/dev/null 2>&1 && [ -d "${PANEL_DIR}/config/fail2ban" ]; then
+    F2B_CHANGED=false
+
+    # Create log files if missing
+    touch /var/log/musedock-panel-auth.log /var/log/musedock-portal-auth.log 2>/dev/null
+    chmod 644 /var/log/musedock-panel-auth.log /var/log/musedock-portal-auth.log 2>/dev/null
+    mkdir -p /var/log/caddy 2>/dev/null
+    touch /var/log/caddy/hosting-access.log 2>/dev/null
+    chmod 644 /var/log/caddy/hosting-access.log 2>/dev/null
+
+    # Sync filters
+    for f in "${PANEL_DIR}"/config/fail2ban/filter.d/*.conf; do
+        [ -f "$f" ] || continue
+        FNAME=$(basename "$f")
+        if ! cmp -s "$f" "/etc/fail2ban/filter.d/${FNAME}" 2>/dev/null; then
+            cp "$f" "/etc/fail2ban/filter.d/${FNAME}"
+            F2B_CHANGED=true
+        fi
+    done
+
+    # Sync jail config
+    if ! cmp -s "${PANEL_DIR}/config/fail2ban/musedock.conf" /etc/fail2ban/jail.d/musedock.conf 2>/dev/null; then
+        cp "${PANEL_DIR}/config/fail2ban/musedock.conf" /etc/fail2ban/jail.d/musedock.conf
+        F2B_CHANGED=true
+    fi
+
+    # Sync logrotate
+    if [ -f "${PANEL_DIR}/config/fail2ban/logrotate-musedock-auth" ]; then
+        cp "${PANEL_DIR}/config/fail2ban/logrotate-musedock-auth" /etc/logrotate.d/musedock-auth 2>/dev/null
+    fi
+
+    if [ "$F2B_CHANGED" = true ] && systemctl is-active --quiet fail2ban 2>/dev/null; then
+        fail2ban-client reload >/dev/null 2>&1
+        ok "Fail2Ban configs updated and reloaded"
+    else
+        ok "Fail2Ban configs up to date"
+    fi
+fi
+
 echo ""
 
 # ============================================================

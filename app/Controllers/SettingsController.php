@@ -925,6 +925,17 @@ class SettingsController
             ];
         }
 
+        // Read whitelist (ignoreip) from jail.local
+        $whitelist = [];
+        $jailLocal = '/etc/fail2ban/jail.local';
+        if (file_exists($jailLocal)) {
+            $jlContent = file_get_contents($jailLocal);
+            if (preg_match('/^ignoreip\s*=\s*(.+)$/m', $jlContent, $m)) {
+                $whitelist = array_map('trim', preg_split('/[\s,]+/', $m[1]));
+                $whitelist = array_values(array_filter($whitelist, fn($v) => !empty($v)));
+            }
+        }
+
         View::render('settings/fail2ban', [
             'layout' => 'main',
             'pageTitle' => 'Fail2Ban',
@@ -932,6 +943,7 @@ class SettingsController
             'serviceStatus' => $serviceStatus,
             'serviceUptime' => $serviceUptime,
             'jails' => $jails,
+            'whitelist' => $whitelist,
         ]);
     }
 
@@ -968,6 +980,97 @@ class SettingsController
         } else {
             Flash::set('success', "IP {$ip} desbaneada del jail {$jail}.");
         }
+
+        Router::redirect('/settings/fail2ban');
+    }
+
+    public function fail2banBan(): void
+    {
+        $jail = trim($_POST['jail'] ?? '');
+        $ip = trim($_POST['ip'] ?? '');
+
+        if (empty($jail) || !preg_match('/^[a-zA-Z0-9_-]+$/', $jail)) {
+            Flash::set('error', 'Nombre de jail invalido.');
+            Router::redirect('/settings/fail2ban');
+            return;
+        }
+
+        if (empty($ip) || !filter_var($ip, FILTER_VALIDATE_IP)) {
+            Flash::set('error', 'Direccion IP invalida.');
+            Router::redirect('/settings/fail2ban');
+            return;
+        }
+
+        $output = trim(shell_exec(sprintf(
+            'fail2ban-client set %s banip %s 2>&1',
+            escapeshellarg($jail),
+            escapeshellarg($ip)
+        )) ?? '');
+
+        LogService::log('fail2ban.ban', $jail, "Ban IP {$ip} in jail {$jail}: {$output}");
+
+        if (str_contains($output, 'ERROR') || str_contains($output, 'NOK')) {
+            Flash::set('error', "Error al banear {$ip} en {$jail}: {$output}");
+        } else {
+            Flash::set('success', "IP {$ip} baneada en jail {$jail}.");
+        }
+
+        Router::redirect('/settings/fail2ban');
+    }
+
+    public function fail2banWhitelist(): void
+    {
+        $action = trim($_POST['action'] ?? '');
+        $ip = trim($_POST['ip'] ?? '');
+
+        if (empty($ip) || (!filter_var($ip, FILTER_VALIDATE_IP) && !preg_match('#^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}$#', $ip))) {
+            Flash::set('error', 'IP o CIDR invalido.');
+            Router::redirect('/settings/fail2ban');
+            return;
+        }
+
+        // Read current jail.local ignoreip
+        $jailLocal = '/etc/fail2ban/jail.local';
+        $currentIgnore = [];
+
+        if (file_exists($jailLocal)) {
+            $content = file_get_contents($jailLocal);
+            if (preg_match('/^ignoreip\s*=\s*(.+)$/m', $content, $m)) {
+                $currentIgnore = array_map('trim', preg_split('/[\s,]+/', $m[1]));
+                $currentIgnore = array_filter($currentIgnore, fn($v) => !empty($v));
+            }
+        }
+
+        if ($action === 'add') {
+            if (!in_array($ip, $currentIgnore)) {
+                $currentIgnore[] = $ip;
+            }
+            LogService::log('fail2ban.whitelist.add', $ip, "Added {$ip} to Fail2Ban whitelist");
+            Flash::set('success', "IP {$ip} anadida a la whitelist.");
+        } elseif ($action === 'remove') {
+            $currentIgnore = array_values(array_filter($currentIgnore, fn($v) => $v !== $ip));
+            LogService::log('fail2ban.whitelist.remove', $ip, "Removed {$ip} from Fail2Ban whitelist");
+            Flash::set('success', "IP {$ip} eliminada de la whitelist.");
+        } else {
+            Flash::set('error', 'Accion invalida.');
+            Router::redirect('/settings/fail2ban');
+            return;
+        }
+
+        // Always keep 127.0.0.1/8 and ::1
+        $defaults = ['127.0.0.1/8', '::1'];
+        foreach ($defaults as $d) {
+            if (!in_array($d, $currentIgnore)) {
+                array_unshift($currentIgnore, $d);
+            }
+        }
+
+        $ignoreStr = implode(' ', $currentIgnore);
+        $newContent = "[DEFAULT]\nignoreip = {$ignoreStr}\n";
+        file_put_contents($jailLocal, $newContent);
+
+        // Reload fail2ban to apply
+        shell_exec('fail2ban-client reload 2>&1');
 
         Router::redirect('/settings/fail2ban');
     }

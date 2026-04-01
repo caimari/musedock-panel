@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.35');
+define('PANEL_VERSION', '1.0.36');
 
 
 
@@ -243,6 +243,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/ssl', 'SettingsController@ssl');
 \MuseDockPanel\Router::get('/settings/fail2ban', 'SettingsController@fail2ban');
 \MuseDockPanel\Router::post('/settings/fail2ban/unban', 'SettingsController@fail2banUnban');
+\MuseDockPanel\Router::post('/settings/fail2ban/ban', 'SettingsController@fail2banBan');
+\MuseDockPanel\Router::post('/settings/fail2ban/whitelist', 'SettingsController@fail2banWhitelist');
 \MuseDockPanel\Router::get('/settings/logs', 'SettingsController@logs');
 \MuseDockPanel\Router::post('/settings/logs/clear', 'SettingsController@logClear');
 

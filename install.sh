@@ -1528,6 +1528,26 @@ CRONEOF
     systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
     ok "$(t update_crons)"
 
+    # --- 5b. Sync Fail2Ban configs ---
+    if command -v fail2ban-client >/dev/null 2>&1 && [ -d "${PANEL_DIR}/config/fail2ban" ]; then
+        touch /var/log/musedock-panel-auth.log /var/log/musedock-portal-auth.log 2>/dev/null
+        chmod 644 /var/log/musedock-panel-auth.log /var/log/musedock-portal-auth.log 2>/dev/null
+        mkdir -p /var/log/caddy 2>/dev/null
+        touch /var/log/caddy/hosting-access.log 2>/dev/null
+        chmod 644 /var/log/caddy/hosting-access.log 2>/dev/null
+
+        for f in "${PANEL_DIR}"/config/fail2ban/filter.d/*.conf; do
+            [ -f "$f" ] && cp "$f" /etc/fail2ban/filter.d/
+        done
+        cp "${PANEL_DIR}/config/fail2ban/musedock.conf" /etc/fail2ban/jail.d/musedock.conf 2>/dev/null
+        [ -f "${PANEL_DIR}/config/fail2ban/logrotate-musedock-auth" ] && cp "${PANEL_DIR}/config/fail2ban/logrotate-musedock-auth" /etc/logrotate.d/musedock-auth 2>/dev/null
+
+        if systemctl is-active --quiet fail2ban 2>/dev/null; then
+            fail2ban-client reload >/dev/null 2>&1
+        fi
+        ok "Fail2Ban configs sincronizados"
+    fi
+
     # --- 6. Fix permissions ---
     chmod 600 "${PANEL_DIR}/.env"
     chmod -R 750 "${PANEL_DIR}/storage"
@@ -2657,6 +2677,49 @@ ok "Cron: failover-worker.php (cada minuto)"
 # Reload cron daemon
 systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
 ok "Cron jobs instalados"
+
+# ============================================================
+# Step 7c: Fail2Ban — Brute force protection
+# ============================================================
+header "Configurando Fail2Ban (proteccion contra fuerza bruta)..."
+
+if command -v fail2ban-client >/dev/null 2>&1; then
+    ok "Fail2Ban detectado"
+
+    # Create log files
+    touch /var/log/musedock-panel-auth.log /var/log/musedock-portal-auth.log
+    chmod 644 /var/log/musedock-panel-auth.log /var/log/musedock-portal-auth.log
+    mkdir -p /var/log/caddy
+    touch /var/log/caddy/hosting-access.log
+    chmod 644 /var/log/caddy/hosting-access.log
+    ok "Log files creados"
+
+    # Install filters
+    cp "${PANEL_DIR}/config/fail2ban/filter.d/musedock-panel.conf" /etc/fail2ban/filter.d/
+    cp "${PANEL_DIR}/config/fail2ban/filter.d/musedock-portal.conf" /etc/fail2ban/filter.d/
+    cp "${PANEL_DIR}/config/fail2ban/filter.d/musedock-wordpress.conf" /etc/fail2ban/filter.d/
+    ok "Filtros Fail2Ban instalados"
+
+    # Install jails
+    cp "${PANEL_DIR}/config/fail2ban/musedock.conf" /etc/fail2ban/jail.d/musedock.conf
+    ok "Jails Fail2Ban instalados (musedock-panel, musedock-portal, musedock-wordpress)"
+
+    # Install logrotate
+    cp "${PANEL_DIR}/config/fail2ban/logrotate-musedock-auth" /etc/logrotate.d/musedock-auth
+    ok "Logrotate configurado"
+
+    # Reload fail2ban
+    if systemctl is-active --quiet fail2ban 2>/dev/null; then
+        fail2ban-client reload >/dev/null 2>&1
+        ok "Fail2Ban recargado"
+    else
+        systemctl enable --now fail2ban >/dev/null 2>&1 || true
+        ok "Fail2Ban iniciado"
+    fi
+else
+    warn "Fail2Ban no instalado. Instala con: apt install fail2ban -y"
+    warn "Despues, ejecuta el updater para activar la proteccion: bash ${PANEL_DIR}/bin/update.sh"
+fi
 
 # ============================================================
 # Post-installation health check

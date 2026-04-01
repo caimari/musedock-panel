@@ -1,0 +1,11 @@
+/var/log/musedock-panel-auth.log
+/var/log/musedock-portal-auth.log
+{
+    weekly
+    rotate 12
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0644 root root
+}

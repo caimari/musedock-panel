@@ -2,6 +2,29 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.36] — 2026-04-01
+
+### Anadido
+- **Fail2Ban integrado** — Proteccion contra fuerza bruta para panel admin, portal de clientes y WordPress, todo gestionado desde el panel sin plugins
+- **Jail musedock-panel** — Banea IPs tras 5 intentos fallidos de login al panel admin en 10 minutos (ban 1h, puerto 8444)
+- **Jail musedock-portal** — Banea IPs tras 10 intentos fallidos de login al portal de clientes en 10 minutos (ban 30min, puerto 8446)
+- **Jail musedock-wordpress** — Banea IPs tras 10 POSTs a wp-login.php o xmlrpc.php en 5 minutos (ban 1h, puertos 80/443). Automatico para todos los hostings, sin necesidad de plugin en WordPress
+- **Auth logging** — Los intentos de login (exitosos y fallidos) del panel y portal se escriben a /var/log/musedock-panel-auth.log y /var/log/musedock-portal-auth.log con IP real del cliente
+- **IP real tras Caddy** — Nuevo metodo `getClientIp()` en ambos AuthController que extrae la IP real de X-Forwarded-For en vez de REMOTE_ADDR (siempre 127.0.0.1 tras reverse proxy)
+- **Caddy access logging para hostings** — Nuevo metodo `SystemService::ensureHostingAccessLog()` que registra dominios en el logger de Caddy via API. Se ejecuta automaticamente al crear o reparar rutas de hosting
+- **Banear IP manualmente** — Nuevo boton en Settings > Fail2Ban para banear una IP en cualquier jail
+- **Whitelist (ignoreip)** — Gestion de IPs que nunca se banean desde el panel, con soporte para IPs individuales y rangos CIDR. Escribe en /etc/fail2ban/jail.local
+- **Boton Whitelist en IPs baneadas** — Cada IP baneada tiene boton para desbanear y anadir a whitelist en un click
+- **Configs en el repo** — Filtros, jails y logrotate en config/fail2ban/ para distribucion automatica via git
+- **Instalador (install.sh)** — Nuevo Step 7c que instala filtros, jails, log files y logrotate de Fail2Ban. En modo update tambien sincroniza configs
+- **Updater (update.sh)** — Sincroniza automaticamente configs de Fail2Ban si hay cambios, solo recarga si es necesario
+- **repair-caddy-routes.php** — Ahora registra dominios reparados para Caddy access logging (Fail2Ban WordPress)
+
+### Corregido
+- **Portal IP siempre 127.0.0.1** — El RateLimiter del portal ahora usa la IP real del cliente en vez de la IP de Caddy
+
+---
+
 ## [0.6.0] — 2026-03-17
 
 ### Añadido
