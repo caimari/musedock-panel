@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.35',
+                'date' => '2026-03-31',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Soporte WebTV CMS en migrador — Detecta config/Config.inc.php automaticamente, extrae credenciales BD y actualiza la config tras importar',
+                            'DNS checks lazy via AJAX en /domains — La pagina carga instantaneamente, los checks DNS se hacen en background con spinners progresivos',
+                        ],
+                        'en' => [
+                            'WebTV CMS support in migrator — Detects config/Config.inc.php automatically, extracts DB credentials and updates config after import',
+                            'Lazy DNS checks via AJAX on /domains — Page loads instantly, DNS checks run in background with progressive spinners',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Pagina /accounts carga instantanea — Disco leido de BD (cacheado) en vez de du en tiempo real. Actualizado por monitor-collector cada minuto',
+                            'IP del servidor cacheada en Settings — No llama a ifconfig.me en cada carga de /domains',
+                        ],
+                        'en' => [
+                            'Instant /accounts page load — Disk read from DB (cached) instead of real-time du. Updated by monitor-collector every minute',
+                            'Server IP cached in Settings — No longer calls ifconfig.me on every /domains page load',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.34',
                 'date' => '2026-03-31',
                 'badge' => 'primary',

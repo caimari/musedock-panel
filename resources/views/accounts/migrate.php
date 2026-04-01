@@ -259,6 +259,9 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                             <label class="btn btn-outline-light" for="srcWordpress"><i class="bi bi-wordpress me-1"></i>WordPress</label>
                             <input type="radio" class="btn-check" name="db_source_toggle" id="srcZend" value="zend">
                             <label class="btn btn-outline-light" for="srcZend"><i class="bi bi-filetype-php me-1"></i>Zend</label>
+
+                            <input type="radio" class="btn-check" name="db_source_toggle" id="srcWebtv" value="webtv">
+                            <label class="btn btn-outline-light" for="srcWebtv"><i class="bi bi-camera-video me-1"></i>WebTV</label>
                         </div>
                     </div>
 
@@ -1175,7 +1178,7 @@ function populateVhostFolders(folders) {
         subdomains.forEach(function(f) {
             var projectBadge = '';
             if (f.project) {
-                var colors = {Laravel: '#ef4444', MuseDock: '#a855f7', WordPress: '#3b82f6', Zend: '#22c55e'};
+                var colors = {Laravel: '#ef4444', MuseDock: '#a855f7', WordPress: '#3b82f6', Zend: '#22c55e', WebTV: '#f97316'};
                 var color = colors[f.project] || '#6b7280';
                 projectBadge = ' <span class="badge" style="background:' + color + ';font-size:0.65rem;">' + f.project + '</span>';
             }

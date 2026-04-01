@@ -34,18 +34,8 @@ class AccountController
              ORDER BY h.created_at DESC"
         );
 
-        // Update disk usage in a single du call for performance
-        $homeDirs = array_filter(array_column($accounts, 'home_dir'), fn($d) => is_dir($d));
-        $diskMap = [];
-        if ($homeDirs) {
-            $cmd = 'du -sm ' . implode(' ', array_map('escapeshellarg', $homeDirs)) . ' 2>/dev/null';
-            $output = shell_exec($cmd) ?: '';
-            foreach (explode("\n", trim($output)) as $line) {
-                if (preg_match('/^(\d+)\s+(.+)$/', $line, $m)) {
-                    $diskMap[rtrim($m[2], '/')] = (int)$m[1];
-                }
-            }
-        }
+        // Disk usage is read from DB (updated periodically by monitor-collector worker)
+        // No real-time du call — that's what made this page slow
 
         // Fetch alias/redirect details per account
         $aliasCounts = [];
@@ -80,8 +70,6 @@ class AccountController
         } catch (\Throwable $e) {}
 
         foreach ($accounts as &$acc) {
-            $key = rtrim($acc['home_dir'], '/');
-            $acc['disk_used_mb'] = $diskMap[$key] ?? 0;
             $acc['alias_count'] = $aliasCounts[(int)$acc['id']] ?? 0;
             $acc['redirect_count'] = $redirectCounts[(int)$acc['id']] ?? 0;
             $acc['alias_details'] = $aliasDetails[(int)$acc['id']] ?? [];

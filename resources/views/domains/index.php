@@ -2,8 +2,12 @@
 use MuseDockPanel\View;
 use MuseDockPanel\Services\CloudflareService;
 
-// Get server IP for DNS check
-$serverIp = trim(shell_exec('curl -s -4 ifconfig.me 2>/dev/null') ?: '');
+// Get server IP (cached in settings — updated by monitor-collector)
+$serverIp = \MuseDockPanel\Settings::get('server_public_ip', '');
+if (empty($serverIp)) {
+    $serverIp = trim(shell_exec('curl -s -4 --max-time 3 ifconfig.me 2>/dev/null') ?: '');
+    if ($serverIp) \MuseDockPanel\Settings::set('server_public_ip', $serverIp);
+}
 
 // Helper: render DNS status badge
 function renderDnsBadge(array $dns): string {
@@ -22,6 +26,9 @@ function renderDnsBadge(array $dns): string {
                             <i class="bi bi-exclamation-triangle me-1"></i>' . $ips . '
                          </span>
                          <small class="text-muted d-block">Points elsewhere</small>',
+        'pending' => '<span class="badge" style="background: rgba(100,116,139,0.1); color: #94a3b8; font-size:0.7rem;">
+                        <span class="spinner-border spinner-border-sm me-1" style="width:0.6rem;height:0.6rem;"></span>
+                    </span>',
         default => '<span class="badge" style="background: rgba(239,68,68,0.15); color: #ef4444;">
                         <i class="bi bi-x-circle me-1"></i>No DNS
                     </span>',
@@ -54,13 +61,13 @@ function renderDnsBadge(array $dns): string {
                 </thead>
                 <tbody>
                     <?php foreach ($accountDomains as $acc): ?>
-                    <?php $dns = CloudflareService::checkDomainDns($acc['domain'], $serverIp); ?>
+                    <?php $dns = ['status' => 'pending', 'ips' => []]; ?>
                     <tr>
                         <td class="ps-3">
                             <a href="/accounts/<?= $acc['id'] ?>" class="text-info text-decoration-none fw-semibold"><?= View::e($acc['domain']) ?></a>
                             <a href="https://<?= View::e($acc['domain']) ?>" target="_blank" class="ms-1" style="color:#64748b;font-size:0.75rem;" title="Open site"><i class="bi bi-box-arrow-up-right"></i></a>
                         </td>
-                        <td><?= renderDnsBadge($dns) ?></td>
+                        <td class="dns-cell" data-domain="<?= View::e($acc['domain']) ?>"><?= renderDnsBadge($dns) ?></td>
                         <td>
                             <a href="/accounts/<?= $acc['id'] ?>" class="text-decoration-none text-light">
                                 <code><?= View::e($acc['username']) ?></code>
@@ -79,7 +86,7 @@ function renderDnsBadge(array $dns): string {
                         // Show alias domains for this account (from hosting_domains table)
                         $accAliases = array_filter($domains, fn($d) => (int)$d['account_id'] === (int)$acc['id'] && $d['domain'] !== $acc['domain']);
                         foreach ($accAliases as $alias):
-                            $aliasDns = CloudflareService::checkDomainDns($alias['domain'], $serverIp);
+                            $aliasDns = ['status' => 'pending', 'ips' => []];
                     ?>
                     <tr style="background: rgba(56,189,248,0.03);">
                         <td class="ps-3">
@@ -89,7 +96,7 @@ function renderDnsBadge(array $dns): string {
                             </a>
                             <span class="badge bg-dark ms-1">alias</span>
                         </td>
-                        <td><?= renderDnsBadge($aliasDns) ?></td>
+                        <td class="dns-cell" data-domain="<?= View::e($alias['domain']) ?>"><?= renderDnsBadge($aliasDns) ?></td>
                         <td colspan="4"></td>
                     </tr>
                     <?php endforeach; ?>
@@ -99,7 +106,7 @@ function renderDnsBadge(array $dns): string {
                         $accSubs = $subdomainsByAccount[(int)$acc['id']] ?? [];
                         foreach ($accSubs as $sub):
                             $subDomain = $sub['subdomain'];
-                            $subDns = CloudflareService::checkDomainDns($subDomain, $serverIp);
+                            $subDns = ['status' => 'pending', 'ips' => []];
                     ?>
                     <tr style="background: rgba(168,85,247,0.03);">
                         <td class="ps-3">
@@ -110,7 +117,7 @@ function renderDnsBadge(array $dns): string {
                             <a href="https://<?= View::e($subDomain) ?>" target="_blank" class="ms-1" style="color:#64748b;font-size:0.75rem;" title="Open site"><i class="bi bi-box-arrow-up-right"></i></a>
                             <span class="badge ms-1" style="background: rgba(168,85,247,0.15); color: #a855f7; font-size:0.65rem;">subdomain</span>
                         </td>
-                        <td><?= renderDnsBadge($subDns) ?></td>
+                        <td class="dns-cell" data-domain="<?= View::e($subDomain) ?>"><?= renderDnsBadge($subDns) ?></td>
                         <td colspan="4"></td>
                     </tr>
                     <?php endforeach; ?>
@@ -149,7 +156,7 @@ function renderDnsBadge(array $dns): string {
             </thead>
             <tbody>
                 <?php foreach ($hostingLinked as $item):
-                    $itemDns = CloudflareService::checkDomainDns($item['domain'], $serverIp);
+                    $itemDns = ['status' => 'pending', 'ips' => []];
                 ?>
                 <tr>
                     <td class="ps-3">
@@ -168,7 +175,7 @@ function renderDnsBadge(array $dns): string {
                             </span>
                         <?php endif; ?>
                     </td>
-                    <td><?= renderDnsBadge($itemDns) ?></td>
+                    <td class="dns-cell" data-domain="<?= View::e($item['domain']) ?>"><?= renderDnsBadge($itemDns) ?></td>
                     <td>
                         <a href="/accounts/<?= $item['hosting_account_id'] ?>" class="text-decoration-none text-light">
                             <i class="bi bi-arrow-right me-1 text-muted"></i><?= View::e($item['account_domain'] ?? '') ?>
@@ -255,7 +262,7 @@ function renderDnsBadge(array $dns): string {
             </thead>
             <tbody>
                 <?php foreach ($standaloneRedirects as $item):
-                    $itemDns = CloudflareService::checkDomainDns($item['domain'], $serverIp);
+                    $itemDns = ['status' => 'pending', 'ips' => []];
                 ?>
                 <tr>
                     <td class="ps-3">
@@ -268,7 +275,7 @@ function renderDnsBadge(array $dns): string {
                             <?= $item['redirect_code'] ?>
                         </span>
                     </td>
-                    <td><?= renderDnsBadge($itemDns) ?></td>
+                    <td class="dns-cell" data-domain="<?= View::e($item['domain']) ?>"><?= renderDnsBadge($itemDns) ?></td>
                     <td>
                         <i class="bi bi-arrow-right me-1 text-muted"></i>
                         <a href="<?= View::e($item['target_url'] ?? '#') ?>" target="_blank" class="text-decoration-none text-light">
@@ -341,6 +348,51 @@ function confirmDeleteRedirect(id, domain) {
         }
     });
 }
+
+// Lazy DNS check — load DNS status via AJAX after page renders
+(function() {
+    var cells = document.querySelectorAll('.dns-cell[data-domain]');
+    var domains = [];
+    cells.forEach(function(c) { domains.push(c.dataset.domain); });
+
+    // Check DNS one by one (sequential to avoid flooding)
+    var i = 0;
+    function checkNext() {
+        if (i >= domains.length) return;
+        var domain = domains[i];
+        var cell = document.querySelectorAll('.dns-cell[data-domain="' + domain + '"]');
+
+        fetch('/domains/check-dns', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: 'domain=' + encodeURIComponent(domain) + '&_csrf_token=' + encodeURIComponent(document.querySelector('input[name=_csrf_token]')?.value || '')
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var html = '';
+            var serverIp = '<?= View::e($serverIp) ?>';
+            if (data.points_here) {
+                html = '<span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;"><i class="bi bi-check-circle me-1"></i>OK — ' + (data.records||[]).join(', ') + '</span>';
+            } else if (data.records && data.records.length > 0) {
+                // Check if Cloudflare
+                var isCf = (data.records||[]).some(function(ip) { return ip.startsWith('104.') || ip.startsWith('172.67.') || ip.startsWith('188.114.'); });
+                if (isCf) {
+                    html = '<span class="badge" style="background:rgba(249,115,22,0.15);color:#f97316;"><i class="bi bi-cloud-fill me-1"></i>CF Proxy</span>';
+                } else {
+                    html = '<span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;"><i class="bi bi-exclamation-triangle me-1"></i>' + (data.records||[]).join(', ') + '</span><small class="text-muted d-block">Points elsewhere</small>';
+                }
+            } else {
+                html = '<span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;"><i class="bi bi-x-circle me-1"></i>No DNS</span>';
+            }
+            cell.forEach(function(c) { c.innerHTML = html; });
+        })
+        .catch(function() {
+            cell.forEach(function(c) { c.innerHTML = '<span class="badge" style="background:rgba(100,116,139,0.1);color:#64748b;">?</span>'; });
+        })
+        .finally(function() { i++; checkNext(); });
+    }
+    checkNext();
+})();
 </script>
 
 <div class="mt-3 p-3 rounded" style="background: rgba(56,189,248,0.05); border: 1px solid #334155;">

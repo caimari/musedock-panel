@@ -254,6 +254,36 @@ class MigrationController
         ];
     }
 
+    /**
+     * Parse WebTV CMS Config.inc.php (variables like $DB_NAME, $DB_USERNAME, $DB_PASSWORD)
+     */
+    private function parseWebTvConfig(string $content): ?array
+    {
+        $extract = function (string $varName) use ($content): string {
+            // Match: $VAR_NAME = "value"; or $VAR_NAME = 'value';
+            if (preg_match('/\$' . preg_quote($varName) . '\s*=\s*["\']([^"\']*)["\']/', $content, $m)) {
+                return $m[1];
+            }
+            return '';
+        };
+
+        $db = $extract('DB_NAME');
+        $user = $extract('DB_USERNAME');
+        if (empty($db) || empty($user)) return null;
+
+        $port = $extract('DB_PORT');
+        // WebTV uses -1 to mean "default port"
+        if (empty($port) || $port === '-1') $port = '3306';
+
+        return [
+            'host' => $extract('DB_HOST') ?: 'localhost',
+            'port' => $port,
+            'database' => $db,
+            'username' => $user,
+            'password' => $extract('DB_PASSWORD'),
+        ];
+    }
+
     private function parseWpConfig(string $content): ?array
     {
         $extract = function (string $name) use ($content): string {
@@ -382,6 +412,7 @@ class MigrationController
             . 'if [ -f "$P/muse" ] && [ -f "$P/.env" ]; then echo "MAIN_PROJECT:MuseDock"; '
             . 'elif [ -f "$P/wp-config.php" ]; then echo "MAIN_PROJECT:WordPress"; '
             . 'elif [ -f "$P/application/settings/database.php" ]; then echo "MAIN_PROJECT:Zend"; '
+            . 'elif [ -f "$P/config/Config.inc.php" ]; then echo "MAIN_PROJECT:WebTV"; '
             . 'elif [ -f "$P/.env" ] && grep -q "DB_DATABASE" "$P/.env" 2>/dev/null; then echo "MAIN_PROJECT:Laravel"; '
             . 'elif [ -f "$P/.env" ]; then echo "MAIN_PROJECT:EnvNoDb"; '
             . 'else echo "MAIN_PROJECT:Unknown"; fi; '
@@ -397,6 +428,7 @@ class MigrationController
             . '  if [ -f "$dp/muse" ] && [ -f "$dp/.env" ]; then proj="MuseDock"; '
             . '  elif [ -f "$dp/wp-config.php" ]; then proj="WordPress"; '
             . '  elif [ -f "$dp/application/settings/database.php" ]; then proj="Zend"; '
+            . '  elif [ -f "$dp/config/Config.inc.php" ]; then proj="WebTV"; '
             . '  elif [ -f "$dp/.env" ] && grep -q "DB_DATABASE" "$dp/.env" 2>/dev/null; then proj="Laravel"; fi; '
             . '  echo "VFOLDER:${name}|${sz}|${ht}|${proj}"; '
             . 'done';
@@ -409,6 +441,7 @@ class MigrationController
             elseif ($pType === 'Laravel') $projectInfo = 'Laravel (detectado .env)';
             elseif ($pType === 'WordPress') $projectInfo = 'WordPress (detectado wp-config.php)';
             elseif ($pType === 'Zend') $projectInfo = 'Zend/SocialEngine (detectado application/settings/database.php)';
+            elseif ($pType === 'WebTV') $projectInfo = 'WebTV CMS (detectado config/Config.inc.php)';
             elseif ($pType === 'EnvNoDb') $projectInfo = '.env sin credenciales BD (no es Laravel)';
         }
 
@@ -849,13 +882,15 @@ class MigrationController
                 . 'test -f "$P/.env" && echo "ENV_EXISTS"; '
                 . 'test -f "$P/muse" && echo "MUSE_EXISTS"; '
                 . 'test -f "$P/wp-config.php" && echo "WP_EXISTS"; '
-                . 'test -f "$P/application/settings/database.php" && echo "ZEND_EXISTS"';
+                . 'test -f "$P/application/settings/database.php" && echo "ZEND_EXISTS"; '
+                . 'test -f "$P/config/Config.inc.php" && echo "WEBTV_EXISTS"';
             $detectOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, $detectScript);
 
             $hasEnv = strpos($detectOutput, 'ENV_EXISTS') !== false;
             $hasMuse = strpos($detectOutput, 'MUSE_EXISTS') !== false;
             $hasWp = strpos($detectOutput, 'WP_EXISTS') !== false;
             $hasZend = strpos($detectOutput, 'ZEND_EXISTS') !== false;
+            $hasWebTv = strpos($detectOutput, 'WEBTV_EXISTS') !== false;
 
             // Try each project type in priority order, with fallback if credentials fail
             $envContent = null;
@@ -902,6 +937,15 @@ class MigrationController
                 }
             }
 
+            if (!$dbCredentials && $hasWebTv) {
+                $webtvContent = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, "cat " . escapeshellarg($projectSearchPath . '/config/Config.inc.php'));
+                $dbCredentials = $this->parseWebTvConfig($webtvContent);
+                if ($dbCredentials) {
+                    $projectType = 'webtv';
+                    $this->sendSSE('log', "Proyecto detectado: WebTV CMS. BD: DB={$dbCredentials['database']}, User={$dbCredentials['username']}", $st);
+                }
+            }
+
             if (!$dbCredentials) {
                 if ($projectType === 'unknown') {
                     $this->sendSSE('log', 'No se detecto proyecto conocido. Solo archivos.', $st);
@@ -915,7 +959,8 @@ class MigrationController
                 . 'test -f "$P/.env" && echo "ENV_EXISTS"; '
                 . 'test -f "$P/muse" && echo "MUSE_EXISTS"; '
                 . 'test -f "$P/wp-config.php" && echo "WP_EXISTS"; '
-                . 'test -f "$P/application/settings/database.php" && echo "ZEND_EXISTS"';
+                . 'test -f "$P/application/settings/database.php" && echo "ZEND_EXISTS"; '
+                . 'test -f "$P/config/Config.inc.php" && echo "WEBTV_EXISTS"';
             $detectOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort, $detectScript);
             if (strpos($detectOutput, 'MUSE_EXISTS') !== false && strpos($detectOutput, 'ENV_EXISTS') !== false) {
                 $projectType = 'musedock';
@@ -1463,6 +1508,15 @@ class MigrationController
                     $zendContent = preg_replace("/'dbname'\s*=>\s*'[^']*'/", "'dbname' => '{$localDbName}'", $zendContent);
                     file_put_contents($zendFile, $zendContent);
                     $this->sendSSE('log', 'Actualizado application/settings/database.php con credenciales locales.', $st);
+                } elseif ($projectType === 'webtv' && file_exists($cfgDir . '/config/Config.inc.php')) {
+                    $webtvFile = $cfgDir . '/config/Config.inc.php';
+                    $webtvContent = file_get_contents($webtvFile);
+                    $webtvContent = preg_replace('/(\$DB_HOST\s*=\s*)["\'][^"\']*["\']/', '$1"localhost"', $webtvContent);
+                    $webtvContent = preg_replace('/(\$DB_NAME\s*=\s*)["\'][^"\']*["\']/', '$1"' . $localDbName . '"', $webtvContent);
+                    $webtvContent = preg_replace('/(\$DB_USERNAME\s*=\s*)["\'][^"\']*["\']/', '$1"' . $localDbUser . '"', $webtvContent);
+                    $webtvContent = preg_replace('/(\$DB_PASSWORD\s*=\s*)["\'][^"\']*["\']/', '$1"' . $localDbPass . '"', $webtvContent);
+                    file_put_contents($webtvFile, $webtvContent);
+                    $this->sendSSE('log', 'Actualizado config/Config.inc.php con credenciales locales.', $st);
                 }
 
                 // Persist db_pass to status file immediately (in case process dies during import)
@@ -2077,6 +2131,7 @@ class MigrationController
                     . 'elif [ -f "$P/.env" ]; then echo "laravel"; '
                     . 'elif [ -f "$P/wp-config.php" ]; then echo "wordpress"; '
                     . 'elif [ -f "$P/application/settings/database.php" ]; then echo "zend"; '
+                    . 'elif [ -f "$P/config/Config.inc.php" ]; then echo "webtv"; '
                     . 'else echo "unknown"; fi'
                 );
             } else {
@@ -2094,9 +2149,9 @@ class MigrationController
             }
         }
 
-        if (($dbSource === 'laravel' || $dbSource === 'wordpress' || $dbSource === 'musedock' || $dbSource === 'zend') && $useSSH) {
+        if (($dbSource === 'laravel' || $dbSource === 'wordpress' || $dbSource === 'musedock' || $dbSource === 'zend' || $dbSource === 'webtv') && $useSSH) {
             // Read config file from REMOTE server via SSH (the local copy may already be modified)
-            $configFileNames = ['musedock' => '.env', 'laravel' => '.env', 'wordpress' => 'wp-config.php', 'zend' => 'application/settings/database.php'];
+            $configFileNames = ['musedock' => '.env', 'laravel' => '.env', 'wordpress' => 'wp-config.php', 'zend' => 'application/settings/database.php', 'webtv' => 'config/Config.inc.php'];
             $configFileName = $configFileNames[$dbSource] ?? '.env';
             $remoteConfigPath = rtrim($sshRemotePath, '/') . '/' . $configFileName;
 
@@ -2142,6 +2197,18 @@ class MigrationController
                 $parsed = $this->parseZendDbConfig($content);
                 if (!$parsed) {
                     Flash::set('error', 'No se pudieron extraer credenciales Zend del database.php remoto.');
+                    Router::redirect('/accounts/' . $params['id'] . '/migrate');
+                    return;
+                }
+                $remoteHost = $parsed['host'];
+                $remotePort = $parsed['port'];
+                $remoteDb = $parsed['database'];
+                $remoteUser = $parsed['username'];
+                $remotePass = $parsed['password'];
+            } elseif ($dbSource === 'webtv') {
+                $parsed = $this->parseWebTvConfig($content);
+                if (!$parsed) {
+                    Flash::set('error', 'No se pudieron extraer credenciales WebTV del Config.inc.php remoto.');
                     Router::redirect('/accounts/' . $params['id'] . '/migrate');
                     return;
                 }

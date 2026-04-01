@@ -658,6 +658,36 @@ if ($alertDiskThreshold > 0 && !empty($diskData)) {
     }
 }
 
+// ─── Update disk usage for all hosting accounts (cached, not real-time) ────
+try {
+    $accounts = Database::fetchAll("SELECT id, home_dir FROM hosting_accounts WHERE status = 'active'");
+    $homeDirs = array_filter(array_column($accounts, 'home_dir'), fn($d) => is_dir($d));
+    if (!empty($homeDirs)) {
+        $cmd = 'du -sm ' . implode(' ', array_map('escapeshellarg', $homeDirs)) . ' 2>/dev/null';
+        $output = shell_exec($cmd) ?: '';
+        $diskMap = [];
+        foreach (explode("\n", trim($output)) as $line) {
+            if (preg_match('/^(\d+)\s+(.+)$/', $line, $m)) {
+                $diskMap[rtrim($m[2], '/')] = (int)$m[1];
+            }
+        }
+        $updated = 0;
+        foreach ($accounts as $acc) {
+            $key = rtrim($acc['home_dir'], '/');
+            $mb = $diskMap[$key] ?? null;
+            if ($mb !== null) {
+                Database::query("UPDATE hosting_accounts SET disk_used_mb = :mb WHERE id = :id", ['mb' => $mb, 'id' => $acc['id']]);
+                $updated++;
+            }
+        }
+        if ($updated > 0) {
+            logMsg("Disk usage updated for {$updated} accounts.");
+        }
+    }
+} catch (\Throwable $e) {
+    logMsg("ERROR updating disk usage: " . $e->getMessage());
+}
+
 cleanup:
 
 $elapsed = round((microtime(true) - $startTime) * 1000, 1);
