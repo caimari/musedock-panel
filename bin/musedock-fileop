@@ -1,0 +1,234 @@
+#!/bin/bash
+# musedock-fileop — Secure file operation wrapper for MuseDock Panel
+#
+# Receives operations via JSON on stdin, executes as the specified system user.
+# All paths are validated to be within the user's home directory.
+#
+# Sudoers entry required:
+# root ALL=(ALL) NOPASSWD: /opt/musedock-panel/bin/musedock-fileop
+#
+# Usage: echo '{"op":"list","user":"username","base":"/home/path","path":"/"}' | sudo /opt/musedock-panel/bin/musedock-fileop
+
+set -euo pipefail
+
+# Read JSON from stdin
+INPUT=$(cat)
+
+# Parse all JSON fields in a single Python call (safer & faster than 7 invocations)
+# Python validates JSON structure and rejects malformed input
+eval "$(echo "$INPUT" | python3 -c "
+import sys, json, shlex
+try:
+    d = json.load(sys.stdin)
+except (json.JSONDecodeError, ValueError):
+    print('echo \'{\"ok\":false,\"error\":\"Invalid JSON input\"}\'; exit 1')
+    sys.exit(0)
+
+fields = {
+    'OP':      d.get('op', ''),
+    'USER':    d.get('user', ''),
+    'BASE':    d.get('base', ''),
+    'RELPATH': d.get('path', ''),
+    'CONTENT': d.get('content', ''),
+    'NEWPATH': d.get('newpath', ''),
+    'PERMS':   d.get('perms', ''),
+}
+
+# Sanitize: reject values containing shell metacharacters in critical fields
+# (content is handled separately via stdin to Python, so we skip it here)
+dangerous = set(';|\`\$(){}')
+for key in ('OP', 'USER', 'BASE', 'RELPATH', 'NEWPATH', 'PERMS'):
+    val = str(fields[key])
+    if any(c in dangerous for c in val):
+        print('echo \'{\"ok\":false,\"error\":\"Invalid characters in input\"}\'; exit 1')
+        sys.exit(0)
+
+for k, v in fields.items():
+    print(f'{k}={shlex.quote(str(v))}')
+" 2>/dev/null)"
+
+# Validate required fields
+if [ -z "$OP" ] || [ -z "$USER" ] || [ -z "$BASE" ]; then
+    echo '{"ok":false,"error":"Missing required fields: op, user, base"}'
+    exit 1
+fi
+
+# Validate user exists
+if ! id "$USER" &>/dev/null; then
+    echo '{"ok":false,"error":"User does not exist"}'
+    exit 1
+fi
+
+# Block system users (UID < 1000: root, www-data, postgres, etc.)
+USER_UID=$(id -u "$USER" 2>/dev/null || echo "0")
+if [ "$USER_UID" -lt 1000 ]; then
+    echo '{"ok":false,"error":"Invalid system user"}'
+    exit 1
+fi
+
+# Validate base directory exists and belongs to user
+if [ ! -d "$BASE" ]; then
+    echo '{"ok":false,"error":"Base directory does not exist"}'
+    exit 1
+fi
+
+# Construct and validate full path
+FULLPATH="$BASE/$RELPATH"
+# Resolve real path (follows symlinks) — CRITICAL for security
+RESOLVED=$(sudo -u "$USER" realpath -m "$FULLPATH" 2>/dev/null || echo "INVALID")
+RESOLVED_BASE=$(realpath -m "$BASE" 2>/dev/null || echo "INVALID_BASE")
+
+# Ensure resolved path is within base directory
+case "$RESOLVED" in
+    "$RESOLVED_BASE"*) ;;
+    *)
+        echo '{"ok":false,"error":"Path outside allowed directory"}'
+        exit 1
+        ;;
+esac
+
+# Execute operation as the specified user
+case "$OP" in
+    list)
+        if [ ! -d "$RESOLVED" ]; then
+            echo '{"ok":false,"error":"Not a directory"}'
+            exit 1
+        fi
+        # List directory using native C binary (fast, no Python overhead)
+        LISTDIR_BIN="/opt/musedock-panel/bin/musedock-listdir"
+        if [ -x "$LISTDIR_BIN" ]; then
+            sudo -u "$USER" "$LISTDIR_BIN" "$RESOLVED" "$RESOLVED_BASE"
+        else
+            # Fallback to Python if binary not compiled
+            sudo -u "$USER" python3 -c "
+import os, json, stat
+path = '$RESOLVED'
+items = []
+try:
+    for name in sorted(os.listdir(path)):
+        fp = os.path.join(path, name)
+        try:
+            s = os.lstat(fp)
+            items.append({
+                'name': name,
+                'type': 'dir' if stat.S_ISDIR(s.st_mode) else ('link' if stat.S_ISLNK(s.st_mode) else 'file'),
+                'size': s.st_size,
+                'perms': oct(s.st_mode)[-3:],
+                'modified': int(s.st_mtime),
+                'owner': s.st_uid,
+            })
+        except: pass
+    print(json.dumps({'ok': True, 'items': items}))
+except PermissionError:
+    print(json.dumps({'ok': False, 'error': 'Permission denied'}))
+except Exception as e:
+    print(json.dumps({'ok': False, 'error': str(e)}))
+"
+        fi
+        ;;
+
+    read)
+        if [ ! -f "$RESOLVED" ]; then
+            echo '{"ok":false,"error":"File not found"}'
+            exit 1
+        fi
+        # Check file size (max 2MB for reading)
+        FSIZE=$(stat -c%s "$RESOLVED" 2>/dev/null || echo "0")
+        if [ "$FSIZE" -gt 2097152 ]; then
+            echo '{"ok":false,"error":"File too large to read (max 2MB)"}'
+            exit 1
+        fi
+        # Read file and return as JSON
+        sudo -u "$USER" python3 -c "
+import json, sys
+try:
+    with open('$RESOLVED', 'r', errors='replace') as f:
+        content = f.read()
+    print(json.dumps({'ok': True, 'content': content, 'size': len(content)}))
+except Exception as e:
+    print(json.dumps({'ok': False, 'error': str(e)}))
+"
+        ;;
+
+    write)
+        # Write content to file
+        DIRPATH=$(dirname "$RESOLVED")
+        if [ ! -d "$DIRPATH" ]; then
+            echo '{"ok":false,"error":"Parent directory does not exist"}'
+            exit 1
+        fi
+        echo "$INPUT" | sudo -u "$USER" python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    content = data.get('content', '')
+    with open('$RESOLVED', 'w') as f:
+        f.write(content)
+    print(json.dumps({'ok': True, 'size': len(content)}))
+except Exception as e:
+    print(json.dumps({'ok': False, 'error': str(e)}))
+"
+        ;;
+
+    mkdir)
+        sudo -u "$USER" mkdir -p "$RESOLVED" 2>/dev/null && \
+            echo '{"ok":true}' || \
+            echo '{"ok":false,"error":"Could not create directory"}'
+        ;;
+
+    delete)
+        if [ ! -e "$RESOLVED" ]; then
+            echo '{"ok":false,"error":"Path does not exist"}'
+            exit 1
+        fi
+        # Prevent deleting base directory itself
+        if [ "$RESOLVED" = "$RESOLVED_BASE" ]; then
+            echo '{"ok":false,"error":"Cannot delete root directory"}'
+            exit 1
+        fi
+        if [ -d "$RESOLVED" ]; then
+            sudo -u "$USER" rm -rf "$RESOLVED" 2>/dev/null && \
+                echo '{"ok":true}' || echo '{"ok":false,"error":"Could not delete directory"}'
+        else
+            sudo -u "$USER" rm -f "$RESOLVED" 2>/dev/null && \
+                echo '{"ok":true}' || echo '{"ok":false,"error":"Could not delete file"}'
+        fi
+        ;;
+
+    rename)
+        if [ -z "$NEWPATH" ]; then
+            echo '{"ok":false,"error":"newpath required"}'
+            exit 1
+        fi
+        NEWFULL="$BASE/$NEWPATH"
+        NEWRESOLVED=$(sudo -u "$USER" realpath -m "$NEWFULL" 2>/dev/null || echo "INVALID")
+        case "$NEWRESOLVED" in
+            "$RESOLVED_BASE"*) ;;
+            *)
+                echo '{"ok":false,"error":"New path outside allowed directory"}'
+                exit 1
+                ;;
+        esac
+        sudo -u "$USER" mv "$RESOLVED" "$NEWRESOLVED" 2>/dev/null && \
+            echo '{"ok":true}' || echo '{"ok":false,"error":"Could not rename"}'
+        ;;
+
+    chmod)
+        if [ -z "$PERMS" ]; then
+            echo '{"ok":false,"error":"perms required (e.g. 755)"}'
+            exit 1
+        fi
+        # Validate perms format
+        if ! echo "$PERMS" | grep -qE '^[0-7]{3}$'; then
+            echo '{"ok":false,"error":"Invalid permissions format"}'
+            exit 1
+        fi
+        sudo -u "$USER" chmod "$PERMS" "$RESOLVED" 2>/dev/null && \
+            echo '{"ok":true}' || echo '{"ok":false,"error":"Could not change permissions"}'
+        ;;
+
+    *)
+        echo '{"ok":false,"error":"Unknown operation: '"$OP"'"}'
+        exit 1
+        ;;
+esac

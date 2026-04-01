@@ -148,6 +148,23 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/rename-user', 'AccountController@renameUser');
 \MuseDockPanel\Router::post('/accounts/{id}/php', 'AccountController@updatePhp');
 
+// File Manager
+\MuseDockPanel\Router::get('/accounts/{id}/files', 'FileManagerController@index');
+\MuseDockPanel\Router::get('/accounts/{id}/files/edit', 'FileManagerController@edit');
+\MuseDockPanel\Router::post('/accounts/{id}/files/save', 'FileManagerController@save');
+\MuseDockPanel\Router::post('/accounts/{id}/files/mkdir', 'FileManagerController@mkdir');
+\MuseDockPanel\Router::post('/accounts/{id}/files/delete', 'FileManagerController@delete');
+\MuseDockPanel\Router::post('/accounts/{id}/files/rename', 'FileManagerController@rename');
+\MuseDockPanel\Router::post('/accounts/{id}/files/chmod', 'FileManagerController@chmod');
+\MuseDockPanel\Router::post('/accounts/{id}/files/upload', 'FileManagerController@upload');
+\MuseDockPanel\Router::get('/accounts/{id}/files/download', 'FileManagerController@download');
+\MuseDockPanel\Router::post('/accounts/{id}/files/write-mode', 'FileManagerController@activateWriteMode');
+\MuseDockPanel\Router::get('/accounts/{id}/audit-log', 'FileManagerController@auditLog');
+\MuseDockPanel\Router::get('/accounts/{id}/audit-log/export', 'FileManagerController@auditLogExport');
+
+// Global Audit Log
+\MuseDockPanel\Router::get('/admin/file-audit-log', 'FileManagerController@globalAuditLog');
+
 // Domain Aliases & Redirects
 \MuseDockPanel\Router::post('/accounts/{id}/aliases/add', 'AccountController@addAlias');
 \MuseDockPanel\Router::post('/accounts/{id}/aliases/{alias_id}/delete', 'AccountController@removeAlias');
@@ -155,8 +172,13 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/redirects/{alias_id}/delete', 'AccountController@removeAlias');
 
 // Subdomains
+\MuseDockPanel\Router::get('/accounts/{id}/subdomains/{sub_id}', 'AccountController@showSubdomain');
+\MuseDockPanel\Router::get('/accounts/{id}/subdomains/{sub_id}/edit', 'AccountController@editSubdomain');
+\MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/update', 'AccountController@updateSubdomain');
+\MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/php', 'AccountController@updateSubdomainPhp');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/add', 'AccountController@addSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/adopt', 'AccountController@adoptSubdomain');
+\MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/toggle-status', 'AccountController@toggleSubdomainStatus');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/delete', 'AccountController@removeSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/toggle-wp-cron', 'AccountController@toggleWpCron');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/promote', 'AccountController@promoteSubdomain');
@@ -258,6 +280,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/portal/save', 'PortalSettingsController@save');
 \MuseDockPanel\Router::post('/settings/portal/send-invitation', 'PortalSettingsController@sendInvitation');
 \MuseDockPanel\Router::post('/settings/portal/revoke-access', 'PortalSettingsController@revokeAccess');
+\MuseDockPanel\Router::post('/settings/portal/activate', 'PortalSettingsController@activate');
+\MuseDockPanel\Router::get('/settings/portal/install-status', 'PortalSettingsController@installStatus');
 
 // Updates
 \MuseDockPanel\Router::get('/settings/updates', 'UpdateController@index');
@@ -360,6 +384,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cloudflare-dns/update-record', 'CloudflareDnsController@updateRecord');
 \MuseDockPanel\Router::post('/settings/cloudflare-dns/delete-record', 'CloudflareDnsController@deleteRecord');
 \MuseDockPanel\Router::post('/settings/cloudflare-dns/toggle-proxy', 'CloudflareDnsController@toggleProxy');
+\MuseDockPanel\Router::post('/settings/cloudflare-dns/bulk-action', 'CloudflareDnsController@bulkAction');
 
 // Proxy Routes (permanent SNI proxy via caddy-l4)
 \MuseDockPanel\Router::get('/settings/proxy-routes', 'ProxyRouteController@index');

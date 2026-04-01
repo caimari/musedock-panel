@@ -18,20 +18,63 @@
     </div>
     <div class="card-body">
         <?php if (!$portalInstalled): ?>
-            <div class="text-center py-4">
+            <div class="text-center py-4" id="portal-activate-section">
                 <i class="bi bi-people" style="font-size:3rem;color:#a855f7;opacity:0.5;"></i>
                 <h5 class="mt-3" style="color:#e2e8f0;">Portal de Clientes</h5>
                 <p class="text-muted" style="max-width:500px;margin:0 auto;">
                     Permite a tus clientes gestionar sus hostings, archivos y bases de datos
                     desde un panel independiente y seguro.
                 </p>
+
+                <!-- License key input -->
+                <div class="mt-4" style="max-width:480px;margin:0 auto;">
+                    <div class="input-group">
+                        <span class="input-group-text" style="background:#1e293b;border-color:#334155;color:#a855f7;">
+                            <i class="bi bi-key"></i>
+                        </span>
+                        <input type="text" id="portal-license-key" class="form-control"
+                            placeholder="MDCK-XXXX-XXXX-XXXX"
+                            style="background:#1e293b;border-color:#334155;color:#e2e8f0;text-transform:uppercase;font-family:monospace;letter-spacing:1px;"
+                            maxlength="19" autocomplete="off">
+                        <button type="button" id="portal-activate-btn" class="btn" style="background:#a855f7;color:#fff;border-color:#a855f7;"
+                            onclick="activatePortal()">
+                            <i class="bi bi-download me-1"></i>Activar e instalar
+                        </button>
+                    </div>
+                    <small class="text-muted d-block mt-2">
+                        Introduce tu license key para descargar e instalar el Portal automaticamente.
+                    </small>
+                </div>
+
                 <div class="mt-3">
-                    <a href="https://musedock.com/portal" target="_blank" class="btn btn-sm" style="background:#a855f7;color:#fff;">
+                    <a href="https://musedock.com/portal" target="_blank" class="btn btn-outline-light btn-sm">
                         <i class="bi bi-cart me-1"></i>Obtener licencia
                     </a>
-                    <a href="https://musedock.com/portal/docs" target="_blank" class="btn btn-outline-light btn-sm ms-2">
-                        <i class="bi bi-book me-1"></i>Documentacion
+                </div>
+            </div>
+
+            <!-- Install progress (hidden by default) -->
+            <div id="portal-install-progress" style="display:none;" class="py-3">
+                <div class="text-center mb-3">
+                    <div class="spinner-border text-info" role="status" id="portal-spinner"></div>
+                    <h6 class="mt-2" style="color:#e2e8f0;" id="portal-install-title">Instalando Portal...</h6>
+                </div>
+                <div class="mx-auto" style="max-width:600px;">
+                    <pre id="portal-install-log" style="background:#020617;border:1px solid #1e293b;border-radius:8px;padding:12px;font-size:0.75rem;color:#94a3b8;max-height:300px;overflow-y:auto;white-space:pre-wrap;"></pre>
+                </div>
+                <div id="portal-install-done" style="display:none;" class="text-center mt-3">
+                    <i class="bi bi-check-circle" style="font-size:2rem;color:#22c55e;"></i>
+                    <p class="mt-2" style="color:#22c55e;font-weight:600;">Portal instalado correctamente!</p>
+                    <a href="/settings/portal" class="btn btn-sm" style="background:#a855f7;color:#fff;">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Recargar pagina
                     </a>
+                </div>
+                <div id="portal-install-error" style="display:none;" class="text-center mt-3">
+                    <i class="bi bi-exclamation-triangle" style="font-size:2rem;color:#ef4444;"></i>
+                    <p class="mt-2" style="color:#ef4444;font-weight:600;">Error durante la instalacion</p>
+                    <button onclick="activatePortal()" class="btn btn-outline-light btn-sm">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Reintentar
+                    </button>
                 </div>
             </div>
         <?php else: ?>
@@ -53,12 +96,50 @@
                     <small class="text-muted">Clientes con acceso</small>
                 </div>
                 <div class="col-md-3 text-center">
-                    <div style="font-size:1.5rem;font-weight:700;color:<?= ($licenseStatus['active'] ?? false) ? '#22c55e' : '#fbbf24' ?>;">
-                        <i class="bi bi-<?= ($licenseStatus['active'] ?? false) ? 'shield-check' : 'shield-exclamation' ?>"></i>
+                    <?php $licActive = ($licenseStatus['active'] ?? false); ?>
+                    <div style="font-size:1.5rem;font-weight:700;color:<?= $licActive ? '#22c55e' : '#fbbf24' ?>;">
+                        <i class="bi bi-<?= $licActive ? 'shield-check' : 'shield-exclamation' ?>"></i>
                     </div>
-                    <small class="text-muted">Licencia <?= ($licenseStatus['active'] ?? false) ? 'activa' : 'dev mode' ?></small>
+                    <small class="text-muted">Licencia <?= $licActive ? 'activa' : 'sin licencia' ?></small>
                 </div>
             </div>
+            <?php if (!empty($licenseStatus['license_key'])): ?>
+            <div class="mt-3 pt-3" style="border-top:1px solid #1e293b;">
+                <div class="d-flex flex-wrap gap-4" style="font-size:0.8rem;">
+                    <div>
+                        <span class="text-muted">Key:</span>
+                        <code><?= View::e($licenseStatus['license_key']) ?></code>
+                    </div>
+                    <?php if (!empty($licenseStatus['hostname'])): ?>
+                    <div>
+                        <span class="text-muted">Servidor:</span>
+                        <strong style="color:#e2e8f0;"><?= View::e($licenseStatus['hostname']) ?></strong>
+                    </div>
+                    <?php endif; ?>
+                    <?php if (!empty($licenseStatus['max_accounts'])): ?>
+                    <div>
+                        <span class="text-muted">Max cuentas:</span>
+                        <strong style="color:#e2e8f0;"><?= (int)$licenseStatus['max_accounts'] ?></strong>
+                    </div>
+                    <?php endif; ?>
+                    <?php if (!empty($licenseStatus['expires'])): ?>
+                    <div>
+                        <span class="text-muted">Expira:</span>
+                        <strong style="color:<?= $licenseStatus['expires'] > time() ? '#22c55e' : '#ef4444' ?>;">
+                            <?= date('d/m/Y', $licenseStatus['expires']) ?>
+                        </strong>
+                    </div>
+                    <?php endif; ?>
+                    <?php if (($licenseStatus['status'] ?? '') === 'grace'): ?>
+                    <div>
+                        <span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;">
+                            <i class="bi bi-exclamation-triangle me-1"></i>Periodo de gracia — renueva pronto
+                        </span>
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <?php endif; ?>
         <?php endif; ?>
     </div>
 </div>
@@ -226,6 +307,109 @@
 <?php endif; ?>
 
 <script>
+// Portal activation flow
+function activatePortal() {
+    var keyInput = document.getElementById('portal-license-key');
+    var key = (keyInput ? keyInput.value.trim().toUpperCase() : '');
+
+    if (!/^MDCK-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/.test(key)) {
+        Swal.fire({
+            title: 'Clave invalida',
+            html: 'El formato debe ser: <code>MDCK-XXXX-XXXX-XXXX</code>',
+            icon: 'warning',
+            background: '#0f172a',
+            color: '#e2e8f0',
+            confirmButtonColor: '#a855f7',
+        });
+        return;
+    }
+
+    // Show progress, hide input
+    document.getElementById('portal-activate-section').style.display = 'none';
+    document.getElementById('portal-install-progress').style.display = '';
+    document.getElementById('portal-install-done').style.display = 'none';
+    document.getElementById('portal-install-error').style.display = 'none';
+    document.getElementById('portal-spinner').style.display = '';
+    document.getElementById('portal-install-title').textContent = 'Activando licencia e instalando Portal...';
+    document.getElementById('portal-install-log').textContent = 'Iniciando...\n';
+
+    var csrf = document.querySelector('input[name=_csrf_token]');
+    var csrfVal = csrf ? csrf.value : '';
+
+    // POST to activate
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/settings/portal/activate');
+    xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
+    xhr.onload = function() {
+        try {
+            var data = JSON.parse(xhr.responseText);
+        } catch(e) {
+            showInstallError('Respuesta invalida del servidor');
+            return;
+        }
+        if (!data.ok) {
+            showInstallError(data.error || 'Error desconocido');
+            return;
+        }
+        // Start polling for progress
+        pollInstallStatus();
+    };
+    xhr.onerror = function() { showInstallError('Error de conexion'); };
+    xhr.send('_csrf_token=' + encodeURIComponent(csrfVal) + '&license_key=' + encodeURIComponent(key));
+}
+
+function pollInstallStatus() {
+    var logEl = document.getElementById('portal-install-log');
+    var interval = setInterval(function() {
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', '/settings/portal/install-status');
+        xhr.onload = function() {
+            try {
+                var data = JSON.parse(xhr.responseText);
+            } catch(e) { return; }
+
+            if (data.log) {
+                logEl.textContent = data.log;
+                logEl.scrollTop = logEl.scrollHeight;
+            }
+
+            if (data.status === 'done') {
+                clearInterval(interval);
+                document.getElementById('portal-spinner').style.display = 'none';
+                document.getElementById('portal-install-title').textContent = 'Instalacion completada!';
+                document.getElementById('portal-install-done').style.display = '';
+            } else if (data.status === 'error' || data.status === 'timeout') {
+                clearInterval(interval);
+                showInstallError(data.status === 'timeout' ? 'Timeout — la instalacion tardo demasiado' : 'Error durante la instalacion');
+            }
+        };
+        xhr.send();
+    }, 2000);
+}
+
+function showInstallError(msg) {
+    document.getElementById('portal-spinner').style.display = 'none';
+    document.getElementById('portal-install-title').textContent = msg;
+    document.getElementById('portal-install-error').style.display = '';
+    // Also show the input again for retry
+    document.getElementById('portal-activate-section').style.display = '';
+    document.getElementById('portal-install-progress').style.display = 'none';
+}
+
+// Auto-format license key input
+var keyInput = document.getElementById('portal-license-key');
+if (keyInput) {
+    keyInput.addEventListener('input', function() {
+        var v = this.value.toUpperCase().replace(/[^A-Z2-9]/g, '');
+        // Insert dashes: MDCK-XXXX-XXXX-XXXX
+        if (v.length > 4) v = v.substring(0, 4) + '-' + v.substring(4);
+        if (v.length > 9) v = v.substring(0, 9) + '-' + v.substring(9);
+        if (v.length > 14) v = v.substring(0, 14) + '-' + v.substring(14);
+        if (v.length > 19) v = v.substring(0, 19);
+        this.value = v;
+    });
+}
+
 function selectTheme(id) {
     document.querySelectorAll('[id^="theme-card-"]').forEach(function(el) {
         el.style.background = 'rgba(255,255,255,0.02)';

@@ -242,6 +242,72 @@ class CloudflareDnsController
     }
 
     /**
+     * AJAX: Bulk actions — delete or toggle proxy for multiple records.
+     */
+    public function bulkAction(): void
+    {
+        header('Content-Type: application/json');
+        View::verifyCsrf();
+
+        $zoneId    = trim($_POST['zone_id'] ?? '');
+        $accIdx    = (int)($_POST['account'] ?? 0);
+        $action    = trim($_POST['action'] ?? ''); // 'delete', 'proxy_on', 'proxy_off'
+        $recordIds = json_decode($_POST['record_ids'] ?? '[]', true);
+
+        $accounts = CloudflareService::getConfiguredAccounts();
+        $token = $accounts[$accIdx]['token'] ?? '';
+
+        if (!$token || !$zoneId || empty($recordIds) || !$action) {
+            echo json_encode(['ok' => false, 'error' => 'Missing required fields']);
+            return;
+        }
+
+        if (!in_array($action, ['delete', 'proxy_on', 'proxy_off'], true)) {
+            echo json_encode(['ok' => false, 'error' => 'Invalid action']);
+            return;
+        }
+
+        $success = 0;
+        $errors = [];
+
+        foreach ($recordIds as $recordId) {
+            $recordId = trim($recordId);
+            if (empty($recordId)) continue;
+
+            if ($action === 'delete') {
+                $result = CloudflareService::deleteRecord($token, $zoneId, $recordId);
+            } else {
+                $proxied = $action === 'proxy_on';
+                $result = CloudflareService::apiRequest($token, 'PATCH', "/zones/{$zoneId}/dns_records/{$recordId}", [
+                    'proxied' => $proxied,
+                ]);
+                $result['ok'] = !empty($result['ok']) || !empty($result['result']);
+            }
+
+            if (!empty($result['ok'])) {
+                $success++;
+            } else {
+                $errors[] = $recordId . ': ' . ($result['error'] ?? 'unknown error');
+            }
+        }
+
+        $total = count($recordIds);
+        $actionLabel = match($action) {
+            'delete'    => 'deleted',
+            'proxy_on'  => 'proxy enabled',
+            'proxy_off' => 'proxy disabled',
+        };
+        LogService::log('cloudflare', "Bulk {$actionLabel}: {$success}/{$total} records");
+
+        echo json_encode([
+            'ok'      => $success > 0,
+            'success' => $success,
+            'total'   => $total,
+            'errors'  => $errors,
+        ]);
+    }
+
+    /**
      * AJAX: Toggle proxy status (orange cloud on/off).
      */
     public function toggleProxy(): void

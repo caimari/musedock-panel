@@ -108,9 +108,22 @@ class LicenseService
             return false;
         }
 
-        // Check feature is in the licensed features list
+        // Check feature: support both 'features' array and 'product' field
         $features = $jwt['features'] ?? [];
-        return in_array($feature, $features, true) || in_array('all', $features, true);
+        if (in_array($feature, $features, true) || in_array('all', $features, true)) {
+            return true;
+        }
+
+        // New JWT format: product='portal' grants all portal features
+        $product = $jwt['product'] ?? '';
+        if ($product === 'portal' && str_starts_with($feature, 'customer-portal') || str_starts_with($feature, 'portal-')) {
+            return true;
+        }
+        if ($product === 'portal' && $feature === self::FEATURE_PORTAL) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -136,21 +149,10 @@ class LicenseService
     }
 
     /**
-     * Verify a JWT token and return its payload.
+     * Verify a JWT token with RS256 signature and return its payload.
      *
-     * Expected JWT payload structure:
-     * {
-     *   "sub": "license_id",
-     *   "iss": "musedock.com",
-     *   "domain": "panel.example.com",
-     *   "ip": "1.2.3.4",
-     *   "features": ["customer-portal", "portal-filemanager", ...],
-     *   "exp": 1735689600,
-     *   "verified_at": 1704067200
-     * }
-     *
-     * TODO: Implement RS256 signature verification with public key.
-     * For now, returns null (no portal license active).
+     * Uses the public key from the Portal installation or panel config.
+     * Verification is offline — no internet needed.
      *
      * @return array|null Decoded payload or null if invalid
      */
@@ -160,23 +162,47 @@ class LicenseService
             return null;
         }
 
-        // TODO: Implement proper JWT RS256 verification
-        // 1. Split token into header.payload.signature
-        // 2. Verify signature with public key (stored in config or hardcoded)
-        // 3. Decode payload
-        // 4. Verify 'iss' === 'musedock.com'
-        // 5. Verify 'domain' matches this panel's domain
-        // 6. Verify 'exp' > time()
-        // 7. Return payload array
-
-        // Placeholder: decode without verification (INSECURE, development only)
         $parts = explode('.', $token);
         if (count($parts) !== 3) {
             return null;
         }
 
-        $payload = json_decode(base64_decode(strtr($parts[1], '-_', '+/')), true);
+        [$headerB64, $payloadB64, $signatureB64] = $parts;
+
+        // Verify header
+        $header = json_decode(self::base64url_decode($headerB64), true);
+        if (!is_array($header) || ($header['alg'] ?? '') !== 'RS256') {
+            return null;
+        }
+
+        // Load public key (from Portal config or Panel config)
+        $publicKey = self::loadPublicKey();
+        if ($publicKey === null) {
+            return null;
+        }
+
+        // Verify RS256 signature
+        $data = $headerB64 . '.' . $payloadB64;
+        $signature = self::base64url_decode($signatureB64);
+
+        $pkeyId = openssl_pkey_get_public($publicKey);
+        if ($pkeyId === false) {
+            return null;
+        }
+
+        $valid = openssl_verify($data, $signature, $pkeyId, OPENSSL_ALGO_SHA256);
+        if ($valid !== 1) {
+            return null;
+        }
+
+        // Decode payload
+        $payload = json_decode(self::base64url_decode($payloadB64), true);
         if (!is_array($payload)) {
+            return null;
+        }
+
+        // Verify issuer
+        if (($payload['iss'] ?? '') !== 'license.musedock.com') {
             return null;
         }
 
@@ -184,25 +210,107 @@ class LicenseService
     }
 
     /**
+     * Load the RSA public key for JWT verification.
+     */
+    private static function loadPublicKey(): ?string
+    {
+        // Try Portal's bundled key first
+        $paths = [
+            '/opt/musedock-portal/config/license-public.pem',
+            PANEL_ROOT . '/config/license-public.pem',
+        ];
+
+        foreach ($paths as $path) {
+            if (file_exists($path)) {
+                $key = file_get_contents($path);
+                if ($key !== false && str_contains($key, 'PUBLIC KEY')) {
+                    return $key;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static function base64url_decode(string $data): string
+    {
+        return base64_decode(strtr($data, '-_', '+/'));
+    }
+
+    /**
      * Refresh the portal license by contacting the licensing server.
-     * Called periodically (every 24h) by the cluster worker.
+     * Called periodically by the cluster worker or cron.
      *
      * @return array ['ok' => bool, 'message' => string]
      */
     public static function refreshPortalLicense(): array
     {
-        $licenseKey = Settings::get('portal_license_key', '');
-        if (empty($licenseKey)) {
-            Settings::set('portal_license_jwt', '');
-            return ['ok' => false, 'message' => 'No portal license key configured'];
+        $currentJwt = Settings::get('portal_license_jwt', '');
+        if (empty($currentJwt)) {
+            // Try reading from portal .license file
+            $licenseFile = '/opt/musedock-portal/.license';
+            if (file_exists($licenseFile)) {
+                $currentJwt = trim(file_get_contents($licenseFile));
+            }
         }
 
-        // TODO: Implement actual API call to musedock.com
-        // POST musedock.com/api/license/check
-        // Body: { key: $licenseKey, domain: $panelDomain, ip: $serverIp }
-        // Response: { ok: true, jwt: "eyJ..." } or { ok: false, error: "..." }
+        if (empty($currentJwt)) {
+            return ['ok' => false, 'message' => 'No portal license JWT found'];
+        }
 
-        return ['ok' => false, 'message' => 'License verification not yet implemented'];
+        // Detect server IP
+        $serverIp = @file_get_contents('https://ifconfig.me', false,
+            stream_context_create(['http' => ['timeout' => 5]]));
+        if (!$serverIp) {
+            return ['ok' => false, 'message' => 'Cannot detect server IP'];
+        }
+        $serverIp = trim($serverIp);
+
+        // Call renewal API
+        $apiUrl = 'https://license.musedock.com/api/v1/renew';
+        $postData = json_encode([
+            'jwt'       => $currentJwt,
+            'server_ip' => $serverIp,
+        ]);
+
+        $ctx = stream_context_create([
+            'http' => [
+                'method'  => 'POST',
+                'header'  => "Content-Type: application/json\r\n",
+                'content' => $postData,
+                'timeout' => 15,
+            ],
+        ]);
+
+        $response = @file_get_contents($apiUrl, false, $ctx);
+        if ($response === false) {
+            return ['ok' => false, 'message' => 'Cannot reach license server'];
+        }
+
+        $data = json_decode($response, true);
+        if (!is_array($data) || empty($data['success'])) {
+            return ['ok' => false, 'message' => $data['error'] ?? 'Renewal failed'];
+        }
+
+        // Save new JWT
+        $newJwt = $data['jwt'] ?? '';
+        if (!empty($newJwt)) {
+            Settings::set('portal_license_jwt', $newJwt);
+
+            // Also update .license file
+            $licenseFile = '/opt/musedock-portal/.license';
+            if (is_dir(dirname($licenseFile))) {
+                @file_put_contents($licenseFile, $newJwt);
+                @chmod($licenseFile, 0600);
+            }
+        }
+
+        $message = 'License renewed successfully';
+        if (!empty($data['update_available'])) {
+            $message .= '. Update available: v' . ($data['latest_version'] ?? '?');
+        }
+
+        return ['ok' => true, 'message' => $message];
     }
 
     /**
@@ -219,14 +327,40 @@ class LicenseService
     public static function getPortalStatus(): array
     {
         $jwt = self::getCachedJwt();
+
+        // Also try .license file if no JWT in settings
         if (!$jwt) {
-            return ['active' => false, 'features' => [], 'expires' => null];
+            $licenseFile = '/opt/musedock-portal/.license';
+            if (file_exists($licenseFile)) {
+                $token = trim(file_get_contents($licenseFile));
+                if (!empty($token)) {
+                    $jwt = self::verifyJwt($token);
+                    // Cache it in settings too
+                    if ($jwt) {
+                        Settings::set('portal_license_jwt', $token);
+                    }
+                }
+            }
         }
+
+        if (!$jwt) {
+            return ['active' => false, 'features' => [], 'expires' => null, 'license_key' => '', 'max_accounts' => 0];
+        }
+
+        $graceDays = 15;
+        $exp = $jwt['exp'] ?? 0;
+        $graceEnd = $exp + ($graceDays * 86400);
+        $isActive = $exp > time();
+        $isGrace = !$isActive && $graceEnd > time();
+
         return [
-            'active' => !isset($jwt['exp']) || $jwt['exp'] > time(),
-            'features' => $jwt['features'] ?? [],
-            'expires' => $jwt['exp'] ?? null,
-            'domain' => $jwt['domain'] ?? '',
+            'active'       => $isActive || $isGrace,
+            'status'       => $isActive ? 'active' : ($isGrace ? 'grace' : 'expired'),
+            'features'     => $jwt['features'] ?? [],
+            'expires'      => $exp,
+            'license_key'  => $jwt['sub'] ?? '',
+            'hostname'     => $jwt['hostname'] ?? '',
+            'max_accounts' => $jwt['max_accounts'] ?? 0,
         ];
     }
 

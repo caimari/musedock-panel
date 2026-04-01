@@ -174,6 +174,28 @@ CRONEOF
     ok "Monitor cron installed"
 fi
 
+# Install audit log purge cron if missing
+if [ ! -f /etc/cron.d/musedock-audit-purge ]; then
+    cat > /etc/cron.d/musedock-audit-purge << CRONEOF
+# MuseDock Panel — Purge file audit logs older than 2 years (weekly, Sunday 4am)
+0 4 * * 0 root /usr/bin/php ${PANEL_DIR}/bin/purge-audit-logs.php >> /var/log/musedock-audit-purge.log 2>&1
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-audit-purge
+    ok "Audit log purge cron installed"
+fi
+
+# Compile musedock-listdir if source changed
+if [ -f "${PANEL_DIR}/bin/musedock-listdir.c" ]; then
+    CURRENT_MD5=$(md5sum "${PANEL_DIR}/bin/musedock-listdir.c" 2>/dev/null | cut -d' ' -f1)
+    STORED_MD5=$(cat "${PANEL_DIR}/bin/.musedock-listdir.md5" 2>/dev/null || echo "")
+    if [ "$CURRENT_MD5" != "$STORED_MD5" ] && command -v gcc >/dev/null 2>&1; then
+        gcc -O2 -Wall -o "${PANEL_DIR}/bin/musedock-listdir" "${PANEL_DIR}/bin/musedock-listdir.c" 2>/dev/null && \
+            echo "$CURRENT_MD5" > "${PANEL_DIR}/bin/.musedock-listdir.md5" && \
+            chmod 755 "${PANEL_DIR}/bin/musedock-listdir" && \
+            ok "musedock-listdir recompiled" || warn "musedock-listdir compilation failed"
+    fi
+fi
+
 # Sync Fail2Ban configs if fail2ban is installed
 if command -v fail2ban-client >/dev/null 2>&1 && [ -d "${PANEL_DIR}/config/fail2ban" ]; then
     F2B_CHANGED=false
@@ -255,6 +277,19 @@ MuseDockPanel\Settings::set('update_in_progress', '0');
 MuseDockPanel\Settings::set('update_remote_version', '${NEW_VERSION:-$CURRENT_VERSION}');
 MuseDockPanel\Settings::set('update_last_check', (string)time());
 " 2>/dev/null && ok "Update flags cleared" || warn "Could not clear update flags (non-critical)"
+
+# ============================================================
+# Step 6: Update Portal if installed
+# ============================================================
+PORTAL_DIR="/opt/musedock-portal"
+if [ -d "$PORTAL_DIR" ] && [ -f "${PORTAL_DIR}/bin/update.sh" ]; then
+    echo ""
+    echo -e "${CYAN}${BOLD}[Portal]${NC} Updating MuseDock Portal..."
+    bash "${PORTAL_DIR}/bin/update.sh"
+elif [ -d "$PORTAL_DIR" ]; then
+    echo ""
+    warn "Portal installed but no update.sh found. Update manually."
+fi
 
 echo ""
 echo -e "${GREEN}${BOLD}  Update complete!${NC}"

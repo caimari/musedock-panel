@@ -58,14 +58,17 @@ class AccountController
             }
         } catch (\Throwable $e) {}
 
-        // Fetch subdomain counts per account
+        // Fetch subdomains per account
         $subCounts = [];
+        $subDetails = [];
         try {
             $subRows = Database::fetchAll(
-                "SELECT account_id, COUNT(*) as cnt FROM hosting_subdomains GROUP BY account_id"
+                "SELECT id, account_id, subdomain, document_root, status FROM hosting_subdomains ORDER BY account_id, subdomain"
             );
             foreach ($subRows as $row) {
-                $subCounts[(int)$row['account_id']] = (int)$row['cnt'];
+                $aid = (int)$row['account_id'];
+                $subCounts[$aid] = ($subCounts[$aid] ?? 0) + 1;
+                $subDetails[$aid][] = $row;
             }
         } catch (\Throwable $e) {}
 
@@ -74,6 +77,7 @@ class AccountController
             $acc['redirect_count'] = $redirectCounts[(int)$acc['id']] ?? 0;
             $acc['alias_details'] = $aliasDetails[(int)$acc['id']] ?? [];
             $acc['subdomain_count'] = $subCounts[(int)$acc['id']] ?? 0;
+            $acc['subdomain_details'] = $subDetails[(int)$acc['id']] ?? [];
         }
 
         View::render('accounts/index', [
@@ -933,7 +937,7 @@ class AccountController
         // Force Caddy to re-obtain the certificate by removing and re-adding the route
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'];
-        $routeId = $account['caddy_route_id'] ?? "hosting-{$account['username']}";
+        $routeId = $account['caddy_route_id'] ?? \MuseDockPanel\Services\SystemService::caddyRouteId($account['domain']);
 
         // Re-add the route including aliases (this triggers new certificates)
         $newRouteId = \MuseDockPanel\Services\DomainAliasService::rebuildCaddyRoute($account) ? $routeId : null;
@@ -1094,6 +1098,150 @@ class AccountController
             }
             Flash::set('success', "Subdominio '{$sub['subdomain']}' eliminado." . ($deleteFiles ? ' Archivos borrados.' : ''));
         }
+        Router::redirect('/accounts/' . $params['id']);
+    }
+
+    public function showSubdomain(array $params): void
+    {
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
+
+        $sub = SubdomainService::getById((int)$params['sub_id']);
+        if (!$sub || (int)$sub['account_id'] !== (int)$account['id']) {
+            Flash::set('error', 'Subdominio no encontrado.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
+        // Redirect to edit page (subdomain detail IS the edit page)
+        Router::redirect("/accounts/{$params['id']}/subdomains/{$params['sub_id']}/edit");
+    }
+
+    public function editSubdomain(array $params): void
+    {
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
+
+        $sub = SubdomainService::getById((int)$params['sub_id']);
+        if (!$sub || (int)$sub['account_id'] !== (int)$account['id']) {
+            Flash::set('error', 'Subdominio no encontrado.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
+        $phpData = SubdomainService::getEffectivePhpSettings((int)$sub['id']);
+        $isSlave = Settings::get('cluster_role', 'standalone') === 'slave';
+
+        View::render('accounts/subdomain_edit', [
+            'layout' => 'main',
+            'pageTitle' => $sub['subdomain'],
+            'account' => $account,
+            'subdomain' => $sub,
+            'phpSettings' => $phpData['settings'] ?? [],
+            'phpOverrides' => $phpData['overrides'] ?? [],
+            'parentPoolExists' => $phpData['parent_pool_exists'] ?? false,
+            'isSlave' => $isSlave,
+        ]);
+    }
+
+    public function updateSubdomain(array $params): void
+    {
+        if ($this->slaveGuard('La edición de subdominios')) return;
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
+
+        $sub = SubdomainService::getById((int)$params['sub_id']);
+        if (!$sub || (int)$sub['account_id'] !== (int)$account['id']) {
+            Flash::set('error', 'Subdominio no encontrado.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
+        $docRootRelative = trim($_POST['document_root_relative'] ?? '');
+
+        if ($docRootRelative !== '' || isset($_POST['document_root_relative'])) {
+            $result = SubdomainService::updateDocumentRoot((int)$sub['id'], $docRootRelative);
+            if (!$result['ok']) {
+                Flash::set('error', $result['error']);
+                Router::redirect("/accounts/{$params['id']}/subdomains/{$params['sub_id']}/edit");
+                return;
+            }
+        }
+
+        // Cluster sync
+        if (Settings::get('cluster_role', 'standalone') === 'master') {
+            $updatedSub = SubdomainService::getById((int)$sub['id']);
+            $this->syncSubdomainToCluster($account, $sub['subdomain'], 'add', $updatedSub['document_root'] ?? $sub['document_root']);
+        }
+
+        Flash::set('success', 'Subdominio actualizado.');
+        Router::redirect("/accounts/{$params['id']}/subdomains/{$params['sub_id']}/edit");
+    }
+
+    public function updateSubdomainPhp(array $params): void
+    {
+        if ($this->slaveGuard('Cambiar PHP de subdominios')) return;
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
+
+        $sub = SubdomainService::getById((int)$params['sub_id']);
+        if (!$sub || (int)$sub['account_id'] !== (int)$account['id']) {
+            Flash::set('error', 'Subdominio no encontrado.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
+        $overrides = [
+            'memory_limit' => trim($_POST['memory_limit'] ?? ''),
+            'upload_max_filesize' => trim($_POST['upload_max_filesize'] ?? ''),
+            'post_max_size' => trim($_POST['post_max_size'] ?? ''),
+            'max_execution_time' => trim($_POST['max_execution_time'] ?? ''),
+            'max_input_vars' => trim($_POST['max_input_vars'] ?? ''),
+        ];
+
+        $result = SubdomainService::updatePhpOverrides((int)$sub['id'], $overrides);
+        if (!$result['ok']) {
+            Flash::set('error', $result['error']);
+        } else {
+            Flash::set('success', 'Ajustes PHP del subdominio actualizados (.user.ini regenerado).');
+        }
+
+        Router::redirect("/accounts/{$params['id']}/subdomains/{$params['sub_id']}/edit");
+    }
+
+    public function toggleSubdomainStatus(array $params): void
+    {
+        if ($this->slaveGuard('Cambiar estado de subdominios')) return;
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
+
+        $sub = SubdomainService::getById((int)$params['sub_id']);
+        if (!$sub || (int)$sub['account_id'] !== (int)$account['id']) {
+            Flash::set('error', 'Subdominio no encontrado.');
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
+        if ($sub['status'] === 'active') {
+            $result = SubdomainService::suspend((int)$sub['id']);
+            $msg = "Subdominio '{$sub['subdomain']}' suspendido.";
+        } else {
+            $result = SubdomainService::activate((int)$sub['id']);
+            $msg = "Subdominio '{$sub['subdomain']}' activado.";
+        }
+
+        if (!$result['ok']) {
+            Flash::set('error', $result['error']);
+        } else {
+            if (Settings::get('cluster_role', 'standalone') === 'master') {
+                $this->syncSubdomainToCluster($account, $sub['subdomain'], $sub['status'] === 'active' ? 'remove' : 'add', $sub['document_root']);
+            }
+            Flash::set('success', $msg);
+        }
+
         Router::redirect('/accounts/' . $params['id']);
     }
 

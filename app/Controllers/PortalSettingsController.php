@@ -184,6 +184,88 @@ class PortalSettingsController
     }
 
 
+    /**
+     * POST: Activate Portal with a license key.
+     * Calls license.musedock.com API, downloads and installs the Portal.
+     * Returns JSON for the AJAX progress UI.
+     */
+    public function activate(): void
+    {
+        header('Content-Type: application/json');
+
+        $licenseKey = trim($_POST['license_key'] ?? '');
+        if (!preg_match('/^MDCK-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/', $licenseKey)) {
+            echo json_encode(['ok' => false, 'error' => 'Formato de clave invalido. Esperado: MDCK-XXXX-XXXX-XXXX']);
+            return;
+        }
+
+        $logFile = '/tmp/portal-install-' . time() . '.log';
+        $panelDir = PANEL_ROOT;
+
+        // Run portal-install.sh in background, capture output
+        $cmd = "sudo bash {$panelDir}/bin/portal-install.sh " . escapeshellarg($licenseKey) . " > " . escapeshellarg($logFile) . " 2>&1 &";
+        exec($cmd);
+
+        // Store install state
+        Settings::set('portal_install_status', 'running');
+        Settings::set('portal_install_log', $logFile);
+        Settings::set('portal_install_key', $licenseKey);
+        Settings::set('portal_install_started', (string)time());
+
+        LogService::log('portal.activate', null, "Portal activation started with key {$licenseKey}");
+
+        echo json_encode([
+            'ok' => true,
+            'message' => 'Instalacion iniciada...',
+            'log_file' => $logFile,
+        ]);
+    }
+
+    /**
+     * GET: Check portal installation progress (AJAX polling).
+     * Returns JSON with current status and log output.
+     */
+    public function installStatus(): void
+    {
+        header('Content-Type: application/json');
+
+        $status = Settings::get('portal_install_status', 'idle');
+        $logFile = Settings::get('portal_install_log', '');
+        $started = (int)Settings::get('portal_install_started', '0');
+
+        $log = '';
+        if ($logFile && file_exists($logFile)) {
+            $log = file_get_contents($logFile);
+        }
+
+        // Detect completion
+        $portalInstalled = file_exists('/opt/musedock-portal/bootstrap.php');
+        $portalService = trim(shell_exec('systemctl is-active musedock-portal 2>/dev/null') ?? '') === 'active';
+
+        if ($status === 'running') {
+            // Check if process finished (log contains "installed successfully" or error)
+            if (str_contains($log, 'installed successfully') || str_contains($log, 'Portal installed')) {
+                Settings::set('portal_install_status', 'done');
+                $status = 'done';
+            } elseif (str_contains($log, 'ERROR') || str_contains($log, 'FAIL') || str_contains($log, 'fail()')) {
+                Settings::set('portal_install_status', 'error');
+                $status = 'error';
+            } elseif (time() - $started > 300) {
+                // Timeout after 5 minutes
+                Settings::set('portal_install_status', 'timeout');
+                $status = 'timeout';
+            }
+        }
+
+        echo json_encode([
+            'status' => $status,
+            'log' => $log,
+            'portal_installed' => $portalInstalled,
+            'portal_service' => $portalService,
+            'elapsed' => $started > 0 ? time() - $started : 0,
+        ]);
+    }
+
     private function getAvailableThemes(): array
     {
         $themes = [

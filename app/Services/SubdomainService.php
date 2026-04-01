@@ -420,6 +420,314 @@ class SubdomainService
     }
 
     /**
+     * Suspend a subdomain: replace its Caddy route with a maintenance page.
+     */
+    public static function suspend(int $subdomainId): array
+    {
+        $sub = self::getById($subdomainId);
+        if (!$sub) return ['ok' => false, 'error' => 'Subdominio no encontrado.'];
+        if ($sub['status'] === 'suspended') return ['ok' => true];
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $sub['account_id']]);
+        if (!$account) return ['ok' => false, 'error' => 'Cuenta padre no encontrada.'];
+
+        // Replace Caddy route with maintenance page
+        $routeId = $sub['caddy_route_id'];
+        if ($routeId) {
+            $config = require PANEL_ROOT . '/config/panel.php';
+            $caddyApi = $config['caddy']['api_url'];
+            $html = SystemService::getMaintenanceHtml($sub['subdomain']);
+
+            $route = [
+                '@id' => $routeId,
+                'match' => [['host' => [$sub['subdomain']]]],
+                'handle' => [[
+                    'handler' => 'static_response',
+                    'status_code' => '503',
+                    'headers' => ['Content-Type' => ['text/html; charset=utf-8'], 'Retry-After' => ['3600']],
+                    'body' => $html,
+                ]],
+                'terminal' => true,
+            ];
+
+            $ch = curl_init("{$caddyApi}/id/{$routeId}");
+            curl_setopt_array($ch, [
+                CURLOPT_CUSTOMREQUEST => 'PUT',
+                CURLOPT_POSTFIELDS => json_encode($route),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 10,
+            ]);
+            curl_exec($ch);
+            curl_close($ch);
+        }
+
+        Database::query("UPDATE hosting_subdomains SET status = 'suspended' WHERE id = :id", ['id' => $subdomainId]);
+        LogService::log('subdomain.suspend', $sub['subdomain'], "Subdomain suspended");
+
+        return ['ok' => true];
+    }
+
+    /**
+     * Activate a suspended subdomain: restore its Caddy route.
+     */
+    public static function activate(int $subdomainId): array
+    {
+        $sub = self::getById($subdomainId);
+        if (!$sub) return ['ok' => false, 'error' => 'Subdominio no encontrado.'];
+        if ($sub['status'] === 'active') return ['ok' => true];
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $sub['account_id']]);
+        if (!$account) return ['ok' => false, 'error' => 'Cuenta padre no encontrada.'];
+
+        // Delete maintenance route and recreate normal route
+        $routeId = $sub['caddy_route_id'];
+        if ($routeId) {
+            $config = require PANEL_ROOT . '/config/panel.php';
+            $caddyApi = $config['caddy']['api_url'];
+            $ch = curl_init("{$caddyApi}/id/{$routeId}");
+            curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
+            curl_exec($ch);
+            curl_close($ch);
+        }
+
+        // Recreate normal Caddy route
+        $newRouteId = SystemService::addCaddyRoute(
+            $sub['subdomain'], $sub['document_root'], $account['username'], $account['php_version'] ?? '8.3'
+        );
+
+        Database::query(
+            "UPDATE hosting_subdomains SET status = 'active', caddy_route_id = :rid WHERE id = :id",
+            ['rid' => $newRouteId, 'id' => $subdomainId]
+        );
+        LogService::log('subdomain.activate', $sub['subdomain'], "Subdomain activated");
+
+        return ['ok' => true];
+    }
+
+    /**
+     * Update a subdomain's document root and Caddy route.
+     *
+     * @return array ['ok' => bool, 'error' => string]
+     */
+    public static function updateDocumentRoot(int $subdomainId, string $newRelativePath): array
+    {
+        $sub = self::getById($subdomainId);
+        if (!$sub) {
+            return ['ok' => false, 'error' => 'Subdominio no encontrado.'];
+        }
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $sub['account_id']]);
+        if (!$account) {
+            return ['ok' => false, 'error' => 'Cuenta padre no encontrada.'];
+        }
+
+        // Build absolute path: parent_home/subdomain_folder/relative
+        $homeDir = rtrim($account['home_dir'], '/');
+        $subFolder = $sub['subdomain'];
+        $basePath = "{$homeDir}/{$subFolder}";
+
+        $newRelativePath = trim($newRelativePath, '/');
+        $newDocRoot = empty($newRelativePath) ? $basePath : "{$basePath}/{$newRelativePath}";
+
+        // Sanitize: reject path traversal
+        if (preg_match('/\.\./', $newRelativePath) || (!empty($newRelativePath) && !preg_match('#^[a-zA-Z0-9/_.-]+$#', $newRelativePath))) {
+            return ['ok' => false, 'error' => 'Ruta de document root no válida.'];
+        }
+
+        $oldDocRoot = $sub['document_root'];
+        if ($newDocRoot === $oldDocRoot) {
+            return ['ok' => true]; // No change
+        }
+
+        // Create directory if needed
+        if (!is_dir($newDocRoot)) {
+            @mkdir($newDocRoot, 0755, true);
+            shell_exec(sprintf('chown %s:www-data %s 2>&1', escapeshellarg($account['username']), escapeshellarg($newDocRoot)));
+        }
+
+        // Update Caddy route
+        SystemService::updateCaddyDocumentRoot($sub['subdomain'], $newDocRoot, $account['username'], $account['php_version'] ?? '8.3');
+
+        // Update DB
+        Database::query(
+            "UPDATE hosting_subdomains SET document_root = :dr WHERE id = :id",
+            ['dr' => $newDocRoot, 'id' => $subdomainId]
+        );
+
+        LogService::log('subdomain.docroot', $sub['subdomain'], "Document root changed: {$oldDocRoot} -> {$newDocRoot}");
+
+        return ['ok' => true, 'document_root' => $newDocRoot];
+    }
+
+    /**
+     * Get the effective PHP settings for a subdomain.
+     * Returns parent account defaults merged with subdomain overrides.
+     */
+    public static function getEffectivePhpSettings(int $subdomainId): array
+    {
+        $sub = self::getById($subdomainId);
+        if (!$sub) return [];
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $sub['account_id']]);
+        if (!$account) return [];
+
+        // Read parent pool defaults
+        $defaults = [
+            'memory_limit' => '128M',
+            'upload_max_filesize' => '2M',
+            'post_max_size' => '8M',
+            'max_execution_time' => '30',
+            'max_input_vars' => '1000',
+        ];
+
+        $poolFile = "/etc/php/{$account['php_version']}/fpm/pool.d/{$account['username']}.conf";
+        if (file_exists($poolFile)) {
+            $content = file_get_contents($poolFile);
+            if ($content !== false && preg_match_all('/^php(?:_admin)?_value\[([^\]]+)\]\s*=\s*(.+)$/m', $content, $matches, PREG_SET_ORDER)) {
+                foreach ($matches as $m) {
+                    $k = trim($m[1]);
+                    if (array_key_exists($k, $defaults)) {
+                        $defaults[$k] = trim($m[2]);
+                    }
+                }
+            }
+        }
+
+        // Merge overrides
+        $overrides = !empty($sub['php_overrides']) ? json_decode($sub['php_overrides'], true) : [];
+        if (is_array($overrides)) {
+            foreach ($overrides as $k => $v) {
+                if (array_key_exists($k, $defaults) && $v !== '') {
+                    $defaults[$k] = $v;
+                }
+            }
+        }
+
+        return [
+            'settings' => $defaults,
+            'overrides' => $overrides ?: [],
+            'parent_pool_exists' => file_exists($poolFile),
+        ];
+    }
+
+    /**
+     * Update PHP overrides for a subdomain via .user.ini in its document root.
+     *
+     * @return array ['ok' => bool, 'error' => string]
+     */
+    public static function updatePhpOverrides(int $subdomainId, array $overrides): array
+    {
+        $sub = self::getById($subdomainId);
+        if (!$sub) {
+            return ['ok' => false, 'error' => 'Subdominio no encontrado.'];
+        }
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $sub['account_id']]);
+        if (!$account) {
+            return ['ok' => false, 'error' => 'Cuenta padre no encontrada.'];
+        }
+
+        // Validate overrides
+        $allowed = [
+            'memory_limit' => '/^\d+[MmGgKk]?$/',
+            'upload_max_filesize' => '/^\d+[MmGgKk]?$/',
+            'post_max_size' => '/^\d+[MmGgKk]?$/',
+            'max_execution_time' => '/^\d+$/',
+            'max_input_vars' => '/^\d+$/',
+        ];
+
+        $clean = [];
+        foreach ($allowed as $key => $pattern) {
+            $value = trim($overrides[$key] ?? '');
+            if ($value === '') continue;
+            if (!preg_match($pattern, $value)) {
+                return ['ok' => false, 'error' => "Valor no válido para {$key}: {$value}"];
+            }
+            $clean[$key] = $value;
+        }
+
+        // Read parent defaults to determine what actually differs
+        $parentDefaults = self::getParentPhpDefaults($account);
+
+        // Only store values that differ from parent
+        $effectiveOverrides = [];
+        foreach ($clean as $k => $v) {
+            if (!isset($parentDefaults[$k]) || $parentDefaults[$k] !== $v) {
+                $effectiveOverrides[$k] = $v;
+            }
+        }
+
+        // Save to DB
+        $json = !empty($effectiveOverrides) ? json_encode($effectiveOverrides) : null;
+        Database::query(
+            "UPDATE hosting_subdomains SET php_overrides = :o WHERE id = :id",
+            ['o' => $json, 'id' => $subdomainId]
+        );
+
+        // Write .user.ini in the subdomain document root
+        self::writeUserIni($sub['document_root'], $clean, $account['username']);
+
+        LogService::log('subdomain.php_settings', $sub['subdomain'],
+            'PHP overrides updated: ' . ($effectiveOverrides ? json_encode($effectiveOverrides) : 'reset to parent defaults'));
+
+        return ['ok' => true, 'overrides' => $effectiveOverrides];
+    }
+
+    /**
+     * Read parent account's PHP pool defaults.
+     */
+    private static function getParentPhpDefaults(array $account): array
+    {
+        $defaults = [
+            'memory_limit' => '128M',
+            'upload_max_filesize' => '2M',
+            'post_max_size' => '8M',
+            'max_execution_time' => '30',
+            'max_input_vars' => '1000',
+        ];
+
+        $poolFile = "/etc/php/{$account['php_version']}/fpm/pool.d/{$account['username']}.conf";
+        if (file_exists($poolFile)) {
+            $content = file_get_contents($poolFile);
+            if ($content !== false && preg_match_all('/^php(?:_admin)?_value\[([^\]]+)\]\s*=\s*(.+)$/m', $content, $matches, PREG_SET_ORDER)) {
+                foreach ($matches as $m) {
+                    $k = trim($m[1]);
+                    if (array_key_exists($k, $defaults)) {
+                        $defaults[$k] = trim($m[2]);
+                    }
+                }
+            }
+        }
+
+        return $defaults;
+    }
+
+    /**
+     * Write a .user.ini file in the subdomain document root with PHP overrides.
+     */
+    private static function writeUserIni(string $documentRoot, array $settings, string $username): void
+    {
+        if (empty($settings)) {
+            // Remove .user.ini if no overrides
+            $iniPath = rtrim($documentRoot, '/') . '/.user.ini';
+            if (file_exists($iniPath)) {
+                @unlink($iniPath);
+            }
+            return;
+        }
+
+        $lines = ["; PHP overrides for this subdomain (managed by MuseDock Panel)", "; Do not edit manually — changes will be overwritten.", ""];
+        foreach ($settings as $key => $value) {
+            $lines[] = "{$key} = {$value}";
+        }
+
+        $iniPath = rtrim($documentRoot, '/') . '/.user.ini';
+        file_put_contents($iniPath, implode("\n", $lines) . "\n");
+        shell_exec(sprintf('chown %s:www-data %s 2>&1', escapeshellarg($username), escapeshellarg($iniPath)));
+    }
+
+    /**
      * Export subdomains for cluster sync.
      */
     public static function exportForSync(int $accountId): array

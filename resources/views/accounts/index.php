@@ -73,10 +73,13 @@ $totalSuspended = $totalAccounts - $totalActive;
                     <tr class="account-row">
                         <td class="ps-3">
                             <a href="/accounts/<?= $acc['id'] ?>" class="text-info text-decoration-none fw-semibold"><?= View::e($acc['domain']) ?></a>
+                            <a href="https://<?= View::e($acc['domain']) ?>" target="_blank" rel="noopener" class="text-muted ms-1" style="font-size:0.7rem;" title="Abrir sitio"><i class="bi bi-box-arrow-up-right"></i></a>
                             <?php if ($acc['subdomain_count'] > 0): ?>
-                                <span class="badge bg-dark ms-1" style="font-size:0.6rem;" title="<?= $acc['subdomain_count'] ?> subdominio<?= $acc['subdomain_count'] > 1 ? 's' : '' ?>">
+                                <button type="button" class="badge bg-dark ms-1 border-0 btn-toggle-subs" style="font-size:0.6rem;cursor:pointer;"
+                                        data-account-id="<?= (int)$acc['id'] ?>"
+                                        title="<?= $acc['subdomain_count'] ?> subdominio<?= $acc['subdomain_count'] > 1 ? 's' : '' ?> — click para expandir">
                                     <i class="bi bi-diagram-3"></i> <?= $acc['subdomain_count'] ?>
-                                </span>
+                                </button>
                             <?php endif; ?>
                         </td>
                         <td>
@@ -131,12 +134,28 @@ $totalSuspended = $totalAccounts - $totalActive;
                         </td>
                         <td><small class="text-muted"><?= date('d/m/Y', strtotime($acc['created_at'])) ?></small></td>
                         <td class="text-end pe-3">
-                            <div class="d-flex gap-1 justify-content-end">
-                                <a href="/accounts/<?= $acc['id'] ?>" class="btn btn-outline-light btn-sm" title="Configuracion"><i class="bi bi-gear"></i></a>
-                                <a href="https://<?= View::e($acc['domain']) ?>" target="_blank" rel="noopener" class="btn btn-outline-info btn-sm" title="Visitar sitio"><i class="bi bi-box-arrow-up-right"></i></a>
-                            </div>
+                            <a href="/accounts/<?= $acc['id'] ?>" class="btn btn-outline-light btn-sm" title="Configuracion"><i class="bi bi-gear"></i></a>
                         </td>
                     </tr>
+                    <?php if (!empty($acc['subdomain_details'])): ?>
+                    <?php foreach ($acc['subdomain_details'] as $sub): ?>
+                    <tr class="sub-row sub-of-<?= (int)$acc['id'] ?>" style="display:none;">
+                        <td class="ps-3" style="padding-left:2.2rem!important;">
+                            <i class="bi bi-corner-down-right text-muted me-1" style="font-size:0.75rem;"></i>
+                            <a href="/accounts/<?= (int)$acc['id'] ?>/subdomains/<?= (int)$sub['id'] ?>/edit" class="text-decoration-none" style="color:#a5b4fc;"><?= View::e($sub['subdomain']) ?></a>
+                            <a href="https://<?= View::e($sub['subdomain']) ?>" target="_blank" class="text-muted ms-1" style="font-size:0.7rem;"><i class="bi bi-box-arrow-up-right"></i></a>
+                        </td>
+                        <td colspan="4"><code class="small text-muted"><?= View::e($sub['document_root']) ?></code></td>
+                        <td colspan="2">
+                            <span class="badge badge-<?= $sub['status'] === 'active' ? 'active' : 'suspended' ?>" style="font-size:0.6rem;"><?= View::e($sub['status']) ?></span>
+                        </td>
+                        <td></td>
+                        <td class="text-end pe-3">
+                            <a href="/accounts/<?= (int)$acc['id'] ?>/subdomains/<?= (int)$sub['id'] ?>/edit" class="btn btn-outline-light btn-sm py-0 px-1" title="Editar subdominio"><i class="bi bi-pencil" style="font-size:0.7rem;"></i></a>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                    <?php endif; ?>
                     <?php endforeach; ?>
                 </tbody>
             </table>
@@ -161,8 +180,22 @@ $totalSuspended = $totalAccounts - $totalActive;
 
             rows.forEach(function(row) {
                 var text = row.textContent.toLowerCase();
-                var match = !query || text.indexOf(query) !== -1;
+                // Also search in subdomain rows for this account
+                var accountId = row.querySelector('.btn-toggle-subs')?.dataset?.accountId;
+                var subText = '';
+                if (accountId) {
+                    document.querySelectorAll('.sub-of-' + accountId).forEach(function(sr) {
+                        subText += ' ' + sr.textContent.toLowerCase();
+                    });
+                }
+                var match = !query || text.indexOf(query) !== -1 || subText.indexOf(query) !== -1;
                 row.style.display = match ? '' : 'none';
+                // Hide sub-rows when filtering (user can re-expand)
+                if (accountId) {
+                    document.querySelectorAll('.sub-of-' + accountId).forEach(function(sr) {
+                        sr.style.display = 'none';
+                    });
+                }
                 if (match) visible++;
             });
 
@@ -177,6 +210,28 @@ $totalSuspended = $totalAccounts - $totalActive;
             }
         });
     }
+
+    // ─── Subdomain accordion ────────────────────────────────
+    document.querySelectorAll('.btn-toggle-subs').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var accountId = btn.dataset.accountId;
+            var subRows = document.querySelectorAll('.sub-of-' + accountId);
+            var icon = btn.querySelector('i');
+            var visible = subRows[0] && subRows[0].style.display !== 'none';
+
+            subRows.forEach(function(row) {
+                row.style.display = visible ? 'none' : '';
+            });
+
+            // Toggle icon
+            if (visible) {
+                icon.className = 'bi bi-diagram-3';
+            } else {
+                icon.className = 'bi bi-diagram-3-fill';
+            }
+        });
+    });
 
     // ─── Alias/Redirect modal ────────────────────────────────
     document.querySelectorAll('.btn-show-aliases').forEach(function(btn) {

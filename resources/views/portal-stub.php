@@ -1,9 +1,16 @@
+<?php
+$panelPort = \MuseDockPanel\Env::get('PANEL_PORT', '8444');
+$host = preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? 'localhost');
+$panelUrl = "https://{$host}:{$panelPort}/settings/portal";
+$faviconUrl = "https://{$host}:{$panelPort}/favicon.svg";
+?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Portal — MuseDock Panel</title>
+    <title>Portal — MuseDock</title>
+    <link rel="icon" type="image/svg+xml" href="<?= htmlspecialchars($faviconUrl) ?>">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -38,12 +45,12 @@
         <p>
             Para activar el portal, instala el modulo <strong>MuseDock Portal</strong>
             y configura tu clave de licencia en
-            <a href="/settings">Settings</a>.
+            <a href="<?= htmlspecialchars($panelUrl) ?>">Panel &gt; Settings &gt; Portal</a>.
         </p>
         <p style="font-size:0.8rem;">
             <a href="https://musedock.com/portal" target="_blank">Mas informacion sobre MuseDock Portal</a>
         </p>
-        <div class="badge">MuseDock Panel <?= defined('PANEL_VERSION') ? PANEL_VERSION : '' ?></div>
+        <div class="badge">MuseDock Portal</div>
     </div>
 </body>
 </html>

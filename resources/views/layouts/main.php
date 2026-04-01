@@ -114,6 +114,9 @@
         <a href="/logs" class="<?= ($pageTitle ?? '') === 'Activity Log' ? 'active' : '' ?>">
             <i class="bi bi-journal-text"></i> Activity Log
         </a>
+        <a href="/admin/file-audit-log" class="<?= str_contains($pageTitle ?? '', 'File Audit') ? 'active' : '' ?>">
+            <i class="bi bi-shield-check"></i> File Audit Log
+        </a>
         <a href="/backups" class="<?= str_contains($pageTitle ?? '', 'Backup') ? 'active' : '' ?>">
             <i class="bi bi-cloud-arrow-down"></i> Backups
         </a>

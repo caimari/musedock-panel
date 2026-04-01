@@ -18,6 +18,7 @@ use MuseDockPanel\Services\CloudflareService;
                 <span><i class="bi bi-server me-2"></i>Account Details</span>
                 <div class="d-flex gap-2">
                     <?php if (!($isSlave ?? false)): ?>
+                    <a href="/accounts/<?= $account['id'] ?>/files" class="btn btn-outline-light btn-sm"><i class="bi bi-folder me-1"></i>Files</a>
                     <a href="/accounts/<?= $account['id'] ?>/migrate" class="btn btn-outline-light btn-sm"><i class="bi bi-cloud-download me-1"></i>Migrate</a>
                     <a href="/accounts/<?= $account['id'] ?>/edit" class="btn btn-outline-light btn-sm"><i class="bi bi-pencil"></i> Edit</a>
                     <?php if ($account['status'] === 'active'): ?>
@@ -237,10 +238,11 @@ use MuseDockPanel\Services\CloudflareService;
                     } else {
                         tbody.innerHTML = relevant.map(r => {
                             const isProxyable = ['A', 'AAAA', 'CNAME'].includes(r.type);
+                            const escapedName = shortName.replace(/'/g, "\\'");
                             const proxyIcon = !isProxyable ? '<span class="text-muted">—</span>' :
                                 (r.proxied
-                                    ? `<i class="bi bi-cloud-fill" style="color:#f97316;cursor:pointer;" title="Proxied (click to toggle)" onclick="cfToggleProxy('${r.id}', false, ${accIdx}, '${zoneId}')"></i>`
-                                    : `<i class="bi bi-cloud" style="color:#94a3b8;cursor:pointer;" title="DNS Only (click to toggle)" onclick="cfToggleProxy('${r.id}', true, ${accIdx}, '${zoneId}')"></i>`);
+                                    ? `<i class="bi bi-cloud-fill" style="color:#f97316;cursor:pointer;" title="Proxied (click to toggle)" onclick="cfToggleProxy('${r.id}', false, ${accIdx}, '${zoneId}', '${escapedName}', '${r.type}')"></i>`
+                                    : `<i class="bi bi-cloud" style="color:#94a3b8;cursor:pointer;" title="DNS Only (click to toggle)" onclick="cfToggleProxy('${r.id}', true, ${accIdx}, '${zoneId}', '${escapedName}', '${r.type}')"></i>`);
                             const shortName = r.name.replace('.' + zoneName, '').replace(zoneName, '@');
                             const ttl = r.ttl === 1 ? 'Auto' : (r.ttl >= 3600 ? (r.ttl/3600)+'h' : (r.ttl >= 60 ? (r.ttl/60)+'m' : r.ttl+'s'));
                             const shortContent = r.content.length > 40 ? r.content.substring(0, 37) + '...' : r.content;
@@ -261,25 +263,52 @@ use MuseDockPanel\Services\CloudflareService;
                 });
         });
 
-        function cfToggleProxy(recordId, proxied, accIdx, zoneId) {
-            const csrf = document.querySelector('input[name="_csrf_token"]').value;
-            fetch('/settings/cloudflare-dns/toggle-proxy', {
-                method: 'POST',
-                body: new URLSearchParams({
-                    _csrf_token: csrf,
-                    account: accIdx,
-                    zone_id: zoneId,
-                    record_id: recordId,
-                    proxied: proxied ? '1' : '',
-                }),
-            })
-            .then(r => r.json())
-            .then(data => {
-                if (data.ok) {
-                    location.reload();
-                } else {
-                    SwalDark.fire({icon: 'error', title: 'Error', text: data.error});
-                }
+        function cfToggleProxy(recordId, proxied, accIdx, zoneId, recordName, recordType) {
+            const action = proxied ? 'activar' : 'desactivar';
+            const icon = proxied
+                ? '<i class="bi bi-cloud-fill" style="color:#f97316;font-size:1.5rem;"></i>'
+                : '<i class="bi bi-cloud" style="color:#94a3b8;font-size:1.5rem;"></i>';
+            const desc = proxied
+                ? 'El tráfico pasará a través de Cloudflare (proxy activo). Cloudflare proporcionará SSL y protección DDoS.'
+                : 'El tráfico irá directamente al servidor (DNS Only). Caddy generará el certificado SSL automáticamente.';
+
+            Swal.fire({
+                title: `${action.charAt(0).toUpperCase() + action.slice(1)} proxy?`,
+                html: `<div class="text-start">
+                    <div class="text-center mb-3">${icon} <i class="bi bi-arrow-right mx-2 text-muted"></i> ${proxied ? '<i class="bi bi-cloud-fill" style="color:#f97316;font-size:1.5rem;"></i>' : '<i class="bi bi-cloud" style="color:#94a3b8;font-size:1.5rem;"></i>'}</div>
+                    <p><strong>${recordType}</strong> <code>${recordName || ''}</code></p>
+                    <p class="small text-muted mb-0">${desc}</p>
+                </div>`,
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonColor: proxied ? '#f97316' : '#6c757d',
+                cancelButtonColor: '#334155',
+                confirmButtonText: proxied ? '<i class="bi bi-cloud-fill me-1"></i>Activar proxy' : '<i class="bi bi-cloud me-1"></i>DNS Only',
+                cancelButtonText: 'Cancelar',
+            }).then(function(result) {
+                if (!result.isConfirmed) return;
+                const csrf = document.querySelector('input[name="_csrf_token"]').value;
+                fetch('/settings/cloudflare-dns/toggle-proxy', {
+                    method: 'POST',
+                    body: new URLSearchParams({
+                        _csrf_token: csrf,
+                        account: accIdx,
+                        zone_id: zoneId,
+                        record_id: recordId,
+                        proxied: proxied ? '1' : '',
+                    }),
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        location.reload();
+                    } else {
+                        Swal.fire({icon: 'error', title: 'Error', text: data.error});
+                    }
+                })
+                .catch(err => {
+                    Swal.fire({icon: 'error', title: 'Error', text: err.message});
+                });
             });
         }
         </script>
@@ -407,27 +436,42 @@ use MuseDockPanel\Services\CloudflareService;
                     <i class="bi bi-info-circle me-1"></i>Subdominios con su propia carpeta y ruta Caddy. Comparten usuario y PHP-FPM con la cuenta principal.
                 </p>
                 <?php if (!empty($subdomains)): ?>
-                <table class="table table-sm mb-3">
-                    <thead><tr><th>Subdominio</th><th>Document Root</th><th>Estado</th><?php if (!($isSlave ?? false)): ?><th class="text-end">Acciones</th><?php endif; ?></tr></thead>
+                <table class="table table-sm mb-3" style="table-layout:fixed;width:100%;">
+                    <thead><tr><th style="width:30%;">Subdominio</th><th style="width:auto;">Document Root</th><th style="width:60px;">Estado</th><?php if (!($isSlave ?? false)): ?><th class="text-end" style="width:120px;">Acciones</th><?php endif; ?></tr></thead>
                     <tbody>
                     <?php foreach ($subdomains as $sub): ?>
                         <tr>
-                            <td>
+                            <td class="text-nowrap">
                                 <i class="bi bi-globe2 text-primary me-1"></i>
-                                <a href="https://<?= View::e($sub['subdomain']) ?>" target="_blank" class="text-decoration-none"><?= View::e($sub['subdomain']) ?></a>
+                                <a href="/accounts/<?= (int)$account['id'] ?>/subdomains/<?= (int)$sub['id'] ?>/edit" class="text-decoration-none"><?= View::e($sub['subdomain']) ?></a>
+                                <a href="https://<?= View::e($sub['subdomain']) ?>" target="_blank" class="text-muted ms-1" style="font-size:0.75rem;" title="Abrir en navegador"><i class="bi bi-box-arrow-up-right"></i></a>
                             </td>
-                            <td><code class="small"><?= View::e($sub['document_root']) ?></code></td>
+                            <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="<?= View::e($sub['document_root']) ?>"><code class="small"><?= View::e($sub['document_root']) ?></code></td>
                             <td><span class="badge badge-<?= $sub['status'] === 'active' ? 'active' : 'suspended' ?>"><?= View::e($sub['status']) ?></span></td>
                             <?php if (!($isSlave ?? false)): ?>
                             <td class="text-end text-nowrap">
-                                <button type="button" class="btn btn-outline-warning btn-sm py-0 px-2 me-1" title="Promover a cuenta independiente"
+                                <a href="/accounts/<?= (int)$account['id'] ?>/subdomains/<?= (int)$sub['id'] ?>/edit" class="btn btn-outline-light btn-sm py-0 px-2 me-1" title="Editar subdominio">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                <?php if ($sub['status'] === 'active'): ?>
+                                <button type="button" class="btn btn-outline-warning btn-sm py-0 px-2 me-1" title="Suspender subdominio"
+                                    onclick="confirmToggleSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, '<?= View::e($sub['subdomain']) ?>', 'suspend')">
+                                    <i class="bi bi-pause-circle"></i>
+                                </button>
+                                <button type="button" class="btn btn-outline-info btn-sm py-0 px-2" title="Promover a cuenta independiente"
                                     onclick="confirmPromoteSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, '<?= View::e($sub['subdomain']) ?>')">
                                     <i class="bi bi-box-arrow-up"></i>
+                                </button>
+                                <?php else: ?>
+                                <button type="button" class="btn btn-outline-success btn-sm py-0 px-2 me-1" title="Activar subdominio"
+                                    onclick="confirmToggleSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, '<?= View::e($sub['subdomain']) ?>', 'activate')">
+                                    <i class="bi bi-play-circle"></i>
                                 </button>
                                 <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2"
                                     onclick="confirmDeleteSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, '<?= View::e($sub['subdomain']) ?>')">
                                     <i class="bi bi-trash"></i>
                                 </button>
+                                <?php endif; ?>
                             </td>
                             <?php endif; ?>
                         </tr>
@@ -739,6 +783,37 @@ function confirmAdoptSubdomain(parentId, childId, childDomain, parentDomain) {
             input.type = 'hidden'; input.name = key; input.value = fields[key];
             form.appendChild(input);
         }
+
+        document.body.appendChild(form);
+        form.submit();
+    });
+}
+
+function confirmToggleSubdomain(accountId, subId, subdomain, action) {
+    var isSuspend = action === 'suspend';
+    var S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+
+    S.fire({
+        title: isSuspend ? 'Suspender subdominio' : 'Activar subdominio',
+        html: isSuspend
+            ? '<p>Suspender <strong>' + subdomain + '</strong>?</p><p class="small text-muted">Se reemplazará la ruta Caddy con una página de mantenimiento. Los archivos no se eliminan.</p>'
+            : '<p>Activar <strong>' + subdomain + '</strong>?</p><p class="small text-muted">Se restaurará la ruta Caddy y el subdominio volverá a estar en línea.</p>',
+        icon: isSuspend ? 'warning' : 'question',
+        showCancelButton: true,
+        confirmButtonText: isSuspend ? '<i class="bi bi-pause-circle me-1"></i>Suspender' : '<i class="bi bi-play-circle me-1"></i>Activar',
+        confirmButtonColor: isSuspend ? '#eab308' : '#22c55e',
+        cancelButtonText: 'Cancelar',
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = '/accounts/' + accountId + '/subdomains/' + subId + '/toggle-status';
+
+        var csrf = document.querySelector('input[name=_csrf_token]').value;
+        var csrfInput = document.createElement('input');
+        csrfInput.type = 'hidden'; csrfInput.name = '_csrf_token'; csrfInput.value = csrf;
+        form.appendChild(csrfInput);
 
         document.body.appendChild(form);
         form.submit();

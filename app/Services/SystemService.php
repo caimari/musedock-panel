@@ -11,6 +11,15 @@ class SystemService
     private static array $allowedPhpVersions = ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4'];
 
     /**
+     * Generate a unique Caddy route ID for a domain.
+     * Uses domain-based IDs to avoid collisions when subdomains share a username.
+     */
+    public static function caddyRouteId(string $domain): string
+    {
+        return 'hosting-' . preg_replace('/[^a-z0-9]/', '', strtolower($domain));
+    }
+
+    /**
      * Validate and sanitize PHP version string
      */
     private static function safePhpVersion(string $version): string
@@ -547,7 +556,9 @@ CONF;
     {
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'];
-        $routeId = "hosting-{$username}";
+
+        $routeId = self::caddyRouteId($domain);
+
         $socketPath = "/run/php/php{$phpVersion}-fpm-{$username}.sock";
 
         // Refresh CF zones if this domain isn't in any known zone, then rebuild TLS policies
@@ -640,7 +651,7 @@ CONF;
     {
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'];
-        $routeId = "hosting-{$username}";
+        $routeId = self::caddyRouteId($mainDomain);
 
         // Build full host list: main + www.main + each alias + www.alias
         $hosts = [$mainDomain, "www.{$mainDomain}"];
@@ -800,7 +811,7 @@ CONF;
     {
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'];
-        $routeId = "hosting-{$username}";
+        $routeId = self::caddyRouteId($domain);
 
         // Delete existing route
         $ch = curl_init("{$caddyApi}/id/{$routeId}");
@@ -876,7 +887,7 @@ CONF;
         // Restore normal Caddy route
         if ($domain && $documentRoot) {
             $caddyApi = $config['caddy']['api_url'];
-            $routeId = "hosting-{$username}";
+            $routeId = self::caddyRouteId($domain);
             // Delete maintenance route
             $ch = curl_init("{$caddyApi}/id/{$routeId}");
             curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
@@ -890,9 +901,9 @@ CONF;
     /**
      * Replace a domain's Caddy route with a maintenance/suspended page
      */
-    private static function setCaddyMaintenanceRoute(string $username, string $domain, string $caddyApi): void
+    public static function setCaddyMaintenanceRoute(string $username, string $domain, string $caddyApi): void
     {
-        $routeId = "hosting-{$username}";
+        $routeId = self::caddyRouteId($domain);
 
         $html = self::getMaintenanceHtml($domain);
 
@@ -926,7 +937,7 @@ CONF;
         curl_close($ch);
     }
 
-    private static function getMaintenanceHtml(string $domain): string
+    public static function getMaintenanceHtml(string $domain): string
     {
         return '<!DOCTYPE html>
 <html lang="es">
@@ -972,7 +983,7 @@ p{color:#94a3b8;line-height:1.6;margin-bottom:0.5rem}
 
         // Remove Caddy route
         $caddyApi = $config['caddy']['api_url'];
-        $routeId = "hosting-{$username}";
+        $routeId = self::caddyRouteId($domain);
         $ch = curl_init("{$caddyApi}/id/{$routeId}");
         curl_setopt_array($ch, [
             CURLOPT_CUSTOMREQUEST => 'DELETE',
@@ -1057,7 +1068,7 @@ p{color:#94a3b8;line-height:1.6;margin-bottom:0.5rem}
         $caddyApi = $config['caddy']['api_url'];
 
         // Delete old route
-        $oldRouteId = "hosting-{$oldUsername}";
+        $oldRouteId = self::caddyRouteId($domain);
         $ch = curl_init("{$caddyApi}/id/{$oldRouteId}");
         curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
         curl_exec($ch);
@@ -1072,7 +1083,7 @@ p{color:#94a3b8;line-height:1.6;margin-bottom:0.5rem}
         return [
             'success' => true,
             'fpm_socket' => $fpmSocket ?? "unix//run/php/php{$phpVersion}-fpm-{$newUsername}.sock",
-            'caddy_route_id' => $newRouteId ?? "hosting-{$newUsername}",
+            'caddy_route_id' => $newRouteId ?? self::caddyRouteId($domain),
             'warnings' => $errors,
         ];
     }
