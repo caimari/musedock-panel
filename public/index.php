@@ -125,6 +125,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/monitor/api/realtime', 'MonitorController@apiRealtime');
 \MuseDockPanel\Router::get('/monitor/api/network-detail', 'MonitorController@apiNetworkDetail');
 \MuseDockPanel\Router::get('/monitor/api/disk-detail', 'MonitorController@apiDiskDetail');
+\MuseDockPanel\Router::get('/monitor/api/bandwidth', 'MonitorController@apiBandwidth');
 \MuseDockPanel\Router::get('/monitor/api/alerts', 'MonitorController@apiAlerts');
 \MuseDockPanel\Router::post('/monitor/api/alerts/ack', 'MonitorController@apiAckAlert');
 \MuseDockPanel\Router::post('/monitor/api/alerts/clear', 'MonitorController@apiClearAlerts');

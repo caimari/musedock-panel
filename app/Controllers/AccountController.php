@@ -2019,9 +2019,11 @@ class AccountController
     public function apiBandwidth(array $params): void
     {
         header('Content-Type: application/json');
-        $period = $_GET['period'] ?? 'day'; // day, month, year
-        $data = \MuseDockPanel\Services\BandwidthService::getByAccount((int)$params['id'], $period);
-        echo json_encode(['ok' => true, 'data' => $data, 'period' => $period]);
+        $range = $_GET['range'] ?? '24h';
+        $allowed = ['1h', '6h', '24h', '7d', '30d', '1y'];
+        if (!in_array($range, $allowed)) $range = '24h';
+        $data = \MuseDockPanel\Services\BandwidthService::getByAccount((int)$params['id'], $range);
+        echo json_encode(['ok' => true, 'data' => $data, 'range' => $range]);
         exit;
     }
 

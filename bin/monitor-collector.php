@@ -14,6 +14,11 @@
 define('PANEL_ROOT', dirname(__DIR__));
 define('PANEL_VERSION', '1.0.4');
 
+// ─── Early CPU sample (before ANY work, captures real system state) ──
+$cpuStat1 = @file_get_contents('/proc/stat');
+usleep(500000); // 500ms clean window — nothing else running in this process
+$cpuStat2 = @file_get_contents('/proc/stat');
+
 // Autoloader
 spl_autoload_register(function ($class) {
     $prefix = 'MuseDockPanel\\';
@@ -107,24 +112,21 @@ foreach ($interfaces as $iface) {
     $current["{$iface}_tx"] = $tx;
 }
 
-// ─── CPU metric (real usage from /proc/stat, 500ms sample) ───
+// ─── CPU metric (from early sample taken before any work) ───
 $cores = (int) trim(shell_exec('nproc') ?: '1');
 $load = sys_getloadavg();
 $cpuPercent = min(100, round(($load[0] / $cores) * 100, 2)); // fallback
-$stat1 = @file_get_contents('/proc/stat');
-if ($stat1 && preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $stat1, $m1)) {
-    usleep(500000); // 500ms sample for better accuracy in background collector
-    $stat2 = @file_get_contents('/proc/stat');
-    if ($stat2 && preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $stat2, $m2)) {
-        $idle1 = (int)$m1[4] + (int)$m1[5];
-        $idle2 = (int)$m2[4] + (int)$m2[5];
-        $total1 = array_sum(array_slice($m1, 1));
-        $total2 = array_sum(array_slice($m2, 1));
-        $totalDelta = $total2 - $total1;
-        $idleDelta = $idle2 - $idle1;
-        if ($totalDelta > 0) {
-            $cpuPercent = round((1 - $idleDelta / $totalDelta) * 100, 2);
-        }
+if ($cpuStat1 && $cpuStat2
+    && preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $cpuStat1, $m1)
+    && preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $cpuStat2, $m2)) {
+    $idle1 = (int)$m1[4] + (int)$m1[5];
+    $idle2 = (int)$m2[4] + (int)$m2[5];
+    $total1 = array_sum(array_slice($m1, 1));
+    $total2 = array_sum(array_slice($m2, 1));
+    $totalDelta = $total2 - $total1;
+    $idleDelta = $idle2 - $idle1;
+    if ($totalDelta > 0) {
+        $cpuPercent = round((1 - $idleDelta / $totalDelta) * 100, 2);
     }
 }
 $inserts[] = [$hostname, 'cpu_percent', $cpuPercent];
@@ -257,6 +259,46 @@ if (!empty($diskData)) {
 // Save current readings for next delta calculation BEFORE DB operations
 // This ensures we always have fresh counters even if DB fails
 file_put_contents($lastFile, json_encode($current));
+
+// ─── Bandwidth metric (parse new log lines since last run) ──
+try {
+    $bwLogFile = '/var/log/caddy/hosting-access.log';
+    $bwOffsetFile = '/tmp/musedock-bw-monitor-offset';
+    $bwOffset = file_exists($bwOffsetFile) ? (int)file_get_contents($bwOffsetFile) : 0;
+
+    if (file_exists($bwLogFile) && is_readable($bwLogFile)) {
+        $bwFileSize = filesize($bwLogFile);
+        if ($bwFileSize < $bwOffset) $bwOffset = 0; // rotated
+
+        if ($bwFileSize > $bwOffset) {
+            $bwFh = fopen($bwLogFile, 'r');
+            if ($bwFh) {
+                fseek($bwFh, $bwOffset);
+                $bwTotalBytes = 0;
+                $bwTotalReqs = 0;
+                while (($bwLine = fgets($bwFh)) !== false) {
+                    $bwEntry = @json_decode(trim($bwLine), true);
+                    if ($bwEntry && isset($bwEntry['size'])) {
+                        $bwTotalBytes += (int)$bwEntry['size'];
+                        $bwTotalReqs++;
+                    }
+                }
+                $bwNewOffset = ftell($bwFh);
+                fclose($bwFh);
+                file_put_contents($bwOffsetFile, $bwNewOffset);
+
+                // Convert to rate (bytes/sec) based on elapsed time
+                if ($elapsed > 0) {
+                    $inserts[] = [$hostname, 'bw_bytes_sec', round($bwTotalBytes / $elapsed)];
+                    $inserts[] = [$hostname, 'bw_requests_sec', round($bwTotalReqs / $elapsed, 2)];
+                    logMsg("  BW: " . formatBytes($bwTotalBytes / $elapsed) . "/s ({$bwTotalReqs} reqs in {$elapsed}s)");
+                }
+            }
+        }
+    }
+} catch (\Throwable $e) {
+    logMsg("  BW error: " . $e->getMessage());
+}
 
 // ─── Batch INSERT ────────────────────────────────────────────
 if (!empty($inserts)) {
@@ -678,34 +720,44 @@ if ($alertDiskThreshold > 0 && !empty($diskData)) {
     }
 }
 
-// ─── Update disk usage for all hosting accounts (cached, not real-time) ────
-try {
-    $accounts = Database::fetchAll("SELECT id, home_dir FROM hosting_accounts WHERE status = 'active'");
-    $homeDirs = array_filter(array_column($accounts, 'home_dir'), fn($d) => is_dir($d));
-    if (!empty($homeDirs)) {
-        $cmd = '/opt/musedock-panel/bin/du-throttled -sm ' . implode(' ', array_map('escapeshellarg', $homeDirs)) . ' 2>/dev/null';
-        $output = shell_exec($cmd) ?: '';
-        $diskMap = [];
-        foreach (explode("\n", trim($output)) as $line) {
-            if (preg_match('/^(\d+)\s+(.+)$/', $line, $m)) {
-                $diskMap[rtrim($m[2], '/')] = (int)$m[1];
+// ─── Update disk usage for all hosting accounts (every 5 min, not every 30s) ─
+// du is expensive even with throttling — no need to run it every collector cycle
+$duLockFile = '/tmp/musedock-du-lastrun';
+$duLastRun = file_exists($duLockFile) ? (int)file_get_contents($duLockFile) : 0;
+$duInterval = 300; // 5 minutes
+
+if ((time() - $duLastRun) >= $duInterval) {
+    try {
+        $accounts = Database::fetchAll("SELECT id, home_dir FROM hosting_accounts WHERE status = 'active'");
+        $homeDirs = array_filter(array_column($accounts, 'home_dir'), fn($d) => is_dir($d));
+        if (!empty($homeDirs)) {
+            $cmd = '/opt/musedock-panel/bin/du-throttled -sm ' . implode(' ', array_map('escapeshellarg', $homeDirs)) . ' 2>/dev/null';
+            $output = shell_exec($cmd) ?: '';
+            $diskMap = [];
+            foreach (explode("\n", trim($output)) as $line) {
+                if (preg_match('/^(\d+)\s+(.+)$/', $line, $m)) {
+                    $diskMap[rtrim($m[2], '/')] = (int)$m[1];
+                }
+            }
+            $updated = 0;
+            foreach ($accounts as $acc) {
+                $key = rtrim($acc['home_dir'], '/');
+                $mb = $diskMap[$key] ?? null;
+                if ($mb !== null) {
+                    Database::query("UPDATE hosting_accounts SET disk_used_mb = :mb WHERE id = :id", ['mb' => $mb, 'id' => $acc['id']]);
+                    $updated++;
+                }
+            }
+            if ($updated > 0) {
+                logMsg("Disk usage updated for {$updated} accounts.");
             }
         }
-        $updated = 0;
-        foreach ($accounts as $acc) {
-            $key = rtrim($acc['home_dir'], '/');
-            $mb = $diskMap[$key] ?? null;
-            if ($mb !== null) {
-                Database::query("UPDATE hosting_accounts SET disk_used_mb = :mb WHERE id = :id", ['mb' => $mb, 'id' => $acc['id']]);
-                $updated++;
-            }
-        }
-        if ($updated > 0) {
-            logMsg("Disk usage updated for {$updated} accounts.");
-        }
+        file_put_contents($duLockFile, time());
+    } catch (\Throwable $e) {
+        logMsg("ERROR updating disk usage: " . $e->getMessage());
     }
-} catch (\Throwable $e) {
-    logMsg("ERROR updating disk usage: " . $e->getMessage());
+} else {
+    logMsg("Disk usage: skipped (next in " . ($duInterval - (time() - $duLastRun)) . "s)");
 }
 
 cleanup:

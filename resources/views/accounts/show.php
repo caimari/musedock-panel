@@ -191,10 +191,13 @@ use MuseDockPanel\Services\CloudflareService;
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-speedometer2 me-2"></i>Ancho de Banda</span>
-                <div class="d-flex gap-1">
-                    <button class="btn btn-outline-light btn-sm py-0 px-2 bw-range active" data-period="day">30d</button>
-                    <button class="btn btn-outline-light btn-sm py-0 px-2 bw-range" data-period="month">12m</button>
-                    <button class="btn btn-outline-light btn-sm py-0 px-2 bw-range" data-period="year">Anual</button>
+                <div class="btn-group btn-group-sm" id="bwRangeButtons">
+                    <button class="btn btn-outline-light bw-range" data-range="1h">1h</button>
+                    <button class="btn btn-outline-light bw-range" data-range="6h">6h</button>
+                    <button class="btn btn-outline-light bw-range active" data-range="24h">24h</button>
+                    <button class="btn btn-outline-light bw-range" data-range="7d">7d</button>
+                    <button class="btn btn-outline-light bw-range" data-range="30d">30d</button>
+                    <button class="btn btn-outline-light bw-range" data-range="1y">1y</button>
                 </div>
             </div>
             <div class="card-body">
@@ -213,7 +216,7 @@ use MuseDockPanel\Services\CloudflareService;
                         <small class="text-muted d-block">Requests</small>
                     </div>
                 </div>
-                <div style="height:180px;position:relative;">
+                <div style="height:200px;position:relative;">
                     <canvas id="bwChart"></canvas>
                 </div>
             </div>
@@ -232,32 +235,41 @@ use MuseDockPanel\Services\CloudflareService;
                 return b + ' B';
             }
 
-            async function loadBandwidth(period) {
-                const resp = await fetch(`/accounts/${accountId}/bandwidth?period=${period}`);
+            function fmtLabel(epoch, range) {
+                if (!epoch) return '';
+                const d = new Date(Number(epoch) * 1000);
+                if (['1h','6h','24h'].includes(range)) return d.toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit'});
+                if (range === '7d') return d.toLocaleDateString('es-ES', {day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'});
+                if (range === '30d') return d.toLocaleDateString('es-ES', {day:'2-digit', month:'short'});
+                return d.toLocaleDateString('es-ES', {month:'short', year:'numeric'});
+            }
+
+            async function loadBandwidth(range) {
+                const resp = await fetch(`/accounts/${accountId}/bandwidth?range=${range}`);
                 const json = await resp.json();
                 if (!json.ok) return;
 
-                const labels = json.data.map(d => {
-                    const dt = d.period;
-                    if (period === 'year') return dt.substring(0, 4);
-                    if (period === 'month') return dt.substring(0, 7);
-                    return dt.substring(5); // MM-DD
-                });
+                const labels = json.data.map(d => fmtLabel(d.period, range));
                 const bytes = json.data.map(d => parseInt(d.bytes_out));
                 const reqs = json.data.map(d => parseInt(d.requests));
 
+                const useBar = ['30d', '1y'].includes(range);
+
                 if (bwChart) bwChart.destroy();
                 bwChart = new Chart(ctx, {
-                    type: 'bar',
+                    type: useBar ? 'bar' : 'line',
                     data: {
                         labels: labels,
                         datasets: [
                             {
-                                label: 'Trafico (bytes)',
+                                label: 'Trafico',
                                 data: bytes,
-                                backgroundColor: 'rgba(56,189,248,0.4)',
+                                backgroundColor: useBar ? 'rgba(56,189,248,0.4)' : 'rgba(56,189,248,0.08)',
                                 borderColor: '#38bdf8',
-                                borderWidth: 1,
+                                borderWidth: useBar ? 1 : 1.5,
+                                fill: !useBar,
+                                tension: 0.3,
+                                pointRadius: 0,
                                 yAxisID: 'y',
                             },
                             {
@@ -267,7 +279,9 @@ use MuseDockPanel\Services\CloudflareService;
                                 borderColor: '#a855f7',
                                 backgroundColor: 'rgba(168,85,247,0.1)',
                                 tension: 0.3,
-                                pointRadius: 2,
+                                pointRadius: 0,
+                                borderWidth: 1.5,
+                                fill: true,
                                 yAxisID: 'y1',
                             }
                         ],
@@ -276,9 +290,12 @@ use MuseDockPanel\Services\CloudflareService;
                         responsive: true,
                         maintainAspectRatio: false,
                         interaction: { mode: 'index', intersect: false },
-                        plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
+                        plugins: {
+                            legend: { labels: { color: '#94a3b8', font: { size: 11 } } },
+                            tooltip: { callbacks: { label: (ctx) => ctx.dataset.label + ': ' + (ctx.datasetIndex === 0 ? fmtBytes(ctx.raw) : ctx.raw) } }
+                        },
                         scales: {
-                            x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(51,65,85,0.3)' } },
+                            x: { ticks: { color: '#64748b', font: { size: 9 }, maxTicksLimit: 12 }, grid: { color: 'rgba(51,65,85,0.3)' } },
                             y: {
                                 position: 'left',
                                 ticks: { color: '#38bdf8', font: { size: 10 }, callback: v => fmtBytes(v) },
@@ -294,13 +311,13 @@ use MuseDockPanel\Services\CloudflareService;
                 });
             }
 
-            loadBandwidth('day');
+            loadBandwidth('24h');
 
             document.querySelectorAll('.bw-range').forEach(btn => {
                 btn.addEventListener('click', function() {
                     document.querySelectorAll('.bw-range').forEach(b => b.classList.remove('active'));
                     this.classList.add('active');
-                    loadBandwidth(this.dataset.period);
+                    loadBandwidth(this.dataset.range);
                 });
             });
         })();

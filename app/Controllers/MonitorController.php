@@ -320,6 +320,60 @@ class MonitorController
     }
 
     /**
+     * GET /monitor/api/bandwidth — Bandwidth chart data (hourly) with optional domain filter.
+     * Params: range (1h,6h,24h,7d,30d,1y), account_id (0 = all)
+     */
+    public function apiBandwidth(): void
+    {
+        header('Content-Type: application/json');
+        $range = $_GET['range'] ?? '1h';
+        $accountId = (int)($_GET['account_id'] ?? 0);
+        $allowed = ['1h', '6h', '24h', '7d', '30d', '1y'];
+        if (!in_array($range, $allowed)) $range = '1h';
+
+        $intervals = [
+            '1h'  => '1 hour',
+            '6h'  => '6 hours',
+            '24h' => '24 hours',
+            '7d'  => '7 days',
+            '30d' => '30 days',
+            '1y'  => '365 days',
+        ];
+        $group = match($range) {
+            '30d' => 'day',
+            '1y'  => 'month',
+            default => 'hour',
+        };
+
+        $interval = $intervals[$range];
+        // Whitelist group values (can't parameterize DATE_TRUNC argument in PostgreSQL)
+        $safeGroup = in_array($group, ['hour', 'day', 'month'], true) ? $group : 'hour';
+
+        if ($accountId > 0) {
+            $rows = \MuseDockPanel\Database::fetchAll("
+                SELECT EXTRACT(EPOCH FROM DATE_TRUNC('{$safeGroup}', ts))::bigint as ts,
+                       SUM(bytes_out) as bytes_out,
+                       SUM(requests) as requests
+                FROM hosting_bandwidth
+                WHERE account_id = :aid AND ts >= (NOW() - INTERVAL '{$interval}')
+                GROUP BY 1 ORDER BY 1
+            ", ['aid' => $accountId]);
+        } else {
+            $rows = \MuseDockPanel\Database::fetchAll("
+                SELECT EXTRACT(EPOCH FROM DATE_TRUNC('{$safeGroup}', ts))::bigint as ts,
+                       SUM(bytes_out) as bytes_out,
+                       SUM(requests) as requests
+                FROM hosting_bandwidth
+                WHERE ts >= (NOW() - INTERVAL '{$interval}')
+                GROUP BY 1 ORDER BY 1
+            ");
+        }
+
+        echo json_encode(['ok' => true, 'data' => $rows, 'range' => $range]);
+        exit;
+    }
+
+    /**
      * GET /monitor/api/alerts — Recent alerts JSON
      */
     public function apiAlerts(): void

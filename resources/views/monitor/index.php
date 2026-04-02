@@ -192,6 +192,37 @@
     </div>
 </div>
 
+<!-- Bandwidth Charts -->
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-speedometer2 me-2"></i>Web Bandwidth</span>
+                <select id="bwDomainFilter" class="form-select form-select-sm" style="width:auto;max-width:200px;background:#1e293b;border-color:#334155;color:#e2e8f0;">
+                    <option value="0">Todos los dominios</option>
+                    <?php
+                    $bwAccounts = \MuseDockPanel\Database::fetchAll("SELECT id, domain FROM hosting_accounts ORDER BY domain");
+                    foreach ($bwAccounts as $ba):
+                    ?>
+                    <option value="<?= (int)$ba['id'] ?>"><?= View::e($ba['domain']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="card-body" style="height:200px;position:relative">
+                <canvas id="bwBytesChart"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header"><i class="bi bi-bar-chart me-2"></i>Web Requests</div>
+            <div class="card-body" style="height:200px;position:relative">
+                <canvas id="bwReqsChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- GPU Charts (only if GPUs detected) -->
 <?php if (!empty($gpus)): ?>
 <div class="row g-3 mb-4">
@@ -382,7 +413,7 @@
 
     let currentIface = '<?= View::e($interfaces[0] ?? 'eth0') ?>';
     let currentRange = '1h';
-    let netChart, cpuChart, ramChart;
+    let netChart, cpuChart, ramChart, bwBytesChart, bwReqsChart;
     let gpuUtilChart, gpuTempChart, gpuMemChart, gpuPowerChart;
     let diskUsageChart, diskIoChart;
     let refreshTimer = null;
@@ -730,6 +761,61 @@
             });
         }
 
+        // Bandwidth charts
+        if (document.getElementById('bwBytesChart')) {
+            const bwBytesOpts = chartDefaults();
+            bwBytesOpts.scales.y.ticks.callback = (v) => {
+                if (v >= 1073741824) return (v/1073741824).toFixed(1) + ' GB';
+                if (v >= 1048576) return (v/1048576).toFixed(1) + ' MB';
+                if (v >= 1024) return (v/1024).toFixed(0) + ' KB';
+                return v + ' B';
+            };
+            // Override X scale for bandwidth: category instead of linear
+            bwBytesOpts.scales.x = {
+                type: 'category',
+                grid: { color: gridColor },
+                ticks: { color: tickColor, maxTicksLimit: 12, font: { size: 10 } },
+            };
+            bwBytesChart = new Chart(document.getElementById('bwBytesChart'), {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Total',
+                        data: [],
+                        backgroundColor: 'rgba(56,189,248,0.5)',
+                        borderColor: '#38bdf8',
+                        borderWidth: 1,
+                        barPercentage: 0.8,
+                    }]
+                },
+                options: bwBytesOpts,
+            });
+
+            const bwReqsOpts = chartDefaults();
+            bwReqsOpts.scales.y.ticks.callback = (v) => Math.round(v);
+            bwReqsOpts.scales.x = {
+                type: 'category',
+                grid: { color: gridColor },
+                ticks: { color: tickColor, maxTicksLimit: 12, font: { size: 10 } },
+            };
+            bwReqsChart = new Chart(document.getElementById('bwReqsChart'), {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Total',
+                        data: [],
+                        backgroundColor: 'rgba(168,85,247,0.5)',
+                        borderColor: '#a855f7',
+                        borderWidth: 1,
+                        barPercentage: 0.8,
+                    }]
+                },
+                options: bwReqsOpts,
+            });
+        }
+
         // Disk charts
         if (DISKS.length > 0 && document.getElementById('diskUsageChart')) {
             const diskPctOpts = chartDefaults();
@@ -940,6 +1026,43 @@
             ramChart.update();
         } catch (e) {
             console.error('Error loading system charts:', e);
+        }
+    }
+
+    // ─── Load Bandwidth chart data ──────────────────────────
+    async function loadBwCharts() {
+        if (!bwBytesChart) return;
+        try {
+            const domainFilter = document.getElementById('bwDomainFilter')?.value || '0';
+            const resp = await fetch(`/monitor/api/bandwidth?range=${currentRange}&account_id=${domainFilter}`);
+            const json = await resp.json();
+            if (!json.ok) return;
+
+            const data = json.data || [];
+
+            // Use labels array for proper bar alignment
+            const labels = data.map(d => {
+                const ms = Number(d.ts) * 1000;
+                if (['1h','6h','24h'].includes(currentRange)) return fmtTzShort(ms);
+                if (currentRange === '7d') return fmtTzDay(ms);
+                if (currentRange === '30d') return fmtTzDay(ms);
+                return fmtTzMonth(ms);
+            });
+
+            bwBytesChart.data.labels = labels;
+            bwBytesChart.data.datasets[0].data = data.map(d => +d.bytes_out);
+            bwReqsChart.data.labels = labels;
+            bwReqsChart.data.datasets[0].data = data.map(d => +d.requests);
+
+            const sel = document.getElementById('bwDomainFilter');
+            const domainName = sel.options[sel.selectedIndex]?.text || 'Todos';
+            bwBytesChart.data.datasets[0].label = domainName === 'Todos los dominios' ? 'Total' : domainName;
+            bwReqsChart.data.datasets[0].label = domainName === 'Todos los dominios' ? 'Total' : domainName;
+
+            bwBytesChart.update();
+            bwReqsChart.update();
+        } catch (e) {
+            console.error('Error loading BW charts:', e);
         }
     }
 
@@ -1263,6 +1386,10 @@
         loadNetChart();
     });
 
+    document.getElementById('bwDomainFilter')?.addEventListener('change', function() {
+        loadBwCharts();
+    });
+
     const diskSelectEl = document.getElementById('diskSelect');
     if (diskSelectEl) {
         diskSelectEl.addEventListener('change', function() {
@@ -1284,6 +1411,7 @@
         loadSystemCharts();
         loadGpuCharts();
         loadDiskCharts();
+        loadBwCharts();
     });
 
     // ─── Auto-refresh ────────────────────────────────────────
@@ -1295,6 +1423,7 @@
             loadSystemCharts();
             loadGpuCharts();
             loadDiskCharts();
+            loadBwCharts();
             updateCards();
             loadAlerts();
         }, interval);
@@ -1306,6 +1435,7 @@
     loadSystemCharts();
     loadGpuCharts();
     loadDiskCharts();
+    loadBwCharts();
     updateCards();
     loadAlerts();
     startAutoRefresh();

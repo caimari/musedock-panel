@@ -80,23 +80,24 @@ class BandwidthService
             $accountId = $domainMap[$lookupHost] ?? $domainMap[$host] ?? null;
             if (!$accountId) continue;
 
-            $date = date('Y-m-d', (int)$ts);
+            // Hourly bucket: "2026-04-02 14:00:00"
+            $hour = date('Y-m-d H:00:00', (int)$ts);
 
             // Account-level aggregation (includes subdomain traffic)
-            if (!isset($aggregated[$accountId][$date])) {
-                $aggregated[$accountId][$date] = ['bytes_out' => 0, 'requests' => 0];
+            if (!isset($aggregated[$accountId][$hour])) {
+                $aggregated[$accountId][$hour] = ['bytes_out' => 0, 'requests' => 0];
             }
-            $aggregated[$accountId][$date]['bytes_out'] += $size;
-            $aggregated[$accountId][$date]['requests'] += 1;
+            $aggregated[$accountId][$hour]['bytes_out'] += $size;
+            $aggregated[$accountId][$hour]['requests'] += 1;
 
             // Subdomain-level aggregation
             $subId = $subdomainIdMap[$lookupHost] ?? $subdomainIdMap[$host] ?? null;
             if ($subId) {
-                if (!isset($subAggregated[$subId][$date])) {
-                    $subAggregated[$subId][$date] = ['bytes_out' => 0, 'requests' => 0];
+                if (!isset($subAggregated[$subId][$hour])) {
+                    $subAggregated[$subId][$hour] = ['bytes_out' => 0, 'requests' => 0];
                 }
-                $subAggregated[$subId][$date]['bytes_out'] += $size;
-                $subAggregated[$subId][$date]['requests'] += 1;
+                $subAggregated[$subId][$hour]['bytes_out'] += $size;
+                $subAggregated[$subId][$hour]['requests'] += 1;
             }
 
             $processed++;
@@ -109,9 +110,9 @@ class BandwidthService
         foreach ($aggregated as $accountId => $dates) {
             foreach ($dates as $date => $data) {
                 Database::query("
-                    INSERT INTO hosting_bandwidth (account_id, date, bytes_out, requests, updated_at)
+                    INSERT INTO hosting_bandwidth (account_id, ts, bytes_out, requests, updated_at)
                     VALUES (:aid, :d, :b, :r, NOW())
-                    ON CONFLICT (account_id, date)
+                    ON CONFLICT (account_id, ts)
                     DO UPDATE SET bytes_out = hosting_bandwidth.bytes_out + :b2,
                                   requests = hosting_bandwidth.requests + :r2,
                                   updated_at = NOW()
@@ -130,9 +131,9 @@ class BandwidthService
         foreach ($subAggregated as $subId => $dates) {
             foreach ($dates as $date => $data) {
                 Database::query("
-                    INSERT INTO hosting_subdomain_bandwidth (subdomain_id, date, bytes_out, requests, updated_at)
+                    INSERT INTO hosting_subdomain_bandwidth (subdomain_id, ts, bytes_out, requests, updated_at)
                     VALUES (:sid, :d, :b, :r, NOW())
-                    ON CONFLICT (subdomain_id, date)
+                    ON CONFLICT (subdomain_id, ts)
                     DO UPDATE SET bytes_out = hosting_subdomain_bandwidth.bytes_out + :b2,
                                   requests = hosting_subdomain_bandwidth.requests + :r2,
                                   updated_at = NOW()
@@ -211,117 +212,82 @@ class BandwidthService
                    COALESCE(SUM(sb.requests), 0) as requests
             FROM hosting_subdomain_bandwidth sb
             JOIN hosting_subdomains s ON s.id = sb.subdomain_id
-            WHERE s.account_id = :aid
-              AND sb.date >= DATE_TRUNC('month', CURRENT_DATE)
+            WHERE s.account_id = :aid AND sb.ts >= DATE_TRUNC('month', CURRENT_DATE)
             GROUP BY sb.subdomain_id
         ", ['aid' => $accountId]);
 
         $map = [];
-        foreach ($rows as $row) {
-            $map[(int)$row['subdomain_id']] = $row;
-        }
+        foreach ($rows as $row) { $map[(int)$row['subdomain_id']] = $row; }
         return $map;
     }
 
-    /**
-     * Get current month totals for ALL subdomains (for listing page).
-     * Returns array indexed by subdomain_id.
-     */
     public static function getAllSubdomainMonthlyTotals(): array
     {
         $rows = Database::fetchAll("
-            SELECT subdomain_id,
-                   COALESCE(SUM(bytes_out), 0) as bytes_out,
-                   COALESCE(SUM(requests), 0) as requests
-            FROM hosting_subdomain_bandwidth
-            WHERE date >= DATE_TRUNC('month', CURRENT_DATE)
-            GROUP BY subdomain_id
+            SELECT subdomain_id, COALESCE(SUM(bytes_out), 0) as bytes_out, COALESCE(SUM(requests), 0) as requests
+            FROM hosting_subdomain_bandwidth WHERE ts >= DATE_TRUNC('month', CURRENT_DATE) GROUP BY subdomain_id
         ");
-
         $map = [];
-        foreach ($rows as $row) {
-            $map[(int)$row['subdomain_id']] = $row;
-        }
+        foreach ($rows as $row) { $map[(int)$row['subdomain_id']] = $row; }
         return $map;
     }
 
     /**
-     * Get bandwidth for an account, grouped by day.
+     * Get bandwidth for an account with range selector (like monitor charts).
      *
-     * @param int    $accountId
-     * @param string $period  'day' (last 30 days), 'month' (last 12 months), 'year' (all years)
-     * @return array
+     * @param string $range  '1h', '6h', '24h', '7d', '30d', '1y'
      */
-    public static function getByAccount(int $accountId, string $period = 'day'): array
+    public static function getByAccount(int $accountId, string $range = '24h'): array
     {
-        if ($period === 'month') {
+        $intervals = [
+            '1h'  => ['interval' => '1 hour',    'group' => null],         // raw hourly buckets
+            '6h'  => ['interval' => '6 hours',   'group' => null],
+            '24h' => ['interval' => '24 hours',  'group' => null],
+            '7d'  => ['interval' => '7 days',    'group' => 'hour'],       // hourly
+            '30d' => ['interval' => '30 days',   'group' => 'day'],        // daily
+            '1y'  => ['interval' => '365 days',  'group' => 'month'],      // monthly
+        ];
+
+        $cfg = $intervals[$range] ?? $intervals['24h'];
+
+        if ($cfg['group']) {
+            $safeGroup = in_array($cfg['group'], ['hour', 'day', 'month'], true) ? $cfg['group'] : 'hour';
             return Database::fetchAll("
-                SELECT DATE_TRUNC('month', date)::date as period,
+                SELECT EXTRACT(EPOCH FROM DATE_TRUNC('{$safeGroup}', ts))::bigint as period,
                        SUM(bytes_out) as bytes_out,
                        SUM(requests) as requests
                 FROM hosting_bandwidth
-                WHERE account_id = :aid AND date >= (CURRENT_DATE - INTERVAL '12 months')
-                GROUP BY period ORDER BY period
+                WHERE account_id = :aid AND ts >= (NOW() - INTERVAL '{$cfg['interval']}')
+                GROUP BY 1 ORDER BY 1
             ", ['aid' => $accountId]);
         }
 
-        if ($period === 'year') {
-            return Database::fetchAll("
-                SELECT DATE_TRUNC('year', date)::date as period,
-                       SUM(bytes_out) as bytes_out,
-                       SUM(requests) as requests
-                FROM hosting_bandwidth
-                WHERE account_id = :aid
-                GROUP BY period ORDER BY period
-            ", ['aid' => $accountId]);
-        }
-
-        // Default: daily (last 30 days)
+        // Raw hourly data
         return Database::fetchAll("
-            SELECT date as period,
-                   bytes_out,
-                   requests
+            SELECT EXTRACT(EPOCH FROM ts)::bigint as period, bytes_out, requests
             FROM hosting_bandwidth
-            WHERE account_id = :aid AND date >= (CURRENT_DATE - INTERVAL '30 days')
-            ORDER BY date
+            WHERE account_id = :aid AND ts >= (NOW() - INTERVAL '{$cfg['interval']}')
+            ORDER BY ts
         ", ['aid' => $accountId]);
     }
 
-    /**
-     * Get current month totals for an account.
-     */
     public static function getMonthlyTotal(int $accountId): array
     {
         $row = Database::fetchOne("
-            SELECT COALESCE(SUM(bytes_out), 0) as bytes_out,
-                   COALESCE(SUM(requests), 0) as requests
-            FROM hosting_bandwidth
-            WHERE account_id = :aid
-              AND date >= DATE_TRUNC('month', CURRENT_DATE)
+            SELECT COALESCE(SUM(bytes_out), 0) as bytes_out, COALESCE(SUM(requests), 0) as requests
+            FROM hosting_bandwidth WHERE account_id = :aid AND ts >= DATE_TRUNC('month', CURRENT_DATE)
         ", ['aid' => $accountId]);
-
         return $row ?: ['bytes_out' => 0, 'requests' => 0];
     }
 
-    /**
-     * Get current month totals for ALL accounts (for listing page).
-     * Returns array indexed by account_id.
-     */
     public static function getAllMonthlyTotals(): array
     {
         $rows = Database::fetchAll("
-            SELECT account_id,
-                   COALESCE(SUM(bytes_out), 0) as bytes_out,
-                   COALESCE(SUM(requests), 0) as requests
-            FROM hosting_bandwidth
-            WHERE date >= DATE_TRUNC('month', CURRENT_DATE)
-            GROUP BY account_id
+            SELECT account_id, COALESCE(SUM(bytes_out), 0) as bytes_out, COALESCE(SUM(requests), 0) as requests
+            FROM hosting_bandwidth WHERE ts >= DATE_TRUNC('month', CURRENT_DATE) GROUP BY account_id
         ");
-
         $map = [];
-        foreach ($rows as $row) {
-            $map[(int)$row['account_id']] = $row;
-        }
+        foreach ($rows as $row) { $map[(int)$row['account_id']] = $row; }
         return $map;
     }
 }
