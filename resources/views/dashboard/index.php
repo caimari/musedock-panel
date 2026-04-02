@@ -192,40 +192,38 @@ systemctl restart caddy</pre>
         <div class="stat-card w-100 d-flex flex-column" role="button" onclick="openProcessModal('cpu')" title="Ver procesos por CPU" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
-                    <div class="stat-value"><?= $stats['cpu']['percent'] ?>%</div>
-                    <div class="stat-label">CPU (<?= $stats['cpu']['cores'] ?> cores)</div>
+                    <div class="stat-value" id="dash-cpu-val"><?= $stats['cpu']['percent'] ?>%</div>
+                    <div class="stat-label" id="dash-cpu-label">CPU (<?= $stats['cpu']['cores'] ?> cores)</div>
                 </div>
                 <i class="bi bi-cpu stat-icon"></i>
             </div>
-            <div class="progress mt-2"><div class="progress-bar bg-info" style="width: <?= $stats['cpu']['percent'] ?>%"></div></div>
-            <small class="text-muted">Load: <?= $stats['cpu']['load_1'] ?> / <?= $stats['cpu']['load_5'] ?> / <?= $stats['cpu']['load_15'] ?></small>
-            <div class="text-end mt-auto"><small class="text-muted"><i class="bi bi-eye"></i> Click para ver procesos</small></div>
+            <div class="progress mt-2"><div class="progress-bar bg-info" id="dash-cpu-bar" style="width: <?= $stats['cpu']['percent'] ?>%"></div></div>
+            <small class="text-muted" id="dash-cpu-load">Load: <?= $stats['cpu']['load_1'] ?> / <?= $stats['cpu']['load_5'] ?> / <?= $stats['cpu']['load_15'] ?></small>
         </div>
     </div>
     <div class="col-md-3 d-flex">
         <div class="stat-card w-100 d-flex flex-column" role="button" onclick="openProcessModal('ram')" title="Ver procesos por RAM" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
-                    <div class="stat-value"><?= $stats['memory']['percent'] ?>%</div>
-                    <div class="stat-label">RAM (<?= $stats['memory']['used_gb'] ?> / <?= $stats['memory']['total_gb'] ?> GB)</div>
+                    <div class="stat-value" id="dash-ram-val"><?= $stats['memory']['percent'] ?>%</div>
+                    <div class="stat-label" id="dash-ram-label">RAM (<?= $stats['memory']['used_gb'] ?> / <?= $stats['memory']['total_gb'] ?> GB)</div>
                 </div>
                 <i class="bi bi-memory stat-icon"></i>
             </div>
-            <div class="progress mt-2"><div class="progress-bar bg-warning" style="width: <?= $stats['memory']['percent'] ?>%"></div></div>
-            <div class="text-end mt-auto"><small class="text-muted"><i class="bi bi-eye"></i> Click para ver procesos</small></div>
+            <div class="progress mt-2"><div class="progress-bar bg-warning" id="dash-ram-bar" style="width: <?= $stats['memory']['percent'] ?>%"></div></div>
         </div>
     </div>
     <div class="col-md-3 d-flex">
-        <div class="stat-card w-100 d-flex flex-column">
+        <div class="stat-card w-100 d-flex flex-column" role="button" onclick="openDashDiskModal()" title="Ver detalle del disco" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
-                    <div class="stat-value"><?= $stats['disk']['percent'] ?>%</div>
-                    <div class="stat-label">Disk (<?= $stats['disk']['used_gb'] ?> / <?= $stats['disk']['total_gb'] ?> GB)</div>
+                    <div class="stat-value" id="dash-disk-val"><?= $stats['disk']['percent'] ?>%</div>
+                    <div class="stat-label" id="dash-disk-label">Disk (<?= $stats['disk']['used_gb'] ?> / <?= $stats['disk']['total_gb'] ?> GB)</div>
                 </div>
                 <i class="bi bi-hdd stat-icon"></i>
             </div>
-            <div class="progress mt-2"><div class="progress-bar bg-<?= $stats['disk']['percent'] > 85 ? 'danger' : 'success' ?>" style="width: <?= $stats['disk']['percent'] ?>%"></div></div>
-            <small class="text-muted"><?= $stats['disk']['free_gb'] ?> GB free</small>
+            <div class="progress mt-2"><div class="progress-bar bg-<?= $stats['disk']['percent'] > 85 ? 'danger' : 'success' ?>" id="dash-disk-bar" style="width: <?= $stats['disk']['percent'] ?>%"></div></div>
+            <small class="text-muted" id="dash-disk-free"><?= $stats['disk']['free_gb'] ?> GB free</small>
         </div>
     </div>
     <div class="col-md-3 d-flex">
@@ -648,7 +646,7 @@ systemctl restart caddy</pre>
 
             // Update summary
             document.getElementById('processSummary').innerHTML =
-                `CPU: <b>${s.cpu_percent}%</b> (${s.cpu_load} load, ${s.cores} cores) | RAM: <b>${s.mem_percent}%</b> (${s.mem_used_gb}/${s.mem_total_gb} GB)`;
+                `CPU: <b>${s.cpu_percent}%</b> de ${s.cores} cores | Load: ${s.cpu_load} | RAM: <b>${s.mem_percent}%</b> (${s.mem_used_gb}/${s.mem_total_gb} GB)`;
 
             // Update timestamp
             const now = new Date();
@@ -973,5 +971,91 @@ window.reactivateNode = async function(nodeId, nodeName) {
     } catch (e) {
         S.fire({ title: 'Error', text: e.message, icon: 'error' });
     }
+};
+
+// ─── Real-time card updates (every 3s) ─────────────────────
+(function() {
+    async function updateDashCards() {
+        try {
+            const resp = await fetch('/monitor/api/realtime');
+            const rt = await resp.json();
+            if (!rt.ok) return;
+
+            // CPU
+            document.getElementById('dash-cpu-val').textContent = rt.cpu_percent + '%';
+            document.getElementById('dash-cpu-bar').style.width = Math.min(100, rt.cpu_percent) + '%';
+            document.getElementById('dash-cpu-load').textContent = 'Load: ' + rt.cpu_load;
+
+            // RAM
+            document.getElementById('dash-ram-val').textContent = rt.mem_percent + '%';
+            document.getElementById('dash-ram-bar').style.width = Math.min(100, rt.mem_percent) + '%';
+            document.getElementById('dash-ram-label').textContent = 'RAM (' + rt.mem_used_gb + ' / ' + rt.mem_total_gb + ' GB)';
+        } catch (e) {}
+    }
+    setInterval(updateDashCards, 3000);
+})();
+
+// ─── Disk Detail Modal (dashboard) ─────────────────────────
+window.openDashDiskModal = async function() {
+    const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+    S.fire({ title: 'Disco', html: '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Analizando disco...</div>', showConfirmButton: false, showCloseButton: true, width: 600 });
+
+    try {
+        const resp = await fetch('/monitor/api/disk-detail?mount=/');
+        const d = await resp.json();
+        if (!d.ok) { S.fire({ icon: 'error', title: 'Error', text: d.error }); return; }
+
+        const fmtB = (b) => {
+            if (b >= 1099511627776) return (b/1099511627776).toFixed(1) + ' TB';
+            if (b >= 1073741824) return (b/1073741824).toFixed(1) + ' GB';
+            if (b >= 1048576) return (b/1048576).toFixed(1) + ' MB';
+            return (b/1024).toFixed(0) + ' KB';
+        };
+
+        const pctColor = d.percent >= 90 ? '#ef4444' : (d.percent >= 75 ? '#fbbf24' : '#22c55e');
+
+        let topHtml = '';
+        if (d.top_dirs && d.top_dirs.length > 0) {
+            const maxMb = d.top_dirs[0].mb || 1;
+            topHtml = d.top_dirs.map(t => {
+                const w = Math.max(2, Math.round(t.mb / maxMb * 100));
+                const label = t.mb >= 1024 ? (t.mb/1024).toFixed(1)+' GB' : t.mb+' MB';
+                const shortPath = t.path.replace(/^\//, '') || '/';
+                return `<div class="mb-1 d-flex align-items-center gap-2">
+                    <code class="small" style="min-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${t.path}">${shortPath}</code>
+                    <div class="flex-grow-1"><div style="height:6px;border-radius:3px;background:#1e293b;"><div style="width:${w}%;height:100%;border-radius:3px;background:#38bdf8;"></div></div></div>
+                    <small class="text-muted" style="min-width:55px;text-align:right;">${label}</small>
+                </div>`;
+            }).join('');
+        }
+
+        const inodeHtml = d.inodes && d.inodes.total ? `<tr><td class="text-muted ps-2">Inodes</td><td>${d.inodes.used.toLocaleString()} / ${d.inodes.total.toLocaleString()} (${d.inodes.percent})</td></tr>` : '';
+
+        // Update the dashboard card too
+        document.getElementById('dash-disk-val').textContent = d.percent + '%';
+        document.getElementById('dash-disk-bar').style.width = d.percent + '%';
+        document.getElementById('dash-disk-label').textContent = 'Disk (' + fmtB(d.used) + ' / ' + fmtB(d.size) + ')';
+        document.getElementById('dash-disk-free').textContent = fmtB(d.free) + ' free';
+
+        S.fire({
+            title: `<i class="bi bi-hdd me-2"></i>/`,
+            html: `<div class="text-start">
+                <div class="text-center mb-3">
+                    <div style="font-size:2rem;color:${pctColor};">${d.percent}%</div>
+                    <div class="progress mx-auto" style="width:80%;height:8px;"><div class="progress-bar" style="width:${d.percent}%;background:${pctColor};"></div></div>
+                    <small class="text-muted">${fmtB(d.used)} / ${fmtB(d.size)} (${fmtB(d.free)} libre)</small>
+                </div>
+                <table class="table table-sm table-dark mb-3">
+                    <tr><td class="text-muted ps-2">Dispositivo</td><td><code>${d.device}</code></td></tr>
+                    <tr><td class="text-muted ps-2">Filesystem</td><td>${d.fstype}</td></tr>
+                    ${inodeHtml}
+                </table>
+                ${topHtml ? '<div class="mb-1"><strong class="small text-muted">Top directorios:</strong></div>' + topHtml : ''}
+            </div>`,
+            showConfirmButton: false,
+            showCloseButton: true,
+            width: 600,
+        });
+    } catch (e) { S.fire({ icon: 'error', title: 'Error', text: e.message }); }
 };
 </script>

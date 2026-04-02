@@ -1306,7 +1306,7 @@ class FileSyncService
             return ['ok' => true, 'updated' => 0];
         }
 
-        $duCmd = 'du -sm ' . implode(' ', $dirs) . ' 2>/dev/null';
+        $duCmd = 'nice -n 19 ionice -c3 du -sm ' . implode(' ', $dirs) . ' 2>/dev/null';
         $sshCmd = sprintf(
             'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d -i %s %s@%s %s 2>/dev/null',
             $port, escapeshellarg($keyPath), escapeshellarg($user),
@@ -1360,7 +1360,7 @@ class FileSyncService
         foreach ($accounts as $acc) {
             $homeDir = rtrim($acc['home_dir'] ?? '', '/');
             if ($homeDir && is_dir($homeDir)) {
-                $localMb = (int)trim((string)shell_exec(sprintf('du -sm %s 2>/dev/null | cut -f1', escapeshellarg($homeDir))));
+                $localMb = (int)trim((string)shell_exec(sprintf('/opt/musedock-panel/bin/du-throttled -sm %s 2>/dev/null | cut -f1', escapeshellarg($homeDir))));
                 if ($localMb > 0) {
                     Database::query(
                         "UPDATE hosting_accounts SET disk_used_mb = :mb WHERE id = :id",

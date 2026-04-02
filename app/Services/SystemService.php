@@ -1094,7 +1094,7 @@ p{color:#94a3b8;line-height:1.6;margin-bottom:0.5rem}
     public static function getDiskUsage(string $path): int
     {
         if (!is_dir($path)) return 0;
-        $output = shell_exec(sprintf('du -sm %s 2>/dev/null | cut -f1', escapeshellarg($path)));
+        $output = shell_exec(sprintf('/opt/musedock-panel/bin/du-throttled -sm %s 2>/dev/null | cut -f1', escapeshellarg($path)));
         return (int) trim($output ?: '0');
     }
 }

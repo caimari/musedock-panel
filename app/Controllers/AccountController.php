@@ -72,12 +72,24 @@ class AccountController
             }
         } catch (\Throwable $e) {}
 
+        // Bandwidth totals for current month
+        $bwTotals = \MuseDockPanel\Services\BandwidthService::getAllMonthlyTotals();
+        $subBwTotals = \MuseDockPanel\Services\BandwidthService::getAllSubdomainMonthlyTotals();
+
         foreach ($accounts as &$acc) {
             $acc['alias_count'] = $aliasCounts[(int)$acc['id']] ?? 0;
             $acc['redirect_count'] = $redirectCounts[(int)$acc['id']] ?? 0;
             $acc['alias_details'] = $aliasDetails[(int)$acc['id']] ?? [];
             $acc['subdomain_count'] = $subCounts[(int)$acc['id']] ?? 0;
             $acc['subdomain_details'] = $subDetails[(int)$acc['id']] ?? [];
+            $acc['bw_bytes'] = (int)($bwTotals[(int)$acc['id']]['bytes_out'] ?? 0);
+            // Attach BW to each subdomain detail
+            if (!empty($acc['subdomain_details'])) {
+                foreach ($acc['subdomain_details'] as &$sd) {
+                    $sd['bw_bytes'] = (int)($subBwTotals[(int)$sd['id']]['bytes_out'] ?? 0);
+                }
+                unset($sd);
+            }
         }
 
         View::render('accounts/index', [
@@ -596,6 +608,9 @@ class AccountController
             ];
         }
 
+        // Bandwidth
+        $bwMonthly = \MuseDockPanel\Services\BandwidthService::getMonthlyTotal((int)$account['id']);
+
         View::render('accounts/show', [
             'layout' => 'main',
             'pageTitle' => $account['domain'],
@@ -612,6 +627,7 @@ class AccountController
             'adoptableAccounts' => $adoptableAccounts,
             'isSlave' => $isSlave,
             'wpInfo' => $wpInfo,
+            'bwMonthly' => $bwMonthly,
         ]);
     }
 
@@ -1998,6 +2014,15 @@ class AccountController
         LogService::log('account.php_settings', $account['domain'], "PHP settings updated: {$changesLog}");
         Flash::set('success', 'Ajustes PHP actualizados y FPM recargado.');
         Router::redirect('/accounts/' . $params['id'] . '/edit');
+    }
+
+    public function apiBandwidth(array $params): void
+    {
+        header('Content-Type: application/json');
+        $period = $_GET['period'] ?? 'day'; // day, month, year
+        $data = \MuseDockPanel\Services\BandwidthService::getByAccount((int)$params['id'], $period);
+        echo json_encode(['ok' => true, 'data' => $data, 'period' => $period]);
+        exit;
     }
 
     public function delete(array $params): void

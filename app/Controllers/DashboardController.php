@@ -117,22 +117,51 @@ class DashboardController
     {
         $load = sys_getloadavg();
         $cores = (int) trim(shell_exec('nproc') ?: '1');
+
+        // Real CPU usage from /proc/stat (instant snapshot, 200ms sample)
+        $percent = null;
+        $stat1 = @file_get_contents('/proc/stat');
+        if ($stat1 && preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $stat1, $m1)) {
+            usleep(200000); // 200ms
+            $stat2 = @file_get_contents('/proc/stat');
+            if ($stat2 && preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $stat2, $m2)) {
+                $idle1 = (int)$m1[4] + (int)$m1[5];
+                $idle2 = (int)$m2[4] + (int)$m2[5];
+                $total1 = array_sum(array_slice($m1, 1));
+                $total2 = array_sum(array_slice($m2, 1));
+                $totalDelta = $total2 - $total1;
+                $idleDelta = $idle2 - $idle1;
+                if ($totalDelta > 0) {
+                    $percent = round((1 - $idleDelta / $totalDelta) * 100, 1);
+                }
+            }
+        }
+        // Fallback to load average if /proc/stat failed
+        if ($percent === null) {
+            $percent = min(100, round(($load[0] / $cores) * 100, 1));
+        }
+
         return [
             'load_1' => round($load[0], 2),
             'load_5' => round($load[1], 2),
             'load_15' => round($load[2], 2),
             'cores' => $cores,
-            'percent' => min(100, round(($load[0] / $cores) * 100, 1)),
+            'percent' => $percent,
         ];
     }
 
     private function getMemoryUsage(): array
     {
-        $free = shell_exec('free -b');
-        preg_match('/Mem:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/', $free, $m);
-        $total = (int)($m[1] ?? 0);
-        $used = (int)($m[2] ?? 0);
-        $available = (int)($m[6] ?? 0);
+        // Parse /proc/meminfo for accurate values (available = truly free for apps)
+        $meminfo = @file_get_contents('/proc/meminfo');
+        $total = 0;
+        $available = 0;
+        if ($meminfo) {
+            if (preg_match('/MemTotal:\s+(\d+)/', $meminfo, $m)) $total = (int)$m[1] * 1024;
+            if (preg_match('/MemAvailable:\s+(\d+)/', $meminfo, $m)) $available = (int)$m[1] * 1024;
+        }
+        $used = $total - $available;
+
         return [
             'total' => $total,
             'used' => $used,
@@ -241,20 +270,41 @@ class DashboardController
             ];
         }
 
-        // Also include current totals
+        // System summary — real CPU from /proc/stat, real RAM from /proc/meminfo
         $load = sys_getloadavg();
         $cores = (int) trim(shell_exec('nproc') ?: '1');
-        $free = shell_exec('free -b');
-        preg_match('/Mem:\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/', $free, $m);
-        $totalMem = (int)($m[1] ?? 0);
-        $usedMem = (int)($m[2] ?? 0);
+
+        // CPU sample (500ms — stable reading for AJAX polling)
+        $cpuPercent = min(100, round(($load[0] / $cores) * 100, 1));
+        $stat1 = @file_get_contents('/proc/stat');
+        if ($stat1 && preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $stat1, $cm1)) {
+            usleep(500000);
+            $stat2 = @file_get_contents('/proc/stat');
+            if ($stat2 && preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $stat2, $cm2)) {
+                $idle1 = (int)$cm1[4] + (int)$cm1[5];
+                $idle2 = (int)$cm2[4] + (int)$cm2[5];
+                $tot1 = array_sum(array_slice($cm1, 1));
+                $tot2 = array_sum(array_slice($cm2, 1));
+                $td = $tot2 - $tot1;
+                if ($td > 0) $cpuPercent = round((1 - ($idle2 - $idle1) / $td) * 100, 1);
+            }
+        }
+
+        // RAM from /proc/meminfo (MemTotal - MemAvailable = real app usage)
+        $meminfo = @file_get_contents('/proc/meminfo');
+        $totalMem = 0; $availMem = 0;
+        if ($meminfo) {
+            if (preg_match('/MemTotal:\s+(\d+)/', $meminfo, $mt)) $totalMem = (int)$mt[1] * 1024;
+            if (preg_match('/MemAvailable:\s+(\d+)/', $meminfo, $ma)) $availMem = (int)$ma[1] * 1024;
+        }
+        $usedMem = $totalMem - $availMem;
 
         echo json_encode([
             'ok'        => true,
             'sort'      => $sort,
             'processes' => $processes,
             'summary'   => [
-                'cpu_percent' => min(100, round(($load[0] / $cores) * 100, 1)),
+                'cpu_percent' => $cpuPercent,
                 'cpu_load'    => round($load[0], 2),
                 'cores'       => $cores,
                 'mem_percent' => $totalMem > 0 ? round(($usedMem / $totalMem) * 100, 1) : 0,

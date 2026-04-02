@@ -2,6 +2,45 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.38] — 2026-04-02
+
+### New
+- Ancho de banda por hosting — Parseo de logs Caddy cada 10 min, acumulado por cuenta/dia en DB
+- Ancho de banda por subdominio — Trafico individual visible en acordeon del listado
+- Columna BW en listado + grafica Chart.js en Account Details (30d/12m/Anual)
+- Totales globales (disco + BW) en barra superior del listado
+- Columnas ordenables (click en headers) con subdominios que siguen a su padre
+- Dashboard cards CPU/RAM/Disk en tiempo real (3s) + modal de disco
+
+### Improved
+- du-throttled — Limita du al 50% de un core via SIGSTOP/SIGCONT
+
+## [1.0.37] — 2026-04-02
+
+### New
+- Subdominios — Pagina de edicion individual con Document Root y ajustes PHP independientes
+- Subdominios — Suspender/activar con pagina de mantenimiento Caddy. Eliminar solo cuando esta suspendido
+- Subdominios — Acordeon en el listado de Hosting Accounts
+- Cloudflare DNS — Seleccion masiva (checkboxes): eliminar, toggle proxy, edicion masiva
+- Cloudflare DNS — Modal de confirmacion al toggle proxy
+- Cloudflare DNS — Crear/editar registros en modal SweetAlert
+- Monitor — Cards CPU/RAM abren modal de procesos
+- Monitor — Cards de red abren modal con detalle (velocidad RT, IPs, MTU, errores)
+- Monitor — Cards de disco abren modal con detalle (filesystem, inodes, top directorios)
+- Monitor — Cards actualizadas en tiempo real cada 3s
+
+### Improved
+- CPU real desde /proc/stat en vez de load average (dashboard, monitor, collector)
+- RAM real con MemAvailable en vez de "used" de free
+- du -sm con nice -n 19 ionice -c3 para no afectar rendimiento
+- Deteccion de estado WireGuard (up en vez de unknown)
+- Tabla de subdominios con text-overflow ellipsis
+
+### Fixed
+- Caddy route ID collision — IDs basados en dominio en vez de username. Subdominios ya no colisionan
+- Cloudflare zona duplicada — CMS ya no crea zonas en Cuenta 2 si existe en Cuenta 1
+- Boton editar DNS fallaba con registros con comillas (TXT, DKIM)
+
 ## [1.0.36] — 2026-04-01
 
 ### Anadido

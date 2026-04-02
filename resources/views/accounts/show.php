@@ -76,6 +76,22 @@ use MuseDockPanel\Services\CloudflareService;
                             <?php endif; ?>
                         </td>
                     </tr>
+                    <tr>
+                        <td class="ps-3 text-muted">Bandwidth</td>
+                        <td>
+                            <?php
+                            $bwB = (int)($bwMonthly['bytes_out'] ?? 0);
+                            $bwR = (int)($bwMonthly['requests'] ?? 0);
+                            if ($bwB >= 1073741824) $bwStr = round($bwB/1073741824, 2) . ' GB';
+                            elseif ($bwB >= 1048576) $bwStr = round($bwB/1048576, 1) . ' MB';
+                            elseif ($bwB > 0) $bwStr = round($bwB/1024, 1) . ' KB';
+                            else $bwStr = '0';
+                            ?>
+                            <span class="text-info"><?= $bwStr ?></span>
+                            <small class="text-muted ms-2"><?= number_format($bwR) ?> requests</small>
+                            <small class="text-muted ms-1">(este mes)</small>
+                        </td>
+                    </tr>
                     <?php if ($account['description']): ?>
                     <tr><td class="ps-3 text-muted">Description</td><td><?= View::e($account['description']) ?></td></tr>
                     <?php endif; ?>
@@ -170,6 +186,125 @@ use MuseDockPanel\Services\CloudflareService;
                 <?php endif; ?>
             </div>
         </div>
+
+        <!-- Bandwidth -->
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-speedometer2 me-2"></i>Ancho de Banda</span>
+                <div class="d-flex gap-1">
+                    <button class="btn btn-outline-light btn-sm py-0 px-2 bw-range active" data-period="day">30d</button>
+                    <button class="btn btn-outline-light btn-sm py-0 px-2 bw-range" data-period="month">12m</button>
+                    <button class="btn btn-outline-light btn-sm py-0 px-2 bw-range" data-period="year">Anual</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <?php
+                $bwBytes = (int)($bwMonthly['bytes_out'] ?? 0);
+                $bwReqs = (int)($bwMonthly['requests'] ?? 0);
+                $bwLabel = $bwBytes >= 1073741824 ? round($bwBytes/1073741824, 2) . ' GB' : ($bwBytes >= 1048576 ? round($bwBytes/1048576, 1) . ' MB' : round($bwBytes/1024, 1) . ' KB');
+                ?>
+                <div class="d-flex gap-4 mb-3">
+                    <div>
+                        <span class="fs-5 fw-bold text-info"><?= $bwLabel ?></span>
+                        <small class="text-muted d-block">Este mes (salida)</small>
+                    </div>
+                    <div>
+                        <span class="fs-5 fw-bold"><?= number_format($bwReqs) ?></span>
+                        <small class="text-muted d-block">Requests</small>
+                    </div>
+                </div>
+                <div style="height:180px;position:relative;">
+                    <canvas id="bwChart"></canvas>
+                </div>
+            </div>
+        </div>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+        <script>
+        (function() {
+            let bwChart = null;
+            const ctx = document.getElementById('bwChart');
+            const accountId = <?= (int)$account['id'] ?>;
+
+            function fmtBytes(b) {
+                if (b >= 1073741824) return (b/1073741824).toFixed(2) + ' GB';
+                if (b >= 1048576) return (b/1048576).toFixed(1) + ' MB';
+                if (b >= 1024) return (b/1024).toFixed(1) + ' KB';
+                return b + ' B';
+            }
+
+            async function loadBandwidth(period) {
+                const resp = await fetch(`/accounts/${accountId}/bandwidth?period=${period}`);
+                const json = await resp.json();
+                if (!json.ok) return;
+
+                const labels = json.data.map(d => {
+                    const dt = d.period;
+                    if (period === 'year') return dt.substring(0, 4);
+                    if (period === 'month') return dt.substring(0, 7);
+                    return dt.substring(5); // MM-DD
+                });
+                const bytes = json.data.map(d => parseInt(d.bytes_out));
+                const reqs = json.data.map(d => parseInt(d.requests));
+
+                if (bwChart) bwChart.destroy();
+                bwChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Trafico (bytes)',
+                                data: bytes,
+                                backgroundColor: 'rgba(56,189,248,0.4)',
+                                borderColor: '#38bdf8',
+                                borderWidth: 1,
+                                yAxisID: 'y',
+                            },
+                            {
+                                label: 'Requests',
+                                data: reqs,
+                                type: 'line',
+                                borderColor: '#a855f7',
+                                backgroundColor: 'rgba(168,85,247,0.1)',
+                                tension: 0.3,
+                                pointRadius: 2,
+                                yAxisID: 'y1',
+                            }
+                        ],
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        interaction: { mode: 'index', intersect: false },
+                        plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } },
+                        scales: {
+                            x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(51,65,85,0.3)' } },
+                            y: {
+                                position: 'left',
+                                ticks: { color: '#38bdf8', font: { size: 10 }, callback: v => fmtBytes(v) },
+                                grid: { color: 'rgba(51,65,85,0.3)' },
+                            },
+                            y1: {
+                                position: 'right',
+                                ticks: { color: '#a855f7', font: { size: 10 } },
+                                grid: { display: false },
+                            },
+                        },
+                    },
+                });
+            }
+
+            loadBandwidth('day');
+
+            document.querySelectorAll('.bw-range').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    document.querySelectorAll('.bw-range').forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    loadBandwidth(this.dataset.period);
+                });
+            });
+        })();
+        </script>
 
         <!-- Cloudflare DNS for this domain -->
         <?php

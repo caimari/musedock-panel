@@ -4,6 +4,13 @@ $clusterRole = \MuseDockPanel\Settings::get('cluster_role', 'standalone');
 $totalAccounts = count($accounts);
 $totalActive = count(array_filter($accounts, fn($a) => $a['status'] === 'active'));
 $totalSuspended = $totalAccounts - $totalActive;
+$totalDiskMb = array_sum(array_column($accounts, 'disk_used_mb'));
+$totalBwBytes = array_sum(array_column($accounts, 'bw_bytes'));
+$totalDiskStr = $totalDiskMb >= 1024 ? round($totalDiskMb / 1024, 1) . ' GB' : $totalDiskMb . ' MB';
+if ($totalBwBytes >= 1073741824) $totalBwStr = round($totalBwBytes / 1073741824, 1) . ' GB';
+elseif ($totalBwBytes >= 1048576) $totalBwStr = round($totalBwBytes / 1048576, 1) . ' MB';
+elseif ($totalBwBytes > 0) $totalBwStr = round($totalBwBytes / 1024, 1) . ' KB';
+else $totalBwStr = '0';
 ?>
 
 <?php if ($clusterRole === 'slave'): ?>
@@ -21,6 +28,8 @@ $totalSuspended = $totalAccounts - $totalActive;
             <?php if ($totalSuspended > 0): ?>
                 <span class="badge bg-danger ms-1" style="font-size:0.7rem;"><?= $totalSuspended ?> suspendido<?= $totalSuspended !== 1 ? 's' : '' ?></span>
             <?php endif; ?>
+            <span class="ms-3"><i class="bi bi-hdd me-1"></i><?= $totalDiskStr ?></span>
+            <span class="ms-2"><i class="bi bi-speedometer2 me-1"></i><?= $totalBwStr ?>/mes</span>
         </span>
     </div>
     <div class="d-flex gap-2 align-items-center">
@@ -57,20 +66,21 @@ $totalSuspended = $totalAccounts - $totalActive;
             <table class="table table-hover mb-0" id="accountsTable">
                 <thead>
                     <tr>
-                        <th class="ps-3">Domain</th>
-                        <th>Customer</th>
-                        <th>User</th>
-                        <th>PHP</th>
+                        <th class="ps-3 sortable-th" data-col="0" data-type="text" style="cursor:pointer;user-select:none;">Domain <i class="bi bi-chevron-expand text-muted" style="font-size:0.6rem;"></i></th>
+                        <th class="sortable-th" data-col="1" data-type="text" style="cursor:pointer;user-select:none;">Customer <i class="bi bi-chevron-expand text-muted" style="font-size:0.6rem;"></i></th>
+                        <th class="sortable-th" data-col="2" data-type="text" style="cursor:pointer;user-select:none;">User <i class="bi bi-chevron-expand text-muted" style="font-size:0.6rem;"></i></th>
+                        <th class="sortable-th" data-col="3" data-type="text" style="cursor:pointer;user-select:none;">PHP <i class="bi bi-chevron-expand text-muted" style="font-size:0.6rem;"></i></th>
                         <th>Alias / Redir</th>
-                        <th>Disk</th>
-                        <th>Status</th>
-                        <th>Created</th>
+                        <th class="sortable-th" data-col="5" data-type="num" style="cursor:pointer;user-select:none;">Disk <i class="bi bi-chevron-expand text-muted" style="font-size:0.6rem;"></i></th>
+                        <th class="sortable-th" data-col="6" data-type="num" style="cursor:pointer;user-select:none;">BW <i class="bi bi-chevron-expand text-muted" style="font-size:0.6rem;"></i></th>
+                        <th class="sortable-th" data-col="7" data-type="text" style="cursor:pointer;user-select:none;">Status <i class="bi bi-chevron-expand text-muted" style="font-size:0.6rem;"></i></th>
+                        <th class="sortable-th" data-col="8" data-type="date" style="cursor:pointer;user-select:none;">Created <i class="bi bi-chevron-expand text-muted" style="font-size:0.6rem;"></i></th>
                         <th class="text-end pe-3"></th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php foreach ($accounts as $acc): ?>
-                    <tr class="account-row">
+                    <tr class="account-row" data-sort-disk="<?= (int)$acc['disk_used_mb'] ?>" data-sort-bw="<?= (int)($acc['bw_bytes'] ?? 0) ?>" data-sort-date="<?= $acc['created_at'] ?>" data-account-id="<?= (int)$acc['id'] ?>">
                         <td class="ps-3">
                             <a href="/accounts/<?= $acc['id'] ?>" class="text-info text-decoration-none fw-semibold"><?= View::e($acc['domain']) ?></a>
                             <a href="https://<?= View::e($acc['domain']) ?>" target="_blank" rel="noopener" class="text-muted ms-1" style="font-size:0.7rem;" title="Abrir sitio"><i class="bi bi-box-arrow-up-right"></i></a>
@@ -128,6 +138,16 @@ $totalSuspended = $totalAccounts - $totalActive;
                             </div>
                         </td>
                         <td>
+                            <?php
+                            $bwB = $acc['bw_bytes'] ?? 0;
+                            if ($bwB >= 1073741824) $bwStr = round($bwB/1073741824, 1) . ' GB';
+                            elseif ($bwB >= 1048576) $bwStr = round($bwB/1048576, 1) . ' MB';
+                            elseif ($bwB > 0) $bwStr = round($bwB/1024, 1) . ' KB';
+                            else $bwStr = '-';
+                            ?>
+                            <small class="text-muted" title="Ancho de banda este mes"><?= $bwStr ?></small>
+                        </td>
+                        <td>
                             <span class="badge badge-<?= $acc['status'] === 'active' ? 'active' : 'suspended' ?>">
                                 <?= $acc['status'] ?>
                             </span>
@@ -145,11 +165,26 @@ $totalSuspended = $totalAccounts - $totalActive;
                             <a href="/accounts/<?= (int)$acc['id'] ?>/subdomains/<?= (int)$sub['id'] ?>/edit" class="text-decoration-none" style="color:#a5b4fc;"><?= View::e($sub['subdomain']) ?></a>
                             <a href="https://<?= View::e($sub['subdomain']) ?>" target="_blank" class="text-muted ms-1" style="font-size:0.7rem;"><i class="bi bi-box-arrow-up-right"></i></a>
                         </td>
-                        <td colspan="4"><code class="small text-muted"><?= View::e($sub['document_root']) ?></code></td>
-                        <td colspan="2">
+                        <!-- Customer + User + PHP + Alias/Redir + Disk = 5 cols for doc root -->
+                        <td colspan="5" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="<?= View::e($sub['document_root']) ?>"><code class="small text-muted"><?= View::e($sub['document_root']) ?></code></td>
+                        <!-- BW -->
+                        <td>
+                            <?php
+                            $sBw = $sub['bw_bytes'] ?? 0;
+                            if ($sBw >= 1073741824) $sBwStr = round($sBw/1073741824, 1) . ' GB';
+                            elseif ($sBw >= 1048576) $sBwStr = round($sBw/1048576, 1) . ' MB';
+                            elseif ($sBw > 0) $sBwStr = round($sBw/1024, 1) . ' KB';
+                            else $sBwStr = '-';
+                            ?>
+                            <small class="text-muted"><?= $sBwStr ?></small>
+                        </td>
+                        <!-- Status -->
+                        <td>
                             <span class="badge badge-<?= $sub['status'] === 'active' ? 'active' : 'suspended' ?>" style="font-size:0.6rem;"><?= View::e($sub['status']) ?></span>
                         </td>
+                        <!-- Created (empty) -->
                         <td></td>
+                        <!-- Actions -->
                         <td class="text-end pe-3">
                             <a href="/accounts/<?= (int)$acc['id'] ?>/subdomains/<?= (int)$sub['id'] ?>/edit" class="btn btn-outline-light btn-sm py-0 px-1" title="Editar subdominio"><i class="bi bi-pencil" style="font-size:0.7rem;"></i></a>
                         </td>
@@ -230,6 +265,77 @@ $totalSuspended = $totalAccounts - $totalActive;
             } else {
                 icon.className = 'bi bi-diagram-3-fill';
             }
+        });
+    });
+
+    // ─── Column sorting ─────────────────────────────────────
+    var currentSortCol = -1;
+    var currentSortAsc = true;
+
+    document.querySelectorAll('.sortable-th').forEach(function(th) {
+        th.addEventListener('click', function() {
+            var col = parseInt(th.dataset.col);
+            var type = th.dataset.type; // text, num, date
+
+            // Toggle direction
+            if (currentSortCol === col) {
+                currentSortAsc = !currentSortAsc;
+            } else {
+                currentSortCol = col;
+                currentSortAsc = true;
+            }
+
+            // Update header icons
+            document.querySelectorAll('.sortable-th i').forEach(function(icon) {
+                icon.className = 'bi bi-chevron-expand text-muted';
+                icon.style.fontSize = '0.6rem';
+            });
+            var icon = th.querySelector('i');
+            icon.className = 'bi ' + (currentSortAsc ? 'bi-chevron-up' : 'bi-chevron-down') + ' text-info';
+            icon.style.fontSize = '0.6rem';
+
+            // Gather account rows with their subdomain rows
+            var tbody = document.querySelector('#accountsTable tbody');
+            var accountRows = Array.from(tbody.querySelectorAll('.account-row'));
+
+            var groups = accountRows.map(function(row) {
+                var accId = row.dataset.accountId;
+                var subRows = Array.from(tbody.querySelectorAll('.sub-of-' + accId));
+                return { main: row, subs: subRows };
+            });
+
+            // Sort groups
+            groups.sort(function(a, b) {
+                var valA, valB;
+
+                if (type === 'num') {
+                    if (col === 5) { // Disk
+                        valA = parseInt(a.main.dataset.sortDisk) || 0;
+                        valB = parseInt(b.main.dataset.sortDisk) || 0;
+                    } else if (col === 6) { // BW
+                        valA = parseInt(a.main.dataset.sortBw) || 0;
+                        valB = parseInt(b.main.dataset.sortBw) || 0;
+                    }
+                    return currentSortAsc ? valA - valB : valB - valA;
+                }
+
+                if (type === 'date') {
+                    valA = a.main.dataset.sortDate || '';
+                    valB = b.main.dataset.sortDate || '';
+                    return currentSortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+                }
+
+                // Text: read from cell
+                var cellA = a.main.children[col]?.textContent?.trim().toLowerCase() || '';
+                var cellB = b.main.children[col]?.textContent?.trim().toLowerCase() || '';
+                return currentSortAsc ? cellA.localeCompare(cellB) : cellB.localeCompare(cellA);
+            });
+
+            // Re-append in sorted order
+            groups.forEach(function(g) {
+                tbody.appendChild(g.main);
+                g.subs.forEach(function(s) { tbody.appendChild(s); });
+            });
         });
     });
 

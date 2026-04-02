@@ -42,7 +42,7 @@
 <div class="row g-3 mb-4">
     <?php foreach ($interfaces as $iface): ?>
     <div class="col-md-3 d-flex">
-        <div class="stat-card w-100 d-flex flex-column">
+        <div class="stat-card w-100 d-flex flex-column" role="button" onclick="openNetworkModal('<?= View::e($iface) ?>')" title="Ver detalle de <?= View::e($iface) ?>" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value" id="card-<?= View::e($iface) ?>-rx">--</div>
@@ -60,7 +60,7 @@
     </div>
     <?php endforeach; ?>
     <div class="col-md-3 d-flex">
-        <div class="stat-card w-100 d-flex flex-column">
+        <div class="stat-card w-100 d-flex flex-column" role="button" onclick="openProcessModal('cpu')" title="Ver procesos por CPU" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value" id="card-cpu">--</div>
@@ -72,7 +72,7 @@
         </div>
     </div>
     <div class="col-md-3 d-flex">
-        <div class="stat-card w-100 d-flex flex-column">
+        <div class="stat-card w-100 d-flex flex-column" role="button" onclick="openProcessModal('ram')" title="Ver procesos por RAM" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value" id="card-ram">--</div>
@@ -124,7 +124,7 @@
         $freeH = $freeB >= 1099511627776 ? round($freeB/1099511627776,1).'T' : round($freeB/1073741824,1).'G';
     ?>
     <div class="col-md-3 d-flex">
-        <div class="stat-card w-100 d-flex flex-column">
+        <div class="stat-card w-100 d-flex flex-column" role="button" onclick="openDiskModal('<?= View::e($disk['mount']) ?>')" title="Ver detalle de <?= View::e($disk['mount']) ?>" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value" style="color:<?= $diskColor ?>"><?= $disk['percent'] ?>%</div>
@@ -1079,31 +1079,49 @@
 
             const s = json.status;
 
-            // Network cards
-            <?php foreach ($interfaces as $iface): ?>
-            {
-                const rxEl = document.getElementById('card-<?= View::e($iface) ?>-rx');
-                const txEl = document.getElementById('card-<?= View::e($iface) ?>-tx');
-                if (rxEl && s['net_<?= View::e($iface) ?>_rx']) rxEl.textContent = fmtBytes(s['net_<?= View::e($iface) ?>_rx'].value);
-                if (txEl && s['net_<?= View::e($iface) ?>_tx']) txEl.textContent = fmtBytes(s['net_<?= View::e($iface) ?>_tx'].value);
-            }
-            <?php endforeach; ?>
+            // CPU, RAM & Network cards — real-time from /monitor/api/realtime
+            try {
+                const rtResp = await fetch('/monitor/api/realtime');
+                const rt = await rtResp.json();
+                if (rt.ok) {
+                    // CPU
+                    const cpuEl = document.getElementById('card-cpu');
+                    const cpuBar = document.getElementById('bar-cpu');
+                    cpuEl.textContent = rt.cpu_percent + '%';
+                    cpuBar.style.width = Math.min(100, rt.cpu_percent) + '%';
 
-            // CPU & RAM cards
-            const cpuEl = document.getElementById('card-cpu');
-            const ramEl = document.getElementById('card-ram');
-            const cpuBar = document.getElementById('bar-cpu');
-            const ramBar = document.getElementById('bar-ram');
+                    // RAM
+                    const ramEl = document.getElementById('card-ram');
+                    const ramBar = document.getElementById('bar-ram');
+                    ramEl.textContent = rt.mem_percent + '%';
+                    ramBar.style.width = Math.min(100, rt.mem_percent) + '%';
 
-            if (s.cpu_percent) {
-                const cpuVal = s.cpu_percent.value.toFixed(1);
-                cpuEl.textContent = cpuVal + '%';
-                cpuBar.style.width = Math.min(100, cpuVal) + '%';
-            }
-            if (s.ram_percent) {
-                const ramVal = s.ram_percent.value.toFixed(1);
-                ramEl.textContent = ramVal + '%';
-                ramBar.style.width = Math.min(100, ramVal) + '%';
+                    // Network
+                    if (rt.net) {
+                        for (const [iface, data] of Object.entries(rt.net)) {
+                            const rxEl = document.getElementById('card-' + iface + '-rx');
+                            const txEl = document.getElementById('card-' + iface + '-tx');
+                            if (rxEl) rxEl.textContent = fmtBytes(data.rx);
+                            if (txEl) txEl.textContent = 'TX (Out): ' + fmtBytes(data.tx);
+                        }
+                    }
+                }
+            } catch(e) {
+                // Fallback to collector data
+                <?php foreach ($interfaces as $iface): ?>
+                {
+                    const rxEl = document.getElementById('card-<?= View::e($iface) ?>-rx');
+                    const txEl = document.getElementById('card-<?= View::e($iface) ?>-tx');
+                    if (rxEl && s['net_<?= View::e($iface) ?>_rx']) rxEl.textContent = fmtBytes(s['net_<?= View::e($iface) ?>_rx'].value);
+                    if (txEl && s['net_<?= View::e($iface) ?>_tx']) txEl.textContent = 'TX (Out): ' + fmtBytes(s['net_<?= View::e($iface) ?>_tx'].value);
+                }
+                <?php endforeach; ?>
+                const cpuEl = document.getElementById('card-cpu');
+                const ramEl = document.getElementById('card-ram');
+                const cpuBar = document.getElementById('bar-cpu');
+                const ramBar = document.getElementById('bar-ram');
+                if (s.cpu_percent) { cpuEl.textContent = s.cpu_percent.value.toFixed(1) + '%'; cpuBar.style.width = Math.min(100, s.cpu_percent.value) + '%'; }
+                if (s.ram_percent) { ramEl.textContent = s.ram_percent.value.toFixed(1) + '%'; ramBar.style.width = Math.min(100, s.ram_percent.value) + '%'; }
             }
 
             // GPU cards
@@ -1296,7 +1314,376 @@
     document.getElementById('rangeButtons').addEventListener('click', startAutoRefresh);
 
     // Card refresh every 10s
-    setInterval(updateCards, 10000);
+    setInterval(updateCards, 3000);
 
 })();
+</script>
+
+<!-- Process Modal (shared with dashboard) -->
+<div class="modal fade" id="processModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header border-secondary d-flex align-items-center">
+                <h5 class="modal-title me-auto" id="processModalTitle">
+                    <i class="bi bi-cpu me-2"></i>Procesos
+                </h5>
+                <span id="processSummary" class="text-muted small me-3"></span>
+                <div class="form-check form-switch mb-0 me-3">
+                    <input class="form-check-input" type="checkbox" id="processAutoRefresh" checked>
+                    <label class="form-check-label small text-muted" for="processAutoRefresh">
+                        Auto <span id="processCountdown">3s</span>
+                    </label>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="d-flex border-bottom border-secondary">
+                    <button class="btn btn-sm rounded-0 flex-fill process-tab active" data-sort="cpu" onclick="switchProcessTab('cpu')">
+                        <i class="bi bi-cpu me-1"></i> Por CPU %
+                    </button>
+                    <button class="btn btn-sm rounded-0 flex-fill process-tab" data-sort="ram" onclick="switchProcessTab('ram')">
+                        <i class="bi bi-memory me-1"></i> Por RAM %
+                    </button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-dark table-hover table-sm mb-0">
+                        <thead>
+                            <tr>
+                                <th class="ps-3" style="width:50px">PID</th>
+                                <th style="width:90px">Usuario</th>
+                                <th style="width:70px" class="text-end">CPU %</th>
+                                <th style="width:70px" class="text-end">RAM %</th>
+                                <th style="width:80px" class="text-end">RSS</th>
+                                <th style="width:70px">Estado</th>
+                                <th style="width:70px">Tiempo</th>
+                                <th>Comando</th>
+                            </tr>
+                        </thead>
+                        <tbody id="processTableBody">
+                            <tr><td colspan="8" class="text-center text-muted py-4"><i class="bi bi-hourglass-split"></i> Cargando...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary py-1">
+                <small class="text-muted" id="processTimestamp"></small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Process Detail Modal -->
+<div class="modal fade" id="processDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title">
+                    <i class="bi bi-terminal me-2"></i>Proceso <span id="detailPid" class="text-info"></span>
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="processDetailBody">
+                <div class="text-center text-muted py-4"><i class="bi bi-hourglass-split"></i> Cargando...</div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <div class="d-flex gap-2 w-100">
+                    <button class="btn btn-warning btn-sm" onclick="killProcess(currentDetailPid, 'TERM')">
+                        <i class="bi bi-exclamation-triangle me-1"></i>SIGTERM
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="killProcess(currentDetailPid, 'KILL')">
+                        <i class="bi bi-x-octagon me-1"></i>SIGKILL
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="killProcess(currentDetailPid, 'HUP')">
+                        <i class="bi bi-arrow-repeat me-1"></i>SIGHUP
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm ms-auto" data-bs-dismiss="modal">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    let currentSort = 'cpu';
+    let refreshTimer = null;
+    let countdownTimer = null;
+    let countdown = 3;
+    const REFRESH_INTERVAL = 3;
+    const modal = document.getElementById('processModal');
+    let bsModal = null;
+
+    function formatKB(kb) {
+        if (kb >= 1048576) return (kb / 1048576).toFixed(1) + ' GB';
+        if (kb >= 1024) return (kb / 1024).toFixed(0) + ' MB';
+        return kb + ' KB';
+    }
+    function cpuColor(val) {
+        if (val >= 50) return '#dc3545';
+        if (val >= 20) return '#ffc107';
+        if (val > 1) return '#0dcaf0';
+        return '#6c757d';
+    }
+    function memColor(val) {
+        if (val >= 30) return '#dc3545';
+        if (val >= 10) return '#ffc107';
+        if (val > 1) return '#ffc107';
+        return '#6c757d';
+    }
+    function esc(str) { const d = document.createElement('div'); d.textContent = str; return d.innerHTML; }
+    function truncCmd(cmd, max) { return (!cmd || cmd.length <= max) ? (cmd||'') : cmd.substring(0, max) + '...'; }
+
+    async function fetchProcesses() {
+        try {
+            const resp = await fetch(`/dashboard/processes?sort=${currentSort}&limit=25`);
+            const data = await resp.json();
+            if (!data.ok) return;
+
+            const tbody = document.getElementById('processTableBody');
+            const s = data.summary;
+
+            document.getElementById('processSummary').innerHTML =
+                `CPU: <b>${s.cpu_percent}%</b> de ${s.cores} cores | Load: ${s.cpu_load} | RAM: <b>${s.mem_percent}%</b> (${s.mem_used_gb}/${s.mem_total_gb} GB)`;
+
+            document.getElementById('processTimestamp').textContent =
+                'Actualizado: ' + new Date().toLocaleTimeString('es-ES');
+
+            if (!data.processes || data.processes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">Sin procesos</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = data.processes.map(p => {
+                const cpuW = Math.min(60, p.cpu * 2);
+                const memW = Math.min(60, p.mem * 3);
+                return `<tr onclick="openProcessDetail(${p.pid})" style="cursor:pointer" title="Ver detalle PID ${p.pid}">
+                    <td class="ps-3 text-muted">${p.pid}</td>
+                    <td><small>${esc(p.user)}</small></td>
+                    <td class="text-end"><span style="color:${cpuColor(p.cpu)}">${p.cpu.toFixed(1)}</span> <span class="cpu-bar" style="width:${Math.min(60, p.cpu*2)}px"></span></td>
+                    <td class="text-end"><span style="color:${memColor(p.mem)}">${p.mem.toFixed(1)}</span> <span class="mem-bar" style="width:${Math.min(60, p.mem*3)}px"></span></td>
+                    <td class="text-end"><small class="text-muted">${formatKB(p.rss)}</small></td>
+                    <td><small class="text-muted">${esc(p.stat)}</small></td>
+                    <td><small class="text-muted">${esc(p.time)}</small></td>
+                    <td><small>${esc(truncCmd(p.command, 80))}</small></td>
+                </tr>`;
+            }).join('');
+        } catch (e) { console.error('Error fetching processes:', e); }
+    }
+
+    function startRefresh() {
+        stopRefresh();
+        countdown = REFRESH_INTERVAL;
+        updateCountdownDisplay();
+        countdownTimer = setInterval(() => {
+            countdown--;
+            if (countdown <= 0) { fetchProcesses(); countdown = REFRESH_INTERVAL; }
+            updateCountdownDisplay();
+        }, 1000);
+    }
+    function stopRefresh() { if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; } }
+    function updateCountdownDisplay() { const el = document.getElementById('processCountdown'); if (el) el.textContent = countdown + 's'; }
+
+    window.switchProcessTab = function(sort) {
+        currentSort = sort;
+        document.querySelectorAll('.process-tab').forEach(t => t.classList.toggle('active', t.dataset.sort === sort));
+        const icon = sort === 'cpu' ? 'bi-cpu' : 'bi-memory';
+        const label = sort === 'cpu' ? 'Procesos por CPU' : 'Procesos por RAM';
+        document.getElementById('processModalTitle').innerHTML = `<i class="bi ${icon} me-2"></i>${label}`;
+        fetchProcesses();
+    };
+
+    window.openProcessModal = function(sort) {
+        currentSort = sort || 'cpu';
+        document.querySelectorAll('.process-tab').forEach(t => t.classList.toggle('active', t.dataset.sort === currentSort));
+        const icon = currentSort === 'cpu' ? 'bi-cpu' : 'bi-memory';
+        const label = currentSort === 'cpu' ? 'Procesos por CPU' : 'Procesos por RAM';
+        document.getElementById('processModalTitle').innerHTML = `<i class="bi ${icon} me-2"></i>${label}`;
+        if (!bsModal) bsModal = new bootstrap.Modal(modal);
+        bsModal.show();
+        fetchProcesses();
+        if (document.getElementById('processAutoRefresh').checked) startRefresh();
+    };
+
+    document.getElementById('processAutoRefresh')?.addEventListener('change', function() {
+        if (this.checked) { startRefresh(); } else { stopRefresh(); document.getElementById('processCountdown').textContent = 'off'; }
+    });
+    modal?.addEventListener('hidden.bs.modal', function() { stopRefresh(); });
+
+    // Process detail
+    let currentDetailPid = 0;
+    let detailModal = null;
+    window.currentDetailPid = 0;
+
+    window.openProcessDetail = async function(pid) {
+        currentDetailPid = pid;
+        window.currentDetailPid = pid;
+        document.getElementById('detailPid').textContent = '#' + pid;
+        document.getElementById('processDetailBody').innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-hourglass-split"></i> Cargando...</div>';
+        if (!detailModal) detailModal = new bootstrap.Modal(document.getElementById('processDetailModal'));
+        detailModal.show();
+
+        try {
+            const resp = await fetch(`/dashboard/process-detail?pid=${pid}`);
+            const data = await resp.json();
+            if (!data.ok) {
+                document.getElementById('processDetailBody').innerHTML = `<div class="alert alert-warning mb-0"><i class="bi bi-exclamation-triangle me-2"></i>${esc(data.error)}</div>`;
+                return;
+            }
+            const d = data;
+            document.getElementById('processDetailBody').innerHTML = `
+                <div class="table-responsive"><table class="table table-dark table-sm mb-0">
+                    <tr><td class="ps-3 text-muted" style="width:140px">PID</td><td><code>${d.pid}</code></td></tr>
+                    <tr><td class="ps-3 text-muted">PPID</td><td><code>${d.ppid}</code></td></tr>
+                    <tr><td class="ps-3 text-muted">Usuario</td><td>${esc(d.user)}</td></tr>
+                    <tr><td class="ps-3 text-muted">CPU %</td><td><span style="color:${cpuColor(d.cpu)}">${d.cpu.toFixed(1)}%</span></td></tr>
+                    <tr><td class="ps-3 text-muted">RAM %</td><td><span style="color:${memColor(d.mem)}">${d.mem.toFixed(1)}%</span></td></tr>
+                    <tr><td class="ps-3 text-muted">RSS</td><td>${formatKB(d.rss)}</td></tr>
+                    <tr><td class="ps-3 text-muted">VSZ</td><td>${formatKB(d.vsz)}</td></tr>
+                    <tr><td class="ps-3 text-muted">Estado</td><td><code>${esc(d.stat)}</code></td></tr>
+                    <tr><td class="ps-3 text-muted">Iniciado</td><td>${esc(d.started)}</td></tr>
+                    <tr><td class="ps-3 text-muted">Tiempo CPU</td><td>${esc(d.time)}</td></tr>
+                    <tr><td class="ps-3 text-muted">Threads</td><td>${d.threads}</td></tr>
+                    <tr><td class="ps-3 text-muted">File Descriptors</td><td>${d.fd_count}</td></tr>
+                    ${d.exe ? `<tr><td class="ps-3 text-muted">Ejecutable</td><td><code class="text-info small">${esc(d.exe)}</code></td></tr>` : ''}
+                    ${d.cwd ? `<tr><td class="ps-3 text-muted">Directorio</td><td><code class="small">${esc(d.cwd)}</code></td></tr>` : ''}
+                </table></div>
+                <div class="mt-3"><label class="text-muted small mb-1 d-block">Comando completo:</label>
+                <pre class="bg-black text-light p-3 rounded small mb-0" style="white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto">${esc(d.cmdline || d.command)}</pre></div>`;
+        } catch (e) {
+            document.getElementById('processDetailBody').innerHTML = `<div class="alert alert-danger mb-0">Error: ${esc(e.message)}</div>`;
+        }
+    };
+
+    const csrfToken = document.querySelector('input[name=_csrf_token]')?.value || '';
+    window.killProcess = async function(pid, signal) {
+        if (!pid || pid < 2) return;
+        const signalLabels = { TERM: 'SIGTERM (graceful)', KILL: 'SIGKILL (forzar)', HUP: 'SIGHUP (reload)' };
+        const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+        const confirmed = await S.fire({
+            title: 'Confirmar Kill',
+            html: `<p>Enviar <b>${signalLabels[signal]||signal}</b> al proceso <code>${pid}</code>?</p>
+                   ${signal === 'KILL' ? '<p class="text-danger"><small>SIGKILL termina el proceso inmediatamente.</small></p>' : ''}`,
+            icon: 'warning', showCancelButton: true,
+            confirmButtonText: `Enviar ${signal}`,
+            confirmButtonColor: signal === 'KILL' ? '#dc3545' : '#ffc107',
+            cancelButtonText: 'Cancelar',
+        });
+        if (!confirmed.isConfirmed) return;
+        try {
+            const form = new FormData();
+            form.append('pid', pid); form.append('signal', signal); form.append('_csrf_token', csrfToken);
+            const resp = await fetch('/dashboard/process-kill', { method: 'POST', body: form });
+            const data = await resp.json();
+            S.fire({ title: data.killed ? 'Terminado' : 'Signal Enviada', text: data.message || (data.ok ? 'OK' : data.error), icon: data.killed ? 'success' : (data.ok ? 'info' : 'error'), timer: 3000 });
+            if (data.killed && detailModal) detailModal.hide();
+            fetchProcesses();
+        } catch (e) { S.fire({ title: 'Error', text: e.message, icon: 'error' }); }
+    };
+})();
+
+// ─── Network Detail Modal ──────────────────────────────────
+window.openNetworkModal = async function(iface) {
+    const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+    S.fire({ title: iface, html: '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Cargando...</div>', showConfirmButton: false, showCloseButton: true, width: 550 });
+
+    try {
+        const resp = await fetch('/monitor/api/network-detail?iface=' + encodeURIComponent(iface));
+        const d = await resp.json();
+        if (!d.ok) { S.fire({ icon: 'error', title: 'Error', text: d.error }); return; }
+
+        const fmtB = (b) => {
+            if (b >= 1099511627776) return (b/1099511627776).toFixed(2) + ' TB';
+            if (b >= 1073741824) return (b/1073741824).toFixed(2) + ' GB';
+            if (b >= 1048576) return (b/1048576).toFixed(1) + ' MB';
+            if (b >= 1024) return (b/1024).toFixed(1) + ' KB';
+            return b + ' B';
+        };
+        const fmtRate = (b) => fmtB(b) + '/s';
+
+        const stateColor = d.state === 'up' ? '#22c55e' : '#ef4444';
+        const errTotal = d.rx_errors + d.tx_errors + d.rx_dropped + d.tx_dropped;
+        const errBadge = errTotal > 0 ? `<span class="badge bg-danger ms-1">${errTotal} errors</span>` : '<span class="badge bg-success ms-1">clean</span>';
+
+        S.fire({
+            title: `<i class="bi bi-hdd-network me-2"></i>${iface}`,
+            html: `<div class="text-start">
+                <div class="d-flex gap-3 mb-3 justify-content-center">
+                    <div class="text-center"><div style="font-size:1.4rem;color:#22c55e;"><i class="bi bi-arrow-down"></i> ${fmtRate(d.rx_rate)}</div><small class="text-muted">Download</small></div>
+                    <div class="text-center"><div style="font-size:1.4rem;color:#38bdf8;"><i class="bi bi-arrow-up"></i> ${fmtRate(d.tx_rate)}</div><small class="text-muted">Upload</small></div>
+                </div>
+                <table class="table table-sm table-dark mb-0">
+                    <tr><td class="text-muted ps-2">Estado</td><td><span style="color:${stateColor}"><i class="bi bi-circle-fill me-1" style="font-size:0.5rem;"></i>${d.state}</span></td></tr>
+                    <tr><td class="text-muted ps-2">IPs</td><td>${d.ips.map(ip => '<code>'+ip+'</code>').join('<br>') || 'N/A'}</td></tr>
+                    <tr><td class="text-muted ps-2">Speed / MTU</td><td>${d.speed} / ${d.mtu}</td></tr>
+                    <tr><td class="text-muted ps-2">Duplex</td><td>${d.duplex}</td></tr>
+                    <tr><td class="text-muted ps-2 border-top border-secondary pt-2" colspan="2"><strong>Totales desde boot</strong></td></tr>
+                    <tr><td class="text-muted ps-2">RX</td><td>${fmtB(d.rx_bytes)} (${d.rx_packets.toLocaleString()} pkts)</td></tr>
+                    <tr><td class="text-muted ps-2">TX</td><td>${fmtB(d.tx_bytes)} (${d.tx_packets.toLocaleString()} pkts)</td></tr>
+                    <tr><td class="text-muted ps-2">Errores / Drops</td><td>RX: ${d.rx_errors}/${d.rx_dropped} — TX: ${d.tx_errors}/${d.tx_dropped} ${errBadge}</td></tr>
+                </table>
+            </div>`,
+            showConfirmButton: false,
+            showCloseButton: true,
+            width: 550,
+        });
+    } catch (e) { S.fire({ icon: 'error', title: 'Error', text: e.message }); }
+};
+
+// ─── Disk Detail Modal ─────────────────────────────────────
+window.openDiskModal = async function(mount) {
+    const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+    S.fire({ title: mount, html: '<div class="text-center py-3"><div class="spinner-border spinner-border-sm"></div> Analizando disco...</div>', showConfirmButton: false, showCloseButton: true, width: 600 });
+
+    try {
+        const resp = await fetch('/monitor/api/disk-detail?mount=' + encodeURIComponent(mount));
+        const d = await resp.json();
+        if (!d.ok) { S.fire({ icon: 'error', title: 'Error', text: d.error }); return; }
+
+        const fmtB = (b) => {
+            if (b >= 1099511627776) return (b/1099511627776).toFixed(1) + ' TB';
+            if (b >= 1073741824) return (b/1073741824).toFixed(1) + ' GB';
+            if (b >= 1048576) return (b/1048576).toFixed(1) + ' MB';
+            return (b/1024).toFixed(0) + ' KB';
+        };
+
+        const pctColor = d.percent >= 90 ? '#ef4444' : (d.percent >= 75 ? '#fbbf24' : '#22c55e');
+
+        let topHtml = '';
+        if (d.top_dirs && d.top_dirs.length > 0) {
+            const maxMb = d.top_dirs[0].mb || 1;
+            topHtml = d.top_dirs.map(t => {
+                const w = Math.max(2, Math.round(t.mb / maxMb * 100));
+                const label = t.mb >= 1024 ? (t.mb/1024).toFixed(1)+' GB' : t.mb+' MB';
+                const shortPath = t.path.replace(mount === '/' ? '' : mount, '').replace(/^\//, '') || '/';
+                return `<div class="mb-1 d-flex align-items-center gap-2">
+                    <code class="small" style="min-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${t.path}">${shortPath}</code>
+                    <div class="flex-grow-1"><div style="height:6px;border-radius:3px;background:#1e293b;"><div style="width:${w}%;height:100%;border-radius:3px;background:#38bdf8;"></div></div></div>
+                    <small class="text-muted" style="min-width:55px;text-align:right;">${label}</small>
+                </div>`;
+            }).join('');
+        }
+
+        const inodeHtml = d.inodes && d.inodes.total ? `<tr><td class="text-muted ps-2">Inodes</td><td>${d.inodes.used.toLocaleString()} / ${d.inodes.total.toLocaleString()} (${d.inodes.percent})</td></tr>` : '';
+
+        S.fire({
+            title: `<i class="bi bi-hdd me-2"></i>${mount}`,
+            html: `<div class="text-start">
+                <div class="text-center mb-3">
+                    <div style="font-size:2rem;color:${pctColor};">${d.percent}%</div>
+                    <div class="progress mx-auto" style="width:80%;height:8px;"><div class="progress-bar" style="width:${d.percent}%;background:${pctColor};"></div></div>
+                    <small class="text-muted">${fmtB(d.used)} / ${fmtB(d.size)} (${fmtB(d.free)} libre)</small>
+                </div>
+                <table class="table table-sm table-dark mb-3">
+                    <tr><td class="text-muted ps-2">Dispositivo</td><td><code>${d.device}</code></td></tr>
+                    <tr><td class="text-muted ps-2">Filesystem</td><td>${d.fstype}</td></tr>
+                    ${inodeHtml}
+                </table>
+                ${topHtml ? '<div class="mb-1"><strong class="small text-muted">Top directorios:</strong></div>' + topHtml : ''}
+            </div>`,
+            showConfirmButton: false,
+            showCloseButton: true,
+            width: 600,
+        });
+    } catch (e) { S.fire({ icon: 'error', title: 'Error', text: e.message }); }
+};
 </script>

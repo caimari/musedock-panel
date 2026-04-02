@@ -107,18 +107,38 @@ foreach ($interfaces as $iface) {
     $current["{$iface}_tx"] = $tx;
 }
 
-// ─── CPU metric ──────────────────────────────────────────────
-$load = sys_getloadavg();
+// ─── CPU metric (real usage from /proc/stat, 500ms sample) ───
 $cores = (int) trim(shell_exec('nproc') ?: '1');
-$cpuPercent = min(100, round(($load[0] / $cores) * 100, 2));
+$load = sys_getloadavg();
+$cpuPercent = min(100, round(($load[0] / $cores) * 100, 2)); // fallback
+$stat1 = @file_get_contents('/proc/stat');
+if ($stat1 && preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $stat1, $m1)) {
+    usleep(500000); // 500ms sample for better accuracy in background collector
+    $stat2 = @file_get_contents('/proc/stat');
+    if ($stat2 && preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $stat2, $m2)) {
+        $idle1 = (int)$m1[4] + (int)$m1[5];
+        $idle2 = (int)$m2[4] + (int)$m2[5];
+        $total1 = array_sum(array_slice($m1, 1));
+        $total2 = array_sum(array_slice($m2, 1));
+        $totalDelta = $total2 - $total1;
+        $idleDelta = $idle2 - $idle1;
+        if ($totalDelta > 0) {
+            $cpuPercent = round((1 - $idleDelta / $totalDelta) * 100, 2);
+        }
+    }
+}
 $inserts[] = [$hostname, 'cpu_percent', $cpuPercent];
 logMsg("  CPU: {$cpuPercent}% (load {$load[0]}, {$cores} cores)");
 
-// ─── RAM metric ──────────────────────────────────────────────
-$free = shell_exec('free -b');
-preg_match('/Mem:\s+(\d+)\s+(\d+)/', $free, $m);
-$totalMem = (int)($m[1] ?? 0);
-$usedMem = (int)($m[2] ?? 0);
+// ─── RAM metric (MemAvailable = truly free for apps) ─────────
+$meminfo = @file_get_contents('/proc/meminfo');
+$totalMem = 0;
+$availMem = 0;
+if ($meminfo) {
+    if (preg_match('/MemTotal:\s+(\d+)/', $meminfo, $mt)) $totalMem = (int)$mt[1] * 1024;
+    if (preg_match('/MemAvailable:\s+(\d+)/', $meminfo, $ma)) $availMem = (int)$ma[1] * 1024;
+}
+$usedMem = $totalMem - $availMem;
 $ramPercent = $totalMem > 0 ? round(($usedMem / $totalMem) * 100, 2) : 0;
 $inserts[] = [$hostname, 'ram_percent', $ramPercent];
 logMsg("  RAM: {$ramPercent}%");
@@ -663,7 +683,7 @@ try {
     $accounts = Database::fetchAll("SELECT id, home_dir FROM hosting_accounts WHERE status = 'active'");
     $homeDirs = array_filter(array_column($accounts, 'home_dir'), fn($d) => is_dir($d));
     if (!empty($homeDirs)) {
-        $cmd = 'du -sm ' . implode(' ', array_map('escapeshellarg', $homeDirs)) . ' 2>/dev/null';
+        $cmd = '/opt/musedock-panel/bin/du-throttled -sm ' . implode(' ', array_map('escapeshellarg', $homeDirs)) . ' 2>/dev/null';
         $output = shell_exec($cmd) ?: '';
         $diskMap = [];
         foreach (explode("\n", trim($output)) as $line) {

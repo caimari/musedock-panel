@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.36');
+define('PANEL_VERSION', '1.0.38');
 
 
 
@@ -122,6 +122,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/monitor', 'MonitorController@index');
 \MuseDockPanel\Router::get('/monitor/api/metrics', 'MonitorController@apiMetrics');
 \MuseDockPanel\Router::get('/monitor/api/status', 'MonitorController@apiStatus');
+\MuseDockPanel\Router::get('/monitor/api/realtime', 'MonitorController@apiRealtime');
+\MuseDockPanel\Router::get('/monitor/api/network-detail', 'MonitorController@apiNetworkDetail');
+\MuseDockPanel\Router::get('/monitor/api/disk-detail', 'MonitorController@apiDiskDetail');
 \MuseDockPanel\Router::get('/monitor/api/alerts', 'MonitorController@apiAlerts');
 \MuseDockPanel\Router::post('/monitor/api/alerts/ack', 'MonitorController@apiAckAlert');
 \MuseDockPanel\Router::post('/monitor/api/alerts/clear', 'MonitorController@apiClearAlerts');
@@ -138,6 +141,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/accounts/import', 'AccountController@importList');
 \MuseDockPanel\Router::post('/accounts/import', 'AccountController@importStore');
 \MuseDockPanel\Router::get('/accounts/{id}', 'AccountController@show');
+\MuseDockPanel\Router::get('/accounts/{id}/bandwidth', 'AccountController@apiBandwidth');
 \MuseDockPanel\Router::get('/accounts/{id}/edit', 'AccountController@edit');
 \MuseDockPanel\Router::post('/accounts/{id}/update', 'AccountController@update');
 \MuseDockPanel\Router::post('/accounts/{id}/delete', 'AccountController@delete');

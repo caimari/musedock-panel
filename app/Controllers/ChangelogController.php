@@ -20,6 +20,108 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.38',
+                'date' => '2026-04-02',
+                'badge' => 'success',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Ancho de banda por hosting — Parseo automatico de logs Caddy cada 10 min, acumulado por cuenta y dia en base de datos. Los datos persisten aunque se borren/roten los logs',
+                            'Ancho de banda por subdominio — Trafico individual por subdominio (api.factubase.com, portal.factubase.com, etc.) visible en el acordeon del listado',
+                            'Columna BW en listado de hostings — Consumo del mes actual de cada hosting',
+                            'Grafica de ancho de banda en Account Details — Chart.js con barras de trafico + linea de requests, selector 30d / 12m / Anual',
+                            'Bandwidth en Account Details — Fila con bytes y requests del mes junto a Disk Usage',
+                            'Totales globales en listado — Suma total de disco y ancho de banda de todos los hostings en la barra superior',
+                            'Columnas ordenables — Click en Domain, Customer, User, PHP, Disk, BW, Status, Created para ordenar ascendente/descendente. Los subdominios se mueven con su dominio padre',
+                            'Dashboard cards en tiempo real — CPU, RAM y Disco se actualizan cada 3s via /monitor/api/realtime',
+                            'Dashboard modal de disco — Click en la card de Disk abre detalle con filesystem, inodes, top 10 directorios',
+                        ],
+                        'en' => [
+                            'Bandwidth per hosting — Automatic Caddy log parsing every 10 min, aggregated per account per day in database. Data persists even if logs are rotated/deleted',
+                            'Bandwidth per subdomain — Individual traffic per subdomain visible in the accordion listing',
+                            'BW column in hosting list — Current month consumption per hosting',
+                            'Bandwidth chart in Account Details — Chart.js with traffic bars + request line, 30d / 12m / Yearly selector',
+                            'Bandwidth in Account Details — Row with bytes and requests next to Disk Usage',
+                            'Global totals in listing — Total disk and bandwidth sum across all hostings in the top bar',
+                            'Sortable columns — Click Domain, Customer, User, PHP, Disk, BW, Status, Created to sort asc/desc. Subdomain rows follow their parent',
+                            'Dashboard real-time cards — CPU, RAM and Disk update every 3s via /monitor/api/realtime',
+                            'Dashboard disk modal — Click Disk card for detail with filesystem, inodes, top 10 directories',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'du-throttled — Wrapper que limita du -sm al 50% de un core via SIGSTOP/SIGCONT (nunca supera ~50% CPU)',
+                        ],
+                        'en' => [
+                            'du-throttled — Wrapper that limits du -sm to 50% of one core via SIGSTOP/SIGCONT (never exceeds ~50% CPU)',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.37',
+                'date' => '2026-04-02',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Subdominios — Pagina de edicion individual con Document Root y ajustes PHP independientes (hereda del dominio principal por defecto, personalizable con .user.ini)',
+                            'Subdominios — Boton suspender/activar con pagina de mantenimiento Caddy. Solo se puede eliminar un subdominio estando suspendido',
+                            'Subdominios — Acordeon en el listado de Hosting Accounts: clic en el badge de subdominios despliega las filas inline',
+                            'Cloudflare DNS — Seleccion masiva con checkboxes: eliminar, activar/desactivar proxy y edicion masiva (cambiar tipo, contenido, TTL, proxy) en multiples registros',
+                            'Cloudflare DNS — Modal de confirmacion al hacer toggle de proxy (nube naranja) tanto en la pagina DNS como en la vista de cuenta',
+                            'Cloudflare DNS — Editar y crear registros ahora en modal SweetAlert en vez de formulario inline',
+                            'Monitor — Cards de CPU y RAM ahora abren el modal de procesos (igual que en Dashboard)',
+                            'Monitor — Cards de red ahora abren modal con detalle: velocidad real-time, IPs, MTU, totales desde boot, errores/drops',
+                            'Monitor — Cards de disco ahora abren modal con detalle: uso, filesystem, inodes, top 10 directorios mas grandes',
+                            'Monitor — Todas las cards (CPU, RAM, red) se actualizan en tiempo real cada 3s con datos de /proc/stat y /proc/meminfo',
+                        ],
+                        'en' => [
+                            'Subdomains — Individual edit page with independent Document Root and PHP settings (inherits from parent by default, customizable via .user.ini)',
+                            'Subdomains — Suspend/activate button with Caddy maintenance page. Deletion only allowed when suspended',
+                            'Subdomains — Accordion in Hosting Accounts list: click subdomain badge to expand inline rows',
+                            'Cloudflare DNS — Bulk selection with checkboxes: delete, toggle proxy and bulk edit (change type, content, TTL, proxy) on multiple records',
+                            'Cloudflare DNS — Confirmation modal when toggling proxy (orange cloud) in both DNS page and account view',
+                            'Cloudflare DNS — Edit and create records now in SweetAlert modal instead of inline form',
+                            'Monitor — CPU and RAM cards now open process modal (same as Dashboard)',
+                            'Monitor — Network cards now open detail modal: real-time speed, IPs, MTU, totals since boot, errors/drops',
+                            'Monitor — Disk cards now open detail modal: usage, filesystem, inodes, top 10 largest directories',
+                            'Monitor — All cards (CPU, RAM, network) update in real-time every 3s from /proc/stat and /proc/meminfo',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'CPU real — Dashboard, Monitor y collector ahora miden CPU real desde /proc/stat (sample 500ms) en vez de aproximar con load average',
+                            'RAM real — Se usa MemTotal - MemAvailable de /proc/meminfo (uso real de apps) en vez del campo "used" de free que incluye cache del kernel',
+                            'du -sm con nice/ionice — El calculo de disco de todos los hostings ahora corre con prioridad minima (nice -n 19, ionice idle) para no afectar al rendimiento',
+                            'Listado de cuentas — Icono de abrir sitio junto al nombre del dominio, eliminado boton duplicado en acciones',
+                            'Tabla de subdominios — Document root con text-overflow ellipsis y table-layout fixed para que no desborde la card',
+                            'Deteccion de estado WireGuard — Las interfaces virtuales (wg0) ahora muestran "up" correctamente en vez de "unknown"',
+                        ],
+                        'en' => [
+                            'Real CPU — Dashboard, Monitor and collector now measure real CPU from /proc/stat (500ms sample) instead of approximating with load average',
+                            'Real RAM — Uses MemTotal - MemAvailable from /proc/meminfo (real app usage) instead of "used" from free which includes kernel cache',
+                            'du -sm with nice/ionice — Disk usage calculation for all hostings now runs at minimum priority (nice -n 19, ionice idle) to avoid performance impact',
+                            'Account list — Open site icon next to domain name, removed duplicate button in actions column',
+                            'Subdomains table — Document root with text-overflow ellipsis and table-layout fixed to prevent card overflow',
+                            'WireGuard state detection — Virtual interfaces (wg0) now correctly show "up" instead of "unknown"',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Caddy route ID collision — Los subdominios ya no colisionan con la cuenta principal. IDs ahora basados en dominio (hosting-{domain}) en vez de usuario (hosting-{username}). Migradas todas las rutas existentes',
+                            'Cloudflare zona duplicada — MuseDock CMS ya no crea zonas en Cuenta 2 si el dominio ya existe en Cuenta 1',
+                            'Editar registro DNS — El boton de editar (lapiz) ya no falla con registros que contienen comillas (TXT, DKIM)',
+                        ],
+                        'en' => [
+                            'Caddy route ID collision — Subdomains no longer collide with parent account. IDs now domain-based (hosting-{domain}) instead of user-based (hosting-{username}). All existing routes migrated',
+                            'Cloudflare duplicate zone — MuseDock CMS no longer creates zones in Account 2 if domain already exists in Account 1',
+                            'Edit DNS record — Edit button (pencil) no longer fails on records containing quotes (TXT, DKIM)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.36',
                 'date' => '2026-04-01',
                 'badge' => 'danger',

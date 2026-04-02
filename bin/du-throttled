@@ -1,0 +1,18 @@
+#!/bin/bash
+# du-throttled — Runs du with CPU throttling (50% of one core)
+# Usage: du-throttled [du arguments...]
+# Executes du in background and alternates SIGSTOP/SIGCONT every 10ms
+# to limit CPU usage to ~50% of a single core.
+
+nice -n 19 ionice -c3 du "$@" &
+DU_PID=$!
+
+# Throttle loop: 10ms run, 10ms pause ≈ 50% CPU
+while kill -0 $DU_PID 2>/dev/null; do
+    kill -STOP $DU_PID 2>/dev/null
+    sleep 0.01
+    kill -CONT $DU_PID 2>/dev/null
+    sleep 0.01
+done
+
+wait $DU_PID 2>/dev/null

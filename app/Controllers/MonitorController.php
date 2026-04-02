@@ -101,6 +101,225 @@ class MonitorController
     }
 
     /**
+     * GET /monitor/api/realtime — Real-time CPU, RAM and network stats (500ms sample).
+     * Used by monitor cards for instant readings instead of collector data.
+     */
+    public function apiRealtime(): void
+    {
+        header('Content-Type: application/json');
+
+        $cores = (int) trim(shell_exec('nproc') ?: '1');
+        $load = sys_getloadavg();
+
+        // --- CPU from /proc/stat (500ms sample) ---
+        $cpuPercent = 0;
+        $stat1 = @file_get_contents('/proc/stat');
+        if ($stat1 && preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $stat1, $m1)) {
+            // Read network counters BEFORE sleeping (so network delta = same 500ms)
+            $netBefore = [];
+            foreach (glob('/sys/class/net/*/statistics/rx_bytes') as $f) {
+                $iface = basename(dirname(dirname($f)));
+                if ($iface === 'lo') continue;
+                $netBefore[$iface] = [
+                    'rx' => (int) @file_get_contents("/sys/class/net/{$iface}/statistics/rx_bytes"),
+                    'tx' => (int) @file_get_contents("/sys/class/net/{$iface}/statistics/tx_bytes"),
+                ];
+            }
+
+            usleep(500000); // 500ms
+
+            $stat2 = @file_get_contents('/proc/stat');
+            if ($stat2 && preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $stat2, $m2)) {
+                $idle1 = (int)$m1[4] + (int)$m1[5];
+                $idle2 = (int)$m2[4] + (int)$m2[5];
+                $total1 = array_sum(array_slice($m1, 1));
+                $total2 = array_sum(array_slice($m2, 1));
+                $td = $total2 - $total1;
+                if ($td > 0) $cpuPercent = round((1 - ($idle2 - $idle1) / $td) * 100, 1);
+            }
+
+            // Read network counters AFTER sleep
+            $netAfter = [];
+            foreach ($netBefore as $iface => $_) {
+                $netAfter[$iface] = [
+                    'rx' => (int) @file_get_contents("/sys/class/net/{$iface}/statistics/rx_bytes"),
+                    'tx' => (int) @file_get_contents("/sys/class/net/{$iface}/statistics/tx_bytes"),
+                ];
+            }
+        }
+
+        // --- RAM from /proc/meminfo ---
+        $meminfo = @file_get_contents('/proc/meminfo');
+        $totalMem = 0; $availMem = 0;
+        if ($meminfo) {
+            if (preg_match('/MemTotal:\s+(\d+)/', $meminfo, $mt)) $totalMem = (int)$mt[1] * 1024;
+            if (preg_match('/MemAvailable:\s+(\d+)/', $meminfo, $ma)) $availMem = (int)$ma[1] * 1024;
+        }
+        $usedMem = $totalMem - $availMem;
+
+        // --- Network rates (bytes/sec) ---
+        $net = [];
+        if (!empty($netBefore)) {
+            foreach ($netBefore as $iface => $before) {
+                $after = $netAfter[$iface] ?? $before;
+                $rxDelta = max(0, $after['rx'] - $before['rx']);
+                $txDelta = max(0, $after['tx'] - $before['tx']);
+                $net[$iface] = [
+                    'rx' => round($rxDelta / 0.5), // bytes per second
+                    'tx' => round($txDelta / 0.5),
+                ];
+            }
+        }
+
+        echo json_encode([
+            'ok' => true,
+            'cpu_percent' => $cpuPercent,
+            'cpu_load' => round($load[0], 2),
+            'cores' => $cores,
+            'mem_percent' => $totalMem > 0 ? round(($usedMem / $totalMem) * 100, 1) : 0,
+            'mem_used_gb' => round($usedMem / 1073741824, 1),
+            'mem_total_gb' => round($totalMem / 1073741824, 1),
+            'net' => $net,
+        ]);
+        exit;
+    }
+
+    /**
+     * GET /monitor/api/network-detail — Detailed info for a network interface.
+     */
+    public function apiNetworkDetail(): void
+    {
+        header('Content-Type: application/json');
+        $iface = preg_replace('/[^a-z0-9_.-]/i', '', $_GET['iface'] ?? '');
+        if (!$iface || !is_dir("/sys/class/net/{$iface}")) {
+            echo json_encode(['ok' => false, 'error' => 'Interface not found']);
+            exit;
+        }
+
+        $read = fn($f) => trim((string)@file_get_contents("/sys/class/net/{$iface}/{$f}"));
+
+        // Basic info
+        $speed = $read('speed'); // Mbps (-1 or empty for virtual)
+        $mtu = $read('mtu');
+        $operstate = $read('operstate');
+        $duplex = $read('duplex');
+        $carrier = $read('carrier');
+
+        // WireGuard/virtual interfaces report "unknown" but are up if they have an IP and flags UP
+        if ($operstate === 'unknown') {
+            $flags = $read('flags');
+            // flags is hex: 0x1 = UP, check if interface has IFF_UP
+            if ($flags && (hexdec($flags) & 0x1)) {
+                $operstate = 'up';
+            }
+        }
+
+        // IP addresses
+        $ipOutput = trim((string)shell_exec("ip -o addr show {$iface} 2>/dev/null"));
+        $ips = [];
+        foreach (explode("\n", $ipOutput) as $line) {
+            if (preg_match('/inet6?\s+(\S+)/', $line, $m)) $ips[] = $m[1];
+        }
+
+        // Traffic totals
+        $rxBytes = (int)$read('statistics/rx_bytes');
+        $txBytes = (int)$read('statistics/tx_bytes');
+        $rxPackets = (int)$read('statistics/rx_packets');
+        $txPackets = (int)$read('statistics/tx_packets');
+        $rxErrors = (int)$read('statistics/rx_errors');
+        $txErrors = (int)$read('statistics/tx_errors');
+        $rxDropped = (int)$read('statistics/rx_dropped');
+        $txDropped = (int)$read('statistics/tx_dropped');
+
+        // Real-time rate (500ms sample)
+        $rxBefore = $rxBytes;
+        $txBefore = $txBytes;
+        usleep(500000);
+        $rxAfter = (int)@file_get_contents("/sys/class/net/{$iface}/statistics/rx_bytes");
+        $txAfter = (int)@file_get_contents("/sys/class/net/{$iface}/statistics/tx_bytes");
+        $rxRate = round(max(0, $rxAfter - $rxBefore) / 0.5);
+        $txRate = round(max(0, $txAfter - $txBefore) / 0.5);
+
+        echo json_encode([
+            'ok' => true,
+            'iface' => $iface,
+            'state' => $operstate,
+            'speed' => is_numeric($speed) && (int)$speed > 0 ? (int)$speed . ' Mbps' : 'N/A',
+            'mtu' => $mtu,
+            'duplex' => $duplex ?: 'N/A',
+            'ips' => $ips,
+            'rx_bytes' => $rxBytes,
+            'tx_bytes' => $txBytes,
+            'rx_packets' => $rxPackets,
+            'tx_packets' => $txPackets,
+            'rx_errors' => $rxErrors,
+            'tx_errors' => $txErrors,
+            'rx_dropped' => $rxDropped,
+            'tx_dropped' => $txDropped,
+            'rx_rate' => $rxRate,
+            'tx_rate' => $txRate,
+        ]);
+        exit;
+    }
+
+    /**
+     * GET /monitor/api/disk-detail — Detailed info for a mount point.
+     */
+    public function apiDiskDetail(): void
+    {
+        header('Content-Type: application/json');
+        $mount = trim($_GET['mount'] ?? '/');
+
+        // Validate mount exists
+        $disks = MonitorService::getDiskUsage();
+        $disk = null;
+        foreach ($disks as $d) {
+            if ($d['mount'] === $mount) { $disk = $d; break; }
+        }
+        if (!$disk) {
+            echo json_encode(['ok' => false, 'error' => 'Mount point not found']);
+            exit;
+        }
+
+        // Inode usage
+        $inodeOutput = trim((string)shell_exec(sprintf('df -i %s 2>/dev/null | tail -1', escapeshellarg($mount))));
+        $inodes = [];
+        if ($inodeOutput && preg_match('/\S+\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)/', $inodeOutput, $im)) {
+            $inodes = ['total' => (int)$im[1], 'used' => (int)$im[2], 'free' => (int)$im[3], 'percent' => $im[4]];
+        }
+
+        // Filesystem type
+        $fstype = trim((string)shell_exec(sprintf("df -T %s 2>/dev/null | tail -1 | awk '{print $2}'", escapeshellarg($mount))));
+
+        // Top 10 largest directories (only first level, quick)
+        $topDirs = [];
+        $duOutput = trim((string)shell_exec(sprintf('nice -n 19 du -sm --max-depth=1 %s 2>/dev/null | sort -rn | head -11', escapeshellarg($mount))));
+        if ($duOutput) {
+            foreach (explode("\n", $duOutput) as $line) {
+                if (preg_match('/^(\d+)\s+(.+)$/', trim($line), $dm)) {
+                    $path = $dm[2];
+                    if ($path === $mount) continue; // skip total
+                    $topDirs[] = ['path' => $path, 'mb' => (int)$dm[1]];
+                }
+            }
+        }
+
+        echo json_encode([
+            'ok' => true,
+            'device' => $disk['device'],
+            'mount' => $disk['mount'],
+            'fstype' => $fstype,
+            'size' => $disk['size'],
+            'used' => $disk['used'],
+            'free' => $disk['size'] - $disk['used'],
+            'percent' => $disk['percent'],
+            'inodes' => $inodes,
+            'top_dirs' => array_slice($topDirs, 0, 10),
+        ]);
+        exit;
+    }
+
+    /**
      * GET /monitor/api/alerts — Recent alerts JSON
      */
     public function apiAlerts(): void

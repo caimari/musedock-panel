@@ -691,7 +691,7 @@ class ClusterService
                         }
                         // Recalculate disk usage on this server
                         if ($homeDir && is_dir($homeDir)) {
-                            $duOutput = trim((string)shell_exec(sprintf('du -sm %s 2>/dev/null | cut -f1', escapeshellarg($homeDir))));
+                            $duOutput = trim((string)shell_exec(sprintf('/opt/musedock-panel/bin/du-throttled -sm %s 2>/dev/null | cut -f1', escapeshellarg($homeDir))));
                             if (is_numeric($duOutput)) {
                                 $updateFields['disk_used_mb'] = (int)$duOutput;
                             }
