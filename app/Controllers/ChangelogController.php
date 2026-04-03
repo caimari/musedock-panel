@@ -20,9 +20,40 @@ class ChangelogController
     {
         return [
             [
-                'version' => '1.0.39',
+                'version' => '1.0.40',
                 'date' => '2026-04-03',
                 'badge' => 'danger',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Migracion automatica de Nginx/Apache a Caddy — El instalador parsea sites-enabled, extrae dominio, document root, PHP y usuario, y crea las rutas Caddy automaticamente',
+                            'Migracion de Apache — Mismo flujo que Nginx: parsea VirtualHosts, extrae ServerName, DocumentRoot y socket FPM',
+                            'Import crea ruta Caddy automaticamente — Al importar un hosting sin ruta Caddy, se crea via API sin intervencion manual',
+                            'Descubrimiento de sitios desde rutas Caddy — /accounts/import ahora detecta sitios migrados que estan fuera de /var/www/vhosts/ escaneando las rutas activas de Caddy',
+                        ],
+                        'en' => [
+                            'Automatic Nginx/Apache to Caddy migration — Installer parses sites-enabled, extracts domain, document root, PHP and user, and creates Caddy routes automatically',
+                            'Apache migration — Same flow as Nginx: parses VirtualHosts, extracts ServerName, DocumentRoot and FPM socket',
+                            'Import auto-creates Caddy route — When importing a hosting without a Caddy route, it is created via API without manual intervention',
+                            'Site discovery from Caddy routes — /accounts/import now detects migrated sites outside /var/www/vhosts/ by scanning active Caddy routes',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Import preserva rutas originales — Respeta el document root original del sitio (httpdocs, public, html, o cualquier ruta personalizada) sin mover archivos',
+                            'UI de import muestra origen — Badge "desde Caddy" para sitios descubiertos via rutas Caddy vs directorio vhosts',
+                        ],
+                        'en' => [
+                            'Import preserves original paths — Respects the original document root (httpdocs, public, html, or any custom path) without moving files',
+                            'Import UI shows source — "from Caddy" badge for sites discovered via Caddy routes vs vhosts directory',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.39',
+                'date' => '2026-04-03',
+                'badge' => 'success',
                 'changes' => [
                     'new' => [
                         'es' => [

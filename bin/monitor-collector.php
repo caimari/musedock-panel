@@ -16,7 +16,7 @@ define('PANEL_VERSION', '1.0.4');
 
 // ─── Early CPU sample (before ANY work, captures real system state) ──
 $cpuStat1 = @file_get_contents('/proc/stat');
-usleep(500000); // 500ms clean window — nothing else running in this process
+usleep(500000); // 500ms measurement window
 $cpuStat2 = @file_get_contents('/proc/stat');
 
 // Autoloader

@@ -174,6 +174,97 @@ CRONEOF
     ok "Monitor cron installed"
 fi
 
+# Install/update bandwidth collector cron
+cat > /etc/cron.d/musedock-bandwidth << CRONEOF
+# MuseDock Panel — Bandwidth + Web Stats collector (staggered: +20s, every 10 min)
+*/10 * * * * root sleep 20 && /usr/bin/php ${PANEL_DIR}/bin/bandwidth-collector.php >> ${PANEL_DIR}/storage/logs/bandwidth-collector.log 2>&1
+CRONEOF
+chmod 644 /etc/cron.d/musedock-bandwidth
+
+# Stagger crons to avoid thundering herd (all starting at :00)
+# Monitor stays at :00/:30, others offset by 5s each
+CRON_UPDATED=false
+
+# Cluster worker: +5s
+if ! grep -q 'sleep 5' /etc/cron.d/musedock-cluster 2>/dev/null; then
+    cat > /etc/cron.d/musedock-cluster << CRONEOF
+# MuseDock Panel — Cluster worker (staggered: +5s)
+* * * * * root sleep 5 && /usr/bin/php ${PANEL_DIR}/bin/cluster-worker.php >> ${PANEL_DIR}/storage/logs/cluster-worker.log 2>&1
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-cluster
+    CRON_UPDATED=true
+fi
+
+# Failover worker: +10s
+if ! grep -q 'sleep 10' /etc/cron.d/musedock-failover 2>/dev/null; then
+    cat > /etc/cron.d/musedock-failover << CRONEOF
+# MuseDock Panel — Failover worker (staggered: +10s)
+* * * * * root sleep 10 && /usr/bin/php ${PANEL_DIR}/bin/failover-worker.php >> ${PANEL_DIR}/storage/logs/failover-worker.log 2>&1
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-failover
+    CRON_UPDATED=true
+fi
+
+# Filesync worker: +15s
+if ! grep -q 'sleep 15' /etc/cron.d/musedock-filesync 2>/dev/null; then
+    cat > /etc/cron.d/musedock-filesync << CRONEOF
+# MuseDock Panel — File sync worker (staggered: +15s)
+* * * * * root sleep 15 && /usr/bin/php ${PANEL_DIR}/bin/filesync-worker.php >> ${PANEL_DIR}/storage/logs/filesync-worker.log 2>&1
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-filesync
+    CRON_UPDATED=true
+fi
+
+if [ "$CRON_UPDATED" = true ]; then
+    systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
+    ok "Crons staggered to avoid CPU spikes"
+fi
+
+# Stagger CMS crons in user crontab (verify-caddy-status and cron-plugins run at same */15)
+CMS_DIR="/var/www/vhosts/musedock.com/httpdocs"
+if [ -d "$CMS_DIR" ]; then
+    CMS_USER=$(stat -c '%U' "$CMS_DIR/public/index.php" 2>/dev/null)
+    if [ -n "$CMS_USER" ] && crontab -u "$CMS_USER" -l >/dev/null 2>&1; then
+        CURRENT_CRONTAB=$(crontab -u "$CMS_USER" -l 2>/dev/null)
+        NEEDS_UPDATE=false
+
+        # verify-caddy-status: */15 -> 3,18,33,48 (offset +3 min)
+        if echo "$CURRENT_CRONTAB" | grep -q '^\*/15.*verify-caddy-status'; then
+            CURRENT_CRONTAB=$(echo "$CURRENT_CRONTAB" | sed 's|^\*/15\(.*verify-caddy-status\)|3,18,33,48\1|')
+            NEEDS_UPDATE=true
+        fi
+
+        # cron-plugins: */15 -> 8,23,38,53 (offset +8 min)
+        if echo "$CURRENT_CRONTAB" | grep -q '^\*/15.*cron-plugins'; then
+            CURRENT_CRONTAB=$(echo "$CURRENT_CRONTAB" | sed 's|^\*/15\(.*cron-plugins\)|8,23,38,53\1|')
+            NEEDS_UPDATE=true
+        fi
+
+        # cleanup-expired-cloudflare-zones: 0 -> 12 (offset to :12 each hour)
+        if echo "$CURRENT_CRONTAB" | grep -q '^0 \*.*cleanup-expired-cloudflare'; then
+            CURRENT_CRONTAB=$(echo "$CURRENT_CRONTAB" | sed 's|^0 \*\(.*cleanup-expired-cloudflare\)|12 *\1|')
+            NEEDS_UPDATE=true
+        fi
+
+        if [ "$NEEDS_UPDATE" = true ]; then
+            echo "$CURRENT_CRONTAB" | crontab -u "$CMS_USER" -
+            ok "CMS crons staggered for user $CMS_USER"
+        fi
+    fi
+fi
+
+# Stagger hourly panel backup to avoid collision with monitor at :00
+if grep -q '^0 \* \* \* \* postgres pg_dump' /etc/cron.d/musedock-backup 2>/dev/null; then
+    cat > /etc/cron.d/musedock-backup << CRONEOF
+# MuseDock Panel — Hourly panel DB backup (at :02 to avoid cron storm at :00)
+2 * * * * postgres pg_dump -p 5433 musedock_panel | gzip > ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz 2>/dev/null
+# Cleanup backups older than 48 hours (at :07)
+7 * * * * root find ${PANEL_DIR}/storage/backups/ -name "panel-*.sql.gz" -mmin +2880 -delete 2>/dev/null
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-backup
+    ok "Panel backup cron staggered to :02/:07"
+fi
+
 # Install audit log purge cron if missing
 if [ ! -f /etc/cron.d/musedock-audit-purge ]; then
     cat > /etc/cron.d/musedock-audit-purge << CRONEOF

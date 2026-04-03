@@ -28,6 +28,9 @@
                             <div class="flex-grow-1">
                                 <h6 class="mb-1">
                                     <i class="bi bi-globe me-1" style="color:#38bdf8;"></i><?= View::e($o['domain']) ?>
+                                    <?php if (($o['source'] ?? 'vhosts') === 'caddy'): ?>
+                                        <span class="badge ms-1" style="background:rgba(168,85,247,0.15);color:#a855f7;font-size:0.65rem;">desde Caddy</span>
+                                    <?php endif; ?>
                                 </h6>
                                 <div class="row g-2 mt-1" style="font-size:0.85rem;">
                                     <div class="col-auto">
@@ -61,12 +64,14 @@
                                         <span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;font-size:0.7rem;">No encontrado</span>
                                     </div>
                                     <?php endif; ?>
-                                    <?php if ($o['caddy_route']): ?>
                                     <div class="col-auto">
                                         <span class="text-muted">Caddy:</span>
-                                        <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;font-size:0.7rem;"><?= View::e($o['caddy_route']) ?></span>
+                                        <?php if ($o['caddy_route']): ?>
+                                            <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;font-size:0.7rem;"><?= View::e($o['caddy_route']) ?></span>
+                                        <?php else: ?>
+                                            <span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;font-size:0.7rem;">Se creara al importar</span>
+                                        <?php endif; ?>
                                     </div>
-                                    <?php endif; ?>
                                     <div class="col-auto">
                                         <span class="text-muted">Shell:</span> <code style="font-size:0.75rem;"><?= View::e($o['shell']) ?></code>
                                     </div>
@@ -89,6 +94,8 @@
                                 <form method="POST" action="/accounts/import" onsubmit="return importConfirm(event, this, '<?= View::e(addslashes($o['domain'])) ?>')">
                     <?= \MuseDockPanel\View::csrf() ?>
                                     <input type="hidden" name="domain" value="<?= View::e($o['domain']) ?>">
+                                    <input type="hidden" name="home_dir" value="<?= View::e($o['home_dir']) ?>">
+                                    <input type="hidden" name="document_root" value="<?= View::e($o['document_root']) ?>">
                                     <button type="submit" class="btn btn-primary btn-sm">
                                         <i class="bi bi-box-arrow-in-down me-1"></i>Importar
                                     </button>
@@ -103,7 +110,7 @@
             <div class="p-2 rounded" style="background: rgba(56,189,248,0.05); border: 1px solid #334155;">
                 <small class="text-muted">
                     <i class="bi bi-info-circle me-1" style="color:#38bdf8;"></i>
-                    <strong>Importar</strong> solo registra el hosting en la base de datos del panel. No crea usuarios, directorios ni modifica configuraciones existentes.
+                    <strong>Importar</strong> registra el hosting en el panel y configura automaticamente la ruta Caddy si no existe. No crea usuarios ni directorios.
                 </small>
             </div>
         <?php endif; ?>
@@ -115,7 +122,7 @@ function importConfirm(e, form, domain) {
     e.preventDefault();
     SwalDark.fire({
         title: 'Importar ' + domain + '?',
-        html: 'Se registrara este hosting en el panel.<br><small class="text-muted">No se modificara ningun archivo ni configuracion existente.</small>',
+        html: 'Se registrara este hosting en el panel y se creara la ruta Caddy si no existe.<br><small class="text-muted">No se modificaran archivos del sitio.</small>',
         icon: 'question',
         showCancelButton: true,
         confirmButtonText: '<i class="bi bi-box-arrow-in-down me-1"></i> Importar',

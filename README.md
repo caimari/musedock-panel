@@ -6,12 +6,6 @@ Gestiona cuentas de hosting Linux con aprovisionamiento automatico de usuarios d
 
 > **Nota:** MuseDock Panel es un **panel de administracion de sistemas** — no tiene relacion con MuseDock CMS (el sistema de gestion de contenidos multi-tenant). Sin embargo, ambos productos estan diseñados para convivir en el mismo servidor: MuseDock Panel puede ver y gestionar las rutas de Caddy creadas por los tenants de MuseDock CMS, y ambos pueden funcionar juntos sin conflictos.
 
-## Capturas de pantalla
-
-| Dashboard | Setup |
-|-----------|-------|
-| ![Dashboard](docs/screenshots/dashboard.png) | ![Setup](docs/screenshots/setup.png) |
-
 ## Caracteristicas
 
 - **Cuentas de Hosting** — Crear, suspender, activar y eliminar cuentas de hosting Linux
@@ -57,6 +51,20 @@ El instalador:
 6. Muestra la URL del panel
 
 Despues de la instalacion, abre `https://IP-DEL-SERVIDOR:8444` en tu navegador. Un asistente de configuracion (similar a WordPress) te guiara para crear la cuenta de administrador.
+
+### Instalacion en servidor con Nginx/Apache existente
+
+Si el servidor ya tiene Nginx o Apache con sitios en produccion, el instalador gestiona la migracion automaticamente:
+
+1. **Detecta** Nginx/Apache corriendo en puertos 80/443
+2. **Parsea** los configs de `sites-enabled` — extrae dominio, document root, version PHP y usuario
+3. **Pregunta** si quieres migrar los sitios detectados a Caddy
+4. **Para** Nginx/Apache (con backup completo de la config) y arranca Caddy
+5. **Crea las rutas Caddy** equivalentes — los sitios siguen funcionando sin downtime
+
+Despues de la instalacion, importa los sitios migrados al panel desde **Panel > Hosting Accounts > Importar**. El import detecta tanto los vhosts en `/var/www/vhosts/` como los sitios migrados en cualquier otro directorio (via las rutas activas de Caddy), y crea automaticamente la ruta Caddy si no existe.
+
+> **Nota:** El instalador respeta el document root original de cada sitio (ya sea `/var/www/html`, `/home/user/public_html`, o cualquier otra ruta). No mueve archivos ni modifica la estructura de directorios existente.
 
 ### Manual
 
@@ -266,7 +274,8 @@ tail -f /opt/musedock-panel/storage/logs/panel.log
 
 ## Hoja de ruta
 
-- [ ] Modo cluster (replicacion master/slave)
+- [x] Modo cluster (replicacion master/slave)
+- [x] Migracion automatica desde Nginx/Apache
 - [ ] Sistema de backups
 - [ ] API para integraciones externas
 - [ ] Soporte multi-idioma

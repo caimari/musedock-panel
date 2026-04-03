@@ -1617,7 +1617,11 @@ class AccountController
             return;
         }
 
-        $homeDir = "/var/www/vhosts/{$domain}";
+        // Accept home_dir from POST (for sites outside /var/www/vhosts/) or default
+        $homeDir = trim($_POST['home_dir'] ?? '');
+        if (empty($homeDir)) {
+            $homeDir = "/var/www/vhosts/{$domain}";
+        }
         if (!is_dir($homeDir)) {
             Flash::set('error', "El directorio {$homeDir} no existe.");
             Router::redirect('/accounts/import');
@@ -1637,14 +1641,12 @@ class AccountController
             return;
         }
 
-        // Detect document root
-        $documentRoot = $homeDir . '/httpdocs';
-        if (!is_dir($documentRoot)) {
-            // Try public
-            if (is_dir($homeDir . '/public')) {
-                $documentRoot = $homeDir . '/public';
-            } else {
-                $documentRoot = $homeDir;
+        // Accept document_root from POST (preserves original path) or auto-detect
+        $documentRoot = trim($_POST['document_root'] ?? '');
+        if (empty($documentRoot) || !is_dir($documentRoot)) {
+            $documentRoot = $homeDir . '/httpdocs';
+            if (!is_dir($documentRoot)) {
+                $documentRoot = is_dir($homeDir . '/public') ? $homeDir . '/public' : $homeDir;
             }
         }
 
@@ -1669,7 +1671,7 @@ class AccountController
             $fpmSocket = "unix//run/php/php{$phpVersion}-fpm-{$username}.sock";
         }
 
-        // Detect Caddy route
+        // Detect existing Caddy route — or create one automatically
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'];
         $caddyRouteId = null;
@@ -1691,6 +1693,11 @@ class AccountController
                     break;
                 }
             }
+        }
+
+        // If no Caddy route exists, create one automatically
+        if (!$caddyRouteId) {
+            $caddyRouteId = SystemService::addCaddyRoute($domain, $documentRoot, $username, $phpVersion);
         }
 
         // Calculate disk usage
@@ -1801,6 +1808,11 @@ class AccountController
         LogService::log('account.import', $domain, "Imported existing hosting: {$username}@{$domain}" . (!empty($detectedDbs) ? " | DBs: " . implode(', ', $detectedDbs) : ''));
 
         $msg = "Hosting {$domain} importado correctamente como {$username}.";
+        if ($caddyRouteId) {
+            $msg .= " Ruta Caddy configurada ({$caddyRouteId}).";
+        } else {
+            $msg .= " ⚠ No se pudo crear la ruta Caddy — configura manualmente.";
+        }
         if (!empty($detectedDbs)) {
             $msg .= " Se detectaron y vincularon " . count($detectedDbs) . " base(s) de datos: " . implode(', ', $detectedDbs);
         }
@@ -1812,39 +1824,42 @@ class AccountController
     {
         $vhostsDir = '/var/www/vhosts';
         $orphans = [];
+        $discoveredDomains = [];
 
         // Get registered domains
         $registered = Database::fetchAll("SELECT domain FROM hosting_accounts");
         $registeredDomains = array_column($registered, 'domain');
 
-        // Scan vhosts directory
-        foreach (glob("{$vhostsDir}/*", GLOB_ONLYDIR) as $dir) {
-            $domain = basename($dir);
+        // Fetch Caddy routes once (used by both discovery methods)
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = $config['caddy']['api_url'];
+        $caddyRoutes = [];
 
-            // Skip if not a valid domain name
-            if (!preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i', $domain)) {
-                continue;
+        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
+        $routesJson = curl_exec($ch);
+        curl_close($ch);
+
+        if ($routesJson) {
+            $caddyRoutes = json_decode($routesJson, true) ?: [];
+        }
+
+        // Helper: find Caddy route for a domain
+        $findCaddyRoute = function (string $domain) use ($caddyRoutes): ?string {
+            foreach ($caddyRoutes as $route) {
+                $hosts = [];
+                foreach ($route['match'] ?? [] as $match) {
+                    $hosts = array_merge($hosts, $match['host'] ?? []);
+                }
+                if (in_array($domain, $hosts) || in_array("*.{$domain}", $hosts)) {
+                    return $route['@id'] ?? 'si (sin @id)';
+                }
             }
+            return null;
+        };
 
-            // Skip if already registered
-            if (in_array($domain, $registeredDomains)) {
-                continue;
-            }
-
-            // Gather info
-            $stat = stat($dir);
-            $ownerInfo = $stat ? posix_getpwuid($stat['uid']) : null;
-            $username = $ownerInfo ? $ownerInfo['name'] : null;
-            $uid = $stat ? $stat['uid'] : null;
-            $shell = $ownerInfo ? ($ownerInfo['shell'] ?? '?') : '?';
-
-            // Detect document root
-            $docRoot = $dir . '/httpdocs';
-            if (!is_dir($docRoot)) {
-                $docRoot = is_dir($dir . '/public') ? $dir . '/public' : $dir;
-            }
-
-            // Detect PHP version and FPM pool
+        // Helper: detect PHP version and FPM pool for a username
+        $detectFpm = function (?string $username): array {
             $phpVersion = null;
             $fpmPool = false;
             if ($username) {
@@ -1859,38 +1874,40 @@ class AccountController
                     }
                 }
             }
+            return [$phpVersion, $fpmPool];
+        };
 
-            // Detect Caddy route
-            $caddyRoute = null;
-            $config = require PANEL_ROOT . '/config/panel.php';
-            $caddyApi = $config['caddy']['api_url'];
-            $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
-            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 3]);
-            $routesJson = curl_exec($ch);
-            curl_close($ch);
+        // --- Source 1: Scan /var/www/vhosts/ directories ---
+        foreach (glob("{$vhostsDir}/*", GLOB_ONLYDIR) as $dir) {
+            $domain = basename($dir);
 
-            if ($routesJson) {
-                $routes = json_decode($routesJson, true) ?: [];
-                foreach ($routes as $route) {
-                    $hosts = [];
-                    foreach ($route['match'] ?? [] as $match) {
-                        $hosts = array_merge($hosts, $match['host'] ?? []);
-                    }
-                    if (in_array($domain, $hosts) || in_array("*.{$domain}", $hosts)) {
-                        $caddyRoute = $route['@id'] ?? 'si (sin @id)';
-                        break;
-                    }
-                }
+            if (!preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i', $domain)) {
+                continue;
+            }
+            if (in_array($domain, $registeredDomains)) {
+                continue;
             }
 
-            // Disk usage
+            $stat = stat($dir);
+            $ownerInfo = $stat ? posix_getpwuid($stat['uid']) : null;
+            $username = $ownerInfo ? $ownerInfo['name'] : null;
+            $uid = $stat ? $stat['uid'] : null;
+            $shell = $ownerInfo ? ($ownerInfo['shell'] ?? '?') : '?';
+
+            $docRoot = $dir . '/httpdocs';
+            if (!is_dir($docRoot)) {
+                $docRoot = is_dir($dir . '/public') ? $dir . '/public' : $dir;
+            }
+
+            [$phpVersion, $fpmPool] = $detectFpm($username);
+            $caddyRoute = $findCaddyRoute($domain);
+
             $diskMb = SystemService::getDiskUsage($dir);
 
-            // Warnings
             $warnings = [];
             if (!$username) $warnings[] = 'No se pudo detectar el usuario propietario';
             if (!$fpmPool) $warnings[] = 'No se encontro pool FPM para este usuario';
-            if (!$caddyRoute) $warnings[] = 'Sin ruta en Caddy (no tiene web server configurado)';
+            if (!$caddyRoute) $warnings[] = 'Sin ruta en Caddy — se creara automaticamente al importar';
 
             $orphans[] = [
                 'domain' => $domain,
@@ -1904,7 +1921,94 @@ class AccountController
                 'caddy_route' => $caddyRoute,
                 'disk_mb' => $diskMb,
                 'warnings' => $warnings,
+                'source' => 'vhosts',
             ];
+            $discoveredDomains[] = $domain;
+        }
+
+        // --- Source 2: Scan active Caddy routes for sites outside /var/www/vhosts/ ---
+        foreach ($caddyRoutes as $route) {
+            $routeId = $route['@id'] ?? null;
+            // Skip panel routes and non-hosting routes
+            if (!$routeId || !str_starts_with($routeId, 'hosting-')) {
+                continue;
+            }
+
+            $hosts = [];
+            foreach ($route['match'] ?? [] as $match) {
+                $hosts = array_merge($hosts, $match['host'] ?? []);
+            }
+            // Use the first non-www host as the primary domain
+            $domain = null;
+            foreach ($hosts as $h) {
+                if (!str_starts_with($h, 'www.') && !str_starts_with($h, '*.')) {
+                    $domain = $h;
+                    break;
+                }
+            }
+            if (!$domain) continue;
+
+            // Skip if already registered or already discovered from vhosts dir
+            if (in_array($domain, $registeredDomains) || in_array($domain, $discoveredDomains)) {
+                continue;
+            }
+
+            // Extract document root from the route config
+            $docRoot = null;
+            foreach ($route['handle'] ?? [] as $handler) {
+                if (($handler['handler'] ?? '') === 'subroute') {
+                    foreach ($handler['routes'] ?? [] as $subroute) {
+                        foreach ($subroute['handle'] ?? [] as $h) {
+                            if (($h['handler'] ?? '') === 'vars' && isset($h['root'])) {
+                                $docRoot = $h['root'];
+                                break 3;
+                            }
+                            if (($h['handler'] ?? '') === 'file_server' && isset($h['root'])) {
+                                $docRoot = $h['root'];
+                            }
+                        }
+                    }
+                }
+            }
+            if (!$docRoot || !is_dir($docRoot)) continue;
+
+            // Resolve home_dir: go up from docRoot if it ends with /httpdocs or /public
+            $homeDir = $docRoot;
+            if (preg_match('#^(.+)/(httpdocs|public|html)$#', $docRoot, $m) && is_dir($m[1])) {
+                $homeDir = $m[1];
+            }
+
+            $stat = stat($homeDir);
+            $ownerInfo = $stat ? posix_getpwuid($stat['uid']) : null;
+            $username = $ownerInfo ? $ownerInfo['name'] : null;
+            $uid = $stat ? $stat['uid'] : null;
+            $shell = $ownerInfo ? ($ownerInfo['shell'] ?? '?') : '?';
+
+            [$phpVersion, $fpmPool] = $detectFpm($username);
+            $diskMb = SystemService::getDiskUsage($homeDir);
+
+            $warnings = [];
+            if (!$username) $warnings[] = 'No se pudo detectar el usuario propietario';
+            if (!$fpmPool) $warnings[] = 'No se encontro pool FPM para este usuario';
+            if ($homeDir !== "/var/www/vhosts/{$domain}") {
+                $warnings[] = "Directorio fuera de /var/www/vhosts/ (migrado desde otro web server)";
+            }
+
+            $orphans[] = [
+                'domain' => $domain,
+                'home_dir' => $homeDir,
+                'document_root' => $docRoot,
+                'username' => $username,
+                'uid' => $uid,
+                'shell' => $shell,
+                'php_version' => $phpVersion,
+                'fpm_pool' => $fpmPool,
+                'caddy_route' => $routeId,
+                'disk_mb' => $diskMb,
+                'warnings' => $warnings,
+                'source' => 'caddy',
+            ];
+            $discoveredDomains[] = $domain;
         }
 
         return $orphans;

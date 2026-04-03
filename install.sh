@@ -144,6 +144,18 @@ t() {
                 apache_detected) text="Apache detectado: $1" ;;
                 apache_plesk_managed) text="Este Apache esta gestionado por Plesk — NO lo desactives sin Plesk" ;;
                 no_conflicts) text="No se detectaron servicios en conflicto (no nginx, no Apache, no Plesk)" ;;
+                migrate_header) text="Migrando sitios de $1 a Caddy" ;;
+                migrate_parsing) text="Parseando $1..." ;;
+                migrate_found) text="Encontrado: $1 → $2" ;;
+                migrate_skipped) text="Omitido (sin server_name): $1" ;;
+                migrate_none) text="No se encontraron sitios para migrar en $1" ;;
+                migrate_ask) text="Migrar $1 sitio(s) de $2 a Caddy? [S/n] " ;;
+                migrate_saved) text="Sitios migrados guardados en $1 (se aplicaran tras instalar Caddy)" ;;
+                migrate_skip_user) text="Migracion omitida por el usuario" ;;
+                migrate_applying) text="Aplicando $1 sitio(s) migrado(s) a Caddy..." ;;
+                migrate_route_ok) text="Ruta Caddy creada: $1" ;;
+                migrate_route_fail) text="Fallo al crear ruta Caddy para $1 (HTTP $2)" ;;
+                migrate_complete) text="Migracion completada: $1/$2 sitios migrados a Caddy" ;;
                 configuration) text="Configuracion" ;;
                 panel_port_prompt) text="Puerto del panel (por defecto: 8444)" ;;
                 php_version) text="Version de PHP" ;;
@@ -420,6 +432,18 @@ t() {
                 apache_detected) text="Apache detected: $1" ;;
                 apache_plesk_managed) text="This Apache is managed by Plesk — do NOT disable it without Plesk" ;;
                 no_conflicts) text="No conflicting services detected (no nginx, no Apache, no Plesk)" ;;
+                migrate_header) text="Migrating $1 sites to Caddy" ;;
+                migrate_parsing) text="Parsing $1..." ;;
+                migrate_found) text="Found: $1 → $2" ;;
+                migrate_skipped) text="Skipped (no server_name): $1" ;;
+                migrate_none) text="No sites found to migrate in $1" ;;
+                migrate_ask) text="Migrate $1 site(s) from $2 to Caddy? [Y/n] " ;;
+                migrate_saved) text="Migrated sites saved to $1 (will be applied after Caddy install)" ;;
+                migrate_skip_user) text="Migration skipped by user" ;;
+                migrate_applying) text="Applying $1 migrated site(s) to Caddy..." ;;
+                migrate_route_ok) text="Caddy route created: $1" ;;
+                migrate_route_fail) text="Failed to create Caddy route for $1 (HTTP $2)" ;;
+                migrate_complete) text="Migration complete: $1/$2 sites migrated to Caddy" ;;
                 configuration) text="Configuration" ;;
                 panel_port_prompt) text="Panel port (default: 8444)" ;;
                 php_version) text="PHP Version" ;;
@@ -1775,6 +1799,189 @@ if command -v apache2 &> /dev/null || command -v httpd &> /dev/null; then
     fi
 fi
 
+# ============================================================
+# Migrate sites from Nginx/Apache to Caddy (deferred — saved to file, applied after Caddy is up)
+# ============================================================
+MIGRATE_SITES_FILE="/tmp/musedock-migrate-sites.json"
+rm -f "$MIGRATE_SITES_FILE"
+
+migrate_nginx_sites() {
+    local SITES_DIR="/etc/nginx/sites-enabled"
+    [ -d "$SITES_DIR" ] || SITES_DIR="/etc/nginx/conf.d"
+    [ -d "$SITES_DIR" ] || return
+
+    header "$(t migrate_header Nginx)"
+
+    local SITES_FOUND=0
+    local SITES_JSON="["
+
+    for conf in "$SITES_DIR"/*.conf "$SITES_DIR"/*; do
+        [ -f "$conf" ] || continue
+        # Skip default/catch-all configs
+        case "$(basename "$conf")" in
+            default|default.conf) continue ;;
+        esac
+
+        ok "$(t migrate_parsing "$(basename "$conf")")"
+
+        # Extract server_name (first non-localhost, non-_ value)
+        local SERVER_NAME=""
+        SERVER_NAME=$(grep -E '^\s*server_name\s+' "$conf" 2>/dev/null | head -1 | sed 's/.*server_name\s\+//; s/\s*;.*//' | tr -s ' ' '\n' | grep -vE '^(_|localhost|127\.|$)' | head -1)
+
+        if [ -z "$SERVER_NAME" ]; then
+            warn "$(t migrate_skipped "$(basename "$conf")")"
+            continue
+        fi
+
+        # Extract root directive
+        local DOC_ROOT=""
+        DOC_ROOT=$(grep -E '^\s*root\s+' "$conf" 2>/dev/null | head -1 | sed 's/.*root\s\+//; s/\s*;.*//')
+
+        if [ -z "$DOC_ROOT" ]; then
+            DOC_ROOT="/var/www/vhosts/${SERVER_NAME}/httpdocs"
+        fi
+
+        # Detect PHP version from fastcgi_pass socket path
+        local PHP_VER="8.3"
+        local FPM_SOCK=""
+        FPM_SOCK=$(grep -oE 'unix:/run/php/php[0-9.]+-fpm[^;]*\.sock' "$conf" 2>/dev/null | head -1)
+        if [ -z "$FPM_SOCK" ]; then
+            FPM_SOCK=$(grep -oE 'unix:/var/run/php/php[0-9.]+-fpm[^;]*\.sock' "$conf" 2>/dev/null | head -1)
+        fi
+        if [ -n "$FPM_SOCK" ]; then
+            PHP_VER=$(echo "$FPM_SOCK" | grep -oE 'php[0-9.]+' | sed 's/php//')
+        fi
+
+        # Detect username from socket name (php8.3-fpm-USERNAME.sock) or from doc root owner
+        local SITE_USER=""
+        if [ -n "$FPM_SOCK" ]; then
+            SITE_USER=$(echo "$FPM_SOCK" | grep -oE 'fpm-[^.]+' | sed 's/fpm-//')
+        fi
+        if [ -z "$SITE_USER" ] && [ -d "$DOC_ROOT" ]; then
+            SITE_USER=$(stat -c '%U' "$DOC_ROOT" 2>/dev/null)
+        fi
+        [ -z "$SITE_USER" ] && SITE_USER="www-data"
+
+        ok "$(t migrate_found "$SERVER_NAME" "$DOC_ROOT")"
+
+        # Append to JSON array
+        [ "$SITES_FOUND" -gt 0 ] && SITES_JSON="${SITES_JSON},"
+        SITES_JSON="${SITES_JSON}{\"domain\":\"${SERVER_NAME}\",\"root\":\"${DOC_ROOT}\",\"user\":\"${SITE_USER}\",\"php\":\"${PHP_VER}\"}"
+        SITES_FOUND=$((SITES_FOUND + 1))
+    done
+
+    SITES_JSON="${SITES_JSON}]"
+
+    if [ "$SITES_FOUND" -eq 0 ]; then
+        warn "$(t migrate_none Nginx)"
+        return
+    fi
+
+    echo ""
+    read -rp "  $(t migrate_ask "$SITES_FOUND" Nginx)" MIGRATE_CONFIRM
+    MIGRATE_CONFIRM=${MIGRATE_CONFIRM:-s}
+
+    if [[ "$MIGRATE_CONFIRM" =~ ^[YySs]$ ]] || [ -z "$MIGRATE_CONFIRM" ]; then
+        echo "$SITES_JSON" > "$MIGRATE_SITES_FILE"
+        ok "$(t migrate_saved "$MIGRATE_SITES_FILE")"
+    else
+        warn "$(t migrate_skip_user)"
+    fi
+}
+
+migrate_apache_sites() {
+    local SITES_DIR="/etc/apache2/sites-enabled"
+    [ -d "$SITES_DIR" ] || SITES_DIR="/etc/httpd/conf.d"
+    [ -d "$SITES_DIR" ] || return
+
+    header "$(t migrate_header Apache)"
+
+    local SITES_FOUND=0
+    local SITES_JSON="["
+
+    # If we already have nginx migrations, start from that
+    if [ -f "$MIGRATE_SITES_FILE" ]; then
+        local EXISTING
+        EXISTING=$(cat "$MIGRATE_SITES_FILE")
+        # Strip trailing ]
+        SITES_JSON="${EXISTING%]}"
+        SITES_FOUND=$(echo "$EXISTING" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+    fi
+
+    for conf in "$SITES_DIR"/*.conf "$SITES_DIR"/*; do
+        [ -f "$conf" ] || continue
+        case "$(basename "$conf")" in
+            000-default*|default*) continue ;;
+        esac
+
+        ok "$(t migrate_parsing "$(basename "$conf")")"
+
+        local SERVER_NAME=""
+        SERVER_NAME=$(grep -iE '^\s*ServerName\s+' "$conf" 2>/dev/null | head -1 | sed 's/.*ServerName\s\+//i; s/\s*$//' | tr -d ' ')
+
+        if [ -z "$SERVER_NAME" ]; then
+            warn "$(t migrate_skipped "$(basename "$conf")")"
+            continue
+        fi
+
+        local DOC_ROOT=""
+        DOC_ROOT=$(grep -iE '^\s*DocumentRoot\s+' "$conf" 2>/dev/null | head -1 | sed 's/.*DocumentRoot\s\+//i; s/\s*$//' | tr -d '"')
+
+        [ -z "$DOC_ROOT" ] && DOC_ROOT="/var/www/vhosts/${SERVER_NAME}/httpdocs"
+
+        # Detect PHP from FPM proxy
+        local PHP_VER="8.3"
+        local FPM_SOCK=""
+        FPM_SOCK=$(grep -oE 'unix:/run/php/php[0-9.]+-fpm[^|]*\.sock' "$conf" 2>/dev/null | head -1)
+        if [ -n "$FPM_SOCK" ]; then
+            PHP_VER=$(echo "$FPM_SOCK" | grep -oE 'php[0-9.]+' | sed 's/php//')
+        fi
+
+        local SITE_USER=""
+        if [ -d "$DOC_ROOT" ]; then
+            SITE_USER=$(stat -c '%U' "$DOC_ROOT" 2>/dev/null)
+        fi
+        [ -z "$SITE_USER" ] && SITE_USER="www-data"
+
+        # Skip if this domain was already found from nginx
+        if echo "$SITES_JSON" | grep -q "\"${SERVER_NAME}\"" 2>/dev/null; then
+            continue
+        fi
+
+        ok "$(t migrate_found "$SERVER_NAME" "$DOC_ROOT")"
+
+        [ "$SITES_FOUND" -gt 0 ] && SITES_JSON="${SITES_JSON},"
+        SITES_JSON="${SITES_JSON}{\"domain\":\"${SERVER_NAME}\",\"root\":\"${DOC_ROOT}\",\"user\":\"${SITE_USER}\",\"php\":\"${PHP_VER}\"}"
+        SITES_FOUND=$((SITES_FOUND + 1))
+    done
+
+    SITES_JSON="${SITES_JSON}]"
+
+    if [ "$SITES_FOUND" -eq 0 ]; then
+        warn "$(t migrate_none Apache)"
+        return
+    fi
+
+    echo ""
+    read -rp "  $(t migrate_ask "$SITES_FOUND" Apache)" MIGRATE_CONFIRM
+    MIGRATE_CONFIRM=${MIGRATE_CONFIRM:-s}
+
+    if [[ "$MIGRATE_CONFIRM" =~ ^[YySs]$ ]] || [ -z "$MIGRATE_CONFIRM" ]; then
+        echo "$SITES_JSON" > "$MIGRATE_SITES_FILE"
+        ok "$(t migrate_saved "$MIGRATE_SITES_FILE")"
+    else
+        warn "$(t migrate_skip_user)"
+    fi
+}
+
+# Run migration discovery if nginx/apache were detected and user chose to stop them
+if [ "$NGINX_DETECTED" = true ]; then
+    migrate_nginx_sites
+fi
+if [ "$APACHE_DETECTED" = true ]; then
+    migrate_apache_sites
+fi
+
 # Summary of detections
 if [ "$NGINX_DETECTED" = false ] && [ "$APACHE_DETECTED" = false ] && [ "$PLESK_DETECTED" = false ]; then
     ok "$(t no_conflicts)"
@@ -2328,6 +2535,86 @@ if [ "$CADDY_API_OK" = "200" ]; then
     ok "$(t caddy_api_ok)"
 else
     warn "$(t caddy_api_wait "$CADDY_API_OK")"
+fi
+
+# ============================================================
+# Apply deferred nginx/apache → Caddy site migrations
+# ============================================================
+MIGRATE_SITES_FILE="/tmp/musedock-migrate-sites.json"
+if [ -f "$MIGRATE_SITES_FILE" ] && [ "$CADDY_API_OK" = "200" ]; then
+    MIGRATE_COUNT=$(python3 -c "import json; print(len(json.load(open('$MIGRATE_SITES_FILE'))))" 2>/dev/null || echo "0")
+    if [ "$MIGRATE_COUNT" -gt 0 ] 2>/dev/null; then
+        header "$(t migrate_applying "$MIGRATE_COUNT")"
+        MIGRATE_OK=0
+
+        # Ensure srv0 server exists with a routes array
+        SRV0_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:2019/config/apps/http/servers/srv0 2>/dev/null)
+        if [ "$SRV0_CHECK" != "200" ]; then
+            curl -s -X POST http://localhost:2019/config/apps/http/servers/srv0 \
+                -H "Content-Type: application/json" \
+                -d '{"listen":[":443",":80"],"routes":[]}' > /dev/null 2>&1
+        fi
+
+        python3 -c "
+import json, sys
+sites = json.load(open('$MIGRATE_SITES_FILE'))
+for s in sites:
+    print(json.dumps(s))
+" 2>/dev/null | while IFS= read -r site_json; do
+            DOMAIN=$(echo "$site_json" | python3 -c "import sys,json; print(json.load(sys.stdin)['domain'])")
+            DOC_ROOT=$(echo "$site_json" | python3 -c "import sys,json; print(json.load(sys.stdin)['root'])")
+            SITE_USER=$(echo "$site_json" | python3 -c "import sys,json; print(json.load(sys.stdin)['user'])")
+            PHP_VER=$(echo "$site_json" | python3 -c "import sys,json; print(json.load(sys.stdin)['php'])")
+
+            ROUTE_ID="hosting-$(echo "$DOMAIN" | tr -dc 'a-zA-Z0-9' | tr '[:upper:]' '[:lower:]')"
+            SOCKET_PATH="/run/php/php${PHP_VER}-fpm-${SITE_USER}.sock"
+
+            # Build Caddy route JSON
+            ROUTE_JSON=$(python3 -c "
+import json
+route = {
+    '@id': '${ROUTE_ID}',
+    'match': [{'host': ['${DOMAIN}', 'www.${DOMAIN}']}],
+    'handle': [{
+        'handler': 'subroute',
+        'routes': [
+            {'handle': [{'handler': 'vars', 'root': '${DOC_ROOT}'}]},
+            {
+                'match': [{'path': ['*.jpg','*.jpeg','*.png','*.gif','*.webp','*.svg','*.ico','*.css','*.js','*.woff','*.woff2']}],
+                'handle': [{'handler': 'headers', 'response': {'set': {'Cache-Control': ['public, max-age=2592000']}}}]
+            },
+            {
+                'match': [{'file': {'try_files': ['{http.request.uri.path}', '{http.request.uri.path}/index.php', '/index.php']}}],
+                'handle': [{'handler': 'rewrite', 'uri': '{http.matchers.file.relative}'}]
+            },
+            {
+                'match': [{'path': ['*.php']}],
+                'handle': [{'handler': 'reverse_proxy', 'transport': {'protocol': 'fastcgi', 'root': '${DOC_ROOT}', 'split_path': ['.php']}, 'upstreams': [{'dial': 'unix/${SOCKET_PATH}'}]}]
+            },
+            {'handle': [{'handler': 'file_server', 'root': '${DOC_ROOT}', 'hide': ['.git', '.env', '.htaccess']}]}
+        ]
+    }],
+    'terminal': True
+}
+print(json.dumps(route))
+")
+
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+                "http://localhost:2019/config/apps/http/servers/srv0/routes" \
+                -H "Content-Type: application/json" \
+                -d "$ROUTE_JSON" 2>/dev/null)
+
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ] 2>/dev/null; then
+                ok "$(t migrate_route_ok "$DOMAIN")"
+                MIGRATE_OK=$((MIGRATE_OK + 1))
+            else
+                warn "$(t migrate_route_fail "$DOMAIN" "$HTTP_CODE")"
+            fi
+        done
+
+        ok "$(t migrate_complete "$MIGRATE_OK" "$MIGRATE_COUNT")"
+        rm -f "$MIGRATE_SITES_FILE"
+    fi
 fi
 
 # ============================================================
