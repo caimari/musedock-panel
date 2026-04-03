@@ -843,6 +843,134 @@ class SettingsController
         Router::redirect('/settings/security');
     }
 
+    /**
+     * POST /settings/security/pg-ssl-enable — Enable SSL on PostgreSQL
+     */
+    public function pgSslEnable(): void
+    {
+        View::verifyCsrf();
+
+        // Find PostgreSQL config
+        $pgConfFile = '';
+        $pgVersion = '';
+        foreach (['14', '15', '16', '17'] as $v) {
+            $f = "/etc/postgresql/{$v}/main/postgresql.conf";
+            if (file_exists($f)) { $pgConfFile = $f; $pgVersion = $v; break; }
+        }
+
+        if (!$pgConfFile) {
+            Flash::set('error', 'No se detecto PostgreSQL instalado.');
+            Router::redirect('/settings/security');
+            return;
+        }
+
+        // Generate self-signed SSL certificate if not exists
+        $sslDir = '/etc/postgresql/ssl';
+        $certFile = "{$sslDir}/server.crt";
+        $keyFile = "{$sslDir}/server.key";
+
+        if (!file_exists($certFile)) {
+            @mkdir($sslDir, 0700, true);
+            $hostname = gethostname() ?: 'localhost';
+            shell_exec(sprintf(
+                'openssl req -new -x509 -days 3650 -nodes -out %s -keyout %s -subj "/CN=%s" 2>&1',
+                escapeshellarg($certFile),
+                escapeshellarg($keyFile),
+                escapeshellarg($hostname)
+            ));
+            // PostgreSQL needs specific permissions
+            shell_exec("chown postgres:postgres {$sslDir}/*");
+            shell_exec("chmod 600 {$keyFile}");
+            shell_exec("chmod 644 {$certFile}");
+        }
+
+        if (!file_exists($certFile)) {
+            Flash::set('error', 'Error al generar certificado SSL.');
+            Router::redirect('/settings/security');
+            return;
+        }
+
+        // Update postgresql.conf
+        $conf = file_get_contents($pgConfFile);
+        if (preg_match('/^\s*ssl\s*=\s*off/m', $conf)) {
+            $conf = preg_replace('/^\s*ssl\s*=\s*off/m', 'ssl = on', $conf);
+        } elseif (!preg_match('/^\s*ssl\s*=\s*on/m', $conf)) {
+            $conf .= "\n# SSL enabled by MuseDock Panel\nssl = on\n";
+        }
+
+        // Set cert paths if not already set
+        if (!preg_match('/^\s*ssl_cert_file\s*=/m', $conf)) {
+            $conf .= "ssl_cert_file = '{$certFile}'\n";
+        } else {
+            $conf = preg_replace('/^\s*ssl_cert_file\s*=.*/m', "ssl_cert_file = '{$certFile}'", $conf);
+        }
+        if (!preg_match('/^\s*ssl_key_file\s*=/m', $conf)) {
+            $conf .= "ssl_key_file = '{$keyFile}'\n";
+        } else {
+            $conf = preg_replace('/^\s*ssl_key_file\s*=.*/m', "ssl_key_file = '{$keyFile}'", $conf);
+        }
+
+        file_put_contents($pgConfFile, $conf);
+
+        // Restart PostgreSQL
+        shell_exec("systemctl restart postgresql 2>&1");
+
+        // Optionally update all hosting .env files
+        if (!empty($_POST['update_envs'])) {
+            $accounts = Database::fetchAll("SELECT id, home_dir, document_root FROM hosting_accounts WHERE status = 'active'");
+            $updated = 0;
+            foreach ($accounts as $acc) {
+                // Check main document_root and parent (for Laravel /public)
+                $dirs = [$acc['document_root']];
+                if (str_ends_with($acc['document_root'], '/public')) {
+                    $dirs[] = dirname($acc['document_root']);
+                }
+                foreach ($dirs as $dir) {
+                    $envFile = $dir . '/.env';
+                    if (!file_exists($envFile)) continue;
+                    $env = file_get_contents($envFile);
+                    if (str_contains($env, 'DB_SSLMODE')) {
+                        $env = preg_replace('/^DB_SSLMODE=.*/m', 'DB_SSLMODE=prefer', $env);
+                        file_put_contents($envFile, $env);
+                        $updated++;
+                    }
+                    break;
+                }
+            }
+            LogService::log('settings.pg_ssl', 'enable', "SSL enabled + {$updated} .env files updated to DB_SSLMODE=prefer");
+            Flash::set('success', "SSL activado en PostgreSQL. {$updated} archivos .env actualizados.");
+        } else {
+            LogService::log('settings.pg_ssl', 'enable', 'PostgreSQL SSL enabled');
+            Flash::set('success', 'SSL activado en PostgreSQL.');
+        }
+
+        Router::redirect('/settings/security');
+    }
+
+    /**
+     * POST /settings/security/pg-ssl-disable — Disable SSL on PostgreSQL
+     */
+    public function pgSslDisable(): void
+    {
+        View::verifyCsrf();
+
+        foreach (['14', '15', '16', '17'] as $v) {
+            $f = "/etc/postgresql/{$v}/main/postgresql.conf";
+            if (!file_exists($f)) continue;
+
+            $conf = file_get_contents($f);
+            $conf = preg_replace('/^\s*ssl\s*=\s*on/m', 'ssl = off', $conf);
+            file_put_contents($f, $conf);
+            break;
+        }
+
+        shell_exec("systemctl restart postgresql 2>&1");
+
+        LogService::log('settings.pg_ssl', 'disable', 'PostgreSQL SSL disabled');
+        Flash::set('success', 'SSL desactivado en PostgreSQL.');
+        Router::redirect('/settings/security');
+    }
+
     // ================================================================
     // Fail2Ban
     // ================================================================

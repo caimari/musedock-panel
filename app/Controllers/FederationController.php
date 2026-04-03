@@ -204,7 +204,7 @@ class FederationController
 
         // Subdomains and aliases for this account
         $subdomains = Database::fetchAll('SELECT * FROM hosting_subdomains WHERE account_id = :aid ORDER BY subdomain', ['aid' => $accountId]);
-        $aliases = Database::fetchAll('SELECT * FROM hosting_domain_aliases WHERE account_id = :aid ORDER BY domain', ['aid' => $accountId]);
+        $aliases = Database::fetchAll('SELECT * FROM hosting_domain_aliases WHERE hosting_account_id = :aid ORDER BY domain', ['aid' => $accountId]);
 
         // Check if there's an active migration
         $activeMigration = Database::fetchOne(

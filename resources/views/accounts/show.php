@@ -789,19 +789,35 @@ use MuseDockPanel\Services\CloudflareService;
 
         <!-- Databases -->
         <div class="card">
-            <div class="card-header"><i class="bi bi-database me-2"></i>Databases</div>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-database me-2"></i>Databases</span>
+                <?php if (!($isSlave ?? false)): ?>
+                <button class="btn btn-outline-success btn-sm" onclick="showCreateDbModal()"><i class="bi bi-plus me-1"></i>Nueva BD</button>
+                <?php endif; ?>
+            </div>
             <div class="card-body p-0">
                 <?php if (empty($databases)): ?>
                     <div class="p-3 text-center text-muted">No databases created yet.</div>
                 <?php else: ?>
-                    <table class="table table-sm mb-0">
-                        <thead><tr><th class="ps-3">Name</th><th>User</th><th>Type</th></tr></thead>
+                    <table class="table table-sm table-hover mb-0">
+                        <thead><tr><th class="ps-3">Name</th><th>User</th><th>Type</th><th class="text-end pe-3"></th></tr></thead>
                         <tbody>
                             <?php foreach ($databases as $db): ?>
-                            <tr>
-                                <td class="ps-3"><code><?= View::e($db['db_name']) ?></code></td>
+                            <tr style="cursor:pointer;" onclick="showDbDetail(<?= (int)$db['id'] ?>, <?= htmlspecialchars(json_encode($db), ENT_QUOTES) ?>)">
+                                <td class="ps-3">
+                                    <code><?= View::e($db['db_name']) ?></code>
+                                </td>
                                 <td><code><?= View::e($db['db_user']) ?></code></td>
-                                <td><?= View::e($db['db_type']) ?></td>
+                                <td>
+                                    <?php if (($db['db_type'] ?? 'mysql') === 'pgsql'): ?>
+                                        <span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;"><i class="bi bi-database me-1"></i>PostgreSQL</span>
+                                    <?php else: ?>
+                                        <span class="badge" style="background:rgba(249,115,22,0.15);color:#f97316;"><i class="bi bi-database me-1"></i>MySQL</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-end pe-3">
+                                    <i class="bi bi-chevron-right text-muted"></i>
+                                </td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -809,6 +825,142 @@ use MuseDockPanel\Services\CloudflareService;
                 <?php endif; ?>
             </div>
         </div>
+
+        <!-- DB Detail / Edit Modal -->
+        <div class="modal fade" id="dbDetailModal" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content bg-dark text-light border-secondary">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title" id="dbDetailTitle"></h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <!-- Connection Info -->
+                        <div class="mb-3 p-3 rounded" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);">
+                            <div class="row small">
+                                <div class="col-4 text-muted">Host</div>
+                                <div class="col-8"><code id="dbInfoHost">localhost</code></div>
+                                <div class="col-4 text-muted">Puerto</div>
+                                <div class="col-8"><code id="dbInfoPort"></code></div>
+                                <div class="col-4 text-muted">Base de datos</div>
+                                <div class="col-8"><code id="dbInfoName"></code></div>
+                                <div class="col-4 text-muted">Usuario</div>
+                                <div class="col-8"><code id="dbInfoUser"></code></div>
+                                <div class="col-4 text-muted">Tipo</div>
+                                <div class="col-8"><span id="dbInfoType"></span></div>
+                            </div>
+                        </div>
+
+                        <?php if (!($isSlave ?? false)): ?>
+                        <!-- Edit Credentials -->
+                        <h6 class="text-muted mb-2"><i class="bi bi-pencil me-1"></i>Cambiar credenciales</h6>
+                        <form id="dbEditForm" method="POST">
+                            <?= View::csrf() ?>
+                            <input type="hidden" name="redirect_to" value="/accounts/<?= $account['id'] ?>">
+                            <div class="mb-2">
+                                <label class="form-label small">Nuevo usuario <small class="text-muted">(dejar vacio para no cambiar)</small></label>
+                                <input type="text" name="new_db_user" id="dbNewUser" class="form-control form-control-sm bg-dark text-light border-secondary">
+                            </div>
+                            <div class="mb-2">
+                                <label class="form-label small">Nueva contrasenya <small class="text-muted">(dejar vacio para no cambiar)</small></label>
+                                <div class="input-group input-group-sm">
+                                    <input type="text" name="new_db_pass" id="dbNewPass" class="form-control bg-dark text-light border-secondary">
+                                    <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('dbNewPass').value=Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(36)).join('').slice(0,20)" title="Generar"><i class="bi bi-shuffle"></i></button>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small">Contrasenya admin <small class="text-danger">(obligatoria)</small></label>
+                                <input type="password" name="admin_password" class="form-control form-control-sm bg-dark text-light border-secondary" required>
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-lg me-1"></i>Guardar cambios</button>
+                        </form>
+                        <?php endif; ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Create DB Modal -->
+        <?php if (!($isSlave ?? false)): ?>
+        <div class="modal fade" id="createDbModal" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content bg-dark text-light border-secondary">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title"><i class="bi bi-plus-circle me-1"></i>Crear Base de Datos</h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <form method="POST" action="/databases/store" onsubmit="this.querySelector('button[type=submit]').disabled=true;">
+                        <?= View::csrf() ?>
+                        <input type="hidden" name="account_id" value="<?= $account['id'] ?>">
+                        <input type="hidden" name="redirect_to" value="/accounts/<?= $account['id'] ?>">
+                        <div class="modal-body">
+                            <div class="mb-3">
+                                <label class="form-label small">Tipo</label>
+                                <select name="db_type" class="form-select form-select-sm bg-dark text-light border-secondary" onchange="updateDbDefaults(this.value)">
+                                    <option value="mysql">MySQL / MariaDB</option>
+                                    <option value="pgsql">PostgreSQL</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small">Nombre (sufijo)</label>
+                                <div class="input-group input-group-sm">
+                                    <span class="input-group-text" style="background:#1e293b;border-color:#334155;color:#94a3b8;"><?= View::e($account['username']) ?>_</span>
+                                    <input type="text" name="db_name" id="createDbName" class="form-control bg-dark text-light border-secondary" required
+                                           value="db" placeholder="sufijo">
+                                </div>
+                                <small class="text-muted">BD: <code id="createDbFullName"><?= View::e($account['username']) ?>_db</code> | Usuario: <code id="createDbFullUser"><?= View::e($account['username']) ?>_db</code></small>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small">Contrasenya</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="text" name="db_password" id="createDbPass" class="form-control bg-dark text-light border-secondary" required>
+                                    <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('createDbPass').value=Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(36)).join('').slice(0,20)" title="Generar"><i class="bi bi-shuffle"></i></button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer border-secondary">
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                            <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-plus me-1"></i>Crear</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <script>
+        function showDbDetail(dbId, db) {
+            document.getElementById('dbDetailTitle').innerHTML = '<i class="bi bi-database me-1"></i>' + db.db_name;
+            document.getElementById('dbInfoName').textContent = db.db_name;
+            document.getElementById('dbInfoUser').textContent = db.db_user;
+            var isPg = (db.db_type || 'mysql') === 'pgsql';
+            document.getElementById('dbInfoHost').textContent = isPg ? 'localhost' : 'localhost';
+            document.getElementById('dbInfoPort').textContent = isPg ? '5432' : '3306';
+            document.getElementById('dbInfoType').innerHTML = isPg
+                ? '<span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;">PostgreSQL</span>'
+                : '<span class="badge" style="background:rgba(249,115,22,0.15);color:#f97316;">MySQL</span>';
+            var form = document.getElementById('dbEditForm');
+            if (form) {
+                form.action = '/databases/' + dbId + '/edit-credentials';
+                form.querySelector('[name=new_db_user]').value = '';
+                form.querySelector('[name=new_db_pass]').value = '';
+                form.querySelector('[name=admin_password]').value = '';
+            }
+            new bootstrap.Modal(document.getElementById('dbDetailModal')).show();
+        }
+
+        function showCreateDbModal() {
+            document.getElementById('createDbPass').value = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(36)).join('').slice(0, 20);
+            new bootstrap.Modal(document.getElementById('createDbModal')).show();
+        }
+
+        // Update full name + user preview as user types
+        document.getElementById('createDbName')?.addEventListener('input', function() {
+            var full = '<?= View::e($account['username']) ?>_' + this.value;
+            document.getElementById('createDbFullName').textContent = full;
+            document.getElementById('createDbFullUser').textContent = full;
+        });
+        </script>
     </div>
 
     <!-- Sidebar -->

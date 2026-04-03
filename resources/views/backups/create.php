@@ -259,9 +259,25 @@
 </div>
 
 <style>
-    .form-check-input { background-color: #0f172a; border-color: #334155; }
+    .form-check-input { background-color: #334155; border-color: #475569; }
     .form-check-input:checked { background-color: #0ea5e9; border-color: #0ea5e9; }
+    .form-switch .form-check-input { background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%2394a3b8'/%3e%3c/svg%3e"); }
+    .form-switch .form-check-input:checked { background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%23fff'/%3e%3c/svg%3e"); }
     .form-check-input:focus { box-shadow: 0 0 0 2px rgba(56,189,248,0.2); border-color: #38bdf8; }
+    .form-check-label { color: #e2e8f0; }
+    .form-check-label i { color: #94a3b8; }
+    .form-label { color: #e2e8f0; }
+    .form-select { background-color: #0f172a; border-color: #334155; color: #e2e8f0; }
+    .form-select:focus { border-color: #38bdf8; box-shadow: 0 0 0 2px rgba(56,189,248,0.2); }
+    .form-control { background-color: #0f172a; border-color: #334155; color: #e2e8f0; }
+    .form-control:focus { border-color: #38bdf8; box-shadow: 0 0 0 2px rgba(56,189,248,0.2); }
+    .form-control[type="time"] { color-scheme: dark; }
+    .input-group-text { background-color: #1e293b; border-color: #334155; color: #94a3b8; }
+    .form-switch .form-check-label { color: #e2e8f0; }
+    .card { background-color: #1e293b; border-color: #334155; }
+    .card-header { background-color: rgba(0,0,0,0.15); border-color: #334155; color: #e2e8f0; }
+    optgroup { background-color: #0f172a; color: #94a3b8; }
+    option { background-color: #0f172a; color: #e2e8f0; }
 </style>
 
 <script>

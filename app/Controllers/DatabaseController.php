@@ -385,7 +385,9 @@ class DatabaseController
             'db_type' => $dbType,
         ]));
 
-        Router::redirect('/databases');
+        $redirectTo = $_POST['redirect_to'] ?? '/databases';
+        if (!str_starts_with($redirectTo, '/')) $redirectTo = '/databases';
+        Router::redirect($redirectTo);
     }
 
     /**
@@ -495,9 +497,12 @@ class DatabaseController
      */
     public function editCredentials(array $params = []): void
     {
+        $redirectTo = $_POST['redirect_to'] ?? '/databases';
+        if (!str_starts_with($redirectTo, '/')) $redirectTo = '/databases';
+
         if (Settings::get('cluster_role', 'standalone') === 'slave') {
             Flash::set('error', 'Este servidor es Slave. Editar credenciales solo esta permitido en el Master.');
-            Router::redirect('/databases');
+            Router::redirect($redirectTo);
             return;
         }
 
@@ -511,21 +516,21 @@ class DatabaseController
 
         if (!$db) {
             Flash::set('error', 'Base de datos no encontrada.');
-            Router::redirect('/databases');
+            Router::redirect($redirectTo);
             return;
         }
 
         $password = $_POST['admin_password'] ?? '';
         if (empty($password)) {
             Flash::set('error', 'Debes ingresar tu contrasena de administrador para confirmar.');
-            Router::redirect('/databases');
+            Router::redirect($redirectTo);
             return;
         }
 
         $admin = Database::fetchOne("SELECT password_hash FROM panel_admins WHERE id = :id", ['id' => $_SESSION['panel_user']['id'] ?? 0]);
         if (!$admin || !password_verify($password, $admin['password_hash'])) {
             Flash::set('error', 'Contrasena de administrador incorrecta.');
-            Router::redirect('/databases');
+            Router::redirect($redirectTo);
             return;
         }
 
@@ -534,7 +539,7 @@ class DatabaseController
 
         if (empty($newDbUser) && empty($newDbPass)) {
             Flash::set('error', 'Debes especificar al menos un nuevo usuario o contrasena.');
-            Router::redirect('/databases');
+            Router::redirect($redirectTo);
             return;
         }
 
@@ -544,14 +549,14 @@ class DatabaseController
         $changes = [];
 
         if ($dbType === 'pgsql') {
-            // PostgreSQL: rename user and/or change password
+            // PostgreSQL: identifiers use double quotes, passwords use single quotes in SQL
             if (!empty($newDbUser) && $newDbUser !== $oldDbUser) {
-                $sql = sprintf("ALTER USER %s RENAME TO %s;", escapeshellarg($oldDbUser), escapeshellarg($newDbUser));
+                $sql = 'ALTER USER "' . str_replace('"', '""', $oldDbUser) . '" RENAME TO "' . str_replace('"', '""', $newDbUser) . '";';
                 $cmd = 'sudo -u postgres psql -c ' . escapeshellarg($sql) . ' 2>&1';
                 $output = shell_exec($cmd);
                 if ($output !== null && stripos($output, 'ERROR') !== false) {
                     Flash::set('error', 'Error al renombrar usuario PostgreSQL: ' . $output);
-                    Router::redirect('/databases');
+                    Router::redirect($redirectTo);
                     return;
                 }
                 $changes[] = "usuario: {$oldDbUser} → {$newDbUser}";
@@ -560,12 +565,12 @@ class DatabaseController
             $effectiveUser = (!empty($newDbUser) && $newDbUser !== $oldDbUser) ? $newDbUser : $oldDbUser;
 
             if (!empty($newDbPass)) {
-                $sql = sprintf("ALTER USER %s WITH PASSWORD %s;", escapeshellarg($effectiveUser), escapeshellarg($newDbPass));
+                $sql = 'ALTER USER "' . str_replace('"', '""', $effectiveUser) . '" WITH PASSWORD \'' . str_replace("'", "''", $newDbPass) . '\';';
                 $cmd = 'sudo -u postgres psql -c ' . escapeshellarg($sql) . ' 2>&1';
                 $output = shell_exec($cmd);
                 if ($output !== null && stripos($output, 'ERROR') !== false) {
                     Flash::set('error', 'Error al cambiar contrasena PostgreSQL: ' . $output);
-                    Router::redirect('/databases');
+                    Router::redirect($redirectTo);
                     return;
                 }
                 $changes[] = 'contrasena actualizada';
@@ -575,7 +580,7 @@ class DatabaseController
             $mysqlCmd = $this->buildMysqlCommand();
             if ($mysqlCmd === null) {
                 Flash::set('error', 'No se pudo determinar el metodo de autenticacion de MySQL.');
-                Router::redirect('/databases');
+                Router::redirect($redirectTo);
                 return;
             }
 
@@ -588,7 +593,7 @@ class DatabaseController
                 $output = shell_exec($mysqlCmd . ' -e ' . escapeshellarg($sql) . ' 2>&1');
                 if ($output !== null && stripos($output, 'ERROR') !== false) {
                     Flash::set('error', 'Error al renombrar usuario MySQL: ' . $output);
-                    Router::redirect('/databases');
+                    Router::redirect($redirectTo);
                     return;
                 }
                 $changes[] = "usuario: {$oldDbUser} → {$newDbUser}";
@@ -605,7 +610,7 @@ class DatabaseController
                 $output = shell_exec($mysqlCmd . ' -e ' . escapeshellarg($sql) . ' 2>&1');
                 if ($output !== null && stripos($output, 'ERROR') !== false) {
                     Flash::set('error', 'Error al cambiar contrasena MySQL: ' . $output);
-                    Router::redirect('/databases');
+                    Router::redirect($redirectTo);
                     return;
                 }
                 $changes[] = 'contrasena actualizada';
@@ -633,7 +638,7 @@ class DatabaseController
             ]));
         }
         Flash::set('success', $flashMsg);
-        Router::redirect('/databases');
+        Router::redirect($redirectTo);
     }
 
     /**

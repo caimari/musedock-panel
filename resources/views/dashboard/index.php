@@ -232,7 +232,7 @@ systemctl restart caddy</pre>
         </div>
     </div>
     <div class="col-md-3 d-flex">
-        <div class="stat-card w-100 d-flex flex-column">
+        <a href="/accounts" class="stat-card w-100 d-flex flex-column text-decoration-none" style="cursor:pointer;">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value"><?= $accounts['total'] ?? 0 ?></div>
@@ -246,7 +246,7 @@ systemctl restart caddy</pre>
                     <span class="badge badge-suspended"><?= $accounts['suspended'] ?> suspended</span>
                 <?php endif; ?>
             </div>
-        </div>
+        </a>
     </div>
 </div>
 

@@ -20,6 +20,57 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.55',
+                'date' => '2026-04-03',
+                'badge' => 'danger',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'PostgreSQL SSL: activar/desactivar desde Settings > Seguridad — Genera certificado auto-firmado, modifica postgresql.conf, reinicia PG. Opcion de actualizar DB_SSLMODE en todos los .env',
+                            'Databases: card interactiva en cuenta — Pulsar sobre una BD abre modal con info de conexion (host, puerto, tipo) y formulario para cambiar usuario/password con verificacion de admin',
+                            'Databases: crear BD desde cuenta — Boton "Nueva BD" con selector MySQL/PostgreSQL, nombre con prefijo automatico, password auto-generada',
+                            'Migration DB: modal de credenciales — Despues de migrar BD, modal SweetAlert que no se cierra hasta pulsar "Ya la he copiado". Muestra DB name, usuario, tipo y password con boton copiar',
+                            'Migration DB: selector de subdominio — Dropdown para elegir de que subdominio migrar la BD. Auto-rellena la ruta remota y actualiza el .env del subdominio local correcto',
+                            'Dashboard: card Hosting Accounts clickable — La card del dashboard enlaza directamente a /accounts',
+                        ],
+                        'en' => [
+                            'PostgreSQL SSL: enable/disable from Settings > Security — Generates self-signed cert, modifies postgresql.conf, restarts PG. Option to update DB_SSLMODE in all .env files',
+                            'Databases: interactive card in account — Click a DB opens modal with connection info (host, port, type) and form to change user/password with admin verification',
+                            'Databases: create DB from account — "New DB" button with MySQL/PostgreSQL selector, auto-prefixed name, auto-generated password',
+                            'Migration DB: credentials modal — After DB migration, SweetAlert modal that stays until "I already copied it". Shows DB name, user, type and password with copy button',
+                            'Migration DB: subdomain selector — Dropdown to choose which subdomain DB to migrate. Auto-fills remote path and updates the correct local subdomain .env',
+                            'Dashboard: clickable Hosting Accounts card — Dashboard card links directly to /accounts',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'PostgreSQL ownership: REASSIGN OWNED tras migracion — Las tablas importadas con pg_dump ahora se reasignan al usuario de la app (antes quedaban como owner postgres)',
+                            'PostgreSQL credenciales: comillas correctas — ALTER USER usa comillas dobles para identificadores y simples para passwords (antes usaba escapeshellarg que generaba SQL invalido)',
+                            'Federation: columna hosting_account_id — Corregidas queries a hosting_domain_aliases que usaban account_id inexistente (causaba error 500 en federation-migrate)',
+                            'Migration DB: redireccion post-error — Los errores al editar credenciales redirigen a la pagina de origen (/accounts/X) en vez de /databases',
+                            'Migration DB: .env del subdominio — Ahora actualiza el .env correcto del subdominio seleccionado, no el del dominio principal',
+                            'Migration DB: DB_SSLMODE — Para PostgreSQL migrado, cambia DB_SSLMODE=require a prefer (conexion local no necesita SSL obligatorio)',
+                            'Backups create: dark theme completo — Switches, inputs time, input-group-text e iconos con colores del dark theme (antes se veian negros)',
+                            'Migration Step 3: titulo PostgreSQL — Card dice "MySQL / PostgreSQL" en vez de solo "MySQL". Texto de proceso actualizado',
+                            'Migration Step 3: memoria de collapse — La card desplegada se mantiene abierta al recargar pagina (localStorage)',
+                            'Migration Step 3: overlay durante migracion — Spinner a pantalla completa con mensaje mientras migra BD (antes no habia feedback visual)',
+                        ],
+                        'en' => [
+                            'PostgreSQL ownership: REASSIGN OWNED after migration — Tables imported with pg_dump now reassigned to app user (previously owned by postgres)',
+                            'PostgreSQL credentials: correct quoting — ALTER USER uses double quotes for identifiers and single quotes for passwords (previously used escapeshellarg generating invalid SQL)',
+                            'Federation: hosting_account_id column — Fixed queries to hosting_domain_aliases using non-existent account_id (caused 500 error in federation-migrate)',
+                            'Migration DB: post-error redirect — Credential edit errors redirect to origin page (/accounts/X) instead of /databases',
+                            'Migration DB: subdomain .env — Now updates the correct subdomain .env, not the main domain one',
+                            'Migration DB: DB_SSLMODE — For migrated PostgreSQL, changes DB_SSLMODE=require to prefer (local connection does not need mandatory SSL)',
+                            'Backups create: full dark theme — Switches, time inputs, input-group-text and icons with dark theme colors (previously appeared black)',
+                            'Migration Step 3: PostgreSQL title — Card says "MySQL / PostgreSQL" instead of just "MySQL". Process text updated',
+                            'Migration Step 3: collapse memory — Expanded card stays open on page reload (localStorage)',
+                            'Migration Step 3: overlay during migration — Full-screen spinner with message while migrating DB (previously no visual feedback)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.54',
                 'date' => '2026-04-03',
                 'badge' => 'success',

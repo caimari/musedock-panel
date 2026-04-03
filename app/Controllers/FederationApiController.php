@@ -329,10 +329,10 @@ class FederationApiController
             if (empty($aliasDomain)) continue;
 
             Database::insert('hosting_domain_aliases', [
-                'account_id'    => $accountId,
-                'domain'        => $aliasDomain,
-                'type'          => $aliasType,
-                'redirect_code' => $alias['redirect_code'] ?? null,
+                'hosting_account_id' => $accountId,
+                'domain'             => $aliasDomain,
+                'type'               => $aliasType,
+                'redirect_code'      => $alias['redirect_code'] ?? null,
             ]);
 
             // Create Caddy route: alias = same content as main, redirect = 301/302
@@ -553,7 +553,7 @@ class FederationApiController
             // Delete DB records
             Database::delete('hosting_databases', 'account_id = :aid', ['aid' => $account['id']]);
             Database::delete('hosting_subdomains', 'account_id = :aid', ['aid' => $account['id']]);
-            Database::delete('hosting_domain_aliases', 'account_id = :aid', ['aid' => $account['id']]);
+            Database::delete('hosting_domain_aliases', 'hosting_account_id = :aid', ['aid' => $account['id']]);
         }
 
         // Remove hosting_accounts record

@@ -307,6 +307,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/php/ini-save', 'SettingsController@phpIniSave');
 \MuseDockPanel\Router::get('/settings/security', 'SettingsController@security');
 \MuseDockPanel\Router::post('/settings/security/save', 'SettingsController@securitySave');
+\MuseDockPanel\Router::post('/settings/security/pg-ssl-enable', 'SettingsController@pgSslEnable');
+\MuseDockPanel\Router::post('/settings/security/pg-ssl-disable', 'SettingsController@pgSslDisable');
 \MuseDockPanel\Router::get('/settings/ssl', 'SettingsController@ssl');
 \MuseDockPanel\Router::get('/settings/fail2ban', 'SettingsController@fail2ban');
 \MuseDockPanel\Router::post('/settings/fail2ban/unban', 'SettingsController@fail2banUnban');

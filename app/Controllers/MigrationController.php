@@ -18,10 +18,17 @@ class MigrationController
             return;
         }
 
+        // Get subdomains for subdomain selector in DB migration step
+        $subdomains = Database::fetchAll(
+            'SELECT * FROM hosting_subdomains WHERE account_id = :aid ORDER BY subdomain',
+            ['aid' => $params['id']]
+        );
+
         View::render('accounts/migrate', [
             'layout' => 'main',
             'pageTitle' => 'Migrate: ' . $account['domain'],
             'account' => $account,
+            'subdomains' => $subdomains,
         ]);
     }
 
@@ -668,7 +675,22 @@ class MigrationController
         @unlink($dumpFile);
 
         // Update .env / wp-config
+        // If a subdomain was selected, find its local document_root for config update
+        $targetSubdomain = trim($_POST['target_subdomain'] ?? '');
         $targetDir = $account['document_root'];
+
+        if (!empty($targetSubdomain)) {
+            // Find the local subdomain by FQDN
+            $subRecord = Database::fetchOne(
+                'SELECT document_root FROM hosting_subdomains WHERE account_id = :aid AND subdomain = :sub',
+                ['aid' => $account['id'], 'sub' => $targetSubdomain]
+            );
+            if ($subRecord && !empty($subRecord['document_root'])) {
+                $targetDir = $subRecord['document_root'];
+                $logs[] = "Subdomain seleccionado: {$targetSubdomain} (local: {$targetDir})";
+            }
+        }
+
         if (str_ends_with($targetDir, '/public') && file_exists(dirname($targetDir) . '/.env')) {
             $targetDir = dirname($targetDir);
         }
@@ -677,10 +699,19 @@ class MigrationController
         if (file_exists($targetDir . '/.env')) {
             $env = file_get_contents($targetDir . '/.env');
             if (str_contains($env, 'DB_DATABASE')) {
-                $env = preg_replace('/^DB_HOST=.*/m', 'DB_HOST=127.0.0.1', $env);
+                $dbHost = $isPostgresDb ? '127.0.0.1' : '127.0.0.1';
+                $dbPort = $isPostgresDb ? '5432' : '3306';
+                $env = preg_replace('/^DB_HOST=.*/m', "DB_HOST={$dbHost}", $env);
+                if (preg_match('/^DB_PORT=.*/m', $env)) {
+                    $env = preg_replace('/^DB_PORT=.*/m', "DB_PORT={$dbPort}", $env);
+                }
                 $env = preg_replace('/^DB_DATABASE=.*/m', "DB_DATABASE={$localDbName}", $env);
                 $env = preg_replace('/^DB_USERNAME=.*/m', "DB_USERNAME={$localDbUser}", $env);
                 $env = preg_replace('/^DB_PASSWORD=.*/m', "DB_PASSWORD={$localDbPass}", $env);
+                // For PostgreSQL: update SSLMODE to disable (local connection doesn't need SSL)
+                if ($isPostgresDb && preg_match('/^DB_SSLMODE=.*/m', $env)) {
+                    $env = preg_replace('/^DB_SSLMODE=.*/m', 'DB_SSLMODE=prefer', $env);
+                }
                 $configUpdated = true;
             } elseif (str_contains($env, 'DB_NAME')) {
                 $env = preg_replace('/^DB_HOST=.*/m', 'DB_HOST=localhost', $env);
@@ -691,7 +722,7 @@ class MigrationController
             }
             if ($configUpdated) {
                 file_put_contents($targetDir . '/.env', $env);
-                $logs[] = '.env actualizado con credenciales locales.';
+                $logs[] = ".env actualizado con credenciales locales en: {$targetDir}/.env";
             }
         }
         if (!$configUpdated && file_exists($targetDir . '/wp-config.php')) {
@@ -2106,6 +2137,22 @@ class MigrationController
         $dbSource = $_POST['db_source'] ?? 'manual';
         $targetDir = $account['document_root'];
 
+        // If a subdomain was selected, use its local document_root
+        $targetSubdomain = trim($_POST['target_subdomain'] ?? '');
+        if (!empty($targetSubdomain)) {
+            $subRecord = Database::fetchOne(
+                'SELECT document_root FROM hosting_subdomains WHERE account_id = :aid AND subdomain = :sub',
+                ['aid' => $params['id'], 'sub' => $targetSubdomain]
+            );
+            if ($subRecord && !empty($subRecord['document_root'])) {
+                $targetDir = $subRecord['document_root'];
+                // Strip /public for Laravel-style apps
+                if (str_ends_with($targetDir, '/public') && file_exists(dirname($targetDir) . '/.env')) {
+                    $targetDir = dirname($targetDir);
+                }
+            }
+        }
+
         // SSH mode: execute mysqldump remotely (needed when MySQL only listens on localhost)
         $sshHost = trim($_POST['ssh_host'] ?? '');
         $sshUser = trim($_POST['ssh_user'] ?? '');
@@ -2398,11 +2445,32 @@ class MigrationController
         $localDbType = $isPostgresDb ? 'pgsql' : 'mysql';
 
         if ($isPostgresDb) {
-            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE USER \"{$localDbUser}\" WITH PASSWORD '{$localDbPass}'")));
-            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("ALTER USER \"{$localDbUser}\" WITH PASSWORD '{$localDbPass}'")));
-            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$localDbName}\" OWNER \"{$localDbUser}\"")));
-            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$localDbName}\" TO \"{$localDbUser}\"")));
+            $safeUser = str_replace('"', '""', $localDbUser);
+            $safePass = str_replace("'", "''", $localDbPass);
+            $safeDbName = str_replace('"', '""', $localDbName);
+
+            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'")));
+            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("ALTER USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'")));
+            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$safeDbName}\" OWNER \"{$safeUser}\"")));
+            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$safeDbName}\" TO \"{$safeUser}\"")));
             shell_exec(sprintf('sudo -u postgres psql -d %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
+
+            // Transfer ownership of ALL tables, sequences, views to the app user
+            // pg_dump imports as postgres, so objects are owned by postgres — fix that
+            shell_exec(sprintf("sudo -u postgres psql -d %s -c %s 2>&1",
+                escapeshellarg($localDbName),
+                escapeshellarg("REASSIGN OWNED BY postgres TO \"{$safeUser}\"")
+            ));
+            // Grant schema usage + all privileges
+            shell_exec(sprintf("sudo -u postgres psql -d %s -c %s 2>&1",
+                escapeshellarg($localDbName),
+                escapeshellarg("GRANT ALL ON SCHEMA public TO \"{$safeUser}\"; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"{$safeUser}\"; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"{$safeUser}\"; GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO \"{$safeUser}\";")
+            ));
+            // Set default privileges for future objects
+            shell_exec(sprintf("sudo -u postgres psql -d %s -c %s 2>&1",
+                escapeshellarg($localDbName),
+                escapeshellarg("ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"{$safeUser}\"; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \"{$safeUser}\";")
+            ));
         } else {
             $sqlSetup = sprintf(
                 "CREATE DATABASE IF NOT EXISTS `%s`;\nCREATE USER IF NOT EXISTS '%s'@'localhost' IDENTIFIED BY '%s';\nALTER USER '%s'@'localhost' IDENTIFIED BY '%s';\nGRANT ALL ON `%s`.* TO '%s'@'localhost';\nFLUSH PRIVILEGES;\n",
@@ -2471,7 +2539,14 @@ class MigrationController
         @unlink($dumpFile);
 
         LogService::log('migration.db', $account['domain'], "DB migrated: {$remoteDb} -> {$localDbName} ({$dumpSize} MB)");
-        Flash::set('success', "BD migrada: {$remoteDb} -> {$localDbName} ({$dumpSize} MB). Credenciales: user={$localDbUser}, pass={$localDbPass}");
+        Flash::set('success', "BD migrada: {$remoteDb} -> {$localDbName} ({$dumpSize} MB)");
+
+        // Store credentials in session for the modal display
+        $_SESSION['migration_db_pass'] = $localDbPass;
+        $_SESSION['migration_db_name'] = $localDbName;
+        $_SESSION['migration_db_user'] = $localDbUser;
+        $_SESSION['migration_db_type'] = $localDbType;
+
         Router::redirect('/accounts/' . $params['id'] . '/migrate');
     }
 }

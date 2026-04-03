@@ -58,4 +58,60 @@
             </div>
         </div>
     </div>
+
+    <div class="col-lg-6">
+        <!-- PostgreSQL SSL -->
+        <div class="card">
+            <div class="card-header"><i class="bi bi-shield-lock me-1"></i> PostgreSQL SSL</div>
+            <div class="card-body">
+                <?php
+                $pgSslEnabled = false;
+                $pgConfFile = '';
+                $pgVersion = '';
+                // Detect PG config location
+                foreach (['14', '15', '16', '17'] as $v) {
+                    $f = "/etc/postgresql/{$v}/main/postgresql.conf";
+                    if (file_exists($f)) { $pgConfFile = $f; $pgVersion = $v; break; }
+                }
+                if ($pgConfFile) {
+                    $pgConf = @file_get_contents($pgConfFile);
+                    $pgSslEnabled = $pgConf && preg_match('/^\s*ssl\s*=\s*on/m', $pgConf);
+                }
+                $pgCertExists = file_exists('/etc/postgresql/ssl/server.crt');
+                ?>
+
+                <div class="d-flex align-items-center mb-3">
+                    <span class="me-2">Estado:</span>
+                    <?php if ($pgSslEnabled): ?>
+                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>SSL activo</span>
+                    <?php else: ?>
+                        <span class="badge bg-secondary"><i class="bi bi-x-circle me-1"></i>SSL desactivado</span>
+                    <?php endif; ?>
+                    <?php if ($pgVersion): ?>
+                        <span class="badge bg-info ms-2">PostgreSQL <?= $pgVersion ?></span>
+                    <?php endif; ?>
+                </div>
+
+                <?php if (!$pgConfFile): ?>
+                    <p class="text-muted small">No se detecto PostgreSQL instalado.</p>
+                <?php elseif ($pgSslEnabled): ?>
+                    <p class="text-muted small mb-2">SSL esta activo. Las conexiones encriptadas estan disponibles.</p>
+                    <form method="POST" action="/settings/security/pg-ssl-disable" onsubmit="return confirm('Desactivar SSL en PostgreSQL?')">
+                        <?= View::csrf() ?>
+                        <button class="btn btn-outline-warning btn-sm"><i class="bi bi-shield-x me-1"></i>Desactivar SSL</button>
+                    </form>
+                <?php else: ?>
+                    <p class="text-muted small mb-2">Activa SSL para encriptar conexiones a PostgreSQL. Recomendado si aceptas conexiones remotas.</p>
+                    <form method="POST" action="/settings/security/pg-ssl-enable" onsubmit="this.querySelector('button[type=submit]').disabled=true;this.querySelector('button[type=submit]').innerHTML='<span class=\'spinner-border spinner-border-sm me-1\'></span>Configurando...';">
+                        <?= View::csrf() ?>
+                        <div class="form-check mb-3">
+                            <input type="checkbox" class="form-check-input" name="update_envs" id="updateEnvs" value="1">
+                            <label class="form-check-label small" for="updateEnvs">Actualizar DB_SSLMODE=prefer en todos los .env de hostings</label>
+                        </div>
+                        <button type="submit" class="btn btn-outline-success btn-sm"><i class="bi bi-shield-check me-1"></i>Activar SSL</button>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
 </div>

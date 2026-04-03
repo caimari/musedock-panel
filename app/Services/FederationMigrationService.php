@@ -520,7 +520,7 @@ class FederationMigrationService
 
         // Collect domain aliases (filtered by selection if specified)
         $aliases = Database::fetchAll(
-            'SELECT * FROM hosting_domain_aliases WHERE account_id = :aid',
+            'SELECT * FROM hosting_domain_aliases WHERE hosting_account_id = :aid',
             ['aid' => $account['id']]
         );
         $selectedAliasIds = $migration['metadata']['include_aliases'] ?? null;
@@ -683,6 +683,20 @@ class FederationMigrationService
                 self::log($migrationId, self::STEP_SYNC_DB, 'error', "Database sync failed: {$dbName}", ['exit_code' => $returnCode]);
             } else {
                 $synced++;
+                // Fix ownership: REASSIGN all objects to the app user (pg_dump may set postgres as owner)
+                if ($dbType === 'pgsql') {
+                    $safeUser = str_replace('"', '""', $dbUser);
+                    $fixOwnerCmd = sprintf(
+                        'ssh %s %s "sudo -u postgres psql -d %s -c %s" 2>&1',
+                        $sshOpts, escapeshellarg($sshTarget),
+                        escapeshellarg($dbName),
+                        escapeshellarg("REASSIGN OWNED BY postgres TO \\\"{$safeUser}\\\"; GRANT ALL ON SCHEMA public TO \\\"{$safeUser}\\\"; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \\\"{$safeUser}\\\"; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \\\"{$safeUser}\\\";")
+                    );
+                    exec($fixOwnerCmd, $ownerOut, $ownerRc);
+                    if ($ownerRc !== 0) {
+                        self::log($migrationId, self::STEP_SYNC_DB, 'warn', "Ownership fix failed for {$dbName} (may need manual REASSIGN)");
+                    }
+                }
             }
         }
 
@@ -822,7 +836,7 @@ class FederationMigrationService
             $subdomains = array_values(array_filter($subdomains, fn($s) => in_array((int)$s['id'], $selectedSubIds)));
         }
 
-        $aliases = Database::fetchAll('SELECT * FROM hosting_domain_aliases WHERE account_id = :aid', ['aid' => $account['id']]);
+        $aliases = Database::fetchAll('SELECT * FROM hosting_domain_aliases WHERE hosting_account_id = :aid', ['aid' => $account['id']]);
         $selectedAliasIds = $migration['metadata']['include_aliases'] ?? null;
         if (is_array($selectedAliasIds)) {
             $selectedAliasIds = array_map('intval', $selectedAliasIds);

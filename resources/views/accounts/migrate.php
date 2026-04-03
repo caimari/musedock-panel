@@ -9,7 +9,10 @@
 $migrationLog = $_SESSION['migration_log'] ?? null;
 $migrationErrors = $_SESSION['migration_errors'] ?? [];
 $migrationDbPass = $_SESSION['migration_db_pass'] ?? null;
-unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migration_db_pass']);
+$migrationDbName = $_SESSION['migration_db_name'] ?? null;
+$migrationDbUser = $_SESSION['migration_db_user'] ?? null;
+$migrationDbType = $_SESSION['migration_db_type'] ?? null;
+unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migration_db_pass'], $_SESSION['migration_db_name'], $_SESSION['migration_db_user'], $_SESSION['migration_db_type']);
 ?>
 
 <?php if ($migrationLog): ?>
@@ -39,16 +42,68 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
         </div>
         <?php if ($migrationDbPass): ?>
         <div class="p-3" style="border-top: 1px solid #334155;">
-            <div class="p-2 rounded" style="background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.2);">
-                <small style="color:#22c55e;">
-                    <i class="bi bi-key me-1"></i><strong>Password de la BD local (se muestra solo una vez):</strong>
-                    <code style="font-size: 0.9rem;"><?= View::e($migrationDbPass) ?></code>
-                </small>
+            <div class="p-3 rounded" style="background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.2);">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span style="color:#22c55e;"><i class="bi bi-key me-1"></i><strong>Credenciales de la BD local</strong></span>
+                    <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>No se mostraran de nuevo</span>
+                </div>
+                <div class="input-group input-group-sm mb-1">
+                    <span class="input-group-text" style="background:#1e293b;border-color:#334155;color:#94a3b8;min-width:90px;">Password</span>
+                    <input type="text" class="form-control bg-dark text-light border-secondary font-monospace" value="<?= View::e($migrationDbPass) ?>" readonly id="migDbPass">
+                    <button class="btn btn-outline-success" type="button" onclick="navigator.clipboard.writeText(document.getElementById('migDbPass').value);this.innerHTML='<i class=\'bi bi-check\'></i> Copiado';setTimeout(()=>this.innerHTML='<i class=\'bi bi-clipboard\'></i> Copiar',2000)" title="Copiar"><i class="bi bi-clipboard"></i> Copiar</button>
+                </div>
             </div>
         </div>
+        <!-- Auto-show modal with credentials so user can't miss it -->
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            SwalDark.fire({
+                title: '<i class="bi bi-key me-2"></i>Credenciales de la BD',
+                html: '<div class="text-start">' +
+                    '<p class="small text-muted mb-3">La base de datos se ha migrado correctamente. Guarda estas credenciales:</p>' +
+                    '<div class="mb-2"><span class="text-muted small">Database:</span><br><code class="text-light"><?= View::e($migrationDbName ?? '') ?></code></div>' +
+                    '<div class="mb-2"><span class="text-muted small">Usuario:</span><br><code class="text-light"><?= View::e($migrationDbUser ?? '') ?></code></div>' +
+                    '<div class="mb-2"><span class="text-muted small">Tipo:</span><br><code class="text-light"><?= ($migrationDbType ?? 'mysql') === 'pgsql' ? 'PostgreSQL' : 'MySQL' ?></code></div>' +
+                    '<div class="mb-3"><span class="text-muted small">Password:</span><br>' +
+                    '<div class="input-group input-group-sm"><input type="text" class="form-control bg-dark text-light border-secondary font-monospace" value="<?= View::e($migrationDbPass) ?>" readonly id="swalDbPass">' +
+                    '<button class="btn btn-outline-success" type="button" onclick="navigator.clipboard.writeText(document.getElementById(\'swalDbPass\').value);this.innerHTML=\'Copiado!\';setTimeout(()=>this.innerHTML=\'Copiar\',2000)">Copiar</button></div></div>' +
+                    '<div class="p-2 rounded small" style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.15);color:#f97316;">' +
+                    '<i class="bi bi-exclamation-triangle me-1"></i>Esta password no se mostrara de nuevo. Copiala ahora.</div></div>',
+                icon: 'success',
+                confirmButtonText: 'Ya la he copiado',
+                allowOutsideClick: false,
+                allowEscapeKey: false,
+            });
+        });
+        </script>
         <?php endif; ?>
     </div>
 </div>
+<?php endif; ?>
+
+<?php if ($migrationDbPass && !$migrationLog): ?>
+<!-- DB migration credentials modal (form-based migrateDb, no streaming log) -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    SwalDark.fire({
+        title: '<i class="bi bi-key me-2"></i>Credenciales de la BD',
+        html: '<div class="text-start">' +
+            '<p class="small text-muted mb-3">La base de datos se ha migrado correctamente. Guarda estas credenciales:</p>' +
+            '<div class="mb-2"><span class="text-muted small">Database:</span><br><code class="text-light"><?= View::e($migrationDbName ?? '') ?></code></div>' +
+            '<div class="mb-2"><span class="text-muted small">Usuario:</span><br><code class="text-light"><?= View::e($migrationDbUser ?? '') ?></code></div>' +
+            '<div class="mb-2"><span class="text-muted small">Tipo:</span><br><code class="text-light"><?= ($migrationDbType ?? 'mysql') === 'pgsql' ? 'PostgreSQL' : 'MySQL' ?></code></div>' +
+            '<div class="mb-3"><span class="text-muted small">Password:</span><br>' +
+            '<div class="input-group input-group-sm"><input type="text" class="form-control bg-dark text-light border-secondary font-monospace" value="<?= View::e($migrationDbPass) ?>" readonly id="swalDbPass2">' +
+            '<button class="btn btn-outline-success" type="button" onclick="navigator.clipboard.writeText(document.getElementById(\'swalDbPass2\').value);this.innerHTML=\'Copiado!\';setTimeout(()=>this.innerHTML=\'Copiar\',2000)">Copiar</button></div></div>' +
+            '<div class="p-2 rounded small" style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.15);color:#f97316;">' +
+            '<i class="bi bi-exclamation-triangle me-1"></i>Esta password no se mostrara de nuevo. Copiala ahora.</div></div>',
+        icon: 'success',
+        confirmButtonText: 'Ya la he copiado',
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+    });
+});
+</script>
 <?php endif; ?>
 
 <div class="row g-3">
@@ -235,14 +290,14 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
     <div class="col-12">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <span><i class="bi bi-database me-2"></i>Opcion 3: Solo Base de Datos (MySQL)</span>
+                <span><i class="bi bi-database me-2"></i>Opcion 3: Solo Base de Datos (MySQL / PostgreSQL)</span>
                 <button class="btn btn-outline-light btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#dbMigrateSection">
                     <i class="bi bi-chevron-down"></i>
                 </button>
             </div>
             <div class="collapse" id="dbMigrateSection">
                 <div class="card-body">
-                    <p class="text-muted small">Migrar solo la base de datos MySQL. Util si ya subiste los archivos por URL o manualmente.</p>
+                    <p class="text-muted small">Migrar base de datos MySQL o PostgreSQL. Util si ya subiste los archivos por URL o manualmente.</p>
 
                     <div class="mb-3">
                         <label class="form-label">Fuente de credenciales</label>
@@ -265,9 +320,10 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                         </div>
                     </div>
 
-                    <form method="POST" action="/accounts/<?= $account['id'] ?>/migrate/db" onsubmit="this.querySelector('button[type=submit]').disabled=true; this.querySelector('button[type=submit]').innerHTML='<span class=\'spinner-border spinner-border-sm me-1\'></span>Migrando BD...';">
+                    <form method="POST" action="/accounts/<?= $account['id'] ?>/migrate/db" id="dbMigrateForm" onsubmit="return startDbMigration(this);">
                     <?= \MuseDockPanel\View::csrf() ?>
                         <input type="hidden" name="db_source" id="dbSourceInput" value="auto">
+                        <input type="hidden" name="target_subdomain" id="dbTargetSubdomain" value="">
 
                         <div id="manualFields">
                             <div class="row g-2 mb-2">
@@ -333,17 +389,31 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                                     <input type="password" name="ssh_password" id="dbSshPassword" class="form-control">
                                 </div>
                             </div>
+                            <?php if (!empty($subdomains)): ?>
+                            <div class="row g-2 mb-2">
+                                <div class="col-12">
+                                    <label class="form-label">Subdominio <small class="text-muted">(opcional — selecciona si quieres migrar la BD de un subdominio especifico)</small></label>
+                                    <select id="dbSubdomainSelect" class="form-select form-select-sm" onchange="updateDbRemotePath()">
+                                        <option value="">Dominio principal (<?= View::e($account['domain']) ?>)</option>
+                                        <?php foreach ($subdomains as $sub): ?>
+                                        <option value="<?= View::e($sub['document_root']) ?>" data-subdomain="<?= View::e($sub['subdomain']) ?>">
+                                            <?= View::e($sub['subdomain']) ?>
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                            </div>
+                            <?php endif; ?>
                             <div class="row g-2 mb-3">
                                 <div class="col-12">
                                     <label class="form-label">Ruta remota del proyecto <small class="text-muted">(donde esta wp-config.php o .env en el servidor remoto)</small></label>
                                     <?php
-                                        // Pre-fill with likely remote path (strip /public suffix added locally)
                                         $remotePath = $account['document_root'];
                                         if (str_ends_with($remotePath, '/public')) {
                                             $remotePath = substr($remotePath, 0, -7);
                                         }
                                     ?>
-                                    <input type="text" name="ssh_remote_path" class="form-control" value="<?= View::e($remotePath) ?>">
+                                    <input type="text" name="ssh_remote_path" id="dbSshRemotePath" class="form-control" value="<?= View::e($remotePath) ?>">
                                 </div>
                             </div>
                             <div class="p-2 mb-2 rounded" style="background: rgba(34,197,94,0.06); border: 1px solid rgba(34,197,94,0.2);">
@@ -354,8 +424,8 @@ unset($_SESSION['migration_log'], $_SESSION['migration_errors'], $_SESSION['migr
                         <div class="p-2 mb-2 rounded" style="background: rgba(56,189,248,0.05); border: 1px solid #334155;">
                             <small class="text-muted">
                                 <i class="bi bi-info-circle me-1"></i>Proceso:
-                                1) mysqldump remoto &mdash;
-                                2) Crear BD local &mdash;
+                                1) Dump remoto (mysqldump o pg_dump) &mdash;
+                                2) Crear BD local (MySQL o PostgreSQL) &mdash;
                                 3) Importar dump &mdash;
                                 4) Actualizar config
                             </small>
@@ -1220,5 +1290,49 @@ function toggleAllSubdomains(checked) {
     document.querySelectorAll('.migrate-subdomain-cb').forEach(function(cb) {
         cb.checked = checked;
     });
+}
+
+// Restore collapse state from localStorage
+document.addEventListener('DOMContentLoaded', function() {
+    var el = document.getElementById('dbMigrateSection');
+    if (!el) return;
+    if (localStorage.getItem('migrate_db_open') === '1') {
+        el.classList.add('show');
+    }
+    el.addEventListener('hidden.bs.collapse', function() { localStorage.setItem('migrate_db_open', '0'); });
+    el.addEventListener('shown.bs.collapse', function() { localStorage.setItem('migrate_db_open', '1'); });
+});
+
+function startDbMigration(form) {
+    var btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Migrando BD... (puede tardar varios minutos)';
+    // Keep collapse open state for after redirect
+    localStorage.setItem('migrate_db_open', '1');
+    // Show overlay so user knows something is happening
+    var overlay = document.createElement('div');
+    overlay.id = 'db-migrate-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = '<div style="text-align:center;color:#e2e8f0;"><div class="spinner-border text-info mb-3" style="width:3rem;height:3rem;"></div><div style="font-size:1.1rem;">Migrando base de datos...</div><div class="text-muted small mt-1">Conectando al servidor remoto, descargando dump e importando.<br>Esto puede tardar varios minutos. No cierres esta pagina.</div></div>';
+    document.body.appendChild(overlay);
+    return true; // allow form submit
+}
+
+function updateDbRemotePath() {
+    var select = document.getElementById('dbSubdomainSelect');
+    var pathInput = document.getElementById('dbSshRemotePath');
+    var hiddenSub = document.getElementById('dbTargetSubdomain');
+    if (!select || !pathInput) return;
+    var docRoot = select.value;
+    var selectedOption = select.options[select.selectedIndex];
+    var subdomain = selectedOption ? (selectedOption.getAttribute('data-subdomain') || '') : '';
+    if (hiddenSub) hiddenSub.value = subdomain;
+    if (docRoot) {
+        if (docRoot.endsWith('/public')) docRoot = docRoot.substring(0, docRoot.length - 7);
+        pathInput.value = docRoot;
+    } else {
+        var defaultPath = '<?= View::e(str_ends_with($account['document_root'], '/public') ? substr($account['document_root'], 0, -7) : $account['document_root']) ?>';
+        pathInput.value = defaultPath;
+    }
 }
 </script>
