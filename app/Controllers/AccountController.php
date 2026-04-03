@@ -566,7 +566,11 @@ class AccountController
 
         $domains = Database::fetchAll("SELECT * FROM hosting_domains WHERE account_id = :id", ['id' => $params['id']]);
         $databases = Database::fetchAll("SELECT * FROM hosting_databases WHERE account_id = :id", ['id' => $params['id']]);
-        $account['disk_used_mb'] = SystemService::getDiskUsage($account['home_dir']);
+        // Use cached disk value from DB (updated by monitor-collector every 5 min)
+        // Avoids slow du on large directories blocking page load
+        if (empty($account['disk_used_mb'])) {
+            $account['disk_used_mb'] = 0;
+        }
 
         // Mail info for this domain
         $mailDomain = Database::fetchOne(
