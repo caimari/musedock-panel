@@ -128,7 +128,7 @@
 <?php endif; ?>
 
 <!-- Caddy Cloudflare Token Warning -->
-<?php if (!empty($caddyTokenStatus) && !$caddyTokenStatus['has_token'] && !\MuseDockPanel\Services\Settings::get('dismiss_cf_token_warning')): ?>
+<?php if (!empty($caddyTokenStatus) && !$caddyTokenStatus['has_token'] && !\MuseDockPanel\Settings::get('dismiss_cf_token_warning')): ?>
 <div class="row g-3 mb-4" id="cf-token-warning">
     <div class="col-12">
         <div class="card border-warning">
