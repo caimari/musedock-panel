@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.50] — 2026-04-03
+
+### New
+- Fail2Ban: boton "Configurar Jails" cuando no hay jails activos (auto-config de panel, portal, WordPress)
+
 ## [1.0.49] — 2026-04-03
 
 ### New

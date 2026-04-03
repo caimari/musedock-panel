@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.50',
+                'date' => '2026-04-03',
+                'badge' => 'success',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Fail2Ban: boton "Configurar Jails" — Cuando no hay jails activos, un boton configura automaticamente los 3 jails (panel, portal, WordPress), crea logs, configura Caddy y reinicia fail2ban',
+                        ],
+                        'en' => [
+                            'Fail2Ban: "Setup Jails" button — When no jails are active, a button auto-configures all 3 jails (panel, portal, WordPress), creates logs, configures Caddy and restarts fail2ban',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.49',
                 'date' => '2026-04-03',
                 'badge' => 'primary',

@@ -301,6 +301,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/fail2ban/whitelist', 'SettingsController@fail2banWhitelist');
 \MuseDockPanel\Router::post('/settings/fail2ban/toggle-jail', 'SettingsController@fail2banToggleJail');
 \MuseDockPanel\Router::post('/settings/fail2ban/install', 'SettingsController@fail2banInstall');
+\MuseDockPanel\Router::post('/settings/fail2ban/setup-jails', 'SettingsController@fail2banSetupJails');
 \MuseDockPanel\Router::get('/settings/logs', 'SettingsController@logs');
 \MuseDockPanel\Router::post('/settings/logs/clear', 'SettingsController@logClear');
 

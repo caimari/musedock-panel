@@ -1065,6 +1065,91 @@ class SettingsController
         Router::redirect('/settings/fail2ban');
     }
 
+    public function fail2banSetupJails(): void
+    {
+        View::verifyCsrf();
+
+        $panelDir = PANEL_ROOT . '/config/fail2ban';
+        $errors = [];
+        $installed = [];
+
+        // 1. Copy filter configs
+        if (is_dir("{$panelDir}/filter.d")) {
+            foreach (glob("{$panelDir}/filter.d/*.conf") as $f) {
+                @copy($f, '/etc/fail2ban/filter.d/' . basename($f));
+                $installed[] = 'filter: ' . basename($f);
+            }
+        }
+
+        // 2. Copy jail config
+        if (file_exists("{$panelDir}/musedock.conf")) {
+            @copy("{$panelDir}/musedock.conf", '/etc/fail2ban/jail.d/musedock.conf');
+            $installed[] = 'jail: musedock.conf';
+        }
+
+        // 3. Copy logrotate
+        if (file_exists("{$panelDir}/logrotate-musedock-auth")) {
+            @copy("{$panelDir}/logrotate-musedock-auth", '/etc/logrotate.d/musedock-auth');
+        }
+
+        // 4. Create log files if missing
+        foreach (['/var/log/musedock-panel-auth.log', '/var/log/musedock-portal-auth.log'] as $log) {
+            if (!file_exists($log)) {
+                @file_put_contents($log, '');
+                @chmod($log, 0644);
+                $installed[] = 'log: ' . basename($log);
+            }
+        }
+
+        // 5. Ensure Caddy hosting-access log exists and is writable
+        $caddyLog = '/var/log/caddy/hosting-access.log';
+        if (!file_exists($caddyLog)) {
+            @mkdir(dirname($caddyLog), 0755, true);
+            @file_put_contents($caddyLog, '');
+            shell_exec('chown caddy:caddy ' . escapeshellarg($caddyLog) . ' 2>&1');
+            $installed[] = 'log: hosting-access.log';
+        }
+
+        // 6. Configure Caddy hosting-access logger if not active
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
+        $loggerCheck = @file_get_contents("{$caddyApi}/config/logging/logs/hosting-access");
+        if (!$loggerCheck || $loggerCheck === 'null') {
+            // Get all hosting domains
+            $accounts = Database::fetchAll("SELECT domain FROM hosting_accounts");
+            $subs = Database::fetchAll("SELECT subdomain as domain FROM hosting_subdomains");
+            $allDomains = [];
+            foreach (array_merge($accounts, $subs) as $row) {
+                $allDomains[] = $row['domain'];
+                $allDomains[] = 'www.' . $row['domain'];
+            }
+            \MuseDockPanel\Services\SystemService::ensureHostingAccessLog($caddyApi, $allDomains);
+            $installed[] = 'caddy: hosting-access logger';
+        }
+
+        // 7. Reload fail2ban
+        shell_exec('systemctl restart fail2ban 2>&1');
+        sleep(1);
+
+        // 8. Check which jails started
+        $statusOutput = trim(shell_exec('fail2ban-client status 2>/dev/null') ?? '');
+        $jailNames = [];
+        if (preg_match('/Jail list:\s*(.+)$/mi', $statusOutput, $m)) {
+            $jailNames = array_map('trim', explode(',', $m[1]));
+        }
+
+        $musedockJails = array_filter($jailNames, fn($j) => str_starts_with($j, 'musedock-'));
+
+        if (!empty($musedockJails)) {
+            \MuseDockPanel\Services\LogService::log('fail2ban', 'Jails configured: ' . implode(', ', $musedockJails));
+            Flash::set('success', 'Jails configurados: ' . implode(', ', $musedockJails));
+        } else {
+            Flash::set('error', 'Los configs se copiaron pero no se activaron jails. Verifica los logs de fail2ban: journalctl -u fail2ban -n 20');
+        }
+
+        Router::redirect('/settings/fail2ban');
+    }
+
     public function fail2banToggleJail(): void
     {
         View::verifyCsrf();

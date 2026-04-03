@@ -162,10 +162,49 @@
     ?>
     <?php if (empty($jails)): ?>
         <div class="card">
-            <div class="card-body text-muted">
-                <i class="bi bi-info-circle me-1"></i> No se encontraron jails configurados.
+            <div class="card-body">
+                <div class="d-flex align-items-center gap-3">
+                    <div>
+                        <i class="bi bi-shield-exclamation text-warning" style="font-size:1.5rem;"></i>
+                    </div>
+                    <div class="flex-grow-1">
+                        <p class="mb-1">No se encontraron jails configurados.</p>
+                        <p class="text-muted small mb-0">Los jails protegen contra fuerza bruta en: panel admin, portal de clientes y WordPress sites.</p>
+                    </div>
+                    <form method="POST" action="/settings/fail2ban/setup-jails" id="form-setup-jails">
+                        <?= View::csrf() ?>
+                        <button type="button" class="btn btn-primary btn-sm" id="btn-setup-jails" onclick="confirmSetupJails()">
+                            <i class="bi bi-shield-plus me-1"></i>Configurar Jails
+                        </button>
+                    </form>
+                </div>
             </div>
         </div>
+        <script>
+        function confirmSetupJails() {
+            var S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+            S.fire({
+                title: 'Configurar Jails de proteccion?',
+                html: '<div class="text-start"><p>Se crearan los siguientes jails:</p>' +
+                    '<ul class="small">' +
+                    '<li><strong>musedock-panel</strong> — Protege login del panel admin (5 intentos / 10 min → ban 1h)</li>' +
+                    '<li><strong>musedock-portal</strong> — Protege login del portal de clientes (10 intentos / 10 min → ban 30 min)</li>' +
+                    '<li><strong>musedock-wordpress</strong> — Protege wp-login.php y xmlrpc.php de todos los WordPress (10 intentos / 5 min → ban 1h)</li>' +
+                    '</ul>' +
+                    '<p class="text-muted small mb-0">Se crearan los archivos de log necesarios y se configurara Caddy para registrar accesos.</p></div>',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: '<i class="bi bi-shield-plus me-1"></i>Configurar',
+                cancelButtonText: 'Cancelar',
+            }).then(function(r) {
+                if (!r.isConfirmed) return;
+                var btn = document.getElementById('btn-setup-jails');
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Configurando jails...';
+                document.getElementById('form-setup-jails').submit();
+            });
+        }
+        </script>
     <?php else: ?>
         <?php foreach ($jails as $jail): ?>
             <div class="card mb-3">
