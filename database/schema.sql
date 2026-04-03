@@ -18,6 +18,25 @@ CREATE TABLE IF NOT EXISTS panel_admins (
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+-- Servers (localhost by default, clustering later)
+CREATE TABLE IF NOT EXISTS servers (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    hostname VARCHAR(255),
+    ip_address VARCHAR(45),
+    role VARCHAR(20) NOT NULL DEFAULT 'standalone',
+    is_local BOOLEAN NOT NULL DEFAULT true,
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    metadata JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Insert localhost server
+INSERT INTO servers (name, hostname, ip_address, role, is_local, status)
+SELECT 'localhost', '', '', 'standalone', true, 'active'
+WHERE NOT EXISTS (SELECT 1 FROM servers WHERE is_local = true);
+
 -- Customers (owners of hosting accounts)
 CREATE TABLE IF NOT EXISTS customers (
     id SERIAL PRIMARY KEY,
@@ -92,25 +111,6 @@ CREATE TABLE IF NOT EXISTS panel_settings (
     value TEXT NOT NULL DEFAULT '',
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
-
--- Servers (localhost by default, clustering later)
-CREATE TABLE IF NOT EXISTS servers (
-    id SERIAL PRIMARY KEY,
-    name VARCHAR(100) NOT NULL,
-    hostname VARCHAR(255),
-    ip_address VARCHAR(45),
-    role VARCHAR(20) NOT NULL DEFAULT 'standalone',
-    is_local BOOLEAN NOT NULL DEFAULT true,
-    status VARCHAR(20) NOT NULL DEFAULT 'active',
-    metadata JSONB,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
--- Insert localhost server
-INSERT INTO servers (name, hostname, ip_address, role, is_local, status)
-SELECT 'localhost', '', '', 'standalone', true, 'active'
-WHERE NOT EXISTS (SELECT 1 FROM servers WHERE is_local = true);
 
 -- Default settings
 INSERT INTO panel_settings (key, value) VALUES

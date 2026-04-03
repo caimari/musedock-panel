@@ -20,9 +20,34 @@ class ChangelogController
     {
         return [
             [
-                'version' => '1.0.44',
+                'version' => '1.0.45',
                 'date' => '2026-04-03',
                 'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Error "relation servers does not exist" en /setup — La tabla servers se creaba despues de hosting_accounts que la referencia. Reordenado schema.sql para crear servers antes',
+                            'Deteccion de firewall mejorada — iptables con policy DROP ahora se detecta correctamente aunque UFW este instalado pero inactivo. Ya no dice "sin firewall" cuando hay reglas iptables activas',
+                        ],
+                        'en' => [
+                            'Error "relation servers does not exist" on /setup — servers table was created after hosting_accounts which references it. Reordered schema.sql to create servers first',
+                            'Improved firewall detection — iptables with DROP policy now correctly detected even when UFW is installed but inactive. No longer says "no firewall" when active iptables rules exist',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Portal removido de la instalacion principal — El portal de clientes es un modulo separado de pago, ya no se ofrece durante la instalacion del panel',
+                        ],
+                        'en' => [
+                            'Portal removed from main installer — Customer portal is a separate paid module, no longer offered during panel installation',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.44',
+                'date' => '2026-04-03',
+                'badge' => 'success',
                 'changes' => [
                     'new' => [
                         'es' => [

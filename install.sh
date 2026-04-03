@@ -3372,12 +3372,18 @@ FW_ENGINE="none"
 if command -v ufw &> /dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
     FW_ENGINE="ufw"
     ok "$(t fw_setup_detect_ufw)"
+elif iptables -L INPUT -n 2>/dev/null | head -1 | grep -qE "policy (DROP|REJECT)"; then
+    # iptables has a restrictive default policy — real firewall active
+    FW_ENGINE="iptables"
+    ok "$(t fw_setup_detect_ipt)"
+    # If UFW is also available (but inactive), prefer using it for management
+    if command -v ufw &> /dev/null; then
+        FW_ENGINE="ufw_inactive"
+        ok "$(t fw_setup_detect_ipt) + UFW available"
+    fi
 elif command -v ufw &> /dev/null; then
     FW_ENGINE="ufw_inactive"
     ok "$(t fw_setup_detect_none)"
-elif iptables -L INPUT -n &>/dev/null; then
-    FW_ENGINE="iptables"
-    ok "$(t fw_setup_detect_ipt)"
 else
     FW_ENGINE="install_ufw"
     ok "$(t fw_setup_detect_none)"
@@ -3659,29 +3665,6 @@ echo -e "  ${CYAN}🔄${NC}  $(t next_steps_replication)"
 echo ""
 echo -e "  ${YELLOW}$(t next_steps_hint)${NC}"
 echo ""
-
-# ============================================================
-# Optional: MuseDock Portal (Customer Panel)
-# ============================================================
-if [ -f "${PANEL_DIR}/bin/portal-install.sh" ]; then
-    echo ""
-    echo -e "  ${CYAN}${BOLD}┌──────────────────────────────────────────────────────────┐${NC}"
-    echo -e "  ${CYAN}${BOLD}│  MuseDock Portal — Customer Self-Service Panel           │${NC}"
-    echo -e "  ${CYAN}${BOLD}│  Let your customers manage their hosting accounts.       │${NC}"
-    echo -e "  ${CYAN}${BOLD}│  Get a license at: https://musedock.com/portal            │${NC}"
-    echo -e "  ${CYAN}${BOLD}└──────────────────────────────────────────────────────────┘${NC}"
-    echo ""
-    echo -e "  Install later with:"
-    echo -e "  ${CYAN}sudo bash ${PANEL_DIR}/bin/portal-install.sh YOUR-LICENSE-KEY${NC}"
-    echo ""
-
-    if [ -t 0 ]; then
-        read -rp "  Enter Portal license key (or press Enter to skip): " PORTAL_KEY
-        if [ -n "$PORTAL_KEY" ]; then
-            bash "${PANEL_DIR}/bin/portal-install.sh" "$PORTAL_KEY"
-        fi
-    fi
-fi
 
 echo -e "  ${GREEN}${BOLD}$(t enjoy)${NC}"
 echo ""
