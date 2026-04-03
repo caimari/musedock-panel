@@ -125,8 +125,9 @@ class FederationController
     /**
      * POST /settings/federation/remove-peer/{id}
      */
-    public function removePeer(int $id): void
+    public function removePeer(array $params): void
     {
+        $id = (int)($params['id'] ?? 0);
         $result = FederationService::removePeer($id);
 
         if ($result['ok']) {
@@ -141,8 +142,9 @@ class FederationController
     /**
      * POST /settings/federation/approve-peer/{id}
      */
-    public function approvePeer(int $id): void
+    public function approvePeer(array $params): void
     {
+        $id = (int)($params['id'] ?? 0);
         $peer = Database::fetchOne('SELECT * FROM federation_peers WHERE id = :id', ['id' => $id]);
         if (!$peer) {
             Flash::error('Peer no encontrado.');
@@ -188,8 +190,9 @@ class FederationController
      * GET /accounts/{id}/federation-migrate
      * Show migration form for an account.
      */
-    public function migrateForm(int $accountId): void
+    public function migrateForm(array $params): void
     {
+        $accountId = (int)($params['id'] ?? 0);
         $account = Database::fetchOne('SELECT * FROM hosting_accounts WHERE id = :id', ['id' => $accountId]);
         if (!$account) {
             http_response_code(404);
@@ -218,9 +221,10 @@ class FederationController
      * POST /accounts/{id}/federation-migrate/start
      * Start a new migration.
      */
-    public function migrateStart(int $accountId): void
+    public function migrateStart(array $params): void
     {
         header('Content-Type: application/json');
+        $accountId = (int)($params['id'] ?? 0);
 
         $peerId  = (int)($_POST['peer_id'] ?? 0);
         $mode    = $_POST['mode'] ?? FederationMigrationService::MODE_MIGRATE;
@@ -246,9 +250,10 @@ class FederationController
      * POST /accounts/{id}/federation-migrate/execute
      * Execute the next step (or run all).
      */
-    public function migrateExecute(int $accountId): void
+    public function migrateExecute(array $params): void
     {
         header('Content-Type: application/json');
+        $accountId = (int)($params['id'] ?? 0);
 
         $migrationId = $_POST['migration_id'] ?? '';
         $runAll      = !empty($_POST['run_all']);
@@ -269,8 +274,9 @@ class FederationController
      * GET /accounts/{id}/federation-migrate/progress
      * SSE or JSON progress for real-time UI.
      */
-    public function migrateProgress(int $accountId): void
+    public function migrateProgress(array $params): void
     {
+        $accountId = (int)($params['id'] ?? 0);
         $migrationId = $_GET['migration_id'] ?? '';
         $format = $_GET['format'] ?? 'json';
 
@@ -303,7 +309,7 @@ class FederationController
     /**
      * POST /accounts/{id}/federation-migrate/pause
      */
-    public function migratePause(int $accountId): void
+    public function migratePause(array $params): void
     {
         header('Content-Type: application/json');
         $migrationId = $_POST['migration_id'] ?? '';
@@ -313,7 +319,7 @@ class FederationController
     /**
      * POST /accounts/{id}/federation-migrate/resume
      */
-    public function migrateResume(int $accountId): void
+    public function migrateResume(array $params): void
     {
         header('Content-Type: application/json');
         $migrationId = $_POST['migration_id'] ?? '';
@@ -323,7 +329,7 @@ class FederationController
     /**
      * POST /accounts/{id}/federation-migrate/cancel
      */
-    public function migrateCancel(int $accountId): void
+    public function migrateCancel(array $params): void
     {
         header('Content-Type: application/json');
         $migrationId = $_POST['migration_id'] ?? '';
@@ -340,7 +346,7 @@ class FederationController
      * GET /accounts/{id}/federation-migrate/logs
      * Get migration logs.
      */
-    public function migrateLogs(int $accountId): void
+    public function migrateLogs(array $params): void
     {
         header('Content-Type: application/json');
         $migrationId = $_GET['migration_id'] ?? '';

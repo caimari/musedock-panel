@@ -318,9 +318,9 @@
             </div>
 
             <?php if (empty($peers)): ?>
-                <div class="alert alert-warning py-2">
+                <div class="py-2 px-3 rounded small" style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.2);color:#f97316;">
                     <i class="bi bi-exclamation-triangle me-1"></i>
-                    No hay peers de federation configurados. <a href="/settings/federation" class="alert-link">Configura un peer primero</a>.
+                    No hay peers de federation configurados. <a href="/settings/federation" style="color:#38bdf8;">Configura un peer primero</a>.
                 </div>
             <?php else: ?>
                 <form id="migration-form">
