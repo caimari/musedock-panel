@@ -135,8 +135,6 @@ class UpdateService
      */
     private static function fetchRemoteVersion(): ?string
     {
-        $url = self::REPO_RAW_URL . '/public/index.php';
-
         $ctx = stream_context_create([
             'http' => [
                 'timeout'    => 10,
@@ -144,11 +142,15 @@ class UpdateService
             ],
         ]);
 
-        $content = @file_get_contents($url, false, $ctx);
-        if ($content === false) return null;
+        // Primary: read version from config/panel.php
+        $content = @file_get_contents(self::REPO_RAW_URL . '/config/panel.php', false, $ctx);
+        if ($content !== false && preg_match("/'version'\s*=>\s*'([^']+)'/", $content, $m)) {
+            return $m[1];
+        }
 
-        // Parse: define('PANEL_VERSION', '0.7.0');
-        if (preg_match("/define\(\s*'PANEL_VERSION'\s*,\s*'([^']+)'\s*\)/", $content, $m)) {
+        // Fallback: legacy index.php with define('PANEL_VERSION', ...)
+        $content = @file_get_contents(self::REPO_RAW_URL . '/public/index.php', false, $ctx);
+        if ($content !== false && preg_match("/define\(\s*'PANEL_VERSION'\s*,\s*'([^']+)'\s*\)/", $content, $m)) {
             return $m[1];
         }
 
