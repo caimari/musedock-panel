@@ -6,3 +6,4 @@ storage/*.lock
 storage/*.json
 storage/*.flag
 .env
+*.deb
