@@ -169,6 +169,55 @@ CREATE TABLE IF NOT EXISTS panel_migrations (
     executed_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+-- Hosting subdomains
+CREATE TABLE IF NOT EXISTS hosting_subdomains (
+    id SERIAL PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES hosting_accounts(id) ON DELETE CASCADE,
+    subdomain VARCHAR(255) NOT NULL,
+    document_root VARCHAR(500),
+    php_version VARCHAR(10) DEFAULT '8.3',
+    caddy_route_id VARCHAR(255),
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    php_overrides JSONB,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Bandwidth per hosting account (hourly granularity)
+CREATE TABLE IF NOT EXISTS hosting_bandwidth (
+    id SERIAL PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES hosting_accounts(id) ON DELETE CASCADE,
+    ts TIMESTAMP NOT NULL,
+    bytes_out BIGINT NOT NULL DEFAULT 0,
+    bytes_in BIGINT NOT NULL DEFAULT 0,
+    requests INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bandwidth_account_ts ON hosting_bandwidth(account_id, ts);
+CREATE INDEX IF NOT EXISTS idx_bandwidth_date ON hosting_bandwidth(ts);
+
+-- Bandwidth per hosting account (hourly rollup)
+CREATE TABLE IF NOT EXISTS hosting_bandwidth_hourly (
+    id SERIAL PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES hosting_accounts(id) ON DELETE CASCADE,
+    hour TIMESTAMP NOT NULL,
+    bytes_out BIGINT NOT NULL DEFAULT 0,
+    bytes_in BIGINT NOT NULL DEFAULT 0,
+    requests INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bandwidth_hourly_account_hour ON hosting_bandwidth_hourly(account_id, hour);
+
+-- Bandwidth per subdomain
+CREATE TABLE IF NOT EXISTS hosting_subdomain_bandwidth (
+    id SERIAL PRIMARY KEY,
+    subdomain_id INTEGER NOT NULL REFERENCES hosting_subdomains(id) ON DELETE CASCADE,
+    ts TIMESTAMP NOT NULL,
+    bytes_out BIGINT NOT NULL DEFAULT 0,
+    bytes_in BIGINT NOT NULL DEFAULT 0,
+    requests INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_bw_sub_ts ON hosting_subdomain_bandwidth(subdomain_id, ts);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_customers_status ON customers(status);
 CREATE INDEX IF NOT EXISTS idx_hosting_accounts_status ON hosting_accounts(status);

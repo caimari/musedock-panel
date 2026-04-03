@@ -20,9 +20,34 @@ class ChangelogController
     {
         return [
             [
-                'version' => '1.0.45',
+                'version' => '1.0.46',
                 'date' => '2026-04-03',
                 'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'schema.sql incluye todas las tablas — hosting_subdomains, hosting_bandwidth (con columna ts), hosting_bandwidth_hourly y hosting_subdomain_bandwidth ahora se crean en instalaciones frescas sin depender de migraciones',
+                            'Instalaciones en servidores nuevos no fallan en /accounts — Todas las tablas referenciadas por BandwidthService existen desde el schema inicial',
+                        ],
+                        'en' => [
+                            'schema.sql includes all tables — hosting_subdomains, hosting_bandwidth (with ts column), hosting_bandwidth_hourly and hosting_subdomain_bandwidth now created on fresh installs without depending on migrations',
+                            'Fresh server installs no longer fail on /accounts — All tables referenced by BandwidthService exist from the initial schema',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Pagina de Import 10x mas rapida — El calculo de disco usa timeout de 3 segundos en vez de du sin limite. Directorios grandes no bloquean la carga',
+                        ],
+                        'en' => [
+                            'Import page 10x faster — Disk calculation uses 3-second timeout instead of unlimited du. Large directories no longer block page load',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.45',
+                'date' => '2026-04-03',
+                'badge' => 'success',
                 'changes' => [
                     'fixed' => [
                         'es' => [

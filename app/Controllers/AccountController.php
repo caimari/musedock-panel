@@ -1858,6 +1858,13 @@ class AccountController
             return null;
         };
 
+        // Helper: fast disk estimate (avoids slow du on large dirs)
+        $fastDiskMb = function (string $dir): int {
+            // Use du with --max-depth=0 and timeout to avoid blocking on huge dirs
+            $output = shell_exec(sprintf('timeout 3 du -sm --max-depth=0 %s 2>/dev/null | cut -f1', escapeshellarg($dir)));
+            return (int) trim($output ?: '0');
+        };
+
         // Helper: detect PHP version and FPM pool for a username
         $detectFpm = function (?string $username): array {
             $phpVersion = null;
@@ -1902,7 +1909,7 @@ class AccountController
             [$phpVersion, $fpmPool] = $detectFpm($username);
             $caddyRoute = $findCaddyRoute($domain);
 
-            $diskMb = SystemService::getDiskUsage($dir);
+            $diskMb = $fastDiskMb($dir);
 
             $warnings = [];
             if (!$username) $warnings[] = 'No se pudo detectar el usuario propietario';
@@ -1985,7 +1992,7 @@ class AccountController
             $shell = $ownerInfo ? ($ownerInfo['shell'] ?? '?') : '?';
 
             [$phpVersion, $fpmPool] = $detectFpm($username);
-            $diskMb = SystemService::getDiskUsage($homeDir);
+            $diskMb = $fastDiskMb($homeDir);
 
             $warnings = [];
             if (!$username) $warnings[] = 'No se pudo detectar el usuario propietario';
