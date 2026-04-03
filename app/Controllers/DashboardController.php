@@ -2,6 +2,7 @@
 namespace MuseDockPanel\Controllers;
 
 use MuseDockPanel\Database;
+use MuseDockPanel\Router;
 use MuseDockPanel\View;
 use MuseDockPanel\Settings;
 use MuseDockPanel\Services\ClusterService;
@@ -431,5 +432,16 @@ class DashboardController
                 : "Signal SIG{$signal} enviada al proceso {$pid} (aun activo, prueba SIGKILL)",
         ]);
         exit;
+    }
+
+    public function dismissAlert(): void
+    {
+        \MuseDockPanel\View::verifyCsrf();
+        $alert = trim($_POST['alert'] ?? '');
+        $allowed = ['cf_token_warning'];
+        if (in_array($alert, $allowed, true)) {
+            Settings::set("dismiss_{$alert}", '1');
+        }
+        Router::redirect('/');
     }
 }

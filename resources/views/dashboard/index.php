@@ -128,13 +128,18 @@
 <?php endif; ?>
 
 <!-- Caddy Cloudflare Token Warning -->
-<?php if (!empty($caddyTokenStatus) && !$caddyTokenStatus['has_token']): ?>
-<div class="row g-3 mb-4">
+<?php if (!empty($caddyTokenStatus) && !$caddyTokenStatus['has_token'] && !\MuseDockPanel\Services\Settings::get('dismiss_cf_token_warning')): ?>
+<div class="row g-3 mb-4" id="cf-token-warning">
     <div class="col-12">
         <div class="card border-warning">
-            <div class="card-header bg-warning text-dark py-2">
-                <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                <strong>Certificados SSL: Token de Cloudflare no configurado</strong>
+            <div class="card-header bg-warning text-dark py-2 d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-exclamation-triangle-fill me-2"></i>
+                <strong>Certificados SSL: Token de Cloudflare no configurado</strong></span>
+                <form method="POST" action="/settings/dismiss-alert" style="display:inline;">
+                    <?= \MuseDockPanel\View::csrf() ?>
+                    <input type="hidden" name="alert" value="cf_token_warning">
+                    <button type="submit" class="btn btn-sm btn-outline-dark border-0" title="Cerrar aviso"><i class="bi bi-x-lg"></i></button>
+                </form>
             </div>
             <div class="card-body">
                 <p class="mb-2">

@@ -84,6 +84,9 @@
 <div class="sidebar">
     <div class="sidebar-brand">
         <h5><i class="bi bi-hdd-rack"></i> MuseDock Panel</h5>
+        <?php if (!empty($panelHostname)): ?>
+            <div><small style="color:#94a3b8;font-size:0.75rem;"><i class="bi bi-server" style="font-size:0.65rem;"></i> <?= View::e($panelHostname) ?></small></div>
+        <?php endif; ?>
         <a href="/changelog" style="text-decoration:none;"><small style="color:#64748b;">v<?= View::e($panelVersion) ?></small></a>
     </div>
     <nav class="sidebar-nav">

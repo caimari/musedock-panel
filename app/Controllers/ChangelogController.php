@@ -20,9 +20,34 @@ class ChangelogController
     {
         return [
             [
-                'version' => '1.0.46',
+                'version' => '1.0.47',
                 'date' => '2026-04-03',
                 'badge' => 'danger',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Hostname del servidor en el sidebar — Muestra el nombre del servidor debajo del logo y encima de la version, util para distinguir master de slave',
+                            'Boton cerrar aviso de Cloudflare — El aviso de token SSL se puede cerrar desde el dashboard. El estado se guarda en panel_settings y no vuelve a aparecer',
+                        ],
+                        'en' => [
+                            'Server hostname in sidebar — Shows server name below logo and above version, useful to distinguish master from slave',
+                            'Dismiss Cloudflare warning button — SSL token warning can be closed from dashboard. State saved in panel_settings and does not reappear',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Version del panel ya no esta hardcoded — PANEL_VERSION se lee de config/panel.php en vez de estar duplicada en index.php',
+                        ],
+                        'en' => [
+                            'Panel version no longer hardcoded — PANEL_VERSION reads from config/panel.php instead of being duplicated in index.php',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.46',
+                'date' => '2026-04-03',
+                'badge' => 'success',
                 'changes' => [
                     'fixed' => [
                         'es' => [

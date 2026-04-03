@@ -5,7 +5,6 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.41');
 
 
 
@@ -24,6 +23,7 @@ spl_autoload_register(function ($class) {
 
 // Config
 $config = require PANEL_ROOT . '/config/panel.php';
+define('PANEL_VERSION', $config['version']);
 
 // Session (hardened)
 ini_set('session.save_path', $config['session']['path']);
@@ -57,6 +57,7 @@ try {
 // Share config with views
 \MuseDockPanel\View::share('panelVersion', PANEL_VERSION);
 \MuseDockPanel\View::share('panelName', $config['name']);
+\MuseDockPanel\View::share('panelHostname', gethostname() ?: php_uname('n'));
 \MuseDockPanel\View::share('currentUser', \MuseDockPanel\Auth::user());
 
 // ===============================
@@ -117,6 +118,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/dashboard/processes', 'DashboardController@processes');
 \MuseDockPanel\Router::get('/dashboard/process-detail', 'DashboardController@processDetail');
 \MuseDockPanel\Router::post('/dashboard/process-kill', 'DashboardController@processKill');
+\MuseDockPanel\Router::post('/settings/dismiss-alert', 'DashboardController@dismissAlert');
 
 // Monitoring
 \MuseDockPanel\Router::get('/monitor', 'MonitorController@index');
