@@ -20,20 +20,32 @@ class ChangelogController
     {
         return [
             [
-                'version' => '1.0.43',
+                'version' => '1.0.44',
                 'date' => '2026-04-03',
                 'badge' => 'danger',
                 'changes' => [
-                    'fixed' => [
+                    'new' => [
                         'es' => [
-                            'Deduplicacion completa en migracion Nginx/Apache — Tres niveles de proteccion: recoleccion (skip -le-ssl.conf, symlinks, dominios vistos), JSON (deduplica antes de aplicar), y Caddy API (elimina rutas existentes antes de crear)',
-                            'Apache no duplica dominios de Nginx — Extrae dominios ya migrados del JSON y los salta. Cuenta solo los nuevos de Apache',
-                            'Doble glob eliminado — Nginx ya no parsea *.conf y * por separado (causaba archivos duplicados)',
+                            'Deteccion de "admin off" en Caddyfile — El instalador detecta y reemplaza automaticamente "admin off" por "admin localhost:2019" para que la API funcione',
+                            'Limpieza de autosave.json corrupto — Si el autosave tiene admin:disabled (de un Caddy pre-existente con admin off), se elimina antes de arrancar Caddy con --resume',
+                            'Dominios del Caddyfile excluidos de migracion — Si Caddy ya tiene un dominio configurado en el Caddyfile, no se ofrece migrarlo desde Nginx/Apache (evita duplicados innecesarios)',
                         ],
                         'en' => [
-                            'Full deduplication in Nginx/Apache migration — Three protection levels: collection (skip -le-ssl.conf, symlinks, seen domains), JSON (deduplicate before applying), and Caddy API (delete existing routes before creating)',
-                            'Apache no longer duplicates Nginx domains — Extracts already-migrated domains from JSON and skips them. Counts only new Apache sites',
-                            'Double glob removed — Nginx no longer parses *.conf and * separately (caused duplicate files)',
+                            'Detect "admin off" in Caddyfile — Installer auto-detects and replaces "admin off" with "admin localhost:2019" so the API works',
+                            'Stale autosave.json cleanup — If autosave has admin:disabled (from pre-existing Caddy with admin off), it is deleted before starting Caddy with --resume',
+                            'Caddyfile domains excluded from migration — If Caddy already has a domain in the Caddyfile, it is not offered for migration from Nginx/Apache (avoids unnecessary duplicates)',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Todas las llamadas curl al API de Caddy usan 127.0.0.1 en vez de localhost — Evita fallos en servidores con IPv6 deshabilitado donde localhost resuelve a ::1',
+                            'Verificacion de API con reintentos — Si Caddy tarda en arrancar, el instalador reintenta 2 veces antes de continuar',
+                            'Deduplicacion completa en migracion Nginx/Apache — Tres niveles: recoleccion, JSON y Caddy API',
+                        ],
+                        'en' => [
+                            'All Caddy API curl calls use 127.0.0.1 instead of localhost — Prevents failures on servers with IPv6 disabled where localhost resolves to ::1',
+                            'API verification with retries — If Caddy takes time to start, installer retries twice before continuing',
+                            'Full deduplication in Nginx/Apache migration — Three levels: collection, JSON and Caddy API',
                         ],
                     ],
                 ],

@@ -153,6 +153,7 @@ t() {
                 migrate_parsing) text="Parseando $1..." ;;
                 migrate_found) text="Encontrado: $1 → $2" ;;
                 migrate_skipped) text="Omitido (sin server_name): $1" ;;
+                migrate_skipped_caddy) text="Omitido $1 — ya configurado en Caddyfile" ;;
                 migrate_none) text="No se encontraron sitios para migrar en $1" ;;
                 migrate_ask) text="Migrar $1 sitio(s) de $2 a Caddy? [S/n] " ;;
                 migrate_saved) text="Sitios migrados guardados en $1 (se aplicaran tras instalar Caddy)" ;;
@@ -467,6 +468,7 @@ t() {
                 migrate_parsing) text="Parsing $1..." ;;
                 migrate_found) text="Found: $1 → $2" ;;
                 migrate_skipped) text="Skipped (no server_name): $1" ;;
+                migrate_skipped_caddy) text="Skipped $1 — already configured in Caddyfile" ;;
                 migrate_none) text="No sites found to migrate in $1" ;;
                 migrate_ask) text="Migrate $1 site(s) from $2 to Caddy? [Y/n] " ;;
                 migrate_saved) text="Migrated sites saved to $1 (will be applied after Caddy install)" ;;
@@ -1084,7 +1086,7 @@ if [ "$REPAIR_MODE" = true ]; then
     echo -e "  ${CYAN}$(t repair_check_caddy)${NC}"
     CADDY_ACTIVE=$(timeout 5 systemctl is-active caddy 2>/dev/null)
     if [ "$CADDY_ACTIVE" = "active" ]; then
-        CADDY_API=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://localhost:2019/config/ 2>/dev/null)
+        CADDY_API=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:2019/config/ 2>/dev/null)
         if [ "$CADDY_API" = "200" ]; then
             ok "$(t repair_caddy_ok)"
         else
@@ -1395,7 +1397,7 @@ elif [ "$VERIFY_ONLY" = true ]; then
     # --- 7. Caddy ---
     echo ""
     echo -e "  ${BOLD}Caddy:${NC}"
-    CADDY_HC=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:2019/config/ 2>/dev/null || echo "000")
+    CADDY_HC=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:2019/config/ 2>/dev/null || echo "000")
     if [ "$CADDY_HC" = "200" ]; then
         ok "$(t health_caddy_ok)"
     else
@@ -1667,7 +1669,7 @@ if command -v caddy &> /dev/null && systemctl is-active --quiet caddy 2>/dev/nul
         echo -e "  ${GREEN}${BOLD}$(t caddy_already_running)${NC}"
         echo -e "  ${GREEN}  $(t caddy_already_desc)${NC}"
         # Count active routes
-        CADDY_EARLY_ROUTES=$(curl -s http://localhost:2019/config/apps/http/servers/srv0/routes 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+        CADDY_EARLY_ROUTES=$(curl -s http://127.0.0.1:2019/config/apps/http/servers/srv0/routes 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
         if [ "$CADDY_EARLY_ROUTES" -gt 0 ] 2>/dev/null; then
             echo -e "  ${GREEN}  $(t caddy_has_routes "$CADDY_EARLY_ROUTES")${NC}"
         fi
@@ -1880,6 +1882,12 @@ fi
 MIGRATE_SITES_FILE="/tmp/musedock-migrate-sites.json"
 rm -f "$MIGRATE_SITES_FILE"
 
+# Extract domains already configured in Caddyfile (to skip from migration)
+CADDYFILE_EXISTING_DOMAINS=""
+if [ -f /etc/caddy/Caddyfile ]; then
+    CADDYFILE_EXISTING_DOMAINS=$(grep -oE '^[a-zA-Z0-9][a-zA-Z0-9._-]*\.[a-zA-Z]{2,}\s*\{' /etc/caddy/Caddyfile 2>/dev/null | sed 's/\s*{//' | tr '\n' ' ')
+fi
+
 migrate_nginx_sites() {
     local SITES_DIR="/etc/nginx/sites-enabled"
     [ -d "$SITES_DIR" ] || SITES_DIR="/etc/nginx/conf.d"
@@ -1919,6 +1927,12 @@ migrate_nginx_sites() {
         # Skip duplicate domains (multiple configs for same domain)
         case "$SEEN_DOMAINS" in *"|${SERVER_NAME}|"*) continue ;; esac
         SEEN_DOMAINS="${SEEN_DOMAINS}|${SERVER_NAME}|"
+
+        # Skip domains already configured in Caddyfile
+        case "$CADDYFILE_EXISTING_DOMAINS" in *"${SERVER_NAME}"*)
+            ok "$(t migrate_skipped_caddy "$SERVER_NAME")"
+            continue ;;
+        esac
 
         # Extract root directive
         local DOC_ROOT=""
@@ -2024,6 +2038,12 @@ migrate_apache_sites() {
 
         # Skip if domain already found from nginx or already seen in this loop
         case "$EXISTING_DOMAINS" in *"${SERVER_NAME}"*) continue ;; esac
+
+        # Skip domains already configured in Caddyfile
+        case "$CADDYFILE_EXISTING_DOMAINS" in *"${SERVER_NAME}"*)
+            ok "$(t migrate_skipped_caddy "$SERVER_NAME")"
+            continue ;;
+        esac
 
         local DOC_ROOT=""
         DOC_ROOT=$(grep -iE '^\s*DocumentRoot\s+' "$conf" 2>/dev/null | head -1 | sed 's/.*DocumentRoot\s\+//i; s/\s*$//' | tr -d '"')
@@ -2458,7 +2478,7 @@ if command -v caddy &> /dev/null; then
     CADDY_HAS_AUTOSAVE=false
 
     if [ "$CADDY_WAS_RUNNING" = true ]; then
-        CADDY_ROUTES=$(curl -s http://localhost:2019/config/apps/http/servers/srv0/routes 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+        CADDY_ROUTES=$(curl -s http://127.0.0.1:2019/config/apps/http/servers/srv0/routes 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
     fi
 
     # Check if Caddyfile has domain blocks (not just global options)
@@ -2511,10 +2531,16 @@ if command -v caddy &> /dev/null; then
 
         if [ "$CADDY_CHOICE" = "1" ]; then
             ok "$(t caddy_integrated)"
-            # Ensure Caddyfile has admin API enabled (add if missing, don't overwrite)
-            if ! grep -q "admin" "$CADDY_FILE" 2>/dev/null; then
-                # Prepend admin block to existing Caddyfile
-                cp "$CADDY_FILE" "${CADDY_FILE}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+            # Ensure Caddyfile has admin API enabled
+            cp "$CADDY_FILE" "${CADDY_FILE}.bak.$(date +%Y%m%d%H%M%S)" 2>/dev/null || true
+            if grep -qE '^\s*admin\s+off' "$CADDY_FILE" 2>/dev/null; then
+                # Replace "admin off" with "admin localhost:2019"
+                sed -i 's/^\(\s*\)admin\s\+off/\1admin localhost:2019/' "$CADDY_FILE"
+                ok "$(t caddy_admin_added) (admin off → localhost:2019)"
+            elif grep -qE '^\s*admin\s+localhost:2019' "$CADDY_FILE" 2>/dev/null; then
+                ok "$(t caddy_admin_exists)"
+            elif ! grep -qE '^\s*admin\s' "$CADDY_FILE" 2>/dev/null; then
+                # No admin directive at all — prepend global block
                 TEMP_CADDY=$(mktemp)
                 cat > "$TEMP_CADDY" << 'ADMINEOF'
 {
@@ -2526,6 +2552,16 @@ ADMINEOF
                 mv "$TEMP_CADDY" "$CADDY_FILE"
                 ok "$(t caddy_admin_added)"
             fi
+
+            # Fix stale autosave.json that may have admin:disabled
+            for autosave_path in /var/lib/caddy/.config/caddy/autosave.json /root/.config/caddy/autosave.json /home/caddy/.config/caddy/autosave.json; do
+                if [ -f "$autosave_path" ]; then
+                    if python3 -c "import json; d=json.load(open('$autosave_path')); exit(0 if d.get('admin',{}).get('disabled') else 1)" 2>/dev/null; then
+                        rm -f "$autosave_path"
+                        ok "Removed stale autosave.json with admin:disabled ($autosave_path)"
+                    fi
+                fi
+            done
             # Ensure --resume is enabled
             mkdir -p /etc/systemd/system/caddy.service.d
             if [ ! -f /etc/systemd/system/caddy.service.d/override-resume.conf ]; then
@@ -2626,9 +2662,17 @@ SVCEOF
     ok "$(t caddy_running_persist)"
 fi
 
-# Verify Caddy API is accessible
-sleep 1
-CADDY_API_OK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:2019/config/ 2>/dev/null || echo "000")
+# Verify Caddy API is accessible (try 127.0.0.1 first, then localhost — some systems have IPv6 issues)
+sleep 2
+CADDY_API_OK=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:2019/config/ 2>/dev/null || echo "000")
+if [ "$CADDY_API_OK" != "200" ]; then
+    CADDY_API_OK=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:2019/config/ 2>/dev/null || echo "000")
+fi
+# Retry once after 3 more seconds if not ready
+if [ "$CADDY_API_OK" != "200" ]; then
+    sleep 3
+    CADDY_API_OK=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:2019/config/ 2>/dev/null || echo "000")
+fi
 if [ "$CADDY_API_OK" = "200" ]; then
     ok "$(t caddy_api_ok)"
 else
@@ -2662,15 +2706,15 @@ json.dump(unique, open('$MIGRATE_SITES_FILE', 'w'))
         MIGRATE_SKIPPED=0
 
         # Ensure srv0 server exists with a routes array
-        SRV0_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:2019/config/apps/http/servers/srv0 2>/dev/null)
+        SRV0_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:2019/config/apps/http/servers/srv0 2>/dev/null)
         if [ "$SRV0_CHECK" != "200" ]; then
-            curl -s -X POST http://localhost:2019/config/apps/http/servers/srv0 \
+            curl -s -X POST http://127.0.0.1:2019/config/apps/http/servers/srv0 \
                 -H "Content-Type: application/json" \
                 -d '{"listen":[":443",":80"],"routes":[]}' > /dev/null 2>&1
         fi
 
         # Fetch existing routes to detect duplicates
-        EXISTING_ROUTES_JSON=$(curl -s http://localhost:2019/config/apps/http/servers/srv0/routes 2>/dev/null || echo "[]")
+        EXISTING_ROUTES_JSON=$(curl -s http://127.0.0.1:2019/config/apps/http/servers/srv0/routes 2>/dev/null || echo "[]")
 
         python3 -c "
 import json, sys
@@ -2702,7 +2746,7 @@ print('no')
             if [ "$ALREADY_EXISTS" = "yes" ]; then
                 # Route exists — delete it first so we replace with clean config (fixes duplicates from bad installs)
                 # Find and delete by @id or by matching domain
-                curl -s -X DELETE "http://localhost:2019/id/${ROUTE_ID}" > /dev/null 2>&1
+                curl -s -X DELETE "http://127.0.0.1:2019/id/${ROUTE_ID}" > /dev/null 2>&1
                 # Also try to delete any route that matches this domain but has a different @id
                 python3 -c "
 import json, sys, urllib.request
@@ -2713,7 +2757,7 @@ for i, r in enumerate(routes):
             rid = r.get('@id', '')
             if rid and rid != '${ROUTE_ID}':
                 try:
-                    req = urllib.request.Request('http://localhost:2019/id/' + rid, method='DELETE')
+                    req = urllib.request.Request('http://127.0.0.1:2019/id/' + rid, method='DELETE')
                     urllib.request.urlopen(req, timeout=3)
                 except: pass
 " 2>/dev/null
@@ -2750,7 +2794,7 @@ print(json.dumps(route))
 ")
 
             HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-                "http://localhost:2019/config/apps/http/servers/srv0/routes" \
+                "http://127.0.0.1:2019/config/apps/http/servers/srv0/routes" \
                 -H "Content-Type: application/json" \
                 -d "$ROUTE_JSON" 2>/dev/null)
 
@@ -3239,7 +3283,7 @@ else
 fi
 
 # 5. Caddy API?
-CADDY_HC=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://localhost:2019/config/ 2>/dev/null || echo "000")
+CADDY_HC=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:2019/config/ 2>/dev/null || echo "000")
 if [ "$CADDY_HC" = "200" ]; then
     ok "$(t health_caddy_ok)"
 else
