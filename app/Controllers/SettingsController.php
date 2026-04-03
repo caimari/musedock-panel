@@ -916,12 +916,20 @@ class SettingsController
                 }
             }
 
+            // Fetch jail settings
+            $maxretry = (int)trim(shell_exec(sprintf('fail2ban-client get %s maxretry 2>/dev/null', escapeshellarg($jailName))) ?? '0');
+            $findtime = (int)trim(shell_exec(sprintf('fail2ban-client get %s findtime 2>/dev/null', escapeshellarg($jailName))) ?? '0');
+            $bantime = (int)trim(shell_exec(sprintf('fail2ban-client get %s bantime 2>/dev/null', escapeshellarg($jailName))) ?? '0');
+
             $jails[] = [
                 'name' => $jailName,
                 'currently_banned' => $currentlyBanned,
                 'total_banned' => $totalBanned,
                 'total_failed' => $totalFailed,
                 'banned_ips' => array_values($bannedIps),
+                'maxretry' => $maxretry,
+                'findtime' => $findtime,
+                'bantime' => $bantime,
             ];
         }
 
@@ -1016,6 +1024,38 @@ class SettingsController
         }
 
         Router::redirect('/settings/fail2ban');
+    }
+
+    public function fail2banToggleJail(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $jail = preg_replace('/[^a-z0-9_-]/i', '', $_POST['jail'] ?? '');
+        $action = $_POST['action'] ?? ''; // 'disable' or 'enable'
+
+        if (!$jail || !in_array($action, ['disable', 'enable'])) {
+            echo json_encode(['ok' => false, 'error' => 'Invalid parameters']);
+            exit;
+        }
+
+        if ($action === 'disable') {
+            $output = trim(shell_exec(sprintf('fail2ban-client stop %s 2>&1', escapeshellarg($jail))));
+            $ok = str_contains($output, 'Jail stopped') || str_contains($output, $jail);
+            \MuseDockPanel\Services\LogService::log('fail2ban', "Jail {$jail} disabled");
+        } else {
+            $output = trim(shell_exec(sprintf('fail2ban-client start %s 2>&1', escapeshellarg($jail))));
+            $ok = !str_contains($output, 'ERROR');
+            if (!$ok) {
+                // Try reload instead (start may fail if jail config still exists)
+                shell_exec('fail2ban-client reload 2>&1');
+                $ok = true;
+            }
+            \MuseDockPanel\Services\LogService::log('fail2ban', "Jail {$jail} enabled");
+        }
+
+        echo json_encode(['ok' => $ok, 'message' => $ok ? 'OK' : $output]);
+        exit;
     }
 
     public function fail2banWhitelist(): void

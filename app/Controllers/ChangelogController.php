@@ -20,6 +20,59 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.39',
+                'date' => '2026-04-03',
+                'badge' => 'danger',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Web Stats por hosting — Pagina de estadisticas tipo AWStats con top paginas, IPs, paises, referrers, navegadores, bots, codigos HTTP y metodos',
+                            'Visitantes unicos por dia — Grafica de barras con selector Hoy/7d/30d/1 ano',
+                            'Navegadores y Bots separados — Tablas independientes con porcentaje y clasificacion automatica (Googlebot, AhrefsBot, Chrome, Safari...)',
+                            'Referrers con link real — Click en el referrer abre la URL original. Filtrado automatico de self-referrals y panel (detecta hostname del servidor dinamicamente)',
+                            'Bandwidth IN (uploads) — bytes_read del log de Caddy ahora se registra como bytes_in. Muestra IN + OUT en Account Details y graficas',
+                            'IP real del visitante — Usa Cf-Connecting-Ip (Cloudflare proxy), X-Forwarded-For, o remote_ip (directo). Compatible con dominios con y sin proxy',
+                            'Boton Stats en listado de hostings — Acceso directo a las estadisticas desde /accounts',
+                            'Fail2Ban: boton Desactivar por jail — Permite desactivar temporalmente la proteccion WordPress u otros jails',
+                            'Fail2Ban: modal de IPs baneadas — Click en el numero de IPs baneadas abre modal con opciones de desbanear o añadir a whitelist',
+                            'Fail2Ban: info de configuracion visible — Cada jail muestra max intentos, ventana y duracion del ban',
+                        ],
+                        'en' => [
+                            'Web Stats per hosting — AWStats-like page with top pages, IPs, countries, referrers, browsers, bots, HTTP codes and methods',
+                            'Unique visitors per day — Bar chart with Today/7d/30d/1y selector',
+                            'Browsers and Bots separated — Independent tables with percentage and auto-classification',
+                            'Referrers with real link — Click opens original URL. Auto-filters self-referrals and panel (detects server hostname dynamically)',
+                            'Bandwidth IN (uploads) — bytes_read from Caddy log now recorded as bytes_in. Shows IN + OUT in Account Details and charts',
+                            'Real visitor IP — Uses Cf-Connecting-Ip (Cloudflare proxy), X-Forwarded-For, or remote_ip (direct)',
+                            'Stats button in hosting list — Direct access to stats from /accounts',
+                            'Fail2Ban: disable button per jail — Temporarily disable WordPress protection or other jails',
+                            'Fail2Ban: banned IPs modal — Click banned count opens modal with unban and whitelist options',
+                            'Fail2Ban: config info visible — Each jail shows max retries, find time and ban duration',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Fail2Ban WordPress: nombres amigables — Muestra "WordPress Sites" en vez del nombre tecnico del jail',
+                        ],
+                        'en' => [
+                            'Fail2Ban WordPress: friendly names — Shows "WordPress Sites" instead of technical jail name',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Fail2Ban WordPress: IP de Cloudflare — El filtro ahora usa Cf-Connecting-Ip (IP real) en vez de client_ip (IP de Cloudflare). Antes baneaba IPs de Cloudflare bloqueando a todos los visitantes del edge node',
+                            'CPU collector: auto-medicion — El sample de CPU ahora se toma antes de cualquier trabajo del collector para no inflarse a si mismo. Picos de CPU en graficas ahora reflejan el uso real del sistema',
+                            'du cada 5 min en vez de 30s — Reduce drasticamente los picos de CPU del collector',
+                        ],
+                        'en' => [
+                            'Fail2Ban WordPress: Cloudflare IP — Filter now uses Cf-Connecting-Ip (real IP) instead of client_ip (Cloudflare IP). Previously banned Cloudflare IPs blocking all visitors',
+                            'CPU collector: self-measurement — CPU sample now taken before any collector work to avoid inflating itself',
+                            'du every 5 min instead of 30s — Drastically reduces collector CPU peaks',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.38',
                 'date' => '2026-04-02',
                 'badge' => 'success',

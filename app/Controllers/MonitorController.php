@@ -352,7 +352,7 @@ class MonitorController
         if ($accountId > 0) {
             $rows = \MuseDockPanel\Database::fetchAll("
                 SELECT EXTRACT(EPOCH FROM DATE_TRUNC('{$safeGroup}', ts))::bigint as ts,
-                       SUM(bytes_out) as bytes_out,
+                       SUM(bytes_out) as bytes_out, SUM(bytes_in) as bytes_in,
                        SUM(requests) as requests
                 FROM hosting_bandwidth
                 WHERE account_id = :aid AND ts >= (NOW() - INTERVAL '{$interval}')
@@ -361,7 +361,7 @@ class MonitorController
         } else {
             $rows = \MuseDockPanel\Database::fetchAll("
                 SELECT EXTRACT(EPOCH FROM DATE_TRUNC('{$safeGroup}', ts))::bigint as ts,
-                       SUM(bytes_out) as bytes_out,
+                       SUM(bytes_out) as bytes_out, SUM(bytes_in) as bytes_in,
                        SUM(requests) as requests
                 FROM hosting_bandwidth
                 WHERE ts >= (NOW() - INTERVAL '{$interval}')

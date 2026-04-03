@@ -2016,6 +2016,28 @@ class AccountController
         Router::redirect('/accounts/' . $params['id'] . '/edit');
     }
 
+    public function stats(array $params): void
+    {
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) { Flash::set('error', 'Cuenta no encontrada.'); Router::redirect('/accounts'); return; }
+
+        $range = $_GET['range'] ?? '7d';
+        $allowed = ['1d', '7d', '30d', '1y'];
+        if (!in_array($range, $allowed)) $range = '7d';
+
+        $stats = \MuseDockPanel\Services\WebStatsService::getStats((int)$account['id'], $range);
+        $bwMonthly = \MuseDockPanel\Services\BandwidthService::getMonthlyTotal((int)$account['id']);
+
+        View::render('accounts/stats', [
+            'layout' => 'main',
+            'pageTitle' => 'Stats: ' . $account['domain'],
+            'account' => $account,
+            'stats' => $stats,
+            'bwMonthly' => $bwMonthly,
+            'currentRange' => $range,
+        ]);
+    }
+
     public function apiBandwidth(array $params): void
     {
         header('Content-Type: application/json');

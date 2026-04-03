@@ -154,7 +154,10 @@ else $totalBwStr = '0';
                         </td>
                         <td><small class="text-muted"><?= date('d/m/Y', strtotime($acc['created_at'])) ?></small></td>
                         <td class="text-end pe-3">
-                            <a href="/accounts/<?= $acc['id'] ?>" class="btn btn-outline-light btn-sm" title="Configuracion"><i class="bi bi-gear"></i></a>
+                            <div class="d-flex gap-1">
+                                <a href="/accounts/<?= $acc['id'] ?>" class="btn btn-outline-light btn-sm" title="Configuracion"><i class="bi bi-gear"></i></a>
+                                <a href="/accounts/<?= $acc['id'] ?>/stats" class="btn btn-outline-light btn-sm" title="Stats"><i class="bi bi-bar-chart"></i></a>
+                            </div>
                         </td>
                     </tr>
                     <?php if (!empty($acc['subdomain_details'])): ?>

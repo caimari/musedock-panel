@@ -59,8 +59,8 @@ class BandwidthService
 
         fseek($fh, $offset);
         $processed = 0;
-        $aggregated = [];    // [account_id][date] => ['bytes_out' => int, 'requests' => int]
-        $subAggregated = []; // [subdomain_id][date] => ['bytes_out' => int, 'requests' => int]
+        $aggregated = [];    // [account_id][hour] => ['bytes_out' => int, 'bytes_in' => int, 'requests' => int]
+        $subAggregated = []; // [subdomain_id][hour] => ['bytes_out' => int, 'bytes_in' => int, 'requests' => int]
 
         while (($line = fgets($fh)) !== false) {
             $line = trim($line);
@@ -71,9 +71,21 @@ class BandwidthService
 
             $host = $entry['request']['host'] ?? '';
             $size = (int)($entry['size'] ?? 0);
+            $bytesRead = (int)($entry['bytes_read'] ?? 0);
             $ts = $entry['ts'] ?? 0;
 
-            if (empty($host) || $size <= 0) continue;
+            // Real client IP: Cf-Connecting-Ip (behind Cloudflare) or remote_ip (direct)
+            $headers = $entry['request']['headers'] ?? [];
+            $clientIp = $headers['Cf-Connecting-Ip'][0]
+                     ?? $headers['X-Forwarded-For'][0]
+                     ?? $entry['request']['remote_ip']
+                     ?? '';
+            // X-Forwarded-For can have multiple IPs (client, proxy1, proxy2) — take first
+            if (str_contains($clientIp, ',')) {
+                $clientIp = trim(explode(',', $clientIp)[0]);
+            }
+
+            if (empty($host) || ($size <= 0 && $bytesRead <= 0)) continue;
 
             // Remove www. prefix for lookup
             $lookupHost = preg_replace('/^www\./', '', strtolower($host));
@@ -85,18 +97,20 @@ class BandwidthService
 
             // Account-level aggregation (includes subdomain traffic)
             if (!isset($aggregated[$accountId][$hour])) {
-                $aggregated[$accountId][$hour] = ['bytes_out' => 0, 'requests' => 0];
+                $aggregated[$accountId][$hour] = ['bytes_out' => 0, 'bytes_in' => 0, 'requests' => 0];
             }
             $aggregated[$accountId][$hour]['bytes_out'] += $size;
+            $aggregated[$accountId][$hour]['bytes_in'] += $bytesRead;
             $aggregated[$accountId][$hour]['requests'] += 1;
 
             // Subdomain-level aggregation
             $subId = $subdomainIdMap[$lookupHost] ?? $subdomainIdMap[$host] ?? null;
             if ($subId) {
                 if (!isset($subAggregated[$subId][$hour])) {
-                    $subAggregated[$subId][$hour] = ['bytes_out' => 0, 'requests' => 0];
+                    $subAggregated[$subId][$hour] = ['bytes_out' => 0, 'bytes_in' => 0, 'requests' => 0];
                 }
                 $subAggregated[$subId][$hour]['bytes_out'] += $size;
+                $subAggregated[$subId][$hour]['bytes_in'] += $bytesRead;
                 $subAggregated[$subId][$hour]['requests'] += 1;
             }
 
@@ -110,18 +124,21 @@ class BandwidthService
         foreach ($aggregated as $accountId => $dates) {
             foreach ($dates as $date => $data) {
                 Database::query("
-                    INSERT INTO hosting_bandwidth (account_id, ts, bytes_out, requests, updated_at)
-                    VALUES (:aid, :d, :b, :r, NOW())
+                    INSERT INTO hosting_bandwidth (account_id, ts, bytes_out, bytes_in, requests, updated_at)
+                    VALUES (:aid, :d, :bo, :bi, :r, NOW())
                     ON CONFLICT (account_id, ts)
-                    DO UPDATE SET bytes_out = hosting_bandwidth.bytes_out + :b2,
+                    DO UPDATE SET bytes_out = hosting_bandwidth.bytes_out + :bo2,
+                                  bytes_in = hosting_bandwidth.bytes_in + :bi2,
                                   requests = hosting_bandwidth.requests + :r2,
                                   updated_at = NOW()
                 ", [
                     'aid' => $accountId,
                     'd' => $date,
-                    'b' => $data['bytes_out'],
+                    'bo' => $data['bytes_out'],
+                    'bi' => $data['bytes_in'],
                     'r' => $data['requests'],
-                    'b2' => $data['bytes_out'],
+                    'bo2' => $data['bytes_out'],
+                    'bi2' => $data['bytes_in'],
                     'r2' => $data['requests'],
                 ]);
             }
@@ -131,18 +148,21 @@ class BandwidthService
         foreach ($subAggregated as $subId => $dates) {
             foreach ($dates as $date => $data) {
                 Database::query("
-                    INSERT INTO hosting_subdomain_bandwidth (subdomain_id, ts, bytes_out, requests, updated_at)
-                    VALUES (:sid, :d, :b, :r, NOW())
+                    INSERT INTO hosting_subdomain_bandwidth (subdomain_id, ts, bytes_out, bytes_in, requests, updated_at)
+                    VALUES (:sid, :d, :bo, :bi, :r, NOW())
                     ON CONFLICT (subdomain_id, ts)
-                    DO UPDATE SET bytes_out = hosting_subdomain_bandwidth.bytes_out + :b2,
+                    DO UPDATE SET bytes_out = hosting_subdomain_bandwidth.bytes_out + :bo2,
+                                  bytes_in = hosting_subdomain_bandwidth.bytes_in + :bi2,
                                   requests = hosting_subdomain_bandwidth.requests + :r2,
                                   updated_at = NOW()
                 ", [
                     'sid' => $subId,
                     'd' => $date,
-                    'b' => $data['bytes_out'],
+                    'bo' => $data['bytes_out'],
+                    'bi' => $data['bytes_in'],
                     'r' => $data['requests'],
-                    'b2' => $data['bytes_out'],
+                    'bo2' => $data['bytes_out'],
+                    'bi2' => $data['bytes_in'],
                     'r2' => $data['requests'],
                 ]);
             }
@@ -162,6 +182,8 @@ class BandwidthService
     /**
      * Build a map of domain/subdomain → account_id.
      */
+    public static function buildDomainMapPublic(): array { return self::buildDomainMap(); }
+
     private static function buildDomainMap(): array
     {
         $map = [];
@@ -209,6 +231,7 @@ class BandwidthService
         $rows = Database::fetchAll("
             SELECT sb.subdomain_id,
                    COALESCE(SUM(sb.bytes_out), 0) as bytes_out,
+                   COALESCE(SUM(sb.bytes_in), 0) as bytes_in,
                    COALESCE(SUM(sb.requests), 0) as requests
             FROM hosting_subdomain_bandwidth sb
             JOIN hosting_subdomains s ON s.id = sb.subdomain_id
@@ -224,7 +247,7 @@ class BandwidthService
     public static function getAllSubdomainMonthlyTotals(): array
     {
         $rows = Database::fetchAll("
-            SELECT subdomain_id, COALESCE(SUM(bytes_out), 0) as bytes_out, COALESCE(SUM(requests), 0) as requests
+            SELECT subdomain_id, COALESCE(SUM(bytes_out), 0) as bytes_out, COALESCE(SUM(bytes_in), 0) as bytes_in, COALESCE(SUM(requests), 0) as requests
             FROM hosting_subdomain_bandwidth WHERE ts >= DATE_TRUNC('month', CURRENT_DATE) GROUP BY subdomain_id
         ");
         $map = [];
@@ -255,6 +278,7 @@ class BandwidthService
             return Database::fetchAll("
                 SELECT EXTRACT(EPOCH FROM DATE_TRUNC('{$safeGroup}', ts))::bigint as period,
                        SUM(bytes_out) as bytes_out,
+                       SUM(bytes_in) as bytes_in,
                        SUM(requests) as requests
                 FROM hosting_bandwidth
                 WHERE account_id = :aid AND ts >= (NOW() - INTERVAL '{$cfg['interval']}')
@@ -264,7 +288,7 @@ class BandwidthService
 
         // Raw hourly data
         return Database::fetchAll("
-            SELECT EXTRACT(EPOCH FROM ts)::bigint as period, bytes_out, requests
+            SELECT EXTRACT(EPOCH FROM ts)::bigint as period, bytes_out, bytes_in, requests
             FROM hosting_bandwidth
             WHERE account_id = :aid AND ts >= (NOW() - INTERVAL '{$cfg['interval']}')
             ORDER BY ts
@@ -274,7 +298,7 @@ class BandwidthService
     public static function getMonthlyTotal(int $accountId): array
     {
         $row = Database::fetchOne("
-            SELECT COALESCE(SUM(bytes_out), 0) as bytes_out, COALESCE(SUM(requests), 0) as requests
+            SELECT COALESCE(SUM(bytes_out), 0) as bytes_out, COALESCE(SUM(bytes_in), 0) as bytes_in, COALESCE(SUM(requests), 0) as requests
             FROM hosting_bandwidth WHERE account_id = :aid AND ts >= DATE_TRUNC('month', CURRENT_DATE)
         ", ['aid' => $accountId]);
         return $row ?: ['bytes_out' => 0, 'requests' => 0];
@@ -283,7 +307,7 @@ class BandwidthService
     public static function getAllMonthlyTotals(): array
     {
         $rows = Database::fetchAll("
-            SELECT account_id, COALESCE(SUM(bytes_out), 0) as bytes_out, COALESCE(SUM(requests), 0) as requests
+            SELECT account_id, COALESCE(SUM(bytes_out), 0) as bytes_out, COALESCE(SUM(bytes_in), 0) as bytes_in, COALESCE(SUM(requests), 0) as requests
             FROM hosting_bandwidth WHERE ts >= DATE_TRUNC('month', CURRENT_DATE) GROUP BY account_id
         ");
         $map = [];

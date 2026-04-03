@@ -5,7 +5,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
-define('PANEL_VERSION', '1.0.38');
+define('PANEL_VERSION', '1.0.39');
 
 
 
@@ -143,6 +143,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/import', 'AccountController@importStore');
 \MuseDockPanel\Router::get('/accounts/{id}', 'AccountController@show');
 \MuseDockPanel\Router::get('/accounts/{id}/bandwidth', 'AccountController@apiBandwidth');
+\MuseDockPanel\Router::get('/accounts/{id}/stats', 'AccountController@stats');
 \MuseDockPanel\Router::get('/accounts/{id}/edit', 'AccountController@edit');
 \MuseDockPanel\Router::post('/accounts/{id}/update', 'AccountController@update');
 \MuseDockPanel\Router::post('/accounts/{id}/delete', 'AccountController@delete');
@@ -272,6 +273,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/fail2ban/unban', 'SettingsController@fail2banUnban');
 \MuseDockPanel\Router::post('/settings/fail2ban/ban', 'SettingsController@fail2banBan');
 \MuseDockPanel\Router::post('/settings/fail2ban/whitelist', 'SettingsController@fail2banWhitelist');
+\MuseDockPanel\Router::post('/settings/fail2ban/toggle-jail', 'SettingsController@fail2banToggleJail');
 \MuseDockPanel\Router::get('/settings/logs', 'SettingsController@logs');
 \MuseDockPanel\Router::post('/settings/logs/clear', 'SettingsController@logClear');
 

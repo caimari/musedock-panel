@@ -128,6 +128,13 @@
     </div>
 
     <!-- Jails -->
+    <?php
+    $jailLabels = [
+        'musedock-panel' => 'Admin Panel',
+        'musedock-portal' => 'Customer Portal',
+        'musedock-wordpress' => 'WordPress Sites',
+    ];
+    ?>
     <?php if (empty($jails)): ?>
         <div class="card">
             <div class="card-body text-muted">
@@ -140,20 +147,31 @@
                 <div class="card-header d-flex align-items-center justify-content-between">
                     <span>
                         <i class="bi bi-shield-lock me-1"></i>
-                        <strong><?= View::e($jail['name']) ?></strong>
+                        <strong><?= View::e($jailLabels[$jail['name']] ?? $jail['name']) ?></strong>
+                        <small class="text-muted ms-1">(<?= View::e($jail['name']) ?>)</small>
                         <span class="badge bg-success ms-2">Activo</span>
                     </span>
-                    <span class="text-muted small">
-                        <?= $jail['currently_banned'] ?> baneadas ahora
-                    </span>
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="text-muted small"><?= $jail['currently_banned'] ?> baneadas ahora</span>
+                        <button type="button" class="btn btn-outline-warning btn-sm py-0 px-2"
+                                onclick="confirmToggleJail('<?= View::e($jail['name']) ?>', '<?= View::e($jailLabels[$jail['name']] ?? $jail['name']) ?>')"
+                                title="Desactivar esta proteccion temporalmente">
+                            <i class="bi bi-power me-1"></i>Desactivar
+                        </button>
+                    </div>
                 </div>
                 <div class="card-body">
                     <div class="row g-3 mb-3">
                         <div class="col-md-4">
-                            <div class="p-2 rounded text-center" style="background:rgba(255,255,255,0.05);">
+                            <div class="p-2 rounded text-center" style="background:rgba(255,255,255,0.05);<?= $jail['currently_banned'] > 0 ? 'cursor:pointer;' : '' ?>"
+                                 <?php if ($jail['currently_banned'] > 0): ?>
+                                 role="button" onclick="showBannedIps('<?= View::e($jail['name']) ?>', '<?= View::e($jailLabels[$jail['name']] ?? $jail['name']) ?>', <?= View::e(json_encode($jail['banned_ips'])) ?>)"
+                                 title="Click para ver IPs baneadas"
+                                 <?php endif; ?>>
                                 <div class="text-muted small">IPs baneadas ahora</div>
                                 <div class="fs-4 fw-bold <?= $jail['currently_banned'] > 0 ? 'text-warning' : 'text-success' ?>">
                                     <?= $jail['currently_banned'] ?>
+                                    <?php if ($jail['currently_banned'] > 0): ?><i class="bi bi-eye ms-1" style="font-size:0.7rem;"></i><?php endif; ?>
                                 </div>
                             </div>
                         </div>
@@ -169,6 +187,12 @@
                                 <div class="fs-4 fw-bold text-danger"><?= $jail['total_failed'] ?></div>
                             </div>
                         </div>
+                    </div>
+
+                    <div class="mb-3 d-flex gap-3 flex-wrap">
+                        <small class="text-muted"><i class="bi bi-shield me-1"></i>Max intentos: <strong><?= $jail['maxretry'] ?? '?' ?></strong></small>
+                        <small class="text-muted"><i class="bi bi-clock me-1"></i>Ventana: <strong><?= isset($jail['findtime']) ? round($jail['findtime']/60) . ' min' : '?' ?></strong></small>
+                        <small class="text-muted"><i class="bi bi-hourglass me-1"></i>Ban: <strong><?= isset($jail['bantime']) ? ($jail['bantime'] >= 3600 ? round($jail['bantime']/3600) . 'h' : round($jail['bantime']/60) . ' min') : '?' ?></strong></small>
                     </div>
 
                     <?php if (!empty($jail['banned_ips'])): ?>
@@ -265,6 +289,112 @@
             return false;
         }
         return confirm('¿Desbanear ' + ip + ' del jail ' + jail + '?');
+    }
+
+    function showBannedIps(jailName, jailLabel, ips) {
+        const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+        if (!ips || ips.length === 0) {
+            S.fire({ title: jailLabel, text: 'No hay IPs baneadas actualmente', icon: 'info' });
+            return;
+        }
+
+        const csrf = document.querySelector('input[name=_csrf_token]')?.value || '';
+        let html = '<div class="text-start"><table class="table table-sm table-dark mb-0">';
+        html += '<thead><tr><th>IP</th><th class="text-end">Acciones</th></tr></thead><tbody>';
+        ips.forEach(function(ip) {
+            html += '<tr><td><code>' + ip + '</code></td>';
+            html += '<td class="text-end">';
+            html += '<button class="btn btn-outline-success btn-sm py-0 px-2 me-1" onclick="quickUnban(\'' + jailName + '\', \'' + ip + '\')" title="Desbanear"><i class="bi bi-unlock"></i></button>';
+            html += '<button class="btn btn-outline-info btn-sm py-0 px-2" onclick="quickWhitelist(\'' + ip + '\')" title="Añadir a whitelist"><i class="bi bi-shield-check"></i></button>';
+            html += '</td></tr>';
+        });
+        html += '</tbody></table></div>';
+
+        S.fire({
+            title: '<i class="bi bi-shield-exclamation me-2"></i>' + jailLabel,
+            html: html,
+            showConfirmButton: false,
+            showCloseButton: true,
+            width: 500,
+        });
+    }
+
+    function quickUnban(jail, ip) {
+        const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+        S.fire({
+            title: 'Desbanear IP?',
+            html: '<p>Desbanear <code>' + ip + '</code> del jail <strong>' + jail + '</strong>?</p>',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Desbanear',
+            confirmButtonColor: '#22c55e',
+            cancelButtonText: 'Cancelar',
+        }).then(function(result) {
+            if (!result.isConfirmed) return;
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/settings/fail2ban/unban';
+            const csrf = document.querySelector('input[name=_csrf_token]').value;
+            form.innerHTML = '<input type="hidden" name="_csrf_token" value="' + csrf + '">'
+                + '<input type="hidden" name="jail" value="' + jail + '">'
+                + '<input type="hidden" name="ip" value="' + ip + '">';
+            document.body.appendChild(form);
+            form.submit();
+        });
+    }
+
+    function quickWhitelist(ip) {
+        const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+        S.fire({
+            title: 'Añadir a whitelist?',
+            html: '<p>La IP <code>' + ip + '</code> nunca sera baneada en ningun jail.</p>',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Añadir',
+            confirmButtonColor: '#38bdf8',
+            cancelButtonText: 'Cancelar',
+        }).then(function(result) {
+            if (!result.isConfirmed) return;
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/settings/fail2ban/whitelist';
+            const csrf = document.querySelector('input[name=_csrf_token]').value;
+            form.innerHTML = '<input type="hidden" name="_csrf_token" value="' + csrf + '">'
+                + '<input type="hidden" name="action" value="add">'
+                + '<input type="hidden" name="ip" value="' + ip + '">';
+            document.body.appendChild(form);
+            form.submit();
+        });
+    }
+
+    function confirmToggleJail(jailName, jailLabel) {
+        const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+        S.fire({
+            title: 'Desactivar ' + jailLabel + '?',
+            html: '<p>La proteccion <strong>' + jailLabel + '</strong> se desactivara.</p>' +
+                  '<p class="text-warning small"><i class="bi bi-exclamation-triangle me-1"></i>Los sitios quedaran sin proteccion contra fuerza bruta hasta que se reactive.</p>',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '<i class="bi bi-power me-1"></i>Desactivar',
+            confirmButtonColor: '#dc3545',
+            cancelButtonText: 'Cancelar',
+        }).then(function(result) {
+            if (!result.isConfirmed) return;
+            const csrf = document.querySelector('input[name=_csrf_token]').value;
+            fetch('/settings/fail2ban/toggle-jail', {
+                method: 'POST',
+                body: new URLSearchParams({ _csrf_token: csrf, jail: jailName, action: 'disable' }),
+            })
+            .then(r => r.json())
+            .then(data => {
+                S.fire({
+                    title: data.ok ? 'Desactivado' : 'Error',
+                    text: data.ok ? jailLabel + ' desactivado temporalmente. Recarga para ver el estado.' : data.error,
+                    icon: data.ok ? 'success' : 'error',
+                    timer: 2000,
+                }).then(() => { if (data.ok) location.reload(); });
+            });
+        });
     }
     </script>
 <?php endif; ?>

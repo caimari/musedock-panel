@@ -28,15 +28,16 @@ spl_autoload_register(function ($class) {
 // Handle --reset flag
 if (in_array('--reset', $argv ?? [])) {
     \MuseDockPanel\Settings::set('bandwidth_log_offset', '0');
-    echo "Offset reset to 0.\n";
+    \MuseDockPanel\Settings::set('webstats_log_offset', '0');
+    echo "Offsets reset to 0.\n";
 }
 
 $result = \MuseDockPanel\Services\BandwidthService::collectFromLog();
+if ($result['ok'] && $result['lines'] > 0) {
+    echo "BW: {$result['lines']} entries for {$result['accounts']} account(s).\n";
+}
 
-if ($result['ok']) {
-    if ($result['lines'] > 0) {
-        echo "Processed {$result['lines']} log entries for {$result['accounts']} account(s).\n";
-    }
-} else {
-    echo "Error: {$result['error']}\n";
+$statsResult = \MuseDockPanel\Services\WebStatsService::collectFromLog();
+if ($statsResult['ok'] && $statsResult['lines'] > 0) {
+    echo "Stats: {$statsResult['lines']} entries for {$statsResult['accounts']} account(s).\n";
 }

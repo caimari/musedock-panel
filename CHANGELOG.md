@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.39] — 2026-04-03
+
+### New
+- Web Stats per hosting — AWStats-like page (top pages, IPs, countries, referrers, browsers/bots, HTTP codes)
+- Bandwidth IN (uploads) via bytes_read + real visitor IP (Cf-Connecting-Ip / X-Forwarded-For / remote_ip)
+- Fail2Ban: disable button per jail, banned IPs modal with unban/whitelist, config info visible
+
+### Fixed
+- Fail2Ban WordPress filter now uses Cf-Connecting-Ip instead of client_ip (was banning Cloudflare IPs)
+- CPU collector self-measurement: sample taken before any work
+- du runs every 5 min instead of 30s
+
 ## [1.0.38] — 2026-04-02
 
 ### New

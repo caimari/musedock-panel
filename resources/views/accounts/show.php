@@ -19,6 +19,7 @@ use MuseDockPanel\Services\CloudflareService;
                 <div class="d-flex gap-2">
                     <?php if (!($isSlave ?? false)): ?>
                     <a href="/accounts/<?= $account['id'] ?>/files" class="btn btn-outline-light btn-sm"><i class="bi bi-folder me-1"></i>Files</a>
+                    <a href="/accounts/<?= $account['id'] ?>/stats" class="btn btn-outline-info btn-sm"><i class="bi bi-bar-chart me-1"></i>Stats</a>
                     <a href="/accounts/<?= $account['id'] ?>/migrate" class="btn btn-outline-light btn-sm"><i class="bi bi-cloud-download me-1"></i>Migrate</a>
                     <a href="/accounts/<?= $account['id'] ?>/edit" class="btn btn-outline-light btn-sm"><i class="bi bi-pencil"></i> Edit</a>
                     <?php if ($account['status'] === 'active'): ?>
@@ -80,16 +81,14 @@ use MuseDockPanel\Services\CloudflareService;
                         <td class="ps-3 text-muted">Bandwidth</td>
                         <td>
                             <?php
-                            $bwB = (int)($bwMonthly['bytes_out'] ?? 0);
+                            $bwOut = (int)($bwMonthly['bytes_out'] ?? 0);
+                            $bwIn = (int)($bwMonthly['bytes_in'] ?? 0);
                             $bwR = (int)($bwMonthly['requests'] ?? 0);
-                            if ($bwB >= 1073741824) $bwStr = round($bwB/1073741824, 2) . ' GB';
-                            elseif ($bwB >= 1048576) $bwStr = round($bwB/1048576, 1) . ' MB';
-                            elseif ($bwB > 0) $bwStr = round($bwB/1024, 1) . ' KB';
-                            else $bwStr = '0';
+                            $fmtBw = function($b) { if ($b >= 1073741824) return round($b/1073741824, 2) . ' GB'; if ($b >= 1048576) return round($b/1048576, 1) . ' MB'; if ($b > 0) return round($b/1024, 1) . ' KB'; return '0'; };
                             ?>
-                            <span class="text-info"><?= $bwStr ?></span>
-                            <small class="text-muted ms-2"><?= number_format($bwR) ?> requests</small>
-                            <small class="text-muted ms-1">(este mes)</small>
+                            <i class="bi bi-arrow-up text-info" style="font-size:0.75rem;"></i> <span class="text-info"><?= $fmtBw($bwOut) ?></span>
+                            <i class="bi bi-arrow-down text-success ms-2" style="font-size:0.75rem;"></i> <span class="text-success"><?= $fmtBw($bwIn) ?></span>
+                            <small class="text-muted ms-2"><?= number_format($bwR) ?> requests (este mes)</small>
                         </td>
                     </tr>
                     <?php if ($account['description']): ?>
@@ -201,18 +200,17 @@ use MuseDockPanel\Services\CloudflareService;
                 </div>
             </div>
             <div class="card-body">
-                <?php
-                $bwBytes = (int)($bwMonthly['bytes_out'] ?? 0);
-                $bwReqs = (int)($bwMonthly['requests'] ?? 0);
-                $bwLabel = $bwBytes >= 1073741824 ? round($bwBytes/1073741824, 2) . ' GB' : ($bwBytes >= 1048576 ? round($bwBytes/1048576, 1) . ' MB' : round($bwBytes/1024, 1) . ' KB');
-                ?>
                 <div class="d-flex gap-4 mb-3">
                     <div>
-                        <span class="fs-5 fw-bold text-info"><?= $bwLabel ?></span>
-                        <small class="text-muted d-block">Este mes (salida)</small>
+                        <span class="fs-5 fw-bold text-info"><i class="bi bi-arrow-up" style="font-size:0.8rem;"></i> <?= $fmtBw($bwOut) ?></span>
+                        <small class="text-muted d-block">Salida (este mes)</small>
                     </div>
                     <div>
-                        <span class="fs-5 fw-bold"><?= number_format($bwReqs) ?></span>
+                        <span class="fs-5 fw-bold text-success"><i class="bi bi-arrow-down" style="font-size:0.8rem;"></i> <?= $fmtBw($bwIn) ?></span>
+                        <small class="text-muted d-block">Entrada (este mes)</small>
+                    </div>
+                    <div>
+                        <span class="fs-5 fw-bold"><?= number_format($bwR) ?></span>
                         <small class="text-muted d-block">Requests</small>
                     </div>
                 </div>
@@ -250,7 +248,8 @@ use MuseDockPanel\Services\CloudflareService;
                 if (!json.ok) return;
 
                 const labels = json.data.map(d => fmtLabel(d.period, range));
-                const bytes = json.data.map(d => parseInt(d.bytes_out));
+                const bytesOut = json.data.map(d => parseInt(d.bytes_out));
+                const bytesIn = json.data.map(d => parseInt(d.bytes_in || 0));
                 const reqs = json.data.map(d => parseInt(d.requests));
 
                 const useBar = ['30d', '1y'].includes(range);
@@ -262,10 +261,21 @@ use MuseDockPanel\Services\CloudflareService;
                         labels: labels,
                         datasets: [
                             {
-                                label: 'Trafico',
-                                data: bytes,
+                                label: 'OUT (salida)',
+                                data: bytesOut,
                                 backgroundColor: useBar ? 'rgba(56,189,248,0.4)' : 'rgba(56,189,248,0.08)',
                                 borderColor: '#38bdf8',
+                                borderWidth: useBar ? 1 : 1.5,
+                                fill: !useBar,
+                                tension: 0.3,
+                                pointRadius: 0,
+                                yAxisID: 'y',
+                            },
+                            {
+                                label: 'IN (entrada)',
+                                data: bytesIn,
+                                backgroundColor: useBar ? 'rgba(34,197,94,0.4)' : 'rgba(34,197,94,0.08)',
+                                borderColor: '#22c55e',
                                 borderWidth: useBar ? 1 : 1.5,
                                 fill: !useBar,
                                 tension: 0.3,
