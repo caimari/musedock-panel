@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.42',
+                'date' => '2026-04-03',
+                'badge' => 'danger',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Firewall interactivo en el instalador — Al finalizar la instalacion, pregunta si configurar restriccion de IP para el puerto del panel. Detecta automaticamente UFW activo, UFW inactivo, iptables o sin firewall, e instala UFW si no hay ninguno',
+                            'Doble capa de seguridad — Aplica reglas de firewall (UFW o iptables) Y actualiza ALLOWED_IPS en .env simultaneamente',
+                            'Deteccion temprana de Caddy — El instalador ahora informa si Caddy ya esta corriendo en 80/443 antes de detectar Nginx/Apache, explicando por que no estan en esos puertos',
+                        ],
+                        'en' => [
+                            'Interactive firewall in installer — After installation, prompts to configure IP restriction for the panel port. Auto-detects active UFW, inactive UFW, iptables, or no firewall, and installs UFW if none found',
+                            'Double security layer — Applies firewall rules (UFW or iptables) AND updates ALLOWED_IPS in .env simultaneously',
+                            'Early Caddy detection — Installer now reports if Caddy is already running on 80/443 before detecting Nginx/Apache, explaining why they are not on those ports',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Mensajes de Nginx/Apache mejorados — Cuando no escuchan en 80/443 porque Caddy ya los ocupa, el instalador lo explica en vez de decir solo "sin conflicto"',
+                        ],
+                        'en' => [
+                            'Improved Nginx/Apache messages — When not listening on 80/443 because Caddy owns them, installer explains why instead of just saying "no conflict"',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.41',
                 'date' => '2026-04-03',
                 'badge' => 'warning',

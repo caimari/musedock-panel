@@ -144,6 +144,11 @@ t() {
                 apache_detected) text="Apache detectado: $1" ;;
                 apache_plesk_managed) text="Este Apache esta gestionado por Plesk — NO lo desactives sin Plesk" ;;
                 no_conflicts) text="No se detectaron servicios en conflicto (no nginx, no Apache, no Plesk)" ;;
+                caddy_already_running) text="Caddy ya esta corriendo en puertos 80/443" ;;
+                caddy_already_desc) text="Este servidor ya tiene Caddy sirviendo sitios. El panel se integrara con el Caddy existente." ;;
+                caddy_has_routes) text="Caddy tiene $1 ruta(s) activa(s)" ;;
+                nginx_not_on_ports_caddy) text="Nginx no escucha en 80/443 porque Caddy ya los ocupa" ;;
+                apache_not_on_ports_caddy) text="Apache no escucha en 80/443 porque Caddy ya los ocupa" ;;
                 migrate_header) text="Migrando sitios de $1 a Caddy" ;;
                 migrate_parsing) text="Parseando $1..." ;;
                 migrate_found) text="Encontrado: $1 → $2" ;;
@@ -319,6 +324,27 @@ t() {
                 firewall_consider) text="Considera activar un firewall para proteger el puerto $1." ;;
                 firewall_access_url) text="Accede al panel en:" ;;
                 firewall_make_sure) text="Asegurate de que el puerto $1 esta abierto para tu IP de administracion." ;;
+                fw_setup_header) text="Proteccion del panel" ;;
+                fw_setup_desc) text="El panel se ejecuta como root. Es CRITICO restringir el acceso al puerto $1." ;;
+                fw_setup_ask) text="Configurar restriccion de IP ahora? (muy recomendado) [S/n] " ;;
+                fw_setup_ip_prompt) text="IP o rango permitido (ej: 85.60.10.5 o 192.168.1.0/24)" ;;
+                fw_setup_ip_another) text="Añadir otra IP? [s/N] " ;;
+                fw_setup_ip_invalid) text="IP/rango no valido: $1" ;;
+                fw_setup_applying_ufw) text="Aplicando reglas UFW..." ;;
+                fw_setup_applying_ipt) text="Aplicando reglas iptables..." ;;
+                fw_setup_installing_ufw) text="Instalando y activando UFW..." ;;
+                fw_setup_ufw_rule) text="UFW: permitido $1 → puerto $2" ;;
+                fw_setup_ufw_deny) text="UFW: denegado acceso general al puerto $1" ;;
+                fw_setup_ipt_rule) text="iptables: permitido $1 → puerto $2" ;;
+                fw_setup_ipt_deny) text="iptables: denegado acceso general al puerto $1" ;;
+                fw_setup_ipt_saved) text="iptables: reglas guardadas (persistentes)" ;;
+                fw_setup_env_ips) text="ALLOWED_IPS actualizado en .env: $1" ;;
+                fw_setup_done) text="Panel protegido — solo accesible desde: $1" ;;
+                fw_setup_skip) text="Omitido — RECUERDA proteger el puerto $1 cuanto antes!" ;;
+                fw_setup_skip_warn) text="Sin proteccion, cualquiera puede acceder al panel como root." ;;
+                fw_setup_detect_ufw) text="UFW detectado y activo" ;;
+                fw_setup_detect_ipt) text="iptables detectado (sin UFW)" ;;
+                fw_setup_detect_none) text="Sin firewall detectado — se instalara UFW" ;;
                 caddy_choose) text="Elige [1/2] (por defecto: 1): " ;;
                 caddy_proxy_ok) text="Caddy HTTPS reverse proxy → https://0.0.0.0:$1 → 127.0.0.1:$2" ;;
                 caddy_tls_internal) text="TLS interno (certificado autofirmado para acceso por IP)" ;;
@@ -432,6 +458,11 @@ t() {
                 apache_detected) text="Apache detected: $1" ;;
                 apache_plesk_managed) text="This Apache is managed by Plesk — do NOT disable it without Plesk" ;;
                 no_conflicts) text="No conflicting services detected (no nginx, no Apache, no Plesk)" ;;
+                caddy_already_running) text="Caddy is already running on ports 80/443" ;;
+                caddy_already_desc) text="This server already has Caddy serving sites. The panel will integrate with the existing Caddy." ;;
+                caddy_has_routes) text="Caddy has $1 active route(s)" ;;
+                nginx_not_on_ports_caddy) text="Nginx is not on 80/443 because Caddy already owns those ports" ;;
+                apache_not_on_ports_caddy) text="Apache is not on 80/443 because Caddy already owns those ports" ;;
                 migrate_header) text="Migrating $1 sites to Caddy" ;;
                 migrate_parsing) text="Parsing $1..." ;;
                 migrate_found) text="Found: $1 → $2" ;;
@@ -614,6 +645,27 @@ t() {
                 firewall_consider) text="Consider enabling a firewall to protect port $1." ;;
                 firewall_access_url) text="Access the panel at:" ;;
                 firewall_make_sure) text="Make sure port $1 is open for your admin IP." ;;
+                fw_setup_header) text="Panel protection" ;;
+                fw_setup_desc) text="The panel runs as root. It is CRITICAL to restrict access to port $1." ;;
+                fw_setup_ask) text="Configure IP restriction now? (highly recommended) [Y/n] " ;;
+                fw_setup_ip_prompt) text="Allowed IP or range (e.g. 85.60.10.5 or 192.168.1.0/24)" ;;
+                fw_setup_ip_another) text="Add another IP? [y/N] " ;;
+                fw_setup_ip_invalid) text="Invalid IP/range: $1" ;;
+                fw_setup_applying_ufw) text="Applying UFW rules..." ;;
+                fw_setup_applying_ipt) text="Applying iptables rules..." ;;
+                fw_setup_installing_ufw) text="Installing and activating UFW..." ;;
+                fw_setup_ufw_rule) text="UFW: allowed $1 → port $2" ;;
+                fw_setup_ufw_deny) text="UFW: denied general access to port $1" ;;
+                fw_setup_ipt_rule) text="iptables: allowed $1 → port $2" ;;
+                fw_setup_ipt_deny) text="iptables: denied general access to port $1" ;;
+                fw_setup_ipt_saved) text="iptables: rules saved (persistent)" ;;
+                fw_setup_env_ips) text="ALLOWED_IPS updated in .env: $1" ;;
+                fw_setup_done) text="Panel protected — only accessible from: $1" ;;
+                fw_setup_skip) text="Skipped — REMEMBER to protect port $1 ASAP!" ;;
+                fw_setup_skip_warn) text="Without protection, anyone can access the panel as root." ;;
+                fw_setup_detect_ufw) text="UFW detected and active" ;;
+                fw_setup_detect_ipt) text="iptables detected (no UFW)" ;;
+                fw_setup_detect_none) text="No firewall detected — UFW will be installed" ;;
                 verify_complete) text="Verification complete" ;;
                 verify_all_ok) text="Everything OK! The panel is running correctly." ;;
                 verify_has_errors) text="Found $1 issue(s). Review above." ;;
@@ -1603,6 +1655,25 @@ NGINX_DETECTED=false
 APACHE_DETECTED=false
 NGINX_ON_HTTP=false
 APACHE_ON_HTTP=false
+CADDY_PREINSTALLED=false
+
+# --- Early Caddy detection (before nginx/apache, to explain port ownership) ---
+if command -v caddy &> /dev/null && systemctl is-active --quiet caddy 2>/dev/null; then
+    CADDY_ON_80=$(ss -tlnp 2>/dev/null | grep ':80\b.*caddy' | wc -l)
+    CADDY_ON_443=$(ss -tlnp 2>/dev/null | grep ':443\b.*caddy' | wc -l)
+    if [ "$CADDY_ON_80" -gt 0 ] || [ "$CADDY_ON_443" -gt 0 ]; then
+        CADDY_PREINSTALLED=true
+        echo ""
+        echo -e "  ${GREEN}${BOLD}$(t caddy_already_running)${NC}"
+        echo -e "  ${GREEN}  $(t caddy_already_desc)${NC}"
+        # Count active routes
+        CADDY_EARLY_ROUTES=$(curl -s http://localhost:2019/config/apps/http/servers/srv0/routes 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+        if [ "$CADDY_EARLY_ROUTES" -gt 0 ] 2>/dev/null; then
+            echo -e "  ${GREEN}  $(t caddy_has_routes "$CADDY_EARLY_ROUTES")${NC}"
+        fi
+        echo ""
+    fi
+fi
 
 # --- Plesk detection ---
 if [ -d /usr/local/psa ] || command -v psa &> /dev/null || [ -f /etc/init.d/psa ]; then
@@ -1664,6 +1735,8 @@ if command -v nginx &> /dev/null; then
     if [ -n "$NGINX_PORTS" ]; then
         echo -e "  ${YELLOW}  $(t listening_ports "$NGINX_PORTS")${NC}"
         echo -e "  ${YELLOW}  $(t caddy_port_conflict)${NC}"
+    elif [ "$CADDY_PREINSTALLED" = true ]; then
+        echo -e "  ${GREEN}  $(t nginx_not_on_ports_caddy)${NC}"
     else
         echo -e "  ${GREEN}  $(t no_port_conflict Nginx)${NC}"
         echo -e "  ${GREEN}  $(t no_conflict_caddy)${NC}"
@@ -1748,6 +1821,8 @@ if command -v apache2 &> /dev/null || command -v httpd &> /dev/null; then
     if [ -n "$APACHE_PORTS" ]; then
         echo -e "  ${YELLOW}  $(t listening_ports "$APACHE_PORTS")${NC}"
         echo -e "  ${YELLOW}  $(t caddy_port_conflict)${NC}"
+    elif [ "$CADDY_PREINSTALLED" = true ]; then
+        echo -e "  ${GREEN}  $(t apache_not_on_ports_caddy)${NC}"
     else
         echo -e "  ${GREEN}  $(t no_port_conflict Apache)${NC}"
         echo -e "  ${GREEN}  $(t no_conflict_caddy)${NC}"
@@ -3163,6 +3238,147 @@ if [ "$UPDATE_ONLY" = true ]; then
     fi
     echo ""
     exit 0
+fi
+
+# ============================================================
+# Interactive firewall / IP restriction setup
+# ============================================================
+header "$(t fw_setup_header)"
+echo ""
+echo -e "  ${RED}${BOLD}$(t fw_setup_desc "$PANEL_PORT")${NC}"
+echo ""
+
+# Detect what firewall is available
+FW_ENGINE="none"
+if command -v ufw &> /dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+    FW_ENGINE="ufw"
+    ok "$(t fw_setup_detect_ufw)"
+elif command -v ufw &> /dev/null; then
+    FW_ENGINE="ufw_inactive"
+    ok "$(t fw_setup_detect_none)"
+elif iptables -L INPUT -n &>/dev/null; then
+    FW_ENGINE="iptables"
+    ok "$(t fw_setup_detect_ipt)"
+else
+    FW_ENGINE="install_ufw"
+    ok "$(t fw_setup_detect_none)"
+fi
+
+echo ""
+read -rp "  $(t fw_setup_ask)" FW_SETUP_CONFIRM
+FW_SETUP_CONFIRM=${FW_SETUP_CONFIRM:-s}
+
+if [[ "$FW_SETUP_CONFIRM" =~ ^[YySs]$ ]] || [ -z "$FW_SETUP_CONFIRM" ]; then
+    # Collect IPs
+    FW_ALLOWED_IPS=()
+    while true; do
+        echo ""
+        read -rp "  $(t fw_setup_ip_prompt): " FW_IP
+        FW_IP=$(echo "$FW_IP" | tr -d ' ')
+
+        # Validate IP or CIDR
+        if echo "$FW_IP" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}(/[0-9]{1,2})?$'; then
+            FW_ALLOWED_IPS+=("$FW_IP")
+        else
+            warn "$(t fw_setup_ip_invalid "$FW_IP")"
+            continue
+        fi
+
+        echo ""
+        read -rp "  $(t fw_setup_ip_another)" FW_MORE
+        if [[ ! "$FW_MORE" =~ ^[YySs]$ ]]; then
+            break
+        fi
+    done
+
+    if [ ${#FW_ALLOWED_IPS[@]} -gt 0 ]; then
+        # --- Apply firewall rules ---
+        case "$FW_ENGINE" in
+            ufw)
+                echo ""
+                ok "$(t fw_setup_applying_ufw)"
+                # Remove any existing broad allow on PANEL_PORT
+                ufw delete allow "${PANEL_PORT}/tcp" 2>/dev/null || true
+                ufw delete allow "$PANEL_PORT" 2>/dev/null || true
+                for ip in "${FW_ALLOWED_IPS[@]}"; do
+                    ufw allow from "$ip" to any port "$PANEL_PORT" proto tcp > /dev/null 2>&1
+                    ok "$(t fw_setup_ufw_rule "$ip" "$PANEL_PORT")"
+                done
+                # Deny general access to panel port
+                ufw deny "$PANEL_PORT"/tcp > /dev/null 2>&1
+                ok "$(t fw_setup_ufw_deny "$PANEL_PORT")"
+                # Ensure SSH is allowed and UFW is active
+                ufw allow 22/tcp > /dev/null 2>&1
+                ufw allow 80/tcp > /dev/null 2>&1
+                ufw allow 443/tcp > /dev/null 2>&1
+                ufw --force enable > /dev/null 2>&1
+                ;;
+            ufw_inactive|install_ufw)
+                echo ""
+                if ! command -v ufw &> /dev/null; then
+                    ok "$(t fw_setup_installing_ufw)"
+                    apt-get install -y -qq ufw > /dev/null 2>&1
+                fi
+                ok "$(t fw_setup_applying_ufw)"
+                # Default policy: allow outgoing, deny incoming (except what we allow)
+                ufw default deny incoming > /dev/null 2>&1
+                ufw default allow outgoing > /dev/null 2>&1
+                # Essential ports
+                ufw allow 22/tcp > /dev/null 2>&1
+                ufw allow 80/tcp > /dev/null 2>&1
+                ufw allow 443/tcp > /dev/null 2>&1
+                # Panel port: only from allowed IPs
+                for ip in "${FW_ALLOWED_IPS[@]}"; do
+                    ufw allow from "$ip" to any port "$PANEL_PORT" proto tcp > /dev/null 2>&1
+                    ok "$(t fw_setup_ufw_rule "$ip" "$PANEL_PORT")"
+                done
+                ufw deny "$PANEL_PORT"/tcp > /dev/null 2>&1
+                ok "$(t fw_setup_ufw_deny "$PANEL_PORT")"
+                ufw --force enable > /dev/null 2>&1
+                ;;
+            iptables)
+                echo ""
+                ok "$(t fw_setup_applying_ipt)"
+                # Remove existing rules for PANEL_PORT
+                while iptables -D INPUT -p tcp --dport "$PANEL_PORT" -j ACCEPT 2>/dev/null; do :; done
+                while iptables -D INPUT -p tcp --dport "$PANEL_PORT" -j DROP 2>/dev/null; do :; done
+                # Allow from each IP
+                for ip in "${FW_ALLOWED_IPS[@]}"; do
+                    iptables -A INPUT -p tcp -s "$ip" --dport "$PANEL_PORT" -j ACCEPT
+                    ok "$(t fw_setup_ipt_rule "$ip" "$PANEL_PORT")"
+                done
+                # Drop everyone else
+                iptables -A INPUT -p tcp --dport "$PANEL_PORT" -j DROP
+                ok "$(t fw_setup_ipt_deny "$PANEL_PORT")"
+                # Save rules if iptables-persistent is available
+                if command -v netfilter-persistent &> /dev/null; then
+                    netfilter-persistent save > /dev/null 2>&1
+                    ok "$(t fw_setup_ipt_saved)"
+                elif command -v iptables-save &> /dev/null; then
+                    iptables-save > /etc/iptables/rules.v4 2>/dev/null || \
+                    iptables-save > /etc/iptables.rules 2>/dev/null || true
+                    ok "$(t fw_setup_ipt_saved)"
+                fi
+                ;;
+        esac
+
+        # --- Update ALLOWED_IPS in .env ---
+        ENV_FILE="${PANEL_DIR}/.env"
+        IP_LIST=$(IFS=','; echo "${FW_ALLOWED_IPS[*]}")
+        if grep -q "^ALLOWED_IPS=" "$ENV_FILE" 2>/dev/null; then
+            sed -i "s|^ALLOWED_IPS=.*|ALLOWED_IPS=${IP_LIST}|" "$ENV_FILE"
+        else
+            echo "ALLOWED_IPS=${IP_LIST}" >> "$ENV_FILE"
+        fi
+        ok "$(t fw_setup_env_ips "$IP_LIST")"
+
+        echo ""
+        echo -e "  ${GREEN}${BOLD}$(t fw_setup_done "$IP_LIST")${NC}"
+    fi
+else
+    echo ""
+    echo -e "  ${RED}${BOLD}$(t fw_setup_skip "$PANEL_PORT")${NC}"
+    echo -e "  ${RED}$(t fw_setup_skip_warn)${NC}"
 fi
 
 # ============================================================
