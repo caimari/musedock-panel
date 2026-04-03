@@ -107,7 +107,7 @@ class FederationMigrationService
     /**
      * Create a new migration.
      */
-    public static function create(int $accountId, int $peerId, string $mode = self::MODE_MIGRATE, bool $dryRun = false, int $gracePeriodMinutes = 60, string $dnsMode = 'auto'): array
+    public static function create(int $accountId, int $peerId, string $mode = self::MODE_MIGRATE, bool $dryRun = false, int $gracePeriodMinutes = 60, string $dnsMode = 'auto', ?array $includeSubdomains = null, ?array $includeAliases = null): array
     {
         $migrationId = self::generateMigrationId();
 
@@ -131,7 +131,11 @@ class FederationMigrationService
             'current_step'         => self::STEP_HEALTH_CHECK,
             'dry_run'              => $dryRun ? 'true' : 'false',
             'grace_period_minutes' => $gracePeriodMinutes,
-            'metadata'             => json_encode(['dns_mode' => $dnsMode]),
+            'metadata'             => json_encode(array_filter([
+                'dns_mode' => $dnsMode,
+                'include_subdomains' => $includeSubdomains, // null = all, array of IDs = selected
+                'include_aliases' => $includeAliases,       // null = all, array of IDs = selected
+            ], fn($v) => $v !== null)),
             'created_by'           => $user['id'] ?? null,
         ]);
 
@@ -401,12 +405,12 @@ class FederationMigrationService
         return match ($step) {
             self::STEP_HEALTH_CHECK => self::stepHealthCheck($migrationId, $account, $peer),
             self::STEP_LOCK         => self::stepLock($migrationId, $account, $peer),
-            self::STEP_PREPARE      => self::stepPrepare($migrationId, $account, $peer),
+            self::STEP_PREPARE      => self::stepPrepare($migrationId, $migration, $account, $peer),
             self::STEP_SYNC_FILES   => self::stepSyncFiles($migrationId, $account, $peer),
             self::STEP_SYNC_DB      => self::stepSyncDb($migrationId, $account, $peer),
             self::STEP_FREEZE       => self::stepFreeze($migrationId, $account, $peer),
             self::STEP_FINAL_SYNC   => self::stepFinalSync($migrationId, $account, $peer),
-            self::STEP_FINALIZE     => self::stepFinalize($migrationId, $account, $peer),
+            self::STEP_FINALIZE     => self::stepFinalize($migrationId, $migration, $account, $peer),
             self::STEP_VERIFY       => self::stepVerify($migrationId, $account, $peer),
             self::STEP_SWITCH_DNS   => self::stepSwitchDns($migrationId, $migration, $account, $peer),
             self::STEP_COMPLETE     => self::stepComplete($migrationId, $migration, $account, $peer),
@@ -495,7 +499,7 @@ class FederationMigrationService
     /**
      * Step 2: PREPARE — API to destination: validate UID, domain free, create tentative user + DB.
      */
-    private static function stepPrepare(string $migrationId, array $account, array $peer): array
+    private static function stepPrepare(string $migrationId, array $migration, array $account, array $peer): array
     {
         // Collect all databases for this account
         $databases = Database::fetchAll(
@@ -503,17 +507,29 @@ class FederationMigrationService
             ['aid' => $account['id']]
         );
 
-        // Collect subdomains
+        // Collect subdomains (filtered by selection if specified)
         $subdomains = Database::fetchAll(
             'SELECT * FROM hosting_subdomains WHERE account_id = :aid',
             ['aid' => $account['id']]
         );
+        $selectedSubIds = $migration['metadata']['include_subdomains'] ?? null;
+        if (is_array($selectedSubIds)) {
+            $selectedSubIds = array_map('intval', $selectedSubIds);
+            $subdomains = array_values(array_filter($subdomains, fn($s) => in_array((int)$s['id'], $selectedSubIds)));
+        }
 
-        // Collect domain aliases
+        // Collect domain aliases (filtered by selection if specified)
         $aliases = Database::fetchAll(
             'SELECT * FROM hosting_domain_aliases WHERE account_id = :aid',
             ['aid' => $account['id']]
         );
+        $selectedAliasIds = $migration['metadata']['include_aliases'] ?? null;
+        if (is_array($selectedAliasIds)) {
+            $selectedAliasIds = array_map('intval', $selectedAliasIds);
+            $aliases = array_values(array_filter($aliases, fn($a) => in_array((int)$a['id'], $selectedAliasIds)));
+        }
+
+        self::log($migrationId, self::STEP_PREPARE, 'info', 'Including ' . count($subdomains) . ' subdomains, ' . count($aliases) . ' aliases');
 
         // Pause slave sync on destination to avoid replicating partial data
         FederationService::callPeerApi($peer, 'POST', '/api/federation/pause-sync', [
@@ -794,12 +810,24 @@ class FederationMigrationService
     /**
      * Step 7: FINALIZE — API to destination: create Linux user, FPM pool, Caddy route, subdomains, aliases.
      */
-    private static function stepFinalize(string $migrationId, array $account, array $peer): array
+    private static function stepFinalize(string $migrationId, array $migration, array $account, array $peer): array
     {
-        // Collect related data for destination to create complete hosting
+        // Collect related data (filtered by selection from metadata)
         $databases = Database::fetchAll('SELECT * FROM hosting_databases WHERE account_id = :aid', ['aid' => $account['id']]);
+
         $subdomains = Database::fetchAll('SELECT * FROM hosting_subdomains WHERE account_id = :aid', ['aid' => $account['id']]);
+        $selectedSubIds = $migration['metadata']['include_subdomains'] ?? null;
+        if (is_array($selectedSubIds)) {
+            $selectedSubIds = array_map('intval', $selectedSubIds);
+            $subdomains = array_values(array_filter($subdomains, fn($s) => in_array((int)$s['id'], $selectedSubIds)));
+        }
+
         $aliases = Database::fetchAll('SELECT * FROM hosting_domain_aliases WHERE account_id = :aid', ['aid' => $account['id']]);
+        $selectedAliasIds = $migration['metadata']['include_aliases'] ?? null;
+        if (is_array($selectedAliasIds)) {
+            $selectedAliasIds = array_map('intval', $selectedAliasIds);
+            $aliases = array_values(array_filter($aliases, fn($a) => in_array((int)$a['id'], $selectedAliasIds)));
+        }
 
         $result = FederationService::callPeerApi($peer, 'POST', '/api/federation/finalize', [
             'migration_id'  => $migrationId,

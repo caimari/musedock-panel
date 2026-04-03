@@ -20,6 +20,41 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.54',
+                'date' => '2026-04-03',
+                'badge' => 'success',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Federation Backups: peers como almacenamiento remoto — Los federation peers aparecen como destinos en transferir backup, backups remotos y auto-backup remoto',
+                            'Federation Backups: selector SSH / HTTP — Al transferir a un peer, elige entre SSH (rsync, rapido) o HTTP upload (para servidores con SSH limitado como Contabo)',
+                            'Federation Backups: API de backups remotos — Endpoints para listar, recibir, descargar y eliminar backups en peers federados',
+                            'Federation Backups: recepcion HTTP — Nuevo endpoint receive-upload para recibir backups via multipart POST cuando SSH no esta disponible',
+                            'Federation Migration: selector de subdominios — Checkboxes para elegir que subdominios y aliases incluir en la migracion/clonacion',
+                            'Federation Migration: Caddy routes para subdominios — El paso FINALIZE ahora crea rutas Caddy individuales para cada subdominio y alias migrado',
+                        ],
+                        'en' => [
+                            'Federation Backups: peers as remote storage — Federation peers appear as destinations in backup transfer, remote backups and auto-backup remote',
+                            'Federation Backups: SSH / HTTP selector — When transferring to a peer, choose between SSH (rsync, fast) or HTTP upload (for servers with limited SSH like Contabo)',
+                            'Federation Backups: remote backup API — Endpoints to list, receive, download and delete backups on federated peers',
+                            'Federation Backups: HTTP receive — New receive-upload endpoint to receive backups via multipart POST when SSH is unavailable',
+                            'Federation Migration: subdomain selector — Checkboxes to choose which subdomains and aliases to include in migration/cloning',
+                            'Federation Migration: Caddy routes for subdomains — FINALIZE step now creates individual Caddy routes for each migrated subdomain and alias',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Backups UI: selectores agrupados — Los selectores de nodo remoto agrupan Cluster Nodes y Federation Peers con etiquetas visuales',
+                            'Auto-backup: destino federation — La configuracion de auto-backup remoto ahora permite seleccionar federation peers ademas de cluster nodes',
+                        ],
+                        'en' => [
+                            'Backups UI: grouped selectors — Remote node selectors group Cluster Nodes and Federation Peers with visual labels',
+                            'Auto-backup: federation destination — Auto-backup remote configuration now allows selecting federation peers in addition to cluster nodes',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.53',
                 'date' => '2026-04-03',
                 'badge' => 'success',

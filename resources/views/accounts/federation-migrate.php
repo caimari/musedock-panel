@@ -362,6 +362,48 @@
                         </div>
                     </div>
 
+                    <?php if (!empty($subdomains) || !empty($aliases)): ?>
+                    <div class="mb-3 p-3 rounded" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);">
+                        <label class="form-label small text-muted mb-2">Subdominios y aliases a incluir</label>
+
+                        <?php if (!empty($subdomains)): ?>
+                        <div class="mb-2">
+                            <small class="text-muted d-block mb-1"><i class="bi bi-diagram-2 me-1"></i>Subdominios</small>
+                            <?php foreach ($subdomains as $sub): ?>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="include_subdomains[]" value="<?= (int)$sub['id'] ?>" id="sub-<?= $sub['id'] ?>" checked>
+                                <label class="form-check-label small" for="sub-<?= $sub['id'] ?>">
+                                    <?= View::e($sub['subdomain']) ?>
+                                    <span class="text-muted">(<?= View::e($sub['document_root'] ?? '') ?>)</span>
+                                    <?php if ($sub['status'] !== 'active'): ?><span class="badge bg-secondary ms-1"><?= $sub['status'] ?></span><?php endif; ?>
+                                </label>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php endif; ?>
+
+                        <?php if (!empty($aliases)): ?>
+                        <div>
+                            <small class="text-muted d-block mb-1"><i class="bi bi-link-45deg me-1"></i>Aliases / Redirects</small>
+                            <?php foreach ($aliases as $alias): ?>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="include_aliases[]" value="<?= (int)$alias['id'] ?>" id="alias-<?= $alias['id'] ?>" checked>
+                                <label class="form-check-label small" for="alias-<?= $alias['id'] ?>">
+                                    <?= View::e($alias['domain']) ?>
+                                    <span class="badge ms-1" style="background:rgba(255,255,255,0.05);color:#94a3b8;font-size:0.7em;"><?= $alias['type'] ?? 'alias' ?></span>
+                                </label>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php endif; ?>
+
+                        <div class="mt-2">
+                            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size:0.75rem;" onclick="document.querySelectorAll('[name=\'include_subdomains[]\'], [name=\'include_aliases[]\']').forEach(c => c.checked = true)">Todos</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" style="font-size:0.75rem;" onclick="document.querySelectorAll('[name=\'include_subdomains[]\'], [name=\'include_aliases[]\']').forEach(c => c.checked = false)">Ninguno</button>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+
                     <div class="form-check mb-3">
                         <input type="checkbox" name="dry_run" class="form-check-input" id="dry-run-check">
                         <label class="form-check-label" for="dry-run-check">
@@ -393,14 +435,16 @@
                         btn.disabled = true;
                         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Iniciando...';
 
-                        const body = new URLSearchParams({
-                            _csrf_token: '<?= View::csrfToken() ?>',
-                            peer_id: form.get('peer_id'),
-                            mode: form.get('mode'),
-                            grace_period: form.get('grace_period'),
-                            dns_mode: form.get('dns_mode'),
-                            dry_run: form.get('dry_run') ? '1' : '',
-                        });
+                        const body = new FormData();
+                        body.append('_csrf_token', '<?= View::csrfToken() ?>');
+                        body.append('peer_id', form.get('peer_id'));
+                        body.append('mode', form.get('mode'));
+                        body.append('grace_period', form.get('grace_period'));
+                        body.append('dns_mode', form.get('dns_mode'));
+                        body.append('dry_run', form.get('dry_run') ? '1' : '');
+                        // Pass selected subdomains and aliases
+                        for (const val of form.getAll('include_subdomains[]')) body.append('include_subdomains[]', val);
+                        for (const val of form.getAll('include_aliases[]')) body.append('include_aliases[]', val);
 
                         fetch('/accounts/<?= $account['id'] ?>/federation-migrate/start', {method:'POST', body})
                         .then(r => r.json())

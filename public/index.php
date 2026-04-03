@@ -115,6 +115,13 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/api/federation/handshake', 'FederationApiController@handshake');
 \MuseDockPanel\Router::post('/api/federation/pause-sync', 'FederationApiController@pauseSync');
 
+// Federation Backup API (remote backup storage)
+\MuseDockPanel\Router::get('/api/federation/backups/list', 'FederationApiController@backupsList');
+\MuseDockPanel\Router::post('/api/federation/backups/receive', 'FederationApiController@backupsReceive');
+\MuseDockPanel\Router::get('/api/federation/backups/download', 'FederationApiController@backupsDownload');
+\MuseDockPanel\Router::post('/api/federation/backups/receive-upload', 'FederationApiController@backupsReceiveUpload');
+\MuseDockPanel\Router::post('/api/federation/backups/delete', 'FederationApiController@backupsDelete');
+
 // ===============================
 // Routes
 // ===============================

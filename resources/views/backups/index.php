@@ -1,5 +1,9 @@
 <?php use MuseDockPanel\View; ?>
-<?php $hasNodes = !empty($nodes); ?>
+<?php
+$hasNodes = !empty($nodes);
+$hasFederationPeers = !empty($federationPeers ?? []);
+$hasRemoteTargets = $hasNodes || $hasFederationPeers;
+?>
 
 <!-- Backup Progress Modal (shown when backup in progress on any page) -->
 <div class="modal fade" id="backupProgressModal" data-bs-backdrop="static" data-bs-keyboard="false" tabindex="-1">
@@ -122,7 +126,7 @@
                             </a>
                             <?php endif; ?>
 
-                            <?php if ($hasNodes): ?>
+                            <?php if ($hasRemoteTargets): ?>
                             <button type="button" class="btn btn-outline-info btn-sm" title="Transferir a nodo remoto"
                                     onclick="transferBackup('<?= $dirName ?>')">
                                 <i class="bi bi-cloud-upload"></i>
@@ -152,17 +156,29 @@
     </div>
 </div>
 
-<?php if ($hasNodes): ?>
+<?php if ($hasRemoteTargets): ?>
 <!-- Remote Backups -->
 <div class="card mt-4">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-cloud me-2"></i>Backups Remotos</span>
         <div class="d-flex align-items-center gap-2">
             <select id="remoteNodeSelect" class="form-select form-select-sm" style="width: auto; background: #0f172a; border-color: #334155; color: #e2e8f0;">
-                <option value="">Seleccionar nodo...</option>
-                <?php foreach ($nodes as $node): ?>
-                <option value="<?= (int) $node['id'] ?>"><?= View::e($node['name']) ?></option>
-                <?php endforeach; ?>
+                <option value="">Seleccionar destino...</option>
+                <?php if ($hasNodes): ?>
+                <optgroup label="Cluster Nodes">
+                    <?php foreach ($nodes as $node): ?>
+                    <option value="node-<?= (int) $node['id'] ?>"><?= View::e($node['name']) ?></option>
+                    <?php endforeach; ?>
+                </optgroup>
+                <?php endif; ?>
+                <?php if ($hasFederationPeers): ?>
+                <optgroup label="Federation Peers">
+                    <?php foreach ($federationPeers as $fp): ?>
+                    <?php if ($fp['status'] === 'pending_approval') continue; ?>
+                    <option value="peer-<?= (int) $fp['id'] ?>" style="color:#10b981;"><?= View::e($fp['name']) ?> (federation)</option>
+                    <?php endforeach; ?>
+                </optgroup>
+                <?php endif; ?>
             </select>
             <button type="button" class="btn btn-outline-info btn-sm" onclick="loadRemoteBackups()" id="btnLoadRemote">
                 <i class="bi bi-arrow-repeat me-1"></i> Cargar
@@ -295,20 +311,26 @@
     // ── Remote Backups ────────────────────────────────────────────
 
     window.loadRemoteBackups = async function() {
-        const nodeId = document.getElementById('remoteNodeSelect')?.value;
-        if (!nodeId) {
-            SwalDark.fire('', 'Selecciona un nodo primero.', 'info');
+        const rawValue = document.getElementById('remoteNodeSelect')?.value;
+        if (!rawValue) {
+            SwalDark.fire('', 'Selecciona un destino primero.', 'info');
             return;
         }
+
+        // Parse "node-X" or "peer-X"
+        const parts = rawValue.split('-');
+        const targetType = parts[0]; // 'node' or 'peer'
+        const targetId = parts[1];
 
         const container = document.getElementById('remoteBackupsContainer');
         const btn = document.getElementById('btnLoadRemote');
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Cargando...';
-        container.innerHTML = '<div class="p-4 text-center text-muted"><span class="spinner-border spinner-border-sm me-1"></span> Conectando al nodo...</div>';
+        container.innerHTML = '<div class="p-4 text-center text-muted"><span class="spinner-border spinner-border-sm me-1"></span> Conectando...</div>';
 
         try {
-            const resp = await fetch('/backups/remote?node_id=' + nodeId);
+            const param = targetType === 'peer' ? 'peer_id' : 'node_id';
+            const resp = await fetch('/backups/remote?' + param + '=' + targetId);
             const data = await resp.json();
 
             if (!data.ok) {
@@ -342,8 +364,8 @@
                 if ((bk.db_count || 0) > 0) html += `<span class="badge" style="background:rgba(56,189,248,0.15);color:#38bdf8;"><i class="bi bi-database me-1"></i>${bk.db_count} BD</span>`;
                 html += '</td>';
                 html += '<td class="text-end pe-3">';
-                html += `<button class="btn btn-outline-success btn-sm" title="Recuperar a local" onclick="fetchRemoteBackup(${nodeId}, '${bk.dir_name}')"><i class="bi bi-cloud-download"></i></button> `;
-                html += `<button class="btn btn-outline-danger btn-sm" title="Eliminar del nodo" onclick="deleteRemoteBackup(${nodeId}, '${bk.dir_name}', '${bk.username || ''}')"><i class="bi bi-trash"></i></button>`;
+                html += `<button class="btn btn-outline-success btn-sm" title="Recuperar a local" onclick="fetchRemoteBackup('${targetType}', ${targetId}, '${bk.dir_name}')"><i class="bi bi-cloud-download"></i></button> `;
+                html += `<button class="btn btn-outline-danger btn-sm" title="Eliminar" onclick="deleteRemoteBackup('${targetType}', ${targetId}, '${bk.dir_name}', '${bk.username || ''}')"><i class="bi bi-trash"></i></button>`;
                 html += '</td></tr>';
             }
 
@@ -363,30 +385,59 @@
         const nodeOptions = {};
         <?php if ($hasNodes): ?>
         <?php foreach ($nodes as $node): ?>
-        nodeOptions[<?= (int) $node['id'] ?>] = <?= json_encode($node['name']) ?>;
+        nodeOptions['node-<?= (int) $node['id'] ?>'] = <?= json_encode($node['name'] . ' (cluster)') ?>;
+        <?php endforeach; ?>
+        <?php endif; ?>
+        <?php if ($hasFederationPeers): ?>
+        <?php foreach ($federationPeers as $fp): ?>
+        <?php if ($fp['status'] === 'pending_approval') continue; ?>
+        nodeOptions['peer-<?= (int) $fp['id'] ?>'] = <?= json_encode($fp['name'] . ' (federation)') ?>;
         <?php endforeach; ?>
         <?php endif; ?>
 
+        // Build HTML with target selector + method selector for peers
+        let selectHtml = '<div class="text-start mb-3"><label class="form-label small">Destino</label><select id="swal-target" class="form-select form-select-sm" style="background:#0f172a;border-color:#334155;color:#e2e8f0;">';
+        selectHtml += '<option value="">Seleccionar destino...</option>';
+        for (const [key, name] of Object.entries(nodeOptions)) {
+            selectHtml += `<option value="${key}">${name}</option>`;
+        }
+        selectHtml += '</select></div>';
+        selectHtml += '<div id="swal-method-row" class="text-start mb-2" style="display:none;"><label class="form-label small">Metodo de transferencia</label><select id="swal-method" class="form-select form-select-sm" style="background:#0f172a;border-color:#334155;color:#e2e8f0;">';
+        selectHtml += '<option value="ssh">SSH (rsync) — rapido, resumible</option>';
+        selectHtml += '<option value="http">HTTP upload — si SSH esta limitado</option>';
+        selectHtml += '</select></div>';
+
         SwalDark.fire({
-            title: 'Transferir backup a nodo remoto',
-            html: 'Backup: <strong>' + dirName + '</strong><br><br>Selecciona el nodo destino:',
-            input: 'select',
-            inputOptions: nodeOptions,
-            inputPlaceholder: 'Seleccionar nodo...',
+            title: 'Transferir backup',
+            html: 'Backup: <strong>' + dirName + '</strong><br><br>' + selectHtml,
             showCancelButton: true,
             confirmButtonText: 'Transferir',
             cancelButtonText: 'Cancelar',
-            preConfirm: function(nodeId) {
-                if (!nodeId) { Swal.showValidationMessage('Selecciona un nodo'); return false; }
-                return nodeId;
+            didOpen: () => {
+                document.getElementById('swal-target').addEventListener('change', function() {
+                    const isPeer = this.value.startsWith('peer-');
+                    document.getElementById('swal-method-row').style.display = isPeer ? 'block' : 'none';
+                });
+            },
+            preConfirm: function() {
+                const val = document.getElementById('swal-target').value;
+                if (!val) { Swal.showValidationMessage('Selecciona un destino'); return false; }
+                const method = document.getElementById('swal-method').value;
+                return { target: val, method: method };
             }
         }).then(async function(result) {
             if (!result.isConfirmed || !result.value) return;
 
             try {
+                const parts = result.value.target.split('-');
+                const targetType = parts[0];
+                const targetId = parts[1];
+                const transferMethod = result.value.method || 'ssh';
+
                 const formData = new FormData();
                 formData.append('_csrf_token', csrfToken);
-                formData.append('node_id', result.value);
+                formData.append(targetType === 'peer' ? 'peer_id' : 'node_id', targetId);
+                if (targetType === 'peer') formData.append('transfer_method', transferMethod);
 
                 const resp = await fetch('/backups/' + encodeURIComponent(dirName) + '/transfer', {
                     method: 'POST',
@@ -496,10 +547,11 @@
         } catch (e) {}
     }
 
-    window.fetchRemoteBackup = async function(nodeId, backupName) {
+    window.fetchRemoteBackup = async function(targetType, targetId, backupName) {
         const result = await SwalDark.fire({
             title: 'Recuperar backup?',
-            html: 'Se descargara <strong>' + backupName + '</strong> del nodo remoto y se guardara localmente.',
+            html: 'Se descargara <strong>' + backupName + '</strong> del servidor remoto y se guardara localmente.' +
+                  (targetType === 'peer' ? '<br><small class="text-muted">Transferencia via SSH (rsync)</small>' : ''),
             icon: 'question',
             showCancelButton: true,
             confirmButtonText: 'Si, recuperar',
@@ -508,12 +560,12 @@
 
         if (!result.isConfirmed) return;
 
-        SwalDark.fire({ title: 'Descargando...', html: 'Recuperando backup del nodo remoto...<br><small class="text-muted">Esto puede tardar varios minutos.</small>', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        SwalDark.fire({ title: 'Descargando...', html: 'Recuperando backup...<br><small class="text-muted">Esto puede tardar varios minutos.</small>', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
 
         try {
             const formData = new FormData();
             formData.append('_csrf_token', csrfToken);
-            formData.append('node_id', nodeId);
+            formData.append(targetType === 'peer' ? 'peer_id' : 'node_id', targetId);
             formData.append('backup_name', backupName);
 
             const resp = await fetch('/backups/remote/fetch', { method: 'POST', body: formData });
@@ -530,10 +582,10 @@
         }
     };
 
-    window.deleteRemoteBackup = async function(nodeId, backupName, username) {
+    window.deleteRemoteBackup = async function(targetType, targetId, backupName, username) {
         const result = await SwalDark.fire({
             title: 'Eliminar backup remoto?',
-            html: 'Se eliminara <strong>' + backupName + '</strong> (' + username + ') del nodo remoto.<br><br><span style="color:#ef4444;">Esta accion es irreversible.</span>',
+            html: 'Se eliminara <strong>' + backupName + '</strong> (' + username + ') del servidor remoto.<br><br><span style="color:#ef4444;">Esta accion es irreversible.</span>',
             icon: 'warning',
             showCancelButton: true,
             confirmButtonText: 'Si, eliminar',
@@ -545,7 +597,7 @@
         try {
             const formData = new FormData();
             formData.append('_csrf_token', csrfToken);
-            formData.append('node_id', nodeId);
+            formData.append(targetType === 'peer' ? 'peer_id' : 'node_id', targetId);
             formData.append('backup_name', backupName);
 
             const resp = await fetch('/backups/remote/delete', { method: 'POST', body: formData });

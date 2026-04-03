@@ -10,6 +10,7 @@ use MuseDockPanel\Settings;
 use MuseDockPanel\View;
 use MuseDockPanel\Services\LogService;
 use MuseDockPanel\Services\ClusterService;
+use MuseDockPanel\Services\FederationService;
 use MuseDockPanel\Services\ReplicationService;
 
 class BackupController
@@ -47,14 +48,17 @@ class BackupController
         // Sort by date descending
         usort($backups, fn($a, $b) => strtotime($b['date'] ?? '0') - strtotime($a['date'] ?? '0'));
 
-        // Get cluster nodes for remote backup options
+        // Get cluster nodes + federation peers for remote backup options
         $nodes = ClusterService::getNodes();
+        $federationPeers = [];
+        try { $federationPeers = FederationService::getPeers(); } catch (\Throwable) {}
 
         View::render('backups/index', [
             'layout' => 'main',
             'pageTitle' => 'Backups',
             'backups' => $backups,
             'nodes' => $nodes,
+            'federationPeers' => $federationPeers,
         ]);
     }
 
@@ -84,6 +88,7 @@ class BackupController
             'autoBackupRemoteEnabled' => Settings::get('auto_backup_remote_enabled', '0') === '1',
             'autoBackupRemoteNodeId' => (int) Settings::get('auto_backup_remote_node_id', '0'),
             'nodes' => ClusterService::getNodes(),
+            'federationPeers' => (function() { try { return FederationService::getPeers(); } catch (\Throwable) { return []; } })(),
         ]);
     }
 
@@ -635,10 +640,11 @@ class BackupController
 
         $backupId = basename($params['id'] ?? '');
         $nodeId = (int) ($_POST['node_id'] ?? 0);
+        $peerId = (int) ($_POST['peer_id'] ?? 0);
         $backupPath = self::BACKUP_DIR . '/' . $backupId;
 
-        if (!$nodeId) {
-            echo json_encode(['ok' => false, 'error' => 'Nodo no especificado.']);
+        if (!$nodeId && !$peerId) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo o peer no especificado.']);
             exit;
         }
 
@@ -647,10 +653,16 @@ class BackupController
             exit;
         }
 
-        $node = ClusterService::getNode($nodeId);
-        if (!$node) {
-            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado.']);
-            exit;
+        // Determine target name for messages
+        $targetName = '';
+        if ($peerId) {
+            $peer = FederationService::getPeer($peerId);
+            if (!$peer) { echo json_encode(['ok' => false, 'error' => 'Peer no encontrado.']); exit; }
+            $targetName = $peer['name'];
+        } else {
+            $node = ClusterService::getNode($nodeId);
+            if (!$node) { echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado.']); exit; }
+            $targetName = $node['name'];
         }
 
         // Check if a transfer is already running
@@ -666,19 +678,31 @@ class BackupController
             }
         }
 
-        // Launch background worker
+        // Launch background worker (pass peer_id as 3rd arg if federation, method as 4th)
         $workerScript = PANEL_ROOT . '/bin/backup-transfer-worker.php';
-        $cmd = sprintf(
-            'php %s %s %d > /dev/null 2>&1 & echo $!',
-            escapeshellarg($workerScript),
-            escapeshellarg($backupId),
-            $nodeId
-        );
+        $transferMethod = $_POST['transfer_method'] ?? 'ssh'; // 'ssh' or 'http'
+        if ($peerId) {
+            $cmd = sprintf(
+                'php %s %s %d %d %s > /dev/null 2>&1 & echo $!',
+                escapeshellarg($workerScript),
+                escapeshellarg($backupId),
+                0, // nodeId = 0
+                $peerId,
+                escapeshellarg($transferMethod)
+            );
+        } else {
+            $cmd = sprintf(
+                'php %s %s %d > /dev/null 2>&1 & echo $!',
+                escapeshellarg($workerScript),
+                escapeshellarg($backupId),
+                $nodeId
+            );
+        }
         $pid = trim((string) shell_exec($cmd));
 
         echo json_encode([
             'ok' => true,
-            'message' => "Transferencia iniciada a {$node['name']}",
+            'message' => "Transferencia iniciada a {$targetName}",
             'pid' => (int) $pid,
         ]);
         exit;
@@ -739,6 +763,22 @@ class BackupController
         header('Content-Type: application/json');
 
         $nodeId = (int) ($_GET['node_id'] ?? 0);
+        $peerId = (int) ($_GET['peer_id'] ?? 0);
+
+        if ($peerId) {
+            // Federation peer — call via federation API
+            $peer = FederationService::getPeer($peerId);
+            if (!$peer) { echo json_encode(['ok' => false, 'error' => 'Peer no encontrado.']); exit; }
+
+            $result = FederationService::callPeerApi($peer, 'GET', '/api/federation/backups/list');
+            if ($result['ok']) {
+                echo json_encode(['ok' => true, 'backups' => $result['data']['backups'] ?? $result['backups'] ?? [], 'count' => $result['data']['count'] ?? 0]);
+            } else {
+                echo json_encode(['ok' => false, 'error' => $result['error'] ?? 'Error de conexion']);
+            }
+            exit;
+        }
+
         if (!$nodeId) {
             echo json_encode(['ok' => false, 'error' => 'Nodo no especificado.']);
             exit;
@@ -762,10 +802,48 @@ class BackupController
         header('Content-Type: application/json');
 
         $nodeId = (int) ($_POST['node_id'] ?? 0);
+        $peerId = (int) ($_POST['peer_id'] ?? 0);
         $backupName = basename($_POST['backup_name'] ?? '');
 
-        if (!$nodeId || !$backupName) {
+        if ((!$nodeId && !$peerId) || !$backupName) {
             echo json_encode(['ok' => false, 'error' => 'Faltan parametros.']);
+            exit;
+        }
+
+        // Federation peer — fetch via SSH/rsync
+        if ($peerId) {
+            $peer = FederationService::getPeer($peerId);
+            if (!$peer) { echo json_encode(['ok' => false, 'error' => 'Peer no encontrado.']); exit; }
+
+            $localPath = self::BACKUP_DIR . '/' . $backupName;
+            if (is_dir($localPath) && file_exists($localPath . '/metadata.json')) {
+                echo json_encode(['ok' => false, 'error' => 'El backup ya existe localmente.']);
+                exit;
+            }
+
+            @mkdir($localPath, 0750, true);
+            $sshTarget = FederationService::getSshTarget($peer);
+            $remotePath = '/opt/musedock-panel/storage/backups/' . $backupName . '/';
+
+            $cmd = sprintf(
+                'rsync -az -e "ssh -p %d -i %s -o StrictHostKeyChecking=no" %s:%s %s 2>&1',
+                $peer['ssh_port'] ?? 22,
+                escapeshellarg($peer['ssh_key_path']),
+                escapeshellarg($sshTarget),
+                escapeshellarg($remotePath),
+                escapeshellarg($localPath . '/')
+            );
+            exec($cmd, $out, $rc);
+
+            if ($rc !== 0 || !file_exists($localPath . '/metadata.json')) {
+                @exec('rm -rf ' . escapeshellarg($localPath));
+                echo json_encode(['ok' => false, 'error' => 'rsync fallo (exit ' . $rc . '): ' . implode("\n", array_slice($out, -3))]);
+                exit;
+            }
+
+            $meta = @json_decode(file_get_contents($localPath . '/metadata.json'), true);
+            LogService::log('backup.fetch', $meta['domain'] ?? $backupName, "Backup recuperado del peer: {$peer['name']}");
+            echo json_encode(['ok' => true, 'message' => "Backup recuperado de {$peer['name']}"]);
             exit;
         }
 
@@ -851,10 +929,28 @@ class BackupController
         header('Content-Type: application/json');
 
         $nodeId = (int) ($_POST['node_id'] ?? 0);
+        $peerId = (int) ($_POST['peer_id'] ?? 0);
         $backupName = basename($_POST['backup_name'] ?? '');
 
-        if (!$nodeId || !$backupName) {
+        if ((!$nodeId && !$peerId) || !$backupName) {
             echo json_encode(['ok' => false, 'error' => 'Faltan parametros.']);
+            exit;
+        }
+
+        if ($peerId) {
+            $peer = FederationService::getPeer($peerId);
+            if (!$peer) { echo json_encode(['ok' => false, 'error' => 'Peer no encontrado.']); exit; }
+
+            $result = FederationService::callPeerApi($peer, 'POST', '/api/federation/backups/delete', [
+                'backup_name' => $backupName,
+            ]);
+
+            if ($result['ok'] ?? false) {
+                LogService::log('backup.remote_delete', $backupName, "Backup eliminado del peer: {$peer['name']}");
+                echo json_encode(['ok' => true, 'message' => "Backup eliminado de {$peer['name']}"]);
+            } else {
+                echo json_encode(['ok' => false, 'error' => $result['error'] ?? 'Error al eliminar']);
+            }
             exit;
         }
 

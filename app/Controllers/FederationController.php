@@ -202,6 +202,10 @@ class FederationController
 
         $peers = FederationService::getPeers();
 
+        // Subdomains and aliases for this account
+        $subdomains = Database::fetchAll('SELECT * FROM hosting_subdomains WHERE account_id = :aid ORDER BY subdomain', ['aid' => $accountId]);
+        $aliases = Database::fetchAll('SELECT * FROM hosting_domain_aliases WHERE account_id = :aid ORDER BY domain', ['aid' => $accountId]);
+
         // Check if there's an active migration
         $activeMigration = Database::fetchOne(
             "SELECT * FROM hosting_migrations WHERE account_id = :aid AND status IN ('pending', 'running', 'paused') LIMIT 1",
@@ -213,6 +217,8 @@ class FederationController
             'pageTitle' => 'Migrar hosting — ' . $account['domain'],
             'account' => $account,
             'peers' => $peers,
+            'subdomains' => $subdomains,
+            'aliases' => $aliases,
             'activeMigration' => $activeMigration,
         ]);
     }
@@ -230,14 +236,18 @@ class FederationController
         $mode    = $_POST['mode'] ?? FederationMigrationService::MODE_MIGRATE;
         $dryRun  = !empty($_POST['dry_run']);
         $gracePeriod = (int)($_POST['grace_period'] ?? 60);
-        $dnsMode = $_POST['dns_mode'] ?? 'auto'; // 'auto' or 'manual'
+        $dnsMode = $_POST['dns_mode'] ?? 'auto';
+
+        // Subdomain/alias selection (empty array = include none, absent = include all)
+        $includeSubdomains = $_POST['include_subdomains'] ?? null; // null = all, [] = none
+        $includeAliases = $_POST['include_aliases'] ?? null;
 
         if ($peerId <= 0) {
             echo json_encode(['ok' => false, 'error' => 'Selecciona un peer de destino']);
             return;
         }
 
-        $result = FederationMigrationService::create($accountId, $peerId, $mode, $dryRun, $gracePeriod, $dnsMode);
+        $result = FederationMigrationService::create($accountId, $peerId, $mode, $dryRun, $gracePeriod, $dnsMode, $includeSubdomains, $includeAliases);
 
         if ($result['ok']) {
             LogService::log('federation.migration.start', null, "Migration started: {$result['migration_id']}");

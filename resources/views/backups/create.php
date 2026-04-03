@@ -143,27 +143,41 @@
                         </div>
                     </div>
 
-                    <?php if (!empty($nodes)): ?>
+                    <?php if (!empty($nodes) || !empty($federationPeers ?? [])): ?>
                     <div class="row g-3 mb-3">
                         <div class="col-md-4">
                             <label class="form-label">Copia remota</label>
                             <div class="form-check form-switch mt-1">
                                 <input class="form-check-input" type="checkbox" name="auto_backup_remote_enabled" id="autoBackupRemote" value="1"
                                     <?= !empty($autoBackupRemoteEnabled) ? 'checked' : '' ?>>
-                                <label class="form-check-label" for="autoBackupRemote">Enviar a nodo</label>
+                                <label class="form-check-label" for="autoBackupRemote">Enviar a servidor</label>
                             </div>
                         </div>
                         <div class="col-md-8">
-                            <label class="form-label">Nodo destino</label>
+                            <label class="form-label">Destino</label>
                             <select name="auto_backup_remote_node_id" class="form-select form-select-sm">
-                                <option value="0">-- Seleccionar nodo --</option>
-                                <?php foreach ($nodes as $node): ?>
-                                <option value="<?= (int) $node['id'] ?>" <?= ((int)($autoBackupRemoteNodeId ?? 0)) === (int) $node['id'] ? 'selected' : '' ?>>
-                                    <?= View::e($node['name']) ?>
-                                </option>
-                                <?php endforeach; ?>
+                                <option value="0">-- Seleccionar destino --</option>
+                                <?php if (!empty($nodes)): ?>
+                                <optgroup label="Cluster Nodes">
+                                    <?php foreach ($nodes as $node): ?>
+                                    <option value="<?= (int) $node['id'] ?>" <?= ((int)($autoBackupRemoteNodeId ?? 0)) === (int) $node['id'] ? 'selected' : '' ?>>
+                                        <?= View::e($node['name']) ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                                <?php endif; ?>
+                                <?php if (!empty($federationPeers ?? [])): ?>
+                                <optgroup label="Federation Peers (SSH)">
+                                    <?php foreach ($federationPeers as $fp): ?>
+                                    <?php if (($fp['status'] ?? '') === 'pending_approval') continue; ?>
+                                    <option value="peer-<?= (int) $fp['id'] ?>" <?= ('peer-' . $fp['id']) === ($autoBackupRemoteNodeId ?? '') ? 'selected' : '' ?>>
+                                        <?= View::e($fp['name']) ?> (federation)
+                                    </option>
+                                    <?php endforeach; ?>
+                                </optgroup>
+                                <?php endif; ?>
                             </select>
-                            <small class="text-muted">Tras cada auto-backup, se transferira al nodo remoto seleccionado</small>
+                            <small class="text-muted">Tras cada auto-backup, se transferira al destino seleccionado</small>
                         </div>
                     </div>
                     <?php endif; ?>

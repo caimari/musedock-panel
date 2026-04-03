@@ -297,27 +297,48 @@ class FederationApiController
             ]);
         }
 
-        // Recreate subdomains
+        // Recreate subdomains (DB records + Caddy routes)
         $subdomains = $input['subdomains'] ?? [];
         foreach ($subdomains as $sub) {
+            $subFqdn = $sub['subdomain'] ?? '';
+            $subDocRoot = $sub['document_root'] ?? '';
+            $subPhpVer = $sub['php_version'] ?? $phpVersion;
+
+            if (empty($subFqdn)) continue;
+
             Database::insert('hosting_subdomains', [
                 'account_id'    => $accountId,
-                'subdomain'     => $sub['subdomain'] ?? '',
-                'document_root' => $sub['document_root'] ?? '',
-                'php_version'   => $sub['php_version'] ?? $phpVersion,
+                'subdomain'     => $subFqdn,
+                'document_root' => $subDocRoot,
+                'php_version'   => $subPhpVer,
                 'status'        => 'active',
             ]);
+
+            // Create Caddy route for subdomain (reuses parent's FPM pool)
+            if (!empty($subDocRoot)) {
+                SystemService::addCaddyRoute($subFqdn, $subDocRoot, $username, $subPhpVer);
+            }
         }
 
-        // Recreate domain aliases
+        // Recreate domain aliases (DB records + Caddy routes for aliases, redirects for redirects)
         $aliases = $input['aliases'] ?? [];
         foreach ($aliases as $alias) {
+            $aliasDomain = $alias['domain'] ?? '';
+            $aliasType = $alias['type'] ?? 'alias';
+
+            if (empty($aliasDomain)) continue;
+
             Database::insert('hosting_domain_aliases', [
                 'account_id'    => $accountId,
-                'domain'        => $alias['domain'] ?? '',
-                'type'          => $alias['type'] ?? 'alias',
+                'domain'        => $aliasDomain,
+                'type'          => $aliasType,
                 'redirect_code' => $alias['redirect_code'] ?? null,
             ]);
+
+            // Create Caddy route: alias = same content as main, redirect = 301/302
+            if ($aliasType === 'alias') {
+                SystemService::addCaddyRoute($aliasDomain, $docRoot, $username, $phpVersion);
+            }
         }
 
         FederationMigrationService::log($migrationId, 'finalize', 'info', "Hosting finalized on destination", [
@@ -780,5 +801,165 @@ class FederationApiController
         }
 
         echo json_encode(['ok' => true]);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Backup API (federation peers as remote backup storage)
+    // ═══════════════════════════════════════════════════════════════
+
+    private const BACKUP_DIR = '/opt/musedock-panel/storage/backups';
+
+    /**
+     * GET /api/federation/backups/list
+     * List all backups on this panel.
+     */
+    public function backupsList(): void
+    {
+        header('Content-Type: application/json');
+
+        $backups = [];
+        $dir = self::BACKUP_DIR;
+        if (is_dir($dir)) {
+            foreach (glob("{$dir}/*/metadata.json") as $metaFile) {
+                $meta = @json_decode(file_get_contents($metaFile), true);
+                if (!$meta) continue;
+
+                $backupDir = dirname($metaFile);
+                $meta['dir_name'] = basename($backupDir);
+
+                // Calculate size
+                $size = 0;
+                foreach (glob("{$backupDir}/*") as $f) {
+                    if (is_file($f)) $size += filesize($f);
+                }
+                if (is_dir("{$backupDir}/databases")) {
+                    foreach (glob("{$backupDir}/databases/*") as $f) {
+                        if (is_file($f)) $size += filesize($f);
+                    }
+                }
+                $meta['size_bytes'] = $size;
+                $meta['size_human'] = $size >= 1048576 ? round($size / 1048576, 1) . ' MB' : round($size / 1024) . ' KB';
+
+                $backups[] = $meta;
+            }
+        }
+
+        usort($backups, fn($a, $b) => strtotime($b['date'] ?? '0') - strtotime($a['date'] ?? '0'));
+
+        echo json_encode([
+            'ok' => true,
+            'data' => ['backups' => $backups, 'count' => count($backups)],
+        ]);
+    }
+
+    /**
+     * POST /api/federation/backups/receive
+     * Receive a backup sent via rsync. Called after rsync completes to confirm receipt.
+     */
+    public function backupsReceive(): void
+    {
+        header('Content-Type: application/json');
+        $input = json_decode(file_get_contents('php://input'), true) ?? [];
+
+        $backupName = basename($input['backup_name'] ?? '');
+        if (empty($backupName)) {
+            echo json_encode(['ok' => false, 'error' => 'backup_name is required']);
+            return;
+        }
+
+        $backupPath = self::BACKUP_DIR . '/' . $backupName;
+        if (!is_dir($backupPath) || !file_exists($backupPath . '/metadata.json')) {
+            echo json_encode(['ok' => false, 'error' => 'Backup not found after transfer']);
+            return;
+        }
+
+        echo json_encode(['ok' => true]);
+    }
+
+    /**
+     * GET /api/federation/backups/download?backup_name=xxx
+     * Stream a backup as tar.gz for download.
+     */
+    public function backupsDownload(): void
+    {
+        $backupName = basename($_GET['backup_name'] ?? '');
+        if (empty($backupName)) {
+            header('Content-Type: application/json');
+            echo json_encode(['ok' => false, 'error' => 'backup_name is required']);
+            return;
+        }
+
+        $backupPath = self::BACKUP_DIR . '/' . $backupName;
+        if (!is_dir($backupPath) || !file_exists($backupPath . '/metadata.json')) {
+            header('Content-Type: application/json');
+            echo json_encode(['ok' => false, 'error' => 'Backup not found']);
+            return;
+        }
+
+        // Stream as tar.gz
+        header('Content-Type: application/gzip');
+        header('Content-Disposition: attachment; filename="' . $backupName . '.tar.gz"');
+        passthru('tar czf - -C ' . escapeshellarg($backupPath) . ' . 2>/dev/null');
+    }
+
+    /**
+     * POST /api/federation/backups/receive-upload
+     * Receive a backup via HTTP multipart upload (for environments with limited SSH).
+     */
+    public function backupsReceiveUpload(): void
+    {
+        header('Content-Type: application/json');
+
+        $backupName = basename($_POST['backup_name'] ?? '');
+        if (empty($backupName) || !isset($_FILES['backup'])) {
+            echo json_encode(['ok' => false, 'error' => 'backup_name and backup file are required']);
+            return;
+        }
+
+        $uploadedFile = $_FILES['backup']['tmp_name'] ?? '';
+        if (!$uploadedFile || !file_exists($uploadedFile)) {
+            echo json_encode(['ok' => false, 'error' => 'Upload failed']);
+            return;
+        }
+
+        $backupPath = self::BACKUP_DIR . '/' . $backupName;
+        @mkdir($backupPath, 0750, true);
+
+        // Extract tar
+        $cmd = sprintf('tar xf %s -C %s 2>&1', escapeshellarg($uploadedFile), escapeshellarg($backupPath));
+        exec($cmd, $out, $rc);
+
+        if ($rc !== 0 || !file_exists($backupPath . '/metadata.json')) {
+            exec('rm -rf ' . escapeshellarg($backupPath));
+            echo json_encode(['ok' => false, 'error' => 'Failed to extract backup (exit ' . $rc . ')']);
+            return;
+        }
+
+        echo json_encode(['ok' => true]);
+    }
+
+    /**
+     * POST /api/federation/backups/delete
+     * Delete a backup on this panel.
+     */
+    public function backupsDelete(): void
+    {
+        header('Content-Type: application/json');
+        $input = json_decode(file_get_contents('php://input'), true) ?? [];
+
+        $backupName = basename($input['backup_name'] ?? '');
+        if (empty($backupName)) {
+            echo json_encode(['ok' => false, 'error' => 'backup_name is required']);
+            return;
+        }
+
+        $backupPath = self::BACKUP_DIR . '/' . $backupName;
+        if (!is_dir($backupPath)) {
+            echo json_encode(['ok' => false, 'error' => 'Backup not found']);
+            return;
+        }
+
+        exec('rm -rf ' . escapeshellarg($backupPath) . ' 2>&1', $out, $rc);
+        echo json_encode(['ok' => $rc === 0]);
     }
 }
