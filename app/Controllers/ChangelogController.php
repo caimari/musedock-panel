@@ -20,6 +20,27 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.41',
+                'date' => '2026-04-03',
+                'badge' => 'warning',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'Crons escalonados — Todos los crons del panel, CMS y servicios arrancan en segundos/minutos distintos para evitar picos de CPU al 100% (thundering herd). Aplicado automaticamente via update.sh',
+                            'Monitor CPU real — El sample de CPU captura la realidad del sistema sin sleep aleatorio ni auto-medicion. Picos reales registrados tal como son',
+                            'update.sh automatiza escalonamiento — Al actualizar, los crons se reescriben con offsets: cluster +5s, failover +10s, filesync +15s, bandwidth +20s, backup :02, CMS crons +3/+8 min',
+                            'du cada 5 min — El calculo de disco solo corre cada 5 minutos en vez de cada 30 segundos, reduciendo picos de CPU',
+                        ],
+                        'en' => [
+                            'Staggered crons — All panel, CMS and service crons start at different seconds/minutes to avoid 100% CPU spikes (thundering herd). Auto-applied via update.sh',
+                            'Real CPU monitoring — CPU sample captures true system state without random sleep or self-measurement inflation',
+                            'update.sh automates staggering — On update, crons auto-rewritten with offsets: cluster +5s, failover +10s, filesync +15s, bandwidth +20s, backup :02, CMS crons +3/+8 min',
+                            'du every 5 min — Disk usage calculation runs every 5 min instead of 30s, reducing CPU peaks',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.40',
                 'date' => '2026-04-03',
                 'badge' => 'danger',

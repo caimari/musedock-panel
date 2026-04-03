@@ -2,6 +2,21 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.41] — 2026-04-03
+
+### Improved
+- Crons escalonados: todos los crons arrancan en segundos/minutos distintos (thundering herd fix)
+- Monitor CPU real: sample sin sleep aleatorio ni auto-medicion
+- update.sh automatiza escalonamiento de crons en cada actualizacion
+- du cada 5 min en vez de 30s
+
+## [1.0.40] — 2026-04-03
+
+### New
+- Migracion automatica Nginx/Apache a Caddy
+- Import crea ruta Caddy automaticamente
+- Descubrimiento de sitios desde rutas Caddy
+
 ## [1.0.39] — 2026-04-03
 
 ### New
