@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.51] — 2026-04-03
+
+### New
+- Firewall: reglas iptables manuales (fuera de UFW) ahora visibles en el panel
+- Firewall: auditoria de puertos sensibles (SSH, panel, portal, MySQL, PostgreSQL, Redis) abiertos a internet
+
 ## [1.0.50] — 2026-04-03
 
 ### New

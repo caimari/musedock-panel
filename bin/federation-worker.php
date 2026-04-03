@@ -23,8 +23,57 @@ spl_autoload_register(function ($class) {
 
 \MuseDockPanel\Env::load(PANEL_ROOT . '/.env');
 
+// Global flock — prevent concurrent execution
+$lockFile = PANEL_ROOT . '/storage/federation-worker.lock';
+$fp = fopen($lockFile, 'w');
+if (!$fp || !flock($fp, LOCK_EX | LOCK_NB)) {
+    exit(0); // Another instance is running
+}
+fwrite($fp, (string)getmypid());
+
 use MuseDockPanel\Database;
+use MuseDockPanel\Settings;
 use MuseDockPanel\Services\FederationMigrationService;
+use MuseDockPanel\Services\FederationService;
+use MuseDockPanel\Services\FileSyncService;
+
+// ── 0. Auto-expire stale sync pauses ─────────────────────────
+// If a domain sync was paused and the expiry time has passed, auto-resume.
+// This prevents permanent sync blockage if the system dies between pause and resume.
+try {
+    $allSettings = Settings::getAll();
+    foreach ($allSettings as $key => $value) {
+        if (str_starts_with($key, 'federation_sync_paused_') && str_ends_with($key, '_expires') && $value) {
+            $expiresAt = (int)$value;
+            if ($expiresAt > 0 && time() > $expiresAt) {
+                // Extract domain from key: federation_sync_paused_{domain}_expires
+                $domain = substr($key, strlen('federation_sync_paused_'), -strlen('_expires'));
+                if ($domain && Settings::get("federation_sync_paused_{$domain}", '0') === '1') {
+                    // Auto-resume: clear flag, remove exclusion, reload lsyncd
+                    Settings::set("federation_sync_paused_{$domain}", '0');
+                    Settings::set("federation_sync_paused_{$domain}_expires", '');
+
+                    $exclusionsList = Settings::get('filesync_exclusions_list', '');
+                    $exclusions = array_filter(array_map('trim', explode("\n", $exclusionsList)));
+                    $domainPath = "/var/www/vhosts/{$domain}";
+                    $exclusions = array_filter($exclusions, fn($e) => $e !== $domainPath);
+                    Settings::set('filesync_exclusions_list', implode("\n", $exclusions));
+
+                    exec('systemctl is-active lsyncd 2>/dev/null', $out, $rc);
+                    if ($rc === 0) {
+                        FileSyncService::generateLsyncdConfig();
+                        exec('systemctl reload lsyncd 2>&1');
+                    }
+
+                    FederationMigrationService::log('', 'watchdog', 'warn',
+                        "Auto-resumed expired sync pause for: {$domain} (was paused > 2h)");
+                }
+            }
+        }
+    }
+} catch (\Throwable $e) {
+    // Settings table may not exist yet
+}
 
 // ── 1. Release stale step locks ──────────────────────────────
 // If a lock is older than 10 minutes, the process that held it is dead.
@@ -102,6 +151,61 @@ foreach ($graceMigrations as $m) {
             FederationMigrationService::log($m['migration_id'], 'complete', 'info',
                 'Grace period elapsed — worker completing migration');
             FederationMigrationService::executeNextStep($m['migration_id']);
+        }
+    }
+}
+
+// ── 4. DNS monitoring for manual DNS migrations ──────────────
+// Check if DNS still points to origin after grace period started.
+// Notify admin if DNS hasn't been updated.
+$dnsPendingMigrations = Database::fetchAll("
+    SELECT m.*, a.domain FROM hosting_migrations m
+    LEFT JOIN hosting_accounts a ON a.id = m.account_id
+    WHERE m.status = 'running'
+      AND m.current_step IN ('switch_dns', 'complete')
+      AND m.metadata::text LIKE '%dns_manual_required%'
+");
+
+foreach ($dnsPendingMigrations as $m) {
+    $mMeta = json_decode($m['metadata'] ?? '{}', true);
+    if (!($mMeta['dns_manual_required'] ?? false)) continue;
+    if ($mMeta['dns_warning_sent'] ?? false) continue; // Already notified
+
+    $domain = $m['domain'] ?? '';
+    $targetIp = $mMeta['dns_target_ip'] ?? '';
+    if (empty($domain) || empty($targetIp)) continue;
+
+    // Check current DNS resolution
+    $currentIps = gethostbynamel($domain) ?: [];
+
+    if (!in_array($targetIp, $currentIps)) {
+        // DNS still points to origin — warn admin
+        $stepResults = json_decode($m['step_results'] ?? '{}', true);
+        $graceStart = $stepResults['switch_dns']['data']['grace_start'] ?? null;
+        $elapsedMinutes = $graceStart ? (int)((time() - strtotime($graceStart)) / 60) : 0;
+
+        if ($elapsedMinutes >= 30) {
+            // 30+ minutes without DNS update — send notification
+            FederationMigrationService::log($m['migration_id'], 'dns_monitor', 'warn',
+                "DNS for {$domain} still points to origin after {$elapsedMinutes}m. Target IP: {$targetIp}. Current: " . implode(', ', $currentIps));
+
+            // Try to send notification via NotificationService
+            try {
+                \MuseDockPanel\Services\NotificationService::send(
+                    'federation_dns_pending',
+                    "Migration DNS pendiente: {$domain}",
+                    "El hosting {$domain} se migro hace {$elapsedMinutes} minutos pero el DNS sigue apuntando al origen.\n" .
+                    "Actualiza el registro A a: {$targetIp}\n" .
+                    "Migration ID: {$m['migration_id']}"
+                );
+            } catch (\Throwable) {}
+
+            // Mark as notified (don't spam)
+            $mMeta['dns_warning_sent'] = true;
+            Database::update('hosting_migrations', [
+                'metadata' => json_encode($mMeta),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ], 'migration_id = :mid', ['mid' => $m['migration_id']]);
         }
     }
 }

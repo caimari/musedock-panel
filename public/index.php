@@ -403,6 +403,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/federation/add-peer', 'FederationController@addPeer');
 \MuseDockPanel\Router::post('/settings/federation/update-peer', 'FederationController@updatePeer');
 \MuseDockPanel\Router::post('/settings/federation/remove-peer/{id}', 'FederationController@removePeer');
+\MuseDockPanel\Router::post('/settings/federation/approve-peer/{id}', 'FederationController@approvePeer');
 \MuseDockPanel\Router::post('/settings/federation/test-peer', 'FederationController@testPeer');
 \MuseDockPanel\Router::post('/settings/federation/exchange-keys', 'FederationController@exchangeKeys');
 

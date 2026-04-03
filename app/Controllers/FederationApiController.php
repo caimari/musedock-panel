@@ -535,10 +535,17 @@ class FederationApiController
         FederationMigrationService::log($migrationId, 'complete', 'info', 'Migration completed notification received from origin');
 
         // Trigger slave sync: enqueue create_hosting to all web slave nodes
-        // This is the same mechanism used when a hosting is created normally
+        // This is the same mechanism used when a hosting is created normally.
+        // Only sync if the hosting is fully operational (status = active, FPM running).
         if (Settings::get('cluster_role', 'standalone') === 'master' && !empty($domain)) {
             $account = Database::fetchOne('SELECT * FROM hosting_accounts WHERE domain = :d', ['d' => $domain]);
             if ($account) {
+                // Sanity check: FPM socket exists = hosting is operational
+                $fpmSocket = $account['fpm_socket'] ?? '';
+                if ($fpmSocket && !file_exists($fpmSocket)) {
+                    FederationMigrationService::log($migrationId, 'complete', 'warn',
+                        "FPM socket missing ({$fpmSocket}) — slave sync will proceed but hosting may not be fully operational");
+                }
                 $nodes = ClusterService::getWebNodes();
                 foreach ($nodes as $node) {
                     ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
@@ -587,10 +594,13 @@ class FederationApiController
             return;
         }
 
+        // Check if auto-accept is enabled (default: no — requires manual approval)
+        $autoAccept = Settings::get('federation_auto_accept_peers', '0') === '1';
+
         // Check if this peer is already registered
         $existing = Database::fetchOne('SELECT id FROM federation_peers WHERE api_url = :url', ['url' => rtrim($peerApiUrl, '/')]);
         if ($existing) {
-            // Update existing peer
+            // Update existing peer (already approved)
             FederationService::updatePeer($existing['id'], [
                 'name'         => $peerName,
                 'auth_token'   => $peerToken,
@@ -600,8 +610,8 @@ class FederationApiController
                 'ssh_key_path' => $sshKeyPath,
             ]);
             $peerId = $existing['id'];
-        } else {
-            // Register new peer
+        } elseif ($autoAccept) {
+            // Auto-accept: register new peer directly
             $result = FederationService::addPeer($peerName, $peerApiUrl, $peerToken, [
                 'host'     => $sshHost,
                 'port'     => $sshPort,
@@ -613,6 +623,22 @@ class FederationApiController
                 return;
             }
             $peerId = $result['id'];
+        } else {
+            // Manual approval required: create peer in 'pending_approval' status
+            $encryptedToken = \MuseDockPanel\Services\ReplicationService::encryptPassword($peerToken);
+            $peerId = Database::insert('federation_peers', [
+                'name'         => $peerName,
+                'api_url'      => rtrim($peerApiUrl, '/'),
+                'auth_token'   => $encryptedToken,
+                'ssh_host'     => $sshHost,
+                'ssh_port'     => $sshPort,
+                'ssh_user'     => $sshUser,
+                'ssh_key_path' => $sshKeyPath,
+                'status'       => 'pending_approval',
+                'metadata'     => json_encode(['handshake_from' => $_SERVER['REMOTE_ADDR'] ?? '', 'handshake_at' => date('Y-m-d H:i:s')]),
+            ]);
+            LogService::log('federation.handshake.pending', $peerName,
+                "Peer handshake received — pending admin approval (from: " . ($_SERVER['REMOTE_ADDR'] ?? '') . ")");
         }
 
         // Install SSH key if provided
@@ -647,8 +673,14 @@ class FederationApiController
 
     /**
      * POST /api/federation/pause-sync
-     * Temporarily pause slave sync (filesync/lsyncd) to avoid replicating
-     * partial data during migration. Called by origin before file transfer starts.
+     * Hard-stop slave sync for a specific domain during migration.
+     *
+     * Three-layer blocking:
+     *   1. Setting flag (soft) — workers check this
+     *   2. Add domain to filesync_exclusions_list (hard) — rsync --exclude skips it
+     *   3. Reload lsyncd config (hard) — real-time sync also excludes it
+     *
+     * Auto-expires after 2 hours to prevent permanent sync blockage.
      */
     public function pauseSync(): void
     {
@@ -659,15 +691,56 @@ class FederationApiController
         $domain = $input['domain'] ?? '';
         $action = $input['action'] ?? 'pause'; // 'pause' or 'resume'
 
+        if (empty($domain)) {
+            echo json_encode(['ok' => false, 'error' => 'domain is required']);
+            return;
+        }
+
+        $exclusionsList = Settings::get('filesync_exclusions_list', '');
+        $exclusions = array_filter(array_map('trim', explode("\n", $exclusionsList)));
+
         if ($action === 'pause') {
-            // Set all web nodes to standby for this specific domain
-            // We use a setting key so lsyncd/filesync workers can check it
+            // 1. Setting flag (checked by workers)
             Settings::set("federation_sync_paused_{$domain}", '1');
-            FederationMigrationService::log($migrationId, 'sync_pause', 'info', "Slave sync paused for: {$domain}");
+            // Store expiry timestamp (auto-expire after 2 hours)
+            Settings::set("federation_sync_paused_{$domain}_expires", (string)(time() + 7200));
+
+            // 2. Add to exclusions list (hard block for rsync)
+            $domainPath = "/var/www/vhosts/{$domain}";
+            if (!in_array($domainPath, $exclusions)) {
+                $exclusions[] = $domainPath;
+                Settings::set('filesync_exclusions_list', implode("\n", $exclusions));
+            }
+
+            // 3. Reload lsyncd if running (picks up new exclusions)
+            exec('systemctl is-active lsyncd 2>/dev/null', $out, $rc);
+            if ($rc === 0) {
+                // Regenerate lsyncd config with new exclusion
+                \MuseDockPanel\Services\FileSyncService::generateLsyncdConfig();
+                exec('systemctl reload lsyncd 2>&1');
+            }
+
+            FederationMigrationService::log($migrationId, 'sync_pause', 'info',
+                "Slave sync HARD-STOPPED for: {$domain} (exclusion + lsyncd reload, expires in 2h)");
         } else {
-            // Resume sync
+            // Resume: remove all three layers
             Settings::set("federation_sync_paused_{$domain}", '0');
-            FederationMigrationService::log($migrationId, 'sync_pause', 'info', "Slave sync resumed for: {$domain}");
+            Settings::set("federation_sync_paused_{$domain}_expires", '');
+
+            // Remove from exclusions list
+            $domainPath = "/var/www/vhosts/{$domain}";
+            $exclusions = array_filter($exclusions, fn($e) => $e !== $domainPath);
+            Settings::set('filesync_exclusions_list', implode("\n", $exclusions));
+
+            // Reload lsyncd
+            exec('systemctl is-active lsyncd 2>/dev/null', $out, $rc);
+            if ($rc === 0) {
+                \MuseDockPanel\Services\FileSyncService::generateLsyncdConfig();
+                exec('systemctl reload lsyncd 2>&1');
+            }
+
+            FederationMigrationService::log($migrationId, 'sync_pause', 'info',
+                "Slave sync RESUMED for: {$domain}");
         }
 
         echo json_encode(['ok' => true]);

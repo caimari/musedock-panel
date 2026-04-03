@@ -263,6 +263,69 @@ class FirewallService
         return $rules;
     }
 
+    /**
+     * Get iptables INPUT rules that are NOT managed by UFW.
+     * These are "ghost" rules added manually that UFW doesn't know about.
+     */
+    public static function getManualIptablesRules(): array
+    {
+        if (self::getType() !== 'ufw') return [];
+
+        $output = (string)shell_exec('iptables -L INPUT -nv --line-numbers 2>/dev/null');
+        $lines = explode("\n", $output);
+        $manual = [];
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, 'Chain') || str_starts_with($line, 'num')) continue;
+
+            $parts = preg_split('/\s+/', $line);
+            if (count($parts) < 9) continue;
+
+            $num    = (int)$parts[0];
+            $target = $parts[3] ?? '';
+            $prot   = $parts[4] ?? '';
+            $inIf   = $parts[6] ?? '*';
+            $source = $parts[8] ?? '';
+            $dest   = $parts[9] ?? '';
+            $extra  = implode(' ', array_slice($parts, 10));
+
+            // Skip UFW chains, loopback, and f2b chains
+            if (str_starts_with($target, 'ufw-') || $target === 'f2b-sshd') continue;
+            // Skip loopback
+            if ($inIf === 'lo') continue;
+            // Skip ctstate RELATED,ESTABLISHED (standard)
+            if (str_contains($extra, 'RELATED,ESTABLISHED')) continue;
+            // Skip ICMP
+            if ($prot === 'icmp' || $prot === '1') continue;
+            // Skip rules that reference ports 80/443 (already in UFW)
+            $port = '';
+            if (preg_match('/dpt:(\d+)/', $extra, $pm)) $port = $pm[1];
+
+            // These are manual rules outside UFW
+            if (in_array($target, ['ACCEPT', 'DROP', 'REJECT'])) {
+                // Try reverse DNS for readable source
+                $sourceDisplay = $source;
+                if ($source !== '0.0.0.0/0') {
+                    $host = @gethostbyaddr(explode('/', $source)[0]);
+                    if ($host && $host !== $source) $sourceDisplay = $host . " ({$source})";
+                }
+
+                $manual[] = [
+                    'num'     => $num,
+                    'target'  => $target,
+                    'protocol' => $prot === 'all' ? 'all' : $prot,
+                    'source'  => $sourceDisplay,
+                    'source_raw' => $source,
+                    'port'    => $port ?: 'all',
+                    'extra'   => $extra,
+                ];
+            }
+        }
+
+        return $manual;
+    }
+
     public static function iptablesAddRule(string $action, string $source, int $port, string $protocol): array
     {
         $target = strtolower($action) === 'allow' ? 'ACCEPT' : 'DROP';
@@ -495,6 +558,53 @@ class FirewallService
                 'title'    => 'Sin reglas con politica DROP',
                 'message'  => 'No hay ninguna regla ACCEPT pero la politica es DROP. Todo el trafico esta bloqueado, incluido tu acceso. Usa el boton de emergencia para permitir tu IP.',
             ];
+        }
+
+        // 6. Sensitive ports open to Anywhere (SSH, panel, portal, DB)
+        $sensitivePorts = [
+            '22'   => ['name' => 'SSH', 'risk' => 'Permite ataques de fuerza bruta desde cualquier IP del mundo'],
+            'ssh'  => ['name' => 'SSH', 'risk' => 'Permite ataques de fuerza bruta desde cualquier IP del mundo'],
+            '8444' => ['name' => 'Panel Admin', 'risk' => 'Expone el panel de administracion a internet'],
+            '8446' => ['name' => 'Portal Clientes', 'risk' => 'Expone el portal de clientes a internet sin restriccion'],
+            '3306' => ['name' => 'MySQL', 'risk' => 'Expone la base de datos MySQL a internet'],
+            '5432' => ['name' => 'PostgreSQL', 'risk' => 'Expone la base de datos PostgreSQL a internet'],
+            '5433' => ['name' => 'PostgreSQL (alt)', 'risk' => 'Expone la base de datos PostgreSQL a internet'],
+            '6379' => ['name' => 'Redis', 'risk' => 'Expone Redis sin autenticacion a internet'],
+        ];
+
+        if ($type === 'ufw') {
+            foreach ($rules as $rule) {
+                if (stripos($rule['action'], 'ALLOW') === false) continue;
+                $from = $rule['from'] ?? '';
+                if ($from !== 'Anywhere' && $from !== 'Anywhere (v6)') continue;
+                $port = strtolower(trim(explode('/', $rule['to'] ?? '')[0]));
+                if (isset($sensitivePorts[$port])) {
+                    $sp = $sensitivePorts[$port];
+                    $warnings[] = [
+                        'severity' => $port === '22' || $port === 'ssh' ? 'danger' : 'warning',
+                        'icon'     => 'bi-unlock-fill',
+                        'title'    => "Puerto {$sp['name']} ({$port}) abierto a todo internet",
+                        'message'  => "{$sp['risk']}. Se recomienda restringir a IPs de confianza.",
+                        'rule_num' => $rule['num'],
+                    ];
+                }
+            }
+        } elseif ($type === 'iptables') {
+            foreach ($rules as $rule) {
+                if ($rule['target'] !== 'ACCEPT') continue;
+                if ($rule['source'] !== '0.0.0.0/0') continue;
+                $port = $rule['port'] ?? '';
+                if (isset($sensitivePorts[$port])) {
+                    $sp = $sensitivePorts[$port];
+                    $warnings[] = [
+                        'severity' => $port === '22' ? 'danger' : 'warning',
+                        'icon'     => 'bi-unlock-fill',
+                        'title'    => "Puerto {$sp['name']} ({$port}) abierto a todo internet",
+                        'message'  => "{$sp['risk']}. Se recomienda restringir a IPs de confianza.",
+                        'rule_num' => $rule['num'],
+                    ];
+                }
+            }
         }
 
         return $warnings;

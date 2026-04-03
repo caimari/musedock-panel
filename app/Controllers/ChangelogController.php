@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.51',
+                'date' => '2026-04-03',
+                'badge' => 'warning',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Firewall: reglas iptables manuales visibles — Muestra reglas añadidas fuera de UFW que antes eran invisibles. Indica que se procesan antes que UFW y pueden anularlas',
+                            'Firewall: auditoria de puertos sensibles — Detecta SSH, panel (8444), portal (8446), MySQL, PostgreSQL y Redis abiertos a todo internet con alertas de severidad',
+                        ],
+                        'en' => [
+                            'Firewall: manual iptables rules visible — Shows rules added outside UFW that were previously invisible. Indicates they are processed before UFW and can override it',
+                            'Firewall: sensitive port audit — Detects SSH, panel (8444), portal (8446), MySQL, PostgreSQL and Redis open to the internet with severity alerts',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.50',
                 'date' => '2026-04-03',
                 'badge' => 'success',

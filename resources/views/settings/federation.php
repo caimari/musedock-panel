@@ -101,11 +101,13 @@
                                 $statusClass = match($peer['status']) {
                                     'online' => 'text-success',
                                     'offline' => 'text-danger',
+                                    'pending_approval' => 'text-warning',
                                     default => 'text-warning',
                                 };
                                 $statusIcon = match($peer['status']) {
                                     'online' => 'bi-check-circle-fill',
                                     'offline' => 'bi-x-circle-fill',
+                                    'pending_approval' => 'bi-exclamation-triangle-fill',
                                     default => 'bi-question-circle-fill',
                                 };
                                 ?>
@@ -113,12 +115,19 @@
                             </td>
                             <td class="small text-muted"><?= $peer['last_seen_at'] ? date('d/m H:i', strtotime($peer['last_seen_at'])) : '—' ?></td>
                             <td class="text-end">
-                                <button class="btn btn-outline-info btn-sm" onclick="testPeer(<?= $peer['id'] ?>)" title="Test conexion">
-                                    <i class="bi bi-lightning"></i>
-                                </button>
-                                <button class="btn btn-outline-warning btn-sm" onclick="exchangeKeys(<?= $peer['id'] ?>)" title="Intercambiar SSH keys">
-                                    <i class="bi bi-key"></i>
-                                </button>
+                                <?php if ($peer['status'] === 'pending_approval'): ?>
+                                    <form method="post" action="/settings/federation/approve-peer/<?= $peer['id'] ?>" class="d-inline">
+                                        <?= View::csrf() ?>
+                                        <button class="btn btn-outline-success btn-sm" title="Aprobar peer"><i class="bi bi-check-lg me-1"></i>Aprobar</button>
+                                    </form>
+                                <?php else: ?>
+                                    <button class="btn btn-outline-info btn-sm" onclick="testPeer(<?= $peer['id'] ?>)" title="Test conexion">
+                                        <i class="bi bi-lightning"></i>
+                                    </button>
+                                    <button class="btn btn-outline-warning btn-sm" onclick="exchangeKeys(<?= $peer['id'] ?>)" title="Intercambiar SSH keys">
+                                        <i class="bi bi-key"></i>
+                                    </button>
+                                <?php endif; ?>
                                 <form method="post" action="/settings/federation/remove-peer/<?= $peer['id'] ?>" class="d-inline"
                                       onsubmit="return confirm('Eliminar peer <?= View::e($peer['name']) ?>?')">
                                     <?= View::csrf() ?>

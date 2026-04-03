@@ -34,6 +34,9 @@ class FirewallController
         // Security audit
         $securityWarnings = FirewallService::auditRules($rules, $policy);
 
+        // Manual iptables rules outside UFW
+        $manualIptables = FirewallService::getManualIptablesRules();
+
         View::render('settings/firewall', [
             'layout'            => 'main',
             'pageTitle'         => 'Firewall',
@@ -46,6 +49,7 @@ class FirewallController
             'replSuggestions'   => $replSuggestions,
             'hostSuggestions'   => $hostSuggestions,
             'securityWarnings'  => $securityWarnings,
+            'manualIptables'    => $manualIptables,
         ]);
     }
 

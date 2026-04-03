@@ -106,6 +106,28 @@ class FederationController
     }
 
     /**
+     * POST /settings/federation/approve-peer/{id}
+     */
+    public function approvePeer(int $id): void
+    {
+        $peer = Database::fetchOne('SELECT * FROM federation_peers WHERE id = :id', ['id' => $id]);
+        if (!$peer) {
+            Flash::error('Peer no encontrado.');
+            header('Location: /settings/federation');
+            return;
+        }
+
+        Database::update('federation_peers', [
+            'status' => 'offline',
+            'updated_at' => date('Y-m-d H:i:s'),
+        ], 'id = :id', ['id' => $id]);
+
+        LogService::log('federation.peer.approve', $peer['name'], 'Federation peer approved');
+        Flash::success("Peer '{$peer['name']}' aprobado.");
+        header('Location: /settings/federation');
+    }
+
+    /**
      * POST /settings/federation/test-peer
      */
     public function testPeer(): void

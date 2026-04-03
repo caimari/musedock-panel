@@ -1549,6 +1549,7 @@ class SettingsController
             'musedock-backup'   => ['desc' => 'Panel DB backup (hourly)', 'interval' => 'Every hour'],
             'musedock-filesync' => ['desc' => 'File sync worker (master-slave replication)', 'interval' => 'Every minute'],
             'musedock-monitor'  => ['desc' => 'Network/system monitoring collector', 'interval' => 'Every 30 seconds'],
+            'musedock-federation' => ['desc' => 'Federation migration worker + cleanup', 'interval' => 'Every minute + hourly'],
         ];
         $cronChecks = [];
         foreach ($requiredCrons as $name => $info) {
@@ -1947,6 +1948,7 @@ class SettingsController
             'musedock-backup' => "# MuseDock Panel — Hourly panel DB backup\n0 * * * * postgres pg_dump -p 5433 musedock_panel | gzip > {$panelDir}/storage/backups/panel-\$(date +\\%Y\\%m\\%d_\\%H).sql.gz 2>/dev/null\n# Cleanup backups older than 48 hours\n5 * * * * root find {$panelDir}/storage/backups/ -name \"panel-*.sql.gz\" -mmin +2880 -delete 2>/dev/null\n",
             'musedock-filesync' => "# MuseDock Panel — File sync worker (master -> slave file replication)\n* * * * * root /usr/bin/php {$panelDir}/bin/filesync-worker.php >> {$panelDir}/storage/logs/filesync-worker.log 2>&1\n",
             'musedock-monitor' => "# MuseDock Panel — Network/system monitoring collector (every 30s)\n* * * * * root /usr/bin/php {$panelDir}/bin/monitor-collector.php\n* * * * * root sleep 30 && /usr/bin/php {$panelDir}/bin/monitor-collector.php\n",
+            'musedock-federation' => "# MuseDock Panel — Federation migration workers\n* * * * * root sleep 30 && /usr/bin/php {$panelDir}/bin/federation-worker.php >> {$panelDir}/storage/logs/federation-worker.log 2>&1\n0 * * * * root /usr/bin/php {$panelDir}/bin/federation-cleanup.php >> {$panelDir}/storage/logs/federation-cleanup.log 2>&1\n",
         ];
 
         if (!isset($cronTemplates[$cronName])) {

@@ -370,6 +370,59 @@
         </div>
     </div>
 
+    <!-- Manual iptables rules (outside UFW) -->
+    <?php if (!empty($manualIptables)): ?>
+    <div class="card mb-3">
+        <div class="card-header d-flex align-items-center justify-content-between">
+            <span>
+                <i class="bi bi-exclamation-triangle me-1 text-warning"></i>
+                Reglas iptables manuales <small class="text-muted">(fuera de UFW)</small>
+                <span class="badge bg-warning text-dark ms-2"><?= count($manualIptables) ?></span>
+            </span>
+        </div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">
+                <i class="bi bi-info-circle me-1"></i>Estas reglas fueron añadidas directamente con <code>iptables</code> y UFW no las gestiona.
+                Se procesan <strong>antes</strong> que las reglas de UFW y pueden anularlas. Considera migrarlas a UFW o eliminarlas.
+            </p>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                    <thead>
+                        <tr class="text-muted">
+                            <th>#</th>
+                            <th>Accion</th>
+                            <th>Protocolo</th>
+                            <th>Origen</th>
+                            <th>Puerto</th>
+                            <th>Detalles</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($manualIptables as $mr): ?>
+                        <tr>
+                            <td><?= (int)$mr['num'] ?></td>
+                            <td>
+                                <?php if ($mr['target'] === 'ACCEPT'): ?>
+                                    <span class="badge bg-success">ACCEPT</span>
+                                <?php elseif ($mr['target'] === 'DROP'): ?>
+                                    <span class="badge bg-danger">DROP</span>
+                                <?php else: ?>
+                                    <span class="badge bg-secondary"><?= View::e($mr['target']) ?></span>
+                                <?php endif; ?>
+                            </td>
+                            <td><code><?= View::e($mr['protocol']) ?></code></td>
+                            <td><code class="small"><?= View::e($mr['source']) ?></code></td>
+                            <td><code><?= View::e($mr['port']) ?></code></td>
+                            <td><small class="text-muted"><?= View::e($mr['extra'] ?: '-') ?></small></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
+
     <!-- Card 3: Anadir Regla -->
     <div class="card mb-3">
         <div class="card-header"><i class="bi bi-plus-circle me-1"></i> Anadir Regla</div>
