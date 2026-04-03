@@ -245,6 +245,11 @@
                             <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;"><i class="bi bi-check-circle me-1"></i>Found</span>
                         <?php else: ?>
                             <span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;"><i class="bi bi-exclamation-triangle me-1"></i>Not found</span>
+                            <?php if (!empty($bin['package'])): ?>
+                            <button type="button" class="btn btn-outline-success btn-sm py-0 px-2 ms-1" onclick="installPackage('<?= View::e($bin['package']) ?>', '<?= View::e($bin['name']) ?>', this)">
+                                <i class="bi bi-download" style="font-size:0.7rem;"></i>
+                            </button>
+                            <?php endif; ?>
                         <?php endif; ?>
                     </td>
                 </tr>
@@ -361,7 +366,12 @@ function confirmRepair(e, form, name) {
         confirmButtonColor: '#22c55e',
         cancelButtonText: 'Cancel'
     }).then(function(result) {
-        if (result.isConfirmed) form.submit();
+        if (result.isConfirmed) {
+            var btn = form.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Reparando...';
+            form.submit();
+        }
     });
     return false;
 }
@@ -377,7 +387,12 @@ function confirmTimezone(e, form, engine) {
         confirmButtonColor: '#22c55e',
         cancelButtonText: 'Cancel'
     }).then(function(result) {
-        if (result.isConfirmed) form.submit();
+        if (result.isConfirmed) {
+            var btn = form.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Aplicando...';
+            form.submit();
+        }
     });
     return false;
 }
@@ -400,5 +415,42 @@ function confirmDbRepair(e, form) {
         }
     });
     return false;
+}
+
+function installPackage(pkg, binName, btn) {
+    var S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+    S.fire({
+        title: 'Instalar ' + binName + '?',
+        html: '<p>Se instalara el paquete <code>' + pkg + '</code></p><p class="text-muted small">Esto puede tardar unos segundos.</p>',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-download me-1"></i>Instalar',
+        cancelButtonText: 'Cancelar',
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm" style="width:0.7rem;height:0.7rem;"></span>';
+        var csrf = document.querySelector('input[name=_csrf_token]')?.value || '<?= $_SESSION['_csrf_token'] ?? '' ?>';
+        fetch('/settings/health/install-package', {
+            method: 'POST',
+            body: new URLSearchParams({ _csrf_token: csrf, package: pkg }),
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                S.fire({ icon: 'success', title: 'Instalado', text: data.message, timer: 2000, showConfirmButton: false })
+                    .then(function() { location.reload(); });
+            } else {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-download" style="font-size:0.7rem;"></i>';
+                S.fire({ icon: 'error', title: 'Error', text: data.message || data.error });
+            }
+        })
+        .catch(function(e) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-download" style="font-size:0.7rem;"></i>';
+            S.fire({ icon: 'error', title: 'Error', text: e.message });
+        });
+    });
 }
 </script>

@@ -17,7 +17,7 @@
             </ul>
             <form method="post" action="/settings/wireguard/install" id="form-install">
                 <?= View::csrf() ?>
-                <button type="button" class="btn btn-primary" onclick="confirmInstall()">
+                <button type="button" class="btn btn-primary" id="btn-install-wg" onclick="confirmInstall()">
                     <i class="bi bi-download me-1"></i>Instalar WireGuard
                 </button>
             </form>
@@ -28,12 +28,18 @@
     function confirmInstall() {
         SwalDark.fire({
             title: 'Instalar WireGuard',
-            text: 'Se instalara el paquete wireguard en este servidor. ¿Continuar?',
+            html: '<p>Se instalara el paquete <code>wireguard</code> en este servidor.</p><p class="text-muted small">Esto puede tardar 1-2 minutos.</p>',
             icon: 'question',
             showCancelButton: true,
-            confirmButtonText: 'Instalar',
+            confirmButtonText: '<i class="bi bi-download me-1"></i>Instalar',
             cancelButtonText: 'Cancelar'
-        }).then(r => { if (r.isConfirmed) document.getElementById('form-install').submit(); });
+        }).then(r => {
+            if (!r.isConfirmed) return;
+            var btn = document.getElementById('btn-install-wg');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Instalando WireGuard...';
+            document.getElementById('form-install').submit();
+        });
     }
     </script>
 

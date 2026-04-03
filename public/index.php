@@ -101,6 +101,20 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/api/cluster/heartbeat', 'ClusterApiController@heartbeat');
 \MuseDockPanel\Router::post('/api/cluster/action', 'ClusterApiController@action');
 
+// Federation API (token auth — called by remote peers)
+\MuseDockPanel\Router::get('/api/federation/health', 'FederationApiController@health');
+\MuseDockPanel\Router::post('/api/federation/check-space', 'FederationApiController@checkSpace');
+\MuseDockPanel\Router::post('/api/federation/check-conflicts', 'FederationApiController@checkConflicts');
+\MuseDockPanel\Router::post('/api/federation/prepare', 'FederationApiController@prepare');
+\MuseDockPanel\Router::post('/api/federation/finalize', 'FederationApiController@finalize');
+\MuseDockPanel\Router::post('/api/federation/verify', 'FederationApiController@verify');
+\MuseDockPanel\Router::get('/api/federation/server-info', 'FederationApiController@serverInfo');
+\MuseDockPanel\Router::post('/api/federation/install-ssh-key', 'FederationApiController@installSshKey');
+\MuseDockPanel\Router::post('/api/federation/rollback', 'FederationApiController@rollback');
+\MuseDockPanel\Router::post('/api/federation/complete', 'FederationApiController@complete');
+\MuseDockPanel\Router::post('/api/federation/handshake', 'FederationApiController@handshake');
+\MuseDockPanel\Router::post('/api/federation/pause-sync', 'FederationApiController@pauseSync');
+
 // ===============================
 // Routes
 // ===============================
@@ -204,6 +218,16 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/migrate/ssh-cancel', 'MigrationController@sshCancel');
 \MuseDockPanel\Router::post('/accounts/{id}/migrate/ssh-resume', 'MigrationController@sshResume');
 
+// Federation Migration (master-to-master)
+\MuseDockPanel\Router::get('/accounts/{id}/federation-migrate', 'FederationController@migrateForm');
+\MuseDockPanel\Router::post('/accounts/{id}/federation-migrate/start', 'FederationController@migrateStart');
+\MuseDockPanel\Router::post('/accounts/{id}/federation-migrate/execute', 'FederationController@migrateExecute');
+\MuseDockPanel\Router::get('/accounts/{id}/federation-migrate/progress', 'FederationController@migrateProgress');
+\MuseDockPanel\Router::post('/accounts/{id}/federation-migrate/pause', 'FederationController@migratePause');
+\MuseDockPanel\Router::post('/accounts/{id}/federation-migrate/resume', 'FederationController@migrateResume');
+\MuseDockPanel\Router::post('/accounts/{id}/federation-migrate/cancel', 'FederationController@migrateCancel');
+\MuseDockPanel\Router::get('/accounts/{id}/federation-migrate/logs', 'FederationController@migrateLogs');
+
 // Domains
 \MuseDockPanel\Router::get('/domains', 'DomainController@index');
 \MuseDockPanel\Router::post('/domains/check-dns', 'DomainController@checkDns');
@@ -276,6 +300,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/fail2ban/ban', 'SettingsController@fail2banBan');
 \MuseDockPanel\Router::post('/settings/fail2ban/whitelist', 'SettingsController@fail2banWhitelist');
 \MuseDockPanel\Router::post('/settings/fail2ban/toggle-jail', 'SettingsController@fail2banToggleJail');
+\MuseDockPanel\Router::post('/settings/fail2ban/install', 'SettingsController@fail2banInstall');
 \MuseDockPanel\Router::get('/settings/logs', 'SettingsController@logs');
 \MuseDockPanel\Router::post('/settings/logs/clear', 'SettingsController@logClear');
 
@@ -284,6 +309,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/health/repair-cron', 'SettingsController@healthRepairCron');
 \MuseDockPanel\Router::post('/settings/health/fix-timezone', 'SettingsController@healthFixTimezone');
 \MuseDockPanel\Router::post('/settings/health/repair-db', 'SettingsController@healthRepairDb');
+\MuseDockPanel\Router::post('/settings/health/install-package', 'SettingsController@healthInstallPackage');
 
 // Portal Settings
 \MuseDockPanel\Router::get('/settings/portal', 'PortalSettingsController@index');
@@ -370,6 +396,14 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/cluster/mail-setup-progress-local', 'ClusterController@mailSetupProgressLocal');
 \MuseDockPanel\Router::post('/settings/cluster/rotate-mail-db-password', 'ClusterController@rotateMailDbPassword');
 \MuseDockPanel\Router::post('/settings/cluster/toggle-node-service', 'ClusterController@toggleNodeService');
+
+// Federation
+\MuseDockPanel\Router::get('/settings/federation', 'FederationController@index');
+\MuseDockPanel\Router::post('/settings/federation/add-peer', 'FederationController@addPeer');
+\MuseDockPanel\Router::post('/settings/federation/update-peer', 'FederationController@updatePeer');
+\MuseDockPanel\Router::post('/settings/federation/remove-peer/{id}', 'FederationController@removePeer');
+\MuseDockPanel\Router::post('/settings/federation/test-peer', 'FederationController@testPeer');
+\MuseDockPanel\Router::post('/settings/federation/exchange-keys', 'FederationController@exchangeKeys');
 
 // Failover
 \MuseDockPanel\Router::post('/settings/failover/save-config', 'FailoverController@saveConfig');

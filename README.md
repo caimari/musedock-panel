@@ -38,7 +38,7 @@ Gestiona cuentas de hosting Linux con aprovisionamiento automatico de usuarios d
 ```bash
 git clone https://github.com/caimari/musedock-panel.git /opt/musedock-panel
 cd /opt/musedock-panel
-sudo bash install.sh
+sudo bash install.sh   # requiere root — el instalador lo verifica
 ```
 
 El instalador:

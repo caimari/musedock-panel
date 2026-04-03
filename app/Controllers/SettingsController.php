@@ -1027,6 +1027,44 @@ class SettingsController
         Router::redirect('/settings/fail2ban');
     }
 
+    public function fail2banInstall(): void
+    {
+        View::verifyCsrf();
+
+        $output = shell_exec('apt-get update -qq 2>&1 && apt-get install -y -qq fail2ban 2>&1');
+
+        if (empty(trim(shell_exec('command -v fail2ban-client 2>/dev/null') ?? ''))) {
+            Flash::set('error', 'Error al instalar Fail2Ban: ' . substr($output ?? '', -200));
+            Router::redirect('/settings/fail2ban');
+            return;
+        }
+
+        // Copy panel filter configs
+        $panelDir = PANEL_ROOT . '/config/fail2ban';
+        if (is_dir($panelDir)) {
+            foreach (glob("{$panelDir}/filter.d/*.conf") as $f) {
+                @copy($f, '/etc/fail2ban/filter.d/' . basename($f));
+            }
+            if (file_exists("{$panelDir}/musedock.conf")) {
+                @copy("{$panelDir}/musedock.conf", '/etc/fail2ban/jail.d/musedock.conf');
+            }
+            if (file_exists("{$panelDir}/logrotate-musedock-auth")) {
+                @copy("{$panelDir}/logrotate-musedock-auth", '/etc/logrotate.d/musedock-auth');
+            }
+        }
+
+        foreach (['/var/log/musedock-panel-auth.log', '/var/log/musedock-portal-auth.log'] as $log) {
+            if (!file_exists($log)) @file_put_contents($log, '');
+        }
+
+        shell_exec('systemctl enable fail2ban 2>&1');
+        shell_exec('systemctl restart fail2ban 2>&1');
+
+        \MuseDockPanel\Services\LogService::log('fail2ban', 'Fail2Ban installed and configured via panel');
+        Flash::set('success', 'Fail2Ban instalado y configurado correctamente.');
+        Router::redirect('/settings/fail2ban');
+    }
+
     public function fail2banToggleJail(): void
     {
         View::verifyCsrf();
@@ -1478,18 +1516,17 @@ class SettingsController
 
         // ─── 3. Required system binaries ─────────────────────────
         $requiredBinaries = [
-            'php'         => ['paths' => ['/usr/bin/php', '/usr/bin/php8.3'], 'desc' => 'PHP CLI interpreter'],
-            'caddy'       => ['paths' => ['/usr/bin/caddy'], 'desc' => 'Web server'],
-            'psql'        => ['paths' => ['/usr/bin/psql'], 'desc' => 'PostgreSQL client'],
-            'pg_dump'     => ['paths' => ['/usr/bin/pg_dump'], 'desc' => 'PostgreSQL backup tool'],
-            'mysql'       => ['paths' => ['/usr/bin/mysql', '/usr/bin/mariadb'], 'desc' => 'MySQL/MariaDB client'],
-            'wg'          => ['paths' => ['/usr/bin/wg'], 'desc' => 'WireGuard tools'],
-            'ufw'         => ['paths' => ['/usr/sbin/ufw'], 'desc' => 'Uncomplicated Firewall'],
-            'fail2ban-client' => ['paths' => ['/usr/bin/fail2ban-client'], 'desc' => 'Fail2Ban intrusion prevention'],
-
-            'rsync'       => ['paths' => ['/usr/bin/rsync'], 'desc' => 'File synchronization'],
-            'git'         => ['paths' => ['/usr/bin/git'], 'desc' => 'Version control'],
-            'nproc'       => ['paths' => ['/usr/bin/nproc'], 'desc' => 'CPU core detection'],
+            'php'         => ['paths' => ['/usr/bin/php', '/usr/bin/php8.3'], 'desc' => 'PHP CLI interpreter', 'package' => ''],
+            'caddy'       => ['paths' => ['/usr/bin/caddy'], 'desc' => 'Web server', 'package' => ''],
+            'psql'        => ['paths' => ['/usr/bin/psql'], 'desc' => 'PostgreSQL client', 'package' => 'postgresql-client'],
+            'pg_dump'     => ['paths' => ['/usr/bin/pg_dump'], 'desc' => 'PostgreSQL backup tool', 'package' => 'postgresql-client'],
+            'mysql'       => ['paths' => ['/usr/bin/mysql', '/usr/bin/mariadb'], 'desc' => 'MySQL/MariaDB client', 'package' => 'mariadb-client'],
+            'wg'          => ['paths' => ['/usr/bin/wg'], 'desc' => 'WireGuard tools', 'package' => 'wireguard-tools'],
+            'ufw'         => ['paths' => ['/usr/sbin/ufw'], 'desc' => 'Uncomplicated Firewall', 'package' => 'ufw'],
+            'fail2ban-client' => ['paths' => ['/usr/bin/fail2ban-client'], 'desc' => 'Fail2Ban intrusion prevention', 'package' => 'fail2ban'],
+            'rsync'       => ['paths' => ['/usr/bin/rsync'], 'desc' => 'File synchronization', 'package' => 'rsync'],
+            'git'         => ['paths' => ['/usr/bin/git'], 'desc' => 'Version control', 'package' => 'git'],
+            'nproc'       => ['paths' => ['/usr/bin/nproc'], 'desc' => 'CPU core detection', 'package' => 'coreutils'],
         ];
         $binChecks = [];
         foreach ($requiredBinaries as $name => $info) {
@@ -1530,6 +1567,7 @@ class SettingsController
                 'found'   => $found,
                 'path'    => $foundPath,
                 'version' => $version,
+                'package' => $info['package'] ?? '',
             ];
         }
         $checks['binaries'] = $binChecks;
@@ -1977,5 +2015,33 @@ class SettingsController
         }
 
         Router::redirect('/settings/health');
+    }
+
+    public function healthInstallPackage(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $package = preg_replace('/[^a-z0-9._-]/i', '', $_POST['package'] ?? '');
+        $allowed = ['postgresql-client', 'mariadb-client', 'wireguard-tools', 'ufw', 'fail2ban', 'rsync', 'git', 'coreutils'];
+
+        if (!$package || !in_array($package, $allowed, true)) {
+            echo json_encode(['ok' => false, 'error' => 'Paquete no permitido']);
+            exit;
+        }
+
+        $output = shell_exec("apt-get update -qq 2>&1 && apt-get install -y -qq {$package} 2>&1");
+        $ok = (int)shell_exec("dpkg -l {$package} 2>/dev/null | grep -c '^ii'") > 0;
+
+        if ($ok) {
+            \MuseDockPanel\Services\LogService::log('health', "Package {$package} installed via panel");
+        }
+
+        echo json_encode([
+            'ok' => $ok,
+            'message' => $ok ? "{$package} instalado correctamente" : "Error instalando {$package}",
+            'output' => substr($output ?? '', -300),
+        ]);
+        exit;
     }
 }

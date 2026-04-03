@@ -6,14 +6,39 @@
     <div class="card">
         <div class="card-header"><i class="bi bi-shield-exclamation me-1"></i> Fail2Ban no instalado</div>
         <div class="card-body">
-            <p class="text-muted mb-3">Fail2Ban no esta instalado en este servidor. Es una herramienta que protege contra ataques de fuerza bruta baneando IPs sospechosas automaticamente.</p>
-            <p class="mb-2">Para instalarlo, ejecuta:</p>
-            <div class="p-2 rounded" style="background:rgba(255,255,255,0.05);font-family:monospace;font-size:0.9rem;">
-                <code>apt update && apt install fail2ban -y</code>
-            </div>
-            <p class="text-muted small mt-3 mb-0">Despues de instalarlo, recarga esta pagina.</p>
+            <p class="text-muted mb-3">Fail2Ban no esta instalado en este servidor. Protege contra ataques de fuerza bruta baneando IPs sospechosas automaticamente.</p>
+            <ul class="text-muted small mb-3">
+                <li>Proteccion para panel admin, portal de clientes y WordPress</li>
+                <li>Banea IPs tras multiples intentos fallidos de login</li>
+                <li>Configurable: umbrales, tiempos de ban, whitelist</li>
+            </ul>
+            <form method="post" action="/settings/fail2ban/install" id="form-install-f2b">
+                <?= View::csrf() ?>
+                <button type="button" class="btn btn-primary" id="btn-install-f2b" onclick="confirmInstallF2b()">
+                    <i class="bi bi-download me-1"></i>Instalar Fail2Ban
+                </button>
+            </form>
         </div>
     </div>
+    <script>
+    function confirmInstallF2b() {
+        var S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+        S.fire({
+            title: 'Instalar Fail2Ban',
+            html: '<p>Se instalara <code>fail2ban</code> y se configuraran los jails de proteccion.</p><p class="text-muted small">Esto puede tardar 1-2 minutos.</p>',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: '<i class="bi bi-download me-1"></i>Instalar',
+            cancelButtonText: 'Cancelar'
+        }).then(function(r) {
+            if (!r.isConfirmed) return;
+            var btn = document.getElementById('btn-install-f2b');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Instalando Fail2Ban...';
+            document.getElementById('form-install-f2b').submit();
+        });
+    }
+    </script>
 <?php else: ?>
     <!-- Estado del servicio -->
     <div class="card mb-3">

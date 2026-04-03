@@ -21,6 +21,7 @@ use MuseDockPanel\Services\CloudflareService;
                     <a href="/accounts/<?= $account['id'] ?>/files" class="btn btn-outline-light btn-sm"><i class="bi bi-folder me-1"></i>Files</a>
                     <a href="/accounts/<?= $account['id'] ?>/stats" class="btn btn-outline-info btn-sm"><i class="bi bi-bar-chart me-1"></i>Stats</a>
                     <a href="/accounts/<?= $account['id'] ?>/migrate" class="btn btn-outline-light btn-sm"><i class="bi bi-cloud-download me-1"></i>Migrate</a>
+                    <a href="/accounts/<?= $account['id'] ?>/federation-migrate" class="btn btn-outline-light btn-sm" style="border-color:#10b981;color:#10b981;"><i class="bi bi-arrow-left-right me-1"></i>Migrar a...</a>
                     <a href="/accounts/<?= $account['id'] ?>/edit" class="btn btn-outline-light btn-sm"><i class="bi bi-pencil"></i> Edit</a>
                     <?php if ($account['status'] === 'active'): ?>
                         <?php $hasActiveMail = !empty($mailDomain) && $mailDomain['status'] === 'active'; ?>

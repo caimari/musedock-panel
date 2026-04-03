@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.49',
+                'date' => '2026-04-03',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Fail2Ban instalable desde web — Boton "Instalar Fail2Ban" en Settings con confirmacion, spinner de progreso, instalacion de paquete + configs + jails automaticos',
+                            'Health: instalar binarios faltantes — Boton de descarga junto a cada binario "Not found" que instala el paquete via apt con spinner AJAX',
+                        ],
+                        'en' => [
+                            'Fail2Ban installable from web — "Install Fail2Ban" button in Settings with confirmation, progress spinner, auto package + configs + jails setup',
+                            'Health: install missing binaries — Download button next to each "Not found" binary that installs the package via apt with AJAX spinner',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'WireGuard: spinner de progreso — El boton "Instalar WireGuard" muestra spinner "Instalando..." mientras se instala',
+                            'Health: spinner en reparaciones — Botones de reparar cron, fix timezone y reparar BD ahora muestran spinner durante la operacion',
+                        ],
+                        'en' => [
+                            'WireGuard: progress spinner — "Install WireGuard" button shows spinner while installing',
+                            'Health: spinner on repairs — Repair cron, fix timezone and repair DB buttons now show spinner during operation',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.48',
                 'date' => '2026-04-03',
                 'badge' => 'danger',

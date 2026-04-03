@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.49] — 2026-04-03
+
+### New
+- Fail2Ban instalable desde web con spinner de progreso y auto-config de jails
+- Health: instalar binarios faltantes via apt con boton AJAX y spinner
+
+### Improved
+- WireGuard: spinner en boton de instalar
+- Health: spinner en todos los botones de reparacion (cron, timezone, BD)
+
 ## [1.0.41] — 2026-04-03
 
 ### Improved

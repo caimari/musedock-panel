@@ -11,8 +11,8 @@ class ApiAuthMiddleware
         $uri = strtok($_SERVER['REQUEST_URI'], '?');
         $uri = rtrim($uri, '/') ?: '/';
 
-        // Only apply to /api/cluster/* routes
-        if (!str_starts_with($uri, '/api/cluster/')) {
+        // Only apply to /api/cluster/* and /api/federation/* routes
+        if (!str_starts_with($uri, '/api/cluster/') && !str_starts_with($uri, '/api/federation/')) {
             return true;
         }
 
@@ -52,6 +52,20 @@ class ApiAuthMiddleware
             if ($localToken !== '' && hash_equals($localToken, $token)) {
                 $_REQUEST['_api_node_id'] = 0; // Local/external caller
                 return true;
+            }
+
+            // Check against federation_peers auth_token values
+            try {
+                $peers = Database::fetchAll('SELECT id, auth_token FROM federation_peers');
+                foreach ($peers as $peer) {
+                    $decrypted = ReplicationService::decryptPassword($peer['auth_token']);
+                    if ($decrypted !== '' && hash_equals($decrypted, $token)) {
+                        $_REQUEST['_api_peer_id'] = (int)$peer['id'];
+                        return true;
+                    }
+                }
+            } catch (\Throwable) {
+                // federation_peers table may not exist yet
             }
         } catch (\Throwable $e) {
             self::sendError(500, 'Internal authentication error');
