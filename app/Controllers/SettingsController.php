@@ -1946,4 +1946,35 @@ class SettingsController
 
         Router::redirect('/settings/health');
     }
+
+    /**
+     * POST /settings/health/repair-db — Re-run schema.sql to create any missing tables
+     */
+    public function healthRepairDb(): void
+    {
+        View::verifyCsrf();
+        $panelDir = defined('PANEL_ROOT') ? PANEL_ROOT : '/opt/musedock-panel';
+        $schemaFile = $panelDir . '/database/schema.sql';
+
+        if (!file_exists($schemaFile)) {
+            Flash::set('error', 'schema.sql no encontrado.');
+            Router::redirect('/settings/health');
+            return;
+        }
+
+        try {
+            $sql = file_get_contents($schemaFile);
+            Database::connect()->exec($sql);
+
+            // Also run pending migrations
+            \MuseDockPanel\Services\MigrationService::runPending();
+
+            LogService::log('system.health', 'repair-db', 'Re-applied schema.sql + pending migrations');
+            Flash::set('success', 'Base de datos reparada: schema aplicado y migraciones ejecutadas.');
+        } catch (\Throwable $e) {
+            Flash::set('error', 'Error reparando BD: ' . $e->getMessage());
+        }
+
+        Router::redirect('/settings/health');
+    }
 }

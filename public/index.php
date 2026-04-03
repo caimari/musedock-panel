@@ -283,6 +283,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/health', 'SettingsController@health');
 \MuseDockPanel\Router::post('/settings/health/repair-cron', 'SettingsController@healthRepairCron');
 \MuseDockPanel\Router::post('/settings/health/fix-timezone', 'SettingsController@healthFixTimezone');
+\MuseDockPanel\Router::post('/settings/health/repair-db', 'SettingsController@healthRepairDb');
 
 // Portal Settings
 \MuseDockPanel\Router::get('/settings/portal', 'PortalSettingsController@index');

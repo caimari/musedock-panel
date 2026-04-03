@@ -20,9 +20,34 @@ class ChangelogController
     {
         return [
             [
-                'version' => '1.0.47',
+                'version' => '1.0.48',
                 'date' => '2026-04-03',
                 'badge' => 'danger',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Boton "Reparar BD" en Settings → Health — Re-ejecuta schema.sql y migraciones pendientes. Crea tablas faltantes sin tocar datos existentes. Soluciona errores 500 por tablas inexistentes',
+                        ],
+                        'en' => [
+                            '"Repair DB" button in Settings → Health — Re-runs schema.sql and pending migrations. Creates missing tables without touching existing data. Fixes 500 errors from missing tables',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'schema.sql ahora contiene TODAS las tablas del sistema — 15 tablas añadidas que solo existian en migraciones (hosting_web_stats, mail_*, monitor_*, replication_*, proxy_routes, database_backups, file_audit_logs, hosting_domain_aliases). Instalaciones nuevas nunca tendran tablas faltantes',
+                            'Monitor: notificaciones email/telegram desactivadas por defecto — Evita errores en instalaciones nuevas sin SMTP/Telegram configurado',
+                        ],
+                        'en' => [
+                            'schema.sql now contains ALL system tables — 15 tables added that only existed in migrations. Fresh installs will never have missing tables',
+                            'Monitor: email/telegram notifications disabled by default — Prevents errors on fresh installs without SMTP/Telegram configured',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.47',
+                'date' => '2026-04-03',
+                'badge' => 'success',
                 'changes' => [
                     'new' => [
                         'es' => [

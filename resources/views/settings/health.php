@@ -169,6 +169,25 @@
     </div>
 </div>
 
+<!-- Database Repair -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-database-gear me-2"></i>Base de datos — Reparar tablas</span>
+        <form method="POST" action="/settings/health/repair-db" class="d-inline" onsubmit="return confirmDbRepair(event, this)">
+            <?= \MuseDockPanel\View::csrf() ?>
+            <button type="submit" class="btn btn-outline-warning btn-sm">
+                <i class="bi bi-wrench me-1"></i>Reparar BD
+            </button>
+        </form>
+    </div>
+    <div class="card-body">
+        <small class="text-muted">
+            Re-ejecuta <code>schema.sql</code> (crea tablas faltantes sin tocar las existentes) y ejecuta migraciones pendientes.
+            Usar si alguna seccion del panel da error 500 por tablas inexistentes.
+        </small>
+    </div>
+</div>
+
 <!-- PHP Extensions -->
 <div class="card mb-4">
     <div class="card-header"><i class="bi bi-puzzle me-2"></i>PHP Extensions</div>
@@ -359,6 +378,26 @@ function confirmTimezone(e, form, engine) {
         cancelButtonText: 'Cancel'
     }).then(function(result) {
         if (result.isConfirmed) form.submit();
+    });
+    return false;
+}
+function confirmDbRepair(e, form) {
+    e.preventDefault();
+    SwalDark.fire({
+        title: 'Reparar base de datos?',
+        html: 'Se re-ejecutara schema.sql para crear tablas faltantes y se ejecutaran migraciones pendientes.<br><small class="text-muted">Las tablas y datos existentes no se modifican.</small>',
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-wrench me-1"></i> Reparar',
+        confirmButtonColor: '#f59e0b',
+        cancelButtonText: 'Cancelar'
+    }).then(function(result) {
+        if (result.isConfirmed) {
+            var btn = form.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Reparando...';
+            form.submit();
+        }
     });
     return false;
 }
