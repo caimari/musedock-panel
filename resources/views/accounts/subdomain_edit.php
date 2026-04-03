@@ -132,6 +132,86 @@ $relativePath = $docRoot === $basePath ? '' : str_replace($basePath . '/', '', $
         </script>
         <?php endif; ?>
 
+        <!-- Federation: Migrate subdomain to another master -->
+        <?php if (!($isSlave ?? false) && !empty($federationPeers)): ?>
+        <?php $activePeers = array_filter($federationPeers, fn($p) => ($p['status'] ?? '') !== 'pending_approval'); ?>
+        <?php if (!empty($activePeers)): ?>
+        <div class="card mb-3" style="border-color:rgba(16,185,129,0.3);">
+            <div class="card-header d-flex justify-content-between align-items-center" style="color:#10b981;">
+                <span><i class="bi bi-arrow-left-right me-2"></i>Migrar subdominio a otro master</span>
+                <button class="btn btn-outline-light btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#subFederationSection">
+                    <i class="bi bi-chevron-down"></i>
+                </button>
+            </div>
+            <div class="collapse" id="subFederationSection">
+                <div class="card-body">
+                    <p class="text-muted small">Migra archivos y base de datos de <strong><?= View::e($subdomain['subdomain']) ?></strong> a un master federado usando SSH keys ya configuradas.</p>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label small">Destino</label>
+                            <select id="subFedPeer" class="form-select form-select-sm bg-dark text-light border-secondary">
+                                <?php foreach ($activePeers as $p): ?>
+                                <option value="<?= (int)$p['id'] ?>"><?= View::e($p['name']) ?> (<?= View::e($p['status']) ?>)</option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small">Que migrar</label>
+                            <select id="subFedScope" class="form-select form-select-sm bg-dark text-light border-secondary">
+                                <option value="all">Archivos + BD</option>
+                                <option value="files">Solo archivos</option>
+                                <option value="db">Solo BD</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button type="button" class="btn btn-sm" style="background:#10b981;border-color:#10b981;color:#fff;" onclick="federateSubdomain()">
+                        <i class="bi bi-arrow-left-right me-1"></i>Migrar subdominio
+                    </button>
+                </div>
+            </div>
+        </div>
+        <script>
+        function federateSubdomain() {
+            var peerId = document.getElementById('subFedPeer').value;
+            var scope = document.getElementById('subFedScope').value;
+            var scopeLabel = {all:'archivos + BD', files:'solo archivos', db:'solo BD'}[scope];
+
+            SwalDark.fire({
+                title: 'Migrar <?= View::e($subdomain['subdomain']) ?>?',
+                html: 'Se migrara <strong><?= View::e($subdomain['subdomain']) ?></strong> (' + scopeLabel + ') al master seleccionado usando federation SSH.',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Migrar',
+            }).then(function(result) {
+                if (!result.isConfirmed) return;
+
+                SwalDark.fire({title:'Migrando subdominio...', html:'rsync + BD via SSH federation.<br>Puede tardar varios minutos.', allowOutsideClick:false, didOpen:function(){Swal.showLoading()}});
+
+                fetch('/accounts/<?= (int)$account['id'] ?>/subdomains/<?= (int)$subdomain['id'] ?>/federation-migrate', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    body: '_csrf_token=<?= \MuseDockPanel\View::csrfToken() ?>&peer_id=' + peerId + '&scope=' + scope,
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (data.ok) {
+                        var msg = '<strong>Subdominio migrado correctamente</strong>';
+                        if (data.logs) msg += '<br><pre class="text-start small mt-2" style="max-height:200px;overflow-y:auto;background:#0f172a;padding:0.5rem;border-radius:4px;color:#94a3b8;">' + data.logs.join('\n') + '</pre>';
+                        if (data.db_pass) msg += '<br><div class="input-group input-group-sm mt-2"><span class="input-group-text" style="background:#1e293b;border-color:#334155;color:#94a3b8;">Password BD</span><input type="text" class="form-control bg-dark text-light border-secondary font-monospace" value="' + data.db_pass + '" readonly id="fedSubDbPass"><button class="btn btn-outline-success" type="button" onclick="navigator.clipboard.writeText(document.getElementById(\'fedSubDbPass\').value);this.innerHTML=\'Copiado!\'">Copiar</button></div>';
+                        SwalDark.fire({icon:'success', title:'Migrado', html:msg, confirmButtonText:'OK', allowOutsideClick:false});
+                    } else {
+                        SwalDark.fire({icon:'error', title:'Error', text: data.error || 'Error desconocido'});
+                    }
+                })
+                .catch(function() { SwalDark.fire({icon:'error', title:'Error de red'}); });
+            });
+        }
+        </script>
+        <?php endif; ?>
+        <?php endif; ?>
+
         <!-- Ajustes PHP del subdominio -->
         <div class="card mb-3">
             <div class="card-header"><i class="bi bi-filetype-php me-2"></i>Ajustes PHP</div>

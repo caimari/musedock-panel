@@ -2249,7 +2249,15 @@ class SettingsController
         header('Content-Type: application/json');
 
         $package = preg_replace('/[^a-z0-9._-]/i', '', $_POST['package'] ?? '');
-        $allowed = ['postgresql-client', 'mariadb-client', 'wireguard-tools', 'ufw', 'fail2ban', 'rsync', 'git', 'coreutils'];
+        $allowed = [
+            'postgresql-client', 'mariadb-client', 'wireguard-tools', 'ufw', 'fail2ban',
+            'rsync', 'git', 'coreutils', 'nodejs', 'npm', 'composer', 'sshpass', 'tar', 'unzip',
+        ];
+
+        // Also allow php extensions: php8.x-{name}
+        if (preg_match('/^php\d+\.\d+-[a-z0-9]+$/', $package)) {
+            $allowed[] = $package;
+        }
 
         if (!$package || !in_array($package, $allowed, true)) {
             echo json_encode(['ok' => false, 'error' => 'Paquete no permitido']);

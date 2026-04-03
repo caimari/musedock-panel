@@ -276,7 +276,8 @@ class DatabaseController
 
         $username = $account['username'];
         $fullDbName = $username . '_' . $dbSuffix;
-        $fullDbUser = $username . '_' . $dbSuffix;
+        $customUser = trim($_POST['db_custom_user'] ?? '');
+        $fullDbUser = !empty($customUser) ? $customUser : $username . '_' . $dbSuffix;
 
         if (strlen($fullDbName) > 64) {
             Flash::set('error', 'El nombre completo de la base de datos no puede exceder 64 caracteres. Actual: ' . strlen($fullDbName));

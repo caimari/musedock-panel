@@ -908,7 +908,12 @@ use MuseDockPanel\Services\CloudflareService;
                                     <input type="text" name="db_name" id="createDbName" class="form-control bg-dark text-light border-secondary" required
                                            value="db" placeholder="sufijo">
                                 </div>
-                                <small class="text-muted">BD: <code id="createDbFullName"><?= View::e($account['username']) ?>_db</code> | Usuario: <code id="createDbFullUser"><?= View::e($account['username']) ?>_db</code></small>
+                                <small class="text-muted">BD: <code id="createDbFullName"><?= View::e($account['username']) ?>_db</code></small>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label small">Usuario BD <small class="text-muted">(dejar vacio = mismo que nombre BD)</small></label>
+                                <input type="text" name="db_custom_user" id="createDbCustomUser" class="form-control form-control-sm bg-dark text-light border-secondary"
+                                       placeholder="<?= View::e($account['username']) ?>_db">
                             </div>
                             <div class="mb-3">
                                 <label class="form-label small">Contrasenya</label>
@@ -954,11 +959,12 @@ use MuseDockPanel\Services\CloudflareService;
             new bootstrap.Modal(document.getElementById('createDbModal')).show();
         }
 
-        // Update full name + user preview as user types
+        // Update full name preview as user types
         document.getElementById('createDbName')?.addEventListener('input', function() {
             var full = '<?= View::e($account['username']) ?>_' + this.value;
             document.getElementById('createDbFullName').textContent = full;
-            document.getElementById('createDbFullUser').textContent = full;
+            var customUser = document.getElementById('createDbCustomUser');
+            if (customUser && !customUser.value) customUser.placeholder = full;
         });
         </script>
     </div>

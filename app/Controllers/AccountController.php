@@ -1159,6 +1159,9 @@ class AccountController
         $phpData = SubdomainService::getEffectivePhpSettings((int)$sub['id']);
         $isSlave = Settings::get('cluster_role', 'standalone') === 'slave';
 
+        $federationPeers = [];
+        try { $federationPeers = \MuseDockPanel\Services\FederationService::getPeers(); } catch (\Throwable) {}
+
         View::render('accounts/subdomain_edit', [
             'layout' => 'main',
             'pageTitle' => $sub['subdomain'],
@@ -1168,6 +1171,7 @@ class AccountController
             'phpOverrides' => $phpData['overrides'] ?? [],
             'parentPoolExists' => $phpData['parent_pool_exists'] ?? false,
             'isSlave' => $isSlave,
+            'federationPeers' => $federationPeers,
         ]);
     }
 
@@ -1258,6 +1262,167 @@ class AccountController
             "Hosting type: {$typeLabels[$oldType]} → {$typeLabels[$hostingType]}");
         Flash::set('success', "Tipo de hosting de {$subdomain['subdomain']} cambiado a {$typeLabels[$hostingType]}.");
         Router::redirect("/accounts/{$params['id']}/subdomains/{$params['sub_id']}/edit");
+    }
+
+    /**
+     * POST /accounts/{id}/subdomains/{sub_id}/federation-migrate
+     * Migrate a subdomain to another master using federation SSH keys.
+     */
+    public function federateSubdomain(array $params): void
+    {
+        header('Content-Type: application/json');
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        $subdomain = Database::fetchOne("SELECT * FROM hosting_subdomains WHERE id = :id AND account_id = :aid", [
+            'id' => $params['sub_id'], 'aid' => $params['id'],
+        ]);
+
+        if (!$account || !$subdomain) {
+            echo json_encode(['ok' => false, 'error' => 'Cuenta o subdominio no encontrado']);
+            return;
+        }
+
+        $peerId = (int)($_POST['peer_id'] ?? 0);
+        $scope = $_POST['scope'] ?? 'all';
+        $peer = \MuseDockPanel\Services\FederationService::getPeer($peerId);
+
+        if (!$peer) {
+            echo json_encode(['ok' => false, 'error' => 'Peer no encontrado']);
+            return;
+        }
+
+        $subFqdn = $subdomain['subdomain'];
+        $localDocRoot = $subdomain['document_root'];
+        $localProjectRoot = $localDocRoot;
+        if (str_ends_with($localProjectRoot, '/public')) {
+            $localProjectRoot = dirname($localProjectRoot);
+        }
+
+        // Also build the subdomain directory path (may differ from doc root)
+        $homeDir = rtrim($account['home_dir'], '/');
+        $subDir = "{$homeDir}/{$subFqdn}";
+        // Use the subdomain directory if it exists, otherwise use doc root parent
+        $rsyncSource = is_dir($subDir) ? $subDir : $localProjectRoot;
+
+        $sshTarget = \MuseDockPanel\Services\FederationService::getSshTarget($peer);
+        $sshPort = $peer['ssh_port'] ?? 22;
+        $sshKey = $peer['ssh_key_path'] ?? '/root/.ssh/id_ed25519';
+        $logs = [];
+        $dbPass = null;
+
+        $logs[] = "Federation migrate: {$subFqdn} → {$peer['name']}";
+        $logs[] = "Scope: {$scope} | Source: {$rsyncSource}";
+
+        // ── Step 1: rsync files ──────────────────────────────
+        if ($scope === 'all' || $scope === 'files') {
+            $cmd = sprintf(
+                'rsync -azP --partial -e "ssh -p %d -i %s -o StrictHostKeyChecking=no" %s/ %s:%s/ 2>&1',
+                $sshPort, escapeshellarg($sshKey),
+                escapeshellarg($rsyncSource),
+                escapeshellarg($sshTarget),
+                escapeshellarg($rsyncSource)
+            );
+
+            $logs[] = "rsync → {$sshTarget}:{$rsyncSource}/";
+            $output = [];
+            exec($cmd, $output, $rc);
+
+            if ($rc !== 0 && $rc !== 24) {
+                $logs[] = "ERROR rsync (exit {$rc})";
+                echo json_encode(['ok' => false, 'error' => "rsync fallo (exit {$rc})", 'logs' => $logs]);
+                return;
+            }
+
+            // Fix ownership on destination
+            $chownCmd = sprintf(
+                'ssh -p %d -i %s -o StrictHostKeyChecking=no %s "chown -R %s:www-data %s" 2>&1',
+                $sshPort, escapeshellarg($sshKey), escapeshellarg($sshTarget),
+                escapeshellarg($account['username']), escapeshellarg($rsyncSource)
+            );
+            exec($chownCmd);
+            $logs[] = "Archivos sincronizados OK";
+        }
+
+        // ── Step 2: DB migration via SSH ─────────────────────
+        if ($scope === 'all' || $scope === 'db') {
+            // Read local .env to get DB credentials
+            $envFile = $localProjectRoot . '/.env';
+            if (file_exists($envFile)) {
+                $envContent = file_get_contents($envFile);
+                $dbVars = [];
+                foreach (explode("\n", $envContent) as $line) {
+                    $line = trim($line);
+                    if (empty($line) || $line[0] === '#') continue;
+                    if (str_contains($line, '=')) {
+                        [$k, $v] = explode('=', $line, 2);
+                        $dbVars[trim($k)] = trim($v, " \t\n\r\0\x0B\"'");
+                    }
+                }
+
+                $dbName = $dbVars['DB_DATABASE'] ?? $dbVars['DB_NAME'] ?? '';
+                $dbUser = $dbVars['DB_USERNAME'] ?? $dbVars['DB_USER'] ?? '';
+                $dbDriver = $dbVars['DB_CONNECTION'] ?? $dbVars['DB_DRIVER'] ?? 'mysql';
+                $isPostgres = $dbDriver === 'pgsql';
+
+                if (!empty($dbName)) {
+                    $logs[] = "BD detectada: {$dbName} ({$dbDriver})";
+
+                    // Dump local DB and pipe to remote
+                    $sshOpts = sprintf('-p %d -i %s -o StrictHostKeyChecking=no', $sshPort, $sshKey);
+
+                    if ($isPostgres) {
+                        // Create user + DB on remote if not exists
+                        $setupCmds = [
+                            "sudo -u postgres psql -c 'CREATE USER \"{$dbUser}\" WITH PASSWORD \\'temp\\'' 2>/dev/null; true",
+                            "sudo -u postgres createdb -O \"{$dbUser}\" \"{$dbName}\" 2>/dev/null; true",
+                        ];
+                        foreach ($setupCmds as $sc) {
+                            exec(sprintf('ssh %s %s %s 2>&1', $sshOpts, escapeshellarg($sshTarget), escapeshellarg($sc)));
+                        }
+
+                        $dumpCmd = sprintf(
+                            'pg_dump -U %s %s | ssh %s %s "sudo -u postgres psql -d %s" 2>&1',
+                            escapeshellarg($dbUser), escapeshellarg($dbName),
+                            $sshOpts, escapeshellarg($sshTarget), escapeshellarg($dbName)
+                        );
+                    } else {
+                        $dumpCmd = sprintf(
+                            'mysqldump -u %s %s | ssh %s %s "mysql -u %s %s" 2>&1',
+                            escapeshellarg($dbUser), escapeshellarg($dbName),
+                            $sshOpts, escapeshellarg($sshTarget),
+                            escapeshellarg($dbUser), escapeshellarg($dbName)
+                        );
+                    }
+
+                    exec($dumpCmd, $out, $dbRc);
+
+                    if ($dbRc === 0) {
+                        $logs[] = "BD sincronizada OK";
+
+                        // Fix ownership on remote for PostgreSQL
+                        if ($isPostgres) {
+                            $safeUser = str_replace('"', '""', $dbUser);
+                            $fixCmd = sprintf(
+                                'ssh %s %s "sudo -u postgres psql -d %s -c \\"REASSIGN OWNED BY postgres TO \\\\\\"%s\\\\\\"; GRANT ALL ON SCHEMA public TO \\\\\\"%s\\\\\\";\\"" 2>&1',
+                                $sshOpts, escapeshellarg($sshTarget), escapeshellarg($dbName), $safeUser, $safeUser
+                            );
+                            exec($fixCmd);
+                        }
+                    } else {
+                        $logs[] = "AVISO: BD sync fallo (exit {$dbRc})";
+                    }
+                } else {
+                    $logs[] = "No se detecto BD en .env";
+                }
+            } else {
+                $logs[] = "No se encontro .env en {$localProjectRoot}";
+            }
+        }
+
+        $logs[] = "Migracion de subdominio completada";
+        LogService::log('federation.subdomain.migrate', $subFqdn, "Subdomain federated to {$peer['name']} (scope: {$scope})");
+
+        echo json_encode(['ok' => true, 'logs' => $logs, 'db_pass' => $dbPass]);
     }
 
     public function updateSubdomainPhp(array $params): void

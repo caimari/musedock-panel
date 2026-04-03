@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.57',
+                'date' => '2026-04-03',
+                'badge' => 'success',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Federation: migrar subdominio entre masters — Boton en la pagina del subdominio para migrar archivos y BD a otro master federado usando SSH keys (sin credenciales manuales)',
+                            'Databases: usuario personalizado al crear BD — Campo opcional para definir nombre de usuario propio en vez del auto-generado',
+                        ],
+                        'en' => [
+                            'Federation: migrate subdomain between masters — Button on subdomain page to migrate files and DB to another federated master using SSH keys (no manual credentials)',
+                            'Databases: custom username on DB creation — Optional field to define custom username instead of auto-generated',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Health: paquetes PHP permitidos — Las extensiones PHP (php8.3-sqlite3, php8.3-bcmath, etc.) ahora se pueden instalar desde el panel sin error "paquete no permitido"',
+                            'Health: binarios nuevos permitidos — nodejs, npm, composer, sshpass, tar, unzip ahora en la lista de paquetes instalables',
+                        ],
+                        'en' => [
+                            'Health: PHP packages allowed — PHP extensions (php8.3-sqlite3, php8.3-bcmath, etc.) can now be installed from panel without "package not allowed" error',
+                            'Health: new binaries allowed — nodejs, npm, composer, sshpass, tar, unzip now in installable packages list',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.56',
                 'date' => '2026-04-03',
                 'badge' => 'danger',

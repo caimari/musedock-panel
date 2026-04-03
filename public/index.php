@@ -207,6 +207,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/update', 'AccountController@updateSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/php', 'AccountController@updateSubdomainPhp');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/hosting-type', 'AccountController@updateSubdomainHostingType');
+\MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/federation-migrate', 'AccountController@federateSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/add', 'AccountController@addSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/adopt', 'AccountController@adoptSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/toggle-status', 'AccountController@toggleSubdomainStatus');
