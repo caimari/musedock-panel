@@ -33,8 +33,8 @@ class MonitorController
             'disk'             => Settings::get('monitor_alert_disk', '90'),
             'gpu_temp'         => Settings::get('monitor_alert_gpu_temp', '85'),
             'gpu_util'         => Settings::get('monitor_alert_gpu_util', '95'),
-            'notify_email'     => Settings::get('monitor_notify_email', '1'),
-            'notify_telegram'  => Settings::get('monitor_notify_telegram', '1'),
+            'notify_email'     => Settings::get('monitor_notify_email', '0'),
+            'notify_telegram'  => Settings::get('monitor_notify_telegram', '0'),
         ];
 
         View::render('monitor/index', [
