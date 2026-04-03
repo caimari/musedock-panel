@@ -1,14 +1,62 @@
 <?php use MuseDockPanel\View; ?>
 <?php include __DIR__ . '/_tabs.php'; ?>
 
-<!-- Add Peer Modal -->
+<!-- Connect with Code Modal (SIMPLE FLOW) -->
+<div class="modal fade" id="connectCodeModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header border-secondary">
+                <h5 class="modal-title"><i class="bi bi-link-45deg me-1"></i>Conectar paneles</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Step 1: Generate or Paste -->
+                <div class="mb-4">
+                    <h6 class="text-info mb-2"><i class="bi bi-1-circle me-1"></i> Genera un codigo en el panel remoto</h6>
+                    <p class="small text-muted mb-2">Ve a <strong>Settings > Federation</strong> en el otro panel y pulsa <strong>"Generar codigo"</strong>.</p>
+                    <div class="d-flex align-items-center gap-2 mb-3 p-2 rounded" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);">
+                        <span class="small text-muted">O genera uno en ESTE panel:</span>
+                        <button type="button" class="btn btn-outline-info btn-sm" id="btn-generate-code" onclick="generateCode()">
+                            <i class="bi bi-key me-1"></i>Generar codigo
+                        </button>
+                    </div>
+                    <div id="generated-code-box" class="d-none mb-3">
+                        <label class="form-label small text-success"><i class="bi bi-check-circle me-1"></i>Codigo generado (valido 10 min) — copialo al otro panel:</label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" id="generated-code" class="form-control bg-dark text-light border-secondary font-monospace" readonly>
+                            <button class="btn btn-outline-light" type="button" onclick="navigator.clipboard.writeText(document.getElementById('generated-code').value);this.innerHTML='<i class=\'bi bi-check\'></i>'"><i class="bi bi-clipboard"></i></button>
+                        </div>
+                    </div>
+                </div>
+
+                <hr class="border-secondary">
+
+                <div>
+                    <h6 class="text-info mb-2"><i class="bi bi-2-circle me-1"></i> Pega el codigo del panel remoto</h6>
+                    <div class="input-group input-group-sm">
+                        <input type="text" id="pairing-code-input" class="form-control bg-dark text-light border-secondary font-monospace" placeholder="Pega aqui el codigo del otro panel...">
+                        <button class="btn btn-primary" type="button" id="btn-connect-code" onclick="connectWithCode()">
+                            <i class="bi bi-link-45deg me-1"></i>Conectar
+                        </button>
+                    </div>
+                    <div id="connect-result" class="mt-2 small"></div>
+                </div>
+            </div>
+            <div class="modal-footer border-secondary">
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cerrar</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Peer Modal (ADVANCED - manual) -->
 <div class="modal fade" id="addPeerModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content bg-dark text-light border-secondary">
             <form method="post" action="/settings/federation/add-peer">
                 <?= View::csrf() ?>
                 <div class="modal-header border-secondary">
-                    <h5 class="modal-title"><i class="bi bi-plus-circle me-1"></i>Agregar Federation Peer</h5>
+                    <h5 class="modal-title"><i class="bi bi-plus-circle me-1"></i>Agregar Peer (manual)</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
@@ -23,7 +71,7 @@
                     <div class="mb-3">
                         <label class="form-label small">Auth Token</label>
                         <input type="text" name="auth_token" class="form-control form-control-sm bg-dark text-light border-secondary" required placeholder="Token del peer remoto">
-                        <div class="form-text text-muted">El mismo cluster_local_token del panel remoto</div>
+                        <div class="form-text text-muted">El mismo cluster_local_token del panel remoto (Settings > Cluster)</div>
                     </div>
                     <hr class="border-secondary">
                     <h6 class="text-muted mb-2">SSH (para transferencia de archivos)</h6>
@@ -61,9 +109,14 @@
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-diagram-3 me-1"></i>Federation Peers</span>
-        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addPeerModal">
-            <i class="bi bi-plus me-1"></i>Agregar Peer
-        </button>
+        <div class="d-flex gap-2">
+            <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#connectCodeModal">
+                <i class="bi bi-link-45deg me-1"></i>Conectar paneles
+            </button>
+            <button class="btn btn-outline-secondary btn-sm" data-bs-toggle="modal" data-bs-target="#addPeerModal">
+                <i class="bi bi-gear me-1"></i>Manual
+            </button>
+        </div>
     </div>
     <div class="card-body p-0">
         <?php if (empty($peers)): ?>
@@ -165,6 +218,8 @@
                             <th>Modo</th>
                             <th>Estado</th>
                             <th>Paso actual</th>
+                            <th>Duracion</th>
+                            <th>Transferido</th>
                             <th>Fecha</th>
                             <th class="text-end">Acciones</th>
                         </tr>
@@ -193,6 +248,14 @@
                             </td>
                             <td><span class="badge <?= $statusBadge ?>"><?= View::e($m['status']) ?></span></td>
                             <td class="small"><?= View::e($m['current_step']) ?></td>
+                            <?php
+                            $mMeta = $m['metadata'] ?? [];
+                            $mMetrics = $mMeta['metrics'] ?? [];
+                            $wallClock = $mMetrics['wall_clock_human'] ?? '';
+                            $totalMb = $mMetrics['total_mb_transferred'] ?? '';
+                            ?>
+                            <td class="small text-muted"><?= $wallClock ?: '—' ?></td>
+                            <td class="small text-muted"><?= $totalMb ? $totalMb . ' MB' : '—' ?></td>
                             <td class="small text-muted"><?= date('d/m H:i', strtotime($m['created_at'])) ?></td>
                             <td class="text-end">
                                 <?php if ($m['status'] === 'running' || $m['status'] === 'paused'): ?>
@@ -269,6 +332,76 @@ function exchangeKeys(peerId) {
             }
         })
         .catch(() => SwalDark.fire({icon:'error', title:'Error de red'}));
+    });
+}
+
+// ── Pairing code system ──────────────────────────────
+function generateCode() {
+    const btn = document.getElementById('btn-generate-code');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Generando...';
+
+    fetch('/settings/federation/generate-pairing-code', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: '_csrf_token=<?= View::csrfToken() ?>'
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-key me-1"></i>Generar codigo';
+        if (data.ok) {
+            document.getElementById('generated-code').value = data.code;
+            document.getElementById('generated-code-box').classList.remove('d-none');
+        } else {
+            SwalDark.fire({icon:'error', title:'Error', text: data.error || 'No se pudo generar el codigo'});
+        }
+    })
+    .catch(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-key me-1"></i>Generar codigo';
+        SwalDark.fire({icon:'error', title:'Error de red'});
+    });
+}
+
+function connectWithCode() {
+    const code = document.getElementById('pairing-code-input').value.trim();
+    if (!code) {
+        document.getElementById('connect-result').innerHTML = '<span class="text-danger">Introduce un codigo</span>';
+        return;
+    }
+
+    const btn = document.getElementById('btn-connect-code');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Conectando...';
+    document.getElementById('connect-result').innerHTML = '<span class="text-muted">Conectando... (verificando API, SSH, intercambiando keys)</span>';
+
+    fetch('/settings/federation/connect-with-code', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: '_csrf_token=<?= View::csrfToken() ?>&pairing_code=' + encodeURIComponent(code)
+    })
+    .then(r => r.json())
+    .then(data => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-link-45deg me-1"></i>Conectar';
+        if (data.ok) {
+            let status = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Conectado a <strong>' + (data.peer_name || 'panel remoto') + '</strong></span><br>';
+            status += '<small class="text-muted">';
+            status += 'API: ' + (data.api_ok ? '<span class="text-success">OK</span>' : '<span class="text-danger">FAIL</span>') + ' | ';
+            status += 'SSH: ' + (data.ssh_ok ? '<span class="text-success">OK</span>' : '<span class="text-warning">Pendiente</span>') + ' | ';
+            status += 'Handshake: ' + (data.handshake_ok ? '<span class="text-success">Bidireccional</span>' : '<span class="text-warning">Unidireccional</span>');
+            status += '</small>';
+            document.getElementById('connect-result').innerHTML = status;
+            setTimeout(() => location.reload(), 2000);
+        } else {
+            document.getElementById('connect-result').innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>' + (data.error || 'Error desconocido') + '</span>';
+        }
+    })
+    .catch(() => {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-link-45deg me-1"></i>Conectar';
+        document.getElementById('connect-result').innerHTML = '<span class="text-danger">Error de red</span>';
     });
 }
 </script>

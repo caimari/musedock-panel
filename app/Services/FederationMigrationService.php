@@ -88,6 +88,9 @@ class FederationMigrationService
     /** Max retries per step before pausing */
     public const MAX_RETRIES = 3;
 
+    /** Max seconds to wait for FPM connections to drain before force-kill */
+    public const FPM_DRAIN_TIMEOUT = 30;
+
     // ═══════════════════════════════════════════════════════════════
     // Mode constants
     // ═══════════════════════════════════════════════════════════════
@@ -257,16 +260,25 @@ class FederationMigrationService
         }
 
         self::log($migrationId, $step, 'info', "Executing step: {$step}");
+        $stepStartTime = microtime(true);
 
         try {
             // Execute the step
             $result = self::executeStep($migrationId, $migration, $step);
 
-            // Persist step result
+            // Add timing metrics to result
+            $stepDuration = round(microtime(true) - $stepStartTime, 2);
+            $result['metrics'] = [
+                'duration_seconds' => $stepDuration,
+                'started_at' => date('Y-m-d H:i:s', (int)$stepStartTime),
+                'finished_at' => date('Y-m-d H:i:s'),
+            ];
+
+            // Persist step result (with metrics)
             self::saveStepResult($migrationId, $step, $result);
 
             if ($result['ok']) {
-                self::log($migrationId, $step, 'info', "Step completed: {$step}", $result['data'] ?? []);
+                self::log($migrationId, $step, 'info', "Step completed: {$step} ({$stepDuration}s)", $result['data'] ?? []);
 
                 // Advance to next step
                 $nextStep = self::getNextStep($step, $migration['mode']);
@@ -283,8 +295,9 @@ class FederationMigrationService
                     'error' => $result['error'] ?? 'Unknown error',
                 ]);
 
-                // Check retry count
-                $retries = $migration['step_results'][$step]['retries'] ?? 0;
+                // Re-read migration to get fresh retry count (avoid stale state)
+                $freshMigration = self::getByMigrationId($migrationId);
+                $retries = $freshMigration['step_results'][$step]['retries'] ?? 0;
                 if ($retries >= self::MAX_RETRIES) {
                     // Exhausted retries → pause (admin can resume or cancel)
                     self::updateStatus($migrationId, self::STATUS_PAUSED, [
@@ -556,16 +569,41 @@ class FederationMigrationService
 
         self::log($migrationId, self::STEP_SYNC_FILES, 'info', 'Starting rsync', ['cmd' => $cmd]);
 
-        $output = '';
+        $rsyncStart = microtime(true);
+        $outputLines = [];
         $returnCode = 0;
         exec($cmd, $outputLines, $returnCode);
         $output = implode("\n", $outputLines);
+        $rsyncDuration = round(microtime(true) - $rsyncStart, 2);
 
         if ($returnCode !== 0 && $returnCode !== 24) { // 24 = vanished files (OK)
             return ['ok' => false, 'error' => "rsync failed (exit code {$returnCode})", 'data' => ['output' => substr($output, -2000)]];
         }
 
-        return ['ok' => true, 'data' => ['bytes_transferred' => strlen($output) > 0 ? 'see logs' : '0']];
+        // Parse rsync stats from output (last lines contain transfer summary)
+        $bytesTransferred = 0;
+        $filesTransferred = 0;
+        foreach ($outputLines as $line) {
+            if (preg_match('/sent ([\d,]+) bytes/', $line, $m)) {
+                $bytesTransferred = (int)str_replace(',', '', $m[1]);
+            }
+            if (preg_match('/Number of files transferred: ([\d,]+)/', $line, $m)) {
+                $filesTransferred = (int)str_replace(',', '', $m[1]);
+            }
+            // rsync 3.x format
+            if (preg_match('/Number of regular files transferred: ([\d,]+)/', $line, $m)) {
+                $filesTransferred = (int)str_replace(',', '', $m[1]);
+            }
+        }
+
+        $speedMbps = $rsyncDuration > 0 ? round(($bytesTransferred / 1048576) / $rsyncDuration, 2) : 0;
+
+        return ['ok' => true, 'data' => [
+            'bytes_transferred' => $bytesTransferred,
+            'files_transferred' => $filesTransferred,
+            'duration_seconds' => $rsyncDuration,
+            'speed_mbps' => $speedMbps,
+        ]];
     }
 
     /**
@@ -667,7 +705,7 @@ class FederationMigrationService
                 'handler' => 'static_response',
                 'status_code' => '503',
                 'headers' => ['Content-Type' => ['text/html; charset=utf-8']],
-                'body' => '<html><body><h1>Site under maintenance</h1><p>We are migrating this site. Please try again shortly.</p></body></html>',
+                'body' => '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Maintenance</title><style>body{font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#1a1a2e;color:#e0e0e0}div{text-align:center;max-width:400px;padding:2rem}.icon{font-size:3rem;margin-bottom:1rem}h1{font-size:1.3rem;margin:0 0 .5rem}p{color:#888;font-size:.9rem;margin:0}</style></head><body><div><div class="icon">&#128295;</div><h1>Site under maintenance</h1><p>We are migrating this site to a new server. This usually takes a few minutes. Please try again shortly.</p></div></body></html>',
             ]],
         ];
 
@@ -690,7 +728,7 @@ class FederationMigrationService
 
         // 2. Wait for in-flight FPM requests to drain (poll active connections)
         $fpmSocket = "/run/php/php{$phpVersion}-fpm-{$username}.sock";
-        $maxWait = 15; // seconds
+        $maxWait = self::FPM_DRAIN_TIMEOUT;
         for ($i = 0; $i < $maxWait; $i++) {
             // Check if any process is using the FPM socket
             $output = [];
@@ -860,14 +898,16 @@ class FederationMigrationService
         // Switch origin from maintenance to read-only mode
         self::setCaddyReadOnly($account['domain']);
 
-        $graceStart = date('Y-m-d H:i:s');
+        $graceStartTs = time();
+        $graceStart = date('Y-m-d H:i:s', $graceStartTs);
 
-        // Store grace period start in step results
+        // Store grace period start in step results (both unix ts and human-readable)
         self::saveStepResult($migrationId, self::STEP_SWITCH_DNS, [
             'ok' => true,
             'data' => [
                 'dest_ip' => $destIp,
                 'grace_start' => $graceStart,
+                'grace_start_ts' => $graceStartTs,
                 'grace_minutes' => $migration['grace_period_minutes'],
                 'dns_automatic' => $dnsAutomatic,
             ],
@@ -891,12 +931,16 @@ class FederationMigrationService
      */
     private static function stepComplete(string $migrationId, array $migration, array $account, array $peer): array
     {
-        // Check grace period elapsed
+        // Check grace period elapsed (prefer unix timestamp, fallback to text)
         $switchResult = $migration['step_results'][self::STEP_SWITCH_DNS] ?? [];
-        $graceStart = $switchResult['data']['grace_start'] ?? $switchResult['grace_start'] ?? null;
+        $graceStartTs = $switchResult['data']['grace_start_ts'] ?? null;
+        if (!$graceStartTs) {
+            $graceStartText = $switchResult['data']['grace_start'] ?? $switchResult['grace_start'] ?? null;
+            $graceStartTs = $graceStartText ? strtotime($graceStartText) : null;
+        }
 
-        if ($graceStart) {
-            $graceEnd = strtotime($graceStart) + ($migration['grace_period_minutes'] * 60);
+        if ($graceStartTs) {
+            $graceEnd = (int)$graceStartTs + ($migration['grace_period_minutes'] * 60);
             if (time() < $graceEnd) {
                 $remaining = $graceEnd - time();
                 return ['ok' => false, 'error' => "Grace period not elapsed ({$remaining}s remaining)"];
@@ -938,12 +982,44 @@ class FederationMigrationService
             'domain'       => $account['domain'],
         ]);
 
+        // Compute overall migration metrics
+        $totalDuration = 0;
+        $totalBytes = 0;
+        $stepTimings = [];
+        $stepResults = $migration['step_results'] ?? [];
+        foreach ($stepResults as $stepName => $sr) {
+            $stepDur = $sr['metrics']['duration_seconds'] ?? 0;
+            $totalDuration += $stepDur;
+            $stepTimings[$stepName] = $stepDur;
+            // Sum bytes from sync steps
+            if (isset($sr['data']['bytes_transferred'])) {
+                $totalBytes += (int)$sr['data']['bytes_transferred'];
+            }
+        }
+
+        $startedAt = $migration['started_at'] ?? $migration['created_at'];
+        $wallClockSeconds = $startedAt ? (time() - strtotime($startedAt)) : 0;
+
+        $metrics = [
+            'total_step_duration_seconds' => round($totalDuration, 2),
+            'wall_clock_seconds' => $wallClockSeconds,
+            'wall_clock_human' => sprintf('%dh %dm %ds', $wallClockSeconds / 3600, ($wallClockSeconds % 3600) / 60, $wallClockSeconds % 60),
+            'total_bytes_transferred' => $totalBytes,
+            'total_mb_transferred' => round($totalBytes / 1048576, 2),
+            'step_timings' => $stepTimings,
+            'disk_used_mb' => $account['disk_used_mb'] ?? 0,
+        ];
+
+        self::updateMetadata($migrationId, ['metrics' => $metrics]);
+
         self::log($migrationId, self::STEP_COMPLETE, 'info', 'Migration completed', [
             'domain' => $account['domain'],
+            'wall_clock' => $metrics['wall_clock_human'],
+            'total_mb' => $metrics['total_mb_transferred'],
             'files_cleanup_after' => date('Y-m-d H:i:s', time() + 48 * 3600),
         ]);
 
-        return ['ok' => true, 'data' => ['domain' => $account['domain'], 'status' => 'completed']];
+        return ['ok' => true, 'data' => ['domain' => $account['domain'], 'status' => 'completed', 'metrics' => $metrics]];
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1165,7 +1241,7 @@ class FederationMigrationService
                                 'handler' => 'static_response',
                                 'status_code' => '503',
                                 'headers' => ['Content-Type' => ['text/html; charset=utf-8']],
-                                'body' => '<html><body><h1>Site is in read-only mode</h1><p>This site is being migrated. Write operations are temporarily disabled.</p></body></html>',
+                                'body' => '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Read-only</title><style>body{font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#1a1a2e;color:#e0e0e0}div{text-align:center;max-width:400px;padding:2rem}h1{font-size:1.2rem;margin:0 0 .5rem}p{color:#888;font-size:.9rem;margin:0}</style></head><body><div><h1>Site is in read-only mode</h1><p>This site is being migrated to a new server. Write operations are temporarily disabled. Please try again in a few minutes.</p></div></body></html>',
                             ]],
                         ],
                         // Block PHP execution (even if someone tries GET on .php)
@@ -1175,7 +1251,7 @@ class FederationMigrationService
                                 'handler' => 'static_response',
                                 'status_code' => '503',
                                 'headers' => ['Content-Type' => ['text/html; charset=utf-8']],
-                                'body' => '<html><body><h1>Site is in read-only mode</h1><p>Dynamic content temporarily unavailable during migration.</p></body></html>',
+                                'body' => '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Read-only</title><style>body{font-family:-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#1a1a2e;color:#e0e0e0}div{text-align:center;max-width:400px;padding:2rem}h1{font-size:1.2rem;margin:0 0 .5rem}p{color:#888;font-size:.9rem;margin:0}</style></head><body><div><h1>Temporarily unavailable</h1><p>This site is being migrated. Dynamic content is temporarily unavailable. Please try again in a few minutes.</p></div></body></html>',
                             ]],
                         ],
                         // Serve static files (images, CSS, JS, etc.)
@@ -1450,6 +1526,29 @@ class FederationMigrationService
             }
         }
 
+        // Collect per-step metrics for real-time display
+        $stepMetrics = [];
+        $elapsedTotal = 0;
+        foreach ($migration['step_results'] as $stepName => $sr) {
+            $dur = $sr['metrics']['duration_seconds'] ?? 0;
+            $elapsedTotal += $dur;
+            $stepMetrics[$stepName] = [
+                'duration' => $dur,
+                'bytes' => $sr['data']['bytes_transferred'] ?? null,
+                'speed_mbps' => $sr['data']['speed_mbps'] ?? null,
+            ];
+        }
+
+        // Wall clock time so far
+        $wallClock = 0;
+        if ($migration['started_at']) {
+            $wallClock = ($migration['completed_at'] ? strtotime($migration['completed_at']) : time()) - strtotime($migration['started_at']);
+        }
+
+        // DNS manual warning
+        $dnsManual = $migration['metadata']['dns_manual_required'] ?? false;
+        $dnsTargetIp = $migration['metadata']['dns_target_ip'] ?? null;
+
         return [
             'ok' => true,
             'migration_id' => $migrationId,
@@ -1461,10 +1560,16 @@ class FederationMigrationService
             'total_steps' => $totalSteps,
             'percent' => $totalSteps > 0 ? round(($currentIndex / $totalSteps) * 100) : 0,
             'step_statuses' => $stepStatuses,
+            'step_metrics' => $stepMetrics,
             'error_message' => $migration['error_message'],
             'grace_remaining' => $graceRemaining,
+            'dns_manual_required' => $dnsManual,
+            'dns_target_ip' => $dnsTargetIp,
             'started_at' => $migration['started_at'],
             'completed_at' => $migration['completed_at'],
+            'elapsed_seconds' => $elapsedTotal,
+            'wall_clock_seconds' => $wallClock,
+            'final_metrics' => $migration['metadata']['metrics'] ?? null,
         ];
     }
 }

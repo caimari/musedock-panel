@@ -168,23 +168,45 @@ class FederationApiController
         // Create directory structure
         SystemService::createDirectories($username, $homeDir, $docRoot);
 
-        // Create databases (tentative)
+        // Create databases (tentative) — verify each creation
         $databases = $input['databases'] ?? [];
         $createdDbs = [];
+        $dbErrors = [];
         foreach ($databases as $db) {
             $dbName = $db['db_name'] ?? '';
             $dbUser = $db['db_user'] ?? '';
             $dbType = $db['db_type'] ?? 'pgsql';
 
+            if (empty($dbName)) continue;
+
             if ($dbType === 'pgsql') {
-                @exec("sudo -u postgres createuser " . escapeshellarg($dbUser) . " 2>&1", $out, $rc);
-                @exec("sudo -u postgres createdb -O " . escapeshellarg($dbUser) . " " . escapeshellarg($dbName) . " 2>&1", $out, $rc);
+                $out = [];
+                exec("sudo -u postgres createuser " . escapeshellarg($dbUser) . " 2>&1", $out, $rc1);
+                exec("sudo -u postgres createdb -O " . escapeshellarg($dbUser) . " " . escapeshellarg($dbName) . " 2>&1", $out, $rc2);
+                // Verify DB exists
+                exec("sudo -u postgres psql -lqt 2>/dev/null | grep -w " . escapeshellarg($dbName), $out, $rcVerify);
+                if ($rcVerify !== 0) {
+                    $dbErrors[] = "{$dbName} (pgsql): creation failed";
+                } else {
+                    $createdDbs[] = $dbName;
+                }
             } else {
-                @exec("mysql -e 'CREATE DATABASE IF NOT EXISTS `{$dbName}`' 2>&1", $out, $rc);
-                @exec("mysql -e \"CREATE USER IF NOT EXISTS '{$dbUser}'@'localhost'\" 2>&1", $out, $rc);
-                @exec("mysql -e \"GRANT ALL ON \`{$dbName}\`.* TO '{$dbUser}'@'localhost'\" 2>&1", $out, $rc);
+                $out = [];
+                exec("mysql -e 'CREATE DATABASE IF NOT EXISTS `" . addslashes($dbName) . "`' 2>&1", $out, $rc1);
+                exec("mysql -e \"CREATE USER IF NOT EXISTS '" . addslashes($dbUser) . "'@'localhost'\" 2>&1", $out, $rc2);
+                exec("mysql -e \"GRANT ALL ON \`" . addslashes($dbName) . "\`.* TO '" . addslashes($dbUser) . "'@'localhost'\" 2>&1", $out, $rc3);
+                // Verify DB exists
+                exec("mysql -e 'USE `" . addslashes($dbName) . "`' 2>&1", $out, $rcVerify);
+                if ($rcVerify !== 0) {
+                    $dbErrors[] = "{$dbName} (mysql): creation failed";
+                } else {
+                    $createdDbs[] = $dbName;
+                }
             }
-            $createdDbs[] = $dbName;
+        }
+
+        if (!empty($dbErrors)) {
+            FederationMigrationService::log($migrationId, 'prepare', 'warn', "Some databases failed to create", ['errors' => $dbErrors]);
         }
 
         FederationMigrationService::log($migrationId, 'prepare', 'info', "Destination prepared", [
@@ -327,13 +349,16 @@ class FederationApiController
         $domain = $input['domain'] ?? '';
         $checks = [];
 
-        // 1. Main page HTTP check (via direct IP, bypass DNS)
-        $ch = curl_init("http://127.0.0.1");
+        // 1. Main page HTTP check (via HTTPS on localhost with SNI, bypass DNS)
+        // Use HTTPS because Caddy routes match on TLS SNI + Host header
+        $ch = curl_init("https://127.0.0.1");
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 15,
             CURLOPT_HTTPHEADER => ["Host: {$domain}"],
             CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_SSL_VERIFYPEER => false, // Self-signed cert on localhost
+            CURLOPT_SSL_VERIFYHOST => 0,
         ]);
         $body = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -485,33 +510,44 @@ class FederationApiController
             }
         }
 
-        // Remove hosting_accounts record (if created)
+        // Remove databases BEFORE deleting the account (so the FK query still works)
+        $account = Database::fetchOne('SELECT id FROM hosting_accounts WHERE domain = :d', ['d' => $domain]);
+        if ($account) {
+            $databases = Database::fetchAll(
+                'SELECT * FROM hosting_databases WHERE account_id = :aid',
+                ['aid' => $account['id']]
+            );
+            // Drop system-level databases first
+            foreach ($databases as $db) {
+                if (($db['db_type'] ?? 'pgsql') === 'pgsql') {
+                    exec("sudo -u postgres dropdb --if-exists " . escapeshellarg($db['db_name']) . " 2>&1", $out, $rc);
+                    exec("sudo -u postgres dropuser --if-exists " . escapeshellarg($db['db_user']) . " 2>&1", $out, $rc);
+                } else {
+                    exec("mysql -e 'DROP DATABASE IF EXISTS `" . addslashes($db['db_name']) . "`' 2>&1", $out, $rc);
+                    exec("mysql -e \"DROP USER IF EXISTS '" . addslashes($db['db_user']) . "'@'localhost'\" 2>&1", $out, $rc);
+                }
+                FederationMigrationService::log($migrationId, 'rollback', 'info',
+                    "Dropped database: {$db['db_name']} (rc: " . ($rc ?? '?') . ")");
+            }
+            // Delete DB records
+            Database::delete('hosting_databases', 'account_id = :aid', ['aid' => $account['id']]);
+            Database::delete('hosting_subdomains', 'account_id = :aid', ['aid' => $account['id']]);
+            Database::delete('hosting_domain_aliases', 'account_id = :aid', ['aid' => $account['id']]);
+        }
+
+        // Remove hosting_accounts record
         Database::delete('hosting_accounts', 'domain = :d', ['d' => $domain]);
 
         // Delete system user and files
         if (!empty($username)) {
-            @exec("pkill -u " . escapeshellarg($username) . " 2>&1");
-            @exec("userdel -r " . escapeshellarg($username) . " 2>&1");
+            exec("pkill -u " . escapeshellarg($username) . " 2>&1", $out, $rc);
+            exec("userdel -r " . escapeshellarg($username) . " 2>&1", $out, $rc);
         }
 
         // Also clean home directory
         $homeDir = "/var/www/vhosts/{$domain}";
         if (is_dir($homeDir)) {
-            @exec("rm -rf " . escapeshellarg($homeDir) . " 2>&1");
-        }
-
-        // Remove databases created during prepare
-        $databases = Database::fetchAll(
-            "SELECT * FROM hosting_databases WHERE account_id IN (SELECT id FROM hosting_accounts WHERE domain = :d)",
-            ['d' => $domain]
-        );
-        foreach ($databases as $db) {
-            if (($db['db_type'] ?? 'pgsql') === 'pgsql') {
-                @exec("sudo -u postgres dropdb " . escapeshellarg($db['db_name']) . " 2>&1");
-                @exec("sudo -u postgres dropuser " . escapeshellarg($db['db_user']) . " 2>&1");
-            } else {
-                @exec("mysql -e 'DROP DATABASE IF EXISTS `{$db['db_name']}`' 2>&1");
-            }
+            exec("rm -rf " . escapeshellarg($homeDir) . " 2>&1", $out, $rc);
         }
 
         FederationMigrationService::log($migrationId, 'rollback', 'info', "Destination cleanup completed: {$domain}");

@@ -406,6 +406,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/federation/approve-peer/{id}', 'FederationController@approvePeer');
 \MuseDockPanel\Router::post('/settings/federation/test-peer', 'FederationController@testPeer');
 \MuseDockPanel\Router::post('/settings/federation/exchange-keys', 'FederationController@exchangeKeys');
+\MuseDockPanel\Router::post('/settings/federation/generate-pairing-code', 'FederationController@generatePairingCode');
+\MuseDockPanel\Router::post('/settings/federation/connect-with-code', 'FederationController@connectWithCode');
 
 // Failover
 \MuseDockPanel\Router::post('/settings/failover/save-config', 'FailoverController@saveConfig');

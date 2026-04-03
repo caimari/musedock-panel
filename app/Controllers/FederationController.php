@@ -33,6 +33,7 @@ class FederationController
 
     /**
      * POST /settings/federation/add-peer
+     * Manual method: admin fills in all fields.
      */
     public function addPeer(): void
     {
@@ -64,6 +65,38 @@ class FederationController
         }
 
         header('Location: /settings/federation');
+    }
+
+    /**
+     * POST /settings/federation/generate-pairing-code
+     * Generate a temporary pairing code that another panel can use to connect.
+     * The code is valid for 10 minutes.
+     */
+    public function generatePairingCode(): void
+    {
+        header('Content-Type: application/json');
+
+        $result = FederationService::generatePairingCode();
+        echo json_encode($result);
+    }
+
+    /**
+     * POST /settings/federation/connect-with-code
+     * Connect to a remote panel using its pairing code.
+     * This is the simplified flow: paste the code and everything is auto-configured.
+     */
+    public function connectWithCode(): void
+    {
+        header('Content-Type: application/json');
+
+        $code = trim($_POST['pairing_code'] ?? '');
+        if (empty($code)) {
+            echo json_encode(['ok' => false, 'error' => 'Introduce el codigo de emparejamiento']);
+            return;
+        }
+
+        $result = FederationService::connectWithPairingCode($code);
+        echo json_encode($result);
     }
 
     /**

@@ -461,4 +461,162 @@ class FederationService
         }
         return $versions;
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Pairing code system (simplified peer registration)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Generate a pairing code that encodes this panel's connection info.
+     *
+     * The code is a base64-encoded JSON string containing:
+     * - API URL (how to reach this panel)
+     * - Auth token (for API authentication)
+     * - SSH host/port (for file transfers)
+     * - Panel name (hostname)
+     *
+     * Valid for 10 minutes. Stored in panel_settings with expiry.
+     */
+    public static function generatePairingCode(): array
+    {
+        $config = require PANEL_ROOT . '/config/panel.php';
+
+        // Get or ensure local auth token exists
+        $localToken = '';
+        $rawToken = Settings::get('cluster_local_token', '');
+        if ($rawToken) {
+            $localToken = ReplicationService::decryptPassword($rawToken);
+        }
+        if (empty($localToken)) {
+            // Auto-generate one
+            $localToken = bin2hex(random_bytes(32));
+            Settings::set('cluster_local_token', ReplicationService::encryptPassword($localToken));
+        }
+
+        // Determine this panel's API URL
+        $publicIp = @file_get_contents('https://api.ipify.org?format=text');
+        $publicIp = $publicIp ? trim($publicIp) : '';
+        $port = $config['port'] ?? 8444;
+        $apiUrl = "https://{$publicIp}:{$port}";
+
+        // SSH info
+        $sshKeyPath = Settings::get('filesync_ssh_key_path', '/root/.ssh/id_ed25519');
+
+        // Build pairing payload
+        $payload = [
+            'v' => 1, // version for future compat
+            'name' => gethostname() ?: 'panel',
+            'url' => $apiUrl,
+            'token' => $localToken,
+            'ssh_host' => $publicIp,
+            'ssh_port' => (int)Settings::get('filesync_ssh_port', '22'),
+            'ssh_user' => Settings::get('filesync_ssh_user', 'root'),
+            'ssh_key' => $sshKeyPath,
+            'exp' => time() + 600, // 10 min expiry
+        ];
+
+        // Encode as compact base64 string
+        $code = rtrim(base64_encode(json_encode($payload)), '=');
+
+        // Store so we can validate inbound connections (optional — code is self-contained)
+        Settings::set('federation_pairing_code', $code);
+        Settings::set('federation_pairing_expires', (string)(time() + 600));
+
+        return [
+            'ok' => true,
+            'code' => $code,
+            'expires_in' => 600,
+            'api_url' => $apiUrl,
+            'hostname' => $payload['name'],
+        ];
+    }
+
+    /**
+     * Connect to a remote panel using its pairing code.
+     *
+     * Decodes the code, extracts connection info, registers the peer,
+     * performs handshake, and exchanges SSH keys — all in one step.
+     */
+    public static function connectWithPairingCode(string $code): array
+    {
+        // Decode pairing code
+        $json = base64_decode($code . str_repeat('=', (4 - strlen($code) % 4) % 4));
+        $payload = json_decode($json, true);
+
+        if (!$payload || !isset($payload['url']) || !isset($payload['token'])) {
+            return ['ok' => false, 'error' => 'Codigo invalido. Verifica que lo has copiado correctamente.'];
+        }
+
+        // Check expiry
+        $expiry = $payload['exp'] ?? 0;
+        if ($expiry > 0 && time() > $expiry) {
+            return ['ok' => false, 'error' => 'Codigo expirado. Genera uno nuevo en el panel remoto.'];
+        }
+
+        $peerName = $payload['name'] ?? 'remote-panel';
+        $peerUrl  = $payload['url'] ?? '';
+        $peerToken = $payload['token'] ?? '';
+
+        // Check if already registered
+        $existing = Database::fetchOne('SELECT id FROM federation_peers WHERE api_url = :url', ['url' => rtrim($peerUrl, '/')]);
+        if ($existing) {
+            return ['ok' => false, 'error' => "Este panel ya esta registrado como peer (URL: {$peerUrl})"];
+        }
+
+        // Test connectivity first
+        $ch = curl_init(rtrim($peerUrl, '/') . '/api/federation/health');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $peerToken,
+            ],
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($error || $httpCode !== 200) {
+            $detail = $error ?: "HTTP {$httpCode}";
+            if (str_contains($detail, 'Connection refused') || str_contains($detail, 'timed out')) {
+                return ['ok' => false, 'error' => "No se puede conectar al panel remoto. Verifica que el firewall permite acceso al puerto (URL: {$peerUrl}). Error: {$detail}"];
+            }
+            if ($httpCode === 401) {
+                return ['ok' => false, 'error' => 'Token rechazado por el panel remoto. El codigo puede haber expirado.'];
+            }
+            return ['ok' => false, 'error' => "Error conectando al panel remoto: {$detail}"];
+        }
+
+        // Register the peer
+        $result = self::addPeer($peerName, $peerUrl, $peerToken, [
+            'host'     => $payload['ssh_host'] ?? '',
+            'port'     => $payload['ssh_port'] ?? 22,
+            'user'     => $payload['ssh_user'] ?? 'root',
+            'key_path' => $payload['ssh_key'] ?? '/root/.ssh/id_ed25519',
+        ]);
+
+        if (!$result['ok']) {
+            return $result;
+        }
+
+        $remoteHostname = $peerName;
+        if (isset($result['handshake']['remote_hostname'])) {
+            $remoteHostname = $result['handshake']['remote_hostname'];
+        }
+
+        // Test SSH as well
+        $peer = self::getPeer($result['id']);
+        $sshResult = $peer ? self::testSshConnection($peer) : ['ok' => false];
+
+        return [
+            'ok' => true,
+            'peer_id' => $result['id'],
+            'peer_name' => $remoteHostname,
+            'api_ok' => true,
+            'ssh_ok' => $sshResult['ok'] ?? false,
+            'handshake_ok' => $result['handshake']['ok'] ?? false,
+        ];
+    }
 }

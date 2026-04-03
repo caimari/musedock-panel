@@ -60,6 +60,30 @@
                 <strong id="grace-timer" class="ms-1"></strong>
             </div>
 
+            <!-- DNS manual warning -->
+            <div id="dns-manual-notice" class="alert mt-3 py-2 px-3 small d-none" style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.2);color:#f97316;">
+                <i class="bi bi-exclamation-triangle me-2"></i>
+                <strong>DNS manual requerido:</strong> Actualiza el registro A del dominio a: <code id="dns-target-ip"></code>
+            </div>
+
+            <!-- Metrics -->
+            <div id="metrics-panel" class="mt-3 d-none">
+                <div class="d-flex gap-3 flex-wrap small">
+                    <div class="px-3 py-2 rounded" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);">
+                        <span class="text-muted">Tiempo total</span>
+                        <div id="metric-time" class="text-light fw-bold">—</div>
+                    </div>
+                    <div class="px-3 py-2 rounded" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);">
+                        <span class="text-muted">Transferido</span>
+                        <div id="metric-bytes" class="text-light fw-bold">—</div>
+                    </div>
+                    <div class="px-3 py-2 rounded" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);">
+                        <span class="text-muted">Velocidad</span>
+                        <div id="metric-speed" class="text-light fw-bold">—</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Error message -->
             <div id="error-box" class="alert alert-danger mt-3 py-2 d-none"></div>
 
@@ -179,6 +203,34 @@
                 if (status === 'running') icon.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
                 else if (status === 'completed') icon.classList.add('text-success');
                 else if (status === 'failed') icon.classList.add('text-danger');
+            }
+
+            // Metrics
+            if (data.wall_clock_seconds > 0 || data.final_metrics) {
+                document.getElementById('metrics-panel').classList.remove('d-none');
+                const wc = data.wall_clock_seconds;
+                const h = Math.floor(wc / 3600); const m = Math.floor((wc % 3600) / 60); const s = wc % 60;
+                document.getElementById('metric-time').textContent = (h > 0 ? h + 'h ' : '') + m + 'm ' + s + 's';
+                // Find sync bytes/speed from step metrics
+                const sm = data.step_metrics || {};
+                let totalBytes = 0, maxSpeed = 0;
+                for (const [step, met] of Object.entries(sm)) {
+                    if (met.bytes) totalBytes += met.bytes;
+                    if (met.speed_mbps && met.speed_mbps > maxSpeed) maxSpeed = met.speed_mbps;
+                }
+                if (data.final_metrics) {
+                    totalBytes = data.final_metrics.total_bytes_transferred || totalBytes;
+                }
+                document.getElementById('metric-bytes').textContent = totalBytes > 1048576 ? (totalBytes / 1048576).toFixed(1) + ' MB' : totalBytes > 1024 ? (totalBytes / 1024).toFixed(0) + ' KB' : totalBytes + ' B';
+                document.getElementById('metric-speed').textContent = maxSpeed > 0 ? maxSpeed.toFixed(1) + ' MB/s' : '—';
+            }
+
+            // DNS manual warning
+            if (data.dns_manual_required) {
+                document.getElementById('dns-manual-notice').classList.remove('d-none');
+                document.getElementById('dns-target-ip').textContent = data.dns_target_ip || '?';
+            } else {
+                document.getElementById('dns-manual-notice').classList.add('d-none');
             }
 
             // Grace period

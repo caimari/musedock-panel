@@ -285,9 +285,42 @@
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
+                            <?php if (str_contains(strtolower($policy), 'deny') || str_contains(strtoupper($policy), 'DROP')): ?>
+                            <tr style="background:rgba(239,68,68,0.06);border-top:2px solid #334155;">
+                                <td><i class="bi bi-lock-fill text-danger"></i></td>
+                                <?php if ($type === 'ufw'): ?>
+                                <td><code>*</code></td>
+                                <td><span class="badge bg-danger">DENY</span></td>
+                                <td>IN</td>
+                                <td>Anywhere</td>
+                                <td colspan="2"><em class="text-muted small"><i class="bi bi-shield-fill-check me-1"></i>Politica por defecto — todo lo demas se deniega automaticamente</em></td>
+                                <?php else: ?>
+                                <td><span class="badge bg-danger">DROP</span></td>
+                                <td>all</td>
+                                <td>*</td>
+                                <td>0.0.0.0/0</td>
+                                <td>*</td>
+                                <td colspan="2"><em class="text-muted small"><i class="bi bi-shield-fill-check me-1"></i>Politica por defecto</em></td>
+                                <?php endif; ?>
+                            </tr>
+                            <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
+
+                <?php if (str_contains(strtolower($policy), 'deny') || str_contains(strtoupper($policy), 'DROP')): ?>
+                <div class="mt-3 p-3 rounded" style="background:rgba(34,197,94,0.06);border:1px solid rgba(34,197,94,0.2);">
+                    <div class="d-flex align-items-start gap-2">
+                        <i class="bi bi-shield-fill-check text-success" style="font-size:1.2rem;"></i>
+                        <div>
+                            <strong class="text-success">Firewall seguro</strong>
+                            <p class="text-muted small mb-1 mt-1">La politica por defecto es <strong>DENY</strong> — todo el trafico entrante esta <strong>bloqueado</strong> excepto lo que aparece como ALLOW en la tabla de arriba.</p>
+                            <p class="text-muted small mb-0">Cualquier puerto, protocolo o IP que no tenga una regla ALLOW explicita recibe un DROP silencioso. No necesitas crear reglas DENY para cada puerto — ya estan todos cerrados por defecto.</p>
+                        </div>
+                    </div>
+                </div>
+                <?php endif; ?>
+
             <?php endif; ?>
 
             <?php if ($type === 'iptables' && strtoupper($policy) === 'DROP'): ?>

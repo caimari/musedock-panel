@@ -20,6 +20,63 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.52',
+                'date' => '2026-04-03',
+                'badge' => 'danger',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Federation: sistema de migracion Master-to-Master — Migra hostings completos entre servidores federados con maquina de estados de 11 pasos, retry automatico, pause/resume y rollback completo',
+                            'Federation: gestion de peers — Settings > Federation para agregar, testar y gestionar paneles remotos. Handshake bidireccional automatico con intercambio de SSH keys',
+                            'Federation: codigo de emparejamiento — Genera un codigo temporal en un panel, pegalo en otro y se conectan automaticamente. Sin copiar tokens ni configurar SSH manualmente',
+                            'Federation: modo clon — Copia un hosting a otro servidor sin mover DNS ni limpiar origen. Ideal para staging o pre-migracion',
+                            'Federation: modo dry-run — Valida conflictos (dominio, UID, disco) sin ejecutar la migracion real',
+                            'Federation: selector DNS automatico/manual — Elige entre cambio via Cloudflare API o manual. Si Cloudflare falla, no bloquea la migracion',
+                            'Federation: read-only real durante grace period — FPM parado, Caddy bloquea PHP y POST/PUT/DELETE. Solo sirve archivos estaticos. Zero escrituras garantizadas',
+                            'Federation: drain de conexiones FPM — Antes de congelar, espera hasta 30s a que las conexiones activas terminen. Despues mata FPM',
+                            'Federation: sync de slaves automatico — Al completar la migracion, el destino encola sync hacia sus slaves (obelix/filemon) exactamente como un hosting nuevo',
+                            'Federation: pause-sync hard-stop — Pausa la replicacion hacia slaves durante la migracion: flag + exclusion rsync + reload lsyncd. Auto-expira en 2h',
+                            'Federation: worker de migraciones — Cron cada minuto: resume migraciones huerfanas tras reinicio, libera locks muertos, completa grace periods, monitoriza DNS manual',
+                            'Federation: cleanup worker — Cron horario: elimina archivos del origen 48h despues de migracion completada',
+                            'Federation: metricas por paso — Duracion, bytes transferidos, velocidad rsync. Resumen total al completar (tiempo, MB, step timings)',
+                            'Federation: verificacion multi-capa — HTTP 200 via HTTPS/SNI, PHP funciona, cada BD responde SELECT 1, ownership correcto, assets estaticos presentes',
+                            'Federation: paginas maintenance/read-only con estilo — Dark theme, responsive, mensajes claros en vez de HTML plano',
+                            'Federation: aprobacion manual de peers — Handshakes remotos crean peers en estado pending_approval. El admin debe aprobar antes de usar',
+                        ],
+                        'en' => [
+                            'Federation: Master-to-Master migration system — Migrate complete hostings between federated servers with 11-step state machine, auto retry, pause/resume and full rollback',
+                            'Federation: peer management — Settings > Federation to add, test and manage remote panels. Automatic bidirectional handshake with SSH key exchange',
+                            'Federation: pairing code — Generate a temporary code on one panel, paste it on another and they auto-connect. No manual token copying or SSH configuration',
+                            'Federation: clone mode — Copy a hosting to another server without moving DNS or cleaning origin. Ideal for staging or pre-migration testing',
+                            'Federation: dry-run mode — Validate conflicts (domain, UID, disk) without executing the actual migration',
+                            'Federation: automatic/manual DNS selector — Choose between Cloudflare API or manual DNS change. If Cloudflare fails, migration continues',
+                            'Federation: real read-only during grace period — FPM stopped, Caddy blocks PHP and POST/PUT/DELETE. Only serves static files. Zero writes guaranteed',
+                            'Federation: FPM connection draining — Before freezing, waits up to 30s for active connections to finish. Then kills FPM',
+                            'Federation: automatic slave sync — On migration completion, destination enqueues sync to its slaves (obelix/filemon) just like a new hosting',
+                            'Federation: hard-stop pause-sync — Pauses slave replication during migration: flag + rsync exclusion + lsyncd reload. Auto-expires in 2h',
+                            'Federation: migration worker — Cron every minute: resumes orphaned migrations after restart, releases stale locks, completes grace periods, monitors manual DNS',
+                            'Federation: cleanup worker — Hourly cron: deletes origin files 48h after completed migration',
+                            'Federation: per-step metrics — Duration, bytes transferred, rsync speed. Total summary on completion (time, MB, step timings)',
+                            'Federation: multi-layer verification — HTTP 200 via HTTPS/SNI, PHP works, each DB responds SELECT 1, correct ownership, static assets present',
+                            'Federation: styled maintenance/read-only pages — Dark theme, responsive, clear messages instead of plain HTML',
+                            'Federation: manual peer approval — Remote handshakes create peers in pending_approval state. Admin must approve before use',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'API Auth: soporte federation — ApiAuthMiddleware ahora valida tokens de federation_peers ademas de cluster_nodes',
+                            'Health: cron federation — musedock-federation aparece en System Health como cron requerido con boton de reparacion',
+                            'Race condition: unique index — Partial unique index impide crear dos migraciones activas para el mismo hosting (proteccion a nivel de BD)',
+                        ],
+                        'en' => [
+                            'API Auth: federation support — ApiAuthMiddleware now validates federation_peers tokens in addition to cluster_nodes',
+                            'Health: federation cron — musedock-federation appears in System Health as required cron with repair button',
+                            'Race condition: unique index — Partial unique index prevents creating two active migrations for the same hosting (DB-level protection)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.51',
                 'date' => '2026-04-03',
                 'badge' => 'warning',

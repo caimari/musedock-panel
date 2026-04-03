@@ -75,9 +75,18 @@ try {
     // Settings table may not exist yet
 }
 
+// ── DB health check ──────────────────────────────────────────
+try {
+    Database::connect();
+} catch (\Throwable $e) {
+    // DB down — nothing we can do. Exit silently, try again next minute.
+    exit(0);
+}
+
 // ── 1. Release stale step locks ──────────────────────────────
-// If a lock is older than 10 minutes, the process that held it is dead.
-$staleLockThreshold = 600; // 10 minutes
+// Threshold must be >= longest step timeout (sync_files = 30min).
+// Use 35 minutes to avoid releasing active locks.
+$staleLockThreshold = 2100; // 35 minutes
 $lockedMigrations = Database::fetchAll("
     SELECT * FROM hosting_migrations
     WHERE step_lock IS NOT NULL AND step_lock != ''
