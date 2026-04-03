@@ -20,9 +20,28 @@ class ChangelogController
     {
         return [
             [
-                'version' => '1.0.42',
+                'version' => '1.0.43',
                 'date' => '2026-04-03',
                 'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Deduplicacion completa en migracion Nginx/Apache — Tres niveles de proteccion: recoleccion (skip -le-ssl.conf, symlinks, dominios vistos), JSON (deduplica antes de aplicar), y Caddy API (elimina rutas existentes antes de crear)',
+                            'Apache no duplica dominios de Nginx — Extrae dominios ya migrados del JSON y los salta. Cuenta solo los nuevos de Apache',
+                            'Doble glob eliminado — Nginx ya no parsea *.conf y * por separado (causaba archivos duplicados)',
+                        ],
+                        'en' => [
+                            'Full deduplication in Nginx/Apache migration — Three protection levels: collection (skip -le-ssl.conf, symlinks, seen domains), JSON (deduplicate before applying), and Caddy API (delete existing routes before creating)',
+                            'Apache no longer duplicates Nginx domains — Extracts already-migrated domains from JSON and skips them. Counts only new Apache sites',
+                            'Double glob removed — Nginx no longer parses *.conf and * separately (caused duplicate files)',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.42',
+                'date' => '2026-04-03',
+                'badge' => 'success',
                 'changes' => [
                     'new' => [
                         'es' => [

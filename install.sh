@@ -1889,9 +1889,17 @@ migrate_nginx_sites() {
 
     local SITES_FOUND=0
     local SITES_JSON="["
+    local SEEN_DOMAINS=""
+    local SEEN_FILES=""
 
-    for conf in "$SITES_DIR"/*.conf "$SITES_DIR"/*; do
+    for conf in "$SITES_DIR"/*; do
         [ -f "$conf" ] || continue
+        # Resolve symlinks to avoid processing the same file twice
+        local REAL_CONF
+        REAL_CONF=$(readlink -f "$conf" 2>/dev/null || echo "$conf")
+        case "$SEEN_FILES" in *"|${REAL_CONF}|"*) continue ;; esac
+        SEEN_FILES="${SEEN_FILES}|${REAL_CONF}|"
+
         # Skip default/catch-all configs
         case "$(basename "$conf")" in
             default|default.conf) continue ;;
@@ -1907,6 +1915,10 @@ migrate_nginx_sites() {
             warn "$(t migrate_skipped "$(basename "$conf")")"
             continue
         fi
+
+        # Skip duplicate domains (multiple configs for same domain)
+        case "$SEEN_DOMAINS" in *"|${SERVER_NAME}|"*) continue ;; esac
+        SEEN_DOMAINS="${SEEN_DOMAINS}|${SERVER_NAME}|"
 
         # Extract root directive
         local DOC_ROOT=""
@@ -1971,22 +1983,33 @@ migrate_apache_sites() {
 
     header "$(t migrate_header Apache)"
 
+    # Collect domains already migrated from nginx to skip them
+    local EXISTING_DOMAINS=""
     local SITES_FOUND=0
     local SITES_JSON="["
+    local SEEN_FILES=""
+    local NEW_APACHE_FOUND=0
 
-    # If we already have nginx migrations, start from that
     if [ -f "$MIGRATE_SITES_FILE" ]; then
         local EXISTING
         EXISTING=$(cat "$MIGRATE_SITES_FILE")
-        # Strip trailing ]
         SITES_JSON="${EXISTING%]}"
         SITES_FOUND=$(echo "$EXISTING" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+        EXISTING_DOMAINS=$(echo "$EXISTING" | python3 -c "import sys,json; print(' '.join(s['domain'] for s in json.load(sys.stdin)))" 2>/dev/null || echo "")
     fi
 
-    for conf in "$SITES_DIR"/*.conf "$SITES_DIR"/*; do
+    for conf in "$SITES_DIR"/*; do
         [ -f "$conf" ] || continue
+        # Resolve symlinks to avoid processing same file twice
+        local REAL_CONF
+        REAL_CONF=$(readlink -f "$conf" 2>/dev/null || echo "$conf")
+        case "$SEEN_FILES" in *"|${REAL_CONF}|"*) continue ;; esac
+        SEEN_FILES="${SEEN_FILES}|${REAL_CONF}|"
+
+        # Skip default configs and SSL duplicates (Apache -le-ssl.conf = same vhost with SSL)
         case "$(basename "$conf")" in
             000-default*|default*) continue ;;
+            *-le-ssl.conf) continue ;;
         esac
 
         ok "$(t migrate_parsing "$(basename "$conf")")"
@@ -1998,6 +2021,9 @@ migrate_apache_sites() {
             warn "$(t migrate_skipped "$(basename "$conf")")"
             continue
         fi
+
+        # Skip if domain already found from nginx or already seen in this loop
+        case "$EXISTING_DOMAINS" in *"${SERVER_NAME}"*) continue ;; esac
 
         local DOC_ROOT=""
         DOC_ROOT=$(grep -iE '^\s*DocumentRoot\s+' "$conf" 2>/dev/null | head -1 | sed 's/.*DocumentRoot\s\+//i; s/\s*$//' | tr -d '"')
@@ -2018,27 +2044,24 @@ migrate_apache_sites() {
         fi
         [ -z "$SITE_USER" ] && SITE_USER="www-data"
 
-        # Skip if this domain was already found from nginx
-        if echo "$SITES_JSON" | grep -q "\"${SERVER_NAME}\"" 2>/dev/null; then
-            continue
-        fi
-
         ok "$(t migrate_found "$SERVER_NAME" "$DOC_ROOT")"
 
         [ "$SITES_FOUND" -gt 0 ] && SITES_JSON="${SITES_JSON},"
         SITES_JSON="${SITES_JSON}{\"domain\":\"${SERVER_NAME}\",\"root\":\"${DOC_ROOT}\",\"user\":\"${SITE_USER}\",\"php\":\"${PHP_VER}\"}"
         SITES_FOUND=$((SITES_FOUND + 1))
+        NEW_APACHE_FOUND=$((NEW_APACHE_FOUND + 1))
+        EXISTING_DOMAINS="${EXISTING_DOMAINS} ${SERVER_NAME}"
     done
 
     SITES_JSON="${SITES_JSON}]"
 
-    if [ "$SITES_FOUND" -eq 0 ]; then
+    if [ "$NEW_APACHE_FOUND" -eq 0 ]; then
         warn "$(t migrate_none Apache)"
         return
     fi
 
     echo ""
-    read -rp "  $(t migrate_ask "$SITES_FOUND" Apache)" MIGRATE_CONFIRM
+    read -rp "  $(t migrate_ask "$NEW_APACHE_FOUND" Apache)" MIGRATE_CONFIRM
     MIGRATE_CONFIRM=${MIGRATE_CONFIRM:-s}
 
     if [[ "$MIGRATE_CONFIRM" =~ ^[YySs]$ ]] || [ -z "$MIGRATE_CONFIRM" ]; then
@@ -2617,10 +2640,26 @@ fi
 # ============================================================
 MIGRATE_SITES_FILE="/tmp/musedock-migrate-sites.json"
 if [ -f "$MIGRATE_SITES_FILE" ] && [ "$CADDY_API_OK" = "200" ]; then
+
+    # Deduplicate the migration file (keep first occurrence of each domain)
+    python3 -c "
+import json
+sites = json.load(open('$MIGRATE_SITES_FILE'))
+seen = set()
+unique = []
+for s in sites:
+    d = s['domain']
+    if d not in seen:
+        seen.add(d)
+        unique.append(s)
+json.dump(unique, open('$MIGRATE_SITES_FILE', 'w'))
+" 2>/dev/null
+
     MIGRATE_COUNT=$(python3 -c "import json; print(len(json.load(open('$MIGRATE_SITES_FILE'))))" 2>/dev/null || echo "0")
     if [ "$MIGRATE_COUNT" -gt 0 ] 2>/dev/null; then
         header "$(t migrate_applying "$MIGRATE_COUNT")"
         MIGRATE_OK=0
+        MIGRATE_SKIPPED=0
 
         # Ensure srv0 server exists with a routes array
         SRV0_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:2019/config/apps/http/servers/srv0 2>/dev/null)
@@ -2629,6 +2668,9 @@ if [ -f "$MIGRATE_SITES_FILE" ] && [ "$CADDY_API_OK" = "200" ]; then
                 -H "Content-Type: application/json" \
                 -d '{"listen":[":443",":80"],"routes":[]}' > /dev/null 2>&1
         fi
+
+        # Fetch existing routes to detect duplicates
+        EXISTING_ROUTES_JSON=$(curl -s http://localhost:2019/config/apps/http/servers/srv0/routes 2>/dev/null || echo "[]")
 
         python3 -c "
 import json, sys
@@ -2643,6 +2685,39 @@ for s in sites:
 
             ROUTE_ID="hosting-$(echo "$DOMAIN" | tr -dc 'a-zA-Z0-9' | tr '[:upper:]' '[:lower:]')"
             SOCKET_PATH="/run/php/php${PHP_VER}-fpm-${SITE_USER}.sock"
+
+            # Check if a route for this domain already exists in Caddy
+            ALREADY_EXISTS=$(echo "$EXISTING_ROUTES_JSON" | python3 -c "
+import sys, json
+routes = json.load(sys.stdin)
+domain = '${DOMAIN}'
+for r in routes:
+    for m in r.get('match', []):
+        if domain in m.get('host', []):
+            print('yes')
+            sys.exit(0)
+print('no')
+" 2>/dev/null)
+
+            if [ "$ALREADY_EXISTS" = "yes" ]; then
+                # Route exists — delete it first so we replace with clean config (fixes duplicates from bad installs)
+                # Find and delete by @id or by matching domain
+                curl -s -X DELETE "http://localhost:2019/id/${ROUTE_ID}" > /dev/null 2>&1
+                # Also try to delete any route that matches this domain but has a different @id
+                python3 -c "
+import json, sys, urllib.request
+routes = json.loads('$(echo "$EXISTING_ROUTES_JSON" | sed "s/'/\\\\'/g")')
+for i, r in enumerate(routes):
+    for m in r.get('match', []):
+        if '${DOMAIN}' in m.get('host', []):
+            rid = r.get('@id', '')
+            if rid and rid != '${ROUTE_ID}':
+                try:
+                    req = urllib.request.Request('http://localhost:2019/id/' + rid, method='DELETE')
+                    urllib.request.urlopen(req, timeout=3)
+                except: pass
+" 2>/dev/null
+            fi
 
             # Build Caddy route JSON
             ROUTE_JSON=$(python3 -c "
