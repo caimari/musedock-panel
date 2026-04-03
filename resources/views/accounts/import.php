@@ -129,7 +129,12 @@ function importConfirm(e, form, domain) {
         confirmButtonColor: '#0ea5e9',
         cancelButtonText: 'Cancelar'
     }).then(function(result) {
-        if (result.isConfirmed) form.submit();
+        if (result.isConfirmed) {
+            var btn = form.querySelector('button[type="submit"]');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Importando...';
+            form.submit();
+        }
     });
     return false;
 }
