@@ -1,6 +1,7 @@
 <?php
 namespace MuseDockPanel\Controllers;
 
+use MuseDockPanel\Database;
 use MuseDockPanel\Flash;
 use MuseDockPanel\Router;
 use MuseDockPanel\View;
