@@ -2549,4 +2549,271 @@ class MigrationController
 
         Router::redirect('/accounts/' . $params['id'] . '/migrate');
     }
+
+    // ================================================================
+    // Option 4: Subdomain individual migration (files + DB)
+    // ================================================================
+
+    /**
+     * POST /accounts/{id}/migrate/subdomain
+     * Migrates a single subdomain: rsync files via SSH + DB migration.
+     */
+    public function migrateSubdomain(array $params): void
+    {
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) {
+            Flash::set('error', 'Account not found.');
+            Router::redirect('/accounts');
+            return;
+        }
+
+        $subdomainId = (int)($_POST['subdomain_id'] ?? 0);
+        $subdomain = Database::fetchOne(
+            "SELECT * FROM hosting_subdomains WHERE id = :id AND account_id = :aid",
+            ['id' => $subdomainId, 'aid' => $params['id']]
+        );
+        if (!$subdomain) {
+            Flash::set('error', 'Subdominio no encontrado.');
+            Router::redirect('/accounts/' . $params['id'] . '/migrate');
+            return;
+        }
+
+        $scope = $_POST['sub_migrate_scope'] ?? 'all'; // all, files, db
+        $sshHost = trim($_POST['ssh_host'] ?? '');
+        $sshUser = trim($_POST['ssh_user'] ?? '');
+        $sshPass = $_POST['ssh_password'] ?? '';
+        $sshPort = (int)($_POST['ssh_port'] ?? 22) ?: 22;
+        $remotePath = rtrim(trim($_POST['remote_subdomain_path'] ?? ''), '/');
+        $localPath = $subdomain['document_root'];
+        $autoDetectDb = !empty($_POST['auto_detect_db']);
+        $subFqdn = $subdomain['subdomain'];
+
+        if (empty($sshHost) || empty($sshUser) || empty($sshPass)) {
+            Flash::set('error', 'Credenciales SSH obligatorias.');
+            Router::redirect('/accounts/' . $params['id'] . '/migrate');
+            return;
+        }
+
+        if (empty($remotePath)) {
+            Flash::set('error', 'Ruta remota del subdominio obligatoria.');
+            Router::redirect('/accounts/' . $params['id'] . '/migrate');
+            return;
+        }
+
+        $logs = [];
+        $logs[] = "Migrando subdominio: {$subFqdn}";
+        $logs[] = "Scope: {$scope} | Remote: {$remotePath} | Local: {$localPath}";
+
+        // ── Step 1: rsync files ──────────────────────────────
+        if ($scope === 'all' || $scope === 'files') {
+            $logs[] = "rsync: {$sshUser}@{$sshHost}:{$remotePath}/ → {$localPath}/";
+
+            // Strip /public for rsync (sync the project root, not just public)
+            $rsyncLocal = $localPath;
+            $rsyncRemote = $remotePath;
+            if (str_ends_with($localPath, '/public')) {
+                $rsyncLocal = dirname($localPath);
+                // Also strip /public from remote if it has it
+                if (str_ends_with($remotePath, '/public')) {
+                    $rsyncRemote = dirname($remotePath);
+                }
+            }
+
+            $cmd = sprintf(
+                'sshpass -p %s rsync -azP --partial -e "ssh -o StrictHostKeyChecking=no -p %d" %s@%s:%s/ %s/ 2>&1',
+                escapeshellarg($sshPass),
+                $sshPort,
+                escapeshellarg($sshUser),
+                escapeshellarg($sshHost),
+                escapeshellarg($rsyncRemote),
+                escapeshellarg($rsyncLocal)
+            );
+
+            $output = [];
+            exec($cmd, $output, $rc);
+
+            if ($rc !== 0 && $rc !== 24) {
+                $logs[] = "ERROR rsync (exit {$rc}): " . implode("\n", array_slice($output, -5));
+                Flash::set('error', "rsync fallo para {$subFqdn} (exit {$rc})");
+                $_SESSION['migration_log'] = $logs;
+                Router::redirect('/accounts/' . $params['id'] . '/migrate');
+                return;
+            }
+
+            // Fix ownership
+            exec(sprintf('chown -R %s:www-data %s 2>&1', escapeshellarg($account['username']), escapeshellarg($rsyncLocal)));
+            $logs[] = "Archivos sincronizados correctamente.";
+        }
+
+        // ── Step 2: DB migration ─────────────────────────────
+        $localDbPass = null;
+        $localDbName = null;
+        $localDbUser = null;
+        $localDbType = null;
+
+        if ($scope === 'all' || $scope === 'db') {
+            $logs[] = "Migrando base de datos...";
+
+            // Find .env in the project
+            $envPath = $localPath;
+            if (str_ends_with($envPath, '/public')) $envPath = dirname($envPath);
+
+            // Read config from REMOTE server
+            $remoteEnvPath = $remotePath;
+            if (str_ends_with($remoteEnvPath, '/public')) $remoteEnvPath = dirname($remoteEnvPath);
+
+            if ($autoDetectDb) {
+                // Read .env from remote
+                $remoteEnvContent = shell_exec(sprintf(
+                    'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -p %d %s@%s %s 2>/dev/null',
+                    escapeshellarg($sshPass), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                    escapeshellarg('cat ' . escapeshellarg($remoteEnvPath . '/.env'))
+                ));
+
+                if (empty($remoteEnvContent)) {
+                    $logs[] = "AVISO: No se pudo leer .env remoto. Intentando con .env local...";
+                    $remoteEnvContent = @file_get_contents($envPath . '/.env');
+                }
+
+                if (!empty($remoteEnvContent)) {
+                    // Parse DB credentials
+                    $dbVars = [];
+                    foreach (explode("\n", $remoteEnvContent) as $line) {
+                        $line = trim($line);
+                        if (empty($line) || $line[0] === '#') continue;
+                        if (str_contains($line, '=')) {
+                            [$k, $v] = explode('=', $line, 2);
+                            $dbVars[trim($k)] = trim($v, " \t\n\r\0\x0B\"'");
+                        }
+                    }
+
+                    $remoteDb = $dbVars['DB_DATABASE'] ?? $dbVars['DB_NAME'] ?? '';
+                    $remoteUser = $dbVars['DB_USERNAME'] ?? $dbVars['DB_USER'] ?? '';
+                    $remotePass = $dbVars['DB_PASSWORD'] ?? $dbVars['DB_PASS'] ?? '';
+                    $remoteHost = $dbVars['DB_HOST'] ?? 'localhost';
+                    $remotePort = $dbVars['DB_PORT'] ?? '3306';
+                    $remoteDriver = $dbVars['DB_CONNECTION'] ?? $dbVars['DB_DRIVER'] ?? 'mysql';
+                    $isPostgres = $remoteDriver === 'pgsql';
+
+                    if (!empty($remoteDb) && !empty($remoteUser)) {
+                        $logs[] = "BD detectada: {$remoteDb} ({$remoteDriver}) user={$remoteUser}";
+
+                        // Dump from remote
+                        $dumpFile = "/tmp/subdomain_db_" . bin2hex(random_bytes(4)) . ".sql";
+
+                        if ($isPostgres) {
+                            $dumpCmd = sprintf('PGPASSWORD=%s pg_dump -h %s -p %s -U %s %s',
+                                escapeshellarg($remotePass), escapeshellarg($remoteHost),
+                                escapeshellarg($remotePort), escapeshellarg($remoteUser), escapeshellarg($remoteDb));
+                        } else {
+                            $dumpCmd = sprintf('mysqldump -h %s -P %s -u %s -p%s %s',
+                                escapeshellarg($remoteHost), escapeshellarg($remotePort),
+                                escapeshellarg($remoteUser), escapeshellarg($remotePass), escapeshellarg($remoteDb));
+                        }
+
+                        shell_exec(sprintf(
+                            'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -p %d %s@%s %s > %s 2>/dev/null',
+                            escapeshellarg($sshPass), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                            escapeshellarg($dumpCmd), escapeshellarg($dumpFile)
+                        ));
+
+                        if (file_exists($dumpFile) && filesize($dumpFile) > 50) {
+                            $dumpSize = round(filesize($dumpFile) / 1048576, 1);
+                            $logs[] = "Dump descargado: {$dumpSize} MB";
+
+                            // Create local DB + user
+                            $localDbName = str_replace(['.', '-'], '_', $account['username']) . '_' . str_replace(['.', '-'], '_', explode('.', $subFqdn)[0]) . '_db';
+                            $localDbUser = $account['username'];
+                            $localDbPass = bin2hex(random_bytes(12));
+                            $localDbType = $isPostgres ? 'pgsql' : 'mysql';
+
+                            if ($isPostgres) {
+                                $safeUser = str_replace('"', '""', $localDbUser);
+                                $safePass = str_replace("'", "''", $localDbPass);
+                                shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'")));
+                                shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("ALTER USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'")));
+                                shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$localDbName}\" OWNER \"{$safeUser}\"")));
+                                shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$localDbName}\" TO \"{$safeUser}\"")));
+                                shell_exec(sprintf('sudo -u postgres psql -d %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
+                                // Fix ownership
+                                shell_exec(sprintf("sudo -u postgres psql -d %s -c %s 2>&1", escapeshellarg($localDbName),
+                                    escapeshellarg("REASSIGN OWNED BY postgres TO \"{$safeUser}\"; GRANT ALL ON SCHEMA public TO \"{$safeUser}\"; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"{$safeUser}\"; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"{$safeUser}\";")));
+                            } else {
+                                $setupSql = "CREATE DATABASE IF NOT EXISTS `{$localDbName}`;\n"
+                                    . "CREATE USER IF NOT EXISTS '{$localDbUser}'@'localhost' IDENTIFIED BY '{$localDbPass}';\n"
+                                    . "ALTER USER '{$localDbUser}'@'localhost' IDENTIFIED BY '{$localDbPass}';\n"
+                                    . "GRANT ALL ON `{$localDbName}`.* TO '{$localDbUser}'@'localhost';\nFLUSH PRIVILEGES;\n";
+                                $tmpSql = tempnam('/tmp', 'dbsetup');
+                                file_put_contents($tmpSql, $setupSql);
+                                shell_exec("mysql < " . escapeshellarg($tmpSql) . " 2>&1");
+                                @unlink($tmpSql);
+                                shell_exec("mysql {$localDbName} < " . escapeshellarg($dumpFile) . " 2>&1");
+                            }
+
+                            $logs[] = "BD creada: {$localDbName} (user: {$localDbUser})";
+
+                            // Register in hosting_databases
+                            $existingDb = Database::fetchOne(
+                                "SELECT id FROM hosting_databases WHERE account_id = :aid AND db_name = :db",
+                                ['aid' => (int)$params['id'], 'db' => $localDbName]
+                            );
+                            if (!$existingDb) {
+                                Database::insert('hosting_databases', [
+                                    'account_id' => (int)$params['id'],
+                                    'db_name' => $localDbName, 'db_user' => $localDbUser, 'db_type' => $localDbType,
+                                ]);
+                            }
+
+                            // Update local .env
+                            if (file_exists($envPath . '/.env')) {
+                                $env = file_get_contents($envPath . '/.env');
+                                $dbHost = $isPostgres ? '127.0.0.1' : '127.0.0.1';
+                                $dbPort = $isPostgres ? '5432' : '3306';
+                                $env = preg_replace('/^DB_HOST=.*/m', "DB_HOST={$dbHost}", $env);
+                                if (preg_match('/^DB_PORT=.*/m', $env)) {
+                                    $env = preg_replace('/^DB_PORT=.*/m', "DB_PORT={$dbPort}", $env);
+                                }
+                                if (str_contains($env, 'DB_DATABASE')) {
+                                    $env = preg_replace('/^DB_DATABASE=.*/m', "DB_DATABASE={$localDbName}", $env);
+                                    $env = preg_replace('/^DB_USERNAME=.*/m', "DB_USERNAME={$localDbUser}", $env);
+                                    $env = preg_replace('/^DB_PASSWORD=.*/m', "DB_PASSWORD={$localDbPass}", $env);
+                                } elseif (str_contains($env, 'DB_NAME')) {
+                                    $env = preg_replace('/^DB_NAME=.*/m', "DB_NAME={$localDbName}", $env);
+                                    $env = preg_replace('/^DB_USER=.*/m', "DB_USER={$localDbUser}", $env);
+                                    $env = preg_replace('/^DB_PASS=.*/m', "DB_PASS={$localDbPass}", $env);
+                                }
+                                if ($isPostgres && preg_match('/^DB_SSLMODE=.*/m', $env)) {
+                                    $env = preg_replace('/^DB_SSLMODE=.*/m', 'DB_SSLMODE=prefer', $env);
+                                }
+                                file_put_contents($envPath . '/.env', $env);
+                                $logs[] = ".env actualizado: {$envPath}/.env";
+                            }
+                        } else {
+                            $logs[] = "AVISO: Dump vacio o fallo. BD no migrada.";
+                        }
+                        @unlink($dumpFile);
+                    } else {
+                        $logs[] = "AVISO: No se detectaron credenciales de BD en .env";
+                    }
+                } else {
+                    $logs[] = "AVISO: No se encontro .env para auto-deteccion de BD";
+                }
+            }
+        }
+
+        $logs[] = "Migracion de subdominio completada!";
+
+        LogService::log('migration.subdomain', $subFqdn, "Subdomain migrated: scope={$scope}");
+        Flash::set('success', "Subdominio {$subFqdn} migrado correctamente.");
+
+        $_SESSION['migration_log'] = $logs;
+        if ($localDbPass) {
+            $_SESSION['migration_db_pass'] = $localDbPass;
+            $_SESSION['migration_db_name'] = $localDbName;
+            $_SESSION['migration_db_user'] = $localDbUser;
+            $_SESSION['migration_db_type'] = $localDbType;
+        }
+
+        Router::redirect('/accounts/' . $params['id'] . '/migrate');
+    }
 }

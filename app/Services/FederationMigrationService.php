@@ -848,6 +848,7 @@ class FederationMigrationService
             'domain'        => $account['domain'],
             'username'      => $account['username'],
             'php_version'   => $account['php_version'] ?? '8.3',
+            'hosting_type'  => $account['hosting_type'] ?? 'php',
             'disk_quota_mb' => $account['disk_quota_mb'] ?? 0,
             'databases'     => $databases,
             'subdomains'    => $subdomains,

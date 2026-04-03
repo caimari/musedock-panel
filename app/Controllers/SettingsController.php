@@ -1710,6 +1710,7 @@ class SettingsController
             'pdo'       => 'Database connectivity (PDO)',
             'pdo_pgsql' => 'PostgreSQL database driver',
             'pdo_mysql' => 'MySQL database driver',
+            'sqlite3'   => 'SQLite3 database (required by some apps)',
             'curl'      => 'HTTP requests (API, notifications)',
             'mbstring'  => 'Multibyte string support',
             'json'      => 'JSON encoding/decoding',
@@ -1717,6 +1718,10 @@ class SettingsController
             'session'   => 'Session management',
             'fileinfo'  => 'File type detection',
             'posix'     => 'POSIX functions (system users)',
+            'zip'       => 'ZIP archive support',
+            'gd'        => 'Image processing (GD library)',
+            'xml'       => 'XML parsing',
+            'bcmath'    => 'Arbitrary precision math',
         ];
         $extChecks = [];
         foreach ($requiredExtensions as $ext => $desc) {
@@ -1741,6 +1746,12 @@ class SettingsController
             'rsync'       => ['paths' => ['/usr/bin/rsync'], 'desc' => 'File synchronization', 'package' => 'rsync'],
             'git'         => ['paths' => ['/usr/bin/git'], 'desc' => 'Version control', 'package' => 'git'],
             'nproc'       => ['paths' => ['/usr/bin/nproc'], 'desc' => 'CPU core detection', 'package' => 'coreutils'],
+            'node'        => ['paths' => ['/usr/bin/node', '/usr/local/bin/node'], 'desc' => 'Node.js runtime (frontend builds)', 'package' => 'nodejs'],
+            'npm'         => ['paths' => ['/usr/bin/npm', '/usr/local/bin/npm'], 'desc' => 'Node Package Manager', 'package' => 'npm'],
+            'composer'    => ['paths' => ['/usr/bin/composer', '/usr/local/bin/composer'], 'desc' => 'PHP dependency manager', 'package' => 'composer'],
+            'sshpass'     => ['paths' => ['/usr/bin/sshpass'], 'desc' => 'SSH password automation (migrations)', 'package' => 'sshpass'],
+            'tar'         => ['paths' => ['/usr/bin/tar', '/bin/tar'], 'desc' => 'Archive tool', 'package' => 'tar'],
+            'unzip'       => ['paths' => ['/usr/bin/unzip'], 'desc' => 'ZIP extraction', 'package' => 'unzip'],
         ];
         $binChecks = [];
         foreach ($requiredBinaries as $name => $info) {

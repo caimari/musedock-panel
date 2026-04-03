@@ -438,6 +438,92 @@ document.addEventListener('DOMContentLoaded', function() {
     </div>
 </div>
 
+<?php if (!empty($subdomains)): ?>
+<!-- Option 4: Subdomain Migration -->
+<div class="row g-3 mt-1">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-layers me-2"></i>Opcion 4: Migrar Subdominio Individual (Archivos + BD)</span>
+                <button class="btn btn-outline-light btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#subMigrateSection">
+                    <i class="bi bi-chevron-down"></i>
+                </button>
+            </div>
+            <div class="collapse" id="subMigrateSection">
+                <div class="card-body">
+                    <p class="text-muted small">Migra los archivos y base de datos de un subdominio especifico via SSH. Util cuando un subdominio no se copio correctamente o necesitas actualizar solo uno.</p>
+
+                    <form method="POST" action="/accounts/<?= $account['id'] ?>/migrate/subdomain" id="subMigrateForm" onsubmit="return startSubMigration(this);">
+                        <?= View::csrf() ?>
+
+                        <div class="row g-2 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Subdominio a migrar</label>
+                                <select name="subdomain_id" class="form-select form-select-sm" required id="subMigrateSelect" onchange="updateSubMigratePaths()">
+                                    <option value="">Seleccionar subdominio...</option>
+                                    <?php foreach ($subdomains as $sub): ?>
+                                    <option value="<?= (int)$sub['id'] ?>"
+                                        data-subdomain="<?= View::e($sub['subdomain']) ?>"
+                                        data-docroot="<?= View::e($sub['document_root']) ?>">
+                                        <?= View::e($sub['subdomain']) ?>
+                                    </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Que migrar</label>
+                                <select name="sub_migrate_scope" class="form-select form-select-sm">
+                                    <option value="all">Archivos + Base de datos</option>
+                                    <option value="files">Solo archivos</option>
+                                    <option value="db">Solo base de datos</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-4">
+                                <label class="form-label">SSH Host</label>
+                                <input type="text" name="ssh_host" class="form-control form-control-sm" placeholder="IP del servidor remoto" required>
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Puerto</label>
+                                <input type="number" name="ssh_port" class="form-control form-control-sm" value="22">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Usuario SSH</label>
+                                <input type="text" name="ssh_user" class="form-control form-control-sm" value="root">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Password SSH</label>
+                                <input type="password" name="ssh_password" class="form-control form-control-sm" required>
+                            </div>
+                        </div>
+
+                        <div class="row g-2 mb-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Ruta remota del subdominio</label>
+                                <input type="text" name="remote_subdomain_path" id="subMigrateRemotePath" class="form-control form-control-sm" placeholder="/var/www/vhosts/domain.com/sub.domain.com">
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">Ruta local <small class="text-muted">(auto-rellenada)</small></label>
+                                <input type="text" name="local_subdomain_path" id="subMigrateLocalPath" class="form-control form-control-sm" readonly>
+                            </div>
+                        </div>
+
+                        <div class="form-check mb-3">
+                            <input type="checkbox" class="form-check-input" name="auto_detect_db" id="subAutoDetectDb" value="1" checked>
+                            <label class="form-check-label small" for="subAutoDetectDb">Auto-detectar credenciales de BD desde .env remoto</label>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-layers me-1"></i>Migrar Subdominio</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Quick migration tip -->
 <div class="mt-3 p-3 rounded" style="background: rgba(56,189,248,0.05); border: 1px solid #334155;">
     <small class="text-muted">
@@ -1335,4 +1421,40 @@ function updateDbRemotePath() {
         pathInput.value = defaultPath;
     }
 }
+
+function updateSubMigratePaths() {
+    var select = document.getElementById('subMigrateSelect');
+    if (!select) return;
+    var opt = select.options[select.selectedIndex];
+    var subdomain = opt ? opt.getAttribute('data-subdomain') : '';
+    var docroot = opt ? opt.getAttribute('data-docroot') : '';
+    // Local path
+    document.getElementById('subMigrateLocalPath').value = docroot || '';
+    // Remote path: guess based on same structure
+    if (subdomain) {
+        var homeDir = '<?= View::e(rtrim($account['home_dir'], '/')) ?>';
+        document.getElementById('subMigrateRemotePath').value = homeDir + '/' + subdomain;
+    }
+}
+
+function startSubMigration(form) {
+    var btn = form.querySelector('button[type=submit]');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Migrando subdominio...';
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = '<div style="text-align:center;color:#e2e8f0;"><div class="spinner-border text-info mb-3" style="width:3rem;height:3rem;"></div><div style="font-size:1.1rem;">Migrando subdominio...</div><div class="text-muted small mt-1">rsync de archivos + migracion de BD.<br>Puede tardar varios minutos.</div></div>';
+    document.body.appendChild(overlay);
+    return true;
+}
+
+// Restore subdomain migration collapse
+document.addEventListener('DOMContentLoaded', function() {
+    var el = document.getElementById('subMigrateSection');
+    if (el) {
+        if (localStorage.getItem('migrate_sub_open') === '1') el.classList.add('show');
+        el.addEventListener('hidden.bs.collapse', function() { localStorage.setItem('migrate_sub_open', '0'); });
+        el.addEventListener('shown.bs.collapse', function() { localStorage.setItem('migrate_sub_open', '1'); });
+    }
+});
 </script>

@@ -552,14 +552,116 @@ CONF;
     /**
      * Add a Caddy route via API for this domain
      */
-    public static function addCaddyRoute(string $domain, string $documentRoot, string $username, string $phpVersion = '8.3'): ?string
+    /**
+     * Build Caddy subroutes based on hosting type.
+     *
+     * @param string $hostingType 'php' | 'spa' | 'static'
+     */
+    private static function buildCaddySubroutes(string $documentRoot, string $username, string $phpVersion, string $hostingType): array
+    {
+        $routes = [];
+
+        // 1. Set root for all subroutes
+        $routes[] = ['handle' => [['handler' => 'vars', 'root' => $documentRoot]]];
+
+        // 2. Static file cache headers (all types)
+        $routes[] = [
+            'match' => [['path' => ['*.jpg', '*.jpeg', '*.png', '*.gif', '*.webp', '*.svg', '*.ico', '*.css', '*.js', '*.woff', '*.woff2']]],
+            'handle' => [['handler' => 'headers', 'response' => ['set' => ['Cache-Control' => ['public, max-age=2592000']]]]],
+        ];
+
+        if ($hostingType === 'spa') {
+            // SPA: try file first, fallback to /index.html (React Router, Vue Router, etc.)
+            $routes[] = [
+                'match' => [['file' => ['try_files' => ['{http.request.uri.path}', '/index.html']]]],
+                'handle' => [['handler' => 'rewrite', 'uri' => '{http.matchers.file.relative}']],
+            ];
+        } elseif ($hostingType === 'static') {
+            // Static: serve files directly, no fallback
+            $routes[] = [
+                'match' => [['file' => ['try_files' => ['{http.request.uri.path}', '{http.request.uri.path}/index.html']]]],
+                'handle' => [['handler' => 'rewrite', 'uri' => '{http.matchers.file.relative}']],
+            ];
+        } else {
+            // PHP: try file, then index.php (Laravel, WordPress, etc.)
+            $socketPath = "/run/php/php{$phpVersion}-fpm-{$username}.sock";
+
+            $routes[] = [
+                'match' => [['file' => ['try_files' => ['{http.request.uri.path}', '{http.request.uri.path}/index.php', '/index.php']]]],
+                'handle' => [['handler' => 'rewrite', 'uri' => '{http.matchers.file.relative}']],
+            ];
+            $routes[] = [
+                'match' => [['path' => ['*.php']]],
+                'handle' => [[
+                    'handler' => 'reverse_proxy',
+                    'transport' => ['protocol' => 'fastcgi', 'root' => $documentRoot, 'split_path' => ['.php']],
+                    'upstreams' => [['dial' => "unix/{$socketPath}"]],
+                ]],
+            ];
+        }
+
+        // File server (all types)
+        $routes[] = [
+            'handle' => [['handler' => 'file_server', 'root' => $documentRoot, 'hide' => ['.git', '.env', '.htaccess']]],
+        ];
+
+        return $routes;
+    }
+
+    /**
+     * Auto-detect hosting type based on document root contents.
+     *
+     * Returns: 'php', 'spa', or 'static'
+     */
+    public static function detectHostingType(string $documentRoot): string
+    {
+        if (!is_dir($documentRoot)) return 'php';
+
+        // Check parent dir too (for Laravel/MuseDock with /public)
+        $projectRoot = $documentRoot;
+        if (str_ends_with($documentRoot, '/public')) {
+            $projectRoot = dirname($documentRoot);
+        }
+
+        // PHP indicators (check first — most common)
+        if (file_exists($documentRoot . '/index.php')) return 'php';
+        if (file_exists($documentRoot . '/wp-config.php')) return 'php';
+        if (file_exists($projectRoot . '/artisan')) return 'php'; // Laravel
+        if (file_exists($projectRoot . '/muse')) return 'php'; // MuseDock CMS
+
+        // SPA indicators: index.html + JS bundle files
+        if (file_exists($documentRoot . '/index.html')) {
+            $html = @file_get_contents($documentRoot . '/index.html', false, null, 0, 2000);
+            if ($html) {
+                // React/Vue/Angular SPA: <div id="root"> or <div id="app"> + bundled JS
+                if (preg_match('/<div\s+id="(root|app|__next)"/', $html) ||
+                    preg_match('/src="[^"]*\/(assets|static|js)\/[^"]*\.js"/', $html) ||
+                    str_contains($html, 'modulepreload') ||
+                    str_contains($html, 'type="module"')) {
+                    // Verify there's no index.php alongside (could be a PHP app with SPA frontend)
+                    if (!file_exists($documentRoot . '/index.php')) {
+                        return 'spa';
+                    }
+                }
+            }
+            // Has index.html but no JS app indicators → static site
+            if (!file_exists($documentRoot . '/index.php')) {
+                // Check if there are multiple .html files (static site) vs single index.html (SPA)
+                $htmlFiles = glob($documentRoot . '/*.html');
+                if (count($htmlFiles) > 3) return 'static';
+                return 'spa'; // Single index.html, likely SPA
+            }
+        }
+
+        return 'php'; // Default
+    }
+
+    public static function addCaddyRoute(string $domain, string $documentRoot, string $username, string $phpVersion = '8.3', string $hostingType = 'php'): ?string
     {
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'];
 
         $routeId = self::caddyRouteId($domain);
-
-        $socketPath = "/run/php/php{$phpVersion}-fpm-{$username}.sock";
 
         // Refresh CF zones if this domain isn't in any known zone, then rebuild TLS policies
         $rootDomain = implode('.', array_slice(explode('.', $domain), -2));
@@ -569,57 +671,13 @@ CONF;
         }
         self::ensureTlsCatchAllPolicy($caddyApi);
 
+        $hosts = [$domain, "www.{$domain}"];
+        $subroutes = self::buildCaddySubroutes($documentRoot, $username, $phpVersion, $hostingType);
+
         $caddyConfig = [
             '@id' => $routeId,
-            'match' => [
-                ['host' => [$domain, "www.{$domain}"]]
-            ],
-            'handle' => [
-                [
-                    'handler' => 'subroute',
-                    'routes' => [
-                        // Set root for all subroutes
-                        [
-                            'handle' => [
-                                ['handler' => 'vars', 'root' => $documentRoot]
-                            ]
-                        ],
-                        // Static file headers
-                        [
-                            'match' => [['path' => ['*.jpg', '*.jpeg', '*.png', '*.gif', '*.webp', '*.svg', '*.ico', '*.css', '*.js', '*.woff', '*.woff2']]],
-                            'handle' => [['handler' => 'headers', 'response' => ['set' => ['Cache-Control' => ['public, max-age=2592000']]]]]
-                        ],
-                        // try_files: rewrite to existing file or index.php (Laravel/WordPress friendly)
-                        [
-                            'match' => [['file' => ['try_files' => ['{http.request.uri.path}', '{http.request.uri.path}/index.php', '/index.php']]]],
-                            'handle' => [['handler' => 'rewrite', 'uri' => '{http.matchers.file.relative}']]
-                        ],
-                        // PHP handler via FPM
-                        [
-                            'match' => [['path' => ['*.php']]],
-                            'handle' => [
-                                [
-                                    'handler' => 'reverse_proxy',
-                                    'transport' => [
-                                        'protocol' => 'fastcgi',
-                                        'root' => $documentRoot,
-                                        'split_path' => ['.php'],
-                                    ],
-                                    'upstreams' => [
-                                        ['dial' => "unix/{$socketPath}"]
-                                    ]
-                                ]
-                            ]
-                        ],
-                        // File server
-                        [
-                            'handle' => [
-                                ['handler' => 'file_server', 'root' => $documentRoot, 'hide' => ['.git', '.env', '.htaccess']]
-                            ]
-                        ]
-                    ]
-                ]
-            ],
+            'match' => [['host' => $hosts]],
+            'handle' => [['handler' => 'subroute', 'routes' => $subroutes]],
             'terminal' => true,
         ];
 
@@ -647,7 +705,7 @@ CONF;
      * Add a Caddy route matching multiple domains (main + aliases).
      * Deletes existing route first, then creates with all domains.
      */
-    public static function rebuildCaddyRouteWithAliases(string $mainDomain, array $aliasDomains, string $documentRoot, string $username, string $phpVersion = '8.3'): ?string
+    public static function rebuildCaddyRouteWithAliases(string $mainDomain, array $aliasDomains, string $documentRoot, string $username, string $phpVersion = '8.3', string $hostingType = 'php'): ?string
     {
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'];
@@ -680,41 +738,11 @@ CONF;
         }
         self::ensureTlsCatchAllPolicy($caddyApi);
 
-        $socketPath = "/run/php/php{$phpVersion}-fpm-{$username}.sock";
+        $subroutes = self::buildCaddySubroutes($documentRoot, $username, $phpVersion, $hostingType);
         $caddyConfig = [
             '@id' => $routeId,
             'match' => [['host' => $hosts]],
-            'handle' => [
-                [
-                    'handler' => 'subroute',
-                    'routes' => [
-                        [
-                            'handle' => [['handler' => 'vars', 'root' => $documentRoot]]
-                        ],
-                        [
-                            'match' => [['path' => ['*.jpg', '*.jpeg', '*.png', '*.gif', '*.webp', '*.svg', '*.ico', '*.css', '*.js', '*.woff', '*.woff2']]],
-                            'handle' => [['handler' => 'headers', 'response' => ['set' => ['Cache-Control' => ['public, max-age=2592000']]]]]
-                        ],
-                        [
-                            'match' => [['file' => ['try_files' => ['{http.request.uri.path}', '{http.request.uri.path}/index.php', '/index.php']]]],
-                            'handle' => [['handler' => 'rewrite', 'uri' => '{http.matchers.file.relative}']]
-                        ],
-                        [
-                            'match' => [['path' => ['*.php']]],
-                            'handle' => [
-                                [
-                                    'handler' => 'reverse_proxy',
-                                    'transport' => ['protocol' => 'fastcgi', 'root' => $documentRoot, 'split_path' => ['.php']],
-                                    'upstreams' => [['dial' => "unix/{$socketPath}"]]
-                                ]
-                            ]
-                        ],
-                        [
-                            'handle' => [['handler' => 'file_server', 'root' => $documentRoot, 'hide' => ['.git', '.env', '.htaccess']]]
-                        ]
-                    ]
-                ]
-            ],
+            'handle' => [['handler' => 'subroute', 'routes' => $subroutes]],
             'terminal' => true,
         ];
 

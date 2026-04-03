@@ -243,14 +243,15 @@ class FederationApiController
 
         // Try to read PHP version from existing account data or default
         $phpVersion = $input['php_version'] ?? '8.3';
+        $hostingType = $input['hosting_type'] ?? 'php';
 
-        FederationMigrationService::log($migrationId, 'finalize', 'info', "Finalizing hosting: {$domain}");
+        FederationMigrationService::log($migrationId, 'finalize', 'info', "Finalizing hosting: {$domain} (type: {$hostingType})");
 
         // Create PHP-FPM pool
         SystemService::createFpmPool($username, $phpVersion, $homeDir);
 
         // Add Caddy route
-        SystemService::addCaddyRoute($domain, $docRoot, $username, $phpVersion);
+        SystemService::addCaddyRoute($domain, $docRoot, $username, $phpVersion, $hostingType);
 
         // Set proper ownership (critical — failure here means broken permissions)
         $chownOut = [];
@@ -280,6 +281,7 @@ class FederationApiController
             'home_dir'      => $homeDir,
             'document_root' => $docRoot,
             'php_version'   => $phpVersion,
+            'hosting_type'  => $hostingType,
             'fpm_socket'    => "/run/php/php{$phpVersion}-fpm-{$username}.sock",
             'status'        => 'active',
             'shell'         => '/usr/sbin/nologin',
@@ -306,17 +308,20 @@ class FederationApiController
 
             if (empty($subFqdn)) continue;
 
+            $subHostingType = $sub['hosting_type'] ?? 'php';
+
             Database::insert('hosting_subdomains', [
                 'account_id'    => $accountId,
                 'subdomain'     => $subFqdn,
                 'document_root' => $subDocRoot,
                 'php_version'   => $subPhpVer,
+                'hosting_type'  => $subHostingType,
                 'status'        => 'active',
             ]);
 
-            // Create Caddy route for subdomain (reuses parent's FPM pool)
+            // Create Caddy route for subdomain with correct hosting type
             if (!empty($subDocRoot)) {
-                SystemService::addCaddyRoute($subFqdn, $subDocRoot, $username, $subPhpVer);
+                SystemService::addCaddyRoute($subFqdn, $subDocRoot, $username, $subPhpVer, $subHostingType);
             }
         }
 

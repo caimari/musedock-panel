@@ -978,6 +978,71 @@ use MuseDockPanel\Services\CloudflareService;
             </div>
         </div>
 
+        <!-- Hosting Type -->
+        <?php if (!($isSlave ?? false)): ?>
+        <?php
+        $currentType = $account['hosting_type'] ?? 'php';
+        $detectedType = \MuseDockPanel\Services\SystemService::detectHostingType($account['document_root']);
+        $typeLabels = ['php' => 'PHP', 'spa' => 'SPA', 'static' => 'Static'];
+        $typeIcons = ['php' => 'bi-filetype-php', 'spa' => 'bi-window-stack', 'static' => 'bi-file-earmark-code'];
+        $typeColors = ['php' => '#a78bfa', 'spa' => '#10b981', 'static' => '#38bdf8'];
+        ?>
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-diagram-2 me-2"></i>Hosting Type</span>
+                <?php if ($currentType !== $detectedType): ?>
+                <span class="badge bg-warning text-dark" style="font-size:0.65rem;" title="Auto-deteccion sugiere: <?= $typeLabels[$detectedType] ?>"><i class="bi bi-lightbulb me-1"></i>Detectado: <?= $typeLabels[$detectedType] ?></span>
+                <?php endif; ?>
+            </div>
+            <div class="card-body py-2">
+                <div class="btn-group w-100" role="group">
+                    <?php foreach (['php', 'spa', 'static'] as $t): ?>
+                    <button type="button" class="btn btn-sm <?= $currentType === $t ? 'active' : '' ?>"
+                        style="<?= $currentType === $t ? "background:{$typeColors[$t]};border-color:{$typeColors[$t]};color:#fff;flex:1;" : "border-color:#334155;color:#94a3b8;flex:1;" ?>"
+                        <?= $currentType === $t ? 'disabled' : '' ?>
+                        onclick="changeHostingType('<?= $t ?>')">
+                        <i class="bi <?= $typeIcons[$t] ?> me-1"></i><?= $typeLabels[$t] ?>
+                    </button>
+                    <?php endforeach; ?>
+                </div>
+                <script>
+                function changeHostingType(type) {
+                    var labels = {php:'PHP',spa:'SPA','static':'Static'};
+                    var descs = {
+                        php: 'try_files → index.php + PHP-FPM. Para WordPress, Laravel, etc.',
+                        spa: 'try_files → index.html. Para React, Vue, Angular, Vite.',
+                        'static': 'Solo file_server. Para HTML estatico puro.'
+                    };
+                    SwalDark.fire({
+                        title: 'Cambiar a ' + labels[type] + '?',
+                        html: 'Se reconfigurara la ruta Caddy de <strong><?= View::e($account['domain']) ?></strong>.<br><br><span class="text-muted small">' + descs[type] + '</span>',
+                        icon: 'question',
+                        showCancelButton: true,
+                        confirmButtonText: 'Cambiar',
+                    }).then(function(result) {
+                        if (!result.isConfirmed) return;
+                        var form = document.createElement('form');
+                        form.method = 'POST';
+                        form.action = '/accounts/<?= $account['id'] ?>/hosting-type';
+                        form.innerHTML = '<?= View::csrf() ?><input type="hidden" name="hosting_type" value="' + type + '">';
+                        document.body.appendChild(form);
+                        form.submit();
+                    });
+                }
+                </script>
+                <div class="small text-muted mt-2">
+                    <?php if ($currentType === 'php'): ?>
+                        <i class="bi bi-info-circle me-1"></i>WordPress, Laravel, PHP apps — try_files → index.php
+                    <?php elseif ($currentType === 'spa'): ?>
+                        <i class="bi bi-info-circle me-1"></i>React, Vue, Angular, Vite — try_files → index.html
+                    <?php else: ?>
+                        <i class="bi bi-info-circle me-1"></i>HTML estatico — solo file_server, sin fallback
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <!-- Federation Clones -->
         <?php if (!empty($federationClones)): ?>
         <div class="card mb-3" style="border-color:rgba(16,185,129,0.3);">

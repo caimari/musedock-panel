@@ -20,6 +20,51 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.56',
+                'date' => '2026-04-03',
+                'badge' => 'danger',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Hosting Type: 3 modos (PHP/SPA/Static) — Configura como Caddy sirve cada hosting: PHP (index.php), SPA (index.html para React/Vue/Angular) o Static (file_server puro)',
+                            'Hosting Type: auto-deteccion — El panel analiza el document root y sugiere el tipo correcto (detecta React, Laravel, WordPress, HTML estatico)',
+                            'Hosting Type: por subdominio — Cada subdominio puede tener su propio tipo independiente del dominio principal (ej: factubase.com=SPA, api.factubase.com=PHP)',
+                            'Hosting Type: modal de confirmacion — Cambiar el tipo requiere confirmacion con descripcion del cambio',
+                            'Migracion: Opcion 4 Subdominio Individual — Migra archivos + BD de un subdominio especifico via SSH en un solo paso',
+                            'Migracion subdomain: auto-deteccion BD — Lee .env del servidor remoto, detecta credenciales MySQL/PostgreSQL, crea BD local y actualiza .env',
+                            'Migracion subdomain: selector de scope — Elige migrar archivos + BD, solo archivos o solo BD',
+                            'Health: PHP extensions — Añadidos sqlite3, zip, gd, xml, bcmath. Boton de instalacion para extensiones faltantes',
+                            'Health: build tools — Añadidos node, npm, composer, sshpass, tar, unzip con botones de instalacion',
+                        ],
+                        'en' => [
+                            'Hosting Type: 3 modes (PHP/SPA/Static) — Configure how Caddy serves each hosting: PHP (index.php), SPA (index.html for React/Vue/Angular) or Static (pure file_server)',
+                            'Hosting Type: auto-detection — Panel analyzes document root and suggests correct type (detects React, Laravel, WordPress, static HTML)',
+                            'Hosting Type: per subdomain — Each subdomain can have its own type independent of main domain (e.g. factubase.com=SPA, api.factubase.com=PHP)',
+                            'Hosting Type: confirmation modal — Changing type requires confirmation with change description',
+                            'Migration: Option 4 Individual Subdomain — Migrate files + DB of a specific subdomain via SSH in one step',
+                            'Migration subdomain: auto-detect DB — Reads .env from remote server, detects MySQL/PostgreSQL credentials, creates local DB and updates .env',
+                            'Migration subdomain: scope selector — Choose to migrate files + DB, files only or DB only',
+                            'Health: PHP extensions — Added sqlite3, zip, gd, xml, bcmath. Install button for missing extensions',
+                            'Health: build tools — Added node, npm, composer, sshpass, tar, unzip with install buttons',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Federation: hosting_type en migracion — El tipo de hosting (PHP/SPA/Static) se transfiere al destino durante la migracion federation',
+                            'Federation: subdominios con tipo — Los subdominios migrados conservan su hosting_type individual y se crean con la ruta Caddy correcta',
+                            'SubdomainService: auto-deteccion al crear — Al crear un subdominio, el tipo se auto-detecta basandose en el contenido del document root',
+                            'SystemService: buildCaddySubroutes — Refactorizado para generar rutas Caddy segun el tipo (eliminado codigo duplicado entre addCaddyRoute y rebuildCaddyRouteWithAliases)',
+                        ],
+                        'en' => [
+                            'Federation: hosting_type in migration — Hosting type (PHP/SPA/Static) is transferred to destination during federation migration',
+                            'Federation: subdomains with type — Migrated subdomains preserve their individual hosting_type and are created with correct Caddy route',
+                            'SubdomainService: auto-detect on creation — When creating a subdomain, type is auto-detected based on document root contents',
+                            'SystemService: buildCaddySubroutes — Refactored to generate Caddy routes based on type (removed duplicate code between addCaddyRoute and rebuildCaddyRouteWithAliases)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.55',
                 'date' => '2026-04-03',
                 'badge' => 'danger',

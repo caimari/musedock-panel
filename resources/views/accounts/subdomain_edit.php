@@ -72,6 +72,66 @@ $relativePath = $docRoot === $basePath ? '' : str_replace($basePath . '/', '', $
             </div>
         </div>
 
+        <!-- Hosting Type -->
+        <?php if (!($isSlave ?? false)): ?>
+        <?php
+        $subHostingType = $subdomain['hosting_type'] ?? 'php';
+        $subDetectedType = \MuseDockPanel\Services\SystemService::detectHostingType($subdomain['document_root']);
+        $typeLabels = ['php' => 'PHP', 'spa' => 'SPA', 'static' => 'Static'];
+        $typeIcons = ['php' => 'bi-filetype-php', 'spa' => 'bi-window-stack', 'static' => 'bi-file-earmark-code'];
+        $typeColors = ['php' => '#a78bfa', 'spa' => '#10b981', 'static' => '#38bdf8'];
+        ?>
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-diagram-2 me-2"></i>Hosting Type</span>
+                <?php if ($subHostingType !== $subDetectedType): ?>
+                <span class="badge bg-warning text-dark" style="font-size:0.65rem;"><i class="bi bi-lightbulb me-1"></i>Detectado: <?= $typeLabels[$subDetectedType] ?></span>
+                <?php endif; ?>
+            </div>
+            <div class="card-body py-2">
+                <div class="btn-group w-100" role="group">
+                    <?php foreach (['php', 'spa', 'static'] as $t): ?>
+                    <button type="button" class="btn btn-sm <?= $subHostingType === $t ? 'active' : '' ?>"
+                        style="<?= $subHostingType === $t ? "background:{$typeColors[$t]};border-color:{$typeColors[$t]};color:#fff;" : "border-color:#334155;color:#94a3b8;" ?>"
+                        <?= $subHostingType === $t ? 'disabled' : '' ?>
+                        onclick="changeSubHostingType('<?= $t ?>')">
+                        <i class="bi <?= $typeIcons[$t] ?> me-1"></i><?= $typeLabels[$t] ?>
+                    </button>
+                    <?php endforeach; ?>
+                </div>
+                <div class="small text-muted mt-2">
+                    <?php if ($subHostingType === 'spa'): ?>
+                        <i class="bi bi-info-circle me-1"></i>React, Vue, Angular — try_files → index.html
+                    <?php elseif ($subHostingType === 'static'): ?>
+                        <i class="bi bi-info-circle me-1"></i>HTML estatico — solo file_server
+                    <?php else: ?>
+                        <i class="bi bi-info-circle me-1"></i>PHP apps — try_files → index.php
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+        <script>
+        function changeSubHostingType(type) {
+            var labels = {php:'PHP',spa:'SPA','static':'Static'};
+            SwalDark.fire({
+                title: 'Cambiar a ' + labels[type] + '?',
+                html: 'Se reconfigurara la ruta Caddy de <strong><?= View::e($subdomain['subdomain']) ?></strong> para servir como ' + labels[type] + '.',
+                icon: 'question',
+                showCancelButton: true,
+                confirmButtonText: 'Cambiar',
+            }).then(function(result) {
+                if (!result.isConfirmed) return;
+                var form = document.createElement('form');
+                form.method = 'POST';
+                form.action = '/accounts/<?= (int)$account['id'] ?>/subdomains/<?= (int)$subdomain['id'] ?>/hosting-type';
+                form.innerHTML = '<?= View::csrf() ?><input type="hidden" name="hosting_type" value="' + type + '">';
+                document.body.appendChild(form);
+                form.submit();
+            });
+        }
+        </script>
+        <?php endif; ?>
+
         <!-- Ajustes PHP del subdominio -->
         <div class="card mb-3">
             <div class="card-header"><i class="bi bi-filetype-php me-2"></i>Ajustes PHP</div>

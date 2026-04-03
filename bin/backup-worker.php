@@ -156,6 +156,8 @@ try {
     }
 
     // ── Step: Dump databases ────────────────────────────────────
+    // All databases for this account (including those used by subdomains)
+    // are registered under the main account_id in hosting_databases.
     if ($includeDatabases) {
         $databases = MuseDockPanel\Database::fetchAll(
             "SELECT * FROM hosting_databases WHERE account_id = :id",

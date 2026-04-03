@@ -1206,6 +1206,60 @@ class AccountController
         Router::redirect("/accounts/{$params['id']}/subdomains/{$params['sub_id']}/edit");
     }
 
+    /**
+     * POST /accounts/{id}/subdomains/{sub_id}/hosting-type
+     */
+    public function updateSubdomainHostingType(array $params): void
+    {
+        if ($this->slaveGuard('Cambiar tipo de hosting')) return;
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        $subdomain = Database::fetchOne("SELECT * FROM hosting_subdomains WHERE id = :id AND account_id = :aid", [
+            'id' => $params['sub_id'], 'aid' => $params['id'],
+        ]);
+
+        if (!$account || !$subdomain) {
+            Flash::set('error', 'Cuenta o subdominio no encontrado.');
+            Router::redirect('/accounts');
+            return;
+        }
+
+        $hostingType = $_POST['hosting_type'] ?? 'php';
+        if (!in_array($hostingType, ['php', 'spa', 'static'], true)) $hostingType = 'php';
+
+        $oldType = $subdomain['hosting_type'] ?? 'php';
+        if ($oldType === $hostingType) {
+            Router::redirect("/accounts/{$params['id']}/subdomains/{$params['sub_id']}/edit");
+            return;
+        }
+
+        Database::update('hosting_subdomains', [
+            'hosting_type' => $hostingType,
+        ], 'id = :id', ['id' => $params['sub_id']]);
+
+        // Rebuild Caddy route
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = $config['caddy']['api_url'];
+        $routeId = SystemService::caddyRouteId($subdomain['subdomain']);
+
+        $ch = curl_init("{$caddyApi}/id/{$routeId}");
+        curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true]);
+        curl_exec($ch);
+        curl_close($ch);
+
+        SystemService::addCaddyRoute(
+            $subdomain['subdomain'], $subdomain['document_root'],
+            $account['username'], $subdomain['php_version'] ?? $account['php_version'] ?? '8.3',
+            $hostingType
+        );
+
+        $typeLabels = ['php' => 'PHP', 'spa' => 'SPA', 'static' => 'Static'];
+        LogService::log('subdomain.hosting_type', $subdomain['subdomain'],
+            "Hosting type: {$typeLabels[$oldType]} → {$typeLabels[$hostingType]}");
+        Flash::set('success', "Tipo de hosting de {$subdomain['subdomain']} cambiado a {$typeLabels[$hostingType]}.");
+        Router::redirect("/accounts/{$params['id']}/subdomains/{$params['sub_id']}/edit");
+    }
+
     public function updateSubdomainPhp(array $params): void
     {
         if ($this->slaveGuard('Cambiar PHP de subdominios')) return;
@@ -2285,5 +2339,72 @@ class AccountController
 
         Flash::set('success', "Cuenta {$account['domain']} eliminada correctamente.");
         Router::redirect('/accounts');
+    }
+
+    /**
+     * POST /accounts/{id}/hosting-type — Change hosting type (php/spa/static)
+     * Rebuilds the Caddy route with the appropriate configuration.
+     */
+    public function updateHostingType(array $params): void
+    {
+        if ($this->slaveGuard('Cambiar tipo de hosting')) return;
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) {
+            Flash::set('error', 'Cuenta no encontrada.');
+            Router::redirect('/accounts');
+            return;
+        }
+
+        $hostingType = $_POST['hosting_type'] ?? 'php';
+        if (!in_array($hostingType, ['php', 'spa', 'static'], true)) {
+            $hostingType = 'php';
+        }
+
+        $oldType = $account['hosting_type'] ?? 'php';
+        if ($oldType === $hostingType) {
+            Router::redirect('/accounts/' . $params['id']);
+            return;
+        }
+
+        // Update DB
+        Database::update('hosting_accounts', [
+            'hosting_type' => $hostingType,
+            'updated_at' => date('Y-m-d H:i:s'),
+        ], 'id = :id', ['id' => $params['id']]);
+
+        // Delete old Caddy route and create new one with correct type
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = $config['caddy']['api_url'];
+        $routeId = SystemService::caddyRouteId($account['domain']);
+
+        $ch = curl_init("{$caddyApi}/id/{$routeId}");
+        curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true]);
+        curl_exec($ch);
+        curl_close($ch);
+
+        // Check for domain aliases to rebuild with
+        $aliases = \MuseDockPanel\Services\DomainAliasService::getAliases((int)$params['id']);
+        $aliasDomains = array_map(fn($a) => $a['domain'], $aliases);
+
+        if (!empty($aliasDomains)) {
+            SystemService::rebuildCaddyRouteWithAliases(
+                $account['domain'], $aliasDomains,
+                $account['document_root'], $account['username'],
+                $account['php_version'] ?? '8.3', $hostingType
+            );
+        } else {
+            SystemService::addCaddyRoute(
+                $account['domain'], $account['document_root'],
+                $account['username'], $account['php_version'] ?? '8.3',
+                $hostingType
+            );
+        }
+
+        $typeLabels = ['php' => 'PHP', 'spa' => 'SPA', 'static' => 'Static'];
+        LogService::log('account.hosting_type', $account['domain'],
+            "Hosting type changed: {$typeLabels[$oldType]} → {$typeLabels[$hostingType]}");
+        Flash::set('success', "Tipo de hosting cambiado a {$typeLabels[$hostingType]}. Ruta Caddy reconstruida.");
+        Router::redirect('/accounts/' . $params['id']);
     }
 }

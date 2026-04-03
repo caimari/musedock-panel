@@ -210,6 +210,13 @@
                             <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;"><i class="bi bi-check-circle me-1"></i>Loaded</span>
                         <?php else: ?>
                             <span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;"><i class="bi bi-x-circle me-1"></i>Missing</span>
+                            <?php
+                            $phpVer = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
+                            $extPkg = "php{$phpVer}-{$ext['name']}";
+                            ?>
+                            <button type="button" class="btn btn-outline-success btn-sm py-0 px-2 ms-1" onclick="installPackage('<?= $extPkg ?>', '<?= View::e($ext['name']) ?>', this)" title="apt install <?= $extPkg ?>">
+                                <i class="bi bi-download" style="font-size:0.7rem;"></i>
+                            </button>
                         <?php endif; ?>
                     </td>
                 </tr>

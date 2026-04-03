@@ -134,8 +134,11 @@ class SubdomainService
         $username = $account['username'];
         shell_exec(sprintf('chown -R %s:www-data %s 2>&1', escapeshellarg($username), escapeshellarg($documentRoot)));
 
-        // Create Caddy route (reuses parent's FPM pool)
-        $caddyRouteId = SystemService::addCaddyRoute($subdomain, $documentRoot, $username, $account['php_version'] ?? '8.3');
+        // Auto-detect hosting type for the subdomain
+        $hostingType = SystemService::detectHostingType($documentRoot);
+
+        // Create Caddy route with correct hosting type (reuses parent's FPM pool)
+        $caddyRouteId = SystemService::addCaddyRoute($subdomain, $documentRoot, $username, $account['php_version'] ?? '8.3', $hostingType);
 
         // Insert DB record
         $id = Database::insert('hosting_subdomains', [
@@ -143,6 +146,7 @@ class SubdomainService
             'subdomain'     => $subdomain,
             'document_root' => $documentRoot,
             'caddy_route_id' => $caddyRouteId,
+            'hosting_type'  => $hostingType,
             'status'        => 'active',
         ]);
 

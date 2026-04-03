@@ -176,6 +176,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/renew-ssl', 'AccountController@renewSsl');
 \MuseDockPanel\Router::post('/accounts/{id}/rename-user', 'AccountController@renameUser');
 \MuseDockPanel\Router::post('/accounts/{id}/php', 'AccountController@updatePhp');
+\MuseDockPanel\Router::post('/accounts/{id}/hosting-type', 'AccountController@updateHostingType');
 
 // File Manager
 \MuseDockPanel\Router::get('/accounts/{id}/files', 'FileManagerController@index');
@@ -205,6 +206,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/accounts/{id}/subdomains/{sub_id}/edit', 'AccountController@editSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/update', 'AccountController@updateSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/php', 'AccountController@updateSubdomainPhp');
+\MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/hosting-type', 'AccountController@updateSubdomainHostingType');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/add', 'AccountController@addSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/adopt', 'AccountController@adoptSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/toggle-status', 'AccountController@toggleSubdomainStatus');
@@ -224,6 +226,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/accounts/{id}/migrate/ssh-status', 'MigrationController@sshStatus');
 \MuseDockPanel\Router::post('/accounts/{id}/migrate/ssh-cancel', 'MigrationController@sshCancel');
 \MuseDockPanel\Router::post('/accounts/{id}/migrate/ssh-resume', 'MigrationController@sshResume');
+\MuseDockPanel\Router::post('/accounts/{id}/migrate/subdomain', 'MigrationController@migrateSubdomain');
 
 // Federation Migration (master-to-master)
 \MuseDockPanel\Router::get('/accounts/{id}/federation-migrate', 'FederationController@migrateForm');
