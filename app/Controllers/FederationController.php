@@ -353,4 +353,84 @@ class FederationController
         $step = $_GET['step'] ?? null;
         echo json_encode(FederationMigrationService::getLogs($migrationId, $step));
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Clone actions (update, re-clone, promote)
+    // All require admin password verification.
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * POST /accounts/{id}/federation-clone/update
+     */
+    public function cloneUpdate(array $params): void
+    {
+        header('Content-Type: application/json');
+        $accountId = (int)($params['id'] ?? 0);
+        $peerId = (int)($_POST['peer_id'] ?? 0);
+        $password = $_POST['admin_password'] ?? '';
+        $syncScope = $_POST['sync_scope'] ?? 'all'; // 'all', 'files', 'db'
+
+        if (!FederationMigrationService::verifyAdminPassword($password)) {
+            echo json_encode(['ok' => false, 'error' => 'Contrasenya incorrecta']);
+            return;
+        }
+
+        $result = FederationMigrationService::updateClone($accountId, $peerId, $syncScope);
+        echo json_encode($result);
+    }
+
+    /**
+     * POST /accounts/{id}/federation-clone/reclone
+     */
+    public function cloneReclone(array $params): void
+    {
+        header('Content-Type: application/json');
+        $accountId = (int)($params['id'] ?? 0);
+        $peerId = (int)($_POST['peer_id'] ?? 0);
+        $password = $_POST['admin_password'] ?? '';
+
+        if (!FederationMigrationService::verifyAdminPassword($password)) {
+            echo json_encode(['ok' => false, 'error' => 'Contrasenya incorrecta']);
+            return;
+        }
+
+        $result = FederationMigrationService::forceReclone($accountId, $peerId);
+        echo json_encode($result);
+    }
+
+    /**
+     * POST /accounts/{id}/federation-clone/promote
+     */
+    public function clonePromote(array $params): void
+    {
+        header('Content-Type: application/json');
+        $accountId = (int)($params['id'] ?? 0);
+        $peerId = (int)($_POST['peer_id'] ?? 0);
+        $password = $_POST['admin_password'] ?? '';
+        $dnsMode = $_POST['dns_mode'] ?? 'auto';
+        $gracePeriod = (int)($_POST['grace_period'] ?? 60);
+        $syncFirst = !empty($_POST['sync_first']);
+
+        if (!FederationMigrationService::verifyAdminPassword($password)) {
+            echo json_encode(['ok' => false, 'error' => 'Contrasenya incorrecta']);
+            return;
+        }
+
+        $result = FederationMigrationService::promoteClone($accountId, $peerId, $dnsMode, $gracePeriod, $syncFirst);
+        echo json_encode($result);
+    }
+
+    /**
+     * GET /accounts/{id}/federation-clone/status
+     * Get clone status for this account (completed clones).
+     */
+    public function cloneStatus(array $params): void
+    {
+        header('Content-Type: application/json');
+        $accountId = (int)($params['id'] ?? 0);
+        echo json_encode([
+            'ok' => true,
+            'clones' => FederationMigrationService::getCompletedClones($accountId),
+        ]);
+    }
 }

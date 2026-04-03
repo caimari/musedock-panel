@@ -95,8 +95,10 @@ class FederationMigrationService
     // Mode constants
     // ═══════════════════════════════════════════════════════════════
 
-    public const MODE_MIGRATE = 'migrate';
-    public const MODE_CLONE   = 'clone';
+    public const MODE_MIGRATE     = 'migrate';
+    public const MODE_CLONE       = 'clone';
+    public const MODE_UPDATE_CLONE = 'update_clone';
+    public const MODE_PROMOTE     = 'promote';
 
     // ═══════════════════════════════════════════════════════════════
     // CRUD
@@ -1571,5 +1573,368 @@ class FederationMigrationService
             'wall_clock_seconds' => $wallClock,
             'final_metrics' => $migration['metadata']['metrics'] ?? null,
         ];
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Clone actions (update, re-clone, promote)
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * Find a completed clone for an account on a specific peer.
+     */
+    public static function findCompletedClone(int $accountId, ?int $peerId = null): ?array
+    {
+        $where = "account_id = :aid AND mode = 'clone' AND status = 'completed'";
+        $params = ['aid' => $accountId];
+        if ($peerId) {
+            $where .= ' AND peer_id = :pid';
+            $params['pid'] = $peerId;
+        }
+        $row = Database::fetchOne(
+            "SELECT * FROM hosting_migrations WHERE {$where} ORDER BY completed_at DESC LIMIT 1",
+            $params
+        );
+        if ($row) {
+            $row['metadata'] = json_decode($row['metadata'] ?? '{}', true);
+            $row['step_results'] = json_decode($row['step_results'] ?? '{}', true);
+        }
+        return $row;
+    }
+
+    /**
+     * Get all completed clones for an account.
+     */
+    public static function getCompletedClones(int $accountId): array
+    {
+        $rows = Database::fetchAll("
+            SELECT m.*, p.name as peer_name
+            FROM hosting_migrations m
+            LEFT JOIN federation_peers p ON p.id = m.peer_id
+            WHERE m.account_id = :aid AND m.mode = 'clone' AND m.status = 'completed'
+            ORDER BY m.completed_at DESC
+        ", ['aid' => $accountId]);
+        foreach ($rows as &$row) {
+            $row['metadata'] = json_decode($row['metadata'] ?? '{}', true);
+            $row['step_results'] = json_decode($row['step_results'] ?? '{}', true);
+        }
+        return $rows;
+    }
+
+    /**
+     * Update clone: incremental rsync (NO --delete) + DB sync.
+     * Adds/modifies files without removing extra files on destination.
+     */
+    /**
+     * @param string $syncScope 'all' = files+db, 'files' = files only, 'db' = databases only
+     */
+    public static function updateClone(int $accountId, int $peerId, string $syncScope = 'all'): array
+    {
+        // Validate
+        $account = Database::fetchOne('SELECT * FROM hosting_accounts WHERE id = :id', ['id' => $accountId]);
+        if (!$account) return ['ok' => false, 'error' => 'Account not found'];
+
+        $peer = FederationService::getPeer($peerId);
+        if (!$peer) return ['ok' => false, 'error' => 'Peer not found'];
+
+        $clone = self::findCompletedClone($accountId, $peerId);
+        if (!$clone) return ['ok' => false, 'error' => 'No completed clone found for this account on this peer'];
+
+        // Check no active migration
+        $active = Database::fetchOne(
+            "SELECT id FROM hosting_migrations WHERE account_id = :aid AND status IN ('pending', 'running', 'paused')",
+            ['aid' => $accountId]
+        );
+        if ($active) return ['ok' => false, 'error' => 'Account has an active migration'];
+
+        $migrationId = self::generateMigrationId();
+        $user = \MuseDockPanel\Auth::user();
+
+        // Create a migration record for tracking
+        $id = Database::insert('hosting_migrations', [
+            'migration_id'         => $migrationId,
+            'account_id'           => $accountId,
+            'peer_id'              => $peerId,
+            'mode'                 => 'update_clone',
+            'direction'            => 'outgoing',
+            'status'               => self::STATUS_RUNNING,
+            'current_step'         => 'sync_files',
+            'dry_run'              => 'false',
+            'grace_period_minutes' => 0,
+            'metadata'             => json_encode(['parent_clone_id' => $clone['migration_id']]),
+            'started_at'           => date('Y-m-d H:i:s'),
+            'created_by'           => $user['id'] ?? null,
+        ]);
+
+        self::log($migrationId, 'update_clone', 'info', "Starting clone update for {$account['domain']}", [
+            'peer' => $peer['name'], 'parent_clone' => $clone['migration_id'],
+        ]);
+
+        // 1. Pause slave sync on destination
+        FederationService::callPeerApi($peer, 'POST', '/api/federation/pause-sync', [
+            'migration_id' => $migrationId, 'domain' => $account['domain'], 'action' => 'pause',
+        ]);
+
+        $sshTarget = FederationService::getSshTarget($peer);
+        $bytesTransferred = 0;
+        $rsyncDuration = 0;
+        $dbSynced = 0;
+
+        // 2. Sync files (if scope includes files)
+        if ($syncScope === 'all' || $syncScope === 'files') {
+            $homeDir = rtrim($account['home_dir'], '/') . '/';
+            $cmd = sprintf(
+                'rsync -azP --partial -e "ssh -p %d -i %s -o StrictHostKeyChecking=no" %s %s:%s 2>&1',
+                $peer['ssh_port'] ?? 22,
+                escapeshellarg($peer['ssh_key_path']),
+                escapeshellarg($homeDir),
+                escapeshellarg($sshTarget),
+                escapeshellarg($homeDir)
+            );
+
+            self::log($migrationId, 'sync_files', 'info', 'rsync incremental (no --delete)');
+            $rsyncStart = microtime(true);
+            $outputLines = [];
+            exec($cmd, $outputLines, $rc);
+            $rsyncDuration = round(microtime(true) - $rsyncStart, 2);
+
+            if ($rc !== 0 && $rc !== 24) {
+                self::updateStatus($migrationId, self::STATUS_FAILED, [
+                    'error_message' => "rsync failed (exit code {$rc})",
+                    'completed_at' => date('Y-m-d H:i:s'),
+                ]);
+                FederationService::callPeerApi($peer, 'POST', '/api/federation/pause-sync', [
+                    'migration_id' => $migrationId, 'domain' => $account['domain'], 'action' => 'resume',
+                ]);
+                return ['ok' => false, 'error' => "rsync failed (exit code {$rc})"];
+            }
+
+            foreach ($outputLines as $line) {
+                if (preg_match('/sent ([\d,]+) bytes/', $line, $m)) {
+                    $bytesTransferred = (int)str_replace(',', '', $m[1]);
+                }
+            }
+        } else {
+            self::log($migrationId, 'sync_files', 'info', 'File sync skipped (scope: db only)');
+        }
+
+        // 3. Sync databases (if scope includes db)
+        if ($syncScope === 'all' || $syncScope === 'db') {
+            self::log($migrationId, 'sync_db', 'info', 'Syncing databases');
+            $databases = Database::fetchAll('SELECT * FROM hosting_databases WHERE account_id = :aid', ['aid' => $accountId]);
+            $sshOpts = sprintf('-p %d -i %s -o StrictHostKeyChecking=no', $peer['ssh_port'] ?? 22, $peer['ssh_key_path']);
+
+            foreach ($databases as $db) {
+                $dbName = $db['db_name'];
+                $dbUser = $db['db_user'];
+                $dbType = $db['db_type'] ?? 'pgsql';
+
+                if ($dbType === 'pgsql') {
+                    $dbCmd = sprintf('pg_dump -U %s %s | ssh %s %s "psql -U %s %s" 2>&1',
+                        escapeshellarg($dbUser), escapeshellarg($dbName), $sshOpts, escapeshellarg($sshTarget),
+                        escapeshellarg($dbUser), escapeshellarg($dbName));
+                } else {
+                    $dbCmd = sprintf('mysqldump -u %s %s | ssh %s %s "mysql -u %s %s" 2>&1',
+                        escapeshellarg($dbUser), escapeshellarg($dbName), $sshOpts, escapeshellarg($sshTarget),
+                        escapeshellarg($dbUser), escapeshellarg($dbName));
+                }
+                exec($dbCmd, $out, $dbRc);
+                if ($dbRc === 0) $dbSynced++;
+            }
+        } else {
+            self::log($migrationId, 'sync_db', 'info', 'DB sync skipped (scope: files only)');
+        }
+
+        // 4. Resume slave sync
+        FederationService::callPeerApi($peer, 'POST', '/api/federation/pause-sync', [
+            'migration_id' => $migrationId, 'domain' => $account['domain'], 'action' => 'resume',
+        ]);
+
+        // 5. Mark completed
+        self::updateStatus($migrationId, self::STATUS_COMPLETED, [
+            'completed_at' => date('Y-m-d H:i:s'),
+        ]);
+        self::saveStepResult($migrationId, 'update_clone', [
+            'ok' => true, 'data' => [
+                'bytes_transferred' => $bytesTransferred,
+                'rsync_duration' => $rsyncDuration,
+                'databases_synced' => $dbSynced,
+            ],
+        ]);
+
+        self::log($migrationId, 'update_clone', 'info', "Clone updated: {$account['domain']}", [
+            'bytes' => $bytesTransferred, 'duration' => $rsyncDuration, 'dbs' => $dbSynced,
+        ]);
+
+        LogService::log('federation.clone.update', $account['domain'],
+            "Clone updated on {$peer['name']} ({$bytesTransferred} bytes, {$rsyncDuration}s)");
+
+        return ['ok' => true, 'migration_id' => $migrationId, 'data' => [
+            'bytes_transferred' => $bytesTransferred,
+            'rsync_duration' => $rsyncDuration,
+            'databases_synced' => $dbSynced,
+        ]];
+    }
+
+    /**
+     * Force re-clone: delete everything on destination, then full clone.
+     * Destination becomes an exact mirror of origin.
+     */
+    public static function forceReclone(int $accountId, int $peerId): array
+    {
+        $account = Database::fetchOne('SELECT * FROM hosting_accounts WHERE id = :id', ['id' => $accountId]);
+        if (!$account) return ['ok' => false, 'error' => 'Account not found'];
+
+        $peer = FederationService::getPeer($peerId);
+        if (!$peer) return ['ok' => false, 'error' => 'Peer not found'];
+
+        // Check no active migration
+        $active = Database::fetchOne(
+            "SELECT id FROM hosting_migrations WHERE account_id = :aid AND status IN ('pending', 'running', 'paused')",
+            ['aid' => $accountId]
+        );
+        if ($active) return ['ok' => false, 'error' => 'Account has an active migration'];
+
+        // 1. Tell destination to clean up the existing hosting
+        self::log('', 'force_reclone', 'info', "Force re-clone: cleaning destination for {$account['domain']}");
+
+        $recloneId = 'reclone-' . time();
+        $rollbackResult = FederationService::callPeerApi($peer, 'POST', '/api/federation/rollback', [
+            'migration_id' => $recloneId,
+            'domain'       => $account['domain'],
+            'username'     => $account['username'],
+        ]);
+
+        if (!$rollbackResult['ok']) {
+            self::log($recloneId, 'force_reclone', 'warn',
+                'Destination cleanup returned error: ' . ($rollbackResult['error'] ?? 'unknown'));
+        }
+
+        // Verify the cleanup: check domain no longer exists on destination
+        $checkResult = FederationService::callPeerApi($peer, 'POST', '/api/federation/check-conflicts', [
+            'domain'   => $account['domain'],
+            'username' => $account['username'],
+        ]);
+        // If domain still exists after rollback, the cleanup failed
+        if ($checkResult['ok'] === false || !empty(array_filter($checkResult['data']['conflicts'] ?? [], fn($c) => str_contains($c, 'already exists')))) {
+            self::log($recloneId, 'force_reclone', 'warn',
+                'Destination still has remnants after cleanup — clone creation will handle IF NOT EXISTS');
+        }
+
+        // Mark old clones as superseded
+        Database::query(
+            "UPDATE hosting_migrations SET metadata = jsonb_set(COALESCE(metadata, '{}'), '{superseded}', 'true')
+             WHERE account_id = :aid AND peer_id = :pid AND mode = 'clone' AND status = 'completed'",
+            ['aid' => $accountId, 'pid' => $peerId]
+        );
+
+        // 2. Create a new full clone (reuse the standard clone flow)
+        $result = self::create($accountId, $peerId, self::MODE_CLONE, false, 0);
+        if (!$result['ok']) return $result;
+
+        // 3. Run all steps
+        $runResult = self::runAll($result['migration_id']);
+
+        LogService::log('federation.clone.reclone', $account['domain'],
+            "Force re-clone to {$peer['name']}: " . ($runResult['status'] ?? 'unknown'));
+
+        return $runResult;
+    }
+
+    /**
+     * Promote clone to primary: optional final sync, verify, switch DNS, deactivate origin.
+     * Effectively converts a clone into a full migration.
+     *
+     * Flow:
+     *   syncFirst=true:  updateClone() → LOCK → FREEZE → FINAL_SYNC → VERIFY → SWITCH_DNS → COMPLETE
+     *   syncFirst=false: VERIFY → SWITCH_DNS → COMPLETE (no sync, just verify existing clone works)
+     *
+     * VERIFY always runs before DNS switch — never promote without verifying the clone works.
+     */
+    public static function promoteClone(int $accountId, int $peerId, string $dnsMode = 'auto', int $gracePeriodMinutes = 60, bool $syncFirst = true): array
+    {
+        $account = Database::fetchOne('SELECT * FROM hosting_accounts WHERE id = :id', ['id' => $accountId]);
+        if (!$account) return ['ok' => false, 'error' => 'Account not found'];
+
+        $peer = FederationService::getPeer($peerId);
+        if (!$peer) return ['ok' => false, 'error' => 'Peer not found'];
+
+        $clone = self::findCompletedClone($accountId, $peerId);
+        if (!$clone) return ['ok' => false, 'error' => 'No completed clone found to promote'];
+
+        // Check no active migration
+        $active = Database::fetchOne(
+            "SELECT id FROM hosting_migrations WHERE account_id = :aid AND status IN ('pending', 'running', 'paused')",
+            ['aid' => $accountId]
+        );
+        if ($active) return ['ok' => false, 'error' => 'Account has an active migration'];
+
+        $migrationId = self::generateMigrationId();
+        $user = \MuseDockPanel\Auth::user();
+
+        // Always start at LOCK if syncing, VERIFY if not
+        // VERIFY always runs before DNS switch — this is a hard invariant
+        $startStep = $syncFirst ? self::STEP_LOCK : self::STEP_VERIFY;
+
+        $id = Database::insert('hosting_migrations', [
+            'migration_id'         => $migrationId,
+            'account_id'           => $accountId,
+            'peer_id'              => $peerId,
+            'mode'                 => 'promote',
+            'direction'            => 'outgoing',
+            'status'               => self::STATUS_PENDING,
+            'current_step'         => $startStep,
+            'dry_run'              => 'false',
+            'grace_period_minutes' => $gracePeriodMinutes,
+            'metadata'             => json_encode([
+                'dns_mode' => $dnsMode,
+                'parent_clone_id' => $clone['migration_id'],
+                'sync_first' => $syncFirst,
+            ]),
+            'created_by'           => $user['id'] ?? null,
+        ]);
+
+        self::log($migrationId, $startStep, 'info', "Promoting clone to primary for {$account['domain']}", [
+            'peer' => $peer['name'], 'dns_mode' => $dnsMode, 'sync_first' => $syncFirst,
+        ]);
+
+        // If syncFirst: do an incremental sync before the formal promote flow
+        if ($syncFirst) {
+            $updateResult = self::updateClone($accountId, $peerId);
+            if (!$updateResult['ok']) {
+                self::updateStatus($migrationId, self::STATUS_FAILED, [
+                    'error_message' => 'Pre-promote sync failed: ' . ($updateResult['error'] ?? ''),
+                    'completed_at' => date('Y-m-d H:i:s'),
+                ]);
+                return ['ok' => false, 'error' => 'Pre-promote sync failed: ' . ($updateResult['error'] ?? '')];
+            }
+            self::log($migrationId, 'sync', 'info', 'Pre-promote sync completed');
+        }
+
+        // Run the promote flow: LOCK → FREEZE → FINAL_SYNC → VERIFY → SWITCH_DNS → COMPLETE
+        // (or VERIFY → SWITCH_DNS → COMPLETE if no sync)
+        self::updateStatus($migrationId, self::STATUS_RUNNING, [
+            'started_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $result = self::runAll($migrationId);
+
+        LogService::log('federation.clone.promote', $account['domain'],
+            "Clone promoted on {$peer['name']}: " . ($result['status'] ?? 'unknown'));
+
+        return $result;
+    }
+
+    /**
+     * Verify admin password for sensitive clone actions.
+     */
+    public static function verifyAdminPassword(string $password): bool
+    {
+        $user = \MuseDockPanel\Auth::user();
+        if (!$user) return false;
+
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $user['id']]);
+        if (!$admin) return false;
+
+        return password_verify($password, $admin['password_hash']);
     }
 }

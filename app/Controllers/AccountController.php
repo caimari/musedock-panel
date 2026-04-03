@@ -615,6 +615,12 @@ class AccountController
         // Bandwidth
         $bwMonthly = \MuseDockPanel\Services\BandwidthService::getMonthlyTotal((int)$account['id']);
 
+        // Federation clones
+        $federationClones = [];
+        try {
+            $federationClones = \MuseDockPanel\Services\FederationMigrationService::getCompletedClones((int)$account['id']);
+        } catch (\Throwable) {}
+
         View::render('accounts/show', [
             'layout' => 'main',
             'pageTitle' => $account['domain'],
@@ -632,6 +638,7 @@ class AccountController
             'isSlave' => $isSlave,
             'wpInfo' => $wpInfo,
             'bwMonthly' => $bwMonthly,
+            'federationClones' => $federationClones,
         ]);
     }
 

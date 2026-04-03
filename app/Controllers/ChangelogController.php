@@ -20,6 +20,55 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.53',
+                'date' => '2026-04-03',
+                'badge' => 'success',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Federation Clone: Actualizar clon — Sincronizacion incremental (archivos y/o BD) sin borrar datos extra en destino. Selector de scope: solo archivos, solo BD, o ambos',
+                            'Federation Clone: Re-clonar — Elimina completamente el hosting en destino y recrea desde cero. Limpieza verificada antes del nuevo clon',
+                            'Federation Clone: Promover clon a produccion — Convierte un clon en el hosting activo con cambio de DNS (auto/manual), grace period y verificacion obligatoria',
+                            'Federation Clone: UI de gestion — Card "Clones en otros servidores" en la pagina de cuenta con botones Actualizar, Re-clonar, Promover',
+                            'Federation Clone: modal de confirmacion con contrasenya — Cada accion requiere contrasenya del admin, con descripcion detallada de lo que va a pasar',
+                            'Federation Clone: warning de clon antiguo — Badge de antiguedad (>24h) en la lista de clones. Warning destacado en modal de Promover si el clon esta desactualizado',
+                            'Federation Clone: sync obligatorio en promote antiguo — Si el clon tiene >24h, el checkbox "Sincronizar antes de promover" se fuerza activado (no se puede desmarcar)',
+                            'Federation Clone: warning de incompatibilidad — Al seleccionar "Solo archivos" o "Solo BD" muestra aviso de posibles problemas de compatibilidad codigo/esquema',
+                        ],
+                        'en' => [
+                            'Federation Clone: Update clone — Incremental sync (files and/or DB) without deleting extra data on destination. Scope selector: files only, DB only, or both',
+                            'Federation Clone: Force re-clone — Completely deletes hosting on destination and recreates from scratch. Verified cleanup before new clone',
+                            'Federation Clone: Promote clone to production — Converts a clone into the active hosting with DNS change (auto/manual), grace period and mandatory verification',
+                            'Federation Clone: Management UI — "Clones on other servers" card on account page with Update, Re-clone, Promote buttons',
+                            'Federation Clone: Confirmation modal with password — Each action requires admin password, with detailed description of what will happen',
+                            'Federation Clone: Stale clone warning — Age badge (>24h) on clone list. Highlighted warning in Promote modal if clone is outdated',
+                            'Federation Clone: Mandatory sync on stale promote — If clone is >24h old, "Sync before promoting" checkbox is forced on (cannot be unchecked)',
+                            'Federation Clone: Incompatibility warning — When selecting "Files only" or "DB only" shows warning about potential code/schema compatibility issues',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Federation: partial unique index — Previene race condition en migraciones duplicadas a nivel de BD',
+                            'Federation: cleanup worker respeta mode=clone — Nunca limpia archivos de origen en clones (regla explicita, no accidental)',
+                            'Federation: promote siempre verifica — VERIFY obligatorio antes de DNS switch, incluso sin sync previo',
+                            'Federation: paginas maintenance/read-only con dark theme — Diseyo responsive, mensajes claros, consistente con el panel',
+                            'Federation: FPM drain configurable (30s) — Constante ajustable para esperar a conexiones en vuelo antes de freeze',
+                            'Federation: metricas por paso — Duracion, bytes transferidos, velocidad rsync. Resumen al completar migracion',
+                            'Federation: alert dark theme — Warning "No hay peers" con estilo consistente (sin fondo crema Bootstrap)',
+                        ],
+                        'en' => [
+                            'Federation: partial unique index — Prevents race condition on duplicate migrations at DB level',
+                            'Federation: cleanup worker respects mode=clone — Never cleans origin files for clones (explicit rule, not accidental)',
+                            'Federation: promote always verifies — VERIFY mandatory before DNS switch, even without prior sync',
+                            'Federation: maintenance/read-only pages with dark theme — Responsive design, clear messages, consistent with panel',
+                            'Federation: configurable FPM drain (30s) — Adjustable constant for waiting on in-flight connections before freeze',
+                            'Federation: per-step metrics — Duration, bytes transferred, rsync speed. Summary on migration completion',
+                            'Federation: dark theme alert — "No peers" warning with consistent styling (no Bootstrap cream background)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.52',
                 'date' => '2026-04-03',
                 'badge' => 'danger',

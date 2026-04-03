@@ -228,6 +228,12 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/federation-migrate/cancel', 'FederationController@migrateCancel');
 \MuseDockPanel\Router::get('/accounts/{id}/federation-migrate/logs', 'FederationController@migrateLogs');
 
+// Federation Clone Actions
+\MuseDockPanel\Router::post('/accounts/{id}/federation-clone/update', 'FederationController@cloneUpdate');
+\MuseDockPanel\Router::post('/accounts/{id}/federation-clone/reclone', 'FederationController@cloneReclone');
+\MuseDockPanel\Router::post('/accounts/{id}/federation-clone/promote', 'FederationController@clonePromote');
+\MuseDockPanel\Router::get('/accounts/{id}/federation-clone/status', 'FederationController@cloneStatus');
+
 // Domains
 \MuseDockPanel\Router::get('/domains', 'DomainController@index');
 \MuseDockPanel\Router::post('/domains/check-dns', 'DomainController@checkDns');

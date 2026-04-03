@@ -826,6 +826,253 @@ use MuseDockPanel\Services\CloudflareService;
             </div>
         </div>
 
+        <!-- Federation Clones -->
+        <?php if (!empty($federationClones)): ?>
+        <div class="card mb-3" style="border-color:rgba(16,185,129,0.3);">
+            <div class="card-header" style="color:#10b981;"><i class="bi bi-copy me-2"></i>Clones en otros servidores</div>
+            <div class="card-body p-0">
+                <?php foreach ($federationClones as $fc): ?>
+                <?php if (!empty($fc['metadata']['superseded'])) continue; ?>
+                <?php
+                // Calculate clone age for staleness warning
+                $lastSync = $fc['completed_at'];
+                // Check if there's a more recent update_clone
+                $lastUpdate = \MuseDockPanel\Database::fetchOne(
+                    "SELECT completed_at FROM hosting_migrations WHERE account_id = :aid AND peer_id = :pid AND mode = 'update_clone' AND status = 'completed' ORDER BY completed_at DESC LIMIT 1",
+                    ['aid' => $fc['account_id'], 'pid' => $fc['peer_id']]
+                );
+                if ($lastUpdate) $lastSync = $lastUpdate['completed_at'];
+                $cloneAgeHours = $lastSync ? (int)((time() - strtotime($lastSync)) / 3600) : 999;
+                $cloneStale = $cloneAgeHours > 24;
+                ?>
+                <div class="p-3 border-bottom border-secondary">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div>
+                            <strong class="text-light"><?= View::e($fc['peer_name'] ?? 'unknown') ?></strong>
+                            <span class="badge bg-success ms-1">clonado</span>
+                            <?php if ($cloneStale): ?>
+                                <span class="badge bg-warning text-dark ms-1" title="Ultima sync hace <?= $cloneAgeHours ?>h"><i class="bi bi-clock me-1"></i><?= $cloneAgeHours ?>h</span>
+                            <?php endif; ?>
+                        </div>
+                        <small class="text-muted"><?= $lastSync ? date('d/m/Y H:i', strtotime($lastSync)) : '' ?></small>
+                    </div>
+                    <div class="d-flex gap-1 flex-wrap">
+                        <button class="btn btn-outline-info btn-sm" onclick="cloneAction('update', <?= $account['id'] ?>, <?= $fc['peer_id'] ?>, <?= $cloneAgeHours ?>)">
+                            <i class="bi bi-arrow-repeat me-1"></i>Actualizar
+                        </button>
+                        <button class="btn btn-outline-warning btn-sm" onclick="cloneAction('reclone', <?= $account['id'] ?>, <?= $fc['peer_id'] ?>, 0)">
+                            <i class="bi bi-arrow-clockwise me-1"></i>Re-clonar
+                        </button>
+                        <button class="btn btn-outline-success btn-sm" onclick="cloneAction('promote', <?= $account['id'] ?>, <?= $fc['peer_id'] ?>, <?= $cloneAgeHours ?>)">
+                            <i class="bi bi-arrow-up-circle me-1"></i>Promover
+                        </button>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+
+        <!-- Clone Action Modal -->
+        <div class="modal fade" id="cloneActionModal" tabindex="-1">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content bg-dark text-light border-secondary">
+                    <div class="modal-header border-secondary">
+                        <h5 class="modal-title" id="cloneModalTitle"></h5>
+                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div id="cloneModalDesc" class="mb-3 small"></div>
+                        <div class="mb-3" id="cloneUpdateOptions" style="display:none;">
+                            <label class="form-label small">Que sincronizar</label>
+                            <select id="clone-sync-scope" class="form-select form-select-sm bg-dark text-light border-secondary" onchange="updateScopeWarning()">
+                                <option value="all">Archivos + bases de datos</option>
+                                <option value="files">Solo archivos</option>
+                                <option value="db">Solo bases de datos</option>
+                            </select>
+                            <div id="scope-warning" class="mt-2 small d-none"></div>
+                        </div>
+                        <div class="mb-3" id="clonePromoteOptions" style="display:none;">
+                            <div class="row">
+                                <div class="col-6">
+                                    <label class="form-label small">DNS</label>
+                                    <select id="clone-dns-mode" class="form-select form-select-sm bg-dark text-light border-secondary">
+                                        <option value="auto">Automatico (Cloudflare)</option>
+                                        <option value="manual">Manual</option>
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Grace period (min)</label>
+                                    <input type="number" id="clone-grace" class="form-control form-control-sm bg-dark text-light border-secondary" value="60" min="5">
+                                </div>
+                            </div>
+                            <div class="form-check mt-2">
+                                <input type="checkbox" class="form-check-input" id="clone-sync-first" checked>
+                                <label class="form-check-label small" for="clone-sync-first">Sincronizar antes de promover (recomendado)</label>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="form-label small">Contrasenya del administrador</label>
+                            <input type="password" id="clone-admin-password" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="Introduce tu contrasenya" required>
+                        </div>
+                        <div id="cloneActionResult" class="mt-2 small"></div>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="button" class="btn btn-primary btn-sm" id="cloneModalConfirmBtn" onclick="executeCloneAction()">
+                            <i class="bi bi-check-lg me-1"></i>Confirmar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        let currentCloneAction = '', currentCloneAccountId = 0, currentClonePeerId = 0;
+        const cloneDescriptions = {
+            update: {
+                title: '<i class="bi bi-arrow-repeat me-1"></i>Actualizar clon',
+                desc: '<p>Se sincronizaran los cambios desde el servidor origen al destino.</p>' +
+                    '<div class="mb-2"><span class="text-success"><i class="bi bi-check-circle me-1"></i></span>Se actualizaran archivos modificados</div>' +
+                    '<div class="mb-2"><span class="text-success"><i class="bi bi-check-circle me-1"></i></span>Se anyadiran nuevos archivos</div>' +
+                    '<div class="mb-2"><span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i></span>NO se eliminaran archivos existentes en el destino</div>' +
+                    '<div class="mb-2 p-2 rounded" style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.15);">' +
+                    '<span class="text-warning"><i class="bi bi-database me-1"></i></span>' +
+                    '<strong class="text-warning small">Las bases de datos del destino seran sobrescritas</strong> con un dump completo desde el origen. ' +
+                    'Cualquier cambio en la BD del destino se perdera.</div>',
+                btnClass: 'btn-info',
+            },
+            reclone: {
+                title: '<i class="bi bi-arrow-clockwise me-1"></i>Re-clonar (sobrescribir destino)',
+                desc: '<div class="p-2 mb-2 rounded" style="background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);">' +
+                    '<i class="bi bi-exclamation-triangle text-danger me-1"></i><strong class="text-danger">Esta accion eliminara COMPLETAMENTE el contenido actual en el servidor destino.</strong></div>' +
+                    '<div class="mb-2"><span class="text-success"><i class="bi bi-check-circle me-1"></i></span>Se borraran todos los archivos</div>' +
+                    '<div class="mb-2"><span class="text-success"><i class="bi bi-check-circle me-1"></i></span>Se eliminaran todas las bases de datos</div>' +
+                    '<div class="mb-2"><span class="text-success"><i class="bi bi-check-circle me-1"></i></span>Se recreara el hosting desde cero</div>' +
+                    '<div class="text-danger small"><i class="bi bi-exclamation-circle me-1"></i>Todos los cambios realizados en el destino se perderan permanentemente.</div>',
+                btnClass: 'btn-warning',
+            },
+            promote: {
+                title: '<i class="bi bi-arrow-up-circle me-1"></i>Promover clon a produccion',
+                desc: '<p>Este clon pasara a ser el servidor principal del hosting.</p>' +
+                    '<div class="mb-2"><span class="text-success"><i class="bi bi-check-circle me-1"></i></span>Se cambiara el DNS hacia el servidor destino</div>' +
+                    '<div class="mb-2"><span class="text-success"><i class="bi bi-check-circle me-1"></i></span>El servidor origen dejara de ser el principal</div>' +
+                    '<div class="mb-2"><span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i></span>Si el clon no esta actualizado, se pueden perder cambios recientes</div>' +
+                    '<div class="text-info small"><i class="bi bi-lightbulb me-1"></i>Recomendacion: actualizar el clon antes de promover.</div>',
+                btnClass: 'btn-success',
+            },
+        };
+
+        function cloneAction(action, accountId, peerId, cloneAgeHours) {
+            currentCloneAction = action;
+            currentCloneAccountId = accountId;
+            currentClonePeerId = peerId;
+            const info = cloneDescriptions[action];
+            let desc = info.desc;
+            // Add staleness warning for promote if clone is old
+            if (action === 'promote' && cloneAgeHours > 24) {
+                desc = '<div class="p-2 mb-3 rounded" style="background:rgba(249,115,22,0.1);border:1px solid rgba(249,115,22,0.25);">' +
+                    '<i class="bi bi-exclamation-triangle text-warning me-1"></i>' +
+                    '<strong class="text-warning">Este clon tiene ' + cloneAgeHours + ' horas de antiguedad.</strong> ' +
+                    'Los datos pueden estar desactualizados. Se recomienda activar "Sincronizar antes de promover".</div>' + desc;
+            }
+            document.getElementById('cloneModalTitle').innerHTML = info.title;
+            document.getElementById('cloneModalDesc').innerHTML = desc;
+            document.getElementById('cloneModalConfirmBtn').className = 'btn btn-sm ' + info.btnClass;
+            document.getElementById('cloneUpdateOptions').style.display = action === 'update' ? 'block' : 'none';
+            document.getElementById('clonePromoteOptions').style.display = action === 'promote' ? 'block' : 'none';
+            // Auto-force sync checkbox if clone is stale (> 24h)
+            if (action === 'promote' && cloneAgeHours > 24) {
+                const cb = document.getElementById('clone-sync-first');
+                cb.checked = true;
+                cb.disabled = true; // Force enabled — too risky to promote stale clone without sync
+            } else if (action === 'promote') {
+                document.getElementById('clone-sync-first').disabled = false;
+            }
+            // Reset scope warning
+            if (action === 'update') {
+                document.getElementById('clone-sync-scope').value = 'all';
+                document.getElementById('scope-warning').classList.add('d-none');
+            }
+            document.getElementById('clone-admin-password').value = '';
+            document.getElementById('cloneActionResult').innerHTML = '';
+            new bootstrap.Modal(document.getElementById('cloneActionModal')).show();
+        }
+
+        function updateScopeWarning() {
+            const scope = document.getElementById('clone-sync-scope').value;
+            const el = document.getElementById('scope-warning');
+            if (scope === 'files') {
+                el.innerHTML = '<div class="p-2 rounded" style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.15);"><i class="bi bi-exclamation-triangle text-warning me-1"></i><span class="text-warning">Codigo nuevo + BD vieja puede causar incompatibilidades (migraciones de BD pendientes, esquemas distintos).</span></div>';
+                el.classList.remove('d-none');
+            } else if (scope === 'db') {
+                el.innerHTML = '<div class="p-2 rounded" style="background:rgba(249,115,22,0.08);border:1px solid rgba(249,115,22,0.15);"><i class="bi bi-exclamation-triangle text-warning me-1"></i><span class="text-warning">BD nueva + codigo viejo puede causar errores si el codigo no soporta el esquema actualizado.</span></div>';
+                el.classList.remove('d-none');
+            } else {
+                el.classList.add('d-none');
+            }
+        }
+
+        function executeCloneAction() {
+            const pw = document.getElementById('clone-admin-password').value;
+            if (!pw) { document.getElementById('cloneActionResult').innerHTML = '<span class="text-danger">Introduce la contrasenya</span>'; return; }
+
+            const btn = document.getElementById('cloneModalConfirmBtn');
+            btn.disabled = true;
+            btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Ejecutando...';
+            document.getElementById('cloneActionResult').innerHTML = '<span class="text-muted">Procesando...</span>';
+
+            const body = new URLSearchParams({
+                _csrf_token: '<?= View::csrfToken() ?>',
+                peer_id: currentClonePeerId,
+                admin_password: pw,
+            });
+
+            if (currentCloneAction === 'update') {
+                body.append('sync_scope', document.getElementById('clone-sync-scope').value);
+            }
+            if (currentCloneAction === 'promote') {
+                body.append('dns_mode', document.getElementById('clone-dns-mode').value);
+                body.append('grace_period', document.getElementById('clone-grace').value);
+                body.append('sync_first', document.getElementById('clone-sync-first').checked ? '1' : '');
+            }
+
+            fetch(`/accounts/${currentCloneAccountId}/federation-clone/${currentCloneAction}`, {method: 'POST', body})
+            .then(r => r.json())
+            .then(data => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Confirmar';
+                if (data.ok) {
+                    let msg = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>';
+                    if (currentCloneAction === 'update') msg += 'Clon actualizado correctamente';
+                    else if (currentCloneAction === 'reclone') msg += 'Re-clonacion completada';
+                    else msg += 'Promocion iniciada';
+                    msg += '</span>';
+                    if (data.data) {
+                        msg += '<br><small class="text-muted">';
+                        if (data.data.bytes_transferred) msg += (data.data.bytes_transferred / 1048576).toFixed(1) + ' MB transferidos | ';
+                        if (data.data.rsync_duration) msg += data.data.rsync_duration + 's | ';
+                        if (data.data.databases_synced !== undefined) msg += data.data.databases_synced + ' BDs sincronizadas';
+                        msg += '</small>';
+                    }
+                    document.getElementById('cloneActionResult').innerHTML = msg;
+                    if (currentCloneAction === 'promote' && data.migration_id) {
+                        setTimeout(() => { location.href = `/accounts/${currentCloneAccountId}/federation-migrate?migration_id=${data.migration_id}`; }, 1500);
+                    } else {
+                        setTimeout(() => location.reload(), 2000);
+                    }
+                } else {
+                    document.getElementById('cloneActionResult').innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>' + (data.error || 'Error') + '</span>';
+                }
+            })
+            .catch(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Confirmar';
+                document.getElementById('cloneActionResult').innerHTML = '<span class="text-danger">Error de red</span>';
+            });
+        }
+        </script>
+        <?php endif; ?>
+
         <!-- Danger Zone -->
         <?php if ($account['status'] === 'suspended' && !($isSlave ?? false)): ?>
         <?php

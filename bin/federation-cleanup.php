@@ -42,6 +42,11 @@ foreach ($migrations as $m) {
         continue; // Not yet time
     }
 
+    // CLONE mode: NEVER clean origin files — both copies must coexist
+    if (($m['mode'] ?? '') === 'clone') {
+        continue;
+    }
+
     // Already cleaned?
     if (!empty($metadata['files_cleaned'])) {
         continue;
