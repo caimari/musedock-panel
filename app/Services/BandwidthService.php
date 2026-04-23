@@ -17,6 +17,27 @@ class BandwidthService
 {
     private const LOG_FILE = '/var/log/caddy/hosting-access.log';
     private const OFFSET_KEY = 'bandwidth_log_offset';
+    private static array $tableExistsCache = [];
+
+    private static function tableExists(string $table): bool
+    {
+        if (array_key_exists($table, self::$tableExistsCache)) {
+            return self::$tableExistsCache[$table];
+        }
+
+        try {
+            $row = Database::fetchOne(
+                "SELECT to_regclass(:tbl) AS reg",
+                ['tbl' => "public.{$table}"]
+            );
+            $exists = !empty($row['reg']);
+            self::$tableExistsCache[$table] = $exists;
+            return $exists;
+        } catch (\Throwable) {
+            self::$tableExistsCache[$table] = false;
+            return false;
+        }
+    }
 
     /**
      * Parse new log entries and aggregate into hosting_bandwidth table.
@@ -24,6 +45,10 @@ class BandwidthService
      */
     public static function collectFromLog(): array
     {
+        if (!self::tableExists('hosting_bandwidth')) {
+            return ['ok' => false, 'error' => 'hosting_bandwidth table missing', 'lines' => 0];
+        }
+
         $logFile = self::LOG_FILE;
         if (!file_exists($logFile) || !is_readable($logFile)) {
             return ['ok' => false, 'error' => 'Log file not found or not readable', 'lines' => 0];
@@ -145,26 +170,28 @@ class BandwidthService
         }
 
         // Upsert subdomain bandwidth
-        foreach ($subAggregated as $subId => $dates) {
-            foreach ($dates as $date => $data) {
-                Database::query("
-                    INSERT INTO hosting_subdomain_bandwidth (subdomain_id, ts, bytes_out, bytes_in, requests, updated_at)
-                    VALUES (:sid, :d, :bo, :bi, :r, NOW())
-                    ON CONFLICT (subdomain_id, ts)
-                    DO UPDATE SET bytes_out = hosting_subdomain_bandwidth.bytes_out + :bo2,
-                                  bytes_in = hosting_subdomain_bandwidth.bytes_in + :bi2,
-                                  requests = hosting_subdomain_bandwidth.requests + :r2,
-                                  updated_at = NOW()
-                ", [
-                    'sid' => $subId,
-                    'd' => $date,
-                    'bo' => $data['bytes_out'],
-                    'bi' => $data['bytes_in'],
-                    'r' => $data['requests'],
-                    'bo2' => $data['bytes_out'],
-                    'bi2' => $data['bytes_in'],
-                    'r2' => $data['requests'],
-                ]);
+        if (self::tableExists('hosting_subdomain_bandwidth')) {
+            foreach ($subAggregated as $subId => $dates) {
+                foreach ($dates as $date => $data) {
+                    Database::query("
+                        INSERT INTO hosting_subdomain_bandwidth (subdomain_id, ts, bytes_out, bytes_in, requests, updated_at)
+                        VALUES (:sid, :d, :bo, :bi, :r, NOW())
+                        ON CONFLICT (subdomain_id, ts)
+                        DO UPDATE SET bytes_out = hosting_subdomain_bandwidth.bytes_out + :bo2,
+                                      bytes_in = hosting_subdomain_bandwidth.bytes_in + :bi2,
+                                      requests = hosting_subdomain_bandwidth.requests + :r2,
+                                      updated_at = NOW()
+                    ", [
+                        'sid' => $subId,
+                        'd' => $date,
+                        'bo' => $data['bytes_out'],
+                        'bi' => $data['bytes_in'],
+                        'r' => $data['requests'],
+                        'bo2' => $data['bytes_out'],
+                        'bi2' => $data['bytes_in'],
+                        'r2' => $data['requests'],
+                    ]);
+                }
             }
         }
 
@@ -228,6 +255,10 @@ class BandwidthService
      */
     public static function getSubdomainMonthlyTotals(int $accountId): array
     {
+        if (!self::tableExists('hosting_subdomain_bandwidth')) {
+            return [];
+        }
+
         $rows = Database::fetchAll("
             SELECT sb.subdomain_id,
                    COALESCE(SUM(sb.bytes_out), 0) as bytes_out,
@@ -246,6 +277,10 @@ class BandwidthService
 
     public static function getAllSubdomainMonthlyTotals(): array
     {
+        if (!self::tableExists('hosting_subdomain_bandwidth')) {
+            return [];
+        }
+
         $rows = Database::fetchAll("
             SELECT subdomain_id, COALESCE(SUM(bytes_out), 0) as bytes_out, COALESCE(SUM(bytes_in), 0) as bytes_in, COALESCE(SUM(requests), 0) as requests
             FROM hosting_subdomain_bandwidth WHERE ts >= DATE_TRUNC('month', CURRENT_DATE) GROUP BY subdomain_id
@@ -262,6 +297,10 @@ class BandwidthService
      */
     public static function getByAccount(int $accountId, string $range = '24h'): array
     {
+        if (!self::tableExists('hosting_bandwidth')) {
+            return [];
+        }
+
         $intervals = [
             '1h'  => ['interval' => '1 hour',    'group' => null],         // raw hourly buckets
             '6h'  => ['interval' => '6 hours',   'group' => null],
@@ -297,15 +336,23 @@ class BandwidthService
 
     public static function getMonthlyTotal(int $accountId): array
     {
+        if (!self::tableExists('hosting_bandwidth')) {
+            return ['bytes_out' => 0, 'bytes_in' => 0, 'requests' => 0];
+        }
+
         $row = Database::fetchOne("
             SELECT COALESCE(SUM(bytes_out), 0) as bytes_out, COALESCE(SUM(bytes_in), 0) as bytes_in, COALESCE(SUM(requests), 0) as requests
             FROM hosting_bandwidth WHERE account_id = :aid AND ts >= DATE_TRUNC('month', CURRENT_DATE)
         ", ['aid' => $accountId]);
-        return $row ?: ['bytes_out' => 0, 'requests' => 0];
+        return $row ?: ['bytes_out' => 0, 'bytes_in' => 0, 'requests' => 0];
     }
 
     public static function getAllMonthlyTotals(): array
     {
+        if (!self::tableExists('hosting_bandwidth')) {
+            return [];
+        }
+
         $rows = Database::fetchAll("
             SELECT account_id, COALESCE(SUM(bytes_out), 0) as bytes_out, COALESCE(SUM(bytes_in), 0) as bytes_in, COALESCE(SUM(requests), 0) as requests
             FROM hosting_bandwidth WHERE ts >= DATE_TRUNC('month', CURRENT_DATE) GROUP BY account_id

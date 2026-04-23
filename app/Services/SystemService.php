@@ -960,7 +960,22 @@ CONF;
                     curl_close($ch);
 
                     if (!($httpPatchCode >= 200 && $httpPatchCode < 300)) {
-                        return false;
+                        // Final fallback: patch parent apps object (some builds reject /apps/http when key is missing)
+                        $ch = curl_init("{$caddyApi}/config/apps");
+                        curl_setopt_array($ch, [
+                            CURLOPT_CUSTOMREQUEST => 'PATCH',
+                            CURLOPT_POSTFIELDS => json_encode(['http' => ['servers' => ['srv0' => $initialServer]]]),
+                            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                            CURLOPT_RETURNTRANSFER => true,
+                            CURLOPT_TIMEOUT => 8,
+                        ]);
+                        curl_exec($ch);
+                        $appsPatchCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                        curl_close($ch);
+
+                        if (!($appsPatchCode >= 200 && $appsPatchCode < 300)) {
+                            return false;
+                        }
                     }
                 }
             }
