@@ -1013,19 +1013,38 @@ CONF;
 
         $needsListenUpdate = !in_array(':443', $existingListen, true);
         if ($listenCode < 200 || $listenCode >= 300 || $needsListenUpdate) {
-            $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/listen");
-            curl_setopt_array($ch, [
-                CURLOPT_CUSTOMREQUEST => 'PUT',
-                CURLOPT_POSTFIELDS => json_encode($listen),
-                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 8,
-            ]);
-            curl_exec($ch);
-            $putCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            if (!($putCode >= 200 && $putCode < 300)) {
-                return false;
+            if ($listenCode === 404) {
+                // listen key missing: create it
+                $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/listen");
+                curl_setopt_array($ch, [
+                    CURLOPT_CUSTOMREQUEST => 'PUT',
+                    CURLOPT_POSTFIELDS => json_encode($listen),
+                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 8,
+                ]);
+                curl_exec($ch);
+                $putCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                if (!($putCode >= 200 && $putCode < 300)) {
+                    return false;
+                }
+            } else {
+                // listen key already exists: update parent object (PUT /listen returns 409 on some Caddy builds)
+                $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0");
+                curl_setopt_array($ch, [
+                    CURLOPT_CUSTOMREQUEST => 'PATCH',
+                    CURLOPT_POSTFIELDS => json_encode(['listen' => $listen]),
+                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 8,
+                ]);
+                curl_exec($ch);
+                $patchCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                if (!($patchCode >= 200 && $patchCode < 300)) {
+                    return false;
+                }
             }
         }
 
