@@ -20,6 +20,41 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.59',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'Monitoring (7d/30d/1y): graficas de administracion ajustadas para lectura operativa — linea principal en AVG y linea secundaria en P95 (en lugar de mostrar solo picos)',
+                            'Monitoring tooltips: en rangos agregados muestran avg/p95/peak para evitar interpretaciones alarmistas por picos puntuales',
+                            'Monitoring data model: agregados horarios y diarios ahora incluyen p95_val para soportar visualizacion y analisis de percentiles',
+                            'Alerts en /monitor: paginacion real por API (page/per_page), contador total y navegacion Prev/Next',
+                            'Alerts en /monitor: selector de tamanyo por pagina (20/50/100) con refresco inmediato',
+                            'UI /monitor: afinado visual de bordes en controles de paginacion y selector para integracion con tema dark',
+                        ],
+                        'en' => [
+                            'Monitoring (7d/30d/1y): admin charts tuned for operational reading — main line uses AVG and secondary line uses P95 (instead of showing only peaks)',
+                            'Monitoring tooltips: aggregated ranges now show avg/p95/peak to avoid alarmist interpretation from isolated spikes',
+                            'Monitoring data model: hourly and daily aggregates now include p95_val to support percentile visualization and analysis',
+                            'Alerts in /monitor: real API pagination (page/per_page), total counter and Prev/Next navigation',
+                            'Alerts in /monitor: page-size selector (20/50/100) with immediate refresh',
+                            'UI /monitor: visual refinement of borders in pagination controls and selector for better dark theme integration',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Login: placeholder de usuario cambiado de \"admin\" a \"Nombre de usuario\" y placeholder de contrasenya a \"Password\" para evitar confusiones en primer acceso',
+                            'Alerts /monitor: ya no se recortan en frontend a 20 fijos; ahora se respetan paginas completas desde backend',
+                        ],
+                        'en' => [
+                            'Login: username placeholder changed from \"admin\" to \"Nombre de usuario\" and password placeholder to \"Password\" to reduce first-login confusion',
+                            'Alerts /monitor: no longer hard-truncated to 20 on frontend; full backend pages are now respected',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.57',
                 'date' => '2026-04-03',
                 'badge' => 'success',

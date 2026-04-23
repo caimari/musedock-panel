@@ -1,0 +1,3 @@
+Actualziar Version musdok-panel en git:
+sudo /root/update_panel_version.sh --dry-run
+

@@ -42,11 +42,11 @@
                     <?= \MuseDockPanel\View::csrf() ?>
             <div class="mb-3">
                 <label class="form-label">Usuario</label>
-                <input type="text" name="username" class="form-control" placeholder="admin" required autofocus>
+                <input type="text" name="username" class="form-control" placeholder="Nombre de usuario" required autofocus>
             </div>
             <div class="mb-3">
                 <label class="form-label">Contraseña</label>
-                <input type="password" name="password" class="form-control" required>
+                <input type="password" name="password" class="form-control" placeholder="Password" required>
             </div>
             <button type="submit" class="btn btn-login btn-primary">
                 <i class="bi bi-box-arrow-in-right me-1"></i> Acceder

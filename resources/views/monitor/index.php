@@ -327,6 +327,27 @@
             </table>
         </div>
     </div>
+    <div class="card-footer d-flex justify-content-between align-items-center flex-wrap gap-2 py-2">
+        <small class="text-muted" id="alertsPageInfo">Página 1 de 1</small>
+        <div class="d-flex align-items-center gap-2">
+            <div class="d-flex align-items-center gap-2 px-2 py-1 rounded border border-secondary-subtle" style="border-width:0.5px;border-color:rgba(148,163,184,0.28)!important;">
+                <label for="alertsPerPageSelect" class="text-muted small mb-0">Por página</label>
+                <select id="alertsPerPageSelect" class="form-select form-select-sm" style="width:auto;min-width:76px;background:#1e293b;border-color:rgba(148,163,184,0.22);border-width:0.5px;color:#e2e8f0;">
+                    <option value="20" selected>20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+            <div class="d-flex align-items-center gap-2 px-2 py-1 rounded border border-secondary-subtle" role="group" aria-label="Alerts pagination" style="border-width:0.5px;border-color:rgba(148,163,184,0.28)!important;">
+                <button type="button" class="btn btn-outline-light btn-sm" id="alertsPrevBtn" style="border-color:rgba(148,163,184,0.35);border-width:0.5px;">
+                    <i class="bi bi-chevron-left"></i> Prev
+                </button>
+                <button type="button" class="btn btn-outline-light btn-sm" id="alertsNextBtn" style="border-color:rgba(148,163,184,0.35);border-width:0.5px;">
+                    Next <i class="bi bi-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Alert Settings -->
@@ -423,6 +444,9 @@
     const GPU_COLORS = ['#a855f7', '#ec4899', '#f97316', '#06b6d4'];
     const DISKS = <?= json_encode(array_map(fn($d) => ['metric' => $d['metric'], 'ioMetric' => str_replace('_percent', '', $d['metric']), 'device' => $d['device'], 'mount' => $d['mount']], $disks ?? [])) ?>;
     let currentDiskIdx = 0;
+    let alertsPage = 1;
+    let alertsPages = 1;
+    let alertsPerPage = 20;
 
     // Panel timezone from Settings > Server (e.g. 'UTC', 'Asia/Tokyo', 'Europe/Madrid')
     const PANEL_TZ = '<?= View::e($panelTz ?? "UTC") ?>';
@@ -459,6 +483,35 @@
     function fmtTime(ts) {
         const d = new Date(ts);
         return d.toLocaleTimeString('es-ES', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    }
+
+    function fmtGpuMetric(metric, value) {
+        const v = Number(value) || 0;
+        if (metric === 'util' || metric === 'mem_percent') return v.toFixed(1) + '%';
+        if (metric === 'temp') return v.toFixed(1) + '°C';
+        if (metric === 'power') return v.toFixed(1) + 'W';
+        return v.toFixed(2);
+    }
+
+    function metricPoint(d, mode = 'peak') {
+        const peak = Number(d?.value ?? 0);
+        const avg = (d?.avg_val !== undefined && d?.avg_val !== null) ? Number(d.avg_val) : peak;
+        const p95 = (d?.p95_val !== undefined && d?.p95_val !== null) ? Number(d.p95_val) : avg;
+        const min = (d?.min_val !== undefined && d?.min_val !== null) ? Number(d.min_val) : peak;
+        const useAvg = mode === true || mode === 'avg';
+        const useP95 = mode === 'p95';
+        return {
+            x: parseUTC(d.ts),
+            y: useP95 ? p95 : (useAvg ? avg : peak),
+            avg,
+            p95,
+            peak,
+            min
+        };
+    }
+
+    function metricSeries(rows, mode = 'peak') {
+        return (rows || []).map(d => metricPoint(d, mode));
     }
 
     function esc(str) {
@@ -595,7 +648,14 @@
                 if (!items.length) return '';
                 return fmtTzFull(items[0].parsed.x) + ' (' + PANEL_TZ + ')';
             },
-            label: (ctx) => ctx.dataset.label + ': ' + fmtBytes(ctx.parsed.y)
+            label: (ctx) => {
+                const raw = ctx.raw || {};
+                const hasAgg = isAggregatedRange() && typeof raw.avg === 'number' && typeof raw.p95 === 'number' && typeof raw.peak === 'number';
+                if (hasAgg) {
+                    return `${ctx.dataset.label}: avg ${fmtBytes(raw.avg)} · p95 ${fmtBytes(raw.p95)} · peak ${fmtBytes(raw.peak)}`;
+                }
+                return ctx.dataset.label + ': ' + fmtBytes(ctx.parsed.y);
+            }
         };
 
         netChart = new Chart(document.getElementById('netChart'), {
@@ -654,6 +714,20 @@
         const cpuOpts = chartDefaults();
         cpuOpts.scales.y.max = 100;
         cpuOpts.scales.y.ticks.callback = (v) => v + '%';
+        cpuOpts.plugins.tooltip.callbacks = {
+            title: (items) => {
+                if (!items.length) return '';
+                return fmtTzFull(items[0].parsed.x) + ' (' + PANEL_TZ + ')';
+            },
+            label: (ctx) => {
+                const raw = ctx.raw || {};
+                const hasAgg = isAggregatedRange() && typeof raw.avg === 'number' && typeof raw.p95 === 'number' && typeof raw.peak === 'number';
+                if (hasAgg) {
+                    return `${ctx.dataset.label}: avg ${raw.avg.toFixed(1)}% · p95 ${raw.p95.toFixed(1)}% · peak ${raw.peak.toFixed(1)}%`;
+                }
+                return `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`;
+            }
+        };
 
         cpuChart = new Chart(document.getElementById('cpuChart'), {
             type: 'line',
@@ -688,6 +762,20 @@
         const ramOpts = chartDefaults();
         ramOpts.scales.y.max = 100;
         ramOpts.scales.y.ticks.callback = (v) => v + '%';
+        ramOpts.plugins.tooltip.callbacks = {
+            title: (items) => {
+                if (!items.length) return '';
+                return fmtTzFull(items[0].parsed.x) + ' (' + PANEL_TZ + ')';
+            },
+            label: (ctx) => {
+                const raw = ctx.raw || {};
+                const hasAgg = isAggregatedRange() && typeof raw.avg === 'number' && typeof raw.p95 === 'number' && typeof raw.peak === 'number';
+                if (hasAgg) {
+                    return `${ctx.dataset.label}: avg ${raw.avg.toFixed(1)}% · p95 ${raw.p95.toFixed(1)}% · peak ${raw.peak.toFixed(1)}%`;
+                }
+                return `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`;
+            }
+        };
 
         ramChart = new Chart(document.getElementById('ramChart'), {
             type: 'line',
@@ -735,9 +823,27 @@
                 return ds;
             }
 
+            function applyGpuTooltip(opts, metricKey) {
+                opts.plugins.tooltip.callbacks = {
+                    title: (items) => {
+                        if (!items.length) return '';
+                        return fmtTzFull(items[0].parsed.x) + ' (' + PANEL_TZ + ')';
+                    },
+                    label: (ctx) => {
+                        const raw = ctx.raw || {};
+                        const hasAgg = typeof raw.avg === 'number' && typeof raw.p95 === 'number' && typeof raw.peak === 'number';
+                        if (hasAgg && isAggregatedRange()) {
+                            return `${ctx.dataset.label}: avg ${fmtGpuMetric(metricKey, raw.avg)} · p95 ${fmtGpuMetric(metricKey, raw.p95)} · peak ${fmtGpuMetric(metricKey, raw.peak)}`;
+                        }
+                        return `${ctx.dataset.label}: ${fmtGpuMetric(metricKey, ctx.parsed.y)}`;
+                    }
+                };
+            }
+
             const gpuPctOpts = chartDefaults();
             gpuPctOpts.scales.y.max = 100;
             gpuPctOpts.scales.y.ticks.callback = (v) => v + '%';
+            applyGpuTooltip(gpuPctOpts, 'util');
 
             gpuUtilChart = new Chart(document.getElementById('gpuUtilChart'), {
                 type: 'line', data: { datasets: gpuDatasets() }, options: gpuPctOpts
@@ -745,18 +851,21 @@
             const gpuMemOpts = chartDefaults();
             gpuMemOpts.scales.y.max = 100;
             gpuMemOpts.scales.y.ticks.callback = (v) => v + '%';
+            applyGpuTooltip(gpuMemOpts, 'mem_percent');
             gpuMemChart = new Chart(document.getElementById('gpuMemChart'), {
                 type: 'line', data: { datasets: gpuDatasets() }, options: gpuMemOpts
             });
 
             const gpuTempOpts = chartDefaults();
             gpuTempOpts.scales.y.ticks.callback = (v) => v + '°C';
+            applyGpuTooltip(gpuTempOpts, 'temp');
             gpuTempChart = new Chart(document.getElementById('gpuTempChart'), {
                 type: 'line', data: { datasets: gpuDatasets() }, options: gpuTempOpts
             });
 
             const gpuPwrOpts = chartDefaults();
             gpuPwrOpts.scales.y.ticks.callback = (v) => v + 'W';
+            applyGpuTooltip(gpuPwrOpts, 'power');
             gpuPowerChart = new Chart(document.getElementById('gpuPowerChart'), {
                 type: 'line', data: { datasets: gpuDatasets() }, options: gpuPwrOpts
             });
@@ -822,6 +931,20 @@
             const diskPctOpts = chartDefaults();
             diskPctOpts.scales.y.max = 100;
             diskPctOpts.scales.y.ticks.callback = (v) => v + '%';
+            diskPctOpts.plugins.tooltip.callbacks = {
+                title: (items) => {
+                    if (!items.length) return '';
+                    return fmtTzFull(items[0].parsed.x) + ' (' + PANEL_TZ + ')';
+                },
+                label: (ctx) => {
+                    const raw = ctx.raw || {};
+                    const hasAgg = isAggregatedRange() && typeof raw.avg === 'number' && typeof raw.p95 === 'number' && typeof raw.peak === 'number';
+                    if (hasAgg) {
+                        return `${ctx.dataset.label}: avg ${raw.avg.toFixed(1)}% · p95 ${raw.p95.toFixed(1)}% · peak ${raw.peak.toFixed(1)}%`;
+                    }
+                    return `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}%`;
+                }
+            };
 
             diskUsageChart = new Chart(document.getElementById('diskUsageChart'), {
                 type: 'line',
@@ -844,7 +967,14 @@
                     if (!items.length) return '';
                     return fmtTzFull(items[0].parsed.x) + ' (' + PANEL_TZ + ')';
                 },
-                label: (ctx) => ctx.dataset.label + ': ' + fmtBytes(ctx.parsed.y)
+                label: (ctx) => {
+                    const raw = ctx.raw || {};
+                    const hasAgg = isAggregatedRange() && typeof raw.avg === 'number' && typeof raw.p95 === 'number' && typeof raw.peak === 'number';
+                    if (hasAgg) {
+                        return `${ctx.dataset.label}: avg ${fmtBytes(raw.avg)} · p95 ${fmtBytes(raw.p95)} · peak ${fmtBytes(raw.peak)}`;
+                    }
+                    return ctx.dataset.label + ': ' + fmtBytes(ctx.parsed.y);
+                }
             };
 
             diskIoChart = new Chart(document.getElementById('diskIoChart'), {
@@ -874,8 +1004,7 @@
 
     // ─── Load chart data ─────────────────────────────────────
     async function loadNetChart() {
-        const isAggregated = ['7d', '30d', '1y'].includes(currentRange);
-        const isDaily = ['30d', '1y'].includes(currentRange);
+        const isAggregated = isAggregatedRange();
 
         try {
             const [rxResp, txResp] = await Promise.all([
@@ -884,86 +1013,70 @@
             ]);
             const rxJson = await rxResp.json();
             const txJson = await txResp.json();
+            const rxRows = rxJson.data || [];
+            const txRows = txJson.data || [];
 
-            // value = max_val (peak) for aggregated, raw value for realtime
-            const rxData = (rxJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
-            const txData = (txJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+            const rxMain = metricSeries(rxRows, isAggregated ? 'avg' : 'peak');
+            const txMain = metricSeries(txRows, isAggregated ? 'avg' : 'peak');
+            const rxP95 = metricSeries(rxRows, 'p95');
+            const txP95 = metricSeries(txRows, 'p95');
 
-            if (isDaily) {
-                // Daily (30d/1y): thin overlapping bars — discrete peaks per day
-                const barBase = {
-                    type: 'bar', borderWidth: 1, pointRadius: 0, fill: false,
-                    barPercentage: 1, categoryPercentage: 1,
-                    maxBarThickness: 20,
-                    stack: 'overlap',
-                };
+            const lineProps = (color, bg) => ({
+                type: 'line',
+                borderWidth: 1.5,
+                borderColor: color,
+                backgroundColor: bg,
+                fill: true,
+                tension: 0.3,
+                pointRadius: 0,
+            });
+            const dashedProps = (color) => ({
+                type: 'line',
+                borderWidth: 1,
+                borderColor: color,
+                backgroundColor: 'transparent',
+                fill: false,
+                tension: 0.3,
+                pointRadius: 0,
+                borderDash: [4, 4],
+            });
 
-                Object.assign(netChart.data.datasets[0], barBase);
-                netChart.data.datasets[0].data = txData; // TX behind (drawn first)
-                netChart.data.datasets[0].label = 'TX Peak';
-                netChart.data.datasets[0].backgroundColor = 'rgba(56,189,248,0.5)';
-                netChart.data.datasets[0].borderColor = '#38bdf8';
+            Object.assign(netChart.data.datasets[0], lineProps('#22c55e', 'rgba(34,197,94,0.08)'));
+            netChart.data.datasets[0].data = rxMain;
+            netChart.data.datasets[0].label = isAggregated ? 'RX Avg' : 'RX (In)';
 
-                Object.assign(netChart.data.datasets[1], barBase);
-                netChart.data.datasets[1].data = rxData; // RX in front
-                netChart.data.datasets[1].label = 'RX Peak';
-                netChart.data.datasets[1].backgroundColor = 'rgba(34,197,94,0.7)';
-                netChart.data.datasets[1].borderColor = '#22c55e';
+            Object.assign(netChart.data.datasets[1], lineProps('#38bdf8', 'rgba(56,189,248,0.08)'));
+            netChart.data.datasets[1].data = txMain;
+            netChart.data.datasets[1].label = isAggregated ? 'TX Avg' : 'TX (Out)';
 
+            if (isAggregated) {
+                Object.assign(netChart.data.datasets[2], dashedProps('rgba(34,197,94,0.5)'));
+                netChart.data.datasets[2].data = rxP95;
+                netChart.data.datasets[2].label = 'RX P95';
+
+                Object.assign(netChart.data.datasets[3], dashedProps('rgba(56,189,248,0.5)'));
+                netChart.data.datasets[3].data = txP95;
+                netChart.data.datasets[3].label = 'TX P95';
+            } else {
                 netChart.data.datasets[2].data = [];
                 netChart.data.datasets[3].data = [];
-
-                // Enable stacked mode but NOT summed (overlapping bars)
-                netChart.options.scales.x.stacked = true;
-                netChart.options.scales.y.stacked = false;
-            } else {
-                // Line chart for 1h/6h/24h/7d
-                netChart.data.datasets[0].data = rxData;
-                netChart.data.datasets[0].label = isAggregated ? 'RX Peak' : 'RX (In)';
-                netChart.data.datasets[0].type = 'line';
-                netChart.data.datasets[0].borderWidth = 1.5;
-                netChart.data.datasets[0].borderColor = '#22c55e';
-                netChart.data.datasets[0].backgroundColor = 'rgba(34,197,94,0.08)';
-                netChart.data.datasets[0].fill = true;
-                netChart.data.datasets[0].tension = 0.3;
-                netChart.data.datasets[0].pointRadius = 0;
-
-                netChart.data.datasets[1].data = txData;
-                netChart.data.datasets[1].label = isAggregated ? 'TX Peak' : 'TX (Out)';
-                netChart.data.datasets[1].type = 'line';
-                netChart.data.datasets[1].borderWidth = 1.5;
-                netChart.data.datasets[1].borderColor = '#38bdf8';
-                netChart.data.datasets[1].backgroundColor = 'rgba(56,189,248,0.08)';
-                netChart.data.datasets[1].fill = true;
-                netChart.data.datasets[1].tension = 0.3;
-                netChart.data.datasets[1].pointRadius = 0;
-
-                // Disable stacked mode for line charts
-                netChart.options.scales.x.stacked = false;
-                netChart.options.scales.y.stacked = false;
-
-                // Avg dashed lines only for 7d (hourly)
-                if (isAggregated) {
-                    netChart.data.datasets[2].data = (rxJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
-                    netChart.data.datasets[3].data = (txJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
-                } else {
-                    netChart.data.datasets[2].data = [];
-                    netChart.data.datasets[3].data = [];
-                }
             }
+
+            // Keep line mode for all ranges to avoid misleading "solid peak bars" impression
+            netChart.options.scales.x.stacked = false;
+            netChart.options.scales.y.stacked = false;
 
             netChart.update();
 
-            document.getElementById('chartEmpty').style.display = (rxData.length === 0 && txData.length === 0) ? 'block' : 'none';
-            document.getElementById('netChart').style.display = (rxData.length === 0 && txData.length === 0) ? 'none' : 'block';
+            document.getElementById('chartEmpty').style.display = (rxMain.length === 0 && txMain.length === 0) ? 'block' : 'none';
+            document.getElementById('netChart').style.display = (rxMain.length === 0 && txMain.length === 0) ? 'none' : 'block';
         } catch (e) {
             console.error('Error loading net chart:', e);
         }
     }
 
     async function loadSystemCharts() {
-        const isAggregated = ['7d', '30d', '1y'].includes(currentRange);
-        const isDaily = ['30d', '1y'].includes(currentRange);
+        const isAggregated = isAggregatedRange();
         try {
             const [cpuResp, ramResp] = await Promise.all([
                 fetch(`/monitor/api/metrics?host=${HOST}&metric=cpu_percent&range=${currentRange}`),
@@ -972,55 +1085,48 @@
             const cpuJson = await cpuResp.json();
             const ramJson = await ramResp.json();
 
-            const cpuData = (cpuJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
-            const ramData = (ramJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+            const cpuRows = cpuJson.data || [];
+            const ramRows = ramJson.data || [];
 
-            if (isDaily) {
-                // Daily (30d/1y): thin bars for peaks + dashed line for avg
-                const barProps = (bg, border) => ({
-                    type: 'bar', borderWidth: 1, backgroundColor: bg, borderColor: border,
-                    barPercentage: 1, categoryPercentage: 1, maxBarThickness: 20,
-                    pointRadius: 0, fill: false,
-                });
+            const lineProps = (color, bg) => ({
+                type: 'line',
+                borderWidth: 1.5,
+                borderColor: color,
+                backgroundColor: bg,
+                fill: true,
+                tension: 0.3,
+                pointRadius: 0,
+            });
+            const dashedProps = (color) => ({
+                type: 'line',
+                borderWidth: 1,
+                borderColor: color,
+                backgroundColor: 'transparent',
+                fill: false,
+                tension: 0.3,
+                pointRadius: 0,
+                borderDash: [4, 4],
+            });
 
-                Object.assign(cpuChart.data.datasets[0], barProps('rgba(14,165,233,0.7)', '#0ea5e9'));
-                cpuChart.data.datasets[0].data = cpuData;
-                cpuChart.data.datasets[0].label = 'CPU Peak';
-                cpuChart.data.datasets[1].data = (cpuJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
-                cpuChart.data.datasets[1].label = 'CPU Avg';
-                cpuChart.data.datasets[1].type = 'line';
+            Object.assign(cpuChart.data.datasets[0], lineProps('#0ea5e9', 'rgba(14,165,233,0.08)'));
+            cpuChart.data.datasets[0].data = metricSeries(cpuRows, isAggregated ? 'avg' : 'peak');
+            cpuChart.data.datasets[0].label = isAggregated ? 'CPU Avg' : 'CPU %';
 
-                Object.assign(ramChart.data.datasets[0], barProps('rgba(245,158,11,0.7)', '#f59e0b'));
-                ramChart.data.datasets[0].data = ramData;
-                ramChart.data.datasets[0].label = 'RAM Peak';
-                ramChart.data.datasets[1].data = (ramJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
-                ramChart.data.datasets[1].label = 'RAM Avg';
-                ramChart.data.datasets[1].type = 'line';
+            Object.assign(ramChart.data.datasets[0], lineProps('#f59e0b', 'rgba(245,158,11,0.08)'));
+            ramChart.data.datasets[0].data = metricSeries(ramRows, isAggregated ? 'avg' : 'peak');
+            ramChart.data.datasets[0].label = isAggregated ? 'RAM Avg' : 'RAM %';
+
+            if (isAggregated) {
+                Object.assign(cpuChart.data.datasets[1], dashedProps('rgba(14,165,233,0.5)'));
+                cpuChart.data.datasets[1].data = metricSeries(cpuRows, 'p95');
+                cpuChart.data.datasets[1].label = 'CPU P95';
+
+                Object.assign(ramChart.data.datasets[1], dashedProps('rgba(245,158,11,0.5)'));
+                ramChart.data.datasets[1].data = metricSeries(ramRows, 'p95');
+                ramChart.data.datasets[1].label = 'RAM P95';
             } else {
-                // Line chart for 1h/6h/24h/7d
-                const lineProps = (color, bg) => ({
-                    type: 'line', borderWidth: 1.5, borderColor: color,
-                    backgroundColor: bg, fill: true, tension: 0.3, pointRadius: 0,
-                });
-
-                Object.assign(cpuChart.data.datasets[0], lineProps('#0ea5e9', 'rgba(14,165,233,0.08)'));
-                cpuChart.data.datasets[0].data = cpuData;
-                cpuChart.data.datasets[0].label = isAggregated ? 'CPU Peak' : 'CPU %';
-
-                Object.assign(ramChart.data.datasets[0], lineProps('#f59e0b', 'rgba(245,158,11,0.08)'));
-                ramChart.data.datasets[0].data = ramData;
-                ramChart.data.datasets[0].label = isAggregated ? 'RAM Peak' : 'RAM %';
-
-                // Avg dashed line only for 7d (hourly)
-                if (isAggregated) {
-                    cpuChart.data.datasets[1].data = (cpuJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
-                    cpuChart.data.datasets[1].label = 'CPU Avg';
-                    ramChart.data.datasets[1].data = (ramJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
-                    ramChart.data.datasets[1].label = 'RAM Avg';
-                } else {
-                    cpuChart.data.datasets[1].data = [];
-                    ramChart.data.datasets[1].data = [];
-                }
+                cpuChart.data.datasets[1].data = [];
+                ramChart.data.datasets[1].data = [];
             }
 
             cpuChart.update();
@@ -1071,6 +1177,7 @@
     async function loadGpuCharts() {
         if (GPU_COUNT === 0 || !gpuUtilChart) return;
         try {
+            const isAgg = isAggregatedRange();
             const metrics = ['util', 'mem_percent', 'temp', 'power'];
             const charts = [gpuUtilChart, gpuMemChart, gpuTempChart, gpuPowerChart];
 
@@ -1081,7 +1188,22 @@
                 }
                 const results = await Promise.all(fetches);
                 for (let g = 0; g < GPU_COUNT; g++) {
-                    charts[m].data.datasets[g].data = (results[g].data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+                    const baseLabel = 'GPU' + g + (GPU_NAMES[g] ? ' — ' + GPU_NAMES[g] : '');
+                    charts[m].data.datasets[g].label = isAgg ? (baseLabel + ' (avg)') : baseLabel;
+                    charts[m].data.datasets[g].data = (results[g].data || []).map(d => {
+                        const peak = +d.value;
+                        const avg = (d.avg_val !== undefined && d.avg_val !== null) ? +d.avg_val : peak;
+                        const p95 = (d.p95_val !== undefined && d.p95_val !== null) ? +d.p95_val : avg;
+                        const min = (d.min_val !== undefined && d.min_val !== null) ? +d.min_val : peak;
+                        return {
+                            x: parseUTC(d.ts),
+                            y: isAgg ? avg : peak,
+                            avg,
+                            p95,
+                            peak,
+                            min
+                        };
+                    });
                 }
                 charts[m].update();
             }
@@ -1100,7 +1222,6 @@
         if (DISKS.length === 0 || !diskUsageChart) return;
         const disk = DISKS[currentDiskIdx];
         const isAgg = isAggregatedRange();
-        const isDaily = ['30d', '1y'].includes(currentRange);
         try {
             const [usageResp, readResp, writeResp] = await Promise.all([
                 fetch(`/monitor/api/metrics?host=${HOST}&metric=${disk.metric}&range=${currentRange}`),
@@ -1111,83 +1232,68 @@
             const readJson = await readResp.json();
             const writeJson = await writeResp.json();
 
-            // Disk usage %: always line (it's a slowly changing value)
-            diskUsageChart.data.datasets[0].data = (usageJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+            const usageRows = usageJson.data || [];
+            const readRows = readJson.data || [];
+            const writeRows = writeJson.data || [];
+
+            // Disk usage %: avg for aggregated ranges, raw otherwise
+            diskUsageChart.data.datasets[0].data = metricSeries(usageRows, isAgg ? 'avg' : 'peak');
+            diskUsageChart.data.datasets[0].label = isAgg ? 'Usage Avg %' : 'Usage %';
             diskUsageChart.data.datasets[0].type = 'line';
-            diskUsageChart.data.datasets[0].tension = isDaily ? 0 : 0.3;
-            diskUsageChart.data.datasets[0].pointRadius = isDaily ? 3 : 0;
+            diskUsageChart.data.datasets[0].tension = 0.3;
+            diskUsageChart.data.datasets[0].pointRadius = 0;
+
+            if (!diskUsageChart.data.datasets[1]) {
+                diskUsageChart.data.datasets.push({
+                    label: 'Usage P95 %',
+                    data: [],
+                    borderColor: 'rgba(34,197,94,0.5)',
+                    backgroundColor: 'transparent',
+                    fill: false,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    borderWidth: 1,
+                    borderDash: [4, 4],
+                });
+            }
+            diskUsageChart.data.datasets[1].data = isAgg ? metricSeries(usageRows, 'p95') : [];
             diskUsageChart.update();
 
-            const readData = (readJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
-            const writeData = (writeJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +d.value }));
+            // Disk I/O: avg for aggregated ranges, raw otherwise
+            const lineProps = (color, bg) => ({
+                type: 'line',
+                borderWidth: 1.5,
+                borderColor: color,
+                backgroundColor: bg,
+                fill: true,
+                tension: 0.3,
+                pointRadius: 0,
+            });
 
-            if (isDaily) {
-                // Daily: thin overlapping bars for I/O peaks
-                const barBase = {
-                    type: 'bar', borderWidth: 1, pointRadius: 0, fill: false,
-                    barPercentage: 1, categoryPercentage: 1,
-                    maxBarThickness: 20, // max 20px wide regardless of data density
-                    stack: 'overlap', tension: 0,
-                };
+            Object.assign(diskIoChart.data.datasets[0], lineProps('#22c55e', 'rgba(34,197,94,0.08)'));
+            diskIoChart.data.datasets[0].data = metricSeries(readRows, isAgg ? 'avg' : 'peak');
+            diskIoChart.data.datasets[0].label = isAgg ? 'Read Avg' : 'Read';
 
-                Object.assign(diskIoChart.data.datasets[0], barBase);
-                diskIoChart.data.datasets[0].data = readData;
-                diskIoChart.data.datasets[0].label = 'Read Peak';
-                diskIoChart.data.datasets[0].backgroundColor = 'rgba(34,197,94,0.7)';
-                diskIoChart.data.datasets[0].borderColor = '#22c55e';
+            Object.assign(diskIoChart.data.datasets[1], lineProps('#f59e0b', 'rgba(245,158,11,0.08)'));
+            diskIoChart.data.datasets[1].data = metricSeries(writeRows, isAgg ? 'avg' : 'peak');
+            diskIoChart.data.datasets[1].label = isAgg ? 'Write Avg' : 'Write';
 
-                Object.assign(diskIoChart.data.datasets[1], barBase);
-                diskIoChart.data.datasets[1].data = writeData;
-                diskIoChart.data.datasets[1].label = 'Write Peak';
-                diskIoChart.data.datasets[1].backgroundColor = 'rgba(245,158,11,0.5)';
-                diskIoChart.data.datasets[1].borderColor = '#f59e0b';
+            diskIoChart.options.scales.x.stacked = false;
+            diskIoChart.options.scales.y.stacked = false;
 
-                diskIoChart.options.scales.x.stacked = true;
-                diskIoChart.options.scales.y.stacked = false;
-
-                // Clear avg lines
-                if (diskIoChart.data.datasets[2]) {
-                    diskIoChart.data.datasets[2].data = [];
-                    diskIoChart.data.datasets[3].data = [];
-                }
-            } else {
-                // Line chart for 1h/6h/24h/7d
-                const lineProps = (color, bg) => ({
-                    type: 'line', borderWidth: 1.5, borderColor: color,
-                    backgroundColor: bg, fill: true, tension: 0.3, pointRadius: 0,
+            if (!diskIoChart.data.datasets[2]) {
+                diskIoChart.data.datasets.push({
+                    label: 'Read P95', data: [], borderColor: 'rgba(34,197,94,0.5)',
+                    backgroundColor: 'transparent', fill: false, tension: 0.3,
+                    pointRadius: 0, borderWidth: 1, borderDash: [4, 4],
+                }, {
+                    label: 'Write P95', data: [], borderColor: 'rgba(245,158,11,0.5)',
+                    backgroundColor: 'transparent', fill: false, tension: 0.3,
+                    pointRadius: 0, borderWidth: 1, borderDash: [4, 4],
                 });
-
-                Object.assign(diskIoChart.data.datasets[0], lineProps('#22c55e', 'rgba(34,197,94,0.08)'));
-                diskIoChart.data.datasets[0].data = readData;
-                diskIoChart.data.datasets[0].label = isAgg ? 'Read Peak' : 'Read';
-
-                Object.assign(diskIoChart.data.datasets[1], lineProps('#f59e0b', 'rgba(245,158,11,0.08)'));
-                diskIoChart.data.datasets[1].data = writeData;
-                diskIoChart.data.datasets[1].label = isAgg ? 'Write Peak' : 'Write';
-
-                diskIoChart.options.scales.x.stacked = false;
-                diskIoChart.options.scales.y.stacked = false;
-
-                // Avg lines for 7d (hourly)
-                if (isAgg && !isDaily) {
-                    if (!diskIoChart.data.datasets[2]) {
-                        diskIoChart.data.datasets.push({
-                            label: 'Read Avg', data: [], borderColor: 'rgba(34,197,94,0.35)',
-                            backgroundColor: 'transparent', fill: false, tension: 0.3,
-                            pointRadius: 0, borderWidth: 1, borderDash: [4, 4],
-                        }, {
-                            label: 'Write Avg', data: [], borderColor: 'rgba(245,158,11,0.35)',
-                            backgroundColor: 'transparent', fill: false, tension: 0.3,
-                            pointRadius: 0, borderWidth: 1, borderDash: [4, 4],
-                        });
-                    }
-                    diskIoChart.data.datasets[2].data = (readJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
-                    diskIoChart.data.datasets[3].data = (writeJson.data || []).map(d => ({ x: parseUTC(d.ts), y: +(d.avg_val || d.value) }));
-                } else if (diskIoChart.data.datasets[2]) {
-                    diskIoChart.data.datasets[2].data = [];
-                    diskIoChart.data.datasets[3].data = [];
-                }
             }
+            diskIoChart.data.datasets[2].data = isAgg ? metricSeries(readRows, 'p95') : [];
+            diskIoChart.data.datasets[3].data = isAgg ? metricSeries(writeRows, 'p95') : [];
             diskIoChart.update();
         } catch (e) {
             console.error('Error loading disk charts:', e);
@@ -1281,19 +1387,39 @@
         }
     }
 
+    function renderAlertsPagination(meta) {
+        const pageInfo = document.getElementById('alertsPageInfo');
+        const prevBtn = document.getElementById('alertsPrevBtn');
+        const nextBtn = document.getElementById('alertsNextBtn');
+        if (!pageInfo || !prevBtn || !nextBtn) return;
+
+        const page = Number(meta?.page || 1);
+        const pages = Number(meta?.pages || 1);
+        const total = Number(meta?.total || 0);
+
+        pageInfo.textContent = `Página ${page} de ${pages} · ${total.toLocaleString()} alertas`;
+        prevBtn.disabled = page <= 1;
+        nextBtn.disabled = page >= pages;
+    }
+
     // ─── Load alerts ─────────────────────────────────────────
-    async function loadAlerts() {
+    async function loadAlerts(page = alertsPage) {
         try {
-            const resp = await fetch(`/monitor/api/alerts?host=${HOST}`);
+            const safePage = Math.max(1, Number(page) || 1);
+            const resp = await fetch(`/monitor/api/alerts?host=${encodeURIComponent(HOST)}&page=${safePage}&per_page=${alertsPerPage}`);
             const json = await resp.json();
             if (!json.ok) return;
 
             const tbody = document.getElementById('alertsBody');
             const badge = document.getElementById('alertBadge');
             const alerts = json.alerts || [];
+            const pagination = json.pagination || { total: alerts.length, page: 1, pages: 1, per_page: alertsPerPage };
+            alertsPage = Number(pagination.page || 1);
+            alertsPages = Number(pagination.pages || 1);
+            renderAlertsPagination(pagination);
 
             const clearBtn = document.getElementById('btnClearAlerts');
-            if (alerts.length === 0) {
+            if ((pagination.total || 0) === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No alerts</td></tr>';
                 badge.style.display = 'none';
                 if (clearBtn) clearBtn.style.display = 'none';
@@ -1301,7 +1427,7 @@
             }
             if (clearBtn) clearBtn.style.display = 'inline-block';
 
-            const unack = alerts.filter(a => !a.acknowledged).length;
+            const unack = Number(json.unacknowledged ?? alerts.filter(a => !a.acknowledged).length);
             badge.textContent = unack;
             badge.style.display = unack > 0 ? 'inline' : 'none';
 
@@ -1309,7 +1435,7 @@
             window._monitorAlerts = {};
             alerts.forEach(a => { window._monitorAlerts[a.id] = a; });
 
-            tbody.innerHTML = alerts.slice(0, 20).map(a => {
+            tbody.innerHTML = alerts.map(a => {
                 const ts = fmtTzFull(parseUTC(a.ts));
                 const statusBadge = a.acknowledged
                     ? '<span class="badge bg-secondary">ACK</span>'
@@ -1340,7 +1466,7 @@
             form.append('_csrf_token', CSRF);
             const resp = await fetch('/monitor/api/alerts/ack', { method: 'POST', body: form });
             const json = await resp.json();
-            if (json.ok) loadAlerts();
+            if (json.ok) loadAlerts(alertsPage);
         } catch (e) {
             console.error('Error acknowledging alert:', e);
         }
@@ -1361,7 +1487,7 @@
             form.append('host', HOST);
             form.append('_csrf_token', CSRF);
             await fetch('/monitor/api/alerts/clear', { method: 'POST', body: form });
-            loadAlerts();
+            loadAlerts(1);
         } catch (e) {
             console.error('Error clearing alerts:', e);
         }
@@ -1413,6 +1539,20 @@
         });
     }
 
+    document.getElementById('alertsPrevBtn')?.addEventListener('click', function() {
+        if (alertsPage > 1) loadAlerts(alertsPage - 1);
+    });
+    document.getElementById('alertsNextBtn')?.addEventListener('click', function() {
+        if (alertsPage < alertsPages) loadAlerts(alertsPage + 1);
+    });
+    document.getElementById('alertsPerPageSelect')?.addEventListener('change', function() {
+        const selected = Number(this.value);
+        if (!Number.isFinite(selected)) return;
+        alertsPerPage = Math.min(100, Math.max(10, selected));
+        alertsPage = 1;
+        loadAlerts(1);
+    });
+
     document.getElementById('rangeButtons').addEventListener('click', function(e) {
         const btn = e.target.closest('[data-range]');
         if (!btn) return;
@@ -1436,16 +1576,21 @@
             loadGpuCharts();
             loadDiskCharts();
             loadBwCharts();
-            loadAlerts();
+            loadAlerts(alertsPage);
         }, interval);
     }
 
     // ─── Init ────────────────────────────────────────────────
     initCharts();
+    const perPageSelect = document.getElementById('alertsPerPageSelect');
+    if (perPageSelect) {
+        const selected = Number(perPageSelect.value);
+        if (Number.isFinite(selected)) alertsPerPage = Math.min(100, Math.max(10, selected));
+    }
     loadNetChart();
     loadSystemCharts();
     updateCards();
-    loadAlerts();
+    loadAlerts(1);
     // Defer less critical charts to speed up first render.
     setTimeout(() => {
         loadGpuCharts();

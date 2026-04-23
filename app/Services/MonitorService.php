@@ -31,7 +31,7 @@ class MonitorService
 
         // Hourly or daily tables — use max_val as main value to preserve peaks
         return Database::fetchAll(
-            "SELECT {$epochExpr} AS ts, max_val AS value, avg_val, min_val FROM {$table}
+            "SELECT {$epochExpr} AS ts, max_val AS value, avg_val, p95_val, min_val FROM {$table}
              WHERE host = :host AND metric = :metric AND ts >= NOW() - INTERVAL '{$interval}'
              ORDER BY ts ASC",
             ['host' => $host, 'metric' => $metric]
@@ -98,20 +98,36 @@ class MonitorService
     }
 
     /**
-     * Get recent alerts.
+     * Get recent alerts with optional pagination window.
      */
-    public static function getAlerts(?string $host = null, int $limit = 50): array
+    public static function getAlerts(?string $host = null, int $limit = 50, int $offset = 0): array
     {
         $host = self::resolveHost($host);
+        $limit = max(1, min(500, $limit));
+        $offset = max(0, $offset);
         return Database::fetchAll(
             "SELECT id, extract(epoch FROM ts AT TIME ZONE 'UTC') AS ts,
                     host, type, message, value, acknowledged, details
              FROM monitor_alerts
              WHERE host = :host
              ORDER BY ts DESC
-             LIMIT :lim",
-            ['host' => $host, 'lim' => $limit]
+             LIMIT CAST(:lim AS INTEGER)
+             OFFSET CAST(:off AS INTEGER)",
+            ['host' => $host, 'lim' => $limit, 'off' => $offset]
         );
+    }
+
+    /**
+     * Get total alert count for host.
+     */
+    public static function getAlertsCount(?string $host = null): int
+    {
+        $host = self::resolveHost($host);
+        $row = Database::fetchOne(
+            "SELECT COUNT(*) AS cnt FROM monitor_alerts WHERE host = :host",
+            ['host' => $host]
+        );
+        return (int) ($row['cnt'] ?? 0);
     }
 
     /**

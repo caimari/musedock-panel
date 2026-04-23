@@ -408,9 +408,27 @@ class MonitorController
         header('Content-Type: application/json');
 
         $host = $_GET['host'] ?? (gethostname() ?: 'localhost');
-        $alerts = MonitorService::getAlerts($host, 50);
+        $page = max(1, (int)($_GET['page'] ?? 1));
+        $perPage = min(100, max(10, (int)($_GET['per_page'] ?? 20)));
+        $total = MonitorService::getAlertsCount($host);
+        $pages = max(1, (int)ceil($total / $perPage));
+        $page = min($page, $pages);
+        $offset = ($page - 1) * $perPage;
 
-        echo json_encode(['ok' => true, 'alerts' => $alerts]);
+        $alerts = MonitorService::getAlerts($host, $perPage, $offset);
+        $unacknowledged = MonitorService::getUnacknowledgedCount($host);
+
+        echo json_encode([
+            'ok' => true,
+            'alerts' => $alerts,
+            'unacknowledged' => $unacknowledged,
+            'pagination' => [
+                'total' => $total,
+                'page' => $page,
+                'per_page' => $perPage,
+                'pages' => $pages,
+            ],
+        ]);
         exit;
     }
 

@@ -320,15 +320,18 @@ if (!empty($inserts)) {
 // ─── Hourly aggregation ─────────────────────────────────────
 try {
     Database::query("
-        INSERT INTO monitor_metrics_hourly (ts, host, metric, avg_val, max_val, min_val, samples)
+        INSERT INTO monitor_metrics_hourly (ts, host, metric, avg_val, p95_val, max_val, min_val, samples)
         SELECT date_trunc('hour', ts), host, metric,
-               AVG(value), MAX(value), MIN(value), COUNT(*)
+               AVG(value),
+               PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value),
+               MAX(value), MIN(value), COUNT(*)
         FROM monitor_metrics
         WHERE ts < date_trunc('hour', NOW())
           AND ts >= date_trunc('hour', NOW()) - INTERVAL '2 hours'
         GROUP BY date_trunc('hour', ts), host, metric
         ON CONFLICT (ts, host, metric) DO UPDATE SET
             avg_val = EXCLUDED.avg_val,
+            p95_val = EXCLUDED.p95_val,
             max_val = EXCLUDED.max_val,
             min_val = EXCLUDED.min_val,
             samples = EXCLUDED.samples
@@ -342,15 +345,18 @@ $minute = (int)date('i');
 if ($minute < 2) {
     try {
         Database::query("
-            INSERT INTO monitor_metrics_daily (ts, host, metric, avg_val, max_val, min_val, samples)
+            INSERT INTO monitor_metrics_daily (ts, host, metric, avg_val, p95_val, max_val, min_val, samples)
             SELECT ts::date, host, metric,
-                   AVG(avg_val), MAX(max_val), MIN(min_val), SUM(samples)
+                   AVG(avg_val),
+                   PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY COALESCE(p95_val, avg_val)),
+                   MAX(max_val), MIN(min_val), SUM(samples)
             FROM monitor_metrics_hourly
             WHERE ts < date_trunc('day', NOW())
               AND ts >= date_trunc('day', NOW()) - INTERVAL '2 days'
             GROUP BY ts::date, host, metric
             ON CONFLICT (ts, host, metric) DO UPDATE SET
                 avg_val = EXCLUDED.avg_val,
+                p95_val = EXCLUDED.p95_val,
                 max_val = EXCLUDED.max_val,
                 min_val = EXCLUDED.min_val,
                 samples = EXCLUDED.samples
