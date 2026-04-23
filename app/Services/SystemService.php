@@ -753,6 +753,9 @@ CONF;
     {
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'];
+        if (!self::ensureCaddyHttpServerReady($caddyApi)) {
+            return null;
+        }
 
         $routeId = self::caddyRouteId($domain);
 
@@ -894,8 +897,159 @@ CONF;
         return $panelPort + 1;
     }
 
+    /**
+     * Ensure Caddy has srv0 and that it listens on 443.
+     * Returns false only when the admin API is unreachable or the config cannot be repaired.
+     */
+    public static function ensureCaddyHttpServerReady(string $caddyApi): bool
+    {
+        $serverUrl = "{$caddyApi}/config/apps/http/servers/srv0";
+
+        // Check if srv0 exists
+        $ch = curl_init($serverUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 8,
+        ]);
+        curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode === 404) {
+            $initialServer = ['listen' => [':443'], 'routes' => []];
+
+            // Create srv0 directly
+            $ch = curl_init($serverUrl);
+            curl_setopt_array($ch, [
+                CURLOPT_CUSTOMREQUEST => 'POST',
+                CURLOPT_POSTFIELDS => json_encode($initialServer),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 8,
+            ]);
+            curl_exec($ch);
+            $createCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if (!($createCode >= 200 && $createCode < 300)) {
+                // Fallback: patch into servers map
+                $ch = curl_init("{$caddyApi}/config/apps/http/servers");
+                curl_setopt_array($ch, [
+                    CURLOPT_CUSTOMREQUEST => 'PATCH',
+                    CURLOPT_POSTFIELDS => json_encode(['srv0' => $initialServer]),
+                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 8,
+                ]);
+                curl_exec($ch);
+                $patchCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+
+                if (!($patchCode >= 200 && $patchCode < 300)) {
+                    // Last fallback: create whole http app with srv0
+                    $ch = curl_init("{$caddyApi}/config/apps/http");
+                    curl_setopt_array($ch, [
+                        CURLOPT_CUSTOMREQUEST => 'PATCH',
+                        CURLOPT_POSTFIELDS => json_encode(['servers' => ['srv0' => $initialServer]]),
+                        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_TIMEOUT => 8,
+                    ]);
+                    curl_exec($ch);
+                    $httpPatchCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    curl_close($ch);
+
+                    if (!($httpPatchCode >= 200 && $httpPatchCode < 300)) {
+                        return false;
+                    }
+                }
+            }
+        } elseif (!($httpCode >= 200 && $httpCode < 300)) {
+            return false;
+        }
+
+        // Ensure listen includes :443 (panel + hosting HTTPS routes live on srv0).
+        $existingListen = [];
+        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/listen");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 8,
+        ]);
+        $listenRaw = curl_exec($ch);
+        $listenCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($listenCode >= 200 && $listenCode < 300) {
+            $decoded = json_decode((string)$listenRaw, true);
+            if (is_array($decoded)) {
+                foreach ($decoded as $entry) {
+                    if (is_string($entry) && $entry !== '') {
+                        $existingListen[] = $entry;
+                    }
+                }
+            }
+        }
+
+        $listen = $existingListen;
+        if (!in_array(':443', $listen, true)) {
+            $listen[] = ':443';
+        }
+        $listen = array_values(array_unique($listen));
+
+        $needsListenUpdate = !in_array(':443', $existingListen, true);
+        if ($listenCode < 200 || $listenCode >= 300 || $needsListenUpdate) {
+            $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/listen");
+            curl_setopt_array($ch, [
+                CURLOPT_CUSTOMREQUEST => 'PUT',
+                CURLOPT_POSTFIELDS => json_encode($listen),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 8,
+            ]);
+            curl_exec($ch);
+            $putCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if (!($putCode >= 200 && $putCode < 300)) {
+                return false;
+            }
+        }
+
+        // Ensure routes key exists
+        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 8,
+        ]);
+        curl_exec($ch);
+        $routesCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($routesCode === 404) {
+            $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+            curl_setopt_array($ch, [
+                CURLOPT_CUSTOMREQUEST => 'PUT',
+                CURLOPT_POSTFIELDS => json_encode([]),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 8,
+            ]);
+            curl_exec($ch);
+            $putCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if (!($putCode >= 200 && $putCode < 300)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static function fetchCaddyRoutes(string $caddyApi): array
     {
+        if (!self::ensureCaddyHttpServerReady($caddyApi)) {
+            return ['ok' => false, 'error' => 'No se pudo preparar srv0/listeners en Caddy'];
+        }
+
         $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
@@ -1010,6 +1164,9 @@ CONF;
     {
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'];
+        if (!self::ensureCaddyHttpServerReady($caddyApi)) {
+            return null;
+        }
         $routeId = self::caddyRouteId($mainDomain);
 
         // Build full host list: main + www.main + each alias + www.alias
@@ -1074,6 +1231,9 @@ CONF;
     {
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'];
+        if (!self::ensureCaddyHttpServerReady($caddyApi)) {
+            return null;
+        }
         $routeId = 'redirect-' . str_replace('.', '-', $fromDomain);
 
         // Refresh CF zones if redirect domain is unknown
