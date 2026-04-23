@@ -1066,11 +1066,14 @@ CONF;
 
         if ($listenCode >= 200 && $listenCode < 300) {
             $decoded = json_decode((string)$listenRaw, true);
-            if (is_array($decoded)) {
-                foreach ($decoded as $entry) {
-                    if (is_string($entry) && $entry !== '') {
-                        $existingListen[] = $entry;
-                    }
+            // Safety first on production nodes: if Caddy returns malformed listen data,
+            // abort auto-heal instead of risking destructive writes.
+            if (!is_array($decoded) || !array_is_list($decoded)) {
+                return false;
+            }
+            foreach ($decoded as $entry) {
+                if (is_string($entry) && $entry !== '') {
+                    $existingListen[] = $entry;
                 }
             }
         }
@@ -1152,24 +1155,12 @@ CONF;
                 return false;
             }
         } elseif ($routesCode >= 200 && $routesCode < 300) {
-            // Some broken states keep routes as object/null; normalize to RouteList ([]).
+            // Safety first on production nodes: never reset routes automatically.
+            // If routes payload is malformed, fail safe and require explicit manual repair.
             $decodedRoutes = json_decode((string)$routesRaw, true);
             $isValidList = is_array($decodedRoutes) && array_is_list($decodedRoutes);
             if (!$isValidList) {
-                $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0");
-                curl_setopt_array($ch, [
-                    CURLOPT_CUSTOMREQUEST => 'PATCH',
-                    CURLOPT_POSTFIELDS => json_encode(['routes' => []]),
-                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_TIMEOUT => 8,
-                ]);
-                curl_exec($ch);
-                $patchCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
-                if (!($patchCode >= 200 && $patchCode < 300)) {
-                    return false;
-                }
+                return false;
             }
         } else {
             return false;
