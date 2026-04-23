@@ -261,6 +261,12 @@ if [ -d "$CMS_DIR" ]; then
             NEEDS_UPDATE=true
         fi
 
+        # verify-caddy-status: force safe mode by default (no background Caddy rewrites)
+        if echo "$CURRENT_CRONTAB" | grep -Eq '^[^#].*verify-caddy-status\.php' && ! echo "$CURRENT_CRONTAB" | grep -Eq '^[^#].*verify-caddy-status\.php.*MUSEDOCK_CADDY_CRON_AUTOREPAIR='; then
+            CURRENT_CRONTAB=$(echo "$CURRENT_CRONTAB" | sed -E 's#^([0-9*/,.-]+[[:space:]]+[0-9*/,.-]+[[:space:]]+[0-9*/,.-]+[[:space:]]+[0-9*/,.-]+[[:space:]]+[0-9*/,.-]+[[:space:]]+)(.*verify-caddy-status\.php.*)$#\1MUSEDOCK_CADDY_CRON_AUTOREPAIR=0 \2#')
+            NEEDS_UPDATE=true
+        fi
+
         # cron-plugins: */15 -> 8,23,38,53 (offset +8 min)
         if echo "$CURRENT_CRONTAB" | grep -q '^\*/15.*cron-plugins'; then
             CURRENT_CRONTAB=$(echo "$CURRENT_CRONTAB" | sed 's|^\*/15\(.*cron-plugins\)|8,23,38,53\1|')
@@ -271,6 +277,20 @@ if [ -d "$CMS_DIR" ]; then
         if echo "$CURRENT_CRONTAB" | grep -q '^0 \*.*cleanup-expired-cloudflare'; then
             CURRENT_CRONTAB=$(echo "$CURRENT_CRONTAB" | sed 's|^0 \*\(.*cleanup-expired-cloudflare\)|12 *\1|')
             NEEDS_UPDATE=true
+        fi
+
+        # If verify-caddy-status cron uses legacy hard require and plugin path is missing,
+        # disable the cron line to avoid fatal loop on nodes without that plugin.
+        VERIFY_SCRIPT="${CMS_DIR}/cron/verify-caddy-status.php"
+        LEGACY_REQUIRE=false
+        if [ -f "$VERIFY_SCRIPT" ] && grep -q "require_once \$pluginPath . '/Services/CaddyService.php'" "$VERIFY_SCRIPT" 2>/dev/null; then
+            LEGACY_REQUIRE=true
+        fi
+        CADDY_PLUGIN_FILE="${CMS_DIR}/plugins/superadmin/caddy-domain-manager/Services/CaddyService.php"
+        if [ "$LEGACY_REQUIRE" = true ] && [ ! -f "$CADDY_PLUGIN_FILE" ] && echo "$CURRENT_CRONTAB" | grep -Eq '^[^#].*verify-caddy-status\.php'; then
+            CURRENT_CRONTAB=$(echo "$CURRENT_CRONTAB" | sed -E 's#^([^#].*verify-caddy-status\.php.*)$## DISABLED_BY_MUSEDOCK_UPDATE: missing caddy-domain-manager plugin -> \1#')
+            NEEDS_UPDATE=true
+            warn "Disabled CMS verify-caddy-status cron for $CMS_USER (missing caddy-domain-manager plugin)"
         fi
 
         if [ "$NEEDS_UPDATE" = true ]; then
