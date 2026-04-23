@@ -709,7 +709,7 @@ class SettingsController
 
         LogService::log('settings.server', 'server', "Updated server settings: tz={$timezone}, hostname={$panelHostname}, protocol={$panelProtocol}");
         if ($routeApplied) {
-            Flash::set('success', "Configuracion guardada. Acceso recomendado: https://{$panelHostname}/");
+            Flash::set('success', "Configuracion guardada. Acceso recomendado: https://{$panelHostname}:8444/");
         } else {
             Flash::set('success', 'Configuracion del servidor guardada.');
         }

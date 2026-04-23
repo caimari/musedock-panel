@@ -858,7 +858,8 @@ CONF;
 
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
-        $panelPublicPort = self::getPanelPublicPort();
+        // Keep admin panel access on :8444 to preserve MIT/admin fallback separation.
+        $panelPublicPort = 8444;
         $internalPort = self::getPanelInternalPort();
 
         $routesResult = self::fetchCaddyRoutes($caddyApi);
@@ -964,8 +965,11 @@ CONF;
     {
         $panelPort = self::getPanelPublicPort();
         $panelListen = ':' . $panelPort;
-        $requiredListen = [':443'];
-        if ($panelListen !== ':443') {
+        // Always preserve:
+        // - :443 for customer hostings
+        // - :8444 for panel/admin fallback (IP or admin hostname with explicit port)
+        $requiredListen = [':443', ':8444'];
+        if ($panelListen !== ':443' && $panelListen !== ':8444') {
             $requiredListen[] = $panelListen;
         }
 
