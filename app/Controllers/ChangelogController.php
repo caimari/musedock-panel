@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.65',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Settings TLS panel: en modo `self_signed` el email ACME deja de persistirse para evitar arrastrar valores legacy al volver a abrir la pantalla',
+                        ],
+                        'en' => [
+                            'Panel TLS settings: in `self_signed` mode ACME email is no longer persisted, avoiding legacy carry-over values in the UI',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.64',
                 'date' => '2026-04-23',
                 'badge' => 'primary',

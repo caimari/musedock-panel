@@ -744,7 +744,8 @@ class SettingsController
                 ? json_encode($panelDnsProviderConfig, JSON_UNESCAPED_SLASHES)
                 : ''
         );
-        \MuseDockPanel\Settings::set('panel_acme_email', $panelAcmeEmail);
+        $panelAcmeEmailToStore = in_array($panelTlsMode, ['http01', 'dns01'], true) ? $panelAcmeEmail : '';
+        \MuseDockPanel\Settings::set('panel_acme_email', $panelAcmeEmailToStore);
 
         // Detect and store server IP
         $serverIp = trim(shell_exec("hostname -I | awk '{print \$1}'") ?? '');
