@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.64',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Settings > Server > Email ACME: eliminado fallback visual hardcoded `admin@musedock.com`; ahora muestra placeholder neutral `webmaster@domain.com` cuando no hay valor guardado',
+                            'Guardado TLS del panel: el email ACME solo es obligatorio en modos `http01`/`dns01`; en `self_signed` puede quedar vacio sin forzar un valor por defecto',
+                        ],
+                        'en' => [
+                            'Settings > Server > ACME email: removed hardcoded visual fallback `admin@musedock.com`; now uses neutral placeholder `webmaster@domain.com` when unset',
+                            'Panel TLS save flow: ACME email is now required only for `http01`/`dns01`; `self_signed` can remain empty without forced defaults',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.63',
                 'date' => '2026-04-23',
                 'badge' => 'primary',

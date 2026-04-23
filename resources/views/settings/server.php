@@ -84,7 +84,7 @@
 
                     <div class="mb-3" id="acme_email_wrap" style="<?= in_array($panelTlsMode, ['http01', 'dns01'], true) ? '' : 'display:none;' ?>">
                         <label class="form-label">Email ACME</label>
-                        <input type="email" name="panel_acme_email" class="form-control" value="<?= View::e($settings['panel_acme_email'] ?? 'admin@musedock.com') ?>" placeholder="admin@tu-dominio.com">
+                        <input type="email" name="panel_acme_email" class="form-control" value="<?= View::e($settings['panel_acme_email'] ?? '') ?>" placeholder="webmaster@domain.com">
                         <small class="text-muted">Email para Let's Encrypt (avisos de expiracion).</small>
                     </div>
 

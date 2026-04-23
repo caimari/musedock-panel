@@ -675,8 +675,7 @@ class SettingsController
         $panelTlsMode = $this->normalizePanelTlsMode((string)($_POST['panel_tls_mode'] ?? \MuseDockPanel\Settings::get('panel_tls_mode', 'self_signed')));
         $panelDnsProvider = strtolower(trim((string)($_POST['panel_dns_provider'] ?? '')));
         $panelDnsProviderConfigRaw = trim((string)($_POST['panel_dns_provider_config'] ?? ''));
-        $panelAcmeEmail = trim((string)($_POST['panel_acme_email'] ?? \MuseDockPanel\Settings::get('panel_acme_email', 'admin@musedock.com')));
-        $panelAcmeEmail = $panelAcmeEmail !== '' ? $panelAcmeEmail : 'admin@musedock.com';
+        $panelAcmeEmail = trim((string)($_POST['panel_acme_email'] ?? \MuseDockPanel\Settings::get('panel_acme_email', '')));
 
         if ($panelHostnameRaw !== '' && $panelHostname === '') {
             Flash::set('error', 'Dominio del panel invalido. Usa solo hostname (ej: panel.ejemplo.com), sin http:// ni /ruta.');
@@ -684,7 +683,18 @@ class SettingsController
             return;
         }
 
-        if (!filter_var($panelAcmeEmail, FILTER_VALIDATE_EMAIL)) {
+        if (in_array($panelTlsMode, ['http01', 'dns01'], true)) {
+            if ($panelAcmeEmail === '') {
+                Flash::set('error', 'Email ACME requerido para modos HTTP-01/DNS-01.');
+                Router::redirect('/settings/server');
+                return;
+            }
+            if (!filter_var($panelAcmeEmail, FILTER_VALIDATE_EMAIL)) {
+                Flash::set('error', 'Email ACME invalido.');
+                Router::redirect('/settings/server');
+                return;
+            }
+        } elseif ($panelAcmeEmail !== '' && !filter_var($panelAcmeEmail, FILTER_VALIDATE_EMAIL)) {
             Flash::set('error', 'Email ACME invalido.');
             Router::redirect('/settings/server');
             return;
