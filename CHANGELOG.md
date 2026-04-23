@@ -2,6 +2,38 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.53] — 2026-04-22
+
+### Security
+- TLS interno endurecido para cluster/federation/backup/failover: eliminación de `CURLOPT_SSL_VERIFYPEER=false` y validación estricta (`VERIFYPEER=true`, `VERIFYHOST=2`) con soporte de CA/pinning (`tls_ca_file`, `tls_pin`) por nodo/peer.
+- Cluster TLS auto-bootstrap: si un nodo privado falla por CA desconocida, el panel intenta autoconfigurar `tls_ca_file` de forma automática (vía export firmado en nodos nuevos o fallback TOFU de cadena TLS en nodos legacy) para evitar cortes operativos post-hardening.
+- Bootstrap TLS de cluster endurecido: se elimina envío de token sobre cURL sin verificación; el flujo firmado usa CA semilla TOFU y validación TLS activa.
+- Verificación local de dominio en federation API ajustada a `CURLOPT_RESOLVE` + TLS estricto (sin bypass de certificado a `127.0.0.1`).
+- `musedock-fileop`: parser JSON migrado a esquema sin `eval` (KEY + base64), manteniendo filtros de metacaracteres y contención robusta de rutas.
+- Backups: validación estricta de `backup_name/backup_id` (regex allowlist) en restore/delete/transfer/fetch remoto.
+- Backups: verificación de ruta reforzada (`base` exacto o `base/*`) para evitar bypass por prefijo en checks con `realpath`.
+- Transferencia a peers: opciones SSH endurecidas con validación de puerto/ruta de clave y builder centralizado.
+- Workers de backup (`backup-worker.php`, `backup-transfer-worker.php`): sanitización de argumentos CLI críticos (`backup_name`, `transfer_method`, `scope`).
+- Restore backup: normalización de versión PHP antes de reiniciar `phpX.Y-fpm`.
+
+### Improved
+- Cluster UI: nueva visibilidad del estado TLS por nodo (pin/CA/auto, vencimiento y detalle), en tabla y modal de estado.
+- `cluster-worker`: alertas proactivas de TLS (warning/crítico por expiración de CA) con throttling y alerta de recuperación cuando vuelve a estado normal.
+- Monitoring: carga inicial de `/monitor` optimizada (charts secundarios diferidos), refresco de cards más ligero y menos polling redundante.
+- Monitoring: `api/realtime` acelerada (sample 250ms + micro-cache 2s) para reducir latencia percibida y carga cuando hay varias vistas abiertas.
+
+## [1.0.52] — 2026-04-22
+
+### Security
+- Login admin (`/login/submit`) ahora valida CSRF en backend (antes el token no se comprobaba en ese endpoint).
+- Rate limit de login admin: 20 intentos/minuto por IP para mitigar fuerza bruta.
+- Resolución de IP de cliente centralizada y segura (`X-Forwarded-For` solo si el request llega desde proxy local).
+- Endurecimiento de ejecución de comandos en migración/federación:
+  - `pkill` ahora usa patrón escapado en `FederationMigrationService` (evita inyección por username).
+  - `systemctl reload phpX.Y-fpm` ahora valida versión PHP antes de componer comando.
+  - opciones SSH (`-i key`) ahora pasan por `escapeshellarg` en todos los flujos de sync DB.
+  - migración de BD de subdominios endurecida con sanitización estricta de `db_name/db_user` y escape en import MySQL.
+
 ## [1.0.51] — 2026-04-03
 
 ### New

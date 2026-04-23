@@ -84,7 +84,7 @@ class ProxyRouteService
     }
 
     /**
-     * Count total routes (for license gating).
+     * Count total routes.
      */
     public static function count(): int
     {
@@ -93,15 +93,11 @@ class ProxyRouteService
     }
 
     /**
-     * Check if adding a new route is allowed under the current license.
-     * Free tier: max 1 proxy route. Pro: unlimited.
+     * MIT panel: proxy routes are unlimited.
      */
     public static function canAddRoute(): bool
     {
-        if (LicenseService::hasFeature(LicenseService::FEATURE_PROXY_ROUTES)) {
-            return true;
-        }
-        return self::count() < 1;
+        return true;
     }
 
     /**

@@ -76,6 +76,7 @@ $hasRemoteTargets = $hasNodes || $hasFederationPeers;
                         <th>Fecha</th>
                         <th>Tamano</th>
                         <th>Contenido</th>
+                        <th>Notas</th>
                         <th class="text-end pe-3">Acciones</th>
                     </tr>
                 </thead>
@@ -115,6 +116,18 @@ $hasRemoteTargets = $hasNodes || $hasFederationPeers;
                                     <i class="bi bi-database me-1"></i><?= $backup['db_count'] ?> BD
                                 </span>
                             <?php endif; ?>
+                        </td>
+                        <td>
+                            <?php $bkNotes = $backup['notes'] ?? ''; ?>
+                            <span class="backup-notes" data-dir="<?= View::e($backup['dir_name'] ?? '') ?>"
+                                  style="cursor:pointer;" title="Click para editar nota"
+                                  onclick="editBackupNotes('<?= View::e($backup['dir_name'] ?? '') ?>', this)">
+                                <?php if ($bkNotes): ?>
+                                    <small><i class="bi bi-sticky me-1" style="color:#fbbf24;"></i><?= View::e($bkNotes) ?></small>
+                                <?php else: ?>
+                                    <small class="text-muted"><i class="bi bi-plus-circle me-1"></i>Nota</small>
+                                <?php endif; ?>
+                            </span>
                         </td>
                         <td class="text-end pe-3">
                             <?php $dirName = View::e($backup['dir_name'] ?? ''); ?>
@@ -637,6 +650,44 @@ function deleteBackup(dirName, username, date) {
             document.getElementById('delete-pass-' + dirName).value = result.value;
             document.getElementById('delete-form-' + dirName).submit();
         }
+    });
+}
+
+function editBackupNotes(dirName, el) {
+    var S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+    var currentNote = el.querySelector('small')?.textContent?.trim() || '';
+    if (currentNote === 'Nota') currentNote = '';
+
+    S.fire({
+        title: 'Nota del backup',
+        input: 'textarea',
+        inputValue: currentNote,
+        inputPlaceholder: 'Ej: Backup pre-actualizacion v2.0, solucion bug login...',
+        showCancelButton: true,
+        confirmButtonText: '<i class="bi bi-check-lg me-1"></i>Guardar',
+        cancelButtonText: 'Cancelar',
+        inputAttributes: { style: 'background:#0f172a;border-color:#334155;color:#e2e8f0;height:80px;' },
+    }).then(function(result) {
+        if (!result.isConfirmed) return;
+        var note = result.value || '';
+        var csrf = document.querySelector('input[name=_csrf_token]')?.value || '';
+
+        fetch('/backups/' + encodeURIComponent(dirName) + '/notes', {
+            method: 'POST',
+            body: new URLSearchParams({ _csrf_token: csrf, notes: note }),
+        })
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            if (data.ok) {
+                if (note) {
+                    el.innerHTML = '<small><i class="bi bi-sticky me-1" style="color:#fbbf24;"></i>' + note.replace(/</g,'&lt;') + '</small>';
+                } else {
+                    el.innerHTML = '<small class="text-muted"><i class="bi bi-plus-circle me-1"></i>Nota</small>';
+                }
+            } else {
+                S.fire({ icon: 'error', title: 'Error', text: data.error || 'Error' });
+            }
+        });
     });
 }
 </script>

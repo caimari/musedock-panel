@@ -4,6 +4,7 @@ namespace MuseDockPanel\Controllers;
 use MuseDockPanel\Database;
 use MuseDockPanel\Env;
 use MuseDockPanel\Settings;
+use MuseDockPanel\Security\TlsClient;
 use MuseDockPanel\Services\ClusterService;
 use MuseDockPanel\Services\MailService;
 use MuseDockPanel\Services\LogService;
@@ -289,20 +290,6 @@ class ClusterApiController
     {
         header('Content-Type: application/json');
 
-        // Authenticate with Bearer token (same as cluster auth)
-        $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-        $providedToken = '';
-        if (preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
-            $providedToken = $m[1];
-        }
-
-        $localToken = Settings::get('cluster_auth_token', '');
-        if (!$localToken || !$providedToken || !hash_equals($localToken, $providedToken)) {
-            http_response_code(401);
-            echo json_encode(['ok' => false, 'error' => 'Unauthorized']);
-            return;
-        }
-
         $domains = \MuseDockPanel\Services\FailoverService::getLocalDomains();
 
         echo json_encode([
@@ -355,6 +342,7 @@ class ClusterApiController
                 'receive-files'    => $this->handleReceiveFiles($payload),
                 'install-ssh-key'  => \MuseDockPanel\Services\FileSyncService::installPublicKey($payload['public_key'] ?? ''),
                 'restore-db-dumps' => $this->handleRestoreDbDumps($payload),
+                'tls-export-ca'    => $this->handleTlsExportCa($payload),
 
                 // ── Mail node actions ────────────────────────
                 'mail_create_domain'    => MailService::nodeCreateDomain($payload),
@@ -405,6 +393,51 @@ class ClusterApiController
             echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
         }
         exit;
+    }
+
+    /**
+     * Export local Caddy CA certificate for trusted bootstrap on peer nodes.
+     * Response is signed with HMAC(token) to prevent tampering on first-contact flows.
+     */
+    private function handleTlsExportCa(array $payload): array
+    {
+        $nonce = trim((string)($payload['nonce'] ?? ''));
+        if ($nonce === '' || !preg_match('/^[a-f0-9]{16,128}$/i', $nonce)) {
+            return ['ok' => false, 'error' => 'Invalid nonce'];
+        }
+
+        $token = (string)($_REQUEST['_api_token'] ?? '');
+        if ($token === '') {
+            return ['ok' => false, 'error' => 'Missing authenticated token'];
+        }
+
+        $caFile = TlsClient::detectLocalCaddyCaFile();
+        if ($caFile === null) {
+            return ['ok' => false, 'error' => 'Local Caddy CA not found'];
+        }
+
+        $caPem = (string)@file_get_contents($caFile);
+        if (trim($caPem) === '') {
+            return ['ok' => false, 'error' => 'Local Caddy CA not readable'];
+        }
+
+        $parsed = @openssl_x509_parse($caPem);
+        if (!is_array($parsed)) {
+            return ['ok' => false, 'error' => 'Invalid CA certificate format'];
+        }
+
+        $caSha = hash('sha256', $caPem);
+        $sig = hash_hmac('sha256', $nonce . '|' . $caSha, $token);
+
+        return [
+            'ok'         => true,
+            'nonce'      => $nonce,
+            'ca_pem'     => $caPem,
+            'ca_sha256'  => $caSha,
+            'sig'        => $sig,
+            'not_before' => isset($parsed['validFrom_time_t']) ? date('c', (int)$parsed['validFrom_time_t']) : null,
+            'not_after'  => isset($parsed['validTo_time_t']) ? date('c', (int)$parsed['validTo_time_t']) : null,
+        ];
     }
 
     /**

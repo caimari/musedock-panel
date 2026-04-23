@@ -2722,32 +2722,46 @@ class MigrationController
                             $logs[] = "Dump descargado: {$dumpSize} MB";
 
                             // Create local DB + user
-                            $localDbName = str_replace(['.', '-'], '_', $account['username']) . '_' . str_replace(['.', '-'], '_', explode('.', $subFqdn)[0]) . '_db';
-                            $localDbUser = $account['username'];
+                            $baseUser = preg_replace('/[^a-z0-9_]/i', '', (string)$account['username']);
+                            $subPart = preg_replace('/[^a-z0-9_]/i', '_', (string)explode('.', $subFqdn)[0]);
+                            $localDbName = substr($baseUser . '_' . $subPart . '_db', 0, 63);
+                            $localDbUser = substr($baseUser, 0, 32);
+                            if ($localDbName === '' || $localDbUser === '') {
+                                $logs[] = 'ERROR: No se pudo construir nombre de BD/usuario local seguro.';
+                                @unlink($dumpFile);
+                                $_SESSION['migration_log'] = $logs;
+                                Flash::set('error', 'No se pudo generar credenciales locales seguras para la BD del subdominio.');
+                                Router::redirect('/accounts/' . $params['id'] . '/migrate');
+                                return;
+                            }
                             $localDbPass = bin2hex(random_bytes(12));
                             $localDbType = $isPostgres ? 'pgsql' : 'mysql';
 
                             if ($isPostgres) {
                                 $safeUser = str_replace('"', '""', $localDbUser);
                                 $safePass = str_replace("'", "''", $localDbPass);
+                                $safeDbName = str_replace('"', '""', $localDbName);
                                 shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'")));
                                 shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("ALTER USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'")));
-                                shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$localDbName}\" OWNER \"{$safeUser}\"")));
-                                shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$localDbName}\" TO \"{$safeUser}\"")));
+                                shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$safeDbName}\" OWNER \"{$safeUser}\"")));
+                                shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$safeDbName}\" TO \"{$safeUser}\"")));
                                 shell_exec(sprintf('sudo -u postgres psql -d %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
                                 // Fix ownership
                                 shell_exec(sprintf("sudo -u postgres psql -d %s -c %s 2>&1", escapeshellarg($localDbName),
                                     escapeshellarg("REASSIGN OWNED BY postgres TO \"{$safeUser}\"; GRANT ALL ON SCHEMA public TO \"{$safeUser}\"; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"{$safeUser}\"; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"{$safeUser}\";")));
                             } else {
-                                $setupSql = "CREATE DATABASE IF NOT EXISTS `{$localDbName}`;\n"
-                                    . "CREATE USER IF NOT EXISTS '{$localDbUser}'@'localhost' IDENTIFIED BY '{$localDbPass}';\n"
-                                    . "ALTER USER '{$localDbUser}'@'localhost' IDENTIFIED BY '{$localDbPass}';\n"
-                                    . "GRANT ALL ON `{$localDbName}`.* TO '{$localDbUser}'@'localhost';\nFLUSH PRIVILEGES;\n";
+                                $safeDbNameSql = str_replace('`', '``', $localDbName);
+                                $safeDbUserSql = str_replace("'", "''", $localDbUser);
+                                $safeDbPassSql = str_replace("'", "''", $localDbPass);
+                                $setupSql = "CREATE DATABASE IF NOT EXISTS `{$safeDbNameSql}`;\n"
+                                    . "CREATE USER IF NOT EXISTS '{$safeDbUserSql}'@'localhost' IDENTIFIED BY '{$safeDbPassSql}';\n"
+                                    . "ALTER USER '{$safeDbUserSql}'@'localhost' IDENTIFIED BY '{$safeDbPassSql}';\n"
+                                    . "GRANT ALL ON `{$safeDbNameSql}`.* TO '{$safeDbUserSql}'@'localhost';\nFLUSH PRIVILEGES;\n";
                                 $tmpSql = tempnam('/tmp', 'dbsetup');
                                 file_put_contents($tmpSql, $setupSql);
                                 shell_exec("mysql < " . escapeshellarg($tmpSql) . " 2>&1");
                                 @unlink($tmpSql);
-                                shell_exec("mysql {$localDbName} < " . escapeshellarg($dumpFile) . " 2>&1");
+                                shell_exec('mysql ' . escapeshellarg($localDbName) . ' < ' . escapeshellarg($dumpFile) . ' 2>&1');
                             }
 
                             $logs[] = "BD creada: {$localDbName} (user: {$localDbUser})";

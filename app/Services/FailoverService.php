@@ -3,6 +3,7 @@ namespace MuseDockPanel\Services;
 
 use MuseDockPanel\Database;
 use MuseDockPanel\Settings;
+use MuseDockPanel\Security\TlsClient;
 
 /**
  * FailoverService — Multi-ISP failover orchestration for MuseDock Panel.
@@ -312,13 +313,19 @@ class FailoverService
         if ($masterIp) {
             $panelPort = (int)Settings::get('panel_port', '8444') ?: 8444;
             $ch = curl_init("https://{$masterIp}:{$panelPort}/api/health");
-            curl_setopt_array($ch, [
+            $headers = ['Accept: application/json'];
+            $masterToken = self::resolveApiTokenForIp($masterIp);
+            if ($masterToken !== '') {
+                $headers[] = 'Authorization: Bearer ' . $masterToken;
+            }
+            $opts = [
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_TIMEOUT => 5,
                 CURLOPT_CONNECTTIMEOUT => 5,
-                CURLOPT_SSL_VERIFYPEER => false,
-                CURLOPT_SSL_VERIFYHOST => 0,
-            ]);
+                CURLOPT_HTTPHEADER => $headers,
+            ];
+            $opts = array_replace($opts, TlsClient::forUrl("https://{$masterIp}:{$panelPort}/api/health"));
+            curl_setopt_array($ch, $opts);
             $resp = curl_exec($ch);
             $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
@@ -477,23 +484,34 @@ class FailoverService
     {
         $start = microtime(true);
         $panelPort = (int)Settings::get('panel_port', '8444') ?: 8444;
+        $apiToken = self::resolveApiTokenForIp($ip);
 
         // Try deep health check via /api/health endpoint first
         $healthUrl = "https://{$ip}:{$panelPort}/api/health";
         $ch = curl_init($healthUrl);
-        curl_setopt_array($ch, [
+        $headers = ['Accept: application/json'];
+        if ($apiToken !== '') {
+            $headers[] = 'Authorization: Bearer ' . $apiToken;
+        }
+        $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => $timeout,
             CURLOPT_CONNECTTIMEOUT => $timeout,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => 0,
-            CURLOPT_HTTPHEADER => ['Accept: application/json'],
-        ]);
+            CURLOPT_HTTPHEADER => $headers,
+        ];
+        $opts = array_replace($opts, TlsClient::forUrl($healthUrl));
+        curl_setopt_array($ch, $opts);
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curlError = curl_error($ch);
         curl_close($ch);
         $elapsed = round((microtime(true) - $start) * 1000);
+
+        // Auth failed or endpoint hidden: treat as "no deep health available"
+        // and fall back to TCP reachability instead of counting as CRITICAL.
+        if (in_array($httpCode, [401, 403], true)) {
+            $response = null;
+        }
 
         if ($response && $httpCode > 0) {
             $data = json_decode($response, true);
@@ -531,6 +549,48 @@ class FailoverService
             'error' => $curlError ?: ($errstr ?: 'Connection refused'),
             'method' => 'tcp_fallback',
         ];
+    }
+
+    /**
+     * Resolve a Bearer token for a peer IP using known cluster node definitions.
+     * Returns empty string when no token can be resolved.
+     */
+    private static function resolveApiTokenForIp(string $ip): string
+    {
+        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            return '';
+        }
+
+        try {
+            $nodes = Database::fetchAll('SELECT api_url, auth_token FROM cluster_nodes');
+            foreach ($nodes as $node) {
+                $host = parse_url((string)($node['api_url'] ?? ''), PHP_URL_HOST);
+                if (!$host) {
+                    continue;
+                }
+
+                if ($host === $ip || gethostbyname($host) === $ip) {
+                    return ReplicationService::decryptPassword((string)($node['auth_token'] ?? ''));
+                }
+            }
+
+            $sources = json_decode(Settings::get('failover_remote_domain_sources', '[]'), true) ?: [];
+            foreach ($sources as $source) {
+                $urlHost = parse_url((string)($source['url'] ?? ''), PHP_URL_HOST);
+                $token = trim((string)($source['token'] ?? ''));
+                if ($urlHost === '' || $token === '') {
+                    continue;
+                }
+
+                if ($urlHost === $ip || gethostbyname($urlHost) === $ip) {
+                    return $token;
+                }
+            }
+        } catch (\Throwable) {
+            return '';
+        }
+
+        return '';
     }
 
     /**
@@ -1018,17 +1078,17 @@ class FailoverService
     public static function fetchRemoteDomains(string $url, string $token): array
     {
         $ch = curl_init($url);
-        curl_setopt_array($ch, [
+        $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 10,
             CURLOPT_CONNECTTIMEOUT => 5,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => 0,
             CURLOPT_HTTPHEADER => [
                 'Accept: application/json',
                 'Authorization: Bearer ' . $token,
             ],
-        ]);
+        ];
+        $opts = array_replace($opts, TlsClient::forUrl($url));
+        curl_setopt_array($ch, $opts);
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);

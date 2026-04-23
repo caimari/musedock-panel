@@ -64,7 +64,7 @@
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value" id="card-cpu">--</div>
-                    <div class="stat-label">CPU</div>
+                    <div class="stat-label" id="card-cpu-label">CPU</div>
                 </div>
                 <i class="bi bi-cpu stat-icon"></i>
             </div>
@@ -76,7 +76,7 @@
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value" id="card-ram">--</div>
-                    <div class="stat-label">RAM</div>
+                    <div class="stat-label" id="card-ram-label">RAM</div>
                 </div>
                 <i class="bi bi-memory stat-icon"></i>
             </div>
@@ -417,6 +417,7 @@
     let gpuUtilChart, gpuTempChart, gpuMemChart, gpuPowerChart;
     let diskUsageChart, diskIoChart;
     let refreshTimer = null;
+    let statusFetchTick = 0;
     const GPU_COUNT = <?= count($gpus ?? []) ?>;
     const GPU_NAMES = <?= json_encode(array_map(fn($g) => $g['name'], $gpus ?? [])) ?>;
     const GPU_COLORS = ['#a855f7', '#ec4899', '#f97316', '#06b6d4'];
@@ -1196,41 +1197,50 @@
     // ─── Update stat cards ───────────────────────────────────
     async function updateCards() {
         try {
-            const resp = await fetch(`/monitor/api/status?host=${HOST}`);
-            const json = await resp.json();
-            if (!json.ok) return;
+            // Realtime always; status only cada ~9s (para GPU/fallback), reduce carga y latencia.
+            const needStatus = (statusFetchTick % 3) === 0;
+            statusFetchTick++;
 
-            const s = json.status;
+            const rtPromise = fetch('/monitor/api/realtime').then(r => r.json()).catch(() => null);
+            const stPromise = needStatus
+                ? fetch(`/monitor/api/status?host=${HOST}`).then(r => r.json()).catch(() => null)
+                : Promise.resolve(null);
 
-            // CPU, RAM & Network cards — real-time from /monitor/api/realtime
-            try {
-                const rtResp = await fetch('/monitor/api/realtime');
-                const rt = await rtResp.json();
-                if (rt.ok) {
-                    // CPU
-                    const cpuEl = document.getElementById('card-cpu');
-                    const cpuBar = document.getElementById('bar-cpu');
-                    cpuEl.textContent = rt.cpu_percent + '%';
-                    cpuBar.style.width = Math.min(100, rt.cpu_percent) + '%';
+            const [rt, stJson] = await Promise.all([rtPromise, stPromise]);
+            const s = (stJson && stJson.ok) ? (stJson.status || {}) : null;
 
-                    // RAM
-                    const ramEl = document.getElementById('card-ram');
-                    const ramBar = document.getElementById('bar-ram');
-                    ramEl.textContent = rt.mem_percent + '%';
-                    ramBar.style.width = Math.min(100, rt.mem_percent) + '%';
+            if (rt && rt.ok) {
+                // CPU
+                const cpuEl = document.getElementById('card-cpu');
+                const cpuBar = document.getElementById('bar-cpu');
+                const cpuLabel = document.getElementById('card-cpu-label');
+                cpuEl.textContent = rt.cpu_percent + '%';
+                cpuBar.style.width = Math.min(100, rt.cpu_percent) + '%';
+                if (cpuLabel && typeof rt.cores !== 'undefined') {
+                    cpuLabel.textContent = 'CPU (' + rt.cores + ' cores)';
+                }
 
-                    // Network
-                    if (rt.net) {
-                        for (const [iface, data] of Object.entries(rt.net)) {
-                            const rxEl = document.getElementById('card-' + iface + '-rx');
-                            const txEl = document.getElementById('card-' + iface + '-tx');
-                            if (rxEl) rxEl.textContent = fmtBytes(data.rx);
-                            if (txEl) txEl.textContent = 'TX (Out): ' + fmtBytes(data.tx);
-                        }
+                // RAM
+                const ramEl = document.getElementById('card-ram');
+                const ramBar = document.getElementById('bar-ram');
+                const ramLabel = document.getElementById('card-ram-label');
+                ramEl.textContent = rt.mem_percent + '%';
+                ramBar.style.width = Math.min(100, rt.mem_percent) + '%';
+                if (ramLabel && typeof rt.mem_used_gb !== 'undefined' && typeof rt.mem_total_gb !== 'undefined') {
+                    ramLabel.textContent = 'RAM (' + rt.mem_used_gb + ' / ' + rt.mem_total_gb + ' GB)';
+                }
+
+                // Network
+                if (rt.net) {
+                    for (const [iface, data] of Object.entries(rt.net)) {
+                        const rxEl = document.getElementById('card-' + iface + '-rx');
+                        const txEl = document.getElementById('card-' + iface + '-tx');
+                        if (rxEl) rxEl.textContent = fmtBytes(data.rx);
+                        if (txEl) txEl.textContent = 'TX (Out): ' + fmtBytes(data.tx);
                     }
                 }
-            } catch(e) {
-                // Fallback to collector data
+            } else if (s) {
+                // Fallback to collector data if realtime failed
                 <?php foreach ($interfaces as $iface): ?>
                 {
                     const rxEl = document.getElementById('card-<?= View::e($iface) ?>-rx');
@@ -1247,22 +1257,24 @@
                 if (s.ram_percent) { ramEl.textContent = s.ram_percent.value.toFixed(1) + '%'; ramBar.style.width = Math.min(100, s.ram_percent.value) + '%'; }
             }
 
-            // GPU cards
-            for (let g = 0; g < GPU_COUNT; g++) {
-                const utilEl = document.getElementById('card-gpu' + g + '-util');
-                const memEl = document.getElementById('card-gpu' + g + '-mem');
-                const tempEl = document.getElementById('card-gpu' + g + '-temp');
-                const powerEl = document.getElementById('card-gpu' + g + '-power');
-                const barEl = document.getElementById('bar-gpu' + g);
+            // GPU cards from status snapshot (updated every ~9s)
+            if (s) {
+                for (let g = 0; g < GPU_COUNT; g++) {
+                    const utilEl = document.getElementById('card-gpu' + g + '-util');
+                    const memEl = document.getElementById('card-gpu' + g + '-mem');
+                    const tempEl = document.getElementById('card-gpu' + g + '-temp');
+                    const powerEl = document.getElementById('card-gpu' + g + '-power');
+                    const barEl = document.getElementById('bar-gpu' + g);
 
-                if (s['gpu' + g + '_util'] && utilEl) {
-                    const v = s['gpu' + g + '_util'].value.toFixed(1);
-                    utilEl.textContent = v + '%';
-                    if (barEl) barEl.style.width = Math.min(100, v) + '%';
+                    if (s['gpu' + g + '_util'] && utilEl) {
+                        const v = s['gpu' + g + '_util'].value.toFixed(1);
+                        utilEl.textContent = v + '%';
+                        if (barEl) barEl.style.width = Math.min(100, v) + '%';
+                    }
+                    if (s['gpu' + g + '_mem_percent'] && memEl) memEl.textContent = s['gpu' + g + '_mem_percent'].value.toFixed(1) + '%';
+                    if (s['gpu' + g + '_temp'] && tempEl) tempEl.textContent = s['gpu' + g + '_temp'].value.toFixed(0) + '°C';
+                    if (s['gpu' + g + '_power'] && powerEl) powerEl.textContent = s['gpu' + g + '_power'].value.toFixed(0) + 'W';
                 }
-                if (s['gpu' + g + '_mem_percent'] && memEl) memEl.textContent = s['gpu' + g + '_mem_percent'].value.toFixed(1) + '%';
-                if (s['gpu' + g + '_temp'] && tempEl) tempEl.textContent = s['gpu' + g + '_temp'].value.toFixed(0) + '°C';
-                if (s['gpu' + g + '_power'] && powerEl) powerEl.textContent = s['gpu' + g + '_power'].value.toFixed(0) + 'W';
             }
         } catch (e) {
             console.error('Error updating cards:', e);
@@ -1424,7 +1436,6 @@
             loadGpuCharts();
             loadDiskCharts();
             loadBwCharts();
-            updateCards();
             loadAlerts();
         }, interval);
     }
@@ -1433,17 +1444,20 @@
     initCharts();
     loadNetChart();
     loadSystemCharts();
-    loadGpuCharts();
-    loadDiskCharts();
-    loadBwCharts();
     updateCards();
     loadAlerts();
+    // Defer less critical charts to speed up first render.
+    setTimeout(() => {
+        loadGpuCharts();
+        loadDiskCharts();
+        loadBwCharts();
+    }, 120);
     startAutoRefresh();
 
     // Refresh interval on range change
     document.getElementById('rangeButtons').addEventListener('click', startAutoRefresh);
 
-    // Card refresh every 10s
+    // Card refresh every 3s
     setInterval(updateCards, 3000);
 
 })();

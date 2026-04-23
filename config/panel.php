@@ -7,12 +7,17 @@
 // Load .env if not already loaded
 \MuseDockPanel\Env::load(dirname(__DIR__) . '/.env');
 
-$phpVersion = \MuseDockPanel\Env::get('FPM_PHP_VERSION', '8.3');
-$panelRoot = dirname(__DIR__);
+// IMPORTANT: variables defined here leak into the calling function's scope
+// (PHP `require` does NOT isolate scope). Use unique prefixed names to avoid
+// silently overwriting local variables in callers (e.g. $phpVersion parameter
+// in SystemService::addCaddyRoute() was being clobbered, causing all Caddy
+// routes to be created with PHP 8.3 regardless of the hosting's real version).
+$panelCfgPhpVersion = \MuseDockPanel\Env::get('FPM_PHP_VERSION', '8.3');
+$panelCfgRoot = dirname(__DIR__);
 
 return [
     'name' => \MuseDockPanel\Env::get('PANEL_NAME', 'MuseDock Panel'),
-    'version' => '1.0.57',
+    'version' => '1.0.58',
     'port' => \MuseDockPanel\Env::int('PANEL_PORT', 8444),
     'debug' => \MuseDockPanel\Env::bool('PANEL_DEBUG', false),
 
@@ -30,14 +35,14 @@ return [
     'session' => [
         'name' => 'musedock_panel_session',
         'lifetime' => \MuseDockPanel\Env::int('SESSION_LIFETIME', 7200),
-        'path' => "{$panelRoot}/storage/sessions",
+        'path' => "{$panelCfgRoot}/storage/sessions",
     ],
 
     // Paths
     'paths' => [
         'vhosts' => \MuseDockPanel\Env::get('VHOSTS_DIR', '/var/www/vhosts'),
-        'fpm_pools' => "/etc/php/{$phpVersion}/fpm/pool.d",
-        'logs' => "{$panelRoot}/storage/logs",
+        'fpm_pools' => "/etc/php/{$panelCfgPhpVersion}/fpm/pool.d",
+        'logs' => "{$panelCfgRoot}/storage/logs",
     ],
 
     // Caddy
@@ -48,7 +53,7 @@ return [
     // PHP-FPM
     'fpm' => [
         'socket_dir' => \MuseDockPanel\Env::get('FPM_SOCKET_DIR', '/run/php'),
-        'php_version' => $phpVersion,
+        'php_version' => $panelCfgPhpVersion,
     ],
 
     // Security

@@ -3,6 +3,7 @@ namespace MuseDockPanel\Services;
 
 use MuseDockPanel\Database;
 use MuseDockPanel\Settings;
+use MuseDockPanel\Security\TlsClient;
 
 /**
  * FileSyncService — Handles file synchronization between master and slave nodes.
@@ -280,7 +281,14 @@ class FileSyncService
      * Sync a hosting's files via HTTPS API (tar + POST).
      * Master packs files, sends to slave's API endpoint.
      */
-    public static function httpsSyncHosting(string $localPath, string $apiUrl, string $token, string $remotePath, string $ownerUser = ''): array
+    public static function httpsSyncHosting(
+        string $localPath,
+        string $apiUrl,
+        string $token,
+        string $remotePath,
+        string $ownerUser = '',
+        array $tlsContext = []
+    ): array
     {
         if (!is_dir($localPath)) {
             return ['ok' => false, 'error' => "Directorio local no existe: {$localPath}"];
@@ -322,14 +330,11 @@ class FileSyncService
         $url = rtrim($apiUrl, '/') . '/api/cluster/action';
         $startTime = microtime(true);
 
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
+        $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
             CURLOPT_TIMEOUT => 600, // 10 min for large files
             CURLOPT_CONNECTTIMEOUT => 30,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => false,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $token,
                 'Accept: application/json',
@@ -340,7 +345,11 @@ class FileSyncService
                 'owner_user' => $ownerUser,
                 'archive' => new \CURLFile($tmpFile, 'application/gzip', 'files.tar.gz'),
             ],
-        ]);
+        ];
+        $opts = array_replace($opts, TlsClient::forUrl($url, $tlsContext));
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, $opts);
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -460,7 +469,9 @@ class FileSyncService
         if ($config['method'] === 'https') {
             // Decrypt token
             $token = ReplicationService::decryptPassword($node['auth_token'] ?? '');
-            return self::httpsSyncHosting($localPath, $node['api_url'], $token, $remotePath, $username);
+            return self::httpsSyncHosting($localPath, $node['api_url'], $token, $remotePath, $username, [
+                'metadata' => $node['metadata'] ?? null,
+            ]);
         }
 
         // SSH method — extract host from API URL, pass owner for --chown
@@ -712,7 +723,9 @@ class FileSyncService
         if ($config['method'] === 'https') {
             $token = ReplicationService::decryptPassword($node['auth_token'] ?? '');
             // Send certs, slave will fix ownership to caddy:caddy
-            $result = self::httpsSyncHosting($certDir, $node['api_url'], $token, $certDir, 'caddy');
+            $result = self::httpsSyncHosting($certDir, $node['api_url'], $token, $certDir, 'caddy', [
+                'metadata' => $node['metadata'] ?? null,
+            ]);
         } else {
             // Direct rsync for SSL certs (panel runs as root, can read caddy dirs)
             $port = $config['ssh_port'] ?? 22;
@@ -1081,7 +1094,9 @@ class FileSyncService
         // Step 1: rsync dump directory to slave
         if ($config['method'] === 'https') {
             $token = ReplicationService::decryptPassword($node['auth_token'] ?? '');
-            $rsyncResult = self::httpsSyncHosting($dumpPath, $node['api_url'], $token, $dumpPath, 'root');
+            $rsyncResult = self::httpsSyncHosting($dumpPath, $node['api_url'], $token, $dumpPath, 'root', [
+                'metadata' => $node['metadata'] ?? null,
+            ]);
         } else {
             $rsyncResult = self::rsyncHosting($dumpPath . '/', $host, $dumpPath . '/', [
                 'owner_user' => 'root',
@@ -1098,6 +1113,8 @@ class FileSyncService
         $restoreResult = ClusterService::callNodeDirect($node['api_url'], $token, 'POST', 'api/cluster/action', [
             'action'  => 'restore-db-dumps',
             'payload' => ['dump_path' => $dumpPath],
+        ], 30, [
+            'metadata' => $node['metadata'] ?? null,
         ]);
 
         return [

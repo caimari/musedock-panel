@@ -8,6 +8,7 @@ use MuseDockPanel\Flash;
 use MuseDockPanel\Router;
 use MuseDockPanel\Settings;
 use MuseDockPanel\View;
+use MuseDockPanel\Security\TlsClient;
 use MuseDockPanel\Services\LogService;
 use MuseDockPanel\Services\ClusterService;
 use MuseDockPanel\Services\FederationService;
@@ -263,8 +264,12 @@ class BackupController
 
         // Security: only allow basename to prevent traversal
         $file = basename($file);
-        $backupId = $_GET['backup'] ?? '';
-        $backupId = basename($backupId);
+        $backupId = self::sanitizeBackupName($_GET['backup'] ?? '');
+        if ($backupId === '') {
+            Flash::set('error', 'Backup no valido.');
+            Router::redirect('/backups');
+            return;
+        }
 
         // Determine subfolder
         $subdir = $_GET['subdir'] ?? '';
@@ -276,7 +281,7 @@ class BackupController
         $realPath = realpath($fullPath);
         $realBackupDir = realpath(self::BACKUP_DIR);
 
-        if (!$realPath || !$realBackupDir || strpos($realPath, $realBackupDir) !== 0) {
+        if (!$realPath || !$realBackupDir || !self::isPathWithin($realPath, $realBackupDir)) {
             Flash::set('error', 'Archivo no encontrado o ruta no valida.');
             Router::redirect('/backups');
             return;
@@ -305,7 +310,12 @@ class BackupController
      */
     public function restore(array $params): void
     {
-        $backupId = basename($params['id'] ?? '');
+        $backupId = self::sanitizeBackupName($params['id'] ?? '');
+        if ($backupId === '') {
+            Flash::set('error', 'Backup no valido.');
+            Router::redirect('/backups');
+            return;
+        }
         $backupPath = self::BACKUP_DIR . '/' . $backupId;
         $metaFile = $backupPath . '/metadata.json';
 
@@ -374,7 +384,12 @@ class BackupController
      */
     public function restoreExecute(array $params): void
     {
-        $backupId = basename($params['id'] ?? '');
+        $backupId = self::sanitizeBackupName($params['id'] ?? '');
+        if ($backupId === '') {
+            Flash::set('error', 'Backup no valido.');
+            Router::redirect('/backups');
+            return;
+        }
         $backupPath = self::BACKUP_DIR . '/' . $backupId;
         $metaFile = $backupPath . '/metadata.json';
 
@@ -496,8 +511,9 @@ class BackupController
         }
 
         // Restart FPM
-        $phpVersion = $account['php_version'] ?? '8.3';
-        shell_exec(sprintf('systemctl restart php%s-fpm 2>&1', escapeshellarg($phpVersion)));
+        $phpVersion = self::normalizePhpVersion($account['php_version'] ?? '8.3');
+        $fpmService = 'php' . $phpVersion . '-fpm';
+        shell_exec(sprintf('systemctl restart %s 2>&1', escapeshellarg($fpmService)));
 
         LogService::log('backup.restore', $account['domain'], "Backup restaurado: {$backupId}");
 
@@ -511,18 +527,54 @@ class BackupController
     }
 
     /**
-     * Delete a backup directory
+     * Update notes metadata for a backup
      */
+    public function updateNotes(array $params): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $backupId = self::sanitizeBackupName($params['id'] ?? '');
+        if ($backupId === '') {
+            echo json_encode(['ok' => false, 'error' => 'Backup no valido']);
+            exit;
+        }
+        $backupPath = self::BACKUP_DIR . '/' . $backupId;
+        $metaFile = $backupPath . '/metadata.json';
+
+        if (!is_dir($backupPath) || !file_exists($metaFile)) {
+            echo json_encode(['ok' => false, 'error' => 'Backup no encontrado']);
+            exit;
+        }
+
+        $meta = @json_decode(file_get_contents($metaFile), true);
+        if (!$meta) {
+            echo json_encode(['ok' => false, 'error' => 'Metadata corrupto']);
+            exit;
+        }
+
+        $meta['notes'] = trim($_POST['notes'] ?? '');
+        file_put_contents($metaFile, json_encode($meta, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+
+        echo json_encode(['ok' => true]);
+        exit;
+    }
+
     public function delete(array $params): void
     {
-        $backupId = basename($params['id'] ?? '');
+        $backupId = self::sanitizeBackupName($params['id'] ?? '');
+        if ($backupId === '') {
+            Flash::set('error', 'Backup no valido.');
+            Router::redirect('/backups');
+            return;
+        }
         $backupPath = self::BACKUP_DIR . '/' . $backupId;
 
         // Validate path is within backup dir
         $realPath = realpath($backupPath);
         $realBackupDir = realpath(self::BACKUP_DIR);
 
-        if (!$realPath || !$realBackupDir || strpos($realPath, $realBackupDir) !== 0 || $realPath === $realBackupDir) {
+        if (!$realPath || !$realBackupDir || !self::isPathWithin($realPath, $realBackupDir) || $realPath === $realBackupDir) {
             Flash::set('error', 'Backup no encontrado o ruta no valida.');
             Router::redirect('/backups');
             return;
@@ -638,12 +690,12 @@ class BackupController
     {
         header('Content-Type: application/json');
 
-        $backupId = basename($params['id'] ?? '');
+        $backupId = self::sanitizeBackupName($params['id'] ?? '');
         $nodeId = (int) ($_POST['node_id'] ?? 0);
         $peerId = (int) ($_POST['peer_id'] ?? 0);
         $backupPath = self::BACKUP_DIR . '/' . $backupId;
 
-        if (!$nodeId && !$peerId) {
+        if ($backupId === '' || (!$nodeId && !$peerId)) {
             echo json_encode(['ok' => false, 'error' => 'Nodo o peer no especificado.']);
             exit;
         }
@@ -680,7 +732,7 @@ class BackupController
 
         // Launch background worker (pass peer_id as 3rd arg if federation, method as 4th)
         $workerScript = PANEL_ROOT . '/bin/backup-transfer-worker.php';
-        $transferMethod = $_POST['transfer_method'] ?? 'ssh'; // 'ssh' or 'http'
+        $transferMethod = ($_POST['transfer_method'] ?? 'ssh') === 'http' ? 'http' : 'ssh';
         if ($peerId) {
             $cmd = sprintf(
                 'php %s %s %d %d %s > /dev/null 2>&1 & echo $!',
@@ -803,7 +855,7 @@ class BackupController
 
         $nodeId = (int) ($_POST['node_id'] ?? 0);
         $peerId = (int) ($_POST['peer_id'] ?? 0);
-        $backupName = basename($_POST['backup_name'] ?? '');
+        $backupName = self::sanitizeBackupName($_POST['backup_name'] ?? '');
 
         if ((!$nodeId && !$peerId) || !$backupName) {
             echo json_encode(['ok' => false, 'error' => 'Faltan parametros.']);
@@ -824,11 +876,16 @@ class BackupController
             @mkdir($localPath, 0750, true);
             $sshTarget = FederationService::getSshTarget($peer);
             $remotePath = '/opt/musedock-panel/storage/backups/' . $backupName . '/';
+            try {
+                $sshOpts = self::buildPeerSshOptions($peer);
+            } catch (\Throwable $e) {
+                echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+                exit;
+            }
 
             $cmd = sprintf(
-                'rsync -az -e "ssh -p %d -i %s -o StrictHostKeyChecking=no" %s:%s %s 2>&1',
-                $peer['ssh_port'] ?? 22,
-                escapeshellarg($peer['ssh_key_path']),
+                'rsync -az -e "ssh %s" %s:%s %s 2>&1',
+                $sshOpts,
                 escapeshellarg($sshTarget),
                 escapeshellarg($remotePath),
                 escapeshellarg($localPath . '/')
@@ -867,13 +924,10 @@ class BackupController
         $tmpFile = sys_get_temp_dir() . '/backup_fetch_' . $backupName . '_' . time() . '.tar.gz';
         $fp = fopen($tmpFile, 'w');
 
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
+        $opts = [
             CURLOPT_POST => true,
             CURLOPT_TIMEOUT => 600,
             CURLOPT_CONNECTTIMEOUT => 30,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => false,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $token,
                 'Content-Type: application/json',
@@ -881,7 +935,13 @@ class BackupController
             ],
             CURLOPT_POSTFIELDS => json_encode(['action' => 'download-backup', 'backup_name' => $backupName]),
             CURLOPT_FILE => $fp,
-        ]);
+        ];
+        $opts = array_replace($opts, TlsClient::forUrl($url, [
+            'metadata' => $node['metadata'] ?? null,
+        ]));
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, $opts);
 
         curl_exec($ch);
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -930,7 +990,7 @@ class BackupController
 
         $nodeId = (int) ($_POST['node_id'] ?? 0);
         $peerId = (int) ($_POST['peer_id'] ?? 0);
-        $backupName = basename($_POST['backup_name'] ?? '');
+        $backupName = self::sanitizeBackupName($_POST['backup_name'] ?? '');
 
         if ((!$nodeId && !$peerId) || !$backupName) {
             echo json_encode(['ok' => false, 'error' => 'Faltan parametros.']);
@@ -1022,5 +1082,43 @@ class BackupController
             return round($bytes / 1024, 2) . ' KB';
         }
         return $bytes . ' B';
+    }
+
+    private static function sanitizeBackupName(string $name): string
+    {
+        $name = basename(trim($name));
+        if ($name === '') {
+            return '';
+        }
+
+        return preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/', $name) ? $name : '';
+    }
+
+    private static function isPathWithin(string $path, string $base): bool
+    {
+        $path = rtrim($path, DIRECTORY_SEPARATOR);
+        $base = rtrim($base, DIRECTORY_SEPARATOR);
+        return $path === $base || str_starts_with($path . DIRECTORY_SEPARATOR, $base . DIRECTORY_SEPARATOR);
+    }
+
+    private static function normalizePhpVersion(string $version): string
+    {
+        $version = trim($version);
+        return preg_match('/^\d+\.\d+$/', $version) ? $version : '8.3';
+    }
+
+    private static function buildPeerSshOptions(array $peer): string
+    {
+        $port = (int)($peer['ssh_port'] ?? 22);
+        if ($port < 1 || $port > 65535) {
+            $port = 22;
+        }
+
+        $keyPath = trim((string)($peer['ssh_key_path'] ?? ''));
+        if ($keyPath === '') {
+            throw new \RuntimeException('Ruta de clave SSH no valida');
+        }
+
+        return sprintf('-p %d -i %s -o StrictHostKeyChecking=no', $port, escapeshellarg($keyPath));
     }
 }

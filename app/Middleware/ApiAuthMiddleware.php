@@ -11,8 +11,13 @@ class ApiAuthMiddleware
         $uri = strtok($_SERVER['REQUEST_URI'], '?');
         $uri = rtrim($uri, '/') ?: '/';
 
-        // Only apply to /api/cluster/* and /api/federation/* routes
-        if (!str_starts_with($uri, '/api/cluster/') && !str_starts_with($uri, '/api/federation/')) {
+        // Apply to sensitive machine APIs.
+        // /api/health and /api/domains are also used for inter-node operations.
+        $needsAuth = str_starts_with($uri, '/api/cluster/')
+            || str_starts_with($uri, '/api/federation/')
+            || in_array($uri, ['/api/health', '/api/domains'], true);
+
+        if (!$needsAuth) {
             return true;
         }
 
@@ -36,6 +41,7 @@ class ApiAuthMiddleware
                 $decrypted = ReplicationService::decryptPassword($node['auth_token']);
                 if ($decrypted !== '' && hash_equals($decrypted, $token)) {
                     $_REQUEST['_api_node_id'] = (int)$node['id'];
+                    $_REQUEST['_api_token'] = $token;
                     return true;
                 }
             }
@@ -51,6 +57,7 @@ class ApiAuthMiddleware
 
             if ($localToken !== '' && hash_equals($localToken, $token)) {
                 $_REQUEST['_api_node_id'] = 0; // Local/external caller
+                $_REQUEST['_api_token'] = $token;
                 return true;
             }
 
@@ -61,6 +68,7 @@ class ApiAuthMiddleware
                     $decrypted = ReplicationService::decryptPassword($peer['auth_token']);
                     if ($decrypted !== '' && hash_equals($decrypted, $token)) {
                         $_REQUEST['_api_peer_id'] = (int)$peer['id'];
+                        $_REQUEST['_api_token'] = $token;
                         return true;
                     }
                 }

@@ -8,6 +8,7 @@ use MuseDockPanel\Services\FailoverService;
 use MuseDockPanel\Services\CloudflareService;
 use MuseDockPanel\Services\ClusterService;
 use MuseDockPanel\Services\LogService;
+use MuseDockPanel\Security\TlsClient;
 
 class FailoverController
 {
@@ -487,16 +488,17 @@ class FailoverController
 
             $endpoint = $url . '/api/domains';
             $ch = curl_init($endpoint);
-            curl_setopt_array($ch, [
+            $opts = [
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_TIMEOUT        => 10,
                 CURLOPT_CONNECTTIMEOUT => 5,
-                CURLOPT_SSL_VERIFYPEER => false,
                 CURLOPT_HTTPHEADER     => array_filter([
                     'Accept: application/json',
                     $token ? "Authorization: Bearer {$token}" : null,
                 ]),
-            ]);
+            ];
+            $opts = array_replace($opts, TlsClient::forUrl($endpoint));
+            curl_setopt_array($ch, $opts);
             $body = curl_exec($ch);
             $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $curlErr  = curl_error($ch);

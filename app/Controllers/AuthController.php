@@ -3,7 +3,9 @@ namespace MuseDockPanel\Controllers;
 
 use MuseDockPanel\Auth;
 use MuseDockPanel\Flash;
+use MuseDockPanel\RateLimiter;
 use MuseDockPanel\Router;
+use MuseDockPanel\Security\ClientIp;
 use MuseDockPanel\View;
 
 class AuthController
@@ -21,6 +23,20 @@ class AuthController
     {
         $username = trim($_POST['username'] ?? '');
         $password = $_POST['password'] ?? '';
+        $ip = ClientIp::resolve() ?: 'unknown';
+
+        if (!View::verifyCsrf()) {
+            Flash::set('error', 'Sesion expirada. Intenta de nuevo.');
+            Router::redirect('/login');
+            return;
+        }
+
+        if (!RateLimiter::check($ip, 'panel-login', 20)) {
+            self::writeAuthLog($ip, $username !== '' ? $username : '-', false);
+            Flash::set('error', 'Demasiados intentos. Espera un minuto.');
+            Router::redirect('/login');
+            return;
+        }
 
         if (empty($username) || empty($password)) {
             Flash::set('error', 'Usuario y contraseña son obligatorios.');
@@ -29,29 +45,14 @@ class AuthController
         }
 
         if (Auth::attempt($username, $password)) {
-            $ip = self::getClientIp();
             self::writeAuthLog($ip, $username, true);
             Flash::set('success', 'Bienvenido al panel.');
             Router::redirect('/');
         } else {
-            $ip = self::getClientIp();
             self::writeAuthLog($ip, $username, false);
             Flash::set('error', 'Credenciales incorrectas.');
             Router::redirect('/login');
         }
-    }
-
-    private static function getClientIp(): string
-    {
-        // Behind Caddy reverse proxy — use X-Forwarded-For
-        if (!empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-            $ips = array_map('trim', explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']));
-            $ip = $ips[0]; // leftmost = original client
-            if (filter_var($ip, FILTER_VALIDATE_IP)) {
-                return $ip;
-            }
-        }
-        return $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
     }
 
     private static function writeAuthLog(string $ip, string $username, bool $success): void

@@ -17,11 +17,21 @@ spl_autoload_register(function ($class) {
 
 MuseDockPanel\Env::load(PANEL_ROOT . '/.env');
 
+function sanitizeBackupNameArg(string $name): string
+{
+    $name = basename(trim($name));
+    if ($name === '') {
+        return '';
+    }
+
+    return preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/', $name) ? $name : '';
+}
+
 $accountId        = (int)($argv[1] ?? 0);
 $includeFiles     = ($argv[2] ?? '0') === '1';
 $includeDatabases = ($argv[3] ?? '0') === '1';
-$backupName       = $argv[4] ?? '';
-$scope            = $argv[5] ?? 'full'; // 'full' = entire domain dir, 'httpdocs' = only httpdocs/
+$backupName       = sanitizeBackupNameArg($argv[4] ?? '');
+$scope            = ($argv[5] ?? 'full') === 'httpdocs' ? 'httpdocs' : 'full'; // 'full' = entire domain dir, 'httpdocs' = only httpdocs/
 
 if (!$accountId || !$backupName) {
     exit(1);

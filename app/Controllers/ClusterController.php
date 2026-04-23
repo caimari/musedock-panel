@@ -49,6 +49,7 @@ class ClusterController
         foreach ($nodes as &$node) {
             $mutedUntil = Settings::get("cluster_node_{$node['id']}_muted_until", '');
             $node['alerts_muted'] = ($mutedUntil && strtotime($mutedUntil) > $now);
+            $node['tls_summary'] = ClusterService::getNodeTlsSummary($node);
         }
         unset($node);
 
@@ -92,6 +93,8 @@ class ClusterController
         $name   = trim($_POST['node_name'] ?? '');
         $apiUrl = trim($_POST['api_url'] ?? '');
         $token  = trim($_POST['auth_token'] ?? '');
+        $tlsPin = trim($_POST['tls_pin'] ?? '');
+        $tlsCaFile = trim($_POST['tls_ca_file'] ?? '');
 
         if ($name === '' || $apiUrl === '' || $token === '') {
             Flash::set('error', 'Todos los campos son obligatorios');
@@ -104,11 +107,28 @@ class ClusterController
             header('Location: /settings/cluster#nodos');
             exit;
         }
+        if ($tlsPin !== '' && !$this->isValidTlsPin($tlsPin)) {
+            Flash::set('error', 'TLS pin no valido (usa formato sha256//...)');
+            header('Location: /settings/cluster#nodos');
+            exit;
+        }
+        if ($tlsCaFile !== '' && (!is_file($tlsCaFile) || !is_readable($tlsCaFile))) {
+            Flash::set('error', 'Ruta CA no valida o no legible en este servidor.');
+            header('Location: /settings/cluster#nodos');
+            exit;
+        }
+
+        $tlsContext = [
+            'metadata' => [
+                'tls_pin' => $tlsPin,
+                'tls_ca_file' => $tlsCaFile,
+            ],
+        ];
 
         // Test connection before saving
         $testResult = ClusterService::callNodeDirect($apiUrl, $token, 'POST', 'api/cluster/action', [
             'action' => 'test-connection',
-        ]);
+        ], 30, $tlsContext);
 
         if (!$testResult['ok']) {
             Flash::set('error', 'No se pudo conectar al nodo: ' . ($testResult['error'] ?? 'Error desconocido'));
@@ -121,7 +141,10 @@ class ClusterController
         $validServices = array_intersect($services, ['web', 'mail']);
         if (empty($validServices)) $validServices = ['web'];
 
-        $id = ClusterService::addNode($name, $apiUrl, $token, array_values($validServices));
+        $id = ClusterService::addNode($name, $apiUrl, $token, array_values($validServices), [
+            'tls_pin' => $tlsPin,
+            'tls_ca_file' => $tlsCaFile,
+        ]);
         LogService::log('cluster.node', 'add', "Nodo anadido: {$name} ({$apiUrl}), servicios: " . implode(',', $validServices) . ", ID: {$id}");
         Flash::set('success', "Nodo '{$name}' anadido correctamente");
         header('Location: /settings/cluster#nodos');
@@ -157,6 +180,27 @@ class ClusterController
         if ($name !== '') $data['name'] = $name;
         if ($apiUrl !== '') $data['api_url'] = $apiUrl;
         if ($token !== '') $data['auth_token'] = $token;
+        if (array_key_exists('tls_pin', $_POST) || array_key_exists('tls_ca_file', $_POST)) {
+            $tlsPin = trim($_POST['tls_pin'] ?? '');
+            $tlsCaFile = trim($_POST['tls_ca_file'] ?? '');
+            if ($tlsPin !== '' && !$this->isValidTlsPin($tlsPin)) {
+                Flash::set('error', 'TLS pin no valido (usa formato sha256//...)');
+                header('Location: /settings/cluster#nodos');
+                exit;
+            }
+            if ($tlsCaFile !== '' && (!is_file($tlsCaFile) || !is_readable($tlsCaFile))) {
+                Flash::set('error', 'Ruta CA no valida o no legible en este servidor.');
+                header('Location: /settings/cluster#nodos');
+                exit;
+            }
+            $meta = json_decode($node['metadata'] ?? '{}', true);
+            $meta = is_array($meta) ? $meta : [];
+            $meta['tls_pin'] = $tlsPin;
+            $meta['tls_ca_file'] = $tlsCaFile;
+            if ($meta['tls_pin'] === '') unset($meta['tls_pin']);
+            if ($meta['tls_ca_file'] === '') unset($meta['tls_ca_file']);
+            $data['metadata'] = json_encode($meta, JSON_UNESCAPED_SLASHES);
+        }
 
         if (!empty($data)) {
             ClusterService::updateNode($id, $data);
@@ -237,7 +281,9 @@ class ClusterController
                     $check = ClusterService::callNodeDirect($node['api_url'], $token, 'POST', 'api/cluster/action', [
                         'action' => 'mail_check_configured',
                         'payload' => [],
-                    ], 10);
+                    ], 10, [
+                        'metadata' => $node['metadata'] ?? null,
+                    ]);
                     $configured = !empty($check['data']['configured']);
                 } catch (\Exception $e) {
                     // Node unreachable — can't verify
@@ -317,16 +363,33 @@ class ClusterController
 
         $apiUrl = trim($_POST['api_url'] ?? '');
         $token  = trim($_POST['auth_token'] ?? '');
+        $tlsPin = trim($_POST['tls_pin'] ?? '');
+        $tlsCaFile = trim($_POST['tls_ca_file'] ?? '');
 
         if (!$apiUrl || !$token) {
             echo json_encode(['ok' => false, 'message' => 'URL y token son obligatorios']);
             exit;
         }
+        if ($tlsPin !== '' && !$this->isValidTlsPin($tlsPin)) {
+            echo json_encode(['ok' => false, 'message' => 'TLS pin no valido (usa formato sha256//...)']);
+            exit;
+        }
+        if ($tlsCaFile !== '' && (!is_file($tlsCaFile) || !is_readable($tlsCaFile))) {
+            echo json_encode(['ok' => false, 'message' => 'Ruta CA no valida o no legible en este servidor.']);
+            exit;
+        }
+
+        $tlsContext = [
+            'metadata' => [
+                'tls_pin' => $tlsPin,
+                'tls_ca_file' => $tlsCaFile,
+            ],
+        ];
 
         // Test basic connection
         $testResult = ClusterService::callNodeDirect($apiUrl, $token, 'POST', 'api/cluster/action', [
             'action' => 'test-connection',
-        ]);
+        ], 30, $tlsContext);
 
         if (!$testResult['ok']) {
             echo json_encode(['ok' => false, 'message' => 'No se pudo conectar: ' . ($testResult['error'] ?? 'Error')]);
@@ -334,7 +397,7 @@ class ClusterController
         }
 
         // Get remote status
-        $statusResult = ClusterService::callNodeDirect($apiUrl, $token, 'GET', 'api/cluster/status');
+        $statusResult = ClusterService::callNodeDirect($apiUrl, $token, 'GET', 'api/cluster/status', [], 30, $tlsContext);
         $remoteStatus = $statusResult['data']['data'] ?? $statusResult['data'] ?? [];
 
         echo json_encode([
@@ -357,6 +420,7 @@ class ClusterController
 
         foreach ($nodes as $node) {
             $result = ClusterService::sendHeartbeat((int)$node['id']);
+            $currentNode = ClusterService::getNode((int)$node['id']) ?: $node;
             $nodesData[] = [
                 'id'           => $node['id'],
                 'name'         => $node['name'],
@@ -365,6 +429,7 @@ class ClusterController
                 'role'         => $result['data']['role'] ?? $node['role'] ?? 'unknown',
                 'last_seen_at' => $result['ok'] ? date('Y-m-d H:i:s') : ($node['last_seen_at'] ?? null),
                 'error'        => $result['error'] ?? '',
+                'tls'          => ClusterService::getNodeTlsSummary($currentNode),
             ];
         }
 
@@ -433,6 +498,7 @@ class ClusterController
             'age_seconds'    => $age,
             'sync_lag'       => (int)($node['sync_lag_seconds'] ?? 0),
             'alerts_muted'   => $isMuted,
+            'tls'            => ClusterService::getNodeTlsSummary($node),
         ]);
         exit;
     }
@@ -856,6 +922,8 @@ class ClusterController
         $result = ClusterService::callNodeDirect($node['api_url'], $token, 'POST', 'api/cluster/action', [
             'action' => 'install-ssh-key',
             'payload' => ['public_key' => $pubKey],
+        ], 30, [
+            'metadata' => $node['metadata'] ?? null,
         ]);
 
         echo json_encode($result['data'] ?? $result);
@@ -1225,7 +1293,8 @@ class ClusterController
                     \MuseDockPanel\Services\ReplicationService::decryptPassword($node['auth_token']),
                     'POST', 'api/cluster/action',
                     ['action' => 'set-standby', 'payload' => ['enabled' => true, 'reason' => $reason ?: 'Mantenimiento']],
-                    5 // 5s timeout
+                    5, // 5s timeout
+                    ['metadata' => $node['metadata'] ?? null]
                 );
             } catch (\Throwable) {} // non-critical — node may already be unreachable
 
@@ -1252,7 +1321,8 @@ class ClusterController
                     \MuseDockPanel\Services\ReplicationService::decryptPassword($node['auth_token']),
                     'POST', 'api/cluster/action',
                     ['action' => 'set-standby', 'payload' => ['enabled' => false]],
-                    5 // 5s timeout — don't block if slave is slow
+                    5, // 5s timeout — don't block if slave is slow
+                    ['metadata' => $node['metadata'] ?? null]
                 );
             } catch (\Throwable) {} // non-critical
 
@@ -1273,7 +1343,8 @@ class ClusterController
                         'cf_accounts'    => \MuseDockPanel\Services\CloudflareService::getConfiguredAccounts(),
                         'remote_domains' => \MuseDockPanel\Settings::get('failover_remote_domains', ''),
                     ]],
-                    10
+                    10,
+                    ['metadata' => $node['metadata'] ?? null]
                 );
             } catch (\Throwable) {} // best-effort, worker will pull within 1h anyway
 
@@ -1448,6 +1519,8 @@ class ClusterController
         $tokenResult = ClusterService::callNodeDirect($node['api_url'], $token, 'POST', 'api/cluster/action', [
             'action' => 'mail_generate_setup_token',
             'payload' => [],
+        ], 30, [
+            'metadata' => $node['metadata'] ?? null,
         ]);
 
         $setupToken = $tokenResult['data']['setup_token'] ?? '';
@@ -1469,7 +1542,9 @@ class ClusterController
                 'ssl_mode'      => $sslMode,
                 'setup_token'   => $setupToken,
             ],
-        ], 30); // Short timeout — node should respond immediately
+        ], 30, [
+            'metadata' => $node['metadata'] ?? null,
+        ]); // Short timeout — node should respond immediately
 
         $taskId = $result['data']['task_id'] ?? '';
         if (!$taskId) {
@@ -1802,6 +1877,8 @@ class ClusterController
         $result = ClusterService::callNodeDirect($node['api_url'], $token, 'POST', 'api/cluster/action', [
             'action'  => 'mail_setup_status',
             'payload' => ['task_id' => $taskId],
+        ], 30, [
+            'metadata' => $node['metadata'] ?? null,
         ]);
 
         if (!($result['ok'] ?? false)) {
@@ -1858,5 +1935,17 @@ class ClusterController
         LogService::log('cluster.filesync', 'exclusions', 'Lista de exclusiones actualizada');
         echo json_encode(['ok' => true]);
         exit;
+    }
+
+    private function isValidTlsPin(string $pin): bool
+    {
+        $pin = trim($pin);
+        if ($pin === '') {
+            return true;
+        }
+        if (str_starts_with($pin, '/') && is_file($pin) && is_readable($pin)) {
+            return true;
+        }
+        return (bool)preg_match('/^(sha256\/\/)?[A-Za-z0-9+\/=]{32,}$/', $pin);
     }
 }

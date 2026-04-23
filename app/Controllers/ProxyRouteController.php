@@ -5,7 +5,6 @@ use MuseDockPanel\View;
 use MuseDockPanel\Flash;
 use MuseDockPanel\Router;
 use MuseDockPanel\Services\ProxyRouteService;
-use MuseDockPanel\Services\LicenseService;
 
 class ProxyRouteController
 {
@@ -16,14 +15,12 @@ class ProxyRouteController
     {
         $routes = ProxyRouteService::getAll();
         $canAdd = ProxyRouteService::canAddRoute();
-        $tier   = LicenseService::getTier();
 
         View::render('settings.proxy-routes', [
             'layout'    => 'main',
             'pageTitle' => 'Proxy Routes',
             'routes'    => $routes,
             'canAdd'    => $canAdd,
-            'tier'      => $tier,
         ]);
     }
 
@@ -90,7 +87,7 @@ class ProxyRouteController
         } else {
             // Create — check license
             if (!ProxyRouteService::canAddRoute()) {
-                Flash::set('error', 'Límite de rutas proxy alcanzado en la licencia Free. Actualiza a Pro para rutas ilimitadas.');
+                Flash::set('error', 'No se pudo crear la ruta proxy.');
                 Router::redirect('/settings/proxy-routes');
                 return;
             }

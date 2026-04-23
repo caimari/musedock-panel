@@ -91,8 +91,30 @@ class SettingsController
         // After Caddy restart/start → auto-repair routes + update autosave
         if ($service === 'caddy' && in_array($action, ['restart', 'start'])) {
             sleep(2); // Wait for Caddy to fully start
-            $repairOutput = shell_exec('/usr/bin/php8.3 /var/www/vhosts/musedock.com/httpdocs/cli/repair-caddy-routes.php 2>&1') ?? '';
-            LogService::log('caddy.repair', 'auto', "Auto-repair after {$action}");
+
+            $repairScript = '';
+            $candidates = [
+                PANEL_ROOT . '/cli/repair-caddy-routes.php',
+                '/var/www/vhosts/musedock.com/httpdocs/cli/repair-caddy-routes.php',
+            ];
+            foreach ($candidates as $candidate) {
+                if (file_exists($candidate)) {
+                    $repairScript = $candidate;
+                    break;
+                }
+            }
+
+            if ($repairScript !== '') {
+                $phpBin = is_executable(PHP_BINARY) ? PHP_BINARY : '/usr/bin/php';
+                $repairOutput = shell_exec(sprintf(
+                    '%s %s 2>&1',
+                    escapeshellarg($phpBin),
+                    escapeshellarg($repairScript)
+                )) ?? '';
+                LogService::log('caddy.repair', 'auto', "Auto-repair after {$action}: {$repairScript}");
+            } else {
+                LogService::log('caddy.repair', 'auto', "Auto-repair skipped after {$action}: script not found");
+            }
 
             // Update autosave
             $currentConfig = @file_get_contents('http://localhost:2019/config/');
@@ -707,6 +729,36 @@ class SettingsController
                 $extList = array_filter(explode("\n", $extOutput), fn($l) => !empty(trim($l)) && $l[0] !== '[');
             }
 
+            // Read OPcache config
+            $opcacheFile = "/etc/php/{$ver}/fpm/conf.d/10-opcache.ini";
+            $opcache = [
+                'opcache.enable' => '1',
+                'opcache.memory_consumption' => '128',
+                'opcache.interned_strings_buffer' => '8',
+                'opcache.max_accelerated_files' => '10000',
+                'opcache.revalidate_freq' => '2',
+                'opcache.jit' => 'off',
+                'opcache.jit_buffer_size' => '0',
+            ];
+            // Try multiple locations for opcache config
+            $opcacheFiles = [
+                "/etc/php/{$ver}/fpm/conf.d/10-opcache.ini",
+                "/etc/php/{$ver}/mods-available/opcache.ini",
+            ];
+            $opcacheConfigFile = '';
+            foreach ($opcacheFiles as $of) {
+                if (file_exists($of)) {
+                    $opcacheConfigFile = $of;
+                    $ocContent = file_get_contents($of);
+                    foreach ($opcache as $key => $default) {
+                        if (preg_match('/^\s*' . preg_quote($key, '/') . '\s*=\s*(.+)$/m', $ocContent, $m)) {
+                            $opcache[$key] = trim($m[1]);
+                        }
+                    }
+                    break;
+                }
+            }
+
             $versions[$ver] = [
                 'version' => $ver,
                 'binary' => $phpBin,
@@ -715,6 +767,8 @@ class SettingsController
                 'pools' => $poolCount,
                 'status' => $status,
                 'extensions' => $extList,
+                'opcache' => $opcache,
+                'opcache_file' => $opcacheConfigFile,
             ];
         }
 
@@ -781,6 +835,68 @@ class SettingsController
             shell_exec(sprintf('systemctl restart %s 2>&1', escapeshellarg($svcName)));
             LogService::log('settings.php', "php{$ver}", "Updated php.ini: " . implode(', ', $changes));
             Flash::set('success', "php.ini de PHP {$ver} actualizado. FPM reiniciado.");
+        } else {
+            Flash::set('warning', 'No se realizaron cambios.');
+        }
+
+        Router::redirect('/settings/php');
+    }
+
+    /**
+     * POST /settings/php/opcache-save — Save OPcache + JIT configuration
+     */
+    public function phpOpcacheSave(): void
+    {
+        $ver = trim($_POST['version'] ?? '');
+        $allowedVersions = ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4'];
+        if (!in_array($ver, $allowedVersions)) {
+            Flash::set('error', 'Version de PHP no valida.');
+            Router::redirect('/settings/php');
+            return;
+        }
+
+        $opcacheFile = "/etc/php/{$ver}/fpm/conf.d/10-opcache.ini";
+
+        // If file doesn't exist, try mods-available
+        if (!file_exists($opcacheFile)) {
+            $modsFile = "/etc/php/{$ver}/mods-available/opcache.ini";
+            if (file_exists($modsFile)) {
+                $opcacheFile = $modsFile;
+            } else {
+                // Create it
+                @mkdir(dirname($opcacheFile), 0755, true);
+            }
+        }
+
+        $settings = [
+            'opcache.enable' => '/^[01]$/',
+            'opcache.memory_consumption' => '/^\d+$/',
+            'opcache.interned_strings_buffer' => '/^\d+$/',
+            'opcache.max_accelerated_files' => '/^\d+$/',
+            'opcache.revalidate_freq' => '/^\d+$/',
+            'opcache.jit' => '/^(off|on|tracing|function|\d+)$/i',
+            'opcache.jit_buffer_size' => '/^\d+[MmGg]?$/',
+        ];
+
+        $lines = ["zend_extension=opcache.so"];
+        $changes = [];
+
+        foreach ($settings as $key => $pattern) {
+            $value = trim($_POST[str_replace('.', '_', $key)] ?? '');
+            if (empty($value)) continue;
+            if (!preg_match($pattern, $value)) continue;
+            $lines[] = "{$key}={$value}";
+            $changes[] = "{$key}={$value}";
+        }
+
+        if (!empty($changes)) {
+            file_put_contents($opcacheFile, implode("\n", $lines) . "\n");
+
+            $svcName = "php{$ver}-fpm";
+            shell_exec(sprintf('systemctl restart %s 2>&1', escapeshellarg($svcName)));
+
+            LogService::log('settings.opcache', "php{$ver}", "OPcache config updated: " . implode(', ', $changes));
+            Flash::set('success', "OPcache de PHP {$ver} actualizado. FPM reiniciado.");
         } else {
             Flash::set('warning', 'No se realizaron cambios.');
         }

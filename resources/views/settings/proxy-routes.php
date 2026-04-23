@@ -29,8 +29,8 @@
             <i class="bi bi-plus-circle me-1"></i>Nueva Ruta
         </button>
         <?php else: ?>
-        <button type="button" class="btn btn-secondary btn-sm" disabled title="Límite Free alcanzado — necesitas Pro">
-            <i class="bi bi-lock me-1"></i>Nueva Ruta (Pro)
+        <button type="button" class="btn btn-secondary btn-sm" disabled title="No disponible">
+            <i class="bi bi-lock me-1"></i>Nueva Ruta
         </button>
         <?php endif; ?>
     </div>
@@ -45,9 +45,6 @@
             Permiten que dominios alojados en servidores sin IP pública sean accesibles a través de este servidor usando caddy-l4 SNI passthrough.
             <br>
             <span class="text-muted">Los certificados SSL los gestiona el servidor destino. El tráfico pasa tal cual (TCP passthrough), sin descifrar.</span>
-            <?php if ($tier === 'free'): ?>
-            <br><span style="color:#eab308;"><i class="bi bi-star me-1"></i>Licencia Free: máximo 1 ruta proxy. <strong>Actualiza a Pro</strong> para rutas ilimitadas.</span>
-            <?php endif; ?>
         </div>
     </div>
 </div>

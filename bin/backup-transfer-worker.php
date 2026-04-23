@@ -18,10 +18,40 @@ spl_autoload_register(function ($class) {
 
 MuseDockPanel\Env::load(PANEL_ROOT . '/.env');
 
-$backupName = $argv[1] ?? '';
+function sanitizeBackupNameArg(string $name): string
+{
+    $name = basename(trim($name));
+    if ($name === '') {
+        return '';
+    }
+
+    return preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/', $name) ? $name : '';
+}
+
+function normalizeTransferMethod(string $method): string
+{
+    return $method === 'http' ? 'http' : 'ssh';
+}
+
+function buildPeerSshOptions(array $peer): string
+{
+    $port = (int)($peer['ssh_port'] ?? 22);
+    if ($port < 1 || $port > 65535) {
+        $port = 22;
+    }
+
+    $keyPath = trim((string)($peer['ssh_key_path'] ?? ''));
+    if ($keyPath === '') {
+        throw new RuntimeException('Ruta de clave SSH no valida');
+    }
+
+    return sprintf('-p %d -i %s -o StrictHostKeyChecking=no', $port, escapeshellarg($keyPath));
+}
+
+$backupName = sanitizeBackupNameArg($argv[1] ?? '');
 $nodeId = (int) ($argv[2] ?? 0);
 $peerId = (int) ($argv[3] ?? 0);
-$transferMethod = $argv[4] ?? 'ssh'; // 'ssh' or 'http'
+$transferMethod = normalizeTransferMethod($argv[4] ?? 'ssh'); // 'ssh' or 'http'
 
 if (!$backupName || (!$nodeId && !$peerId)) {
     exit(1);
@@ -103,13 +133,11 @@ if ($peerId > 0) {
         $uploadStartTime = microtime(true);
 
         $ch = curl_init($url);
-        curl_setopt_array($ch, [
+        $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
             CURLOPT_TIMEOUT => 600,
             CURLOPT_CONNECTTIMEOUT => 30,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => false,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $token,
                 'Accept: application/json',
@@ -142,7 +170,11 @@ if ($peerId > 0) {
                 ]);
                 return 0;
             },
-        ]);
+        ];
+        $opts = array_replace($opts, \MuseDockPanel\Security\TlsClient::forUrl($url, [
+            'metadata' => $peer['metadata'] ?? null,
+        ]));
+        curl_setopt_array($ch, $opts);
 
         $response = curl_exec($ch);
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -180,11 +212,21 @@ if ($peerId > 0) {
         $sshTarget = MuseDockPanel\Services\FederationService::getSshTarget($peer);
         $remotePath = '/opt/musedock-panel/storage/backups/' . $backupName . '/';
         $rsyncStart = microtime(true);
+        try {
+            $sshOpts = buildPeerSshOptions($peer);
+        } catch (Throwable $e) {
+            updateStatus($statusFile, [
+                'status' => 'error',
+                'error' => $e->getMessage(),
+                'backup_name' => $backupName,
+                'node_name' => $peerName,
+            ]);
+            exit(1);
+        }
 
         $cmd = sprintf(
-            'rsync -azP --partial -e "ssh -p %d -i %s -o StrictHostKeyChecking=no" %s %s:%s 2>&1',
-            $peer['ssh_port'] ?? 22,
-            escapeshellarg($peer['ssh_key_path']),
+            'rsync -azP --partial -e "ssh %s" %s %s:%s 2>&1',
+            $sshOpts,
             escapeshellarg($backupPath . '/'),
             escapeshellarg($sshTarget),
             escapeshellarg($remotePath)
@@ -356,13 +398,11 @@ $url = rtrim($node['api_url'], '/') . '/api/cluster/action';
 $uploadStartTime = microtime(true);
 
 $ch = curl_init($url);
-curl_setopt_array($ch, [
+$opts = [
     CURLOPT_RETURNTRANSFER => true,
     CURLOPT_POST => true,
     CURLOPT_TIMEOUT => 600,
     CURLOPT_CONNECTTIMEOUT => 30,
-    CURLOPT_SSL_VERIFYPEER => false,
-    CURLOPT_SSL_VERIFYHOST => false,
     CURLOPT_HTTPHEADER => [
         'Authorization: Bearer ' . $token,
         'Accept: application/json',
@@ -426,7 +466,11 @@ curl_setopt_array($ch, [
 
         return 0;
     },
-]);
+];
+$opts = array_replace($opts, \MuseDockPanel\Security\TlsClient::forUrl($url, [
+    'metadata' => $node['metadata'] ?? null,
+]));
+curl_setopt_array($ch, $opts);
 
 $response = curl_exec($ch);
 $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);

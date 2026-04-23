@@ -956,7 +956,9 @@ class MailService
                         'db_name' => 'musedock_panel',
                         'db_user' => 'musedock_mail',
                     ],
-                ], 30);
+                ], 30, [
+                    'metadata' => $node['metadata'] ?? null,
+                ]);
                 $results[] = ['node' => $node['name'], 'ok' => $result['data']['ok'] ?? false, 'error' => $result['error'] ?? ''];
             } catch (\Exception $e) {
                 $results[] = ['node' => $node['name'], 'ok' => false, 'error' => $e->getMessage()];

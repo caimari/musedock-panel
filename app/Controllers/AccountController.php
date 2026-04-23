@@ -678,6 +678,26 @@ class AccountController
             }
         }
 
+        // Parse FPM pool manager settings
+        $fpmSettings = [
+            'pm' => 'ondemand',
+            'pm.max_children' => '5',
+            'pm.start_servers' => '2',
+            'pm.min_spare_servers' => '1',
+            'pm.max_spare_servers' => '3',
+            'pm.max_requests' => '500',
+        ];
+        if (file_exists($poolFile)) {
+            $poolContent = $poolContent ?? file_get_contents($poolFile);
+            if ($poolContent) {
+                foreach ($fpmSettings as $key => $default) {
+                    if (preg_match('/^\s*' . preg_quote($key, '/') . '\s*=\s*(.+)$/m', $poolContent, $m)) {
+                        $fpmSettings[$key] = trim($m[1]);
+                    }
+                }
+            }
+        }
+
         $isSlave = Settings::get('cluster_role', 'standalone') === 'slave';
 
         View::render('accounts/edit', [
@@ -685,6 +705,7 @@ class AccountController
             'pageTitle' => 'Editar: ' . $account['domain'],
             'account' => $account,
             'phpSettings' => $phpSettings,
+            'fpmSettings' => $fpmSettings,
             'poolFileExists' => file_exists($poolFile),
             'isSlave' => $isSlave,
         ]);
@@ -856,7 +877,7 @@ class AccountController
             return;
         }
 
-        $linuxCheck = shell_exec("id -u {$newUsername} 2>/dev/null");
+        $linuxCheck = shell_exec("id -u " . escapeshellarg($newUsername) . " 2>/dev/null");
         if (!empty(trim($linuxCheck ?? ''))) {
             Flash::set('error', "El usuario Linux '{$newUsername}' ya existe en el sistema.");
             Router::redirect('/accounts/' . $params['id'] . '/edit');
@@ -2249,6 +2270,94 @@ class AccountController
         }
 
         return $orphans;
+    }
+
+    /**
+     * POST /accounts/{id}/fpm-pool — Update FPM pool manager settings (pm, max_children, etc.)
+     */
+    public function updateFpmPool(array $params): void
+    {
+        if ($this->slaveGuard('Cambiar FPM pool')) return;
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) {
+            Flash::set('error', 'Cuenta no encontrada.');
+            Router::redirect('/accounts');
+            return;
+        }
+
+        $poolFile = "/etc/php/{$account['php_version']}/fpm/pool.d/{$account['username']}.conf";
+        if (!file_exists($poolFile)) {
+            Flash::set('error', 'Pool FPM no encontrado.');
+            Router::redirect('/accounts/' . $params['id'] . '/edit');
+            return;
+        }
+
+        $poolContent = file_get_contents($poolFile);
+        if ($poolContent === false) {
+            Flash::set('error', 'No se pudo leer el pool FPM.');
+            Router::redirect('/accounts/' . $params['id'] . '/edit');
+            return;
+        }
+
+        $pm = $_POST['pm'] ?? 'ondemand';
+        if (!in_array($pm, ['ondemand', 'dynamic', 'static'], true)) $pm = 'ondemand';
+
+        $settings = [
+            'pm' => $pm,
+            'pm.max_children' => max(1, min(200, (int)($_POST['pm_max_children'] ?? 5))),
+            'pm.max_requests' => max(0, min(100000, (int)($_POST['pm_max_requests'] ?? 500))),
+        ];
+
+        if ($pm === 'dynamic') {
+            $settings['pm.start_servers'] = max(1, min(50, (int)($_POST['pm_start_servers'] ?? 2)));
+            $settings['pm.min_spare_servers'] = max(1, min(50, (int)($_POST['pm_min_spare_servers'] ?? 1)));
+            $settings['pm.max_spare_servers'] = max(1, min(50, (int)($_POST['pm_max_spare_servers'] ?? 3)));
+
+            // Validate: start must be between min and max spare
+            if ($settings['pm.start_servers'] < $settings['pm.min_spare_servers']) {
+                $settings['pm.start_servers'] = $settings['pm.min_spare_servers'];
+            }
+            if ($settings['pm.start_servers'] > $settings['pm.max_spare_servers']) {
+                $settings['pm.start_servers'] = $settings['pm.max_spare_servers'];
+            }
+            if ($settings['pm.max_spare_servers'] > $settings['pm.max_children']) {
+                $settings['pm.max_spare_servers'] = $settings['pm.max_children'];
+            }
+        }
+
+        // Update pool file
+        foreach ($settings as $key => $value) {
+            $pattern = '/^\s*' . preg_quote($key, '/') . '\s*=\s*.+$/m';
+            if (preg_match($pattern, $poolContent)) {
+                $poolContent = preg_replace($pattern, "{$key} = {$value}", $poolContent);
+            } else {
+                // Add the setting if it doesn't exist
+                $poolContent .= "\n{$key} = {$value}\n";
+            }
+        }
+
+        // Remove dynamic-only settings if not in dynamic mode
+        if ($pm !== 'dynamic') {
+            $poolContent = preg_replace('/^\s*pm\.start_servers\s*=.*$/m', '; pm.start_servers (disabled - not dynamic)', $poolContent);
+            $poolContent = preg_replace('/^\s*pm\.min_spare_servers\s*=.*$/m', '; pm.min_spare_servers (disabled - not dynamic)', $poolContent);
+            $poolContent = preg_replace('/^\s*pm\.max_spare_servers\s*=.*$/m', '; pm.max_spare_servers (disabled - not dynamic)', $poolContent);
+        } else {
+            // Re-enable if previously commented out
+            $poolContent = preg_replace('/^;\s*pm\.start_servers\s*\(disabled.*$/m', "pm.start_servers = {$settings['pm.start_servers']}", $poolContent);
+            $poolContent = preg_replace('/^;\s*pm\.min_spare_servers\s*\(disabled.*$/m', "pm.min_spare_servers = {$settings['pm.min_spare_servers']}", $poolContent);
+            $poolContent = preg_replace('/^;\s*pm\.max_spare_servers\s*\(disabled.*$/m', "pm.max_spare_servers = {$settings['pm.max_spare_servers']}", $poolContent);
+        }
+
+        file_put_contents($poolFile, $poolContent);
+
+        // Reload PHP-FPM
+        exec("systemctl reload php{$account['php_version']}-fpm 2>&1", $out, $rc);
+
+        $settingsStr = implode(', ', array_map(fn($k, $v) => "{$k}={$v}", array_keys($settings), $settings));
+        LogService::log('account.fpm_pool', $account['domain'], "FPM pool updated: {$settingsStr}");
+        Flash::set('success', "FPM Pool actualizado: pm={$pm}. PHP-FPM recargado.");
+        Router::redirect('/accounts/' . $params['id'] . '/edit');
     }
 
     public function updatePhp(array $params): void

@@ -212,6 +212,115 @@ if (Settings::get('mail_enabled', '0') === '1') {
     }
 }
 
+// ─── Step 2c: TLS trust / expiry alerts ───────────────────────
+logMsg("Checking TLS trust/expiry...");
+try {
+    $tlsNodes = ClusterService::getNodes();
+    $tlsAlertStateRaw = Settings::get('cluster_tls_alert_state', '{}');
+    $tlsAlertState = json_decode($tlsAlertStateRaw, true);
+    if (!is_array($tlsAlertState)) {
+        $tlsAlertState = [];
+    }
+
+    $now = time();
+    $seenTlsNodes = [];
+
+    foreach ($tlsNodes as $node) {
+        $nid = (string)($node['id'] ?? '0');
+        if ($nid === '0') {
+            continue;
+        }
+        $seenTlsNodes[] = $nid;
+
+        if (!empty($node['standby'])) {
+            logMsg("  Node #{$nid} ({$node['name']}): standby, skipping TLS alerts");
+            continue;
+        }
+
+        $mutedUntil = Settings::get("cluster_node_{$nid}_muted_until", '');
+        if ($mutedUntil && strtotime($mutedUntil) > $now) {
+            logMsg("  Node #{$nid} ({$node['name']}): TLS alerts muted until {$mutedUntil}");
+            continue;
+        }
+
+        $tls = ClusterService::getNodeTlsSummary($node);
+        $tlsStatus = (string)($tls['status'] ?? 'info');
+        $tlsMode = (string)($tls['mode'] ?? 'none');
+        $daysLeft = $tls['days_left'] ?? null;
+        $isExpiringCa = ($tlsMode === 'ca')
+            && in_array($tlsStatus, ['warning', 'critical'], true)
+            && is_numeric($daysLeft);
+
+        $prev = $tlsAlertState[$nid] ?? null;
+
+        if (!$isExpiringCa) {
+            if (is_array($prev) && in_array((string)($prev['status'] ?? ''), ['warning', 'critical'], true)) {
+                $nodeName = (string)($node['name'] ?? "#{$nid}");
+                ClusterService::sendAlert(
+                    "[MuseDock Cluster] TLS recuperado: {$nodeName}",
+                    "El estado TLS del nodo {$nodeName} ha vuelto a normal.\n"
+                    . "Estado actual: " . ($tls['summary'] ?? 'OK') . "\n"
+                    . "Fecha: " . date('Y-m-d H:i:s')
+                );
+                LogService::log('cluster.tls', 'recovered', "Nodo {$nodeName} recuperado TLS");
+                logMsg("  Node #{$nid} ({$nodeName}): TLS recovered, notification sent.");
+            }
+            unset($tlsAlertState[$nid]);
+            continue;
+        }
+
+        $repeatEvery = ($tlsStatus === 'critical') ? 21600 : 86400; // critical: 6h, warning: 24h
+        $lastAlert = (int)($prev['last_alert'] ?? 0);
+        $prevStatus = (string)($prev['status'] ?? '');
+        $statusChanged = ($prevStatus !== $tlsStatus);
+        $dueByTime = ($lastAlert === 0) || (($now - $lastAlert) >= $repeatEvery);
+
+        if ($statusChanged || $dueByTime) {
+            $nodeName = (string)($node['name'] ?? "#{$nid}");
+            $severity = $tlsStatus === 'critical' ? 'CRITICA' : 'WARNING';
+            $subject = "[MuseDock Cluster] ALERTA TLS {$severity}: {$nodeName}";
+            $body = "Nodo: {$nodeName}\n"
+                . "URL: " . ($node['api_url'] ?? '') . "\n"
+                . "Estado TLS: " . ($tls['summary'] ?? $tlsStatus) . "\n"
+                . "Modo: {$tlsMode}\n"
+                . "Dias restantes: " . (string)($daysLeft ?? '?') . "\n"
+                . "Expira: " . (string)($tls['not_after'] ?? '?') . "\n"
+                . "CA local: " . (string)($tls['ca_file'] ?? '-') . "\n"
+                . "Detalle: " . (string)($tls['detail'] ?? '-') . "\n"
+                . "Fecha: " . date('Y-m-d H:i:s') . "\n\n"
+                . "Revise el nodo en /settings/cluster.";
+
+            ClusterService::sendAlert($subject, $body);
+            LogService::log('cluster.tls', 'expiry-alert', "Nodo {$nodeName} {$tlsStatus} ({$daysLeft} dias)");
+            logMsg("  Node #{$nid} ({$nodeName}): TLS {$tlsStatus} alert sent.");
+
+            $tlsAlertState[$nid] = [
+                'status' => $tlsStatus,
+                'last_alert' => $now,
+                'summary' => (string)($tls['summary'] ?? ''),
+            ];
+        } else {
+            $remaining = max(0, $repeatEvery - ($now - $lastAlert));
+            logMsg("  Node #{$nid} ({$node['name']}): TLS {$tlsStatus} throttled, next alert in {$remaining}s.");
+            $tlsAlertState[$nid] = [
+                'status' => $tlsStatus,
+                'last_alert' => $lastAlert,
+                'summary' => (string)($tls['summary'] ?? ''),
+            ];
+        }
+    }
+
+    foreach (array_keys($tlsAlertState) as $nid) {
+        if (!in_array((string)$nid, $seenTlsNodes, true)) {
+            unset($tlsAlertState[$nid]);
+        }
+    }
+
+    Settings::set('cluster_tls_alert_state', json_encode($tlsAlertState));
+} catch (\Throwable $e) {
+    logMsg("ERROR checking TLS expiry: " . $e->getMessage());
+}
+
 // ─── Step 3: Check for unreachable nodes (escalating alerts) ──
 logMsg("Checking unreachable nodes...");
 try {

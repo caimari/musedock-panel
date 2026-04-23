@@ -539,6 +539,12 @@ class FederationMigrationService
         ]);
         self::log($migrationId, self::STEP_PREPARE, 'info', 'Slave sync paused on destination');
 
+        // Read system user password hash for transfer
+        $passwordHash = trim(shell_exec("getent shadow " . escapeshellarg($account['username']) . " 2>/dev/null | cut -d: -f2") ?: '');
+
+        // Read DB credentials from .env files so destination creates users with same passwords
+        $dbCredentials = self::extractDbCredentials($account, $subdomains);
+
         $result = FederationService::callPeerApi($peer, 'POST', '/api/federation/prepare', [
             'migration_id'  => $migrationId,
             'domain'        => $account['domain'],
@@ -549,9 +555,11 @@ class FederationMigrationService
             'php_version'   => $account['php_version'],
             'disk_quota_mb' => $account['disk_quota_mb'],
             'shell'         => $account['shell'] ?? '/usr/sbin/nologin',
+            'password_hash' => $passwordHash,
             'databases'     => $databases,
             'subdomains'    => $subdomains,
             'aliases'       => $aliases,
+            'db_credentials' => $dbCredentials,
         ]);
 
         if (!$result['ok']) {
@@ -640,7 +648,7 @@ class FederationMigrationService
         }
 
         $sshTarget = FederationService::getSshTarget($peer);
-        $sshOpts = sprintf('-p %d -i %s -o StrictHostKeyChecking=no', $peer['ssh_port'] ?? 22, $peer['ssh_key_path']);
+        $sshOpts = self::buildSshOptions($peer);
         $errors = [];
         $synced = 0;
 
@@ -690,7 +698,7 @@ class FederationMigrationService
                         'ssh %s %s "sudo -u postgres psql -d %s -c %s" 2>&1',
                         $sshOpts, escapeshellarg($sshTarget),
                         escapeshellarg($dbName),
-                        escapeshellarg("REASSIGN OWNED BY postgres TO \\\"{$safeUser}\\\"; GRANT ALL ON SCHEMA public TO \\\"{$safeUser}\\\"; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \\\"{$safeUser}\\\"; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \\\"{$safeUser}\\\";")
+                        escapeshellarg("REASSIGN OWNED BY postgres TO \\\"{$safeUser}\\\"; GRANT ALL ON SCHEMA public TO \\\"{$safeUser}\\\"; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \\\"{$safeUser}\\\"; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \\\"{$safeUser}\\\"; GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO \\\"{$safeUser}\\\"; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \\\"{$safeUser}\\\"; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \\\"{$safeUser}\\\";")
                     );
                     exec($fixOwnerCmd, $ownerOut, $ownerRc);
                     if ($ownerRc !== 0) {
@@ -719,8 +727,11 @@ class FederationMigrationService
     {
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy_api'] ?? 'http://localhost:2019';
-        $username = $account['username'];
-        $phpVersion = $account['php_version'] ?? '8.3';
+        $username = self::normalizeLinuxUsername((string)($account['username'] ?? ''));
+        if ($username === '') {
+            return ['ok' => false, 'error' => 'Invalid hosting username for freeze step'];
+        }
+        $phpVersion = self::normalizePhpVersion((string)($account['php_version'] ?? '8.3'));
 
         // 1. Replace hosting route with maintenance page
         $routeId = SystemService::caddyRouteId($account['domain']);
@@ -775,7 +786,8 @@ class FederationMigrationService
 
         // 3. STOP FPM pool — guarantees ZERO PHP execution
         //    This kills any remaining workers for this user
-        exec("pkill -f 'php-fpm:.*{$username}' 2>&1", $out, $rc);
+        $pkillPattern = 'php-fpm:.*' . preg_quote($username, '/');
+        exec('pkill -f ' . escapeshellarg($pkillPattern) . ' 2>&1', $out, $rc);
 
         // Remove pool config so FPM reload doesn't restart it
         $poolFile = "/etc/php/{$phpVersion}/fpm/pool.d/{$username}.conf";
@@ -783,7 +795,7 @@ class FederationMigrationService
         if (file_exists($poolFile)) {
             copy($poolFile, $poolBackup);  // backup for rollback
             unlink($poolFile);
-            exec("systemctl reload php{$phpVersion}-fpm 2>&1");
+            exec('systemctl reload php' . $phpVersion . '-fpm 2>&1');
         }
 
         // Store pool backup path in metadata for rollback
@@ -843,6 +855,35 @@ class FederationMigrationService
             $aliases = array_values(array_filter($aliases, fn($a) => in_array((int)$a['id'], $selectedAliasIds)));
         }
 
+        // Read FPM pool config from origin to transfer to destination
+        $poolFile = "/etc/php/{$account['php_version']}/fpm/pool.d/{$account['username']}.conf";
+        $fpmConfig = [];
+        $phpConfig = [];
+        if (file_exists($poolFile)) {
+            $poolContent = file_get_contents($poolFile);
+            if ($poolContent) {
+                // Extract FPM pool settings
+                foreach (['pm', 'pm.max_children', 'pm.start_servers', 'pm.min_spare_servers', 'pm.max_spare_servers', 'pm.max_requests'] as $key) {
+                    if (preg_match('/^\s*' . preg_quote($key, '/') . '\s*=\s*(.+)$/m', $poolContent, $m)) {
+                        $fpmConfig[$key] = trim($m[1]);
+                    }
+                }
+                // Extract PHP settings
+                if (preg_match_all('/^php(?:_admin)?_value\[([^\]]+)\]\s*=\s*(.+)$/m', $poolContent, $matches, PREG_SET_ORDER)) {
+                    foreach ($matches as $match) {
+                        $phpConfig[trim($match[1])] = trim($match[2]);
+                    }
+                }
+            }
+        }
+
+        // Read DB credentials for transfer (passwords from hosting_databases)
+        $dbCredentials = [];
+        foreach ($databases as $db) {
+            // Try to get password from .env files
+            $dbCredentials[$db['db_name']] = ['db_user' => $db['db_user'], 'db_type' => $db['db_type'] ?? 'mysql'];
+        }
+
         $result = FederationService::callPeerApi($peer, 'POST', '/api/federation/finalize', [
             'migration_id'  => $migrationId,
             'domain'        => $account['domain'],
@@ -850,6 +891,10 @@ class FederationMigrationService
             'php_version'   => $account['php_version'] ?? '8.3',
             'hosting_type'  => $account['hosting_type'] ?? 'php',
             'disk_quota_mb' => $account['disk_quota_mb'] ?? 0,
+            'description'   => $account['description'] ?? '',
+            'customer_id'   => $account['customer_id'] ?? null,
+            'fpm_config'    => $fpmConfig,
+            'php_config'    => $phpConfig,
             'databases'     => $databases,
             'subdomains'    => $subdomains,
             'aliases'       => $aliases,
@@ -1200,18 +1245,25 @@ class FederationMigrationService
         if ($stepIndex >= $freezeIndex) {
             $metadata = $migration['metadata'] ?? [];
             $poolBackup = $metadata['fpm_pool_backup'] ?? '';
-            $fpmVersion = $metadata['fpm_php_version'] ?? ($account['php_version'] ?? '8.3');
-            $poolFile = "/etc/php/{$fpmVersion}/fpm/pool.d/{$account['username']}.conf";
+            $fpmVersion = self::normalizePhpVersion((string)($metadata['fpm_php_version'] ?? ($account['php_version'] ?? '8.3')));
+            $poolUser = self::normalizeLinuxUsername((string)($account['username'] ?? ''));
+            if ($poolUser === '') {
+                self::log($migrationId, $currentStep, 'warn', 'Invalid username while restoring FPM pool');
+                $poolUser = 'invalid-user';
+            }
+            $poolFile = "/etc/php/{$fpmVersion}/fpm/pool.d/{$poolUser}.conf";
 
             if (!empty($poolBackup) && file_exists($poolBackup) && !file_exists($poolFile)) {
                 copy($poolBackup, $poolFile);
-                exec("systemctl reload php{$fpmVersion}-fpm 2>&1");
+                exec('systemctl reload php' . $fpmVersion . '-fpm 2>&1');
                 @unlink($poolBackup);
                 self::log($migrationId, $currentStep, 'info', 'FPM pool restored from backup');
             } elseif (!file_exists($poolFile)) {
                 // No backup — recreate pool from scratch
-                SystemService::createFpmPool($account['username'], $fpmVersion, $account['home_dir']);
-                exec("systemctl reload php{$fpmVersion}-fpm 2>&1");
+                if ($poolUser !== 'invalid-user') {
+                    SystemService::createFpmPool($poolUser, $fpmVersion, $account['home_dir']);
+                }
+                exec('systemctl reload php' . $fpmVersion . '-fpm 2>&1');
                 self::log($migrationId, $currentStep, 'info', 'FPM pool recreated (no backup found)');
             }
 
@@ -1494,6 +1546,71 @@ class FederationMigrationService
         return $ip ? trim($ip) : null;
     }
 
+    /**
+     * Extract DB credentials from .env files of the account and its subdomains.
+     * Returns array keyed by db_name with user + password.
+     */
+    private static function extractDbCredentials(array $account, array $subdomains): array
+    {
+        $credentials = [];
+
+        // Collect all directories to scan for .env files
+        $dirs = [];
+        $docRoot = $account['document_root'];
+        $dirs[] = $docRoot;
+        if (str_ends_with($docRoot, '/public')) $dirs[] = dirname($docRoot);
+
+        foreach ($subdomains as $sub) {
+            $subDocRoot = $sub['document_root'] ?? '';
+            if (!empty($subDocRoot)) {
+                $dirs[] = $subDocRoot;
+                if (str_ends_with($subDocRoot, '/public')) $dirs[] = dirname($subDocRoot);
+            }
+        }
+
+        // Also check subdomain directories in home_dir
+        $homeDir = rtrim($account['home_dir'], '/');
+        foreach ($subdomains as $sub) {
+            $subFqdn = $sub['subdomain'] ?? '';
+            if ($subFqdn) $dirs[] = "{$homeDir}/{$subFqdn}";
+        }
+
+        $dirs = array_unique($dirs);
+
+        foreach ($dirs as $dir) {
+            $envFile = rtrim($dir, '/') . '/.env';
+            if (!file_exists($envFile)) continue;
+
+            $content = @file_get_contents($envFile);
+            if (!$content) continue;
+
+            $vars = [];
+            foreach (explode("\n", $content) as $line) {
+                $line = trim($line);
+                if (empty($line) || $line[0] === '#') continue;
+                if (str_contains($line, '=')) {
+                    [$k, $v] = explode('=', $line, 2);
+                    $vars[trim($k)] = trim($v, " \t\n\r\0\x0B\"'");
+                }
+            }
+
+            $dbName = $vars['DB_DATABASE'] ?? $vars['DB_NAME'] ?? '';
+            $dbUser = $vars['DB_USERNAME'] ?? $vars['DB_USER'] ?? '';
+            $dbPass = $vars['DB_PASSWORD'] ?? $vars['DB_PASS'] ?? '';
+            $dbDriver = $vars['DB_CONNECTION'] ?? $vars['DB_DRIVER'] ?? 'mysql';
+
+            if (!empty($dbName) && !empty($dbUser) && !empty($dbPass)) {
+                $credentials[$dbName] = [
+                    'db_user' => $dbUser,
+                    'db_pass' => $dbPass,
+                    'db_type' => $dbDriver === 'pgsql' ? 'pgsql' : 'mysql',
+                ];
+            }
+        }
+
+        return $credentials;
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // Logging
     // ═══════════════════════════════════════════════════════════════
@@ -1764,7 +1881,7 @@ class FederationMigrationService
         if ($syncScope === 'all' || $syncScope === 'db') {
             self::log($migrationId, 'sync_db', 'info', 'Syncing databases');
             $databases = Database::fetchAll('SELECT * FROM hosting_databases WHERE account_id = :aid', ['aid' => $accountId]);
-            $sshOpts = sprintf('-p %d -i %s -o StrictHostKeyChecking=no', $peer['ssh_port'] ?? 22, $peer['ssh_key_path']);
+            $sshOpts = self::buildSshOptions($peer);
 
             foreach ($databases as $db) {
                 $dbName = $db['db_name'];
@@ -1979,5 +2096,31 @@ class FederationMigrationService
         if (!$admin) return false;
 
         return password_verify($password, $admin['password_hash']);
+    }
+
+    private static function normalizePhpVersion(string $version, string $fallback = '8.3'): string
+    {
+        $version = trim($version);
+        return preg_match('/^\d+\.\d+$/', $version) ? $version : $fallback;
+    }
+
+    private static function normalizeLinuxUsername(string $username): string
+    {
+        $username = trim($username);
+        return preg_match('/^[a-z_][a-z0-9_-]{0,31}$/', $username) ? $username : '';
+    }
+
+    private static function buildSshOptions(array $peer): string
+    {
+        $port = (int)($peer['ssh_port'] ?? 22);
+        if ($port < 1 || $port > 65535) {
+            $port = 22;
+        }
+        $keyPath = (string)($peer['ssh_key_path'] ?? '/root/.ssh/id_ed25519');
+        if ($keyPath === '') {
+            $keyPath = '/root/.ssh/id_ed25519';
+        }
+
+        return sprintf('-p %d -i %s -o StrictHostKeyChecking=no', $port, escapeshellarg($keyPath));
     }
 }

@@ -87,8 +87,117 @@
                 </div>
             </div>
         </div>
+
+        <!-- OPcache + JIT -->
+        <div class="mt-3 pt-3" style="border-top: 1px solid #334155;">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="mb-0"><i class="bi bi-lightning-charge me-1" style="color:#fbbf24;"></i>OPcache / JIT</h6>
+                <?php
+                $jitMode = $info['opcache']['opcache.jit'] ?? 'off';
+                $opcacheOn = ($info['opcache']['opcache.enable'] ?? '0') === '1';
+                ?>
+                <div>
+                    <?php if ($opcacheOn): ?>
+                        <span class="badge bg-success">OPcache ON</span>
+                    <?php else: ?>
+                        <span class="badge bg-secondary">OPcache OFF</span>
+                    <?php endif; ?>
+                    <?php if ($jitMode !== 'off' && $jitMode !== '0'): ?>
+                        <span class="badge ms-1" style="background:rgba(251,191,36,0.15);color:#fbbf24;">JIT: <?= View::e($jitMode) ?></span>
+                    <?php else: ?>
+                        <span class="badge bg-secondary ms-1">JIT OFF</span>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <form method="POST" action="/settings/php/opcache-save">
+                <?= View::csrf() ?>
+                <input type="hidden" name="version" value="<?= View::e($ver) ?>">
+
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">opcache.enable</label>
+                        <select name="opcache_enable" class="form-select">
+                            <option value="1" <?= ($info['opcache']['opcache.enable'] ?? '0') === '1' ? 'selected' : '' ?>>1 (ON)</option>
+                            <option value="0" <?= ($info['opcache']['opcache.enable'] ?? '0') === '0' ? 'selected' : '' ?>>0 (OFF)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">memory_consumption</label>
+                        <div class="input-group">
+                            <input type="number" name="opcache_memory_consumption" class="form-control" value="<?= View::e($info['opcache']['opcache.memory_consumption'] ?? '128') ?>" min="32" max="2048">
+                            <span class="input-group-text" style="background:#0f172a;border-color:#334155;color:#64748b;">MB</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">interned_strings_buffer</label>
+                        <div class="input-group">
+                            <input type="number" name="opcache_interned_strings_buffer" class="form-control" value="<?= View::e($info['opcache']['opcache.interned_strings_buffer'] ?? '8') ?>" min="4" max="128">
+                            <span class="input-group-text" style="background:#0f172a;border-color:#334155;color:#64748b;">MB</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">max_accelerated_files</label>
+                        <input type="number" name="opcache_max_accelerated_files" class="form-control" value="<?= View::e($info['opcache']['opcache.max_accelerated_files'] ?? '10000') ?>" min="200" max="1000000">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">revalidate_freq</label>
+                        <div class="input-group">
+                            <input type="number" name="opcache_revalidate_freq" class="form-control" value="<?= View::e($info['opcache']['opcache.revalidate_freq'] ?? '2') ?>" min="0" max="3600">
+                            <span class="input-group-text" style="background:#0f172a;border-color:#334155;color:#64748b;">seg</span>
+                        </div>
+                        <small class="text-muted">0=siempre verificar, 60=produccion</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">jit</label>
+                        <select name="opcache_jit" class="form-select">
+                            <option value="off" <?= $jitMode === 'off' ? 'selected' : '' ?>>off (desactivado)</option>
+                            <option value="1255" <?= $jitMode === '1255' ? 'selected' : '' ?>>1255 (tracing optimizado)</option>
+                            <option value="1235" <?= $jitMode === '1235' ? 'selected' : '' ?>>1235 (tracing)</option>
+                            <option value="function" <?= $jitMode === 'function' ? 'selected' : '' ?>>function</option>
+                            <option value="tracing" <?= $jitMode === 'tracing' ? 'selected' : '' ?>>tracing</option>
+                            <option value="on" <?= $jitMode === 'on' ? 'selected' : '' ?>>on</option>
+                        </select>
+                        <small class="text-muted">1255 = maximo rendimiento</small>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">jit_buffer_size</label>
+                        <input type="text" name="opcache_jit_buffer_size" class="form-control" value="<?= View::e($info['opcache']['opcache.jit_buffer_size'] ?? '0') ?>" placeholder="64M">
+                        <small class="text-muted">Ej: 64M, 128M (0=off)</small>
+                    </div>
+                </div>
+
+                <div class="mt-2 p-2 rounded small" style="background:rgba(251,191,36,0.05);border:1px solid rgba(251,191,36,0.15);color:#94a3b8;">
+                    <i class="bi bi-lightbulb me-1" style="color:#fbbf24;"></i>
+                    <strong>Produccion recomendado:</strong> enable=1, memory=192, strings=16, files=10000, revalidate=60, jit=1255, jit_buffer=64M
+                    <button type="button" class="btn btn-outline-warning btn-sm py-0 px-2 ms-2" style="font-size:0.7rem;" onclick="applyOpcachePreset('<?= View::e($ver) ?>')">Aplicar preset</button>
+                </div>
+
+                <div class="mt-3">
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-lg me-1"></i>Guardar OPcache y reiniciar FPM</button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
 <?php endforeach; ?>
+
+<script>
+function applyOpcachePreset(ver) {
+    var forms = document.querySelectorAll('form[action="/settings/php/opcache-save"]');
+    for (var form of forms) {
+        if (form.querySelector('input[name=version]').value !== ver) continue;
+        form.querySelector('[name=opcache_enable]').value = '1';
+        form.querySelector('[name=opcache_memory_consumption]').value = '192';
+        form.querySelector('[name=opcache_interned_strings_buffer]').value = '16';
+        form.querySelector('[name=opcache_max_accelerated_files]').value = '10000';
+        form.querySelector('[name=opcache_revalidate_freq]').value = '60';
+        form.querySelector('[name=opcache_jit]').value = '1255';
+        form.querySelector('[name=opcache_jit_buffer_size]').value = '64M';
+        SwalDark.fire({icon:'success', title:'Preset aplicado', text:'Valores de produccion cargados. Pulsa Guardar para aplicar.', timer:2000});
+        break;
+    }
+}
+</script>
 
 <?php endif; ?>

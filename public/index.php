@@ -25,6 +25,89 @@ spl_autoload_register(function ($class) {
 $config = require PANEL_ROOT . '/config/panel.php';
 define('PANEL_VERSION', $config['version']);
 
+// IP allowlist (ALLOWED_IPS in .env)
+$requestPath = strtok($_SERVER['REQUEST_URI'] ?? '/', '?') ?: '/';
+$allowedIps = array_values($config['allowed_ips'] ?? []);
+if (!empty($allowedIps)) {
+    $clientIp = (static function (): string {
+        $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '';
+
+        // Only trust X-Forwarded-For when the direct client is local proxy.
+        if (in_array($remoteAddr, ['127.0.0.1', '::1'], true) && !empty($_SERVER['HTTP_X_FORWARDED_FOR'])) {
+            $forwarded = explode(',', (string)$_SERVER['HTTP_X_FORWARDED_FOR']);
+            foreach ($forwarded as $candidate) {
+                $candidate = trim($candidate);
+                if (filter_var($candidate, FILTER_VALIDATE_IP)) {
+                    return $candidate;
+                }
+            }
+        }
+
+        return filter_var($remoteAddr, FILTER_VALIDATE_IP) ? $remoteAddr : '';
+    })();
+
+    $cidrMatch = static function (string $ip, string $rule): bool {
+        if (!str_contains($rule, '/')) {
+            return false;
+        }
+
+        [$subnet, $prefix] = explode('/', $rule, 2);
+        if (!is_numeric($prefix)) {
+            return false;
+        }
+
+        $ipBin = @inet_pton($ip);
+        $subnetBin = @inet_pton($subnet);
+        if ($ipBin === false || $subnetBin === false || strlen($ipBin) !== strlen($subnetBin)) {
+            return false;
+        }
+
+        $prefix = (int)$prefix;
+        $maxBits = strlen($ipBin) * 8;
+        if ($prefix < 0 || $prefix > $maxBits) {
+            return false;
+        }
+
+        $fullBytes = intdiv($prefix, 8);
+        $remainingBits = $prefix % 8;
+
+        if ($fullBytes > 0 && substr($ipBin, 0, $fullBytes) !== substr($subnetBin, 0, $fullBytes)) {
+            return false;
+        }
+
+        if ($remainingBits === 0) {
+            return true;
+        }
+
+        $mask = (0xFF << (8 - $remainingBits)) & 0xFF;
+        return (ord($ipBin[$fullBytes]) & $mask) === (ord($subnetBin[$fullBytes]) & $mask);
+    };
+
+    $isAllowed = false;
+    foreach ($allowedIps as $rule) {
+        $rule = trim((string)$rule);
+        if ($rule === '') {
+            continue;
+        }
+        if ($clientIp !== '' && ($rule === $clientIp || $cidrMatch($clientIp, $rule))) {
+            $isAllowed = true;
+            break;
+        }
+    }
+
+    if (!$isAllowed) {
+        http_response_code(403);
+        if (str_starts_with($requestPath, '/api/')) {
+            header('Content-Type: application/json');
+            echo json_encode(['ok' => false, 'error' => 'Access denied by IP allowlist']);
+        } else {
+            header('Content-Type: text/plain; charset=UTF-8');
+            echo 'Access denied by IP allowlist.';
+        }
+        exit;
+    }
+}
+
 // Session (hardened)
 ini_set('session.save_path', $config['session']['path']);
 ini_set('session.cookie_secure', (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? '1' : '0');
@@ -176,6 +259,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/renew-ssl', 'AccountController@renewSsl');
 \MuseDockPanel\Router::post('/accounts/{id}/rename-user', 'AccountController@renameUser');
 \MuseDockPanel\Router::post('/accounts/{id}/php', 'AccountController@updatePhp');
+\MuseDockPanel\Router::post('/accounts/{id}/fpm-pool', 'AccountController@updateFpmPool');
 \MuseDockPanel\Router::post('/accounts/{id}/hosting-type', 'AccountController@updateHostingType');
 
 // File Manager
@@ -309,6 +393,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/server/save', 'SettingsController@serverSave');
 \MuseDockPanel\Router::get('/settings/php', 'SettingsController@php');
 \MuseDockPanel\Router::post('/settings/php/ini-save', 'SettingsController@phpIniSave');
+\MuseDockPanel\Router::post('/settings/php/opcache-save', 'SettingsController@phpOpcacheSave');
 \MuseDockPanel\Router::get('/settings/security', 'SettingsController@security');
 \MuseDockPanel\Router::post('/settings/security/save', 'SettingsController@securitySave');
 \MuseDockPanel\Router::post('/settings/security/pg-ssl-enable', 'SettingsController@pgSslEnable');
@@ -495,6 +580,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/backups/{id}/restore', 'BackupController@restore');
 \MuseDockPanel\Router::post('/backups/{id}/restore', 'BackupController@restoreExecute');
 \MuseDockPanel\Router::post('/backups/{id}/delete', 'BackupController@delete');
+\MuseDockPanel\Router::post('/backups/{id}/notes', 'BackupController@updateNotes');
 \MuseDockPanel\Router::post('/backups/auto-backup-settings', 'BackupController@saveAutoBackupSettings');
 // Remote Backups (static routes before {id} wildcard)
 \MuseDockPanel\Router::get('/backups/transfer/status', 'BackupController@transferStatus');

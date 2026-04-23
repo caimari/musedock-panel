@@ -174,6 +174,97 @@
             </div>
         </div>
 
+        <!-- FPM Pool Manager -->
+        <?php if (!empty($poolFileExists)): ?>
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-cpu me-2"></i>FPM Pool Manager</div>
+            <div class="card-body">
+                <form method="POST" action="/accounts/<?= $account['id'] ?>/fpm-pool">
+                    <?= View::csrf() ?>
+                    <fieldset <?= ($isSlave ?? false) ? 'disabled' : '' ?>>
+                    <p class="text-muted small mb-3">
+                        Controla como PHP-FPM gestiona los workers para <code><?= View::e($account['username']) ?></code>.
+                        Afecta al dominio principal y todos sus subdominios.
+                    </p>
+
+                    <div class="row g-3 mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label">pm (Process Manager)</label>
+                            <select name="pm" class="form-select" id="fpmPmSelect" onchange="toggleFpmFields()">
+                                <option value="ondemand" <?= ($fpmSettings['pm'] ?? '') === 'ondemand' ? 'selected' : '' ?>>ondemand</option>
+                                <option value="dynamic" <?= ($fpmSettings['pm'] ?? '') === 'dynamic' ? 'selected' : '' ?>>dynamic</option>
+                                <option value="static" <?= ($fpmSettings['pm'] ?? '') === 'static' ? 'selected' : '' ?>>static</option>
+                            </select>
+                            <small class="text-muted" id="fpmPmDesc"></small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">pm.max_children</label>
+                            <input type="number" name="pm_max_children" class="form-control" value="<?= View::e($fpmSettings['pm.max_children'] ?? '5') ?>" min="1" max="200">
+                            <small class="text-muted">Max workers simultaneos</small>
+                        </div>
+                        <div class="col-md-4" id="fpmMaxRequests">
+                            <label class="form-label">pm.max_requests</label>
+                            <input type="number" name="pm_max_requests" class="form-control" value="<?= View::e($fpmSettings['pm.max_requests'] ?? '500') ?>" min="0" max="100000">
+                            <small class="text-muted">Requests antes de reciclar (0=nunca)</small>
+                        </div>
+                    </div>
+
+                    <div class="row g-3" id="fpmDynamicFields">
+                        <div class="col-md-4">
+                            <label class="form-label">pm.start_servers</label>
+                            <input type="number" name="pm_start_servers" class="form-control" value="<?= View::e($fpmSettings['pm.start_servers'] ?? '2') ?>" min="1" max="50">
+                            <small class="text-muted">Workers al arrancar</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">pm.min_spare_servers</label>
+                            <input type="number" name="pm_min_spare_servers" class="form-control" value="<?= View::e($fpmSettings['pm.min_spare_servers'] ?? '1') ?>" min="1" max="50">
+                            <small class="text-muted">Workers idle minimos</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label">pm.max_spare_servers</label>
+                            <input type="number" name="pm_max_spare_servers" class="form-control" value="<?= View::e($fpmSettings['pm.max_spare_servers'] ?? '3') ?>" min="1" max="50">
+                            <small class="text-muted">Workers idle maximos</small>
+                        </div>
+                    </div>
+
+                    <div class="mt-3 p-2 rounded small" id="fpmTip" style="background:rgba(56,189,248,0.05);border:1px solid rgba(56,189,248,0.15);color:#94a3b8;">
+                    </div>
+
+                    <div class="mt-4">
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Guardar configuracion FPM</button>
+                    </div>
+                    </fieldset>
+                </form>
+
+                <script>
+                function toggleFpmFields() {
+                    var pm = document.getElementById('fpmPmSelect').value;
+                    var dynFields = document.getElementById('fpmDynamicFields');
+                    var desc = document.getElementById('fpmPmDesc');
+                    var tip = document.getElementById('fpmTip');
+
+                    dynFields.style.display = pm === 'dynamic' ? 'flex' : 'none';
+
+                    var descs = {
+                        ondemand: 'Crea workers bajo demanda. Bajo consumo RAM pero mas lento en primera request.',
+                        dynamic: 'Mantiene workers vivos. Mejor rendimiento para sitios con trafico. Recomendado para APIs.',
+                        'static': 'Numero fijo de workers siempre activos. Maximo rendimiento, mayor consumo RAM.'
+                    };
+                    desc.textContent = descs[pm] || '';
+
+                    var tips = {
+                        ondemand: '<i class="bi bi-lightbulb me-1" style="color:#fbbf24;"></i><strong>ondemand</strong>: Ideal para sitios con poco trafico. Los workers mueren entre requests, cada nueva request crea uno — mas lento pero ahorra RAM.',
+                        dynamic: '<i class="bi bi-lightbulb me-1" style="color:#fbbf24;"></i><strong>dynamic</strong>: Recomendado para APIs y sitios con trafico regular. Mantiene workers vivos, reutiliza conexiones a BD. Configuracion sugerida para APIs: max_children=15, start=3, min_spare=2, max_spare=5, max_requests=1000.',
+                        'static': '<i class="bi bi-lightbulb me-1" style="color:#fbbf24;"></i><strong>static</strong>: Todos los workers siempre activos. Maximo rendimiento pero usa mas RAM (cada worker ~30-50MB). Solo para sitios de alto trafico.'
+                    };
+                    tip.innerHTML = tips[pm] || '';
+                }
+                toggleFpmFields();
+                </script>
+            </div>
+        </div>
+        <?php endif; ?>
+
         <!-- Renombrar usuario del sistema -->
         <?php if (!($isSlave ?? false)): ?>
         <div class="card mb-3">

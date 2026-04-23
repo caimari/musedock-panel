@@ -7,6 +7,7 @@ use MuseDockPanel\Flash;
 use MuseDockPanel\Router;
 use MuseDockPanel\Settings;
 use MuseDockPanel\View;
+use MuseDockPanel\Security\TlsClient;
 use MuseDockPanel\Services\ClusterService;
 use MuseDockPanel\Services\LogService;
 use MuseDockPanel\Services\ReplicationService;
@@ -1267,20 +1268,23 @@ class DatabaseController
             $fields['overwrite'] = '1';
         }
 
-        $ch = curl_init($url);
-        curl_setopt_array($ch, [
+        $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST           => true,
             CURLOPT_TIMEOUT        => 300,
             CURLOPT_CONNECTTIMEOUT => 15,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => false,
             CURLOPT_HTTPHEADER     => [
                 'Authorization: Bearer ' . $token,
                 'Accept: application/json',
             ],
             CURLOPT_POSTFIELDS => $fields,
-        ]);
+        ];
+        $opts = array_replace($opts, TlsClient::forUrl($url, [
+            'metadata' => $node['metadata'] ?? null,
+        ]));
+
+        $ch = curl_init($url);
+        curl_setopt_array($ch, $opts);
 
         $response = curl_exec($ch);
         $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -1376,20 +1380,23 @@ class DatabaseController
                 'db_backup' => new \CURLFile($filepath, 'application/gzip', $backup['filename']),
             ];
 
-            $ch = curl_init($url);
-            curl_setopt_array($ch, [
+            $opts = [
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_POST           => true,
                 CURLOPT_TIMEOUT        => 300,
                 CURLOPT_CONNECTTIMEOUT => 15,
-                CURLOPT_SSL_VERIFYPEER => false,
-                CURLOPT_SSL_VERIFYHOST => false,
                 CURLOPT_HTTPHEADER     => [
                     'Authorization: Bearer ' . $token,
                     'Accept: application/json',
                 ],
                 CURLOPT_POSTFIELDS => $fields,
-            ]);
+            ];
+            $opts = array_replace($opts, TlsClient::forUrl($url, [
+                'metadata' => $node['metadata'] ?? null,
+            ]));
+
+            $ch = curl_init($url);
+            curl_setopt_array($ch, $opts);
 
             $response = curl_exec($ch);
             $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);

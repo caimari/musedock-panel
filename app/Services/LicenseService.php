@@ -6,16 +6,14 @@ use MuseDockPanel\Settings;
 /**
  * LicenseService — Feature gating for MuseDock Panel.
  *
- * Free tier:  Admin panel (MIT), 1 master + 1 active slave
- * Pro tier:   Multi-slave, election, chain failover, proxy routes
- * Portal tier: Customer portal, file manager, DB management (separate commercial license)
+ * Admin panel tier: MIT (all admin features included, no Pro gating)
+ * Portal tier: customer-facing commercial module (separate license)
  *
- * License key is stored in panel_settings as 'license_key'.
- * Portal license verified via JWT from musedock.com/api/license/check.
+ * Portal license is verified via JWT signed by license.musedock.com.
  */
 class LicenseService
 {
-    // Admin panel feature constants
+    // Admin-panel feature constants (kept for compatibility; MIT = always enabled)
     public const FEATURE_MULTI_SLAVE    = 'multi-slave';
     public const FEATURE_ELECTION       = 'election';
     public const FEATURE_CHAIN_FAILOVER = 'chain-failover';
@@ -29,20 +27,7 @@ class LicenseService
     public const FEATURE_PORTAL_BACKUPS     = 'portal-backups';
     public const FEATURE_PORTAL_TICKETS     = 'portal-tickets';
 
-    // Features included in free tier (always available)
-    private static array $freeFeatures = [
-        // Basic failover: 1 master + 1 slave + passive replicas
-    ];
-
-    // Features that require Pro license (admin panel)
-    private static array $proFeatures = [
-        self::FEATURE_MULTI_SLAVE,
-        self::FEATURE_ELECTION,
-        self::FEATURE_CHAIN_FAILOVER,
-        self::FEATURE_PROXY_ROUTES,
-    ];
-
-    // Features that require Portal license (commercial, separate from Pro)
+    // Features that require Portal license (commercial, separate from MIT panel)
     private static array $portalFeatures = [
         self::FEATURE_PORTAL,
         self::FEATURE_PORTAL_FILEMANAGER,
@@ -61,34 +46,21 @@ class LicenseService
      */
     public static function hasFeature(string $feature): bool
     {
-        // Free features are always available
-        if (in_array($feature, self::$freeFeatures, true)) {
-            return true;
-        }
-
-        // Pro features — check admin license
-        if (in_array($feature, self::$proFeatures, true)) {
-            return self::isProLicense();
-        }
-
         // Portal features — check portal license JWT
         if (in_array($feature, self::$portalFeatures, true)) {
             return self::isPortalLicensed($feature);
         }
 
-        // Unknown features default to allowed
+        // MIT panel: all non-portal features are always available.
         return true;
     }
 
     /**
-     * Check if the current installation has a valid Pro license.
-     * TODO: Implement actual license key validation for admin Pro features.
+     * Backward-compatible alias.
+     * Admin panel no longer has Pro gating under MIT distribution.
      */
     public static function isProLicense(): bool
     {
-        $licenseKey = Settings::get('license_key', '');
-        // TODO: Validate license key against licensing server
-        // For now, all installations are treated as Pro (development mode)
         return true;
     }
 
@@ -116,7 +88,7 @@ class LicenseService
 
         // New JWT format: product='portal' grants all portal features
         $product = $jwt['product'] ?? '';
-        if ($product === 'portal' && str_starts_with($feature, 'customer-portal') || str_starts_with($feature, 'portal-')) {
+        if ($product === 'portal' && (str_starts_with($feature, 'customer-portal') || str_starts_with($feature, 'portal-'))) {
             return true;
         }
         if ($product === 'portal' && $feature === self::FEATURE_PORTAL) {
@@ -262,15 +234,20 @@ class LicenseService
         $serverIp = @file_get_contents('https://ifconfig.me', false,
             stream_context_create(['http' => ['timeout' => 5]]));
         if (!$serverIp) {
+            $serverIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
+        }
+        if (!$serverIp) {
             return ['ok' => false, 'message' => 'Cannot detect server IP'];
         }
         $serverIp = trim($serverIp);
+        $hostname = trim((string)(gethostname() ?: ''));
 
         // Call renewal API
         $apiUrl = 'https://license.musedock.com/api/v1/renew';
         $postData = json_encode([
             'jwt'       => $currentJwt,
             'server_ip' => $serverIp,
+            'hostname'  => $hostname,
         ]);
 
         $ctx = stream_context_create([
@@ -318,7 +295,7 @@ class LicenseService
      */
     public static function getTier(): string
     {
-        return self::isProLicense() ? 'pro' : 'free';
+        return 'mit';
     }
 
     /**
@@ -378,9 +355,6 @@ class LicenseService
      */
     public static function canAddActiveSlaves(): bool
     {
-        if (self::hasFeature(self::FEATURE_MULTI_SLAVE)) {
-            return true;
-        }
-        return self::countActiveSlaves() < 1;
+        return true;
     }
 }

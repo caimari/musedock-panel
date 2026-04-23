@@ -1,6 +1,8 @@
 <?php
 namespace MuseDockPanel;
 
+use MuseDockPanel\Security\ClientIp;
+
 class Auth
 {
     public static function attempt(string $username, string $password): bool
@@ -21,7 +23,7 @@ class Auth
         // Update last login
         Database::update('panel_admins', [
             'last_login_at' => date('Y-m-d H:i:s'),
-            'last_login_ip' => $_SERVER['REMOTE_ADDR'] ?? '',
+            'last_login_ip' => ClientIp::resolve(),
         ], 'id = :id', ['id' => $user['id']]);
 
         // Regenerate session ID to prevent session fixation

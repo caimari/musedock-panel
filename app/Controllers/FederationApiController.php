@@ -8,6 +8,7 @@ use MuseDockPanel\Services\FederationMigrationService;
 use MuseDockPanel\Services\ClusterService;
 use MuseDockPanel\Services\SystemService;
 use MuseDockPanel\Services\LogService;
+use MuseDockPanel\Security\TlsClient;
 
 /**
  * FederationApiController — API endpoints for inter-panel federation communication.
@@ -165,11 +166,18 @@ class FederationApiController
             return;
         }
 
+        // Set the same password hash as origin (preserves user's password)
+        $passwordHash = $input['password_hash'] ?? '';
+        if (!empty($passwordHash) && $passwordHash !== '!' && $passwordHash !== '*') {
+            exec("usermod -p " . escapeshellarg($passwordHash) . " " . escapeshellarg($username) . " 2>&1");
+        }
+
         // Create directory structure
         SystemService::createDirectories($username, $homeDir, $docRoot);
 
-        // Create databases (tentative) — verify each creation
+        // Create databases (tentative) — with original credentials from origin
         $databases = $input['databases'] ?? [];
+        $dbCredentials = $input['db_credentials'] ?? [];
         $createdDbs = [];
         $dbErrors = [];
         foreach ($databases as $db) {
@@ -179,10 +187,26 @@ class FederationApiController
 
             if (empty($dbName)) continue;
 
+            // Get original password from db_credentials (extracted from .env on origin)
+            $dbPass = $dbCredentials[$dbName]['db_pass'] ?? '';
+
             if ($dbType === 'pgsql') {
                 $out = [];
-                exec("sudo -u postgres createuser " . escapeshellarg($dbUser) . " 2>&1", $out, $rc1);
+                $safeUser = str_replace('"', '""', $dbUser);
+                $safePass = str_replace("'", "''", $dbPass);
+
+                // Create user with original password (or no password if not available)
+                if (!empty($dbPass)) {
+                    exec("sudo -u postgres psql -c " . escapeshellarg("CREATE USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'") . " 2>&1", $out, $rc1);
+                } else {
+                    exec("sudo -u postgres createuser " . escapeshellarg($dbUser) . " 2>&1", $out, $rc1);
+                }
+
                 exec("sudo -u postgres createdb -O " . escapeshellarg($dbUser) . " " . escapeshellarg($dbName) . " 2>&1", $out, $rc2);
+
+                // Grant all privileges (ownership + schema access)
+                exec("sudo -u postgres psql -c " . escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$dbName}\" TO \"{$safeUser}\"") . " 2>&1", $out);
+
                 // Verify DB exists
                 exec("sudo -u postgres psql -lqt 2>/dev/null | grep -w " . escapeshellarg($dbName), $out, $rcVerify);
                 if ($rcVerify !== 0) {
@@ -192,9 +216,21 @@ class FederationApiController
                 }
             } else {
                 $out = [];
+                $safeUser = addslashes($dbUser);
+                $safePass = addslashes($dbPass);
+
                 exec("mysql -e 'CREATE DATABASE IF NOT EXISTS `" . addslashes($dbName) . "`' 2>&1", $out, $rc1);
-                exec("mysql -e \"CREATE USER IF NOT EXISTS '" . addslashes($dbUser) . "'@'localhost'\" 2>&1", $out, $rc2);
-                exec("mysql -e \"GRANT ALL ON \`" . addslashes($dbName) . "\`.* TO '" . addslashes($dbUser) . "'@'localhost'\" 2>&1", $out, $rc3);
+
+                if (!empty($dbPass)) {
+                    exec("mysql -e \"CREATE USER IF NOT EXISTS '{$safeUser}'@'localhost' IDENTIFIED BY '{$safePass}'\" 2>&1", $out, $rc2);
+                    exec("mysql -e \"ALTER USER '{$safeUser}'@'localhost' IDENTIFIED BY '{$safePass}'\" 2>&1", $out);
+                } else {
+                    exec("mysql -e \"CREATE USER IF NOT EXISTS '{$safeUser}'@'localhost'\" 2>&1", $out, $rc2);
+                }
+
+                exec("mysql -e \"GRANT ALL ON \`" . addslashes($dbName) . "\`.* TO '{$safeUser}'@'localhost'\" 2>&1", $out, $rc3);
+                exec("mysql -e 'FLUSH PRIVILEGES' 2>&1", $out);
+
                 // Verify DB exists
                 exec("mysql -e 'USE `" . addslashes($dbName) . "`' 2>&1", $out, $rcVerify);
                 if ($rcVerify !== 0) {
@@ -250,6 +286,43 @@ class FederationApiController
         // Create PHP-FPM pool
         SystemService::createFpmPool($username, $phpVersion, $homeDir);
 
+        // Apply FPM pool config from origin (pm, max_children, etc.)
+        $fpmConfig = $input['fpm_config'] ?? [];
+        $phpConfig = $input['php_config'] ?? [];
+        if (!empty($fpmConfig) || !empty($phpConfig)) {
+            $poolFile = "/etc/php/{$phpVersion}/fpm/pool.d/{$username}.conf";
+            if (file_exists($poolFile)) {
+                $poolContent = file_get_contents($poolFile);
+
+                // Apply FPM settings
+                foreach ($fpmConfig as $key => $value) {
+                    $pattern = '/^\s*' . preg_quote($key, '/') . '\s*=\s*.+$/m';
+                    if (preg_match($pattern, $poolContent)) {
+                        $poolContent = preg_replace($pattern, "{$key} = {$value}", $poolContent);
+                    } else {
+                        $poolContent .= "\n{$key} = {$value}\n";
+                    }
+                }
+
+                // Apply PHP settings
+                foreach ($phpConfig as $key => $value) {
+                    $directive = "php_admin_value[{$key}]";
+                    $pattern = '/^\s*php(?:_admin)?_value\[' . preg_quote($key, '/') . '\]\s*=\s*.+$/m';
+                    if (preg_match($pattern, $poolContent)) {
+                        $poolContent = preg_replace($pattern, "{$directive} = {$value}", $poolContent);
+                    } else {
+                        $poolContent .= "\n{$directive} = {$value}\n";
+                    }
+                }
+
+                file_put_contents($poolFile, $poolContent);
+                exec("systemctl reload php{$phpVersion}-fpm 2>&1");
+
+                FederationMigrationService::log($migrationId, 'finalize', 'info',
+                    'FPM pool config applied: pm=' . ($fpmConfig['pm'] ?? 'default') . ', PHP settings: ' . count($phpConfig));
+            }
+        }
+
         // Add Caddy route
         SystemService::addCaddyRoute($domain, $docRoot, $username, $phpVersion, $hostingType);
 
@@ -286,6 +359,8 @@ class FederationApiController
             'status'        => 'active',
             'shell'         => '/usr/sbin/nologin',
             'disk_quota_mb' => (int)($input['disk_quota_mb'] ?? 0),
+            'description'   => $input['description'] ?? '',
+            'customer_id'   => !empty($input['customer_id']) ? (int)$input['customer_id'] : null,
         ]);
 
         // Recreate databases in hosting_databases
@@ -375,17 +450,28 @@ class FederationApiController
         $domain = $input['domain'] ?? '';
         $checks = [];
 
-        // 1. Main page HTTP check (via HTTPS on localhost with SNI, bypass DNS)
-        // Use HTTPS because Caddy routes match on TLS SNI + Host header
-        $ch = curl_init("https://127.0.0.1");
-        curl_setopt_array($ch, [
+        // 1. Main page HTTP check (via HTTPS + SNI using local resolve, bypass DNS)
+        // Use HTTPS because Caddy routes match on TLS SNI + Host header.
+        $targetHost = strtolower(trim((string)$domain));
+        if ($targetHost === '' || !preg_match('/^[a-z0-9.-]+$/', $targetHost)) {
+            echo json_encode(['ok' => false, 'error' => 'Invalid domain for verification']);
+            return;
+        }
+
+        $verifyUrl = "https://{$targetHost}/";
+        $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 15,
-            CURLOPT_HTTPHEADER => ["Host: {$domain}"],
             CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_SSL_VERIFYPEER => false, // Self-signed cert on localhost
-            CURLOPT_SSL_VERIFYHOST => 0,
-        ]);
+            CURLOPT_RESOLVE => ["{$targetHost}:443:127.0.0.1"],
+        ];
+        $localCaddyCa = TlsClient::detectLocalCaddyCaFile();
+        $opts = array_replace($opts, TlsClient::forUrl($verifyUrl, [
+            'tls_ca_file' => $localCaddyCa,
+        ]));
+
+        $ch = curl_init($verifyUrl);
+        curl_setopt_array($ch, $opts);
         $body = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);

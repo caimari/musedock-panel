@@ -479,6 +479,7 @@
                                 <th>Último Heartbeat</th>
                                 <th>Lag</th>
                                 <th>Rol Remoto</th>
+                                <th>TLS</th>
                                 <th>Servicios</th>
                                 <th>Mail Hostname</th>
                                 <th class="text-center">Alertas</th>
@@ -531,6 +532,28 @@
                                     <span class="badge bg-secondary" id="node-role-<?= (int)$node['id'] ?>">
                                         <?= View::e(ucfirst($node['role'] ?? 'unknown')) ?>
                                     </span>
+                                </td>
+                                <td class="small" id="node-tls-<?= (int)$node['id'] ?>">
+                                    <?php
+                                        $tls = is_array($node['tls_summary'] ?? null) ? $node['tls_summary'] : [];
+                                        $tlsStatus = (string)($tls['status'] ?? 'info');
+                                        $tlsBadge = match ($tlsStatus) {
+                                            'ok' => 'bg-success',
+                                            'warning' => 'bg-warning text-dark',
+                                            'critical' => 'bg-danger',
+                                            default => 'bg-secondary',
+                                        };
+                                        $tlsSummary = (string)($tls['summary'] ?? 'Sin datos TLS');
+                                        $tlsDetail = trim((string)($tls['detail'] ?? ''));
+                                    ?>
+                                    <span class="badge <?= $tlsBadge ?>" title="<?= View::e($tlsDetail !== '' ? $tlsDetail : $tlsSummary) ?>">
+                                        <?= View::e($tlsSummary) ?>
+                                    </span>
+                                    <?php if ($tlsDetail !== ''): ?>
+                                        <small class="text-muted d-block text-truncate" style="max-width:180px;" title="<?= View::e($tlsDetail) ?>">
+                                            <?= View::e($tlsDetail) ?>
+                                        </small>
+                                    <?php endif; ?>
                                 </td>
                                 <td id="node-services-<?= (int)$node['id'] ?>">
                                     <?php $nodeServices = json_decode($node['services'] ?? '["web"]', true) ?: ['web']; ?>
@@ -679,6 +702,18 @@
                                     <i class="bi bi-arrow-clockwise me-1"></i>Generar
                                 </button>
                             </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">TLS pin (opcional)</label>
+                            <input type="text" name="tls_pin" class="form-control font-monospace"
+                                   placeholder="sha256//BASE64_SPki_HASH">
+                            <small class="text-muted">Recomendado para nodos con certificados internos/self-signed.</small>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">CA bundle local (opcional)</label>
+                            <input type="text" name="tls_ca_file" class="form-control font-monospace"
+                                   placeholder="/etc/ssl/certs/ca-certificates.crt">
+                            <small class="text-muted">Ruta de CA legible desde este servidor para validar el certificado remoto.</small>
                         </div>
 
                         <div class="mb-3">
@@ -2782,6 +2817,50 @@ document.addEventListener('DOMContentLoaded', function() {
     statusInterval = setInterval(refreshClusterStatus, 10000);
 });
 
+function escapeHtml(v) {
+    return String(v ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+function tlsBadgeClass(status) {
+    if (status === 'ok') return 'bg-success';
+    if (status === 'warning') return 'bg-warning text-dark';
+    if (status === 'critical') return 'bg-danger';
+    return 'bg-secondary';
+}
+
+function renderTlsCell(tls) {
+    if (!tls || typeof tls !== 'object') {
+        return '<span class="badge bg-secondary">Sin datos TLS</span>';
+    }
+    const summary = escapeHtml(tls.summary || 'Sin datos TLS');
+    const detail = escapeHtml(tls.detail || '');
+    const badge = tlsBadgeClass(tls.status || 'info');
+    let html = '<span class="badge ' + badge + '" title="' + (detail || summary) + '">' + summary + '</span>';
+    if (detail) {
+        html += '<small class="text-muted d-block text-truncate" style="max-width:180px;" title="' + detail + '">' + detail + '</small>';
+    }
+    return html;
+}
+
+function renderTlsModal(tls) {
+    if (!tls || typeof tls !== 'object') return '<span class="badge bg-secondary">Sin datos TLS</span>';
+    const summary = escapeHtml(tls.summary || 'Sin datos TLS');
+    const detail = escapeHtml(tls.detail || '');
+    const caFile = escapeHtml(tls.ca_file || '');
+    const notAfter = escapeHtml(tls.not_after || '');
+    const badge = tlsBadgeClass(tls.status || 'info');
+    let html = '<span class="badge ' + badge + '">' + summary + '</span>';
+    if (detail) html += '<div class="small text-muted mt-1">' + detail + '</div>';
+    if (caFile) html += '<div class="small mt-1"><code>' + caFile + '</code></div>';
+    if (notAfter) html += '<div class="small text-muted mt-1">Expira: ' + notAfter + '</div>';
+    return html;
+}
+
 function refreshClusterStatus() {
     fetch('/settings/cluster/node-status')
         .then(r => r.json())
@@ -2793,6 +2872,7 @@ function refreshClusterStatus() {
                 const statusEl = document.getElementById('node-status-' + node.id);
                 const lastSeenEl = document.getElementById('node-lastseen-' + node.id);
                 const roleEl = document.getElementById('node-role-' + node.id);
+                const tlsEl = document.getElementById('node-tls-' + node.id);
 
                 if (statusEl) {
                     statusEl.className = 'badge ' + (node.status === 'online' ? 'bg-success' : 'bg-danger');
@@ -2803,6 +2883,9 @@ function refreshClusterStatus() {
                 }
                 if (roleEl) {
                     roleEl.textContent = (node.role || 'unknown').charAt(0).toUpperCase() + (node.role || 'unknown').slice(1);
+                }
+                if (tlsEl) {
+                    tlsEl.innerHTML = renderTlsCell(node.tls || null);
                 }
             });
 
@@ -2850,6 +2933,8 @@ function refreshClusterStatus() {
 function testNodeConnection() {
     const url = document.getElementById('add-node-url').value;
     const token = document.getElementById('add-node-token').value;
+    const tlsPin = (document.querySelector('#form-add-node [name="tls_pin"]') || {}).value || '';
+    const tlsCaFile = (document.querySelector('#form-add-node [name="tls_ca_file"]') || {}).value || '';
     const resultEl = document.getElementById('test-node-result');
     const btn = document.getElementById('btn-test-node');
     const remoteInfo = document.getElementById('remote-info');
@@ -2866,6 +2951,8 @@ function testNodeConnection() {
     const formData = new FormData();
     formData.append('api_url', url);
     formData.append('auth_token', token);
+    formData.append('tls_pin', tlsPin);
+    formData.append('tls_ca_file', tlsCaFile);
     formData.append('_csrf_token', document.querySelector('[name=_csrf_token]').value);
 
     fetch('/settings/cluster/test-node', { method: 'POST', body: formData })
@@ -2929,6 +3016,7 @@ function viewNodeStatus(nodeId, nodeName) {
             const mutedBadge = data.alerts_muted
                 ? '<span class="badge bg-secondary ms-1"><i class="bi bi-bell-slash me-1"></i>Silenciadas</span>'
                 : '<span class="badge bg-success ms-1"><i class="bi bi-bell-fill me-1"></i>Activas</span>';
+            const tlsHtml = renderTlsModal(data.tls || null);
 
             let html = '<table class="table table-sm mb-3">';
             html += '<tr><td class="text-muted" style="width:160px">Estado (DB)</td><td><span class="badge ' + statusBadge + '">' + data.status + '</span></td></tr>';
@@ -2937,6 +3025,7 @@ function viewNodeStatus(nodeId, nodeName) {
             html += '<tr><td class="text-muted">URL</td><td><code>' + (data.api_url || '') + '</code></td></tr>';
             html += '<tr><td class="text-muted">Último heartbeat</td><td>' + (data.last_seen_at || 'Nunca') + (data.age_seconds !== null ? ' <small class="text-muted">(' + ageText + ' atrás)</small>' : '') + '</td></tr>';
             html += '<tr><td class="text-muted">Sync lag</td><td>' + data.sync_lag + 's</td></tr>';
+            html += '<tr><td class="text-muted">TLS</td><td>' + tlsHtml + '</td></tr>';
             html += '<tr><td class="text-muted">Alertas</td><td>' + mutedBadge + '</td></tr>';
             html += '</table>';
 

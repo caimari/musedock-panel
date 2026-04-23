@@ -101,14 +101,30 @@ class MonitorController
     }
 
     /**
-     * GET /monitor/api/realtime — Real-time CPU, RAM and network stats (500ms sample).
+     * GET /monitor/api/realtime — Real-time CPU, RAM and network stats (250ms sample).
      * Used by monitor cards for instant readings instead of collector data.
      */
     public function apiRealtime(): void
     {
         header('Content-Type: application/json');
 
-        $cores = (int) trim(shell_exec('nproc') ?: '1');
+        $cacheDir = dirname(__DIR__, 2) . '/storage/cache';
+        $cacheFile = $cacheDir . '/monitor-realtime.json';
+        $cacheTtl = 2; // seconds
+        $now = time();
+
+        if (is_file($cacheFile) && ($now - (int)@filemtime($cacheFile)) < $cacheTtl) {
+            $cached = @file_get_contents($cacheFile);
+            if ($cached !== false && $cached !== '') {
+                echo $cached;
+                exit;
+            }
+        }
+
+        $cores = (int) trim((string)shell_exec('nproc 2>/dev/null'));
+        if ($cores < 1) {
+            $cores = 1;
+        }
         $load = sys_getloadavg();
 
         // --- CPU from /proc/stat (500ms sample) ---
@@ -126,7 +142,7 @@ class MonitorController
                 ];
             }
 
-            usleep(500000); // 500ms
+            usleep(250000); // 250ms
 
             $stat2 = @file_get_contents('/proc/stat');
             if ($stat2 && preg_match('/^cpu\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/m', $stat2, $m2)) {
@@ -165,13 +181,13 @@ class MonitorController
                 $rxDelta = max(0, $after['rx'] - $before['rx']);
                 $txDelta = max(0, $after['tx'] - $before['tx']);
                 $net[$iface] = [
-                    'rx' => round($rxDelta / 0.5), // bytes per second
-                    'tx' => round($txDelta / 0.5),
+                    'rx' => round($rxDelta / 0.25), // bytes per second
+                    'tx' => round($txDelta / 0.25),
                 ];
             }
         }
 
-        echo json_encode([
+        $payload = json_encode([
             'ok' => true,
             'cpu_percent' => $cpuPercent,
             'cpu_load' => round($load[0], 2),
@@ -181,6 +197,17 @@ class MonitorController
             'mem_total_gb' => round($totalMem / 1073741824, 1),
             'net' => $net,
         ]);
+        if ($payload === false) {
+            echo json_encode(['ok' => false, 'error' => 'encode_failed']);
+            exit;
+        }
+
+        if (!is_dir($cacheDir)) {
+            @mkdir($cacheDir, 0755, true);
+        }
+        @file_put_contents($cacheFile, $payload, LOCK_EX);
+
+        echo $payload;
         exit;
     }
 
@@ -215,7 +242,7 @@ class MonitorController
         }
 
         // IP addresses
-        $ipOutput = trim((string)shell_exec("ip -o addr show {$iface} 2>/dev/null"));
+        $ipOutput = trim((string)shell_exec("ip -o addr show " . escapeshellarg($iface) . " 2>/dev/null"));
         $ips = [];
         foreach (explode("\n", $ipOutput) as $line) {
             if (preg_match('/inet6?\s+(\S+)/', $line, $m)) $ips[] = $m[1];

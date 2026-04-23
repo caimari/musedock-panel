@@ -73,6 +73,16 @@
                         <input type="text" name="auth_token" class="form-control form-control-sm bg-dark text-light border-secondary" required placeholder="Token del peer remoto">
                         <div class="form-text text-muted">El mismo cluster_local_token del panel remoto (Settings > Cluster)</div>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label small">TLS pin (opcional)</label>
+                        <input type="text" name="tls_pin" class="form-control form-control-sm bg-dark text-light border-secondary font-monospace"
+                               placeholder="sha256//BASE64_SPki_HASH">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small">CA bundle local (opcional)</label>
+                        <input type="text" name="tls_ca_file" class="form-control form-control-sm bg-dark text-light border-secondary font-monospace"
+                               placeholder="/etc/ssl/certs/ca-certificates.crt">
+                    </div>
                     <hr class="border-secondary">
                     <h6 class="text-muted mb-2">SSH (para transferencia de archivos)</h6>
                     <div class="row">

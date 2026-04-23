@@ -11,41 +11,88 @@
 
 set -euo pipefail
 
+# Strict path boundary check: target must be base itself or base/*
+is_within_base() {
+    local target="$1"
+    local base="$2"
+    [[ "$target" == "$base" || "$target" == "$base/"* ]]
+}
+
 # Read JSON from stdin
 INPUT=$(cat)
 
-# Parse all JSON fields in a single Python call (safer & faster than 7 invocations)
-# Python validates JSON structure and rejects malformed input
-eval "$(echo "$INPUT" | python3 -c "
-import sys, json, shlex
+# Parse JSON safely without eval (outputs KEY<TAB>BASE64_VALUE per line)
+if ! PARSED_FIELDS=$(INPUT_JSON="$INPUT" python3 - <<'PY' 2>/dev/null
+import base64
+import json
+import os
+import sys
+
 try:
-    d = json.load(sys.stdin)
-except (json.JSONDecodeError, ValueError):
-    print('echo \'{\"ok\":false,\"error\":\"Invalid JSON input\"}\'; exit 1')
-    sys.exit(0)
+    d = json.loads(os.environ.get("INPUT_JSON", ""))
+except (json.JSONDecodeError, TypeError, ValueError):
+    print("ERROR\tInvalid JSON input")
+    sys.exit(1)
 
 fields = {
-    'OP':      d.get('op', ''),
-    'USER':    d.get('user', ''),
-    'BASE':    d.get('base', ''),
-    'RELPATH': d.get('path', ''),
-    'CONTENT': d.get('content', ''),
-    'NEWPATH': d.get('newpath', ''),
-    'PERMS':   d.get('perms', ''),
+    "OP": d.get("op", ""),
+    "USER": d.get("user", ""),
+    "BASE": d.get("base", ""),
+    "RELPATH": d.get("path", ""),
+    "CONTENT": d.get("content", ""),
+    "NEWPATH": d.get("newpath", ""),
+    "PERMS": d.get("perms", ""),
 }
 
-# Sanitize: reject values containing shell metacharacters in critical fields
-# (content is handled separately via stdin to Python, so we skip it here)
-dangerous = set(';|\`\$(){}')
-for key in ('OP', 'USER', 'BASE', 'RELPATH', 'NEWPATH', 'PERMS'):
+# Reject shell metacharacters in command-relevant fields.
+dangerous = set(";|`$(){}")
+for key in ("OP", "USER", "BASE", "RELPATH", "NEWPATH", "PERMS"):
     val = str(fields[key])
     if any(c in dangerous for c in val):
-        print('echo \'{\"ok\":false,\"error\":\"Invalid characters in input\"}\'; exit 1')
-        sys.exit(0)
+        print("ERROR\tInvalid characters in input")
+        sys.exit(1)
 
 for k, v in fields.items():
-    print(f'{k}={shlex.quote(str(v))}')
-" 2>/dev/null)"
+    b64 = base64.b64encode(str(v).encode("utf-8")).decode("ascii")
+    print(f"{k}\t{b64}")
+PY
+); then
+    err="${PARSED_FIELDS#ERROR	}"
+    if [ -z "$err" ] || [ "$err" = "$PARSED_FIELDS" ]; then
+        err="Invalid JSON input"
+    fi
+    echo "{\"ok\":false,\"error\":\"${err}\"}"
+    exit 1
+fi
+
+OP=''
+USER=''
+BASE=''
+RELPATH=''
+CONTENT=''
+NEWPATH=''
+PERMS=''
+
+while IFS=$'\t' read -r key b64val; do
+    [ -z "$key" ] && continue
+
+    if [ "$key" = "ERROR" ]; then
+        echo "{\"ok\":false,\"error\":\"${b64val}\"}"
+        exit 1
+    fi
+
+    value=$(printf '%s' "$b64val" | base64 --decode 2>/dev/null || true)
+
+    case "$key" in
+        OP) OP="$value" ;;
+        USER) USER="$value" ;;
+        BASE) BASE="$value" ;;
+        RELPATH) RELPATH="$value" ;;
+        CONTENT) CONTENT="$value" ;;
+        NEWPATH) NEWPATH="$value" ;;
+        PERMS) PERMS="$value" ;;
+    esac
+done <<< "$PARSED_FIELDS"
 
 # Validate required fields
 if [ -z "$OP" ] || [ -z "$USER" ] || [ -z "$BASE" ]; then
@@ -79,13 +126,10 @@ RESOLVED=$(sudo -u "$USER" realpath -m "$FULLPATH" 2>/dev/null || echo "INVALID"
 RESOLVED_BASE=$(realpath -m "$BASE" 2>/dev/null || echo "INVALID_BASE")
 
 # Ensure resolved path is within base directory
-case "$RESOLVED" in
-    "$RESOLVED_BASE"*) ;;
-    *)
-        echo '{"ok":false,"error":"Path outside allowed directory"}'
-        exit 1
-        ;;
-esac
+if ! is_within_base "$RESOLVED" "$RESOLVED_BASE"; then
+    echo '{"ok":false,"error":"Path outside allowed directory"}'
+    exit 1
+fi
 
 # Execute operation as the specified user
 case "$OP" in
@@ -100,9 +144,9 @@ case "$OP" in
             sudo -u "$USER" "$LISTDIR_BIN" "$RESOLVED" "$RESOLVED_BASE"
         else
             # Fallback to Python if binary not compiled
-            sudo -u "$USER" python3 -c "
-import os, json, stat
-path = '$RESOLVED'
+            sudo -u "$USER" python3 - "$RESOLVED" <<'PY'
+import os, json, stat, sys
+path = sys.argv[1]
 items = []
 try:
     for name in sorted(os.listdir(path)):
@@ -123,7 +167,7 @@ except PermissionError:
     print(json.dumps({'ok': False, 'error': 'Permission denied'}))
 except Exception as e:
     print(json.dumps({'ok': False, 'error': str(e)}))
-"
+PY
         fi
         ;;
 
@@ -139,15 +183,16 @@ except Exception as e:
             exit 1
         fi
         # Read file and return as JSON
-        sudo -u "$USER" python3 -c "
+        sudo -u "$USER" python3 - "$RESOLVED" <<'PY'
 import json, sys
+path = sys.argv[1]
 try:
-    with open('$RESOLVED', 'r', errors='replace') as f:
+    with open(path, 'r', errors='replace') as f:
         content = f.read()
     print(json.dumps({'ok': True, 'content': content, 'size': len(content)}))
 except Exception as e:
     print(json.dumps({'ok': False, 'error': str(e)}))
-"
+PY
         ;;
 
     write)
@@ -157,17 +202,18 @@ except Exception as e:
             echo '{"ok":false,"error":"Parent directory does not exist"}'
             exit 1
         fi
-        echo "$INPUT" | sudo -u "$USER" python3 -c "
+        echo "$INPUT" | sudo -u "$USER" python3 - "$RESOLVED" <<'PY'
 import json, sys
+path = sys.argv[1]
 try:
     data = json.load(sys.stdin)
     content = data.get('content', '')
-    with open('$RESOLVED', 'w') as f:
+    with open(path, 'w') as f:
         f.write(content)
     print(json.dumps({'ok': True, 'size': len(content)}))
 except Exception as e:
     print(json.dumps({'ok': False, 'error': str(e)}))
-"
+PY
         ;;
 
     mkdir)
@@ -202,13 +248,10 @@ except Exception as e:
         fi
         NEWFULL="$BASE/$NEWPATH"
         NEWRESOLVED=$(sudo -u "$USER" realpath -m "$NEWFULL" 2>/dev/null || echo "INVALID")
-        case "$NEWRESOLVED" in
-            "$RESOLVED_BASE"*) ;;
-            *)
-                echo '{"ok":false,"error":"New path outside allowed directory"}'
-                exit 1
-                ;;
-        esac
+        if ! is_within_base "$NEWRESOLVED" "$RESOLVED_BASE"; then
+            echo '{"ok":false,"error":"New path outside allowed directory"}'
+            exit 1
+        fi
         sudo -u "$USER" mv "$RESOLVED" "$NEWRESOLVED" 2>/dev/null && \
             echo '{"ok":true}' || echo '{"ok":false,"error":"Could not rename"}'
         ;;

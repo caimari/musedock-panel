@@ -3,6 +3,7 @@ namespace MuseDockPanel\Services;
 
 use MuseDockPanel\Database;
 use MuseDockPanel\Settings;
+use MuseDockPanel\Security\TlsClient;
 
 /**
  * FederationService — Manages federation peers and inter-panel communication.
@@ -48,6 +49,10 @@ class FederationService
         }
 
         $encryptedToken = ReplicationService::encryptPassword($authToken);
+        $metadata = array_filter([
+            'tls_pin' => trim((string)($sshConfig['tls_pin'] ?? '')),
+            'tls_ca_file' => trim((string)($sshConfig['tls_ca_file'] ?? '')),
+        ], static fn($v) => $v !== '');
 
         $id = Database::insert('federation_peers', [
             'name'         => $name,
@@ -57,6 +62,7 @@ class FederationService
             'ssh_port'     => $sshConfig['port'] ?? 22,
             'ssh_user'     => $sshConfig['user'] ?? 'root',
             'ssh_key_path' => $sshConfig['key_path'] ?? '/root/.ssh/id_ed25519',
+            'metadata'     => json_encode($metadata, JSON_UNESCAPED_SLASHES),
             'status'       => 'offline',
         ]);
 
@@ -101,12 +107,11 @@ class FederationService
         $localPubKey = file_exists($pubKeyPath) ? trim(file_get_contents($pubKeyPath)) : '';
 
         // Call the remote peer's handshake endpoint
-        $ch = curl_init(rtrim($remoteApiUrl, '/') . '/api/federation/handshake');
-        curl_setopt_array($ch, [
+        $handshakeUrl = rtrim($remoteApiUrl, '/') . '/api/federation/handshake';
+        $opts = [
             CURLOPT_POST => true,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 15,
-            CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_HTTPHEADER => [
                 'Content-Type: application/json',
                 'Authorization: Bearer ' . $remoteToken,
@@ -121,7 +126,11 @@ class FederationService
                 'ssh_key_path' => $sshConfig['key_path'] ?? '/root/.ssh/id_ed25519',
                 'public_key'   => $localPubKey,
             ]),
-        ]);
+        ];
+        $opts = array_replace($opts, TlsClient::forUrl($handshakeUrl));
+
+        $ch = curl_init($handshakeUrl);
+        curl_setopt_array($ch, $opts);
 
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -167,6 +176,14 @@ class FederationService
         if (isset($data['ssh_port'])) $updateData['ssh_port'] = (int)$data['ssh_port'];
         if (isset($data['ssh_user'])) $updateData['ssh_user'] = $data['ssh_user'];
         if (isset($data['ssh_key_path'])) $updateData['ssh_key_path'] = $data['ssh_key_path'];
+        if (array_key_exists('tls_pin', $data) || array_key_exists('tls_ca_file', $data)) {
+            $meta = is_array($peer['metadata']) ? $peer['metadata'] : [];
+            $meta['tls_pin'] = trim((string)($data['tls_pin'] ?? ''));
+            $meta['tls_ca_file'] = trim((string)($data['tls_ca_file'] ?? ''));
+            if ($meta['tls_pin'] === '') unset($meta['tls_pin']);
+            if ($meta['tls_ca_file'] === '') unset($meta['tls_ca_file']);
+            $updateData['metadata'] = json_encode($meta, JSON_UNESCAPED_SLASHES);
+        }
 
         Database::update('federation_peers', $updateData, 'id = :id', ['id' => $id]);
 
@@ -209,8 +226,7 @@ class FederationService
         $url = rtrim($peer['api_url'], '/') . $endpoint;
         $token = $peer['auth_token_plain'] ?? ReplicationService::decryptPassword($peer['auth_token']);
 
-        $ch = curl_init();
-        curl_setopt_array($ch, [
+        $opts = [
             CURLOPT_URL => $url,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => $timeout,
@@ -220,8 +236,13 @@ class FederationService
                 'Authorization: Bearer ' . $token,
                 'X-Federation-Source: ' . gethostname(),
             ],
-            CURLOPT_SSL_VERIFYPEER => false, // Internal network — self-signed certs OK
-        ]);
+        ];
+        $opts = array_replace($opts, TlsClient::forUrl($url, [
+            'metadata' => $peer['metadata'] ?? null,
+        ]));
+
+        $ch = curl_init();
+        curl_setopt_array($ch, $opts);
 
         if ($method === 'POST') {
             curl_setopt($ch, CURLOPT_POST, true);
@@ -564,15 +585,18 @@ class FederationService
         }
 
         // Test connectivity first
-        $ch = curl_init(rtrim($peerUrl, '/') . '/api/federation/health');
-        curl_setopt_array($ch, [
+        $healthUrl = rtrim($peerUrl, '/') . '/api/federation/health';
+        $opts = [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 10,
-            CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $peerToken,
             ],
-        ]);
+        ];
+        $opts = array_replace($opts, TlsClient::forUrl($healthUrl));
+
+        $ch = curl_init($healthUrl);
+        curl_setopt_array($ch, $opts);
         $response = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $error = curl_error($ch);

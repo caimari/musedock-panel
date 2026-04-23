@@ -3,6 +3,7 @@ namespace MuseDockPanel\Services;
 
 use MuseDockPanel\Database;
 use MuseDockPanel\Settings;
+use MuseDockPanel\Security\TlsClient;
 use MuseDockPanel\Env;
 use MuseDockPanel\Services\FirewallService;
 use MuseDockPanel\Services\NotificationService;
@@ -35,9 +36,139 @@ class ClusterService
         return Database::fetchOne('SELECT * FROM cluster_nodes WHERE id = :id', ['id' => $id]);
     }
 
-    public static function addNode(string $name, string $apiUrl, string $authToken, array $services = ['web']): int
+    /**
+     * Describe TLS trust state for a node from current metadata/config.
+     *
+     * status: ok|warning|critical|info
+     * mode: pin|ca|auto|none
+     */
+    public static function getNodeTlsSummary(array $node, int $warnDays = 14, int $criticalDays = 7): array
+    {
+        $apiUrl = trim((string)($node['api_url'] ?? ''));
+        $scheme = strtolower((string)(parse_url($apiUrl, PHP_URL_SCHEME) ?? ''));
+        $host = strtolower((string)(parse_url($apiUrl, PHP_URL_HOST) ?? ''));
+
+        $meta = json_decode((string)($node['metadata'] ?? '{}'), true);
+        $meta = is_array($meta) ? $meta : [];
+        $tlsPin = trim((string)($meta['tls_pin'] ?? ''));
+        $tlsCaFile = trim((string)($meta['tls_ca_file'] ?? ''));
+
+        if ($scheme !== 'https') {
+            return [
+                'status' => 'info',
+                'mode' => 'none',
+                'summary' => 'Nodo HTTP (sin TLS)',
+                'host' => $host,
+                'ca_file' => '',
+                'days_left' => null,
+                'not_after' => null,
+            ];
+        }
+
+        if ($tlsPin !== '') {
+            $pinShort = str_starts_with($tlsPin, 'sha256//')
+                ? substr($tlsPin, 0, 20) . '...'
+                : (str_starts_with($tlsPin, '/') ? basename($tlsPin) : substr($tlsPin, 0, 16) . '...');
+            return [
+                'status' => 'ok',
+                'mode' => 'pin',
+                'summary' => 'Pin TLS activo',
+                'detail' => $pinShort,
+                'host' => $host,
+                'ca_file' => '',
+                'days_left' => null,
+                'not_after' => null,
+            ];
+        }
+
+        if ($tlsCaFile === '') {
+            return [
+                'status' => self::isPrivateOrLocalHost($host) ? 'warning' : 'info',
+                'mode' => 'auto',
+                'summary' => self::isPrivateOrLocalHost($host)
+                    ? 'Sin CA fija (auto-bootstrap en red privada)'
+                    : 'Sin CA fija',
+                'host' => $host,
+                'ca_file' => '',
+                'days_left' => null,
+                'not_after' => null,
+            ];
+        }
+
+        if (!is_file($tlsCaFile) || !is_readable($tlsCaFile)) {
+            return [
+                'status' => 'critical',
+                'mode' => 'ca',
+                'summary' => 'CA no accesible',
+                'detail' => $tlsCaFile,
+                'host' => $host,
+                'ca_file' => $tlsCaFile,
+                'days_left' => null,
+                'not_after' => null,
+            ];
+        }
+
+        $pem = (string)@file_get_contents($tlsCaFile);
+        $cert = @openssl_x509_parse($pem);
+        if (!is_array($cert) || empty($cert['validTo_time_t'])) {
+            return [
+                'status' => 'critical',
+                'mode' => 'ca',
+                'summary' => 'CA inválida',
+                'detail' => basename($tlsCaFile),
+                'host' => $host,
+                'ca_file' => $tlsCaFile,
+                'days_left' => null,
+                'not_after' => null,
+            ];
+        }
+
+        $now = time();
+        $notAfterTs = (int)$cert['validTo_time_t'];
+        $daysLeft = (int)floor(($notAfterTs - $now) / 86400);
+        $notAfter = date('Y-m-d H:i:s', $notAfterTs);
+        $subjectCn = self::extractCertCn($cert['subject'] ?? null);
+        $issuerCn = self::extractCertCn($cert['issuer'] ?? null);
+
+        $status = 'ok';
+        $summary = 'CA válida';
+        if ($daysLeft < 0) {
+            $status = 'critical';
+            $summary = 'CA expirada';
+        } elseif ($daysLeft <= $criticalDays) {
+            $status = 'critical';
+            $summary = "CA vence en {$daysLeft} día(s)";
+        } elseif ($daysLeft <= $warnDays) {
+            $status = 'warning';
+            $summary = "CA vence en {$daysLeft} día(s)";
+        }
+
+        return [
+            'status' => $status,
+            'mode' => 'ca',
+            'summary' => $summary,
+            'detail' => trim(($subjectCn ? $subjectCn : basename($tlsCaFile)) . ($issuerCn ? " · issuer: {$issuerCn}" : '')),
+            'host' => $host,
+            'ca_file' => $tlsCaFile,
+            'days_left' => $daysLeft,
+            'not_after' => $notAfter,
+        ];
+    }
+
+    public static function addNode(
+        string $name,
+        string $apiUrl,
+        string $authToken,
+        array $services = ['web'],
+        array $metadata = []
+    ): int
     {
         $encryptedToken = ReplicationService::encryptPassword($authToken);
+        $cleanMeta = array_filter([
+            'tls_pin' => trim((string)($metadata['tls_pin'] ?? '')),
+            'tls_ca_file' => trim((string)($metadata['tls_ca_file'] ?? '')),
+        ], static fn($v) => $v !== '');
+
         return Database::insert('cluster_nodes', [
             'name'       => $name,
             'api_url'    => rtrim($apiUrl, '/'),
@@ -45,6 +176,7 @@ class ClusterService
             'status'     => 'offline',
             'role'       => 'standalone',
             'services'   => json_encode($services),
+            'metadata'   => json_encode($cleanMeta, JSON_UNESCAPED_SLASHES),
             'created_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
         ]);
@@ -433,35 +565,87 @@ class ClusterService
         $token = ReplicationService::decryptPassword($node['auth_token']);
         $apiUrl = rtrim($node['api_url'], '/');
 
-        return self::callNodeDirect($apiUrl, $token, $method, $endpoint, $data);
+        return self::callNodeDirect($apiUrl, $token, $method, $endpoint, $data, 30, [
+            'metadata' => $node['metadata'] ?? null,
+            'node_id'  => (int)$node['id'],
+        ]);
     }
 
-    public static function callNodeDirect(string $apiUrl, string $token, string $method, string $endpoint, array $data = [], int $timeout = 30): array
+    public static function callNodeDirect(
+        string $apiUrl,
+        string $token,
+        string $method,
+        string $endpoint,
+        array $data = [],
+        int $timeout = 30,
+        array $tlsContext = []
+    ): array
     {
         $url = rtrim($apiUrl, '/') . '/' . ltrim($endpoint, '/');
+        $method = strtoupper($method);
+        $payload = in_array($method, ['POST', 'PUT'], true) ? json_encode($data) : null;
 
-        $ch = curl_init();
-        curl_setopt_array($ch, [
+        $request = self::executeNodeRequest($url, $token, $method, $payload, $timeout, $tlsContext);
+
+        $error = (string)($request['error'] ?? '');
+        if (($request['response'] === false || $error !== '')
+            && self::shouldAutoBootstrapTls($url, $tlsContext, $error)
+        ) {
+            $bootstrap = self::autoBootstrapTlsTrust($apiUrl, $token, $timeout, $tlsContext);
+            if (!empty($bootstrap['ok']) && !empty($bootstrap['tls_context']) && is_array($bootstrap['tls_context'])) {
+                $tlsContext = $bootstrap['tls_context'];
+                $request = self::executeNodeRequest($url, $token, $method, $payload, $timeout, $tlsContext);
+            }
+        }
+
+        $response = $request['response'];
+        $httpCode = (int)($request['http_code'] ?? 0);
+        $error = (string)($request['error'] ?? '');
+
+        if ($response === false || $error !== '') {
+            return ['ok' => false, 'status' => $httpCode, 'data' => null, 'error' => $error !== '' ? $error : 'Connection failed'];
+        }
+
+        $decoded = json_decode((string)$response, true);
+        $ok = $httpCode >= 200 && $httpCode < 300;
+
+        return [
+            'ok'     => $ok,
+            'status' => $httpCode,
+            'data'   => $decoded,
+            'error'  => $ok ? '' : ($decoded['error'] ?? $decoded['message'] ?? "HTTP {$httpCode}"),
+        ];
+    }
+
+    private static function executeNodeRequest(
+        string $url,
+        string $token,
+        string $method,
+        ?string $payload,
+        int $timeout,
+        array $tlsContext
+    ): array {
+        $opts = [
             CURLOPT_URL            => $url,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT        => $timeout,
             CURLOPT_CONNECTTIMEOUT => 10,
-            CURLOPT_SSL_VERIFYPEER => false,
-            CURLOPT_SSL_VERIFYHOST => false,
             CURLOPT_HTTPHEADER     => [
                 'Authorization: Bearer ' . $token,
                 'Content-Type: application/json',
                 'Accept: application/json',
             ],
-        ]);
+        ];
+        $opts = array_replace($opts, TlsClient::forUrl($url, $tlsContext));
 
-        $method = strtoupper($method);
+        $ch = curl_init();
+        curl_setopt_array($ch, $opts);
         if ($method === 'POST') {
             curl_setopt($ch, CURLOPT_POST, true);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $payload ?? '{}');
         } elseif ($method === 'PUT') {
             curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'PUT');
-            curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $payload ?? '{}');
         } elseif ($method === 'DELETE') {
             curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
         }
@@ -471,19 +655,308 @@ class ClusterService
         $error = curl_error($ch);
         curl_close($ch);
 
-        if ($response === false || $error) {
-            return ['ok' => false, 'status' => $httpCode, 'data' => null, 'error' => $error ?: 'Connection failed'];
+        return [
+            'response'  => $response,
+            'http_code' => $httpCode,
+            'error'     => $error,
+        ];
+    }
+
+    private static function shouldAutoBootstrapTls(string $url, array $tlsContext, string $error): bool
+    {
+        if (!preg_match('#^https://#i', $url)) {
+            return false;
+        }
+        if ($error === '') {
+            return false;
         }
 
-        $decoded = json_decode($response, true);
-        $ok = $httpCode >= 200 && $httpCode < 300;
+        $caPath = self::contextValue($tlsContext, ['tls_ca_file', 'ca_file', 'tls_cafile']);
+        $hasPin = self::contextValue($tlsContext, ['tls_pin', 'pin', 'tls_public_key_pin']) !== null;
+        if ($hasPin) {
+            return false;
+        }
 
-        return [
-            'ok'     => $ok,
-            'status' => $httpCode,
-            'data'   => $decoded,
-            'error'  => $ok ? '' : ($decoded['error'] ?? $decoded['message'] ?? "HTTP {$httpCode}"),
-        ];
+        $tlsErr = strtolower($error);
+        $isCertError = str_contains($tlsErr, 'ssl certificate problem')
+            || str_contains($tlsErr, 'unable to get local issuer certificate')
+            || str_contains($tlsErr, 'self signed certificate')
+            || str_contains($tlsErr, 'certificate verify failed');
+        if (!$isCertError) {
+            return false;
+        }
+
+        $host = strtolower((string)(parse_url($url, PHP_URL_HOST) ?? ''));
+        if (!self::isPrivateOrLocalHost($host)) {
+            return false;
+        }
+
+        // If CA is already configured manually, do not override.
+        // Only allow automatic re-bootstrap for auto-managed node CA files.
+        if ($caPath !== null && !str_contains($caPath, '/storage/tls/node-')) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static function autoBootstrapTlsTrust(string $apiUrl, string $token, int $timeout, array $tlsContext): array
+    {
+        $host = strtolower((string)(parse_url($apiUrl, PHP_URL_HOST) ?? ''));
+        if ($host === '') {
+            return ['ok' => false, 'error' => 'invalid_host'];
+        }
+
+        $caPem = '';
+        $bootstrapMode = 'signed';
+        $nonce = bin2hex(random_bytes(16));
+        $bootstrapUrl = rtrim($apiUrl, '/') . '/api/cluster/action';
+        $bootstrapPayload = json_encode([
+            'action'  => 'tls-export-ca',
+            'payload' => ['nonce' => $nonce],
+        ]);
+        $seedCaPem = self::extractCaFromPeerChain($apiUrl) ?? '';
+
+        // Signed export using a TOFU seed CA: avoids sending auth token over TLS with verification disabled.
+        if ($seedCaPem !== '') {
+            $tmpCaPath = @tempnam(sys_get_temp_dir(), 'mdtls-');
+            if (is_string($tmpCaPath) && $tmpCaPath !== '' && @file_put_contents($tmpCaPath, $seedCaPem) !== false) {
+                @chmod($tmpCaPath, 0600);
+                $req = self::executeNodeRequest(
+                    $bootstrapUrl,
+                    $token,
+                    'POST',
+                    $bootstrapPayload ?: '{}',
+                    min($timeout, 15),
+                    ['tls_ca_file' => $tmpCaPath]
+                );
+                @unlink($tmpCaPath);
+
+                $raw = $req['response'] ?? false;
+                $httpCode = (int)($req['http_code'] ?? 0);
+                $curlError = (string)($req['error'] ?? '');
+
+                if ($raw !== false && $curlError === '' && $httpCode >= 200 && $httpCode < 300) {
+                    $decoded = json_decode((string)$raw, true);
+                    if (is_array($decoded) && !empty($decoded['ok'])) {
+                        $respNonce = (string)($decoded['nonce'] ?? '');
+                        $signedCa = (string)($decoded['ca_pem'] ?? '');
+                        $caSha = strtolower((string)($decoded['ca_sha256'] ?? ''));
+                        $sig = strtolower((string)($decoded['sig'] ?? ''));
+
+                        if ($respNonce === $nonce && $signedCa !== '' && $caSha !== '' && $sig !== '') {
+                            $calcSha = strtolower(hash('sha256', $signedCa));
+                            $expectedSig = strtolower(hash_hmac('sha256', $nonce . '|' . $caSha, $token));
+                            if (hash_equals($calcSha, $caSha) && hash_equals($expectedSig, $sig)) {
+                                $caPem = $signedCa;
+                            }
+                        }
+                    }
+                }
+            } elseif (is_string($tmpCaPath) && $tmpCaPath !== '' && is_file($tmpCaPath)) {
+                @unlink($tmpCaPath);
+            }
+        }
+
+        // Backward-compatibility fallback for older nodes without tls-export-ca action.
+        // TOFU over private network: extracts the CA issuer cert from the peer TLS chain.
+        if ($caPem === '') {
+            $bootstrapMode = 'peer-chain';
+            $caPem = $seedCaPem !== '' ? $seedCaPem : (self::extractCaFromPeerChain($apiUrl) ?? '');
+            if ($caPem === '') {
+                return ['ok' => false, 'error' => 'bootstrap_unavailable'];
+            }
+        }
+
+        $parsed = @openssl_x509_parse($caPem);
+        if (!is_array($parsed)) {
+            return ['ok' => false, 'error' => 'bootstrap_invalid_certificate'];
+        }
+
+        $caPath = self::storeNodeCaFile($host, $caPem);
+        if ($caPath === null) {
+            return ['ok' => false, 'error' => 'bootstrap_store_failed'];
+        }
+
+        $nodeId = (int)($tlsContext['node_id'] ?? 0);
+        if ($nodeId > 0) {
+            self::persistNodeTlsCaPath($nodeId, $caPath);
+        }
+
+        $meta = [];
+        $rawMeta = $tlsContext['metadata'] ?? null;
+        if (is_string($rawMeta)) {
+            $tmp = json_decode($rawMeta, true);
+            $meta = is_array($tmp) ? $tmp : [];
+        } elseif (is_array($rawMeta)) {
+            $meta = $rawMeta;
+        }
+        $meta['tls_ca_file'] = $caPath;
+        $tlsContext['metadata'] = $meta;
+
+        LogService::log('cluster.tls', 'auto-bootstrap', "CA remota autoconfigurada para {$host} ({$bootstrapMode})");
+
+        return ['ok' => true, 'tls_context' => $tlsContext];
+    }
+
+    private static function extractCaFromPeerChain(string $apiUrl): ?string
+    {
+        $host = (string)(parse_url($apiUrl, PHP_URL_HOST) ?? '');
+        $port = (int)(parse_url($apiUrl, PHP_URL_PORT) ?? 443);
+        if ($host === '' || $port < 1 || $port > 65535) {
+            return null;
+        }
+
+        $context = stream_context_create([
+            'ssl' => [
+                'capture_peer_cert' => true,
+                'capture_peer_cert_chain' => true,
+                'verify_peer' => false,
+                'verify_peer_name' => false,
+                'SNI_enabled' => true,
+                'peer_name' => $host,
+            ],
+        ]);
+
+        $errno = 0;
+        $errstr = '';
+        $client = @stream_socket_client(
+            "ssl://{$host}:{$port}",
+            $errno,
+            $errstr,
+            10,
+            STREAM_CLIENT_CONNECT,
+            $context
+        );
+        if ($client === false) {
+            return null;
+        }
+
+        $params = stream_context_get_params($client);
+        @fclose($client);
+
+        $chain = $params['options']['ssl']['peer_certificate_chain'] ?? [];
+        if (!is_array($chain) || empty($chain)) {
+            $single = $params['options']['ssl']['peer_certificate'] ?? null;
+            if ($single) {
+                $chain = [$single];
+            }
+        }
+        if (empty($chain)) {
+            return null;
+        }
+
+        $candidate = end($chain);
+        if (!$candidate) {
+            return null;
+        }
+
+        $pem = '';
+        if (!@openssl_x509_export($candidate, $pem) || trim($pem) === '') {
+            return null;
+        }
+
+        $parsed = @openssl_x509_parse($pem);
+        if (!is_array($parsed)) {
+            return null;
+        }
+        return $pem;
+    }
+
+    private static function storeNodeCaFile(string $host, string $caPem): ?string
+    {
+        $baseDir = dirname(__DIR__, 2) . '/storage/tls';
+        if (!is_dir($baseDir) && !@mkdir($baseDir, 0750, true) && !is_dir($baseDir)) {
+            return null;
+        }
+
+        $safeHost = preg_replace('/[^a-z0-9_.-]/i', '_', $host);
+        $path = $baseDir . '/node-' . $safeHost . '-root-ca.pem';
+        $bytes = @file_put_contents($path, $caPem);
+        if ($bytes === false || $bytes < 1) {
+            return null;
+        }
+        @chmod($path, 0640);
+        return $path;
+    }
+
+    private static function persistNodeTlsCaPath(int $nodeId, string $caPath): void
+    {
+        try {
+            $node = self::getNode($nodeId);
+            if (!$node) {
+                return;
+            }
+            $meta = json_decode($node['metadata'] ?? '{}', true);
+            $meta = is_array($meta) ? $meta : [];
+            $meta['tls_ca_file'] = $caPath;
+            Database::update('cluster_nodes', [
+                'metadata' => json_encode($meta, JSON_UNESCAPED_SLASHES),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ], 'id = :id', ['id' => $nodeId]);
+        } catch (\Throwable) {
+            // Best effort only.
+        }
+    }
+
+    private static function contextValue(array $context, array $keys): ?string
+    {
+        foreach ($keys as $k) {
+            if (isset($context[$k]) && trim((string)$context[$k]) !== '') {
+                return trim((string)$context[$k]);
+            }
+        }
+
+        $meta = $context['metadata'] ?? null;
+        if (is_string($meta)) {
+            $decoded = json_decode($meta, true);
+            $meta = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($meta)) {
+            $meta = [];
+        }
+
+        foreach ($keys as $k) {
+            if (isset($meta[$k]) && trim((string)$meta[$k]) !== '') {
+                return trim((string)$meta[$k]);
+            }
+        }
+        return null;
+    }
+
+    private static function isPrivateOrLocalHost(string $host): bool
+    {
+        if ($host === 'localhost') {
+            return true;
+        }
+        if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) === false) {
+            if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false) {
+                return str_starts_with(strtolower($host), 'fc')
+                    || str_starts_with(strtolower($host), 'fd')
+                    || $host === '::1';
+            }
+            return false;
+        }
+
+        if (str_starts_with($host, '10.') || str_starts_with($host, '127.') || str_starts_with($host, '192.168.')) {
+            return true;
+        }
+        if (preg_match('/^172\.(1[6-9]|2[0-9]|3[0-1])\./', $host)) {
+            return true;
+        }
+        return false;
+    }
+
+    private static function extractCertCn(mixed $dn): string
+    {
+        if (!is_array($dn)) {
+            return '';
+        }
+        $cn = $dn['CN'] ?? '';
+        if (is_array($cn)) {
+            $cn = $cn[0] ?? '';
+        }
+        return trim((string)$cn);
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -511,8 +984,10 @@ class ClusterService
         if ($result['ok']) {
             $remoteData = $result['data'] ?? [];
 
-            // Merge heartbeat info into metadata (preserve existing fields like alerts_muted)
-            $existingMeta = json_decode($node['metadata'] ?? '{}', true) ?: [];
+            // Merge heartbeat info into metadata (preserve existing fields like alerts_muted/tls_*).
+            // Re-read current row because callNodeDirect may have updated metadata (e.g. TLS bootstrap).
+            $currentNode = self::getNode($nodeId) ?: $node;
+            $existingMeta = json_decode($currentNode['metadata'] ?? '{}', true) ?: [];
             $existingMeta['repl_role']         = $remoteData['repl_role'] ?? 'standalone';
             $existingMeta['pg_replication']     = $remoteData['pg_replication'] ?? null;
             $existingMeta['mysql_replication']  = $remoteData['mysql_replication'] ?? null;

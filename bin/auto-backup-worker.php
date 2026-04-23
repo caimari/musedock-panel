@@ -140,14 +140,11 @@ if ($remoteEnabled && $remoteNodeId > 0) {
             $token = MuseDockPanel\Services\ReplicationService::decryptPassword($node['auth_token'] ?? '');
             $url = rtrim($node['api_url'], '/') . '/api/cluster/action';
 
-            $ch = curl_init($url);
-            curl_setopt_array($ch, [
+            $opts = [
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_POST => true,
                 CURLOPT_TIMEOUT => 600,
                 CURLOPT_CONNECTTIMEOUT => 30,
-                CURLOPT_SSL_VERIFYPEER => false,
-                CURLOPT_SSL_VERIFYHOST => false,
                 CURLOPT_HTTPHEADER => [
                     'Authorization: Bearer ' . $token,
                     'Accept: application/json',
@@ -157,7 +154,13 @@ if ($remoteEnabled && $remoteNodeId > 0) {
                     'backup_name' => $backupName,
                     'backup' => new CURLFile($tmpFile, 'application/gzip', 'backup.tar.gz'),
                 ],
-            ]);
+            ];
+            $opts = array_replace($opts, \MuseDockPanel\Security\TlsClient::forUrl($url, [
+                'metadata' => $node['metadata'] ?? null,
+            ]));
+
+            $ch = curl_init($url);
+            curl_setopt_array($ch, $opts);
 
             $response = curl_exec($ch);
             $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);

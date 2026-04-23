@@ -44,9 +44,21 @@ class FederationController
         $sshPort   = (int)($_POST['ssh_port'] ?? 22);
         $sshUser   = trim($_POST['ssh_user'] ?? 'root');
         $sshKeyPath = trim($_POST['ssh_key_path'] ?? '/root/.ssh/id_ed25519');
+        $tlsPin = trim($_POST['tls_pin'] ?? '');
+        $tlsCaFile = trim($_POST['tls_ca_file'] ?? '');
 
         if (empty($name) || empty($apiUrl) || empty($authToken)) {
             Flash::error('Nombre, URL y token son obligatorios.');
+            header('Location: /settings/federation');
+            return;
+        }
+        if ($tlsPin !== '' && !$this->isValidTlsPin($tlsPin)) {
+            Flash::error('TLS pin no valido (usa formato sha256//...)');
+            header('Location: /settings/federation');
+            return;
+        }
+        if ($tlsCaFile !== '' && (!is_file($tlsCaFile) || !is_readable($tlsCaFile))) {
+            Flash::error('Ruta CA no valida o no legible en este servidor.');
             header('Location: /settings/federation');
             return;
         }
@@ -56,6 +68,8 @@ class FederationController
             'port'     => $sshPort,
             'user'     => $sshUser,
             'key_path' => $sshKeyPath,
+            'tls_pin'  => $tlsPin,
+            'tls_ca_file' => $tlsCaFile,
         ]);
 
         if ($result['ok']) {
@@ -107,6 +121,18 @@ class FederationController
         $id = (int)($_POST['id'] ?? 0);
         if ($id <= 0) {
             Flash::error('ID invalido.');
+            header('Location: /settings/federation');
+            return;
+        }
+        $tlsPin = trim($_POST['tls_pin'] ?? '');
+        $tlsCaFile = trim($_POST['tls_ca_file'] ?? '');
+        if ($tlsPin !== '' && !$this->isValidTlsPin($tlsPin)) {
+            Flash::error('TLS pin no valido (usa formato sha256//...)');
+            header('Location: /settings/federation');
+            return;
+        }
+        if ($tlsCaFile !== '' && (!is_file($tlsCaFile) || !is_readable($tlsCaFile))) {
+            Flash::error('Ruta CA no valida o no legible en este servidor.');
             header('Location: /settings/federation');
             return;
         }
@@ -180,6 +206,18 @@ class FederationController
         header('Content-Type: application/json');
         $id = (int)($_POST['peer_id'] ?? 0);
         echo json_encode(FederationService::exchangeSshKeys($id));
+    }
+
+    private function isValidTlsPin(string $pin): bool
+    {
+        $pin = trim($pin);
+        if ($pin === '') {
+            return true;
+        }
+        if (str_starts_with($pin, '/') && is_file($pin) && is_readable($pin)) {
+            return true;
+        }
+        return (bool)preg_match('/^(sha256\/\/)?[A-Za-z0-9+\/=]{32,}$/', $pin);
     }
 
     // ═══════════════════════════════════════════════════════════════

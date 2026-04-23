@@ -7,3 +7,4 @@ storage/*.json
 storage/*.flag
 .env
 *.deb
+docs/
