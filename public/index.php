@@ -123,7 +123,29 @@ header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 header('X-XSS-Protection: 1; mode=block');
 header('Referrer-Policy: strict-origin-when-cross-origin');
-if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+
+// HSTS is intentionally disabled by default for the admin panel port (8444),
+// to avoid browser lockouts when cert mode changes (ACME/internal fallback).
+// Enable only when explicitly configured and only on canonical HTTPS/443.
+$isHttpsReq = (!empty($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https')
+    || (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off');
+$hstsEnabled = \MuseDockPanel\Env::bool('PANEL_HSTS_ENABLED', false);
+$reqPort = (int)($_SERVER['HTTP_X_FORWARDED_PORT'] ?? 0);
+if ($reqPort <= 0) {
+    $hostHeader = (string)($_SERVER['HTTP_HOST'] ?? '');
+    if ($hostHeader !== '' && str_contains($hostHeader, ':')) {
+        $parts = explode(':', $hostHeader);
+        $tail = (string)end($parts);
+        $candidate = (int)$tail;
+        if ($candidate > 0) {
+            $reqPort = $candidate;
+        }
+    }
+}
+if ($reqPort <= 0) {
+    $reqPort = (int)($_SERVER['SERVER_PORT'] ?? ($isHttpsReq ? 443 : 80));
+}
+if ($hstsEnabled && $isHttpsReq && $reqPort === 443) {
     header('Strict-Transport-Security: max-age=31536000; includeSubDomains');
 }
 

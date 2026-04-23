@@ -1516,6 +1516,7 @@ elif [ "$UPDATE_ONLY" = true ]; then
     add_env_key "FPM_SOCKET_DIR" "/run/php"
     add_env_key "SESSION_LIFETIME" "7200"
     add_env_key "ALLOWED_IPS" ""
+    add_env_key "PANEL_HSTS_ENABLED" "false"
 
     if [ "$ENV_KEYS_ADDED" -gt 0 ]; then
         ok "$(t update_env_new_keys) ($ENV_KEYS_ADDED)"
@@ -2919,6 +2920,7 @@ cat > "${PANEL_DIR}/.env" << ENVEOF
 PANEL_NAME="MuseDock Panel"
 PANEL_PORT=${PANEL_PORT}
 PANEL_DEBUG=false
+PANEL_HSTS_ENABLED=false
 
 DB_HOST=127.0.0.1
 DB_PORT=5433

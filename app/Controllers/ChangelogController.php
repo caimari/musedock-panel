@@ -20,6 +20,31 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.62',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'HSTS del panel: desactivado por defecto en el puerto admin para evitar bloqueos persistentes de navegador tras cambios de certificado',
+                            'TLS admin anti-lockout: al cambiar entre cert publico/interno ya no se queda el acceso atrapado por cache HSTS en Chrome',
+                        ],
+                        'en' => [
+                            'Panel HSTS: disabled by default on admin port to avoid persistent browser lockouts after certificate mode changes',
+                            'Admin TLS anti-lockout: switching between public/internal cert modes no longer traps access behind stale Chrome HSTS cache',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Nueva variable `PANEL_HSTS_ENABLED` en instalador/update/.env.example para habilitar HSTS solo cuando se quiera explicitamente',
+                        ],
+                        'en' => [
+                            'New `PANEL_HSTS_ENABLED` variable in installer/update/.env.example so HSTS is opt-in only',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.61',
                 'date' => '2026-04-23',
                 'badge' => 'primary',
