@@ -483,6 +483,35 @@ CONF;
 
     private static function patchTlsPolicies(string $caddyApi, array $policies): void
     {
+        // Some Caddy states do not have apps.tls.automation yet.
+        // Seed the path so PATCH below does not fail with "invalid traversal path".
+        $ensureTlsPath = static function () use ($caddyApi): void {
+            $ch = curl_init("{$caddyApi}/config/apps/tls/automation");
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 10,
+            ]);
+            curl_exec($ch);
+            $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if ($code >= 200 && $code < 300) {
+                return;
+            }
+
+            $ch = curl_init("{$caddyApi}/config/apps");
+            curl_setopt_array($ch, [
+                CURLOPT_CUSTOMREQUEST => 'PATCH',
+                CURLOPT_POSTFIELDS => json_encode(['tls' => ['automation' => ['policies' => []]]]),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 10,
+            ]);
+            curl_exec($ch);
+            curl_close($ch);
+        };
+
+        $ensureTlsPath();
+
         // Use DELETE + POST to fully replace (PATCH merges and can leave stale policies)
         $ch = curl_init("{$caddyApi}/config/apps/tls/automation/policies");
         curl_setopt_array($ch, [
@@ -505,6 +534,22 @@ CONF;
         $resp = (string) curl_exec($ch);
         $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+
+        if (($httpCode < 200 || $httpCode >= 300) && str_contains(strtolower($resp), 'invalid traversal path')) {
+            // Retry once after recreating tls.automation path
+            $ensureTlsPath();
+            $ch = curl_init("{$caddyApi}/config/apps/tls/automation");
+            curl_setopt_array($ch, [
+                CURLOPT_CUSTOMREQUEST => 'PATCH',
+                CURLOPT_POSTFIELDS => json_encode(['policies' => $policies]),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 10,
+            ]);
+            $resp = (string) curl_exec($ch);
+            $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+        }
 
         // Some nodes run a Caddy build without cloudflare DNS provider.
         // If that happens, retry with a degraded HTTP-only policy set so TLS automation
@@ -1054,7 +1099,7 @@ CONF;
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 8,
         ]);
-        curl_exec($ch);
+        $routesRaw = curl_exec($ch);
         $routesCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
@@ -1073,6 +1118,28 @@ CONF;
             if (!($putCode >= 200 && $putCode < 300)) {
                 return false;
             }
+        } elseif ($routesCode >= 200 && $routesCode < 300) {
+            // Some broken states keep routes as object/null; normalize to RouteList ([]).
+            $decodedRoutes = json_decode((string)$routesRaw, true);
+            $isValidList = is_array($decodedRoutes) && array_is_list($decodedRoutes);
+            if (!$isValidList) {
+                $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0");
+                curl_setopt_array($ch, [
+                    CURLOPT_CUSTOMREQUEST => 'PATCH',
+                    CURLOPT_POSTFIELDS => json_encode(['routes' => []]),
+                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 8,
+                ]);
+                curl_exec($ch);
+                $patchCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                if (!($patchCode >= 200 && $patchCode < 300)) {
+                    return false;
+                }
+            }
+        } else {
+            return false;
         }
 
         return true;
