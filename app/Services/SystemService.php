@@ -843,7 +843,7 @@ CONF;
     }
 
     /**
-     * Create/update a dedicated Caddy route for panel domain access via HTTPS (443).
+     * Create/update a dedicated Caddy route for panel domain access via the configured panel port.
      * Result:
      *  - ok: bool
      *  - error: string (when ok=false)
@@ -858,6 +858,7 @@ CONF;
 
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
+        $panelPublicPort = self::getPanelPublicPort();
         $internalPort = self::getPanelInternalPort();
 
         $routesResult = self::fetchCaddyRoutes($caddyApi);
@@ -878,11 +879,10 @@ CONF;
 
         $route = [
             '@id' => self::PANEL_DOMAIN_ROUTE_ID,
-            // Domain route must only serve on 443.
-            // Keep PANEL_PORT (e.g. 8444) as IP fallback, not as domain endpoint.
+            // Panel hostname must only be served on PANEL_PORT (e.g. 8444).
             'match' => [[
                 'host' => [$hostname],
-                'expression' => '{http.request.port} == 443',
+                'expression' => '{http.request.port} == ' . $panelPublicPort,
             ]],
             'handle' => [[
                 'handler' => 'reverse_proxy',
@@ -917,7 +917,7 @@ CONF;
         }
 
         // Trigger first handshake locally (helps cert bootstrap without waiting for first user hit).
-        self::warmupPanelDomainTls($hostname);
+        self::warmupPanelDomainTls($hostname, $panelPublicPort);
 
         $warning = self::buildPanelDomainDnsWarning($hostname);
         return ['ok' => true, 'warning' => $warning];
@@ -940,11 +940,20 @@ CONF;
             return $internal;
         }
 
-        $panelPort = (int)\MuseDockPanel\Env::get('PANEL_PORT', 8444);
+        $panelPort = self::getPanelPublicPort();
         if ($panelPort <= 0) {
             $panelPort = 8444;
         }
         return $panelPort + 1;
+    }
+
+    private static function getPanelPublicPort(): int
+    {
+        $panelPort = (int)\MuseDockPanel\Env::get('PANEL_PORT', 8444);
+        if ($panelPort <= 0) {
+            $panelPort = 8444;
+        }
+        return $panelPort;
     }
 
     /**
@@ -953,10 +962,7 @@ CONF;
      */
     public static function ensureCaddyHttpServerReady(string $caddyApi): bool
     {
-        $panelPort = (int)\MuseDockPanel\Env::get('PANEL_PORT', 8444);
-        if ($panelPort <= 0) {
-            $panelPort = 8444;
-        }
+        $panelPort = self::getPanelPublicPort();
         $panelListen = ':' . $panelPort;
         $requiredListen = [':443'];
         if ($panelListen !== ':443') {
@@ -1228,16 +1234,17 @@ CONF;
         return ($httpCode >= 200 && $httpCode < 300) || $httpCode === 404;
     }
 
-    private static function warmupPanelDomainTls(string $hostname): void
+    private static function warmupPanelDomainTls(string $hostname, int $panelPort): void
     {
-        $ch = curl_init("https://{$hostname}/");
+        $url = $panelPort === 443 ? "https://{$hostname}/" : "https://{$hostname}:{$panelPort}/";
+        $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_NOBODY => true,
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 10,
             CURLOPT_SSL_VERIFYPEER => false,
             CURLOPT_SSL_VERIFYHOST => 0,
-            CURLOPT_RESOLVE => ["{$hostname}:443:127.0.0.1"],
+            CURLOPT_RESOLVE => ["{$hostname}:{$panelPort}:127.0.0.1"],
         ]);
         curl_exec($ch);
         curl_close($ch);
