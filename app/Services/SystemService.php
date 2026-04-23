@@ -502,8 +502,78 @@ CONF;
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 10,
         ]);
+        $resp = (string) curl_exec($ch);
+        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        // Some nodes run a Caddy build without cloudflare DNS provider.
+        // If that happens, retry with a degraded HTTP-only policy set so TLS automation
+        // still works for direct (non-wildcard) domains and panel hostnames.
+        if ($httpCode >= 200 && $httpCode < 300) {
+            return;
+        }
+
+        if (!str_contains(strtolower($resp), 'dns.providers.cloudflare')) {
+            return;
+        }
+
+        $fallbackPolicies = self::degradePoliciesWithoutDnsProvider($policies);
+        $ch = curl_init("{$caddyApi}/config/apps/tls/automation");
+        curl_setopt_array($ch, [
+            CURLOPT_CUSTOMREQUEST => 'PATCH',
+            CURLOPT_POSTFIELDS => json_encode(['policies' => $fallbackPolicies]),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+        ]);
         curl_exec($ch);
         curl_close($ch);
+    }
+
+    private static function degradePoliciesWithoutDnsProvider(array $policies): array
+    {
+        $result = [];
+
+        foreach ($policies as $policy) {
+            $subjects = $policy['subjects'] ?? [];
+
+            // Keep catch-all policy always (it supports HTTP-01).
+            if (!empty($subjects)) {
+                // Subject-specific policies are mostly for wildcard/DNS-01.
+                // Keep only non-wildcard subjects; drop wildcard entries.
+                $subjects = array_values(array_filter($subjects, static fn($s) => !str_starts_with((string)$s, '*.')));
+                if (empty($subjects)) {
+                    continue;
+                }
+                $policy['subjects'] = $subjects;
+            }
+
+            // Remove explicit DNS challenge block from issuers.
+            $issuers = [];
+            foreach (($policy['issuers'] ?? []) as $iss) {
+                unset($iss['challenges']['dns']);
+                if (isset($iss['challenges']) && empty($iss['challenges'])) {
+                    unset($iss['challenges']);
+                }
+                $issuers[] = $iss;
+            }
+            if (!empty($issuers)) {
+                $policy['issuers'] = $issuers;
+            }
+
+            $result[] = $policy;
+        }
+
+        if (empty($result)) {
+            $result[] = [
+                'issuers' => [[
+                    'email' => 'admin@musedock.com',
+                    'module' => 'acme',
+                ]],
+            ];
+        }
+
+        return $result;
     }
 
     /**
