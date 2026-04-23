@@ -27,12 +27,31 @@ class AccountController
 
     public function index(): void
     {
-        $accounts = Database::fetchAll(
-            "SELECT h.*, c.name as customer_name, c.email as customer_email
-             FROM hosting_accounts h
-             LEFT JOIN customers c ON c.id = h.customer_id
-             ORDER BY h.created_at DESC"
-        );
+        $accounts = [];
+        try {
+            $accounts = Database::fetchAll(
+                "SELECT h.*, c.name as customer_name, c.email as customer_email
+                 FROM hosting_accounts h
+                 LEFT JOIN customers c ON c.id = h.customer_id
+                 ORDER BY h.created_at DESC"
+            );
+        } catch (\Throwable $e) {
+            // Some nodes may have partial schema during upgrades (e.g. missing/old customers table).
+            // Degrade gracefully so /accounts does not hard-fail with HTTP 500.
+            try {
+                $accounts = Database::fetchAll(
+                    "SELECT h.*,
+                            NULL::text AS customer_name,
+                            NULL::text AS customer_email
+                     FROM hosting_accounts h
+                     ORDER BY h.id DESC"
+                );
+                LogService::log('accounts.index.degraded', 'accounts', 'Fallback query used: ' . $e->getMessage());
+            } catch (\Throwable $e2) {
+                LogService::log('accounts.index.error', 'accounts', 'Accounts list failed: ' . $e2->getMessage());
+                $accounts = [];
+            }
+        }
 
         // Disk usage is read from DB (updated periodically by monitor-collector worker)
         // No real-time du call — that's what made this page slow
@@ -72,11 +91,25 @@ class AccountController
             }
         } catch (\Throwable $e) {}
 
-        // Bandwidth totals for current month
-        $bwTotals = \MuseDockPanel\Services\BandwidthService::getAllMonthlyTotals();
-        $subBwTotals = \MuseDockPanel\Services\BandwidthService::getAllSubdomainMonthlyTotals();
+        // Bandwidth totals for current month (schema may be missing on partially updated nodes)
+        $bwTotals = [];
+        $subBwTotals = [];
+        try {
+            $bwTotals = \MuseDockPanel\Services\BandwidthService::getAllMonthlyTotals();
+            $subBwTotals = \MuseDockPanel\Services\BandwidthService::getAllSubdomainMonthlyTotals();
+        } catch (\Throwable $e) {
+            LogService::log('accounts.index.bandwidth.degraded', 'accounts', 'Bandwidth totals unavailable: ' . $e->getMessage());
+        }
 
         foreach ($accounts as &$acc) {
+            $acc['status'] = $acc['status'] ?? 'active';
+            $acc['disk_used_mb'] = (int)($acc['disk_used_mb'] ?? 0);
+            $acc['disk_quota_mb'] = (int)($acc['disk_quota_mb'] ?? 0);
+            $acc['created_at'] = $acc['created_at'] ?? date('Y-m-d H:i:s');
+            $acc['php_version'] = $acc['php_version'] ?? '8.3';
+            $acc['username'] = $acc['username'] ?? '';
+            $acc['domain'] = $acc['domain'] ?? '';
+
             $acc['alias_count'] = $aliasCounts[(int)$acc['id']] ?? 0;
             $acc['redirect_count'] = $redirectCounts[(int)$acc['id']] ?? 0;
             $acc['alias_details'] = $aliasDetails[(int)$acc['id']] ?? [];
