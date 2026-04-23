@@ -257,15 +257,25 @@ class CloudflareService
         $decoded = json_decode($raw, true);
         if (!is_array($decoded)) return [];
 
-        // Decrypt tokens (they are stored encrypted with AES-256-CBC)
+        // Decrypt tokens (stored encrypted-at-rest). If legacy plain token is found,
+        // return plain in memory and schedule re-encryption at rest.
+        $needsReencrypt = false;
         foreach ($decoded as &$acct) {
             if (!empty($acct['token'])) {
                 $decrypted = ReplicationService::decryptPassword($acct['token']);
                 // If decryption succeeds, use it; otherwise token was stored in plain text (legacy)
                 if ($decrypted !== '') {
                     $acct['token'] = $decrypted;
+                } else {
+                    $needsReencrypt = true;
                 }
             }
+        }
+        unset($acct);
+
+        if ($needsReencrypt) {
+            // Persist encrypted-at-rest normalization transparently.
+            self::saveAccounts($decoded);
         }
 
         return $decoded;
@@ -276,7 +286,7 @@ class CloudflareService
      */
     public static function saveAccounts(array $accounts): void
     {
-        Settings::set('failover_cf_accounts', json_encode($accounts));
+        Settings::set('failover_cf_accounts', json_encode(self::normalizeAccountsEncrypted($accounts)));
     }
 
     /**
@@ -322,10 +332,36 @@ class CloudflareService
         unset($acct);
 
         if ($changed) {
-            Settings::set('failover_cf_accounts', json_encode($accounts));
+            self::saveAccounts($accounts);
         }
 
         return $changed;
+    }
+
+    /**
+     * Ensure Cloudflare account tokens are encrypted-at-rest.
+     * Accepts plain or encrypted tokens and always returns encrypted storage format.
+     */
+    private static function normalizeAccountsEncrypted(array $accounts): array
+    {
+        foreach ($accounts as &$acct) {
+            $tokenRaw = trim((string)($acct['token'] ?? ''));
+            if ($tokenRaw === '') {
+                continue;
+            }
+
+            // Already encrypted? keep as-is.
+            $dec = ReplicationService::decryptPassword($tokenRaw);
+            if ($dec !== '') {
+                continue;
+            }
+
+            // Legacy/plain -> encrypt before persisting.
+            $acct['token'] = ReplicationService::encryptPassword($tokenRaw);
+        }
+        unset($acct);
+
+        return $accounts;
     }
 
     // --- DNS / IP detection -----------------------------------------------

@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.71',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Cloudflare secrets-at-rest: `failover_cf_accounts` se normaliza siempre cifrado al guardar (aunque llegue token en claro desde flujo legacy)',
+                            'Auto-migracion silenciosa: al leer cuentas Cloudflare, si detecta token legacy en claro, lo recifra automaticamente en `panel_settings` sin romper compatibilidad',
+                        ],
+                        'en' => [
+                            'Cloudflare secrets-at-rest: `failover_cf_accounts` is now always normalized encrypted when saved (even if legacy plain token input arrives)',
+                            'Silent auto-migration: while reading Cloudflare accounts, any detected legacy plain token is automatically re-encrypted in `panel_settings` with backward compatibility',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.70',
                 'date' => '2026-04-23',
                 'badge' => 'primary',
