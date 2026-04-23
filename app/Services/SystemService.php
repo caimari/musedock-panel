@@ -862,6 +862,13 @@ CONF;
         // Keep admin panel access on :8444 to preserve MIT/admin fallback separation.
         $panelPublicPort = 8444;
         $internalPort = self::getPanelInternalPort();
+        $panelPortOwner = self::findServerByListenPort($caddyApi, $panelPublicPort, 'srv0');
+        if ($panelPortOwner !== null) {
+            return [
+                'ok' => true,
+                'warning' => "El puerto {$panelPublicPort} ya esta servido por {$panelPortOwner}; se omite ruta dedicada en srv0."
+            ];
+        }
 
         $routesResult = self::fetchCaddyRoutes($caddyApi, true);
         if (!($routesResult['ok'] ?? false)) {
@@ -921,12 +928,20 @@ CONF;
     {
         $hostname = self::normalizeStoredHostname((string)\MuseDockPanel\Settings::get('panel_hostname', ''));
         if ($hostname === '') {
-            return ['ok' => true, 'skipped' => true];
+            return ['ok' => true, 'skipped' => true, 'reason' => 'panel_hostname_empty'];
         }
 
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
         $panelPublicPort = self::getPanelPublicPort();
+        $panelPortOwner = self::findServerByListenPort($caddyApi, $panelPublicPort, 'srv0');
+        if ($panelPortOwner !== null) {
+            return [
+                'ok' => true,
+                'skipped' => true,
+                'reason' => "panel-port-owned-by-{$panelPortOwner}",
+            ];
+        }
 
         $routesResult = self::fetchCaddyRoutes($caddyApi, true);
         if (!($routesResult['ok'] ?? false)) {
@@ -1022,10 +1037,12 @@ CONF;
     public static function ensureCaddyHttpServerReady(string $caddyApi, bool $enforcePanelPort = false): bool
     {
         $requiredListen = [':443'];
+        $panelPort = self::getPanelPublicPort();
+        $panelListen = ':' . $panelPort;
+        $panelPortClaimedElsewhere = false;
         if ($enforcePanelPort) {
-            $panelPort = self::getPanelPublicPort();
-            $panelListen = ':' . $panelPort;
-            if (!in_array($panelListen, $requiredListen, true)) {
+            $panelPortClaimedElsewhere = self::findServerByListenPort($caddyApi, $panelPort, 'srv0') !== null;
+            if (!$panelPortClaimedElsewhere && !in_array($panelListen, $requiredListen, true)) {
                 $requiredListen[] = $panelListen;
             }
         }
@@ -1241,7 +1258,7 @@ CONF;
             return false;
         }
 
-        if ($enforcePanelPort && !self::ensurePanelFallbackRoute($caddyApi)) {
+        if ($enforcePanelPort && !$panelPortClaimedElsewhere && !self::ensurePanelFallbackRoute($caddyApi)) {
             return false;
         }
 
@@ -1317,6 +1334,51 @@ CONF;
         curl_close($ch);
 
         return $postCode >= 200 && $postCode < 300;
+    }
+
+    /**
+     * Returns the HTTP server name (srvX) currently listening on the provided port,
+     * excluding an optional server name. Returns null when no owner is found.
+     */
+    private static function findServerByListenPort(string $caddyApi, int $port, string $excludeServer = ''): ?string
+    {
+        if ($port <= 0) {
+            return null;
+        }
+
+        $ch = curl_init("{$caddyApi}/config/apps/http/servers");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 8,
+        ]);
+        $raw = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if (!($httpCode >= 200 && $httpCode < 300)) {
+            return null;
+        }
+
+        $servers = json_decode((string)$raw, true);
+        if (!is_array($servers)) {
+            return null;
+        }
+
+        $needle = ':' . $port;
+        foreach ($servers as $serverName => $serverCfg) {
+            if (!is_string($serverName) || ($excludeServer !== '' && $serverName === $excludeServer)) {
+                continue;
+            }
+            $listen = $serverCfg['listen'] ?? null;
+            if (!is_array($listen) || !array_is_list($listen)) {
+                continue;
+            }
+            if (in_array($needle, $listen, true)) {
+                return $serverName;
+            }
+        }
+
+        return null;
     }
 
     private static function fetchCaddyRoutes(string $caddyApi, bool $enforcePanelPort = false): array

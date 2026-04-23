@@ -72,7 +72,15 @@ try {
 
 $result = \MuseDockPanel\Services\SystemService::ensurePanelDomainRouteFromSettings();
 if (!empty($result['skipped'])) {
-    echo "[repair-caddy] INFO: panel_hostname vacio, no se aplica ruta dedicada.\n";
+    $reason = (string)($result['reason'] ?? '');
+    if ($reason === 'panel_hostname_empty') {
+        echo "[repair-caddy] INFO: panel_hostname vacio, no se aplica ruta dedicada.\n";
+    } elseif (str_starts_with($reason, 'panel-port-owned-by-')) {
+        $owner = substr($reason, strlen('panel-port-owned-by-'));
+        echo "[repair-caddy] INFO: PANEL_PORT ya lo gestiona {$owner}; se omite ruta dedicada en srv0.\n";
+    } else {
+        echo "[repair-caddy] INFO: ruta dedicada del panel omitida ({$reason}).\n";
+    }
 } elseif ($result['ok'] ?? false) {
     $panelHostname = trim((string)\MuseDockPanel\Settings::get('panel_hostname', ''));
     echo "[repair-caddy] OK: ruta del panel aplicada para {$panelHostname}.\n";
