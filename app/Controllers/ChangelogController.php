@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.73',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Cluster schema backfill: columnas `cluster_nodes.standby`, `standby_since` y `standby_reason` añadidas en nodos legacy para evitar errores de `cluster-worker` tras update',
+                        ],
+                        'en' => [
+                            'Cluster schema backfill: `cluster_nodes.standby`, `standby_since` and `standby_reason` columns added on legacy nodes to prevent post-update `cluster-worker` errors',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.72',
                 'date' => '2026-04-23',
                 'badge' => 'primary',

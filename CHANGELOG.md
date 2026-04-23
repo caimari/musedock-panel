@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.73] — 2026-04-23
+
+### Fixed
+- Cluster schema backfill: añade columnas `cluster_nodes.standby`, `standby_since` y `standby_reason` en nodos legacy actualizados para evitar errores `column n.standby does not exist` en `cluster-worker`.
+
 ## [1.0.72] — 2026-04-23
 
 ### Fixed
