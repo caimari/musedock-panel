@@ -135,22 +135,15 @@ class UpdateService
      */
     private static function fetchRemoteVersion(): ?string
     {
-        $ctx = stream_context_create([
-            'http' => [
-                'timeout'    => 10,
-                'user_agent' => 'MuseDockPanel/' . PANEL_VERSION,
-            ],
-        ]);
-
         // Primary: read version from config/panel.php
-        $content = @file_get_contents(self::REPO_RAW_URL . '/config/panel.php', false, $ctx);
-        if ($content !== false && preg_match("/'version'\s*=>\s*'([^']+)'/", $content, $m)) {
+        $content = self::httpGet(self::REPO_RAW_URL . '/config/panel.php');
+        if ($content !== null && preg_match("/'version'\s*=>\s*'([^']+)'/", $content, $m)) {
             return $m[1];
         }
 
         // Fallback: legacy index.php with define('PANEL_VERSION', ...)
-        $content = @file_get_contents(self::REPO_RAW_URL . '/public/index.php', false, $ctx);
-        if ($content !== false && preg_match("/define\(\s*'PANEL_VERSION'\s*,\s*'([^']+)'\s*\)/", $content, $m)) {
+        $content = self::httpGet(self::REPO_RAW_URL . '/public/index.php');
+        if ($content !== null && preg_match("/define\(\s*'PANEL_VERSION'\s*,\s*'([^']+)'\s*\)/", $content, $m)) {
             return $m[1];
         }
 
@@ -163,16 +156,8 @@ class UpdateService
     public static function fetchRemoteChangelog(): array
     {
         $url = self::REPO_RAW_URL . '/app/Controllers/ChangelogController.php';
-
-        $ctx = stream_context_create([
-            'http' => [
-                'timeout'    => 10,
-                'user_agent' => 'MuseDockPanel/' . PANEL_VERSION,
-            ],
-        ]);
-
-        $content = @file_get_contents($url, false, $ctx);
-        if ($content === false) return [];
+        $content = self::httpGet($url);
+        if ($content === null) return [];
 
         // Extract version entries using regex
         $entries = [];
@@ -194,5 +179,47 @@ class UpdateService
         }
 
         return $entries;
+    }
+
+    /**
+     * HTTP GET helper with curl-first strategy.
+     * Why: on some nodes file_get_contents(https://...) times out while curl works.
+     */
+    private static function httpGet(string $url, int $timeout = 10): ?string
+    {
+        $userAgent = 'MuseDockPanel/' . PANEL_VERSION;
+
+        if (function_exists('curl_init')) {
+            $ch = curl_init($url);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_FOLLOWLOCATION => true,
+                CURLOPT_CONNECTTIMEOUT => min(5, $timeout),
+                CURLOPT_TIMEOUT => $timeout,
+                CURLOPT_USERAGENT => $userAgent,
+                CURLOPT_HTTPHEADER => ['Accept: text/plain'],
+                CURLOPT_SSL_VERIFYPEER => true,
+                CURLOPT_SSL_VERIFYHOST => 2,
+                CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+            ]);
+            $body = curl_exec($ch);
+            $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlErr = curl_errno($ch);
+            curl_close($ch);
+
+            if ($curlErr === 0 && $httpCode >= 200 && $httpCode < 400 && is_string($body)) {
+                return $body;
+            }
+        }
+
+        // Fallback for minimal environments without curl extension.
+        $ctx = stream_context_create([
+            'http' => [
+                'timeout' => $timeout,
+                'user_agent' => $userAgent,
+            ],
+        ]);
+        $content = @file_get_contents($url, false, $ctx);
+        return $content !== false ? $content : null;
     }
 }

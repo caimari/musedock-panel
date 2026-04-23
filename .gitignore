@@ -8,3 +8,4 @@ storage/*.flag
 .env
 *.deb
 docs/
+Notas.txt

@@ -55,6 +55,39 @@ class ChangelogController
                 ],
             ],
             [
+                'version' => '1.0.58',
+                'date' => '2026-04-22',
+                'badge' => 'success',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'Cluster TLS: validacion interna endurecida con soporte de CA/pinning para conexiones entre nodos',
+                            'Health checks de cluster: mejor diagnostico de heartbeat caido con mensajes mas claros en panel y logs',
+                            'Monitoring: optimizada carga inicial de /monitor para reducir latencia con historicos amplios',
+                            'Release ops: flujo de versionado simplificado para publicar version/tag en Git con un solo script',
+                        ],
+                        'en' => [
+                            'Cluster TLS: internal validation hardened with CA/pinning support for node-to-node connections',
+                            'Cluster health checks: improved diagnostics for missing heartbeat with clearer panel and log messages',
+                            'Monitoring: optimized initial /monitor load to reduce latency on large historical datasets',
+                            'Release ops: simplified versioning flow to publish version/tag to Git with a single script',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'File operations: eliminado uso residual de eval en rutas sensibles para reducir superficie de riesgo',
+                            'Cluster sync: corregidos falsos positivos de "Master caido" causados por validacion TLS inconsistente entre nodos',
+                            'Login UX: textos de acceso ajustados para evitar confusion en instalaciones nuevas',
+                        ],
+                        'en' => [
+                            'File operations: removed residual eval usage in sensitive paths to reduce risk surface',
+                            'Cluster sync: fixed false "Master down" positives caused by inconsistent TLS validation between nodes',
+                            'Login UX: access text adjusted to reduce confusion in fresh installations',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.57',
                 'date' => '2026-04-03',
                 'badge' => 'success',

@@ -9,6 +9,7 @@ namespace MuseDockPanel\Services;
 class SystemService
 {
     private static array $allowedPhpVersions = ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4'];
+    private const PANEL_DOMAIN_ROUTE_ID = 'panel-domain-route';
 
     /**
      * Generate a unique Caddy route ID for a domain.
@@ -699,6 +700,214 @@ CONF;
             return $routeId;
         }
         return null;
+    }
+
+    /**
+     * Create/update a dedicated Caddy route for panel domain access via HTTPS (443).
+     * Result:
+     *  - ok: bool
+     *  - error: string (when ok=false)
+     *  - warning: string (non-blocking diagnostics)
+     */
+    public static function configurePanelDomainRoute(string $hostname): array
+    {
+        $hostname = strtolower(trim($hostname));
+        if ($hostname === '') {
+            return ['ok' => false, 'error' => 'Hostname vacio'];
+        }
+
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
+        $internalPort = self::getPanelInternalPort();
+
+        $routesResult = self::fetchCaddyRoutes($caddyApi);
+        if (!($routesResult['ok'] ?? false)) {
+            return ['ok' => false, 'error' => (string)($routesResult['error'] ?? 'No se pudo leer la config de Caddy')];
+        }
+        $routes = $routesResult['routes'] ?? [];
+
+        $conflict = self::findHostRouteConflict($routes, $hostname, self::PANEL_DOMAIN_ROUTE_ID);
+        if ($conflict !== null) {
+            return ['ok' => false, 'error' => "El dominio {$hostname} ya esta en uso por la ruta Caddy '{$conflict}'."];
+        }
+
+        // Keep TLS policies fresh so DNS-01 fallback is available when needed.
+        self::ensureTlsCatchAllPolicy($caddyApi);
+
+        self::deleteRouteById($caddyApi, self::PANEL_DOMAIN_ROUTE_ID);
+
+        $route = [
+            '@id' => self::PANEL_DOMAIN_ROUTE_ID,
+            'match' => [['host' => [$hostname]]],
+            'handle' => [[
+                'handler' => 'reverse_proxy',
+                'upstreams' => [['dial' => "127.0.0.1:{$internalPort}"]],
+                'headers' => [
+                    'request' => [
+                        'set' => [
+                            'X-Forwarded-Proto' => ['https'],
+                            'X-Forwarded-Host' => ['{http.request.host}'],
+                            'X-Real-IP' => ['{remote_host}'],
+                        ],
+                    ],
+                ],
+            ]],
+            'terminal' => true,
+        ];
+
+        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($route),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if (!($httpCode >= 200 && $httpCode < 300)) {
+            return ['ok' => false, 'error' => "No se pudo crear la ruta panel-domain en Caddy (HTTP {$httpCode}). {$response}"];
+        }
+
+        // Trigger first handshake locally (helps cert bootstrap without waiting for first user hit).
+        self::warmupPanelDomainTls($hostname);
+
+        $warning = self::buildPanelDomainDnsWarning($hostname);
+        return ['ok' => true, 'warning' => $warning];
+    }
+
+    /**
+     * Remove panel domain Caddy route if present.
+     */
+    public static function removePanelDomainRoute(): bool
+    {
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
+        return self::deleteRouteById($caddyApi, self::PANEL_DOMAIN_ROUTE_ID);
+    }
+
+    private static function getPanelInternalPort(): int
+    {
+        $internal = (int)\MuseDockPanel\Env::get('PANEL_INTERNAL_PORT', 0);
+        if ($internal > 0) {
+            return $internal;
+        }
+
+        $panelPort = (int)\MuseDockPanel\Env::get('PANEL_PORT', 8444);
+        if ($panelPort <= 0) {
+            $panelPort = 8444;
+        }
+        return $panelPort + 1;
+    }
+
+    private static function fetchCaddyRoutes(string $caddyApi): array
+    {
+        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 8,
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if (!($httpCode >= 200 && $httpCode < 300)) {
+            return ['ok' => false, 'error' => "Caddy API no disponible (HTTP {$httpCode})"];
+        }
+
+        $routes = json_decode((string)$response, true);
+        if (!is_array($routes)) {
+            $routes = [];
+        }
+        return ['ok' => true, 'routes' => $routes];
+    }
+
+    private static function findHostRouteConflict(array $routes, string $hostname, string $excludeRouteId): ?string
+    {
+        foreach ($routes as $route) {
+            $rid = (string)($route['@id'] ?? '');
+            if ($rid === $excludeRouteId) {
+                continue;
+            }
+
+            foreach (($route['match'] ?? []) as $match) {
+                foreach (($match['host'] ?? []) as $host) {
+                    if (strcasecmp((string)$host, $hostname) === 0) {
+                        return $rid !== '' ? $rid : 'route-sin-id';
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private static function deleteRouteById(string $caddyApi, string $routeId): bool
+    {
+        $ch = curl_init("{$caddyApi}/id/{$routeId}");
+        curl_setopt_array($ch, [
+            CURLOPT_CUSTOMREQUEST => 'DELETE',
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 8,
+        ]);
+        curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        return ($httpCode >= 200 && $httpCode < 300) || $httpCode === 404;
+    }
+
+    private static function warmupPanelDomainTls(string $hostname): void
+    {
+        $ch = curl_init("https://{$hostname}/");
+        curl_setopt_array($ch, [
+            CURLOPT_NOBODY => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_SSL_VERIFYHOST => 0,
+            CURLOPT_RESOLVE => ["{$hostname}:443:127.0.0.1"],
+        ]);
+        curl_exec($ch);
+        curl_close($ch);
+    }
+
+    private static function buildPanelDomainDnsWarning(string $hostname): string
+    {
+        $publicIp = trim((string)@file_get_contents(
+            'https://ifconfig.me/ip',
+            false,
+            stream_context_create(['http' => ['timeout' => 3]])
+        ));
+        if ($publicIp === '') {
+            $publicIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
+        }
+        if ($publicIp === '') {
+            return '';
+        }
+
+        $dns = CloudflareService::checkDomainDns($hostname, $publicIp);
+        $status = (string)($dns['status'] ?? '');
+
+        if ($status === 'ok') {
+            return '';
+        }
+
+        if ($status === 'none') {
+            return "Dominio guardado, pero {$hostname} aun no tiene registro A en DNS. Sin DNS no habra certificado publico.";
+        }
+
+        if ($status === 'elsewhere') {
+            $ips = implode(', ', $dns['ips'] ?? []);
+            return "Dominio guardado. DNS de {$hostname} apunta a {$ips}, no a este servidor ({$publicIp}).";
+        }
+
+        if ($status === 'cloudflare') {
+            return "Dominio guardado. {$hostname} parece pasar por Cloudflare; revisa SSL mode (Full/Strict) y que el origen este accesible.";
+        }
+
+        return '';
     }
 
     /**

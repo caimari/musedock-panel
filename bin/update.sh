@@ -56,8 +56,21 @@ if [ ! -x "$PHP_BIN" ]; then
     PHP_BIN="/usr/bin/php"
 fi
 
+read_panel_version() {
+    local ver=""
+    # Preferred source (current architecture)
+    if [ -f "${PANEL_DIR}/config/panel.php" ]; then
+        ver=$(sed -n "s/.*'version'[[:space:]]*=>[[:space:]]*'\\([0-9][0-9.]*\\)'.*/\\1/p" "${PANEL_DIR}/config/panel.php" | head -1)
+    fi
+    # Legacy fallback
+    if [ -z "$ver" ] && [ -f "${PANEL_DIR}/public/index.php" ]; then
+        ver=$(sed -n "s/.*PANEL_VERSION'.*'\\([0-9][0-9.]*\\)'.*/\\1/p" "${PANEL_DIR}/public/index.php" | head -1)
+    fi
+    echo "$ver"
+}
+
 # Get current version
-CURRENT_VERSION=$(sed -n "s/.*PANEL_VERSION'.*'\\([0-9][0-9.]*\\)'.*/\\1/p" "${PANEL_DIR}/public/index.php" | head -1)
+CURRENT_VERSION=$(read_panel_version)
 
 echo ""
 echo -e "${CYAN}${BOLD}"
@@ -137,7 +150,7 @@ fi
 echo ""
 
 # Read new version
-NEW_VERSION=$(sed -n "s/.*PANEL_VERSION'.*'\\([0-9][0-9.]*\\)'.*/\\1/p" "${PANEL_DIR}/public/index.php" | head -1)
+NEW_VERSION=$(read_panel_version)
 
 if [ -n "$NEW_VERSION" ] && [ "$NEW_VERSION" != "$CURRENT_VERSION" ]; then
     echo -e "  ${GREEN}${BOLD}Version: ${CURRENT_VERSION} → ${NEW_VERSION}${NC}"

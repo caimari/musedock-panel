@@ -61,7 +61,7 @@
                     <div class="mb-3">
                         <label class="form-label">Dominio del panel <small class="text-muted">(opcional)</small></label>
                         <input type="text" name="panel_hostname" class="form-control" value="<?= View::e($settings['panel_hostname'] ?? '') ?>" placeholder="panel.ejemplo.com">
-                        <small class="text-muted">Si pones un dominio, Caddy generara certificado SSL automatico. Vacio = acceso por IP.</small>
+                        <small class="text-muted">Al guardar, el panel crea/actualiza la ruta HTTPS en Caddy para este dominio. Si el DNS apunta aqui, el certificado publico se emite automaticamente.</small>
                     </div>
 
                     <div class="mb-3">
@@ -91,14 +91,19 @@
                     <div class="mb-3">
                         <label class="form-label">URL de acceso actual</label>
                         <?php
-                        $proto = $detectedProto;
                         $host = !empty($settings['panel_hostname']) ? $settings['panel_hostname'] : $serverIp;
-                        $panelUrl = "{$proto}://{$host}:{$panelPort}";
+                        $panelUrl = !empty($settings['panel_hostname'])
+                            ? "https://{$host}"
+                            : "https://{$host}:{$panelPort}";
+                        $fallbackUrl = "https://{$host}:{$panelPort}";
                         ?>
                         <div class="input-group">
                             <input type="text" class="form-control" value="<?= View::e($panelUrl) ?>" disabled>
                             <button class="btn btn-outline-light" type="button" onclick="navigator.clipboard.writeText('<?= View::e($panelUrl) ?>')"><i class="bi bi-clipboard"></i></button>
                         </div>
+                        <?php if (!empty($settings['panel_hostname'])): ?>
+                            <small class="text-muted d-block mt-1">Fallback emergencia: <?= View::e($fallbackUrl) ?> (certificado interno).</small>
+                        <?php endif; ?>
                     </div>
 
                     <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Guardar</button>

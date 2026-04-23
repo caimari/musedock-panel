@@ -667,8 +667,15 @@ class SettingsController
     public function serverSave(): void
     {
         $timezone = trim($_POST['timezone'] ?? '');
-        $panelHostname = trim($_POST['panel_hostname'] ?? '');
+        $panelHostnameRaw = trim($_POST['panel_hostname'] ?? '');
+        $panelHostname = $this->normalizePanelHostname($panelHostnameRaw);
         $panelProtocol = trim($_POST['panel_protocol'] ?? 'http');
+
+        if ($panelHostnameRaw !== '' && $panelHostname === '') {
+            Flash::set('error', 'Dominio del panel invalido. Usa solo hostname (ej: panel.ejemplo.com), sin http:// ni /ruta.');
+            Router::redirect('/settings/server');
+            return;
+        }
 
         // Validate timezone
         if (!empty($timezone) && in_array($timezone, \DateTimeZone::listIdentifiers())) {
@@ -685,9 +692,52 @@ class SettingsController
         $serverIp = trim(shell_exec("hostname -I | awk '{print \$1}'") ?? '');
         \MuseDockPanel\Settings::set('server_ip', $serverIp);
 
+        $routeApplied = false;
+        if ($panelHostname !== '') {
+            $result = \MuseDockPanel\Services\SystemService::configurePanelDomainRoute($panelHostname);
+            if ($result['ok'] ?? false) {
+                $routeApplied = true;
+                if (!empty($result['warning'])) {
+                    Flash::set('warning', (string)$result['warning']);
+                }
+            } else {
+                Flash::set('warning', 'Configuracion guardada, pero no se pudo activar HTTPS automatico en Caddy: ' . (string)($result['error'] ?? 'error desconocido'));
+            }
+        } else {
+            \MuseDockPanel\Services\SystemService::removePanelDomainRoute();
+        }
+
         LogService::log('settings.server', 'server', "Updated server settings: tz={$timezone}, hostname={$panelHostname}, protocol={$panelProtocol}");
-        Flash::set('success', 'Configuracion del servidor guardada.');
+        if ($routeApplied) {
+            Flash::set('success', "Configuracion guardada. Acceso recomendado: https://{$panelHostname}/");
+        } else {
+            Flash::set('success', 'Configuracion del servidor guardada.');
+        }
         Router::redirect('/settings/server');
+    }
+
+    private function normalizePanelHostname(string $value): string
+    {
+        $host = strtolower(trim($value));
+        if ($host === '') {
+            return '';
+        }
+
+        $host = preg_replace('#^https?://#i', '', $host);
+        $host = explode('/', $host)[0] ?? '';
+        $host = preg_replace('/:\d+$/', '', $host);
+        $host = rtrim($host, '.');
+
+        if ($host === '' || str_contains($host, ' ')) {
+            return '';
+        }
+
+        // Require a real FQDN (at least one dot). Keep it strict for TLS automation.
+        if (!preg_match('/^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/', $host)) {
+            return '';
+        }
+
+        return $host;
     }
 
     // ================================================================
