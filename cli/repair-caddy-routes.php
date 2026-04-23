@@ -29,6 +29,17 @@ if (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi
     fwrite(STDERR, "[repair-caddy] ERROR: no se pudo preparar srv0/listeners.\n");
     exit(1);
 }
+
+// Post-check: do not report success if Caddy still returns malformed listen/routes payloads.
+$listenRaw = @file_get_contents("{$caddyApi}/config/apps/http/servers/srv0/listen");
+$routesRaw = @file_get_contents("{$caddyApi}/config/apps/http/servers/srv0/routes");
+$listen = json_decode((string)$listenRaw, true);
+$routes = json_decode((string)$routesRaw, true);
+if (!is_array($listen) || !array_is_list($listen) || !is_array($routes) || !array_is_list($routes)) {
+    fwrite(STDERR, "[repair-caddy] ERROR: srv0 incompleto (listen=" . trim((string)$listenRaw) . ", routes=" . trim((string)$routesRaw) . ").\n");
+    exit(1);
+}
+
 echo "[repair-caddy] OK: srv0/listeners activos.\n";
 
 try {

@@ -1156,12 +1156,31 @@ CONF;
                 return false;
             }
         } elseif ($routesCode >= 200 && $routesCode < 300) {
-            // Safety first on production nodes: never reset routes automatically.
-            // If routes payload is malformed, fail safe and require explicit manual repair.
-            $decodedRoutes = json_decode((string)$routesRaw, true);
-            $isValidList = is_array($decodedRoutes) && array_is_list($decodedRoutes);
-            if (!$isValidList) {
-                return false;
+            // Recover only from the specific broken state observed in some nodes:
+            // routes endpoint returns null/empty after srv0 listen patching.
+            // Do not touch routes in any other malformed case.
+            $routesRawTrim = trim((string)$routesRaw);
+            if ($routesRawTrim === '' || strtolower($routesRawTrim) === 'null') {
+                $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+                curl_setopt_array($ch, [
+                    CURLOPT_CUSTOMREQUEST => 'PUT',
+                    CURLOPT_POSTFIELDS => json_encode([]),
+                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 8,
+                ]);
+                curl_exec($ch);
+                $putCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                if (!($putCode >= 200 && $putCode < 300)) {
+                    return false;
+                }
+            } else {
+                $decodedRoutes = json_decode((string)$routesRaw, true);
+                $isValidList = is_array($decodedRoutes) && array_is_list($decodedRoutes);
+                if (!$isValidList) {
+                    return false;
+                }
             }
         } else {
             return false;
