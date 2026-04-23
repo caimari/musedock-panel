@@ -112,6 +112,27 @@
                     </div>
 
                     <div class="mb-3">
+                        <div class="rounded p-3" style="border:1px solid rgba(251,191,36,0.35); background:rgba(234,179,8,0.08);">
+                            <div class="fw-semibold mb-2"><i class="bi bi-lightning-charge me-1"></i>Formula rapida: renovar cert con firewall estricto (HTTP-01)</div>
+                            <div class="small text-muted mb-2">
+                                Si tu panel usa <strong>HTTP-01/TLS-ALPN-01</strong> y normalmente tienes firewall cerrado, abre temporalmente 80/443, repara Caddy y vuelve a cerrar.
+                                En <strong>Ajustes &gt; Firewall</strong> ahora activar/desactivar UFW pide contrasena de administrador.
+                            </div>
+                            <div class="p-2 rounded mb-2" style="background:rgba(2,6,23,0.55); border:1px solid rgba(148,163,184,0.2); font-family:monospace; font-size:0.86rem; line-height:1.45;">
+                                <code>ufw allow 80/tcp</code><br>
+                                <code>ufw allow 443/tcp</code><br>
+                                <code>cd /opt/musedock-panel &amp;&amp; php cli/repair-caddy-routes.php</code><br>
+                                <code>curl -kI https://PANEL_DOMINIO:<?= (int)$panelPort ?>/login</code><br>
+                                <code>ufw delete allow 80/tcp</code><br>
+                                <code>ufw delete allow 443/tcp</code>
+                            </div>
+                            <div class="small text-muted">
+                                Si no quieres abrir puertos nunca, usa modo <strong>DNS-01</strong> o <strong>self-signed</strong>.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
                         <div class="rounded p-3" style="border:1px solid rgba(56,189,248,0.32); background:rgba(2,132,199,0.08);">
                             <div class="fw-semibold mb-2"><i class="bi bi-info-circle me-1"></i>Notas operativas TLS (admin)</div>
                             <div class="small text-muted mb-1">Acceso de emergencia recomendado: <code>https://IP_DEL_SERVIDOR:<?= (int)$panelPort ?></code> (fallback por IP activo).</div>

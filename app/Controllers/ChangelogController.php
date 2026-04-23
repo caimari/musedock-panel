@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.69',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'Firewall (UFW): activar/desactivar ahora requiere confirmacion con contrasena de administrador en modal, para evitar cambios accidentales o sin autorizacion',
+                            'TLS panel (Settings > Servidor): nueva formula operativa visible para renovacion HTTP-01 con ventana corta de firewall (abrir 80/443, reparar Caddy, verificar y cerrar)',
+                        ],
+                        'en' => [
+                            'Firewall (UFW): enable/disable now requires admin-password confirmation in modal, preventing accidental or unauthorized changes',
+                            'Panel TLS (Settings > Server): new visible operational recipe for HTTP-01 renewal with a short firewall window (open 80/443, repair Caddy, verify, then close)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.68',
                 'date' => '2026-04-23',
                 'badge' => 'primary',

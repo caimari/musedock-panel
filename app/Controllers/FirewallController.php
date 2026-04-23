@@ -4,6 +4,7 @@ namespace MuseDockPanel\Controllers;
 use MuseDockPanel\View;
 use MuseDockPanel\Flash;
 use MuseDockPanel\Settings;
+use MuseDockPanel\Database;
 use MuseDockPanel\Services\FirewallService;
 use MuseDockPanel\Services\LogService;
 
@@ -221,6 +222,11 @@ class FirewallController
     public function enableFirewall(): void
     {
         View::verifyCsrf();
+        $password = (string)($_POST['admin_password'] ?? '');
+
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'activar el firewall')) {
+            exit;
+        }
 
         $result = FirewallService::ufwEnable();
 
@@ -238,6 +244,11 @@ class FirewallController
     public function disableFirewall(): void
     {
         View::verifyCsrf();
+        $password = (string)($_POST['admin_password'] ?? '');
+
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'desactivar el firewall')) {
+            exit;
+        }
 
         $result = FirewallService::ufwDisable();
 
@@ -300,5 +311,34 @@ class FirewallController
             'hosting'     => $hostSuggestions,
         ]);
         exit;
+    }
+
+    private function verifyAdminPasswordOrRedirect(string $password, string $actionLabel): bool
+    {
+        $password = trim($password);
+        if ($password === '') {
+            Flash::set('error', "Contrasena de administrador requerida para {$actionLabel}.");
+            header('Location: /settings/firewall');
+            return false;
+        }
+
+        $adminId = (int)($_SESSION['panel_user']['id'] ?? 0);
+        if ($adminId < 1) {
+            Flash::set('error', 'Sesion no valida. Inicia sesion de nuevo.');
+            header('Location: /login');
+            return false;
+        }
+
+        $admin = Database::fetchOne(
+            "SELECT password_hash FROM panel_admins WHERE id = :id",
+            ['id' => $adminId]
+        );
+        if (!$admin || !password_verify($password, (string)($admin['password_hash'] ?? ''))) {
+            Flash::set('error', 'Contrasena de administrador incorrecta.');
+            header('Location: /settings/firewall');
+            return false;
+        }
+
+        return true;
     }
 }

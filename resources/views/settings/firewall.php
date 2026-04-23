@@ -159,6 +159,7 @@
                     <?php if ($active): ?>
                         <form method="POST" action="/settings/firewall/disable" class="d-inline" onsubmit="return confirmDisable(this)">
                             <?= View::csrf() ?>
+                            <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
                             <button type="submit" class="btn btn-outline-danger btn-sm">
                                 <i class="bi bi-shield-x me-1"></i>Desactivar UFW
                             </button>
@@ -166,6 +167,7 @@
                     <?php else: ?>
                         <form method="POST" action="/settings/firewall/enable" class="d-inline" onsubmit="return confirmEnable(this)">
                             <?= View::csrf() ?>
+                            <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
                             <button type="submit" class="btn btn-outline-success btn-sm">
                                 <i class="bi bi-shield-check me-1"></i>Activar UFW
                             </button>
@@ -794,7 +796,12 @@ function confirmEnable(form) {
     if (typeof Swal !== 'undefined') {
         Swal.fire({
             title: 'Activar Firewall',
-            html: '¿Seguro que quieres activar el firewall UFW?<br><small class="text-muted">Asegurate de que las reglas permiten tu acceso al servidor.</small>',
+            html:
+                '¿Seguro que quieres activar el firewall UFW?<br><small class="text-muted">Asegurate de que las reglas permiten tu acceso al servidor.</small>' +
+                '<div class="mt-3 text-start">' +
+                '<label for="swal-fw-enable-password" class="form-label small mb-1">Contrasena admin</label>' +
+                '<input type="password" id="swal-fw-enable-password" class="swal2-input m-0" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;" placeholder="Tu contrasena de administrador" autocomplete="current-password">' +
+                '</div>',
             icon: 'question',
             showCancelButton: true,
             confirmButtonText: 'Si, activar',
@@ -803,22 +810,43 @@ function confirmEnable(form) {
             color: '#cdd6f4',
             confirmButtonColor: '#198754',
             cancelButtonColor: '#585b70',
+            preConfirm: function() {
+                var pwd = document.getElementById('swal-fw-enable-password').value;
+                if (!pwd) {
+                    Swal.showValidationMessage('Debes ingresar tu contrasena de administrador');
+                    return false;
+                }
+                return pwd;
+            }
         }).then(function(result) {
             if (result.isConfirmed) {
+                var pwdField = form.querySelector('.fw-admin-password-field');
+                if (pwdField) pwdField.value = result.value || '';
                 form.onsubmit = null;
                 form.submit();
             }
         });
         return false;
     }
-    return confirm('¿Activar el firewall UFW?');
+    var confirmed = confirm('¿Activar el firewall UFW?');
+    if (!confirmed) return false;
+    var pwd = prompt('Contrasena de administrador:');
+    if (!pwd) return false;
+    var pwdField = form.querySelector('.fw-admin-password-field');
+    if (pwdField) pwdField.value = pwd;
+    return true;
 }
 
 function confirmDisable(form) {
     if (typeof Swal !== 'undefined') {
         Swal.fire({
             title: 'Desactivar Firewall',
-            html: '<strong class="text-danger">Advertencia:</strong> Desactivar el firewall dejara el servidor sin proteccion.<br>Todas las reglas se desactivaran (pero se conservaran para reactivar).',
+            html:
+                '<strong class="text-danger">Advertencia:</strong> Desactivar el firewall dejara el servidor sin proteccion.<br>Todas las reglas se desactivaran (pero se conservaran para reactivar).' +
+                '<div class="mt-3 text-start">' +
+                '<label for="swal-fw-disable-password" class="form-label small mb-1">Contrasena admin</label>' +
+                '<input type="password" id="swal-fw-disable-password" class="swal2-input m-0" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;" placeholder="Tu contrasena de administrador" autocomplete="current-password">' +
+                '</div>',
             icon: 'warning',
             showCancelButton: true,
             confirmButtonText: 'Si, desactivar',
@@ -827,15 +855,31 @@ function confirmDisable(form) {
             color: '#cdd6f4',
             confirmButtonColor: '#dc3545',
             cancelButtonColor: '#585b70',
+            preConfirm: function() {
+                var pwd = document.getElementById('swal-fw-disable-password').value;
+                if (!pwd) {
+                    Swal.showValidationMessage('Debes ingresar tu contrasena de administrador');
+                    return false;
+                }
+                return pwd;
+            }
         }).then(function(result) {
             if (result.isConfirmed) {
+                var pwdField = form.querySelector('.fw-admin-password-field');
+                if (pwdField) pwdField.value = result.value || '';
                 form.onsubmit = null;
                 form.submit();
             }
         });
         return false;
     }
-    return confirm('¿Desactivar el firewall UFW? El servidor quedara sin proteccion.');
+    var confirmed = confirm('¿Desactivar el firewall UFW? El servidor quedara sin proteccion.');
+    if (!confirmed) return false;
+    var pwd = prompt('Contrasena de administrador:');
+    if (!pwd) return false;
+    var pwdField = form.querySelector('.fw-admin-password-field');
+    if (pwdField) pwdField.value = pwd;
+    return true;
 }
 
 function confirmEmergency(form) {
