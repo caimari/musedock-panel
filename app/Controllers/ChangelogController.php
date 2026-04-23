@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.66',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'UX TLS (Settings > Servidor): ayuda contextual ampliada para distinguir uso de Email ACME, fallback por IP y escenario HSTS `includeSubDomains`',
+                            'Guia operativa en UI: recomendaciones explicitas para acceso admin por IP (`:8444`) y uso de DNS-01 cuando se quiere certificado publico sin abrir puertos',
+                        ],
+                        'en' => [
+                            'TLS UX (Settings > Server): expanded contextual guidance for ACME email usage, IP fallback, and `includeSubDomains` HSTS scenarios',
+                            'Operational UI guide: explicit recommendations for admin IP access (`:8444`) and DNS-01 when public certs are required without opening ports',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.65',
                 'date' => '2026-04-23',
                 'badge' => 'primary',

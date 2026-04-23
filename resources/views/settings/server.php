@@ -85,7 +85,7 @@
                     <div class="mb-3" id="acme_email_wrap" style="<?= in_array($panelTlsMode, ['http01', 'dns01'], true) ? '' : 'display:none;' ?>">
                         <label class="form-label">Email ACME</label>
                         <input type="email" name="panel_acme_email" class="form-control" value="<?= View::e($settings['panel_acme_email'] ?? '') ?>" placeholder="webmaster@domain.com">
-                        <small class="text-muted">Email para Let's Encrypt (avisos de expiracion).</small>
+                        <small class="text-muted">Solo se usa en modos HTTP-01/DNS-01 para Let's Encrypt (avisos de expiracion).</small>
                     </div>
 
                     <div class="mb-3" id="dns_provider_wrap" style="<?= $panelTlsMode === 'dns01' ? '' : 'display:none;' ?>">
@@ -108,6 +108,15 @@
                             <div class="small text-muted mb-1"><strong>A) Self-signed:</strong> no depende de Internet ni ACME. Ideal para panel privado con firewall estricto.</div>
                             <div class="small text-muted mb-1"><strong>B) HTTP-01/TLS-ALPN-01:</strong> requiere puertos 80/443 alcanzables desde Internet durante emision/renovacion (si falla, entra fallback interno para no bloquear acceso).</div>
                             <div class="small text-muted"><strong>C) DNS-01:</strong> no requiere abrir 80/443 para certificar, pero exige proveedor DNS con API y modulo Caddy instalado (tambien con fallback interno).</div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="rounded p-3" style="border:1px solid rgba(56,189,248,0.32); background:rgba(2,132,199,0.08);">
+                            <div class="fw-semibold mb-2"><i class="bi bi-info-circle me-1"></i>Notas operativas TLS (admin)</div>
+                            <div class="small text-muted mb-1">Acceso de emergencia recomendado: <code>https://IP_DEL_SERVIDOR:<?= (int)$panelPort ?></code> (fallback por IP activo).</div>
+                            <div class="small text-muted mb-1">Si el dominio raiz usa HSTS con <code>includeSubDomains</code>, el navegador puede bloquear subdominios admin con cert no publico.</div>
+                            <div class="small text-muted">Para eliminar warnings en hostname admin sin abrir puertos, usa modo <strong>DNS-01</strong> con proveedor DNS API.</div>
                         </div>
                     </div>
 
