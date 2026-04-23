@@ -382,7 +382,8 @@ CONF;
      *
      * Policy structure:
      * 1. Per-account policies: each CF account's domains get DNS-01 with their specific token
-     * 2. Catch-all: HTTP-01 first (for non-CF domains), DNS-01 with primary token as fallback
+     * 2. Panel IP fallback policy: internal issuer for server IPs (safe emergency admin access)
+     * 3. Catch-all: HTTP-01 first (for non-CF domains), DNS-01 with primary token as fallback
      */
     public static function ensureTlsCatchAllPolicy(string $caddyApi): void
     {
@@ -429,10 +430,53 @@ CONF;
             }
         }
 
+        // Dedicated policy for panel IP access (e.g. https://SERVER_IP:8444)
+        // This avoids lockouts when ACME cannot issue certificates.
+        $panelIpPolicy = self::buildPanelIpFallbackPolicy();
+        if ($panelIpPolicy !== null) {
+            $newPolicies[] = $panelIpPolicy;
+        }
+
         // Catch-all: HTTP-01 first (non-CF domains), DNS-01 fallback (CF domains with primary token)
         $newPolicies[] = self::buildCfPolicy($cfToken, [], $canUseCloudflareDns);
 
         self::patchTlsPolicies($caddyApi, $newPolicies);
+    }
+
+    private static function buildPanelIpFallbackPolicy(): ?array
+    {
+        $subjects = [];
+
+        $storedServerIp = trim((string)\MuseDockPanel\Settings::get('server_ip', ''));
+        if ($storedServerIp !== '' && filter_var($storedServerIp, FILTER_VALIDATE_IP)) {
+            $subjects[$storedServerIp] = true;
+        }
+
+        $rawIps = trim((string)shell_exec('hostname -I 2>/dev/null'));
+        if ($rawIps !== '') {
+            $detectedIps = preg_split('/\s+/', $rawIps) ?: [];
+            foreach ($detectedIps as $ip) {
+                $ip = trim((string)$ip);
+                if ($ip !== '' && filter_var($ip, FILTER_VALIDATE_IP)) {
+                    $subjects[$ip] = true;
+                }
+            }
+        }
+
+        // Always keep local loopback available for local diagnostics/recovery.
+        $subjects['127.0.0.1'] = true;
+
+        $subjects = array_keys($subjects);
+        if (empty($subjects)) {
+            return null;
+        }
+
+        return [
+            'subjects' => $subjects,
+            'issuers' => [[
+                'module' => 'internal',
+            ]],
+        ];
     }
 
     private static function buildCfPolicy(string $cfToken, array $subjects = [], bool $allowDns = true): array

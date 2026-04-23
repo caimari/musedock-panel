@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.63',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'TLS panel por IP: nueva policy dedicada con certificado interno para `server_ip`/IPs del nodo, evitando bloqueo de acceso admin por IP cuando ACME falla',
+                            'Hardening TLS admin: el fallback por IP ya no depende del catch-all ACME de hostings, evitando mezclar disponibilidad del panel con certificados publicos de clientes',
+                        ],
+                        'en' => [
+                            'Panel IP TLS: new dedicated internal-certificate policy for `server_ip`/node IPs, preventing admin IP lockout when ACME fails',
+                            'Admin TLS hardening: IP fallback no longer depends on hosting catch-all ACME policy, keeping panel availability separated from customer public certs',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.62',
                 'date' => '2026-04-23',
                 'badge' => 'primary',
