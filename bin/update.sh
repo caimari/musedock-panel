@@ -267,6 +267,13 @@ if [ -d "$CMS_DIR" ]; then
             NEEDS_UPDATE=true
         fi
 
+        # verify-caddy-status: normalize duplicated env prefix from old updater runs
+        NORMALIZED_VERIFY=$(echo "$CURRENT_CRONTAB" | sed -E '/verify-caddy-status\.php/ s#(MUSEDOCK_CADDY_CRON_AUTOREPAIR=0[[:space:]]+)+#MUSEDOCK_CADDY_CRON_AUTOREPAIR=0 #g')
+        if [ "$NORMALIZED_VERIFY" != "$CURRENT_CRONTAB" ]; then
+            CURRENT_CRONTAB="$NORMALIZED_VERIFY"
+            NEEDS_UPDATE=true
+        fi
+
         # cron-plugins: */15 -> 8,23,38,53 (offset +8 min)
         if echo "$CURRENT_CRONTAB" | grep -q '^\*/15.*cron-plugins'; then
             CURRENT_CRONTAB=$(echo "$CURRENT_CRONTAB" | sed 's|^\*/15\(.*cron-plugins\)|8,23,38,53\1|')
