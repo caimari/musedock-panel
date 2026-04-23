@@ -862,7 +862,7 @@ CONF;
         $panelPublicPort = 8444;
         $internalPort = self::getPanelInternalPort();
 
-        $routesResult = self::fetchCaddyRoutes($caddyApi);
+        $routesResult = self::fetchCaddyRoutes($caddyApi, true);
         if (!($routesResult['ok'] ?? false)) {
             return ['ok' => false, 'error' => (string)($routesResult['error'] ?? 'No se pudo leer la config de Caddy')];
         }
@@ -958,19 +958,21 @@ CONF;
     }
 
     /**
-     * Ensure Caddy has srv0 and that it listens on 443.
+     * Ensure Caddy has srv0 and required listeners.
+     * By default only enforces :443 (hosting path). When $enforcePanelPort is true,
+     * also enforces panel public port (8444 by default).
+     *
      * Returns false only when the admin API is unreachable or the config cannot be repaired.
      */
-    public static function ensureCaddyHttpServerReady(string $caddyApi): bool
+    public static function ensureCaddyHttpServerReady(string $caddyApi, bool $enforcePanelPort = false): bool
     {
-        $panelPort = self::getPanelPublicPort();
-        $panelListen = ':' . $panelPort;
-        // Always preserve:
-        // - :443 for customer hostings
-        // - :8444 for panel/admin fallback (IP or admin hostname with explicit port)
-        $requiredListen = [':443', ':8444'];
-        if ($panelListen !== ':443' && $panelListen !== ':8444') {
-            $requiredListen[] = $panelListen;
+        $requiredListen = [':443'];
+        if ($enforcePanelPort) {
+            $panelPort = self::getPanelPublicPort();
+            $panelListen = ':' . $panelPort;
+            if (!in_array($panelListen, $requiredListen, true)) {
+                $requiredListen[] = $panelListen;
+            }
         }
 
         $serverUrl = "{$caddyApi}/config/apps/http/servers/srv0";
@@ -1169,9 +1171,9 @@ CONF;
         return true;
     }
 
-    private static function fetchCaddyRoutes(string $caddyApi): array
+    private static function fetchCaddyRoutes(string $caddyApi, bool $enforcePanelPort = false): array
     {
-        if (!self::ensureCaddyHttpServerReady($caddyApi)) {
+        if (!self::ensureCaddyHttpServerReady($caddyApi, $enforcePanelPort)) {
             return ['ok' => false, 'error' => 'No se pudo preparar srv0/listeners en Caddy'];
         }
 

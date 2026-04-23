@@ -25,7 +25,7 @@ $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
 
 echo "[repair-caddy] API: {$caddyApi}\n";
 
-if (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi)) {
+if (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi, true)) {
     fwrite(STDERR, "[repair-caddy] ERROR: no se pudo preparar srv0/listeners.\n");
     exit(1);
 }
