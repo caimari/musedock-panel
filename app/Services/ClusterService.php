@@ -10,9 +10,34 @@ use MuseDockPanel\Services\NotificationService;
 
 class ClusterService
 {
+    private static ?bool $clusterNodesHasStandby = null;
+
     // ═══════════════════════════════════════════════════════════
     // ─── Node Management ─────────────────────────────────────
     // ═══════════════════════════════════════════════════════════
+
+    private static function clusterNodesHasStandbyColumn(): bool
+    {
+        if (self::$clusterNodesHasStandby !== null) {
+            return self::$clusterNodesHasStandby;
+        }
+
+        try {
+            $row = Database::fetchOne(
+                "SELECT 1
+                 FROM information_schema.columns
+                 WHERE table_schema = 'public'
+                   AND table_name = 'cluster_nodes'
+                   AND column_name = 'standby'
+                 LIMIT 1"
+            );
+            self::$clusterNodesHasStandby = !empty($row);
+        } catch (\Throwable) {
+            self::$clusterNodesHasStandby = false;
+        }
+
+        return self::$clusterNodesHasStandby;
+    }
 
     public static function getNodes(): array
     {
@@ -28,7 +53,11 @@ class ClusterService
     /** Get only nodes NOT in standby — use for sync, queue processing, alerts */
     public static function getActiveNodes(): array
     {
-        return Database::fetchAll('SELECT * FROM cluster_nodes WHERE standby = false ORDER BY name');
+        if (self::clusterNodesHasStandbyColumn()) {
+            return Database::fetchAll('SELECT * FROM cluster_nodes WHERE standby = false ORDER BY name');
+        }
+        // Legacy schema fallback: standby column missing
+        return Database::fetchAll('SELECT * FROM cluster_nodes ORDER BY name');
     }
 
     public static function getNode(int $id): ?array
@@ -403,14 +432,27 @@ class ClusterService
 
     public static function getPendingQueue(int $nodeId = 0): array
     {
+        $standbyFilter = self::clusterNodesHasStandbyColumn()
+            ? ' AND (n.standby IS NULL OR n.standby = false)'
+            : '';
+
         if ($nodeId > 0) {
             return Database::fetchAll(
-                "SELECT q.*, n.name AS node_name FROM cluster_queue q LEFT JOIN cluster_nodes n ON n.id = q.node_id WHERE q.status = 'pending' AND q.node_id = :nid AND (n.standby IS NULL OR n.standby = false) ORDER BY q.priority ASC, q.scheduled_at ASC",
+                "SELECT q.*, n.name AS node_name
+                 FROM cluster_queue q
+                 LEFT JOIN cluster_nodes n ON n.id = q.node_id
+                 WHERE q.status = 'pending'
+                   AND q.node_id = :nid{$standbyFilter}
+                 ORDER BY q.priority ASC, q.scheduled_at ASC",
                 ['nid' => $nodeId]
             );
         }
         return Database::fetchAll(
-            "SELECT q.*, n.name AS node_name FROM cluster_queue q LEFT JOIN cluster_nodes n ON n.id = q.node_id WHERE q.status = 'pending' AND (n.standby IS NULL OR n.standby = false) ORDER BY q.priority ASC, q.scheduled_at ASC"
+            "SELECT q.*, n.name AS node_name
+             FROM cluster_queue q
+             LEFT JOIN cluster_nodes n ON n.id = q.node_id
+             WHERE q.status = 'pending'{$standbyFilter}
+             ORDER BY q.priority ASC, q.scheduled_at ASC"
         );
     }
 

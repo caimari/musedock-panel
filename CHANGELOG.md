@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.74] — 2026-04-23
+
+### Fixed
+- Cluster legacy-safe queue: `ClusterService` ahora detecta en runtime si existe `cluster_nodes.standby`; si falta en un nodo legacy, omite el filtro `n.standby` y evita el error `SQLSTATE[42703] column n.standby does not exist`.
+- Compatibilidad de lectura en nodos mixtos: `getActiveNodes()` cae a `SELECT * FROM cluster_nodes` cuando el esquema aún no tiene standby, evitando ruptura del worker durante ventanas de actualización.
+
 ## [1.0.73] — 2026-04-23
 
 ### Fixed

@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.74',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Cluster legacy-safe queue: `ClusterService` detecta en runtime si existe `cluster_nodes.standby`; si falta en un nodo legacy, omite el filtro `n.standby` para evitar `SQLSTATE[42703]` en el worker',
+                            'Compatibilidad en nodos mixtos: `getActiveNodes()` usa fallback sin standby cuando el esquema todavia no tiene esa columna, evitando caidas durante ventanas de update',
+                        ],
+                        'en' => [
+                            'Legacy-safe cluster queue: `ClusterService` now checks at runtime whether `cluster_nodes.standby` exists; when missing on legacy nodes, it skips the `n.standby` filter to avoid worker `SQLSTATE[42703]` errors',
+                            'Mixed-node compatibility: `getActiveNodes()` now falls back to non-standby queries when schema lag exists, preventing update-window worker failures',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.73',
                 'date' => '2026-04-23',
                 'badge' => 'primary',
