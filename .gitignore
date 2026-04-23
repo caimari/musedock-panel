@@ -1,7 +1,10 @@
 storage/backups/
+storage/db-backups/
 storage/sessions/
 storage/cache/
 storage/logs/
+storage/tls/*
+!storage/tls/.gitkeep
 storage/*.lock
 storage/*.json
 storage/*.flag

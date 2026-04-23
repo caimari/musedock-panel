@@ -126,7 +126,14 @@ SELF_HASH_BEFORE=$(md5sum "$SELF_SCRIPT" 2>/dev/null | cut -d' ' -f1)
 
 # Pull
 BEFORE_HASH=$(git rev-parse HEAD 2>/dev/null)
-git pull --ff-only origin main 2>&1 | sed 's/^/    /'
+set +e
+PULL_OUTPUT=$(git pull --ff-only origin main 2>&1)
+PULL_RC=$?
+set -e
+echo "$PULL_OUTPUT" | sed 's/^/    /'
+if [ $PULL_RC -ne 0 ]; then
+    fail "git pull failed. Resolve local/untracked conflicts and retry."
+fi
 AFTER_HASH=$(git rev-parse HEAD 2>/dev/null)
 
 if [ "$BEFORE_HASH" = "$AFTER_HASH" ]; then
