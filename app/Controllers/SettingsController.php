@@ -666,15 +666,54 @@ class SettingsController
 
     public function serverSave(): void
     {
+        $previousPanelHostname = $this->normalizePanelHostname((string)\MuseDockPanel\Settings::get('panel_hostname', ''));
+
         $timezone = trim($_POST['timezone'] ?? '');
         $panelHostnameRaw = trim($_POST['panel_hostname'] ?? '');
         $panelHostname = $this->normalizePanelHostname($panelHostnameRaw);
         $panelProtocol = trim($_POST['panel_protocol'] ?? 'http');
+        $panelTlsMode = $this->normalizePanelTlsMode((string)($_POST['panel_tls_mode'] ?? \MuseDockPanel\Settings::get('panel_tls_mode', 'self_signed')));
+        $panelDnsProvider = strtolower(trim((string)($_POST['panel_dns_provider'] ?? '')));
+        $panelDnsProviderConfigRaw = trim((string)($_POST['panel_dns_provider_config'] ?? ''));
+        $panelAcmeEmail = trim((string)($_POST['panel_acme_email'] ?? \MuseDockPanel\Settings::get('panel_acme_email', 'admin@musedock.com')));
+        $panelAcmeEmail = $panelAcmeEmail !== '' ? $panelAcmeEmail : 'admin@musedock.com';
 
         if ($panelHostnameRaw !== '' && $panelHostname === '') {
             Flash::set('error', 'Dominio del panel invalido. Usa solo hostname (ej: panel.ejemplo.com), sin http:// ni /ruta.');
             Router::redirect('/settings/server');
             return;
+        }
+
+        if (!filter_var($panelAcmeEmail, FILTER_VALIDATE_EMAIL)) {
+            Flash::set('error', 'Email ACME invalido.');
+            Router::redirect('/settings/server');
+            return;
+        }
+
+        $panelDnsProviderConfig = [];
+        if ($panelTlsMode === 'dns01') {
+            if ($panelHostname === '') {
+                Flash::set('error', 'DNS-01 requiere dominio del panel configurado.');
+                Router::redirect('/settings/server');
+                return;
+            }
+            if ($panelDnsProvider === '' || !preg_match('/^[a-z0-9][a-z0-9_.-]{1,63}$/i', $panelDnsProvider)) {
+                Flash::set('error', 'Proveedor DNS invalido. Ejemplo: cloudflare, route53, digitalocean.');
+                Router::redirect('/settings/server');
+                return;
+            }
+            if ($panelDnsProviderConfigRaw === '') {
+                Flash::set('error', 'DNS-01 requiere configuracion JSON del proveedor DNS.');
+                Router::redirect('/settings/server');
+                return;
+            }
+            $decoded = json_decode($panelDnsProviderConfigRaw, true);
+            if (!is_array($decoded)) {
+                Flash::set('error', 'JSON de configuracion DNS invalido.');
+                Router::redirect('/settings/server');
+                return;
+            }
+            $panelDnsProviderConfig = $decoded;
         }
 
         // Validate timezone
@@ -687,6 +726,15 @@ class SettingsController
         // Panel hostname (optional — for HTTPS with domain)
         \MuseDockPanel\Settings::set('panel_hostname', $panelHostname);
         \MuseDockPanel\Settings::set('panel_protocol', in_array($panelProtocol, ['http', 'https']) ? $panelProtocol : 'http');
+        \MuseDockPanel\Settings::set('panel_tls_mode', $panelTlsMode);
+        \MuseDockPanel\Settings::set('panel_dns_provider', $panelTlsMode === 'dns01' ? $panelDnsProvider : '');
+        \MuseDockPanel\Settings::set(
+            'panel_dns_provider_config',
+            $panelTlsMode === 'dns01'
+                ? json_encode($panelDnsProviderConfig, JSON_UNESCAPED_SLASHES)
+                : ''
+        );
+        \MuseDockPanel\Settings::set('panel_acme_email', $panelAcmeEmail);
 
         // Detect and store server IP
         $serverIp = trim(shell_exec("hostname -I | awk '{print \$1}'") ?? '');
@@ -704,12 +752,13 @@ class SettingsController
                 Flash::set('warning', 'Configuracion guardada, pero no se pudo activar HTTPS automatico en Caddy: ' . (string)($result['error'] ?? 'error desconocido'));
             }
         } else {
-            \MuseDockPanel\Services\SystemService::removePanelDomainRoute();
+            \MuseDockPanel\Services\SystemService::removePanelDomainRoute($previousPanelHostname);
         }
 
-        LogService::log('settings.server', 'server', "Updated server settings: tz={$timezone}, hostname={$panelHostname}, protocol={$panelProtocol}");
+        LogService::log('settings.server', 'server', "Updated server settings: tz={$timezone}, hostname={$panelHostname}, protocol={$panelProtocol}, tls_mode={$panelTlsMode}");
+        $panelPort = (int)\MuseDockPanel\Env::get('PANEL_PORT', 8444);
         if ($routeApplied) {
-            Flash::set('success', "Configuracion guardada. Acceso recomendado: https://{$panelHostname}:8444/");
+            Flash::set('success', "Configuracion guardada. Acceso recomendado: https://{$panelHostname}:{$panelPort}/");
         } else {
             Flash::set('success', 'Configuracion del servidor guardada.');
         }
@@ -738,6 +787,12 @@ class SettingsController
         }
 
         return $host;
+    }
+
+    private function normalizePanelTlsMode(string $value): string
+    {
+        $mode = strtolower(trim($value));
+        return in_array($mode, ['self_signed', 'http01', 'dns01'], true) ? $mode : 'self_signed';
     }
 
     // ================================================================

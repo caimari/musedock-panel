@@ -61,7 +61,54 @@
                     <div class="mb-3">
                         <label class="form-label">Dominio del panel <small class="text-muted">(opcional)</small></label>
                         <input type="text" name="panel_hostname" class="form-control" value="<?= View::e($settings['panel_hostname'] ?? '') ?>" placeholder="panel.ejemplo.com">
-                        <small class="text-muted">Al guardar, el panel crea/actualiza la ruta HTTPS en Caddy para este dominio. Si el DNS apunta aqui, el certificado publico se emite automaticamente.</small>
+                        <small class="text-muted">Al guardar, el panel crea/actualiza la ruta HTTPS en Caddy para este dominio en el puerto <?= (int)$panelPort ?>.</small>
+                    </div>
+
+                    <div class="mb-3">
+                        <?php
+                            $panelTlsMode = (string)($settings['panel_tls_mode'] ?? 'self_signed');
+                            if (!in_array($panelTlsMode, ['self_signed', 'http01', 'dns01'], true)) {
+                                $panelTlsMode = 'self_signed';
+                            }
+                        ?>
+                        <label class="form-label">TLS del panel (puerto <?= (int)$panelPort ?>)</label>
+                        <select class="form-select" name="panel_tls_mode" id="panel_tls_mode">
+                            <option value="self_signed" <?= $panelTlsMode === 'self_signed' ? 'selected' : '' ?>>Certificado interno/autofirmado (recomendado para admin privado)</option>
+                            <option value="http01" <?= $panelTlsMode === 'http01' ? 'selected' : '' ?>>Let's Encrypt HTTP-01 / TLS-ALPN-01</option>
+                            <option value="dns01" <?= $panelTlsMode === 'dns01' ? 'selected' : '' ?>>Let's Encrypt DNS-01 (proveedor DNS con API)</option>
+                        </select>
+                        <small class="text-muted">
+                            Recomendado: <strong>self-signed</strong> si el panel esta cerrado por firewall. Usa DNS-01 si quieres certificado publico sin abrir puertos.
+                        </small>
+                    </div>
+
+                    <div class="mb-3" id="acme_email_wrap" style="<?= in_array($panelTlsMode, ['http01', 'dns01'], true) ? '' : 'display:none;' ?>">
+                        <label class="form-label">Email ACME</label>
+                        <input type="email" name="panel_acme_email" class="form-control" value="<?= View::e($settings['panel_acme_email'] ?? 'admin@musedock.com') ?>" placeholder="admin@tu-dominio.com">
+                        <small class="text-muted">Email para Let's Encrypt (avisos de expiracion).</small>
+                    </div>
+
+                    <div class="mb-3" id="dns_provider_wrap" style="<?= $panelTlsMode === 'dns01' ? '' : 'display:none;' ?>">
+                        <label class="form-label">Proveedor DNS (modulo Caddy)</label>
+                        <input type="text" name="panel_dns_provider" class="form-control" value="<?= View::e($settings['panel_dns_provider'] ?? '') ?>" placeholder="cloudflare / route53 / digitalocean / hetzner / ...">
+                        <small class="text-muted">Nombre del modulo en Caddy: <code>dns.providers.&lt;proveedor&gt;</code>.</small>
+                    </div>
+
+                    <div class="mb-3" id="dns_provider_cfg_wrap" style="<?= $panelTlsMode === 'dns01' ? '' : 'display:none;' ?>">
+                        <label class="form-label">Configuracion JSON del proveedor DNS</label>
+                        <textarea name="panel_dns_provider_config" class="form-control" rows="5" placeholder='{"api_token":"..."}'><?= View::e($settings['panel_dns_provider_config'] ?? '') ?></textarea>
+                        <small class="text-muted">
+                            Ejemplos: Cloudflare <code>{"api_token":"..."}</code>, DigitalOcean <code>{"token":"..."}</code>, Route53 <code>{"access_key_id":"...","secret_access_key":"..."}</code>.
+                        </small>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="rounded p-3" style="border:1px solid rgba(148,163,184,0.28); background:rgba(15,23,42,0.45);">
+                            <div class="fw-semibold mb-2">Guia rapida de certificacion del panel</div>
+                            <div class="small text-muted mb-1"><strong>A) Self-signed:</strong> no depende de Internet ni ACME. Ideal para panel privado con firewall estricto.</div>
+                            <div class="small text-muted mb-1"><strong>B) HTTP-01/TLS-ALPN-01:</strong> requiere puertos 80/443 alcanzables desde Internet durante emision/renovacion.</div>
+                            <div class="small text-muted"><strong>C) DNS-01:</strong> no requiere abrir 80/443 para certificar, pero exige proveedor DNS con API y modulo Caddy instalado.</div>
+                        </div>
                     </div>
 
                     <div class="mb-3">
@@ -92,18 +139,14 @@
                         <label class="form-label">URL de acceso actual</label>
                         <?php
                         $host = !empty($settings['panel_hostname']) ? $settings['panel_hostname'] : $serverIp;
-                        $panelUrl = !empty($settings['panel_hostname'])
-                            ? "https://{$host}"
-                            : "https://{$host}:{$panelPort}";
+                        $panelUrl = "https://{$host}:{$panelPort}";
                         $fallbackUrl = "https://{$host}:{$panelPort}";
                         ?>
                         <div class="input-group">
                             <input type="text" class="form-control" value="<?= View::e($panelUrl) ?>" disabled>
                             <button class="btn btn-outline-light" type="button" onclick="navigator.clipboard.writeText('<?= View::e($panelUrl) ?>')"><i class="bi bi-clipboard"></i></button>
                         </div>
-                        <?php if (!empty($settings['panel_hostname'])): ?>
-                            <small class="text-muted d-block mt-1">Fallback emergencia: <?= View::e($fallbackUrl) ?> (certificado interno).</small>
-                        <?php endif; ?>
+                        <small class="text-muted d-block mt-1">Fallback emergencia: <?= View::e($fallbackUrl) ?>.</small>
                     </div>
 
                     <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Guardar</button>
@@ -112,3 +155,24 @@
         </div>
     </div>
 </div>
+
+<script>
+(() => {
+    const modeSel = document.getElementById('panel_tls_mode');
+    const acmeWrap = document.getElementById('acme_email_wrap');
+    const providerWrap = document.getElementById('dns_provider_wrap');
+    const providerCfgWrap = document.getElementById('dns_provider_cfg_wrap');
+
+    if (!modeSel) return;
+    const refresh = () => {
+        const mode = modeSel.value || 'self_signed';
+        const acmeVisible = mode === 'http01' || mode === 'dns01';
+        acmeWrap.style.display = acmeVisible ? '' : 'none';
+        const dnsVisible = mode === 'dns01';
+        providerWrap.style.display = dnsVisible ? '' : 'none';
+        providerCfgWrap.style.display = dnsVisible ? '' : 'none';
+    };
+    modeSel.addEventListener('change', refresh);
+    refresh();
+})();
+</script>

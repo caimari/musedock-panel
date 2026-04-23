@@ -20,6 +20,92 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.61',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'TLS del panel (Settings > Servidor): nuevos 3 modos para el puerto admin (self-signed, HTTP-01/TLS-ALPN-01 y DNS-01 con proveedor DNS configurable)',
+                            'DNS-01 multi-proveedor para el panel: soporte por nombre de modulo Caddy (`dns.providers.<proveedor>`) + configuracion JSON del provider (no solo Cloudflare)',
+                            'Setup first-run: bloque informativo de seguridad/TLS para explicar diferencias entre self-signed, HTTP-01 y DNS-01 antes de crear el admin',
+                        ],
+                        'en' => [
+                            'Panel TLS (Settings > Server): new 3-mode admin-port TLS model (self-signed, HTTP-01/TLS-ALPN-01 and DNS-01 with configurable DNS provider)',
+                            'Multi-provider DNS-01 for panel TLS: support via Caddy module name (`dns.providers.<provider>`) + provider JSON config (not Cloudflare-only)',
+                            'First-run setup: security/TLS guidance block explaining self-signed vs HTTP-01 vs DNS-01 before admin creation',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Caddy panel route: ahora usa siempre el `PANEL_PORT` real (ya no hardcoded) y mantiene coherencia entre URL mostrada, fallback y reglas',
+                            'Politicas TLS del panel: se gestionan de forma dedicada por hostname del panel para no mezclar decision de cert admin con TLS general de hostings',
+                            'Installer (shell): resumen final ampliado con instrucciones claras de los 3 modelos de certificacion del panel admin y requisitos de cada uno',
+                        ],
+                        'en' => [
+                            'Caddy panel route: now always uses real `PANEL_PORT` (no hardcoded value), keeping URL/fallback/rules consistent',
+                            'Panel TLS policies: now managed per panel hostname so admin cert strategy is separated from general hosting TLS policies',
+                            'Installer (shell): expanded final output with clear instructions for the 3 admin-panel certificate models and their requirements',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Settings server save: validaciones de DNS-01 (dominio requerido, proveedor valido, JSON valido, email ACME valido)',
+                            'Limpieza TLS del panel: al quitar dominio del panel, se elimina tambien la policy TLS dedicada para evitar estado residual',
+                            'URL de panel en UI: para hostname configurado muestra acceso correcto por puerto admin (`https://dominio:8444`), evitando confusion con 443',
+                        ],
+                        'en' => [
+                            'Server settings save: DNS-01 validation added (hostname required, provider format, valid JSON, valid ACME email)',
+                            'Panel TLS cleanup: when panel hostname is removed, dedicated panel TLS policy is removed too (no stale policy leftovers)',
+                            'Panel URL in UI: hostname access now explicitly uses admin port (`https://domain:8444`), avoiding confusing 443 assumptions',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.60',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'CLI de reparacion Caddy: nuevo comando `php cli/repair-caddy-routes.php` para validar y reparar listeners/politicas/rutas del panel',
+                        ],
+                        'en' => [
+                            'Caddy repair CLI: new `php cli/repair-caddy-routes.php` command to validate and repair panel listeners/policies/routes',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Caddy self-heal reforzado: normalizacion de `srv0` ante estados mixtos (`listen`/`routes` nulos o incompletos) y compatibilidad con despliegues sin modulo DNS Cloudflare',
+                            'Updater endurecido: `bin/update.sh` corta la actualizacion cuando falla una migracion y evita continuar en estado parcialmente aplicado',
+                            'Cluster heartbeat mas robusto: se reduce el falso positivo de "Master caido" cuando el problema real es el listener local del panel en el slave',
+                            'Mantenimiento de cron mas estable: normalizacion de variables de entorno y ejecucion escalonada para tareas de verificacion Caddy/plugins',
+                        ],
+                        'en' => [
+                            'Hardened Caddy self-heal: `srv0` normalization for mixed states (`listen`/`routes` null or incomplete) and compatibility with deployments without Cloudflare DNS module',
+                            'Hardened updater: `bin/update.sh` now stops the update when a migration fails, preventing partially-applied states',
+                            'More robust cluster heartbeat: reduces false "Master down" alerts when the actual issue is the slave local panel listener',
+                            'More stable cron maintenance: normalized env variables and staggered execution for Caddy/plugins verification tasks',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Migraciones: corregido fallo en nodos legacy donde faltaba `hosting_subdomains` al aplicar `2026_04_03_000004_add_hosting_type_to_subdomains`',
+                            'Schema de ancho de banda: migracion de reparacion para crear/ajustar tablas faltantes y eliminar error 500 en `/accounts` por `hosting_bandwidth` inexistente',
+                            'Caddy API: corregidos flujos que provocaban estados invalidos (409 en `listen`, rutas perdidas o `routes` nulo) tras updates/reloads',
+                            'Panel domain route: re-creacion y sincronizacion de ruta HTTPS del dominio del panel con fallback operativo del puerto administrativo',
+                        ],
+                        'en' => [
+                            'Migrations: fixed legacy-node failure when `hosting_subdomains` was missing while applying `2026_04_03_000004_add_hosting_type_to_subdomains`',
+                            'Bandwidth schema: repair migration now creates/fixes missing tables and removes `/accounts` 500 errors caused by missing `hosting_bandwidth`',
+                            'Caddy API: fixed flows that produced invalid states (409 on `listen`, lost routes or null `routes`) after updates/reloads',
+                            'Panel domain route: restored and synchronized panel HTTPS domain route while keeping administrative-port fallback operational',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.59',
                 'date' => '2026-04-23',
                 'badge' => 'primary',

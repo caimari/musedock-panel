@@ -12,6 +12,7 @@ class SystemService
     private const PANEL_DOMAIN_ROUTE_ID = 'panel-domain-route';
     private const PANEL_FALLBACK_ROUTE_ID = 'panel-fallback-route';
     private static ?bool $hasCloudflareDnsProvider = null;
+    private static array $dnsProviderAvailability = [];
 
     /**
      * Generate a unique Caddy route ID for a domain.
@@ -473,13 +474,31 @@ CONF;
 
     private static function caddyHasCloudflareDnsProvider(): bool
     {
-        if (self::$hasCloudflareDnsProvider !== null) {
-            return self::$hasCloudflareDnsProvider;
+        if (self::$hasCloudflareDnsProvider === null) {
+            self::$hasCloudflareDnsProvider = self::caddyHasDnsProvider('cloudflare');
+        }
+        return self::$hasCloudflareDnsProvider;
+    }
+
+    private static function caddyHasDnsProvider(string $provider): bool
+    {
+        $provider = strtolower(trim($provider));
+        if ($provider === '' || !preg_match('/^[a-z0-9][a-z0-9_.-]{1,63}$/', $provider)) {
+            return false;
         }
 
-        $out = trim((string) shell_exec('caddy list-modules 2>/dev/null | grep -E "^dns\\.providers\\.cloudflare$"'));
-        self::$hasCloudflareDnsProvider = ($out === 'dns.providers.cloudflare');
-        return self::$hasCloudflareDnsProvider;
+        if (array_key_exists($provider, self::$dnsProviderAvailability)) {
+            return self::$dnsProviderAvailability[$provider];
+        }
+
+        $needle = 'dns.providers.' . $provider;
+        $out = trim((string)shell_exec('caddy list-modules 2>/dev/null | grep -E "^' . preg_quote($needle, '/') . '$"'));
+        $ok = ($out === $needle);
+        self::$dnsProviderAvailability[$provider] = $ok;
+        if ($provider === 'cloudflare') {
+            self::$hasCloudflareDnsProvider = $ok;
+        }
+        return $ok;
     }
 
     private static function patchTlsPolicies(string $caddyApi, array $policies): void
@@ -860,7 +879,7 @@ CONF;
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
         // Keep admin panel access on :8444 to preserve MIT/admin fallback separation.
-        $panelPublicPort = 8444;
+        $panelPublicPort = self::getPanelPublicPort();
         $internalPort = self::getPanelInternalPort();
         $panelPortOwner = self::findServerByListenPort($caddyApi, $panelPublicPort, 'srv0');
         if ($panelPortOwner !== null) {
@@ -883,6 +902,10 @@ CONF;
 
         // Keep TLS policies fresh so DNS-01 fallback is available when needed.
         self::ensureTlsCatchAllPolicy($caddyApi);
+        $panelTlsResult = self::ensurePanelTlsPolicyFromSettings($caddyApi, $hostname);
+        if (!($panelTlsResult['ok'] ?? false)) {
+            return ['ok' => false, 'error' => (string)($panelTlsResult['error'] ?? 'No se pudo aplicar la politica TLS del panel')];
+        }
 
         self::deleteRouteById($caddyApi, self::PANEL_DOMAIN_ROUTE_ID);
 
@@ -917,6 +940,9 @@ CONF;
         self::warmupPanelDomainTls($hostname, $panelPublicPort);
 
         $warning = self::buildPanelDomainDnsWarning($hostname);
+        if (!empty($panelTlsResult['warning'])) {
+            $warning = trim($warning . ' ' . (string)$panelTlsResult['warning']);
+        }
         return ['ok' => true, 'warning' => $warning];
     }
 
@@ -943,6 +969,11 @@ CONF;
             ];
         }
 
+        $panelTlsResult = self::ensurePanelTlsPolicyFromSettings($caddyApi, $hostname);
+        if (!($panelTlsResult['ok'] ?? false)) {
+            return ['ok' => false, 'error' => (string)($panelTlsResult['error'] ?? 'No se pudo aplicar la politica TLS del panel')];
+        }
+
         $routesResult = self::fetchCaddyRoutes($caddyApi, true);
         if (!($routesResult['ok'] ?? false)) {
             return ['ok' => false, 'error' => (string)($routesResult['error'] ?? 'No se pudo leer rutas Caddy')];
@@ -957,7 +988,8 @@ CONF;
             $expr = (string)($match['expression'] ?? '');
             $expectedExpr = '{http.request.port} == ' . $panelPublicPort;
             if (in_array($hostname, $hosts, true) && trim($expr) === $expectedExpr) {
-                return ['ok' => true];
+                $warning = (string)($panelTlsResult['warning'] ?? '');
+                return $warning !== '' ? ['ok' => true, 'warning' => $warning] : ['ok' => true];
             }
             break;
         }
@@ -968,11 +1000,17 @@ CONF;
     /**
      * Remove panel domain Caddy route if present.
      */
-    public static function removePanelDomainRoute(): bool
+    public static function removePanelDomainRoute(?string $hostname = null): bool
     {
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
-        return self::deleteRouteById($caddyApi, self::PANEL_DOMAIN_ROUTE_ID);
+        $routeDeleted = self::deleteRouteById($caddyApi, self::PANEL_DOMAIN_ROUTE_ID);
+        $targetHost = self::normalizeStoredHostname((string)$hostname);
+        if ($targetHost === '') {
+            $targetHost = self::normalizeStoredHostname((string)\MuseDockPanel\Settings::get('panel_hostname', ''));
+        }
+        $tlsDeleted = self::removePanelTlsPolicy($caddyApi, $targetHost);
+        return $routeDeleted && $tlsDeleted;
     }
 
     private static function getPanelInternalPort(): int
@@ -1008,6 +1046,224 @@ CONF;
         $value = explode('/', $value, 2)[0] ?? '';
         $value = explode(':', $value, 2)[0] ?? '';
         return trim((string)$value);
+    }
+
+    /**
+     * Keep TLS automation policy for panel hostname aligned with selected mode.
+     *
+     * Supported modes:
+     * - self_signed: Caddy internal issuer (recommended for private admin port)
+     * - http01: ACME HTTP/TLS-ALPN (requires public 80/443 reachability)
+     * - dns01: ACME DNS challenge with configurable DNS provider module
+     */
+    public static function ensurePanelTlsPolicyFromSettings(string $caddyApi, string $hostname = ''): array
+    {
+        $hostname = self::normalizeStoredHostname($hostname !== '' ? $hostname : (string)\MuseDockPanel\Settings::get('panel_hostname', ''));
+        if ($hostname === '') {
+            return ['ok' => true, 'skipped' => true, 'reason' => 'panel_hostname_empty'];
+        }
+
+        $mode = strtolower(trim((string)\MuseDockPanel\Settings::get('panel_tls_mode', 'self_signed')));
+        if (!in_array($mode, ['self_signed', 'http01', 'dns01'], true)) {
+            $mode = 'self_signed';
+        }
+
+        $email = trim((string)\MuseDockPanel\Settings::get('panel_acme_email', 'admin@musedock.com'));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $email = 'admin@musedock.com';
+        }
+
+        $provider = strtolower(trim((string)\MuseDockPanel\Settings::get('panel_dns_provider', '')));
+        $providerConfigRaw = trim((string)\MuseDockPanel\Settings::get('panel_dns_provider_config', ''));
+        $providerConfig = [];
+        if ($providerConfigRaw !== '') {
+            $decoded = json_decode($providerConfigRaw, true);
+            if (!is_array($decoded)) {
+                return ['ok' => false, 'error' => 'JSON invalido en configuracion DNS del panel'];
+            }
+            $providerConfig = $decoded;
+        }
+
+        $warning = '';
+        $policy = self::buildPanelTlsPolicy($hostname, $mode, $email, $provider, $providerConfig, $warning);
+        if (!($policy['ok'] ?? false)) {
+            return ['ok' => false, 'error' => (string)($policy['error'] ?? 'No se pudo construir la politica TLS del panel')];
+        }
+        $panelPolicy = $policy['policy'];
+
+        $ch = curl_init("{$caddyApi}/config/apps/tls/automation/policies");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+        ]);
+        $raw = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        $policies = [];
+        if ($httpCode >= 200 && $httpCode < 300) {
+            $decoded = json_decode((string)$raw, true);
+            if (is_array($decoded) && array_is_list($decoded)) {
+                $policies = $decoded;
+            }
+        }
+
+        $filtered = [];
+        foreach ($policies as $existingPolicy) {
+            $subjects = $existingPolicy['subjects'] ?? [];
+            if (!is_array($subjects)) {
+                $subjects = [];
+            }
+            $normalizedSubjects = array_values(array_filter(array_map(
+                static fn($s) => strtolower(trim((string)$s)),
+                $subjects
+            )));
+
+            // Remove previous dedicated policy for this panel hostname.
+            if (count($normalizedSubjects) === 1 && $normalizedSubjects[0] === $hostname) {
+                continue;
+            }
+            $filtered[] = $existingPolicy;
+        }
+
+        array_unshift($filtered, $panelPolicy);
+        self::patchTlsPolicies($caddyApi, $filtered);
+
+        return $warning !== '' ? ['ok' => true, 'warning' => $warning] : ['ok' => true];
+    }
+
+    private static function buildPanelTlsPolicy(
+        string $hostname,
+        string $mode,
+        string $email,
+        string $provider,
+        array $providerConfig,
+        string &$warning
+    ): array {
+        $warning = '';
+
+        if ($mode === 'self_signed') {
+            return [
+                'ok' => true,
+                'policy' => [
+                    'subjects' => [$hostname],
+                    'issuers' => [[
+                        'module' => 'internal',
+                    ]],
+                ],
+            ];
+        }
+
+        if ($mode === 'http01') {
+            return [
+                'ok' => true,
+                'policy' => [
+                    'subjects' => [$hostname],
+                    'issuers' => [[
+                        'module' => 'acme',
+                        'email' => $email,
+                    ]],
+                ],
+            ];
+        }
+
+        if ($mode !== 'dns01') {
+            return ['ok' => false, 'error' => "Modo TLS de panel no soportado: {$mode}"];
+        }
+
+        if ($provider === '' || !preg_match('/^[a-z0-9][a-z0-9_.-]{1,63}$/i', $provider)) {
+            return ['ok' => false, 'error' => 'DNS-01 requiere un proveedor DNS valido (ej: cloudflare, route53, digitalocean)'];
+        }
+
+        // Backward compatibility: if provider=cloudflare and no JSON config set, try env token.
+        if ($provider === 'cloudflare' && empty($providerConfig)) {
+            $token = trim((string)getenv('CLOUDFLARE_API_TOKEN'));
+            if ($token === '') {
+                $caddyEnv = @file_get_contents('/etc/default/caddy');
+                if ($caddyEnv && preg_match('/^CLOUDFLARE_API_TOKEN=(.+)$/m', $caddyEnv, $m)) {
+                    $token = trim($m[1]);
+                }
+            }
+            if ($token !== '') {
+                $providerConfig = ['api_token' => $token];
+                $warning = 'DNS-01 del panel usando token heredado de /etc/default/caddy (CLOUDFLARE_API_TOKEN).';
+            }
+        }
+
+        if (empty($providerConfig)) {
+            return ['ok' => false, 'error' => 'DNS-01 requiere configuracion JSON del proveedor DNS'];
+        }
+
+        if (!self::caddyHasDnsProvider($provider)) {
+            return ['ok' => false, 'error' => "Caddy no tiene cargado dns.providers.{$provider}"];
+        }
+
+        return [
+            'ok' => true,
+            'policy' => [
+                'subjects' => [$hostname],
+                'issuers' => [[
+                    'module' => 'acme',
+                    'email' => $email,
+                    'challenges' => [
+                        'dns' => [
+                            'provider' => array_merge(['name' => $provider], $providerConfig),
+                            'resolvers' => ['1.1.1.1:53', '8.8.8.8:53'],
+                        ],
+                    ],
+                ]],
+            ],
+        ];
+    }
+
+    private static function removePanelTlsPolicy(string $caddyApi, string $hostname): bool
+    {
+        if ($hostname === '') {
+            return true;
+        }
+
+        $ch = curl_init("{$caddyApi}/config/apps/tls/automation/policies");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+        ]);
+        $raw = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if (!($httpCode >= 200 && $httpCode < 300)) {
+            return true;
+        }
+
+        $policies = json_decode((string)$raw, true);
+        if (!is_array($policies) || !array_is_list($policies)) {
+            return true;
+        }
+
+        $changed = false;
+        $filtered = [];
+        foreach ($policies as $policy) {
+            $subjects = $policy['subjects'] ?? [];
+            if (!is_array($subjects)) {
+                $subjects = [];
+            }
+            $normalizedSubjects = array_values(array_filter(array_map(
+                static fn($s) => strtolower(trim((string)$s)),
+                $subjects
+            )));
+            if (count($normalizedSubjects) === 1 && $normalizedSubjects[0] === $hostname) {
+                $changed = true;
+                continue;
+            }
+            $filtered[] = $policy;
+        }
+
+        if (!$changed) {
+            return true;
+        }
+
+        self::patchTlsPolicies($caddyApi, $filtered);
+        return true;
     }
 
     private static function panelReverseProxyHandle(int $internalPort): array
