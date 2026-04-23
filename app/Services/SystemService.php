@@ -878,7 +878,12 @@ CONF;
 
         $route = [
             '@id' => self::PANEL_DOMAIN_ROUTE_ID,
-            'match' => [['host' => [$hostname]]],
+            // Domain route must only serve on 443.
+            // Keep PANEL_PORT (e.g. 8444) as IP fallback, not as domain endpoint.
+            'match' => [[
+                'host' => [$hostname],
+                'expression' => '{http.request.port} == 443',
+            ]],
             'handle' => [[
                 'handler' => 'reverse_proxy',
                 'upstreams' => [['dial' => "127.0.0.1:{$internalPort}"]],
