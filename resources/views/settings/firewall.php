@@ -155,13 +155,16 @@
             <?php endif; ?>
 
             <div class="d-flex gap-2 flex-wrap">
-                <?php if ($type === 'ufw'): ?>
+                <?php if ($type === 'ufw' || $type === 'iptables'): ?>
+                    <?php
+                        $fwLabel = strtoupper($type === 'iptables' ? 'iptables' : 'UFW');
+                    ?>
                     <?php if ($active): ?>
                         <form method="POST" action="/settings/firewall/disable" class="d-inline" onsubmit="return confirmDisable(this)">
                             <?= View::csrf() ?>
                             <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
                             <button type="submit" class="btn btn-outline-danger btn-sm">
-                                <i class="bi bi-shield-x me-1"></i>Desactivar UFW
+                                <i class="bi bi-shield-x me-1"></i>Desactivar <?= View::e($fwLabel) ?>
                             </button>
                         </form>
                     <?php else: ?>
@@ -169,7 +172,7 @@
                             <?= View::csrf() ?>
                             <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
                             <button type="submit" class="btn btn-outline-success btn-sm">
-                                <i class="bi bi-shield-check me-1"></i>Activar UFW
+                                <i class="bi bi-shield-check me-1"></i>Activar <?= View::e($fwLabel) ?>
                             </button>
                         </form>
                     <?php endif; ?>
@@ -594,6 +597,7 @@
 
 <script>
 var firewallType = '<?= View::e($type) ?>';
+var firewallLabel = firewallType === 'iptables' ? 'iptables' : 'UFW';
 
 // ─── Edit Modal ─────────────────────────────────────────
 function openEditModal(ruleNum, ruleData) {
@@ -795,9 +799,9 @@ function confirmDelete(form, ruleNum) {
 function confirmEnable(form) {
     if (typeof Swal !== 'undefined') {
         Swal.fire({
-            title: 'Activar Firewall',
+            title: 'Activar ' + firewallLabel,
             html:
-                '¿Seguro que quieres activar el firewall UFW?<br><small class="text-muted">Asegurate de que las reglas permiten tu acceso al servidor.</small>' +
+                '¿Seguro que quieres activar ' + firewallLabel + '?<br><small class="text-muted">Asegurate de que las reglas permiten tu acceso al servidor.</small>' +
                 '<div class="mt-3 text-start">' +
                 '<label for="swal-fw-enable-password" class="form-label small mb-1">Contrasena admin</label>' +
                 '<input type="password" id="swal-fw-enable-password" class="swal2-input m-0" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;" placeholder="Tu contrasena de administrador" autocomplete="current-password">' +
@@ -828,7 +832,7 @@ function confirmEnable(form) {
         });
         return false;
     }
-    var confirmed = confirm('¿Activar el firewall UFW?');
+    var confirmed = confirm('¿Activar ' + firewallLabel + '?');
     if (!confirmed) return false;
     var pwd = prompt('Contrasena de administrador:');
     if (!pwd) return false;
@@ -840,9 +844,9 @@ function confirmEnable(form) {
 function confirmDisable(form) {
     if (typeof Swal !== 'undefined') {
         Swal.fire({
-            title: 'Desactivar Firewall',
+            title: 'Desactivar ' + firewallLabel,
             html:
-                '<strong class="text-danger">Advertencia:</strong> Desactivar el firewall dejara el servidor sin proteccion.<br>Todas las reglas se desactivaran (pero se conservaran para reactivar).' +
+                '<strong class="text-danger">Advertencia:</strong> Desactivar ' + firewallLabel + ' dejara el servidor sin proteccion.<br>Todas las reglas se desactivaran (pero se conservaran para reactivar).' +
                 '<div class="mt-3 text-start">' +
                 '<label for="swal-fw-disable-password" class="form-label small mb-1">Contrasena admin</label>' +
                 '<input type="password" id="swal-fw-disable-password" class="swal2-input m-0" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;" placeholder="Tu contrasena de administrador" autocomplete="current-password">' +
@@ -873,7 +877,7 @@ function confirmDisable(form) {
         });
         return false;
     }
-    var confirmed = confirm('¿Desactivar el firewall UFW? El servidor quedara sin proteccion.');
+    var confirmed = confirm('¿Desactivar ' + firewallLabel + '? El servidor quedara sin proteccion.');
     if (!confirmed) return false;
     var pwd = prompt('Contrasena de administrador:');
     if (!pwd) return false;

@@ -6,6 +6,8 @@ use MuseDockPanel\Settings;
 class FirewallService
 {
     private static ?string $cachedType = null;
+    private const IPTABLES_DISABLED_FLAG = __DIR__ . '/../../storage/firewall/iptables.disabled.flag';
+    private const IPTABLES_BACKUP_FILE = __DIR__ . '/../../storage/firewall/iptables.before-disable.v4';
 
     // ─── Detection ────────────────────────────────────────────
 
@@ -46,7 +48,16 @@ class FirewallService
         }
         if ($type === 'iptables') {
             $path = trim((string)shell_exec('which iptables 2>/dev/null'));
-            return $path !== '';
+            if ($path === '') {
+                return false;
+            }
+
+            // If panel explicitly disabled iptables, reflect inactive in UI.
+            if (is_file(self::IPTABLES_DISABLED_FLAG)) {
+                return false;
+            }
+
+            return true;
         }
         return false;
     }
@@ -392,6 +403,83 @@ class FirewallService
             return $m[1];
         }
         return 'desconocida';
+    }
+
+    public static function iptablesEnable(): array
+    {
+        $iptables = trim((string)shell_exec('which iptables 2>/dev/null'));
+        if ($iptables === '') {
+            return ['ok' => false, 'output' => 'iptables no esta disponible en este servidor'];
+        }
+
+        $restoreOutput = '';
+        $ok = true;
+
+        // Restore previous rules snapshot if available.
+        if (is_file(self::IPTABLES_BACKUP_FILE) && filesize(self::IPTABLES_BACKUP_FILE) > 0) {
+            $restoreCmd = 'iptables-restore < ' . escapeshellarg(self::IPTABLES_BACKUP_FILE) . ' 2>&1';
+            $restoreOutput = trim((string)shell_exec($restoreCmd));
+            if ($restoreOutput !== '' && stripos($restoreOutput, 'error') !== false) {
+                $ok = false;
+            }
+        }
+
+        if ($ok) {
+            if (is_file(self::IPTABLES_DISABLED_FLAG)) {
+                @unlink(self::IPTABLES_DISABLED_FLAG);
+            }
+            self::iptablesSave();
+        }
+
+        return [
+            'ok' => $ok,
+            'output' => $ok
+                ? ($restoreOutput !== '' ? "Restaurado desde backup: {$restoreOutput}" : 'Firewall iptables activado')
+                : ("Error al restaurar iptables: {$restoreOutput}"),
+        ];
+    }
+
+    public static function iptablesDisable(): array
+    {
+        $iptables = trim((string)shell_exec('which iptables 2>/dev/null'));
+        if ($iptables === '') {
+            return ['ok' => false, 'output' => 'iptables no esta disponible en este servidor'];
+        }
+
+        @mkdir(dirname(self::IPTABLES_DISABLED_FLAG), 0750, true);
+
+        // Snapshot current rules to allow safe restore.
+        $backupCmd = 'iptables-save > ' . escapeshellarg(self::IPTABLES_BACKUP_FILE) . ' 2>&1';
+        $backupOut = trim((string)shell_exec($backupCmd));
+        if ($backupOut !== '' && stripos($backupOut, 'error') !== false) {
+            return ['ok' => false, 'output' => "No se pudo crear backup de iptables: {$backupOut}"];
+        }
+
+        $commands = [
+            'iptables -P INPUT ACCEPT 2>&1',
+            'iptables -P FORWARD ACCEPT 2>&1',
+            'iptables -P OUTPUT ACCEPT 2>&1',
+            'iptables -F INPUT 2>&1',
+            'iptables -F FORWARD 2>&1',
+            'iptables -F OUTPUT 2>&1',
+        ];
+
+        $errors = [];
+        foreach ($commands as $cmd) {
+            $out = trim((string)shell_exec($cmd));
+            if ($out !== '' && stripos($out, 'error') !== false) {
+                $errors[] = $out;
+            }
+        }
+
+        if (!empty($errors)) {
+            return ['ok' => false, 'output' => 'Error al desactivar iptables: ' . implode(' | ', $errors)];
+        }
+
+        @file_put_contents(self::IPTABLES_DISABLED_FLAG, (string)time());
+        self::iptablesSave();
+
+        return ['ok' => true, 'output' => 'Firewall iptables desactivado (backup guardado para restaurar)'];
     }
 
     // ─── Common Methods ───────────────────────────────────────

@@ -228,11 +228,19 @@ class FirewallController
             exit;
         }
 
-        $result = FirewallService::ufwEnable();
+        $type = FirewallService::getType();
+        if ($type === 'ufw') {
+            $result = FirewallService::ufwEnable();
+        } elseif ($type === 'iptables') {
+            $result = FirewallService::iptablesEnable();
+        } else {
+            $result = ['ok' => false, 'output' => 'No se detecto un firewall compatible para activar'];
+        }
 
         if ($result['ok']) {
-            LogService::log('firewall.enable', 'ufw', 'Firewall UFW activado');
-            Flash::set('success', 'Firewall UFW activado correctamente.');
+            LogService::log('firewall.enable', $type, 'Firewall activado');
+            $name = strtoupper($type === 'iptables' ? 'iptables' : 'ufw');
+            Flash::set('success', "Firewall {$name} activado correctamente.");
         } else {
             Flash::set('error', 'Error al activar el firewall: ' . ($result['output'] ?? 'desconocido'));
         }
@@ -250,11 +258,19 @@ class FirewallController
             exit;
         }
 
-        $result = FirewallService::ufwDisable();
+        $type = FirewallService::getType();
+        if ($type === 'ufw') {
+            $result = FirewallService::ufwDisable();
+        } elseif ($type === 'iptables') {
+            $result = FirewallService::iptablesDisable();
+        } else {
+            $result = ['ok' => false, 'output' => 'No se detecto un firewall compatible para desactivar'];
+        }
 
         if ($result['ok']) {
-            LogService::log('firewall.disable', 'ufw', 'Firewall UFW desactivado');
-            Flash::set('success', 'Firewall UFW desactivado.');
+            LogService::log('firewall.disable', $type, 'Firewall desactivado');
+            $name = strtoupper($type === 'iptables' ? 'iptables' : 'ufw');
+            Flash::set('success', "Firewall {$name} desactivado.");
         } else {
             Flash::set('error', 'Error al desactivar el firewall: ' . ($result['output'] ?? 'desconocido'));
         }

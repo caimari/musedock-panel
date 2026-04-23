@@ -20,6 +20,31 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.70',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'Firewall UI: botones Activar/Desactivar tambien disponibles para iptables (ademas de UFW), con deteccion de estado en pantalla',
+                            'Seguridad firewall: activar/desactivar iptables requiere confirmacion con contrasena admin igual que UFW',
+                        ],
+                        'en' => [
+                            'Firewall UI: Enable/Disable buttons now available for iptables too (in addition to UFW), with on-screen state detection',
+                            'Firewall security: enabling/disabling iptables now requires admin-password confirmation, same as UFW',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Controlador firewall: acciones de activar/desactivar ya no estan hardcodeadas a UFW; ahora enrutan segun tipo detectado (`ufw` o `iptables`)',
+                        ],
+                        'en' => [
+                            'Firewall controller: enable/disable actions are no longer hardcoded to UFW; now route by detected type (`ufw` or `iptables`)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.69',
                 'date' => '2026-04-23',
                 'badge' => 'primary',
