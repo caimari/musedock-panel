@@ -948,6 +948,16 @@ CONF;
      */
     public static function ensureCaddyHttpServerReady(string $caddyApi): bool
     {
+        $panelPort = (int)\MuseDockPanel\Env::get('PANEL_PORT', 8444);
+        if ($panelPort <= 0) {
+            $panelPort = 8444;
+        }
+        $panelListen = ':' . $panelPort;
+        $requiredListen = [':443'];
+        if ($panelListen !== ':443') {
+            $requiredListen[] = $panelListen;
+        }
+
         $serverUrl = "{$caddyApi}/config/apps/http/servers/srv0";
 
         // Check if srv0 exists
@@ -961,7 +971,7 @@ CONF;
         curl_close($ch);
 
         if ($httpCode === 404) {
-            $initialServer = ['listen' => [':443'], 'routes' => []];
+            $initialServer = ['listen' => $requiredListen, 'routes' => []];
 
             // Create srv0 directly
             $ch = curl_init($serverUrl);
@@ -1028,7 +1038,7 @@ CONF;
             return false;
         }
 
-        // Ensure listen includes :443 (panel + hosting HTTPS routes live on srv0).
+        // Ensure listen includes :443 and panel port (fallback IP access).
         $existingListen = [];
         $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/listen");
         curl_setopt_array($ch, [
@@ -1051,12 +1061,20 @@ CONF;
         }
 
         $listen = $existingListen;
-        if (!in_array(':443', $listen, true)) {
-            $listen[] = ':443';
+        foreach ($requiredListen as $requiredPort) {
+            if (!in_array($requiredPort, $listen, true)) {
+                $listen[] = $requiredPort;
+            }
         }
         $listen = array_values(array_unique($listen));
 
-        $needsListenUpdate = !in_array(':443', $existingListen, true);
+        $needsListenUpdate = false;
+        foreach ($requiredListen as $requiredPort) {
+            if (!in_array($requiredPort, $existingListen, true)) {
+                $needsListenUpdate = true;
+                break;
+            }
+        }
         if ($listenCode < 200 || $listenCode >= 300 || $needsListenUpdate) {
             if ($listenCode === 404) {
                 // listen key missing: create it
