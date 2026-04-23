@@ -1068,14 +1068,13 @@ CONF;
 
         if ($listenCode >= 200 && $listenCode < 300) {
             $decoded = json_decode((string)$listenRaw, true);
-            // Safety first on production nodes: if Caddy returns malformed listen data,
-            // abort auto-heal instead of risking destructive writes.
-            if (!is_array($decoded) || !array_is_list($decoded)) {
-                return false;
-            }
-            foreach ($decoded as $entry) {
-                if (is_string($entry) && $entry !== '') {
-                    $existingListen[] = $entry;
+            // If Caddy returns malformed listen payload (e.g. null), treat it as empty and
+            // rebuild listeners. This is a targeted self-heal that does not touch routes.
+            if (is_array($decoded) && array_is_list($decoded)) {
+                foreach ($decoded as $entry) {
+                    if (is_string($entry) && $entry !== '') {
+                        $existingListen[] = $entry;
+                    }
                 }
             }
         }

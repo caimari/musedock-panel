@@ -491,6 +491,18 @@ if ($clusterRole === 'slave') {
             $age = time() - strtotime($masterLastHb);
 
             if ($age > $timeoutSec) {
+                // If this slave local admin endpoint is down, "master down" alerts are often
+                // false positives (master cannot deliver heartbeat here). Suppress email spam.
+                $localPanelPort = (int)\MuseDockPanel\Env::get('PANEL_PORT', 8444);
+                if ($localPanelPort <= 0) $localPanelPort = 8444;
+                $errno = 0; $errstr = '';
+                $sock = @fsockopen('127.0.0.1', $localPanelPort, $errno, $errstr, 1.0);
+                if ($sock === false) {
+                    logMsg("  [POSSIBLE-FALSE-POSITIVE] local panel port {$localPanelPort} down ({$errno}: {$errstr}); suppressing master-down alert.");
+                    LogService::log('cluster.alert', 'master-down-suppressed', "Master-down suprimido: puerto local {$localPanelPort} no accesible ({$errno}: {$errstr})");
+                } else {
+                    fclose($sock);
+
                 // Master is down — escalating re-alert intervals to avoid spam
                 $lastAlert = Settings::get('cluster_master_down_alerted', '');
                 $alertAge = $lastAlert ? (time() - strtotime($lastAlert)) : 99999;
@@ -555,6 +567,7 @@ if ($clusterRole === 'slave') {
                     }
                 } else {
                     logMsg("  Master down (already alerted " . round($alertAge / 60) . " min ago).");
+                }
                 }
             } else {
                 // Master is alive — clear alert flags
