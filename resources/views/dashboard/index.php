@@ -135,20 +135,29 @@
             <div class="card-header bg-warning text-dark py-2 d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-exclamation-triangle-fill me-2"></i>
                 <strong>Certificados SSL: Token de Cloudflare no configurado</strong></span>
-                <form method="POST" action="/settings/dismiss-alert" style="display:inline;">
-                    <?= \MuseDockPanel\View::csrf() ?>
-                    <input type="hidden" name="alert" value="cf_token_warning">
-                    <button type="submit" class="btn btn-sm btn-outline-dark border-0" title="Cerrar aviso"><i class="bi bi-x-lg"></i></button>
-                </form>
+                <div class="d-flex align-items-center gap-2">
+                    <form method="POST" action="/settings/dismiss-alert" style="display:inline;">
+                        <?= \MuseDockPanel\View::csrf() ?>
+                        <input type="hidden" name="alert" value="cf_token_warning">
+                        <button type="submit" class="btn btn-sm btn-outline-dark" title="No mostrar más">
+                            <i class="bi bi-eye-slash me-1"></i>No mostrar más
+                        </button>
+                    </form>
+                    <form method="POST" action="/settings/dismiss-alert" style="display:inline;">
+                        <?= \MuseDockPanel\View::csrf() ?>
+                        <input type="hidden" name="alert" value="cf_token_warning">
+                        <button type="submit" class="btn btn-sm btn-outline-dark border-0" title="Cerrar aviso"><i class="bi bi-x-lg"></i></button>
+                    </form>
+                </div>
             </div>
             <div class="card-body">
                 <p class="mb-2">
                     El archivo <code>/etc/default/caddy</code> no contiene la variable <code>CLOUDFLARE_API_TOKEN</code>.
-                    Sin este token, Caddy <strong>no puede generar certificados SSL</strong> para dominios con proxy de Cloudflare (nube naranja) ni para dominios que usan DNS-01.
+                    Sin este token, Caddy <strong>no puede generar certificados SSL por DNS-01</strong> para dominios con proxy de Cloudflare (nube naranja) ni para panel TLS en modo DNS-01.
                 </p>
                 <p class="mb-2">
-                    <strong>¿Por que es importante?</strong> Caddy necesita un token de Cloudflare con permisos de <em>DNS:Edit (All zones)</em>
-                    para completar el desafio DNS-01 de Let's Encrypt. Sin el, los dominios de hosting mostraran errores de certificado (ERR_SSL, 526, etc.).
+                    <strong>¿Por que es importante?</strong> Caddy necesita un token de Cloudflare con permisos de <em>DNS:Edit</em>
+                    para completar el desafio DNS-01 de Let's Encrypt. Sin el, los dominios que dependan de DNS-01 pueden mostrar errores de certificado (ERR_SSL, 526, etc.).
                 </p>
                 <div class="mb-2 py-2 px-3 rounded" style="background:rgba(100,116,139,0.15);color:#94a3b8;">
                     <i class="bi bi-exclamation-circle me-1"></i>
@@ -160,7 +169,7 @@
                     <i class="bi bi-arrow-repeat me-1"></i>
                     <strong>Servidor Slave:</strong> Este token se configura desde el <strong>Master</strong>.
                     Ve a <em>Settings &rarr; Cluster &rarr; Failover &rarr; Cuentas Cloudflare</em> en el master y marca
-                    <strong>&laquo;Actualizar token de Caddy&raquo;</strong> al guardar. El token se propagara automaticamente a todos los slaves.
+                    <strong>&laquo;Actualizar token de Caddy&raquo;</strong> al guardar. El token se intentara propagar automaticamente a todos los slaves (no hace falta editar cada slave manualmente si la sincronizacion fue correcta).
                 </div>
                 <?php elseif ($caddyTokenStatus['cms_manages']): ?>
                 <div class="mb-2 py-2 px-3 rounded" style="background:rgba(100,116,139,0.15);color:#94a3b8;">

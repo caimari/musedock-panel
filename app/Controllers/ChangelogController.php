@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.67',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'Dashboard SSL warning: texto aclarado para indicar que la falta de `CLOUDFLARE_API_TOKEN` afecta especificamente a flujos DNS-01 (dominios proxied y panel DNS-01), evitando confundirlo con todos los certificados',
+                            'Dashboard SSL warning (slave): mensaje actualizado para explicar que la propagacion desde master requiere guardar cuentas Cloudflare con «Actualizar token de Caddy» y que no debe hacerse manual en cada slave si sync fue correcto',
+                            'Dashboard UX: añadido boton visible «No mostrar mas» en el aviso de token Cloudflare (ademas del cierre rapido)',
+                        ],
+                        'en' => [
+                            'Dashboard SSL warning: clarified copy to indicate missing `CLOUDFLARE_API_TOKEN` specifically affects DNS-01 flows (proxied domains and panel DNS-01), avoiding confusion with all certificates',
+                            'Dashboard SSL warning (slave): updated message clarifies propagation from master requires saving Cloudflare accounts with “Update Caddy token”, so per-slave manual edits are not needed when sync succeeds',
+                            'Dashboard UX: added explicit “Do not show again” button on Cloudflare token warning (in addition to quick close)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.66',
                 'date' => '2026-04-23',
                 'badge' => 'primary',
