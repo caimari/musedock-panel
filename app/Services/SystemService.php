@@ -10,6 +10,7 @@ class SystemService
 {
     private static array $allowedPhpVersions = ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4'];
     private const PANEL_DOMAIN_ROUTE_ID = 'panel-domain-route';
+    private static ?bool $hasCloudflareDnsProvider = null;
 
     /**
      * Generate a unique Caddy route ID for a domain.
@@ -383,6 +384,8 @@ CONF;
      */
     public static function ensureTlsCatchAllPolicy(string $caddyApi): void
     {
+        $canUseCloudflareDns = self::caddyHasCloudflareDnsProvider();
+
         // Read primary Cloudflare API token
         $cfToken = trim(getenv('CLOUDFLARE_API_TOKEN') ?: '');
         if (!$cfToken) {
@@ -391,6 +394,9 @@ CONF;
                 $cfToken = trim($m[1]);
             }
         }
+        if (!$canUseCloudflareDns) {
+            $cfToken = '';
+        }
 
         // Build policies from scratch (idempotent — doesn't depend on current state)
         $newPolicies = [];
@@ -398,6 +404,11 @@ CONF;
         // Per-account policies for each CF account with a different token
         $cfAccounts = CloudflareService::getConfiguredAccounts();
         foreach ($cfAccounts as $acct) {
+            if (!$canUseCloudflareDns) {
+                // Per-account policies depend on DNS challenge provider.
+                continue;
+            }
+
             $token = $acct['token'] ?? '';
             if (!$token || $token === $cfToken) continue;
 
@@ -412,22 +423,22 @@ CONF;
                 $subjects[] = '*.' . $zoneName;
             }
             if (!empty($subjects)) {
-                $newPolicies[] = self::buildCfPolicy($token, $subjects);
+                $newPolicies[] = self::buildCfPolicy($token, $subjects, true);
             }
         }
 
         // Catch-all: HTTP-01 first (non-CF domains), DNS-01 fallback (CF domains with primary token)
-        $newPolicies[] = self::buildCfPolicy($cfToken, []);
+        $newPolicies[] = self::buildCfPolicy($cfToken, [], $canUseCloudflareDns);
 
         self::patchTlsPolicies($caddyApi, $newPolicies);
     }
 
-    private static function buildCfPolicy(string $cfToken, array $subjects = []): array
+    private static function buildCfPolicy(string $cfToken, array $subjects = [], bool $allowDns = true): array
     {
         if (!empty($subjects)) {
             // Per-account policy: DNS-01 only (domains behind Cloudflare proxy)
             $acmeIssuer = ['email' => 'admin@musedock.com', 'module' => 'acme'];
-            if ($cfToken) {
+            if ($allowDns && $cfToken) {
                 $acmeIssuer['challenges'] = [
                     'dns' => [
                         'provider' => ['name' => 'cloudflare', 'api_token' => $cfToken],
@@ -442,7 +453,7 @@ CONF;
         $httpIssuer = ['email' => 'admin@musedock.com', 'module' => 'acme'];
         $issuers = [$httpIssuer];
 
-        if ($cfToken) {
+        if ($allowDns && $cfToken) {
             $dnsIssuer = [
                 'email' => 'admin@musedock.com',
                 'module' => 'acme',
@@ -457,6 +468,17 @@ CONF;
         }
 
         return ['issuers' => $issuers];
+    }
+
+    private static function caddyHasCloudflareDnsProvider(): bool
+    {
+        if (self::$hasCloudflareDnsProvider !== null) {
+            return self::$hasCloudflareDnsProvider;
+        }
+
+        $out = trim((string) shell_exec('caddy list-modules 2>/dev/null | grep -E "^dns\\.providers\\.cloudflare$"'));
+        self::$hasCloudflareDnsProvider = ($out === 'dns.providers.cloudflare');
+        return self::$hasCloudflareDnsProvider;
     }
 
     private static function patchTlsPolicies(string $caddyApi, array $policies): void
