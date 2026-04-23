@@ -42,6 +42,14 @@ if (!is_array($listen) || !array_is_list($listen) || !is_array($routes) || !arra
 
 echo "[repair-caddy] OK: srv0/listeners activos.\n";
 
+$panelOwner = \MuseDockPanel\Services\SystemService::panelPortOwner($caddyApi);
+$panelManaged = \MuseDockPanel\Services\SystemService::panelRuntimeManagedByPanel($caddyApi);
+if (!$panelManaged) {
+    echo "[repair-caddy] INFO: PANEL_PORT gestionado por {$panelOwner}; se omite auto-repair de TLS/rutas del panel en runtime API.\n";
+    echo "[repair-caddy] DONE\n";
+    exit(0);
+}
+
 try {
     \MuseDockPanel\Services\SystemService::ensureTlsCatchAllPolicy($caddyApi);
     $policiesRaw = @file_get_contents("{$caddyApi}/config/apps/tls/automation/policies");

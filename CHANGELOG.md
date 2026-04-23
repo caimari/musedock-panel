@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.72] — 2026-04-23
+
+### Fixed
+- Caddy mixed-mode hardening: el auto-repair del panel ya no inyecta `:8444` en `srv0`; usa servidor dedicado `srv_panel_admin` cuando aplica.
+- Guard anti-clobber en nodos mixtos: si `PANEL_PORT` lo sirve un server externo del Caddyfile (ej. `srv1`), se omite la mutación runtime de rutas/políticas del panel.
+- Panel routes target fix: `panel-fallback-route` y `panel-domain-route` se escriben solo en servidores gestionados por el panel (`srv0` legacy o `srv_panel_admin`).
+
+### Improved
+- Nueva variable opcional `.env`: `CADDY_PANEL_SERVER_NAME` para personalizar el server runtime dedicado del panel.
+
 ## [1.0.53] — 2026-04-22
 
 ### Security

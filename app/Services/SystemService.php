@@ -9,6 +9,7 @@ namespace MuseDockPanel\Services;
 class SystemService
 {
     private static array $allowedPhpVersions = ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4'];
+    private const PANEL_ADMIN_SERVER_ID = 'srv_panel_admin';
     private const PANEL_DOMAIN_ROUTE_ID = 'panel-domain-route';
     private const PANEL_FALLBACK_ROUTE_ID = 'panel-fallback-route';
     private static ?bool $hasCloudflareDnsProvider = null;
@@ -922,18 +923,23 @@ CONF;
 
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
-        // Keep admin panel access on :8444 to preserve MIT/admin fallback separation.
         $panelPublicPort = self::getPanelPublicPort();
         $internalPort = self::getPanelInternalPort();
-        $panelPortOwner = self::findServerByListenPort($caddyApi, $panelPublicPort, 'srv0');
-        if ($panelPortOwner !== null) {
+        $panelServerName = self::getPanelAdminServerName();
+        $panelRouteServer = self::resolvePanelRouteServer($caddyApi, true);
+        if ($panelRouteServer === null) {
+            return ['ok' => false, 'error' => 'No se pudo preparar servidor Caddy para el panel'];
+        }
+        // If PANEL_PORT is served by an external Caddyfile server (e.g. srv1),
+        // do not mutate routes on srv0/srv_panel_admin.
+        if ($panelRouteServer !== 'srv0' && $panelRouteServer !== $panelServerName) {
             return [
                 'ok' => true,
-                'warning' => "El puerto {$panelPublicPort} ya esta servido por {$panelPortOwner}; se omite ruta dedicada en srv0."
+                'warning' => "El puerto {$panelPublicPort} ya esta servido por {$panelRouteServer}; se omite ruta dedicada gestionada por panel."
             ];
         }
 
-        $routesResult = self::fetchCaddyRoutes($caddyApi, true);
+        $routesResult = self::fetchCaddyRoutes($caddyApi, false);
         if (!($routesResult['ok'] ?? false)) {
             return ['ok' => false, 'error' => (string)($routesResult['error'] ?? 'No se pudo leer la config de Caddy')];
         }
@@ -964,7 +970,7 @@ CONF;
             'terminal' => true,
         ];
 
-        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        $ch = curl_init("{$caddyApi}/config/apps/http/servers/{$panelRouteServer}/routes");
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => json_encode($route),
@@ -1004,12 +1010,16 @@ CONF;
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
         $panelPublicPort = self::getPanelPublicPort();
-        $panelPortOwner = self::findServerByListenPort($caddyApi, $panelPublicPort, 'srv0');
-        if ($panelPortOwner !== null) {
+        $panelServerName = self::getPanelAdminServerName();
+        $panelRouteServer = self::resolvePanelRouteServer($caddyApi, true);
+        if ($panelRouteServer === null) {
+            return ['ok' => false, 'error' => 'No se pudo preparar servidor Caddy para el panel'];
+        }
+        if ($panelRouteServer !== 'srv0' && $panelRouteServer !== $panelServerName) {
             return [
                 'ok' => true,
                 'skipped' => true,
-                'reason' => "panel-port-owned-by-{$panelPortOwner}",
+                'reason' => "panel-port-owned-by-{$panelRouteServer}",
             ];
         }
 
@@ -1018,12 +1028,13 @@ CONF;
             return ['ok' => false, 'error' => (string)($panelTlsResult['error'] ?? 'No se pudo aplicar la politica TLS del panel')];
         }
 
-        $routesResult = self::fetchCaddyRoutes($caddyApi, true);
-        if (!($routesResult['ok'] ?? false)) {
-            return ['ok' => false, 'error' => (string)($routesResult['error'] ?? 'No se pudo leer rutas Caddy')];
+        $routesRaw = @file_get_contents("{$caddyApi}/config/apps/http/servers/{$panelRouteServer}/routes");
+        $routes = json_decode((string)$routesRaw, true);
+        if (!is_array($routes) || !array_is_list($routes)) {
+            return ['ok' => false, 'error' => "No se pudo leer rutas Caddy del servidor {$panelRouteServer}"];
         }
 
-        foreach (($routesResult['routes'] ?? []) as $route) {
+        foreach ($routes as $route) {
             if ((string)($route['@id'] ?? '') !== self::PANEL_DOMAIN_ROUTE_ID) {
                 continue;
             }
@@ -1078,6 +1089,164 @@ CONF;
             $panelPort = 8444;
         }
         return $panelPort;
+    }
+
+    private static function getPanelAdminServerName(): string
+    {
+        $name = trim((string)\MuseDockPanel\Env::get('CADDY_PANEL_SERVER_NAME', self::PANEL_ADMIN_SERVER_ID));
+        if ($name === '' || !preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $name)) {
+            return self::PANEL_ADMIN_SERVER_ID;
+        }
+        return $name;
+    }
+
+    public static function panelPortOwner(string $caddyApi): ?string
+    {
+        return self::findServerByListenPort($caddyApi, self::getPanelPublicPort());
+    }
+
+    public static function panelRuntimeManagedByPanel(string $caddyApi): bool
+    {
+        $owner = self::panelPortOwner($caddyApi);
+        if ($owner === null) {
+            return true;
+        }
+        $panelServer = self::getPanelAdminServerName();
+        return $owner === 'srv0' || $owner === $panelServer;
+    }
+
+    private static function resolvePanelRouteServer(string $caddyApi, bool $createIfMissing = true): ?string
+    {
+        $panelPort = self::getPanelPublicPort();
+        $owner = self::findServerByListenPort($caddyApi, $panelPort);
+        if ($owner !== null) {
+            return $owner;
+        }
+
+        if (!$createIfMissing) {
+            return null;
+        }
+
+        $panelServer = self::getPanelAdminServerName();
+        if (!self::ensurePanelAdminServerReady($caddyApi, $panelServer)) {
+            return null;
+        }
+        return $panelServer;
+    }
+
+    private static function ensurePanelAdminServerReady(string $caddyApi, ?string $serverName = null): bool
+    {
+        $serverName = $serverName ?: self::getPanelAdminServerName();
+        $serverUrl = "{$caddyApi}/config/apps/http/servers/{$serverName}";
+        $panelListen = ':' . self::getPanelPublicPort();
+
+        // Ensure server object exists.
+        $ch = curl_init($serverUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 8,
+        ]);
+        $serverRaw = curl_exec($ch);
+        $serverCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($serverCode === 404) {
+            $initialServer = [
+                'listen' => [$panelListen],
+                'automatic_https' => ['disable_redirects' => true],
+                'tls_connection_policies' => [[]],
+                'routes' => [],
+            ];
+            $ch = curl_init("{$caddyApi}/config/apps/http/servers");
+            curl_setopt_array($ch, [
+                CURLOPT_CUSTOMREQUEST => 'PATCH',
+                CURLOPT_POSTFIELDS => json_encode([$serverName => $initialServer]),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 8,
+            ]);
+            curl_exec($ch);
+            $createCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if (!($createCode >= 200 && $createCode < 300)) {
+                return false;
+            }
+        } elseif (!($serverCode >= 200 && $serverCode < 300)) {
+            return false;
+        }
+
+        // Normalize critical server fields but keep existing routes untouched.
+        $decodedServer = json_decode((string)$serverRaw, true);
+        $existingListen = [];
+        if (is_array($decodedServer)) {
+            $listen = $decodedServer['listen'] ?? null;
+            if (is_array($listen) && array_is_list($listen)) {
+                foreach ($listen as $entry) {
+                    if (is_string($entry) && $entry !== '') {
+                        $existingListen[] = $entry;
+                    }
+                }
+            }
+        }
+        if (!in_array($panelListen, $existingListen, true)) {
+            $existingListen[] = $panelListen;
+        }
+        $existingListen = array_values(array_unique($existingListen));
+
+        $patch = [
+            'listen' => $existingListen,
+            'automatic_https' => ['disable_redirects' => true],
+            'tls_connection_policies' => [[]],
+        ];
+        $ch = curl_init($serverUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_CUSTOMREQUEST => 'PATCH',
+            CURLOPT_POSTFIELDS => json_encode($patch),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 8,
+        ]);
+        curl_exec($ch);
+        $patchCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if (!($patchCode >= 200 && $patchCode < 300)) {
+            return false;
+        }
+
+        // Ensure routes key exists and is a list.
+        $ch = curl_init("{$serverUrl}/routes");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 8,
+        ]);
+        $routesRaw = curl_exec($ch);
+        $routesCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($routesCode === 404 || trim((string)$routesRaw) === '' || strtolower(trim((string)$routesRaw)) === 'null') {
+            $ch = curl_init("{$serverUrl}/routes");
+            curl_setopt_array($ch, [
+                CURLOPT_CUSTOMREQUEST => 'PUT',
+                CURLOPT_POSTFIELDS => json_encode([]),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT => 8,
+            ]);
+            curl_exec($ch);
+            $putCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if (!($putCode >= 200 && $putCode < 300)) {
+                return false;
+            }
+        } elseif (!($routesCode >= 200 && $routesCode < 300)) {
+            return false;
+        } else {
+            $decodedRoutes = json_decode((string)$routesRaw, true);
+            if (!(is_array($decodedRoutes) && array_is_list($decodedRoutes))) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static function normalizeStoredHostname(string $value): string
@@ -1341,21 +1510,20 @@ CONF;
 
     /**
      * Ensure Caddy has srv0 and required listeners.
-     * By default only enforces :443 (hosting path). When $enforcePanelPort is true,
-     * also enforces panel public port (8444 by default).
+     * By default only enforces :443 on srv0 (hosting path).
+     * When $enforcePanelPort is true, panel port is handled in a dedicated server
+     * (srv_panel_admin by default) and never forced into srv0.
      *
      * Returns false only when the admin API is unreachable or the config cannot be repaired.
      */
     public static function ensureCaddyHttpServerReady(string $caddyApi, bool $enforcePanelPort = false): bool
     {
         $requiredListen = [':443'];
-        $panelPort = self::getPanelPublicPort();
-        $panelListen = ':' . $panelPort;
-        $panelPortClaimedElsewhere = false;
+        $panelRouteServer = null;
         if ($enforcePanelPort) {
-            $panelPortClaimedElsewhere = self::findServerByListenPort($caddyApi, $panelPort, 'srv0') !== null;
-            if (!$panelPortClaimedElsewhere && !in_array($panelListen, $requiredListen, true)) {
-                $requiredListen[] = $panelListen;
+            $panelRouteServer = self::resolvePanelRouteServer($caddyApi, true);
+            if ($panelRouteServer === null) {
+                return false;
             }
         }
 
@@ -1570,8 +1738,12 @@ CONF;
             return false;
         }
 
-        if ($enforcePanelPort && !$panelPortClaimedElsewhere && !self::ensurePanelFallbackRoute($caddyApi)) {
-            return false;
+        if ($enforcePanelPort) {
+            $panelServerName = self::getPanelAdminServerName();
+            if (($panelRouteServer === 'srv0' || $panelRouteServer === $panelServerName)
+                && !self::ensurePanelFallbackRoute($caddyApi, $panelRouteServer)) {
+                return false;
+            }
         }
 
         return true;
@@ -1581,17 +1753,28 @@ CONF;
      * Keep a deterministic fallback route for admin access by IP/hostname on PANEL_PORT.
      * This prevents panel lockouts after caddy reloads that drop runtime routes.
      */
-    private static function ensurePanelFallbackRoute(string $caddyApi): bool
+    private static function ensurePanelFallbackRoute(string $caddyApi, string $serverName = 'srv0'): bool
     {
         $panelPort = self::getPanelPublicPort();
         $internalPort = self::getPanelInternalPort();
         $expectedExpr = '{http.request.port} == ' . $panelPort;
 
-        $routesResult = self::fetchCaddyRoutes($caddyApi, false);
-        if (!($routesResult['ok'] ?? false)) {
+        $routesUrl = "{$caddyApi}/config/apps/http/servers/{$serverName}/routes";
+        $ch = curl_init($routesUrl);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 8,
+        ]);
+        $routesRaw = curl_exec($ch);
+        $routesCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if (!($routesCode >= 200 && $routesCode < 300)) {
             return false;
         }
-        $routes = $routesResult['routes'] ?? [];
+        $routes = json_decode((string)$routesRaw, true);
+        if (!is_array($routes) || !array_is_list($routes)) {
+            return false;
+        }
 
         foreach ($routes as $route) {
             if ((string)($route['@id'] ?? '') !== self::PANEL_FALLBACK_ROUTE_ID) {
@@ -1633,7 +1816,7 @@ CONF;
         }
 
         self::deleteRouteById($caddyApi, self::PANEL_FALLBACK_ROUTE_ID);
-        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        $ch = curl_init($routesUrl);
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => json_encode($fallbackRoute),

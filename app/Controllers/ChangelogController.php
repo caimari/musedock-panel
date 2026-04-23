@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.72',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Caddy mixed-mode hardening: el auto-repair del panel deja de inyectar `:8444` en `srv0`; ahora usa servidor dedicado `srv_panel_admin` cuando corresponde',
+                            'Update/cluster safe-guard: si `PANEL_PORT` lo sirve un server externo del Caddyfile (ej. `srv1`), se omite la mutacion de rutas/politicas runtime del panel para no romper dominios productivos',
+                            'Panel route targeting: `panel-fallback-route` y `panel-domain-route` se aplican solo en servidores gestionados por el panel (`srv0` legacy o `srv_panel_admin`), evitando pisar configuraciones ajenas',
+                        ],
+                        'en' => [
+                            'Caddy mixed-mode hardening: panel auto-repair no longer injects `:8444` into `srv0`; it now uses dedicated `srv_panel_admin` where applicable',
+                            'Update/cluster safe-guard: when `PANEL_PORT` is owned by an external Caddyfile server (e.g. `srv1`), runtime panel route/policy mutations are skipped to avoid breaking production domains',
+                            'Panel route targeting: `panel-fallback-route` and `panel-domain-route` are applied only on panel-managed servers (`srv0` legacy or `srv_panel_admin`), preventing foreign config clobbering',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Nuevo `.env` opcional `CADDY_PANEL_SERVER_NAME` para personalizar el server runtime dedicado del panel',
+                        ],
+                        'en' => [
+                            'New optional `.env` key `CADDY_PANEL_SERVER_NAME` to customize the panel dedicated runtime server name',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.71',
                 'date' => '2026-04-23',
                 'badge' => 'primary',

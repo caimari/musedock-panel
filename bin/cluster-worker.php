@@ -632,7 +632,11 @@ if (file_exists($regenFlag)) {
 try {
     $config = require PANEL_ROOT . '/config/panel.php';
     $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
-    if (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi, true)) {
+    $panelManaged = \MuseDockPanel\Services\SystemService::panelRuntimeManagedByPanel($caddyApi);
+    if (!$panelManaged) {
+        $owner = \MuseDockPanel\Services\SystemService::panelPortOwner($caddyApi) ?? 'unknown';
+        logMsg("INFO: PANEL_PORT gestionado por {$owner}; se omite auto-repair Caddy runtime en este nodo.");
+    } elseif (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi, true)) {
         logMsg("WARNING: Caddy srv0/listeners not ready — skipping TLS policy check.");
     } else {
         $panelRouteResult = \MuseDockPanel\Services\SystemService::ensurePanelDomainRouteFromSettings();
