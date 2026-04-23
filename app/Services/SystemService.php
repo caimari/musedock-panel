@@ -10,6 +10,7 @@ class SystemService
 {
     private static array $allowedPhpVersions = ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4'];
     private const PANEL_DOMAIN_ROUTE_ID = 'panel-domain-route';
+    private const PANEL_FALLBACK_ROUTE_ID = 'panel-fallback-route';
     private static ?bool $hasCloudflareDnsProvider = null;
 
     /**
@@ -885,19 +886,7 @@ CONF;
                 'host' => [$hostname],
                 'expression' => '{http.request.port} == ' . $panelPublicPort,
             ]],
-            'handle' => [[
-                'handler' => 'reverse_proxy',
-                'upstreams' => [['dial' => "127.0.0.1:{$internalPort}"]],
-                'headers' => [
-                    'request' => [
-                        'set' => [
-                            'X-Forwarded-Proto' => ['https'],
-                            'X-Forwarded-Host' => ['{http.request.host}'],
-                            'X-Real-IP' => ['{remote_host}'],
-                        ],
-                    ],
-                ],
-            ]],
+            'handle' => self::panelReverseProxyHandle($internalPort),
             'terminal' => true,
         ];
 
@@ -922,6 +911,43 @@ CONF;
 
         $warning = self::buildPanelDomainDnsWarning($hostname);
         return ['ok' => true, 'warning' => $warning];
+    }
+
+    /**
+     * Ensure the panel hostname route (if configured in settings) exists in Caddy.
+     * Used by cluster-worker after reloads to self-heal runtime API config.
+     */
+    public static function ensurePanelDomainRouteFromSettings(): array
+    {
+        $hostname = self::normalizeStoredHostname((string)\MuseDockPanel\Settings::get('panel_hostname', ''));
+        if ($hostname === '') {
+            return ['ok' => true, 'skipped' => true];
+        }
+
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
+        $panelPublicPort = self::getPanelPublicPort();
+
+        $routesResult = self::fetchCaddyRoutes($caddyApi, true);
+        if (!($routesResult['ok'] ?? false)) {
+            return ['ok' => false, 'error' => (string)($routesResult['error'] ?? 'No se pudo leer rutas Caddy')];
+        }
+
+        foreach (($routesResult['routes'] ?? []) as $route) {
+            if ((string)($route['@id'] ?? '') !== self::PANEL_DOMAIN_ROUTE_ID) {
+                continue;
+            }
+            $match = $route['match'][0] ?? [];
+            $hosts = $match['host'] ?? [];
+            $expr = (string)($match['expression'] ?? '');
+            $expectedExpr = '{http.request.port} == ' . $panelPublicPort;
+            if (in_array($hostname, $hosts, true) && trim($expr) === $expectedExpr) {
+                return ['ok' => true];
+            }
+            break;
+        }
+
+        return self::configurePanelDomainRoute($hostname);
     }
 
     /**
@@ -955,6 +981,35 @@ CONF;
             $panelPort = 8444;
         }
         return $panelPort;
+    }
+
+    private static function normalizeStoredHostname(string $value): string
+    {
+        $value = strtolower(trim($value));
+        if ($value === '') {
+            return '';
+        }
+        $value = preg_replace('#^https?://#', '', $value);
+        $value = explode('/', $value, 2)[0] ?? '';
+        $value = explode(':', $value, 2)[0] ?? '';
+        return trim((string)$value);
+    }
+
+    private static function panelReverseProxyHandle(int $internalPort): array
+    {
+        return [[
+            'handler' => 'reverse_proxy',
+            'upstreams' => [['dial' => "127.0.0.1:{$internalPort}"]],
+            'headers' => [
+                'request' => [
+                    'set' => [
+                        'X-Forwarded-Proto' => ['https'],
+                        'X-Forwarded-Host' => ['{http.request.host}'],
+                        'X-Real-IP' => ['{remote_host}'],
+                    ],
+                ],
+            ],
+        ]];
     }
 
     /**
@@ -1186,7 +1241,82 @@ CONF;
             return false;
         }
 
+        if ($enforcePanelPort && !self::ensurePanelFallbackRoute($caddyApi)) {
+            return false;
+        }
+
         return true;
+    }
+
+    /**
+     * Keep a deterministic fallback route for admin access by IP/hostname on PANEL_PORT.
+     * This prevents panel lockouts after caddy reloads that drop runtime routes.
+     */
+    private static function ensurePanelFallbackRoute(string $caddyApi): bool
+    {
+        $panelPort = self::getPanelPublicPort();
+        $internalPort = self::getPanelInternalPort();
+        $expectedExpr = '{http.request.port} == ' . $panelPort;
+
+        $routesResult = self::fetchCaddyRoutes($caddyApi, false);
+        if (!($routesResult['ok'] ?? false)) {
+            return false;
+        }
+        $routes = $routesResult['routes'] ?? [];
+
+        foreach ($routes as $route) {
+            if ((string)($route['@id'] ?? '') !== self::PANEL_FALLBACK_ROUTE_ID) {
+                continue;
+            }
+            $match = $route['match'][0] ?? [];
+            $expr = trim((string)($match['expression'] ?? ''));
+            $upstreamDial = (string)($route['handle'][0]['upstreams'][0]['dial'] ?? '');
+            $expectedDial = "127.0.0.1:{$internalPort}";
+            if ($expr === $expectedExpr && $upstreamDial === $expectedDial) {
+                return true;
+            }
+            break;
+        }
+
+        $fallbackRoute = [
+            '@id' => self::PANEL_FALLBACK_ROUTE_ID,
+            'match' => [[
+                'expression' => $expectedExpr,
+            ]],
+            'handle' => self::panelReverseProxyHandle($internalPort),
+            'terminal' => true,
+        ];
+
+        $ch = curl_init("{$caddyApi}/id/" . self::PANEL_FALLBACK_ROUTE_ID);
+        curl_setopt_array($ch, [
+            CURLOPT_CUSTOMREQUEST => 'PUT',
+            CURLOPT_POSTFIELDS => json_encode($fallbackRoute),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 8,
+        ]);
+        curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if ($httpCode >= 200 && $httpCode < 300) {
+            return true;
+        }
+
+        self::deleteRouteById($caddyApi, self::PANEL_FALLBACK_ROUTE_ID);
+        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($fallbackRoute),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 8,
+        ]);
+        curl_exec($ch);
+        $postCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        return $postCode >= 200 && $postCode < 300;
     }
 
     private static function fetchCaddyRoutes(string $caddyApi, bool $enforcePanelPort = false): array

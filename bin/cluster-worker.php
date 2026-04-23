@@ -632,18 +632,27 @@ if (file_exists($regenFlag)) {
 try {
     $config = require PANEL_ROOT . '/config/panel.php';
     $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
-    if (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi)) {
+    if (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi, true)) {
         logMsg("WARNING: Caddy srv0/listeners not ready — skipping TLS policy check.");
     } else {
+        $panelRouteResult = \MuseDockPanel\Services\SystemService::ensurePanelDomainRouteFromSettings();
+        if (!($panelRouteResult['ok'] ?? false)) {
+            logMsg("WARNING: panel-domain route not ready — " . ($panelRouteResult['error'] ?? 'unknown error'));
+        } elseif (!empty($panelRouteResult['warning'])) {
+            logMsg("WARNING: panel-domain route — " . $panelRouteResult['warning']);
+        }
+
         $policies = json_decode(@file_get_contents("{$caddyApi}/config/apps/tls/automation/policies") ?: '[]', true) ?: [];
 
-        // Check if our catch-all has HTTP-01 (sign that policies are correctly set by us)
+        // Catch-all must include at least one ACME issuer without explicit DNS challenge.
+        // Internal-only policies are invalid for public panel hostnames.
         $hasCorrectCatchAll = false;
         foreach ($policies as $p) {
             if (empty($p['subjects'])) {
-                // Catch-all found — check if it has HTTP-01 issuer (our signature)
                 foreach ($p['issuers'] ?? [] as $iss) {
-                    if (empty($iss['challenges'])) {
+                    $module = (string)($iss['module'] ?? '');
+                    $hasDnsChallenge = isset($iss['challenges']['dns']);
+                    if ($module === 'acme' && !$hasDnsChallenge) {
                         $hasCorrectCatchAll = true;
                         break;
                     }

@@ -44,21 +44,43 @@ echo "[repair-caddy] OK: srv0/listeners activos.\n";
 
 try {
     \MuseDockPanel\Services\SystemService::ensureTlsCatchAllPolicy($caddyApi);
-    echo "[repair-caddy] OK: politicas TLS verificadas.\n";
+    $policiesRaw = @file_get_contents("{$caddyApi}/config/apps/tls/automation/policies");
+    $policies = json_decode((string)$policiesRaw, true);
+    $hasAcmeCatchAll = false;
+    if (is_array($policies)) {
+        foreach ($policies as $policy) {
+            if (!empty($policy['subjects'])) {
+                continue;
+            }
+            foreach (($policy['issuers'] ?? []) as $issuer) {
+                if (($issuer['module'] ?? '') === 'acme' && !isset($issuer['challenges']['dns'])) {
+                    $hasAcmeCatchAll = true;
+                    break 2;
+                }
+            }
+            break;
+        }
+    }
+    if ($hasAcmeCatchAll) {
+        echo "[repair-caddy] OK: politicas TLS verificadas.\n";
+    } else {
+        fwrite(STDERR, "[repair-caddy] WARNING TLS: catch-all ACME HTTP-01 ausente (posible policy internal-only).\n");
+    }
 } catch (\Throwable $e) {
     fwrite(STDERR, "[repair-caddy] WARNING TLS: " . $e->getMessage() . "\n");
 }
 
-$panelHostname = trim((string)\MuseDockPanel\Settings::get('panel_hostname', ''));
-if ($panelHostname !== '') {
-    $result = \MuseDockPanel\Services\SystemService::configurePanelDomainRoute($panelHostname);
-    if ($result['ok'] ?? false) {
-        echo "[repair-caddy] OK: ruta del panel aplicada para {$panelHostname}.\n";
-    } else {
-        fwrite(STDERR, "[repair-caddy] WARNING route: " . ($result['error'] ?? 'error desconocido') . "\n");
+$result = \MuseDockPanel\Services\SystemService::ensurePanelDomainRouteFromSettings();
+if (!empty($result['skipped'])) {
+    echo "[repair-caddy] INFO: panel_hostname vacio, no se aplica ruta dedicada.\n";
+} elseif ($result['ok'] ?? false) {
+    $panelHostname = trim((string)\MuseDockPanel\Settings::get('panel_hostname', ''));
+    echo "[repair-caddy] OK: ruta del panel aplicada para {$panelHostname}.\n";
+    if (!empty($result['warning'])) {
+        fwrite(STDERR, "[repair-caddy] WARNING route: " . $result['warning'] . "\n");
     }
 } else {
-    echo "[repair-caddy] INFO: panel_hostname vacio, no se aplica ruta dedicada.\n";
+    fwrite(STDERR, "[repair-caddy] WARNING route: " . ($result['error'] ?? 'error desconocido') . "\n");
 }
 
 echo "[repair-caddy] DONE\n";
