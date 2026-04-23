@@ -74,8 +74,8 @@
                         <label class="form-label">TLS del panel (puerto <?= (int)$panelPort ?>)</label>
                         <select class="form-select" name="panel_tls_mode" id="panel_tls_mode">
                             <option value="self_signed" <?= $panelTlsMode === 'self_signed' ? 'selected' : '' ?>>Certificado interno/autofirmado (recomendado para admin privado)</option>
-                            <option value="http01" <?= $panelTlsMode === 'http01' ? 'selected' : '' ?>>Let's Encrypt HTTP-01 / TLS-ALPN-01</option>
-                            <option value="dns01" <?= $panelTlsMode === 'dns01' ? 'selected' : '' ?>>Let's Encrypt DNS-01 (proveedor DNS con API)</option>
+                            <option value="http01" <?= $panelTlsMode === 'http01' ? 'selected' : '' ?>>Let's Encrypt HTTP-01 / TLS-ALPN-01 (+ fallback interno)</option>
+                            <option value="dns01" <?= $panelTlsMode === 'dns01' ? 'selected' : '' ?>>Let's Encrypt DNS-01 (+ fallback interno, proveedor DNS con API)</option>
                         </select>
                         <small class="text-muted">
                             Recomendado: <strong>self-signed</strong> si el panel esta cerrado por firewall. Usa DNS-01 si quieres certificado publico sin abrir puertos.
@@ -106,8 +106,8 @@
                         <div class="rounded p-3" style="border:1px solid rgba(148,163,184,0.28); background:rgba(15,23,42,0.45);">
                             <div class="fw-semibold mb-2">Guia rapida de certificacion del panel</div>
                             <div class="small text-muted mb-1"><strong>A) Self-signed:</strong> no depende de Internet ni ACME. Ideal para panel privado con firewall estricto.</div>
-                            <div class="small text-muted mb-1"><strong>B) HTTP-01/TLS-ALPN-01:</strong> requiere puertos 80/443 alcanzables desde Internet durante emision/renovacion.</div>
-                            <div class="small text-muted"><strong>C) DNS-01:</strong> no requiere abrir 80/443 para certificar, pero exige proveedor DNS con API y modulo Caddy instalado.</div>
+                            <div class="small text-muted mb-1"><strong>B) HTTP-01/TLS-ALPN-01:</strong> requiere puertos 80/443 alcanzables desde Internet durante emision/renovacion (si falla, entra fallback interno para no bloquear acceso).</div>
+                            <div class="small text-muted"><strong>C) DNS-01:</strong> no requiere abrir 80/443 para certificar, pero exige proveedor DNS con API y modulo Caddy instalado (tambien con fallback interno).</div>
                         </div>
                     </div>
 

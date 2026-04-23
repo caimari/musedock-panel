@@ -50,11 +50,13 @@ class ChangelogController
                     ],
                     'fixed' => [
                         'es' => [
+                            'Panel TLS anti-lockout: en modos ACME (`http01` y `dns01`) se añade fallback interno para evitar `ERR_SSL_PROTOCOL_ERROR` cuando ACME falla',
                             'Settings server save: validaciones de DNS-01 (dominio requerido, proveedor valido, JSON valido, email ACME valido)',
                             'Limpieza TLS del panel: al quitar dominio del panel, se elimina tambien la policy TLS dedicada para evitar estado residual',
                             'URL de panel en UI: para hostname configurado muestra acceso correcto por puerto admin (`https://dominio:8444`), evitando confusion con 443',
                         ],
                         'en' => [
+                            'Panel TLS anti-lockout: ACME modes (`http01` and `dns01`) now include internal fallback to avoid `ERR_SSL_PROTOCOL_ERROR` when ACME fails',
                             'Server settings save: DNS-01 validation added (hostname required, provider format, valid JSON, valid ACME email)',
                             'Panel TLS cleanup: when panel hostname is removed, dedicated panel TLS policy is removed too (no stale policy leftovers)',
                             'Panel URL in UI: hostname access now explicitly uses admin port (`https://domain:8444`), avoiding confusing 443 assumptions',

@@ -77,8 +77,8 @@
                 <div class="mb-1"><strong>Modo por defecto:</strong> certificado interno/autofirmado en el puerto del panel (recomendado para administracion privada).</div>
                 <div class="mb-1">Tras completar el setup puedes cambiarlo en <strong>Settings → Servidor</strong>:</div>
                 <div class="small">1) Self-signed (privado)</div>
-                <div class="small">2) Let's Encrypt HTTP-01/TLS-ALPN-01 (requiere 80/443 abiertos desde Internet)</div>
-                <div class="small">3) Let's Encrypt DNS-01 (requiere proveedor DNS con API)</div>
+                <div class="small">2) Let's Encrypt HTTP-01/TLS-ALPN-01 (requiere 80/443 abiertos desde Internet, con fallback interno)</div>
+                <div class="small">3) Let's Encrypt DNS-01 (requiere proveedor DNS con API, con fallback interno)</div>
                 <div class="small mt-2">Mantén el puerto admin restringido a IPs de confianza.</div>
             </div>
         </div>

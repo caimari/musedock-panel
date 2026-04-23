@@ -1159,10 +1159,16 @@ CONF;
                 'ok' => true,
                 'policy' => [
                     'subjects' => [$hostname],
-                    'issuers' => [[
-                        'module' => 'acme',
-                        'email' => $email,
-                    ]],
+                    'issuers' => [
+                        [
+                            'module' => 'acme',
+                            'email' => $email,
+                        ],
+                        [
+                            // Fallback to keep admin panel reachable when ACME is blocked/failing.
+                            'module' => 'internal',
+                        ],
+                    ],
                 ],
             ];
         }
@@ -1202,16 +1208,22 @@ CONF;
             'ok' => true,
             'policy' => [
                 'subjects' => [$hostname],
-                'issuers' => [[
-                    'module' => 'acme',
-                    'email' => $email,
-                    'challenges' => [
-                        'dns' => [
-                            'provider' => array_merge(['name' => $provider], $providerConfig),
-                            'resolvers' => ['1.1.1.1:53', '8.8.8.8:53'],
+                'issuers' => [
+                    [
+                        'module' => 'acme',
+                        'email' => $email,
+                        'challenges' => [
+                            'dns' => [
+                                'provider' => array_merge(['name' => $provider], $providerConfig),
+                                'resolvers' => ['1.1.1.1:53', '8.8.8.8:53'],
+                            ],
                         ],
                     ],
-                ]],
+                    [
+                        // Fallback if DNS challenge cannot complete.
+                        'module' => 'internal',
+                    ],
+                ],
             ],
         ];
     }

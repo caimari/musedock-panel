@@ -3592,13 +3592,13 @@ echo ""
 echo -e "  ${YELLOW}${BOLD}TLS del panel admin (${PANEL_PORT})${NC}"
 if [ "$LANG_CODE" = "es" ]; then
     echo -e "     - Modo por defecto: certificado interno/autofirmado (no depende de Internet)."
-    echo -e "     - Opcion 1: Let's Encrypt HTTP-01/TLS-ALPN-01 (requiere 80/443 abiertos para emitir/renovar)."
-    echo -e "     - Opcion 2: Let's Encrypt DNS-01 (sin abrir 80/443 para certificar; requiere proveedor DNS con API)."
+    echo -e "     - Opcion 1: Let's Encrypt HTTP-01/TLS-ALPN-01 (requiere 80/443 abiertos para emitir/renovar; fallback interno automatico si falla)."
+    echo -e "     - Opcion 2: Let's Encrypt DNS-01 (sin abrir 80/443 para certificar; requiere proveedor DNS con API; fallback interno automatico)."
     echo -e "     - Se configura desde: Settings -> Servidor (TLS del panel)."
 else
     echo -e "     - Default mode: internal/self-signed certificate (no Internet dependency)."
-    echo -e "     - Option 1: Let's Encrypt HTTP-01/TLS-ALPN-01 (requires public 80/443 for issue/renew)."
-    echo -e "     - Option 2: Let's Encrypt DNS-01 (no need to open 80/443 for cert issuance; requires DNS API provider)."
+    echo -e "     - Option 1: Let's Encrypt HTTP-01/TLS-ALPN-01 (requires public 80/443 for issue/renew; automatic internal fallback on failure)."
+    echo -e "     - Option 2: Let's Encrypt DNS-01 (no need to open 80/443 for cert issuance; requires DNS API provider; automatic internal fallback)."
     echo -e "     - Configure it from: Settings -> Server (Panel TLS mode)."
 fi
 echo ""
