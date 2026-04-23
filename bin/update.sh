@@ -170,7 +170,14 @@ fi
 echo -e "${CYAN}${BOLD}[2/4]${NC} Running database migrations..."
 echo ""
 
-$PHP_BIN "${PANEL_DIR}/bin/migrate.php" 2>&1 | sed 's/^/  /'
+set +e
+MIG_OUT=$($PHP_BIN "${PANEL_DIR}/bin/migrate.php" 2>&1)
+MIG_RC=$?
+set -e
+echo "$MIG_OUT" | sed 's/^/  /'
+if [ $MIG_RC -ne 0 ]; then
+    fail "Database migrations failed. Fix migrations and retry update."
+fi
 
 echo ""
 
