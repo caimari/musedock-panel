@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.68',
+                'date' => '2026-04-23',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Sync Cloudflare master→slave: corregido payload para enviar `cf_accounts` en formato raw cifrado (no decriptado), restaurando la propagacion fiable de token a `/etc/default/caddy` en slaves',
+                            'Seguridad en slave: al recibir `cf_accounts`, los tokens se normalizan a cifrados antes de guardar en `panel_settings` (compatibilidad con payloads legacy en texto plano)',
+                            'Compatibilidad update token: `sync-failover-config` acepta token legacy en claro para ejecutar `update-caddy-token.sh` y luego persiste cifrado en BD',
+                        ],
+                        'en' => [
+                            'Cloudflare master→slave sync: fixed payload to send `cf_accounts` as raw encrypted data (not decrypted), restoring reliable token propagation to `/etc/default/caddy` on slaves',
+                            'Slave security: incoming `cf_accounts` tokens are normalized to encrypted-at-rest before saving into `panel_settings` (compatibility with legacy plain-text payloads)',
+                            'Token-update compatibility: `sync-failover-config` now accepts legacy plain tokens for `update-caddy-token.sh` execution and then persists encrypted in DB',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.67',
                 'date' => '2026-04-23',
                 'badge' => 'primary',

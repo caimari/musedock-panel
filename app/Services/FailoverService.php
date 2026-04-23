@@ -1249,10 +1249,17 @@ class FailoverService
             }
         }
 
+        // Sync must use raw stored accounts (encrypted tokens), not decrypted helper output.
+        // Otherwise slaves receive plain tokens and cannot apply update-caddy-token flow reliably.
+        $cfAccountsRaw = json_decode(Settings::get('failover_cf_accounts', '[]'), true);
+        if (!is_array($cfAccountsRaw)) {
+            $cfAccountsRaw = [];
+        }
+
         $payload = [
             'config'            => $config,
             'servers'           => self::getServers(),
-            'cf_accounts'       => CloudflareService::getConfiguredAccounts(),
+            'cf_accounts'       => $cfAccountsRaw,
             'remote_domains'    => Settings::get('failover_remote_domains', ''),
             'update_caddy_token' => $updateCaddyToken,
         ];

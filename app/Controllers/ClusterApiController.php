@@ -531,8 +531,20 @@ class ClusterApiController
             Settings::set('failover_servers', json_encode($servers));
         }
 
-        // Save Cloudflare accounts
+        // Save Cloudflare accounts (force encrypted-at-rest for tokens).
         if ($cfAccounts !== null && is_array($cfAccounts)) {
+            foreach ($cfAccounts as &$acct) {
+                $tokenRaw = trim((string)($acct['token'] ?? ''));
+                if ($tokenRaw === '') {
+                    continue;
+                }
+                // If token is plain (legacy/buggy payload), encrypt before storing.
+                $dec = \MuseDockPanel\Services\ReplicationService::decryptPassword($tokenRaw);
+                if ($dec === '') {
+                    $acct['token'] = \MuseDockPanel\Services\ReplicationService::encryptPassword($tokenRaw);
+                }
+            }
+            unset($acct);
             Settings::set('failover_cf_accounts', json_encode($cfAccounts));
         }
 
@@ -547,7 +559,12 @@ class ClusterApiController
         if ($updateCaddyToken && !empty($cfAccounts) && is_array($cfAccounts)) {
             $firstAccount = $cfAccounts[0] ?? null;
             if ($firstAccount && !empty($firstAccount['token'])) {
-                $token = \MuseDockPanel\Services\ReplicationService::decryptPassword($firstAccount['token']);
+                $tokenRaw = (string)$firstAccount['token'];
+                $token = \MuseDockPanel\Services\ReplicationService::decryptPassword($tokenRaw);
+                if ($token === '') {
+                    // Compatibility: accept plain token from old payloads.
+                    $token = trim($tokenRaw);
+                }
                 if ($token && file_exists('/usr/local/bin/update-caddy-token.sh')) {
                     $out = shell_exec('sudo /usr/local/bin/update-caddy-token.sh ' . escapeshellarg($token) . ' 2>&1');
                     $caddyTokenUpdated = str_contains($out ?? '', 'OK');
