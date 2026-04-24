@@ -129,7 +129,7 @@
                 <form method="post" action="/mail/relay/domains/store" class="row g-2 mb-3">
                     <?= View::csrf() ?>
                     <div class="col">
-                        <input class="form-control form-control-sm" name="domain" placeholder="picalias.com" required>
+                        <input class="form-control form-control-sm" name="domain" placeholder="example.com" required>
                     </div>
                     <div class="col-auto">
                         <button class="btn btn-info btn-sm"><i class="bi bi-plus-lg me-1"></i>Añadir dominio</button>
@@ -196,11 +196,11 @@
                 <?php if (!$isSlave): ?>
                 <form method="post" action="/mail/relay/users/store" class="row g-2 mb-3">
                     <?= View::csrf() ?>
-                    <div class="col-md-4"><input class="form-control form-control-sm" name="username" placeholder="mortadelo-relay" required></div>
-                    <div class="col-md-4"><input class="form-control form-control-sm" name="description" placeholder="Apps de mortadelo"></div>
+                    <div class="col-md-4"><input class="form-control form-control-sm" name="username" placeholder="web01-relay" required></div>
+                    <div class="col-md-4"><input class="form-control form-control-sm" name="description" placeholder="Apps del servidor web"></div>
                     <div class="col-md-2"><input class="form-control form-control-sm" name="rate_limit_per_hour" type="number" min="1" value="200"></div>
                     <div class="col-md-2"><button class="btn btn-info btn-sm w-100">Crear</button></div>
-                    <div class="col-12"><input class="form-control form-control-sm" name="allowed_from_domains" placeholder="Dominios permitidos opcional: picalias.com, factubase.com"></div>
+                    <div class="col-12"><input class="form-control form-control-sm" name="allowed_from_domains" placeholder="Dominios permitidos opcional: example.com, example.net"></div>
                 </form>
                 <?php endif; ?>
 
@@ -439,15 +439,15 @@
 <?php endif; ?>
 
 <!-- Deliverability -->
-<div class="card mb-4">
+<div class="card mt-4 mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-shield-check me-2"></i>Entregabilidad DNS</span>
         <span class="text-muted small">SPF, DKIM, DMARC, PTR y blacklists</span>
     </div>
     <div class="card-body">
         <p class="text-muted small mb-3">
-            Esta seccion te dice, en cristiano, si el dominio esta preparado para enviar sin caer en spam.
-            Los checks leen DNS en tiempo real; los registros recomendados son los que debes copiar en tu proveedor DNS.
+            Comprueba si el dominio tiene los registros necesarios para una entrega de correo correcta.
+            Los checks leen DNS en tiempo real; los registros recomendados se pueden copiar al proveedor DNS.
         </p>
 
         <?php if (($mailMode ?? 'full') === 'external'): ?>
@@ -530,7 +530,7 @@
             <div class="col-md-5">
                 <label class="form-label">Test de envio</label>
                 <input type="email" name="test_email" class="form-control" placeholder="tu@email.com" required>
-                <div class="form-text text-muted">Envia un correo simple y mira si Postfix lo acepta, lo envia, lo difiere o lo rebota.</div>
+                <div class="form-text text-muted">Envia un correo de prueba y muestra si Postfix lo entrega, lo deja en cola o lo rechaza.</div>
             </div>
             <div class="col-md-auto">
                 <button class="btn btn-outline-info"><i class="bi bi-send me-1"></i>Enviar test</button>

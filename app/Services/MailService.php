@@ -465,7 +465,7 @@ class MailService
                 'username' => Settings::get('mail_smtp_user', ''),
                 'password' => $includeSecret ? $password : ($enc !== '' ? '***' : ''),
                 'from_address' => Settings::get('mail_from_address', ''),
-                'from_name' => Settings::get('mail_from_name', 'MuseDock'),
+                'from_name' => Settings::get('mail_from_name', ''),
             ];
         }
 
@@ -477,7 +477,7 @@ class MailService
             'username' => null,
             'password' => null,
             'from_address' => Settings::get('mail_from_address', '') ?: ('noreply@' . (Settings::get('mail_outbound_domain', '') ?: gethostname())),
-            'from_name' => Settings::get('mail_from_name', 'MuseDock'),
+            'from_name' => Settings::get('mail_from_name', ''),
             'dkim_configured' => $mode === 'relay' ? !empty(self::getRelayDomains()) : self::satelliteDkimConfigured(),
             'deliverability_score' => 'unknown',
         ];

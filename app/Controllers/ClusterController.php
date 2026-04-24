@@ -1571,7 +1571,7 @@ class ClusterController
                     'password' => (string)($_POST['smtp_password'] ?? ''),
                     'encryption' => $_POST['smtp_encryption'] ?? 'tls',
                     'from_address' => trim($_POST['from_address'] ?? ''),
-                    'from_name' => trim($_POST['from_name'] ?? 'MuseDock'),
+                    'from_name' => trim($_POST['from_name'] ?? ''),
                 ],
                 'relay' => [
                     'host' => trim($_POST['relay_host'] ?? ''),
@@ -1784,7 +1784,7 @@ class ClusterController
                 'password' => (string)($_POST['smtp_password'] ?? ''),
                 'encryption' => $_POST['smtp_encryption'] ?? 'tls',
                 'from_address' => trim($_POST['from_address'] ?? ''),
-                'from_name' => trim($_POST['from_name'] ?? 'MuseDock'),
+                'from_name' => trim($_POST['from_name'] ?? ''),
             ],
             'relay' => [
                 'host' => trim($_POST['relay_host'] ?? ''),
@@ -1903,6 +1903,13 @@ class ClusterController
             Settings::set('mail_setup_started_at', '');
             Settings::set('mail_setup_task_id', '');
 
+            if (in_array($status, ['completed', 'completed_with_errors'], true)) {
+                $detectedRelayPublicIp = trim((string)($result['progress']['relay_public_ip'] ?? ''));
+                if ($detectedRelayPublicIp !== '') {
+                    Settings::set('mail_relay_public_ip', $detectedRelayPublicIp);
+                }
+            }
+
             if ($status === 'completed') {
                 Settings::set('mail_node_configured', '1');
                 Settings::set('mail_local_configured', '1');
@@ -2004,6 +2011,12 @@ class ClusterController
         if (in_array($status, ['completed', 'completed_with_errors', 'failed', 'stale', 'timeout'])) {
             Settings::set('mail_setup_started_at', '');
             Settings::set('mail_setup_task_id', '');
+            if (in_array($status, ['completed', 'completed_with_errors'], true)) {
+                $detectedRelayPublicIp = trim((string)($response['progress']['relay_public_ip'] ?? ''));
+                if ($detectedRelayPublicIp !== '') {
+                    Settings::set('mail_relay_public_ip', $detectedRelayPublicIp);
+                }
+            }
             LogService::log('cluster.mail', "setup-{$status}", "Mail setup {$status} en nodo #{$nodeId}");
         }
 

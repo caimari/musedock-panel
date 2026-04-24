@@ -55,6 +55,21 @@ class UpdateController
 
         $result = UpdateService::runUpdate();
 
+        $wantsJson = (
+            ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest'
+            || str_contains((string)($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json')
+        );
+
+        if ($wantsJson) {
+            header('Content-Type: application/json');
+            echo json_encode([
+                'ok' => (bool)($result['success'] ?? false),
+                'message' => $result['message'] ?? '',
+                'current' => PANEL_VERSION,
+            ]);
+            exit;
+        }
+
         if ($result['success']) {
             Flash::set('success', 'Actualizacion iniciada. El panel se reiniciara automaticamente en unos segundos.');
         } else {
@@ -84,7 +99,10 @@ class UpdateController
             'remote'       => $cached['remote'] ?? '',
             'checked_at'   => $cached['checked_at'] ?? null,
             'in_progress'  => $status['in_progress'],
+            'started_at'   => $status['started_at'],
+            'elapsed'      => $status['elapsed'],
             'output'       => $status['output'],
+            'completed'    => !$status['in_progress'] && str_contains((string)$status['output'], 'Update complete'),
         ]);
         exit;
     }

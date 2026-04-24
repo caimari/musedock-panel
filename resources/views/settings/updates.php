@@ -156,6 +156,37 @@
 </div>
 
 <script>
+const UPDATE_PAGE_START_VERSION = '<?= View::e(PANEL_VERSION) ?>';
+
+function updateCacheBustUrl(url) {
+    return url + (url.includes('?') ? '&' : '?') + '_=' + Date.now();
+}
+
+function forceReloadUpdatesPage() {
+    window.location.replace('/settings/updates?updated=1&_=' + Date.now());
+}
+
+function updateStatusFetch() {
+    return fetch(updateCacheBustUrl('/settings/updates/api/status'), {
+        cache: 'no-store',
+        headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    }).then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    });
+}
+
+function panelReadyFetch() {
+    return fetch(updateCacheBustUrl('/settings/updates'), {
+        cache: 'no-store',
+        redirect: 'follow',
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    });
+}
+
 function confirmUpdate(e) {
     e.preventDefault();
     SwalDark.fire({
@@ -173,7 +204,15 @@ function confirmUpdate(e) {
         if (result.isConfirmed) {
             // Launch update via AJAX and start polling immediately
             var fd = new FormData(document.getElementById('updateForm'));
-            fetch('/settings/updates/run', { method: 'POST', body: fd })
+            fetch('/settings/updates/run', {
+                method: 'POST',
+                body: fd,
+                cache: 'no-store',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
                 .catch(function() {}); // Ignore — panel may restart before response
             startUpdatePolling();
         }
@@ -195,16 +234,12 @@ function startUpdatePolling() {
     }
 
     var polls = 0, catchCount = 0, sawRestart = false;
-    var maxPolls = 90;
+    var maxPolls = 180;
     var out = document.getElementById('updateOutput');
 
     function tryReload() {
-        // Just check if the panel responds at all (any HTTP status = panel is up)
-        fetch('/settings/updates', {cache: 'no-store', redirect: 'follow'})
-            .then(function(r) {
-                // Panel is responding — reload the page
-                window.location.href = '/settings/updates?updated=1';
-            })
+        panelReadyFetch()
+            .then(forceReloadUpdatesPage)
             .catch(function() { setTimeout(tryReload, 2000); });
     }
 
@@ -216,15 +251,19 @@ function startUpdatePolling() {
             return;
         }
 
-        fetch('/settings/updates/api/status', {cache: 'no-store'})
-            .then(function(r) { return r.json(); })
+        updateStatusFetch()
             .then(function(data) {
                 catchCount = 0;
                 if (data.output && out) {
                     out.textContent = data.output;
                     out.scrollTop = out.scrollHeight;
                 }
-                if (!data.in_progress) {
+                if (data.current && data.current !== UPDATE_PAGE_START_VERSION && (!data.in_progress || data.completed)) {
+                    clearInterval(timer);
+                    forceReloadUpdatesPage();
+                    return;
+                }
+                if (!data.in_progress || data.completed || (data.output && data.output.includes('Update complete'))) {
                     clearInterval(timer);
                     setTimeout(tryReload, 1500);
                 }
@@ -253,15 +292,12 @@ function startUpdatePolling() {
     let catchCount = 0;
     let sawComplete = false;
     let sawRestart = false;
-    const maxPolls = 90; // 90 * 2s = 3 minutes max
+    const maxPolls = 180; // 180 * 2s = 6 minutes max
     const out = document.getElementById('updateOutput');
 
     function tryReload() {
-        // Check if panel responds at all (any HTTP status = panel is up)
-        fetch('/settings/updates', {cache: 'no-store', redirect: 'follow'})
-            .then(() => {
-                window.location.href = '/settings/updates?updated=1';
-            })
+        panelReadyFetch()
+            .then(forceReloadUpdatesPage)
             .catch(() => setTimeout(tryReload, 2000));
     }
 
@@ -273,8 +309,7 @@ function startUpdatePolling() {
             return;
         }
 
-        fetch('/settings/updates/api/status', {cache: 'no-store'})
-            .then(r => r.json())
+        updateStatusFetch()
             .then(data => {
                 catchCount = 0;
                 if (data.output) {
@@ -286,7 +321,12 @@ function startUpdatePolling() {
                         sawComplete = true;
                     }
                 }
-                if (!data.in_progress) {
+                if (data.current && data.current !== UPDATE_PAGE_START_VERSION && (!data.in_progress || data.completed)) {
+                    clearInterval(timer);
+                    forceReloadUpdatesPage();
+                    return;
+                }
+                if (!data.in_progress || data.completed) {
                     clearInterval(timer);
                     // Small delay then reload
                     setTimeout(tryReload, 1500);

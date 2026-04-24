@@ -180,6 +180,18 @@ function configureSatelliteRelayFailover(array $payload, string $logFile, array 
     }
 }
 
+function detectPublicIpv4(): string
+{
+    $ctx = stream_context_create(['http' => ['timeout' => 3]]);
+    foreach (['https://api.ipify.org', 'https://ifconfig.me/ip'] as $url) {
+        $ip = trim((string)@file_get_contents($url, false, $ctx));
+        if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return $ip;
+        }
+    }
+    return '';
+}
+
 // ── Extract payload ──────────────────────────────────────────
 
 $dbHost    = $payload['db_host'] ?? 'localhost';
@@ -214,6 +226,15 @@ if ($outboundDomain === '' && str_contains($hostname, '.')) {
     $outboundDomain = implode('.', array_slice($parts, -2));
 }
 
+if ($mailMode === 'relay' && $relayPublicIp === '') {
+    $relayPublicIp = detectPublicIpv4();
+    if ($relayPublicIp !== '') {
+        logLine($logFile, 'INFO', "IP publica del relay detectada automaticamente: {$relayPublicIp}");
+    } else {
+        logLine($logFile, 'WARN', 'No se pudo detectar la IP publica del relay; entregabilidad necesitara configurarla manualmente.');
+    }
+}
+
 if ($mailMode === 'external') {
     $step = 1;
     writeProgress($progressFile, ['id' => 'save_external_smtp', 'label' => 'Guardar SMTP externo'], $step, 1, 'running', $errors);
@@ -224,7 +245,7 @@ if ($mailMode === 'external') {
     $smtpPass = (string)($smtp['password'] ?? '');
     $smtpEncryption = in_array(($smtp['encryption'] ?? 'tls'), ['tls', 'ssl', 'none'], true) ? $smtp['encryption'] : 'tls';
     $fromAddress = trim((string)($smtp['from_address'] ?? ''));
-    $fromName = trim((string)($smtp['from_name'] ?? 'MuseDock'));
+    $fromName = trim((string)($smtp['from_name'] ?? ''));
 
     if ($smtpHost === '' || $fromAddress === '') {
         $errors[] = ['step' => 'save_external_smtp', 'command' => 'validate smtp payload', 'exit' => 1, 'output' => 'smtp_host y from_address son obligatorios'];
@@ -391,6 +412,7 @@ if ($mailMode === 'relay') {
         'mail_mode' => 'relay',
         'services' => $serviceStatus,
         'wireguard_ip' => $wireguardIp,
+        'relay_public_ip' => $relayPublicIp,
         'submission_wireguard_only' => !empty($listenOut),
         'finished_at' => date('Y-m-d H:i:s'),
     ]);

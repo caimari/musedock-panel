@@ -61,10 +61,12 @@
                 </div>
             </div>
 
-            <form id="form-mail-setup" onsubmit="return startMailSetup(event)">
+            <form id="form-mail-setup" onsubmit="return startMailSetup(event)" autocomplete="off">
                 <?= View::csrf() ?>
                 <input type="hidden" name="setup_mode" id="hidden-setup-mode" value="local">
                 <input type="hidden" name="db_host" value="localhost">
+                <input type="text" name="mail_setup_autofill_user" autocomplete="username" tabindex="-1" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;opacity:0;">
+                <input type="password" name="mail_setup_autofill_password" autocomplete="current-password" tabindex="-1" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;opacity:0;">
 
                 <div class="row g-3">
                     <div class="col-12">
@@ -81,7 +83,7 @@
                                 <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(14,165,233,.35);background:rgba(14,165,233,.08);cursor:pointer;">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="relay" onchange="toggleMailMode()">
                                     <strong>Relay Privado</strong>
-                                    <small class="d-block text-muted mt-1">Tu propio Sweego por WireGuard. Otros servidores envian por VPN con usuario SMTP. DKIM independiente por dominio.</small>
+                                    <small class="d-block text-muted mt-1">Relay SMTP privado por WireGuard. Otros servidores envian por VPN con usuario SMTP. DKIM independiente por dominio.</small>
                                 </label>
                             </div>
                             <div class="col-md-3">
@@ -111,70 +113,74 @@
                             <?php endforeach; ?>
                         </select>
                     </div>
-                    <div class="col-md-6">
+                    <div class="col-md-6 mb-2">
                         <label class="form-label">Hostname de mail</label>
-                        <input type="text" name="mail_hostname" class="form-control" placeholder="mail.example.com" required>
-                        <small class="text-muted mode-help mode-full">FQDN para registros MX y certificado TLS (ej: mail.tudominio.com)</small>
-                        <small class="text-muted mode-help mode-satellite" style="display:none;">Hostname de salida/EHLO. Debe tener A y PTR correctos (ej: mailout.tudominio.com)</small>
-                        <small class="text-muted mode-help mode-relay" style="display:none;">Hostname publico del relay. Debe coincidir con el PTR/rDNS de la IP publica.</small>
+                        <input type="text" name="mail_hostname" class="form-control" placeholder="mail.dominio.com" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true" required>
+                        <small class="text-muted mode-help mode-full">Nombre publico del servidor de correo. Se usara para MX, certificado TLS y conexiones SMTP/IMAP. Ej: mail.dominio.com.</small>
+                        <small class="text-muted mode-help mode-satellite" style="display:none;">Nombre de salida/EHLO del servidor. Debe tener A y PTR/rDNS correctos. Ej: mailout.dominio.com.</small>
+                        <small class="text-muted mode-help mode-relay" style="display:none;">Nombre publico del relay. Debe coincidir con el PTR/rDNS de la IP publica. Ej: relay.dominio.com.</small>
                     </div>
-                    <div class="col-md-6 mode-satellite-field mode-relay-field" style="display:none;">
+                    <div class="col-md-6 mb-2 mode-satellite-field mode-relay-field" style="display:none;">
                         <label class="form-label">Dominio remitente</label>
-                        <input type="text" name="outbound_domain" class="form-control" placeholder="example.com">
-                        <small class="text-muted">Dominio que firmara DKIM y tendra SPF/DMARC. Ej: tu SaaS envia desde noreply@example.com.</small>
+                        <input type="text" name="outbound_domain" class="form-control" placeholder="dominio.com" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
+                        <small class="text-muted">Dominio que firmara DKIM y tendra SPF/DMARC. Ej: una aplicacion envia desde noreply@dominio.com.</small>
                     </div>
-                    <div class="col-12 mode-relay-field" style="display:none;">
+                    <div class="col-12 mt-2 mode-relay-field" style="display:none;">
                         <div class="row g-3 p-3 rounded" style="border:1px solid rgba(14,165,233,.25);background:rgba(14,165,233,.06);">
                             <div class="col-md-4">
                                 <label class="form-label">IP WireGuard del relay</label>
-                                <input type="text" name="wireguard_ip" class="form-control" placeholder="10.10.70.X">
-                                <small class="text-muted">Postfix 587 escuchara solo aqui, no en la IP publica.</small>
+                                <input type="text" name="wireguard_ip" class="form-control" placeholder="10.10.70.10" autocomplete="off" inputmode="decimal" data-lpignore="true" data-1p-ignore="true">
+                                <small class="text-muted">Postfix 587 escuchara solo en esta IP privada, no en la IP publica.</small>
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">Red WireGuard autorizada</label>
-                                <input type="text" name="wireguard_cidr" class="form-control" value="10.10.70.0/24">
+                                <input type="text" name="wireguard_cidr" class="form-control" value="10.10.70.0/24" autocomplete="off" inputmode="decimal" data-lpignore="true" data-1p-ignore="true">
+                                <small class="text-muted">Rango privado que podra usar el relay. Normalmente 10.10.70.0/24.</small>
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">IP publica del relay</label>
-                                <input type="text" name="relay_public_ip" class="form-control" placeholder="X.X.X.X">
-                                <small class="text-muted">Para SPF, PTR y blacklists.</small>
+                                <input type="text" name="relay_public_ip" class="form-control" placeholder="Se detecta automaticamente si lo dejas vacio" autocomplete="off" inputmode="decimal" data-lpignore="true" data-1p-ignore="true">
+                                <small class="text-muted">Opcional. Si se deja vacia, el instalador detecta la IPv4 publica del nodo. Se usa para SPF, PTR y blacklists.</small>
                             </div>
                         </div>
                     </div>
-                    <div class="col-12 mode-satellite-field" style="display:none;">
+                    <div class="col-12 mt-2 mode-satellite-field" style="display:none;">
                         <div class="row g-3 p-3 rounded" style="border:1px solid rgba(56,189,248,.22);background:rgba(56,189,248,.05);">
                             <div class="col-12">
                                 <strong class="small">Failover opcional: relay privado → SMTP externo</strong>
-                                <div class="small text-muted">Si rellenas estos campos, Postfix local enviara por tu relay WireGuard y cambiara a Sweego/SMTP externo si el relay cae.</div>
+                                <div class="small text-muted">Si rellenas estos campos, Postfix local enviara por el relay WireGuard y cambiara al SMTP externo si el relay no responde.</div>
                             </div>
-                            <div class="col-md-3"><label class="form-label">Relay host/IP</label><input name="relay_host" class="form-control" placeholder="10.10.70.X"></div>
-                            <div class="col-md-2"><label class="form-label">Puerto relay</label><input name="relay_port" type="number" class="form-control" value="587"></div>
-                            <div class="col-md-3"><label class="form-label">Usuario relay</label><input name="relay_user" class="form-control"></div>
-                            <div class="col-md-4"><label class="form-label">Password relay</label><input name="relay_password" type="password" class="form-control"></div>
-                            <div class="col-md-3"><label class="form-label">Fallback SMTP</label><input name="fallback_smtp_host" class="form-control" placeholder="prod-mta-06.swg-srv.net"></div>
-                            <div class="col-md-2"><label class="form-label">Puerto fallback</label><input name="fallback_smtp_port" type="number" class="form-control" value="2525"></div>
-                            <div class="col-md-3"><label class="form-label">Usuario fallback</label><input name="fallback_smtp_user" class="form-control"></div>
-                            <div class="col-md-4"><label class="form-label">Password fallback</label><input name="fallback_smtp_password" type="password" class="form-control"></div>
+                            <div class="col-md-3"><label class="form-label">Relay host/IP</label><input name="relay_host" class="form-control" placeholder="10.10.70.10" autocomplete="off" data-lpignore="true" data-1p-ignore="true"></div>
+                            <div class="col-md-2"><label class="form-label">Puerto relay</label><input name="relay_port" type="number" class="form-control" value="587" autocomplete="off"></div>
+                            <div class="col-md-3"><label class="form-label">Usuario relay</label><input name="relay_user" class="form-control" autocomplete="off" data-lpignore="true" data-1p-ignore="true"></div>
+                            <div class="col-md-4"><label class="form-label">Password relay</label><input name="relay_password" type="password" class="form-control" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true"></div>
+                            <div class="col-md-3"><label class="form-label">Fallback SMTP</label><input name="fallback_smtp_host" class="form-control" placeholder="smtp.proveedor.com" autocomplete="off" data-lpignore="true" data-1p-ignore="true"></div>
+                            <div class="col-md-2"><label class="form-label">Puerto fallback</label><input name="fallback_smtp_port" type="number" class="form-control" value="587" autocomplete="off"></div>
+                            <div class="col-md-3"><label class="form-label">Usuario fallback</label><input name="fallback_smtp_user" class="form-control" autocomplete="off" data-lpignore="true" data-1p-ignore="true"></div>
+                            <div class="col-md-4"><label class="form-label">Password fallback</label><input name="fallback_smtp_password" type="password" class="form-control" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true"></div>
                         </div>
                     </div>
                     <div class="col-md-6 mode-full-field">
-                        <label class="form-label">Certificado SSL</label>
+                        <label class="form-label">Certificado SSL del correo</label>
                         <select name="ssl_mode" class="form-select">
                             <option value="letsencrypt">Let's Encrypt (automatico)</option>
                             <option value="selfsigned">Auto-firmado (testing)</option>
                             <option value="manual">Manual (ya tengo certificados)</option>
                         </select>
-                        <small class="text-muted">Para conexiones SMTP/IMAP seguras.</small>
+                        <small class="text-muted">
+                            Solo aplica a <strong>Correo Completo</strong>. El certificado se instala en el servidor elegido:
+                            si eliges modo local, en este master; si eliges nodo remoto, en ese slave. Se usa para SMTP/IMAP seguros del hostname indicado.
+                        </small>
                     </div>
-                    <div class="col-12 mode-external-field" style="display:none;">
+                    <div class="col-12 mt-3 mode-external-field" style="display:none;">
                         <div class="row g-3 p-3 rounded" style="border:1px solid rgba(148,163,184,.25);background:rgba(15,23,42,.35);">
                             <div class="col-md-6">
                                 <label class="form-label">Servidor SMTP</label>
-                                <input type="text" name="smtp_host" class="form-control" placeholder="smtp.mailgun.org">
+                                <input type="text" name="smtp_host" class="form-control" placeholder="smtp.proveedor.com" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">Puerto</label>
-                                <input type="number" name="smtp_port" class="form-control" value="587">
+                                <input type="number" name="smtp_port" class="form-control" value="587" autocomplete="off">
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">Cifrado</label>
@@ -186,25 +192,28 @@
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Usuario SMTP</label>
-                                <input type="text" name="smtp_user" class="form-control">
+                                <input type="text" name="smtp_user" class="form-control" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">Password SMTP</label>
-                                <input type="password" name="smtp_password" class="form-control">
+                                <input type="password" name="smtp_password" class="form-control" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">From address</label>
-                                <input type="email" name="from_address" class="form-control" placeholder="noreply@example.com">
+                                <input type="email" name="from_address" class="form-control" placeholder="noreply@dominio.com" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
                             </div>
                             <div class="col-md-6">
                                 <label class="form-label">From name</label>
-                                <input type="text" name="from_name" class="form-control" value="MuseDock">
+                                <input type="text" name="from_name" class="form-control" placeholder="Nombre visible del remitente" value="" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
+                            </div>
+                            <div class="col-12">
+                                <small class="text-muted">Estos datos solo se guardan para que el panel y las apps locales puedan enviar por tu proveedor SMTP. El nombre visible es opcional.</small>
                             </div>
                         </div>
                     </div>
                     <div class="col-md-6">
                         <label class="form-label">Tu contrase&ntilde;a del panel</label>
-                        <input type="password" name="admin_password" class="form-control" required>
+                        <input type="password" name="admin_password" class="form-control" value="" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" required>
                         <small class="text-muted">Para confirmar esta operacion.</small>
                     </div>
                     <div class="col-12">

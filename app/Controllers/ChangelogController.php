@@ -20,6 +20,27 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.84',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/settings/updates`: el polling web detecta fin de update, cambio de version y reinicio del panel con cache-busting, recargando automaticamente al terminar',
+                            '`/mail?setup=1`: limpieza de placeholders/autofill en SMTP externo, relay WireGuard y passwords para evitar valores pegados por el navegador',
+                            'Relay privado: la IP publica del relay es opcional; si queda vacia, el instalador detecta la IPv4 publica del nodo y la guarda para SPF/PTR/blacklists',
+                            'SMTP externo: `From name` deja de tener valor hardcodeado por defecto y queda vacio salvo que el admin lo defina',
+                        ],
+                        'en' => [
+                            '`/settings/updates`: web polling detects update completion, version changes and panel restart with cache-busting, then reloads automatically',
+                            '`/mail?setup=1`: cleaned placeholders/autofill handling for external SMTP, WireGuard relay and password fields to avoid browser-injected values',
+                            'Private relay: public relay IP is optional; when left empty, installer detects the node public IPv4 and stores it for SPF/PTR/blacklists',
+                            'External SMTP: `From name` no longer has a hardcoded default and stays empty unless the admin sets it',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.83',
                 'date' => '2026-04-24',
                 'badge' => 'primary',
@@ -29,13 +50,13 @@ class ChangelogController
                             'Mail setup incorpora `Relay Privado (WireGuard)`: un relay SMTP propio accesible solo por VPN',
                             'Relay privado instala Postfix + OpenDKIM multi-dominio + SASL, sin Dovecot/Rspamd ni recepcion publica',
                             '`/mail`: gestion de dominios autorizados del relay con DKIM independiente y usuarios SMTP SASL',
-                            'Satellite mode puede usar relay privado primario y SMTP externo/Sweego como fallback mediante healthcheck local',
+                            'Satellite mode puede usar relay privado primario y SMTP externo como fallback mediante healthcheck local',
                         ],
                         'en' => [
                             'Mail setup adds `Private Relay (WireGuard)`: a self-hosted SMTP relay reachable only over VPN',
                             'Private relay installs Postfix + multi-domain OpenDKIM + SASL, without Dovecot/Rspamd or public inbound mail',
                             '`/mail`: manage relay authorized domains with independent DKIM and SMTP SASL users',
-                            'Satellite mode can use a private relay as primary and external SMTP/Sweego as fallback through local health checks',
+                            'Satellite mode can use a private relay as primary and external SMTP as fallback through local health checks',
                         ],
                     ],
                     'improved' => [
@@ -57,13 +78,13 @@ class ChangelogController
                 'changes' => [
                     'new' => [
                         'es' => [
-                            'Mail setup con tres modos: `Solo Envio (Satellite)`, `Correo Completo` y `SMTP Externo`, explicados en cristiano desde la UI',
+                            'Mail setup con tres modos: `Solo Envio (Satellite)`, `Correo Completo` y `SMTP Externo`, explicados de forma clara desde la UI',
                             'Satellite mode instala solo Postfix + OpenDKIM para enviar notificaciones, sin Dovecot/Rspamd y sin abrir puertos de entrada',
                             '`/mail`: panel de entregabilidad DNS con SPF, DKIM, DMARC, A, PTR/rDNS, blacklists y registros recomendados copiables',
                             'Endpoint local `GET /api/internal/smtp-config` para que apps PHP/Laravel del mismo servidor lean la configuracion SMTP con token',
                         ],
                         'en' => [
-                            'Mail setup now supports three modes: `Send Only (Satellite)`, `Full Mail` and `External SMTP`, with plain-language UI explanations',
+                            'Mail setup now supports three modes: `Send Only (Satellite)`, `Full Mail` and `External SMTP`, with clear UI descriptions',
                             'Satellite mode installs only Postfix + OpenDKIM for outbound notifications, without Dovecot/Rspamd and without opening inbound ports',
                             '`/mail`: deliverability dashboard with SPF, DKIM, DMARC, A, PTR/rDNS, blacklists and copyable recommended DNS records',
                             'Local `GET /api/internal/smtp-config` endpoint lets same-server PHP/Laravel apps read SMTP config via token',
