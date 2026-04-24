@@ -20,6 +20,27 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.90',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/docs/mail-modes` y modal de instalacion mail: ejemplos neutralizados con dominios genericos, sin hosts privados del entorno',
+                            'Setup inicial: nueva seccion de firewall que detecta firewall activo y permite abrir SSH/puerto panel solo para una IP o rango de confianza',
+                            'Setup inicial: si no hay firewall activo, ofrece preparar UFW con `deny incoming`, `allow outgoing`, SSH y puerto panel restringidos antes de activarlo',
+                            'Login: ahora muestra mensajes `success` y `warning` del setup, no solo errores',
+                        ],
+                        'en' => [
+                            '`/docs/mail-modes` and mail installer modal: examples now use generic domains, without private environment hostnames',
+                            'First setup: new firewall section detects an active firewall and can open SSH/panel port only for a trusted IP or range',
+                            'First setup: when no active firewall is detected, it offers to prepare UFW with `deny incoming`, `allow outgoing`, SSH and panel port restricted before enabling it',
+                            'Login: now shows setup `success` and `warning` messages, not only errors',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.89',
                 'date' => '2026-04-24',
                 'badge' => 'primary',
@@ -36,13 +57,13 @@ class ChangelogController
                         'es' => [
                             '`/mail?tab=general`: instalador de mail con modal de ayuda para elegir modo, ejemplos de uso y diferencias entre SaaS local, relay WireGuard y buzones completos',
                             '`/mail?tab=general`: textos ampliados para hostname, DNS, PTR/rDNS, Let\'s Encrypt, WireGuard, credenciales SMTP y confirmacion de admin',
-                            '`/mail?tab=general`: recomendacion dinamica segun el modo seleccionado, incluyendo convivencia gradual con Sweego/Cloudflare',
+                            '`/mail?tab=general`: recomendacion dinamica segun el modo seleccionado, con ejemplos genericos de envio por VPN y convivencia gradual con proveedores SMTP externos',
                             '`/settings/updates`: el check remoto resuelve el SHA real de `origin/main` y lee GitHub raw por commit para evitar cache stale de `main`',
                         ],
                         'en' => [
                             '`/mail?tab=general`: mail installer now includes a help modal to choose the mode, with practical examples for local SaaS, WireGuard relay and full mailboxes',
                             '`/mail?tab=general`: expanded copy for hostname, DNS, PTR/rDNS, Let\'s Encrypt, WireGuard, SMTP credentials and admin confirmation',
-                            '`/mail?tab=general`: dynamic recommendation based on selected mode, including gradual coexistence with Sweego/Cloudflare',
+                            '`/mail?tab=general`: dynamic recommendation based on selected mode, with generic examples for VPN relay and gradual coexistence with external SMTP providers',
                             '`/settings/updates`: remote check resolves the real `origin/main` SHA and reads GitHub raw by commit to avoid stale `main` cache',
                         ],
                     ],

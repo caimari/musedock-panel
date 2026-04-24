@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.90] — 2026-04-24
+
+### Improved
+- `/docs/mail-modes` y modal de instalacion mail: ejemplos neutralizados con dominios genericos, sin hosts privados del entorno.
+- Setup inicial: nueva seccion de firewall que detecta firewall activo y permite abrir SSH/puerto panel solo para una IP o rango de confianza.
+- Setup inicial: si no hay firewall activo, ofrece preparar UFW con `deny incoming`, `allow outgoing`, SSH y puerto panel restringidos antes de activarlo.
+- Login: ahora muestra mensajes `success` y `warning` del setup, no solo errores.
+
 ## [1.0.89] — 2026-04-24
 
 ### New
@@ -10,7 +18,7 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 ### Improved
 - `/mail?tab=general`: instalador de mail con modal de ayuda para elegir modo, ejemplos de uso y diferencias claras entre SaaS local, relay WireGuard y buzones completos.
 - `/mail?tab=general`: textos ampliados para hostname, DNS, PTR/rDNS, Let's Encrypt, WireGuard, credenciales SMTP y confirmacion de admin.
-- `/mail?tab=general`: recomendacion dinamica segun el modo seleccionado, incluyendo ejemplos para mortadelo enviando por VPN y convivencia gradual con Sweego/Cloudflare.
+- `/mail?tab=general`: recomendacion dinamica segun el modo seleccionado, incluyendo ejemplos genericos de envio por VPN y convivencia gradual con proveedores SMTP externos.
 - `/settings/updates`: el check remoto resuelve primero el SHA real de `origin/main` y lee GitHub raw por commit para evitar cache stale de `main`.
 
 ## [1.0.88] — 2026-04-24

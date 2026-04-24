@@ -25,7 +25,7 @@
                         <strong>Antes de instalar, decide el uso real.</strong>
                         <div class="small text-muted mt-1">
                             Si solo este SaaS envia desde la misma maquina, usa <strong>Solo Envio</strong>.
-                            Si otros servidores como mortadelo enviaran por WireGuard, usa <strong>Relay Privado</strong>.
+                            Si otros servidores enviaran por WireGuard, usa <strong>Relay Privado</strong>.
                             Si necesitas buzones IMAP, recibir correo y webmail, usa <strong>Correo Completo</strong>.
                         </div>
                     </div>
@@ -124,7 +124,7 @@
                                 <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(251,191,36,.35);background:rgba(251,191,36,.06);cursor:pointer;">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="external" onchange="toggleMailMode()">
                                     <strong>SMTP Externo</strong>
-                                    <small class="d-block text-muted mt-1">Para delegar envio en SES, Mailgun, Brevo, Sweego u otro proveedor. No instala servidor local.</small>
+                                    <small class="d-block text-muted mt-1">Para delegar envio en SES, Mailgun, Brevo u otro proveedor. No instala servidor local.</small>
                                 </label>
                             </div>
                         </div>
@@ -151,15 +151,15 @@
                     </div>
                     <div class="col-md-6 mb-2">
                         <label class="form-label">Hostname de mail</label>
-                        <input type="text" name="mail_hostname" class="form-control" placeholder="mail.muserelay.com" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true" required>
-                        <small class="text-muted mode-help mode-full">Nombre publico del servidor. Debe tener A hacia esta IP, MX del dominio apuntando aqui, PTR/rDNS idealmente igual y puertos 25/587/993 abiertos. Ej: mail.muserelay.com.</small>
-                        <small class="text-muted mode-help mode-satellite" style="display:none;">Nombre de salida/EHLO del servidor. Debe tener A y PTR/rDNS correctos. Ej: mail.muserelay.com o mailout.muserelay.com.</small>
-                        <small class="text-muted mode-help mode-relay" style="display:none;">Nombre publico del relay para reputacion, SPF, PTR y DKIM. Los clientes remotos conectan por la IP WireGuard, no por la IP publica. Ej: mail.muserelay.com.</small>
+                        <input type="text" name="mail_hostname" class="form-control" placeholder="mail.example.com" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true" required>
+                        <small class="text-muted mode-help mode-full">Nombre publico del servidor. Debe tener A hacia esta IP, MX del dominio apuntando aqui, PTR/rDNS idealmente igual y puertos 25/587/993 abiertos. Ej: mail.example.com.</small>
+                        <small class="text-muted mode-help mode-satellite" style="display:none;">Nombre de salida/EHLO del servidor. Debe tener A y PTR/rDNS correctos. Ej: mail.example.com o mailout.example.com.</small>
+                        <small class="text-muted mode-help mode-relay" style="display:none;">Nombre publico del relay para reputacion, SPF, PTR y DKIM. Los clientes remotos conectan por la IP WireGuard, no por la IP publica. Ej: relay.example.net.</small>
                     </div>
                     <div class="col-md-6 mb-2 mode-satellite-field mode-relay-field" style="display:none;">
                         <label class="form-label">Dominio remitente</label>
                         <input type="text" name="outbound_domain" class="form-control" placeholder="dominio.com" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
-                        <small class="text-muted">Dominio que firmara DKIM y tendra SPF/DMARC. Ej: si la app envia desde noreply@muserelay.com, escribe muserelay.com.</small>
+                        <small class="text-muted">Dominio que firmara DKIM y tendra SPF/DMARC. Ej: si la app envia desde noreply@example.com, escribe example.com.</small>
                     </div>
                     <div class="col-12 mt-2 mode-relay-field" style="display:none;">
                         <div class="row g-3 p-3 rounded" style="border:1px solid rgba(14,165,233,.25);background:rgba(14,165,233,.06);">
@@ -346,7 +346,7 @@
                         <div class="p-3 rounded h-100" style="background:rgba(15,23,42,.35);border:1px solid #334155;">
                             <h6>2. Hostname, DNS y certificado</h6>
                             <p class="small text-muted mb-2">
-                                Usa un hostname real, por ejemplo <code>mail.muserelay.com</code>. Debe tener un registro A hacia la IP publica del servidor.
+                                Usa un hostname real, por ejemplo <code>mail.example.com</code>. Debe tener un registro A hacia la IP publica del servidor.
                                 Para buena entrega, el PTR/rDNS de esa IP deberia resolver al mismo hostname.
                             </p>
                             <p class="small text-muted mb-0">
@@ -375,7 +375,7 @@
                             <h6>Relay Privado (WireGuard)</h6>
                             <p class="small text-muted mb-2">
                                 Es Satellite mas SMTP autenticado por VPN. La app local puede seguir enviando por localhost sin credenciales.
-                                Servidores remotos, por ejemplo mortadelo, conectan por WireGuard a <code>10.10.70.x:587</code> con usuario y password.
+                                Servidores remotos conectan por WireGuard a <code>10.10.70.x:587</code> con usuario y password.
                             </p>
                             <p class="small text-muted mb-0">
                                 Usa este modo si quieres que varios servidores envien por una maquina central. Las credenciales se crean luego en
@@ -401,7 +401,7 @@
                         <div class="p-3 rounded h-100" style="background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.22);">
                             <h6>SMTP Externo</h6>
                             <p class="small text-muted mb-2">
-                                Guarda credenciales de un proveedor como SES, Mailgun, Brevo, Cloudflare/Sweego u otro. No instala servidor local.
+                                Guarda credenciales de un proveedor como SES, Mailgun, Brevo u otro. No instala servidor local.
                             </p>
                             <p class="small text-muted mb-0">
                                 Es la opcion menos invasiva cuando solo quieres que el panel o una app envie usando un proveedor ya validado.
@@ -411,11 +411,11 @@
 
                     <div class="col-lg-6">
                         <div class="p-3 rounded h-100" style="background:rgba(15,23,42,.35);border:1px solid #334155;">
-                            <h6>DKIM con Sweego y DKIM propio</h6>
+                            <h6>DKIM externo y DKIM propio</h6>
                             <p class="small text-muted mb-2">
                                 Pueden convivir. DKIM funciona por selector. Por ejemplo:
-                                <code>selector1._domainkey.muserelay.com</code> puede ser Sweego y
-                                <code>default._domainkey.muserelay.com</code> puede ser OpenDKIM de MuseDock.
+                                <code>provider._domainkey.example.com</code> puede ser tu proveedor externo y
+                                <code>default._domainkey.example.com</code> puede ser OpenDKIM de MuseDock.
                             </p>
                             <p class="small text-muted mb-0">
                                 Gmail lee el selector usado en cada email y verifica contra esa clave publica. No se confunde mientras cada selector exista en DNS.
@@ -427,7 +427,7 @@
                         <div class="p-3 rounded h-100" style="background:rgba(15,23,42,.35);border:1px solid #334155;">
                             <h6>SPF durante la migracion</h6>
                             <p class="small text-muted mb-2">
-                                SPF debe autorizar todos los emisores activos. Si ahora usas Cloudflare/Sweego y anades tu servidor:
+                                SPF debe autorizar todos los emisores activos. Si ahora usas un proveedor externo y anades tu servidor:
                             </p>
                             <pre class="small mb-2 p-2 rounded" style="background:#0f172a;color:#e2e8f0;">v=spf1 ip4:TU_IP_SERVIDOR include:_spf.mx.cloudflare.net ~all</pre>
                             <p class="small text-muted mb-0">
@@ -504,7 +504,7 @@ function updateMailModeAdvice(mode) {
         ],
         relay: [
             'Relay Privado',
-            'Elige esto si mortadelo u otros servidores enviaran a traves de esta maquina por WireGuard. El SaaS local puede usar localhost; los servidores remotos usan MAIL_HOST=IP_WIREGUARD, puerto 587, usuario y password SMTP.'
+                            'Elige esto si otros servidores enviaran a traves de esta maquina por WireGuard. El SaaS local puede usar localhost; los servidores remotos usan MAIL_HOST=IP_WIREGUARD, puerto 587, usuario y password SMTP.'
         ],
         full: [
             'Correo Completo',
@@ -512,7 +512,7 @@ function updateMailModeAdvice(mode) {
         ],
         external: [
             'SMTP Externo',
-            'Elige esto si quieres seguir enviando por un proveedor como Sweego, SES, Mailgun o Brevo. MuseDock guarda las credenciales, pero no instala Postfix, Dovecot ni DKIM local.'
+            'Elige esto si quieres seguir enviando por un proveedor como SES, Mailgun, Brevo u otro SMTP externo. MuseDock guarda las credenciales, pero no instala Postfix, Dovecot ni DKIM local.'
         ]
     };
 

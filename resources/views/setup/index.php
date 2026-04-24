@@ -11,7 +11,7 @@
     <style>
         body { background: #0f172a; color: #e2e8f0; font-family: 'Inter', -apple-system, sans-serif;
                min-height: 100vh; display: flex; align-items: center; justify-content: center; }
-        .setup-container { max-width: 600px; width: 100%; padding: 1rem; }
+        .setup-container { max-width: 760px; width: 100%; padding: 1rem; }
         .setup-card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 2.5rem; }
         .setup-header { text-align: center; margin-bottom: 2rem; }
         .setup-header h1 { color: #38bdf8; font-size: 1.5rem; font-weight: 700; }
@@ -34,6 +34,9 @@
         .input-group .btn:hover { color: #38bdf8; }
         .step-badge { display: inline-block; width: 24px; height: 24px; border-radius: 50%; background: rgba(56,189,248,0.15);
                       color: #38bdf8; text-align: center; line-height: 24px; font-size: 0.75rem; font-weight: 700; margin-right: 0.5rem; }
+        .setup-option { border: 1px solid #334155; background: rgba(15,23,42,0.35); border-radius: 12px; padding: 1rem; }
+        .setup-option .form-check-input { margin-top: 0.25rem; }
+        .setup-note { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.25); color: #fbbf24; border-radius: 12px; padding: 0.9rem; }
     </style>
 </head>
 <body>
@@ -87,6 +90,7 @@
 
         <!-- Admin Setup Form -->
         <form method="POST" action="/setup/install" <?= !$allOk ? 'style="opacity:0.5;pointer-events:none;"' : '' ?>>
+            <?= View::csrf() ?>
             <h6 style="color:#94a3b8;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:1rem;">
                 <span class="step-badge">2</span> Cuenta de administrador
             </h6>
@@ -130,6 +134,81 @@
             <div class="mb-4">
                 <label class="form-label">Email (opcional)</label>
                 <input type="email" name="email" class="form-control" placeholder="admin@ejemplo.com">
+            </div>
+
+            <hr class="divider">
+
+            <h6 style="color:#94a3b8;font-size:0.8rem;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:1rem;">
+                <span class="step-badge">3</span> Acceso seguro por firewall
+            </h6>
+
+            <?php
+                $fw = $firewall ?? [];
+                $fwActive = (bool)($fw['active'] ?? false);
+                $fwType = (string)($fw['type'] ?? 'none');
+                $fwAdminIp = (string)($fw['admin_ip'] ?? '');
+                $fwPanelPort = (int)($fw['panel_port'] ?? 8444);
+                $fwCanManage = (bool)($fw['can_manage'] ?? true);
+            ?>
+
+            <div class="setup-note mb-3">
+                <div class="d-flex gap-2">
+                    <i class="bi bi-exclamation-triangle-fill"></i>
+                    <div class="small">
+                        Si activas un firewall sin permitir primero SSH y el puerto del panel, puedes perder la conexion.
+                        Lo seguro es permitir <strong>22/tcp</strong> y <strong><?= View::e((string)$fwPanelPort) ?>/tcp</strong>
+                        solo desde tu IP o un rango de confianza.
+                    </div>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">IP o rango de confianza</label>
+                <input type="text" name="firewall_trusted_source" class="form-control"
+                       value="<?= View::e($fwAdminIp) ?>" placeholder="203.0.113.10 o 203.0.113.0/24"
+                       autocomplete="off" spellcheck="false">
+                <small class="text-muted">
+                    Detectada desde tu sesion: <?= View::e($fwAdminIp ?: 'no disponible') ?>.
+                    Puedes cambiarla por un CIDR IPv4 si administras desde una oficina/VPN.
+                </small>
+            </div>
+
+            <div class="d-grid gap-2 mb-4">
+                <?php if (!$fwCanManage): ?>
+                    <div class="alert alert-danger mb-2">
+                        El proceso web no corre como root, asi que el setup no puede modificar firewall. Hazlo manualmente desde SSH.
+                    </div>
+                <?php endif; ?>
+
+                <?php if ($fwActive): ?>
+                    <label class="setup-option">
+                        <input class="form-check-input me-2" type="radio" name="firewall_mode" value="allow_existing" <?= $fwCanManage ? 'checked' : 'disabled' ?>>
+                        <strong>Firewall activo detectado (<?= View::e(strtoupper($fwType === 'iptables' ? 'iptables' : 'UFW')) ?>)</strong>
+                        <span class="d-block small text-muted mt-1">
+                            Anadir reglas para permitir SSH y panel solo desde la IP/rango de confianza. Tambien guarda ese rango en <code>ALLOWED_IPS</code>.
+                        </span>
+                    </label>
+                    <label class="setup-option">
+                        <input class="form-check-input me-2" type="radio" name="firewall_mode" value="skip">
+                        <strong>No tocar firewall ahora</strong>
+                        <span class="d-block small text-muted mt-1">Podras ajustarlo despues en Settings &rarr; Firewall, pero revisa manualmente que <?= View::e((string)$fwPanelPort) ?>/tcp no quede abierto a todo internet.</span>
+                    </label>
+                <?php else: ?>
+                    <label class="setup-option">
+                        <input class="form-check-input me-2" type="radio" name="firewall_mode" value="install_ufw" <?= $fwCanManage ? 'checked' : 'disabled' ?>>
+                        <strong>No hay firewall activo: preparar UFW recomendado</strong>
+                        <span class="d-block small text-muted mt-1">
+                            Instala UFW si hace falta, aplica <code>deny incoming</code>, <code>allow outgoing</code>, permite SSH y panel solo desde la IP/rango de confianza, y activa UFW.
+                        </span>
+                    </label>
+                    <label class="setup-option">
+                        <input class="form-check-input me-2" type="radio" name="firewall_mode" value="skip">
+                        <strong>Dejar firewall para despues</strong>
+                        <span class="d-block small text-muted mt-1">
+                            El panel quedara instalado, pero tendras que restringir manualmente SSH y <?= View::e((string)$fwPanelPort) ?>/tcp antes de exponerlo.
+                        </span>
+                    </label>
+                <?php endif; ?>
             </div>
 
             <button type="submit" class="btn btn-primary w-100 py-2" <?= !$allOk ? 'disabled' : '' ?>>

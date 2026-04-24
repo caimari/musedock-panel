@@ -38,7 +38,7 @@
                 </p>
                 <ul class="text-muted small mb-0">
                     <li>El SaaS local puede seguir usando <code>localhost</code> sin credenciales.</li>
-                    <li>Mortadelo u otros nodos usan <code>MAIL_HOST=10.10.70.x</code>, puerto <code>587</code>, usuario y password.</li>
+                    <li>Otros nodos usan <code>MAIL_HOST=10.10.70.x</code>, puerto <code>587</code>, usuario y password.</li>
                     <li>Los usuarios SMTP se crean en Mail &rarr; Relay &rarr; Usuarios.</li>
                 </ul>
             </div>
@@ -67,7 +67,7 @@
             <div class="card-header"><i class="bi bi-cloud-arrow-up me-2 text-warning"></i>SMTP Externo</div>
             <div class="card-body">
                 <p class="text-muted">
-                    Usa un proveedor externo como Sweego, SES, Mailgun, Brevo u otro. El panel guarda credenciales y configura envio,
+                    Usa un proveedor externo como SES, Mailgun, Brevo u otro. El panel guarda credenciales y configura envio,
                     pero no instala servidor de correo local.
                 </p>
                 <ul class="text-muted small mb-0">
@@ -81,22 +81,22 @@
 </div>
 
 <div class="card mt-4">
-    <div class="card-header"><i class="bi bi-signpost-split me-2"></i>Migracion gradual con Sweego/Cloudflare</div>
+    <div class="card-header"><i class="bi bi-signpost-split me-2"></i>Migracion gradual con un proveedor externo</div>
     <div class="card-body">
         <div class="row g-4">
             <div class="col-lg-6">
                 <h6>DKIM puede convivir</h6>
                 <p class="text-muted small">
-                    DKIM funciona por selector. Puedes tener <code>selector1._domainkey.muserelay.com</code> para Sweego y
-                    <code>default._domainkey.muserelay.com</code> para OpenDKIM de MuseDock. Cada email indica que selector uso.
+                    DKIM funciona por selector. Puedes tener <code>provider._domainkey.example.com</code> para tu proveedor SMTP y
+                    <code>default._domainkey.example.com</code> para OpenDKIM de MuseDock. Cada email indica que selector uso.
                 </p>
             </div>
             <div class="col-lg-6">
                 <h6>SPF debe incluir todos los emisores</h6>
                 <p class="text-muted small mb-2">
-                    Mientras convivan tu servidor y Cloudflare/Sweego, autoriza ambos:
+                    Mientras convivan tu servidor y el proveedor SMTP externo, autoriza ambos:
                 </p>
-                <pre class="small p-3 rounded mb-0" style="background:#0f172a;color:#e2e8f0;">v=spf1 ip4:TU_IP_SERVIDOR include:_spf.mx.cloudflare.net ~all</pre>
+                <pre class="small p-3 rounded mb-0" style="background:#0f172a;color:#e2e8f0;">v=spf1 ip4:TU_IP_SERVIDOR include:_spf.proveedor.example ~all</pre>
             </div>
         </div>
     </div>
@@ -106,11 +106,11 @@
     <div class="card-header"><i class="bi bi-diagram-3 me-2"></i>Ejemplo WireGuard para otro servidor</div>
     <div class="card-body">
         <p class="text-muted small">
-            Si instalas Relay Privado en muserelay y mortadelo debe enviar por ahi, configura las apps de mortadelo con la IP privada del relay:
+            Si instalas Relay Privado en un servidor central y otro nodo debe enviar por ahi, configura las apps del nodo remoto con la IP privada del relay:
         </p>
         <pre class="small p-3 rounded mb-0" style="background:#0f172a;color:#e2e8f0;">MAIL_HOST=10.10.70.X
 MAIL_PORT=587
-MAIL_USERNAME=mortadelo-relay
+MAIL_USERNAME=app-server-relay
 MAIL_PASSWORD=la_password_generada
 MAIL_ENCRYPTION=tls</pre>
     </div>
