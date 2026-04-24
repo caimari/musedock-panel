@@ -257,6 +257,23 @@ class MailService
             }
             // Note: suspend/activate for local mode would need Dovecot passdb deny list — not yet implemented
         }
+
+        if (array_key_exists('autoresponder_enabled', $data)
+            || array_key_exists('autoresponder_subject', $data)
+            || array_key_exists('autoresponder_body', $data)) {
+            $autoPayload = [
+                'email' => $account['email'],
+                'home_dir' => $account['home_dir'],
+                'enabled' => !empty($data['autoresponder_enabled']),
+                'subject' => (string)($data['autoresponder_subject'] ?? ''),
+                'body' => (string)($data['autoresponder_body'] ?? ''),
+            ];
+            if ($account['mail_node_id']) {
+                ClusterService::enqueue((int)$account['mail_node_id'], 'mail_update_autoresponder', $autoPayload);
+            } elseif (Settings::get('mail_local_configured', '') === '1') {
+                self::nodeUpdateAutoresponder($autoPayload);
+            }
+        }
     }
 
     public static function deleteAccount(int $id): void
@@ -1514,6 +1531,99 @@ class MailService
     {
         $email = $payload['email'] ?? '';
         return ['ok' => true, 'message' => "Mailbox activated: {$email}"];
+    }
+
+    public static function nodeEnableSieve(array $payload = []): array
+    {
+        $commands = [
+            'apt-get update -qq',
+            'DEBIAN_FRONTEND=noninteractive apt-get install -yqq dovecot-sieve dovecot-managesieved',
+        ];
+        $errors = [];
+        foreach ($commands as $cmd) {
+            exec($cmd . ' 2>&1', $out, $code);
+            if ($code !== 0) {
+                $errors[] = $cmd . ': ' . implode("\n", array_slice($out, -8));
+            }
+        }
+
+        @mkdir('/etc/dovecot/sieve', 0755, true);
+        file_put_contents('/etc/dovecot/sieve/default.sieve', "require [\"fileinto\"];\n");
+        shell_exec('sievec /etc/dovecot/sieve/default.sieve 2>/dev/null || true');
+
+        $conf = "# MuseDock Sieve/ManageSieve configuration\n"
+            . "protocols = \$protocols sieve\n\n"
+            . "mail_plugins = \$mail_plugins sieve\n\n"
+            . "protocol lmtp {\n"
+            . "  mail_plugins = \$mail_plugins sieve\n"
+            . "}\n\n"
+            . "plugin {\n"
+            . "  sieve = file:~/sieve;active=~/.dovecot.sieve\n"
+            . "  sieve_default = /etc/dovecot/sieve/default.sieve\n"
+            . "  sieve_global_extensions = +vacation +copy +include\n"
+            . "}\n\n"
+            . "service managesieve-login {\n"
+            . "  inet_listener sieve {\n"
+            . "    port = 4190\n"
+            . "  }\n"
+            . "}\n";
+        file_put_contents('/etc/dovecot/conf.d/90-musedock-sieve.conf', $conf);
+        exec('systemctl restart dovecot 2>&1', $restartOut, $restartCode);
+        if ($restartCode !== 0) {
+            $errors[] = 'restart dovecot: ' . implode("\n", array_slice($restartOut, -8));
+        }
+        return empty($errors)
+            ? ['ok' => true, 'message' => 'Sieve/ManageSieve enabled']
+            : ['ok' => false, 'error' => implode('; ', $errors)];
+    }
+
+    public static function nodeUpdateAutoresponder(array $payload): array
+    {
+        $email = (string)($payload['email'] ?? '');
+        $homeDir = (string)($payload['home_dir'] ?? '');
+        $enabled = !empty($payload['enabled']);
+        $subject = trim((string)($payload['subject'] ?? ''));
+        $body = trim((string)($payload['body'] ?? ''));
+
+        if ($email === '' || $homeDir === '') {
+            return ['ok' => false, 'error' => 'Missing email or home_dir'];
+        }
+        if (!str_starts_with($homeDir, '/var/mail/vhosts/')) {
+            return ['ok' => false, 'error' => 'Invalid home_dir path'];
+        }
+
+        $sieveDir = $homeDir . '/sieve';
+        $scriptFile = $sieveDir . '/musedock-autoresponder.sieve';
+        $activeFile = $homeDir . '/.dovecot.sieve';
+        if (!$enabled) {
+            @unlink($scriptFile);
+            if (is_link($activeFile) && readlink($activeFile) === $scriptFile) {
+                @unlink($activeFile);
+            }
+            shell_exec(sprintf('chown -R vmail:vmail %s 2>&1', escapeshellarg($homeDir)));
+            return ['ok' => true, 'message' => "Autoresponder disabled: {$email}"];
+        }
+
+        if ($subject === '') $subject = 'Auto-reply';
+        if ($body === '') $body = "I am currently unavailable and will reply as soon as possible.";
+        if (!is_dir($sieveDir)) {
+            mkdir($sieveDir, 0700, true);
+        }
+        $escapeSieve = static function (string $value): string {
+            return str_replace(['\\', '"', "\r"], ['\\\\', '\"', ''], $value);
+        };
+        $script = "# MuseDock autoresponder - managed by panel\n"
+            . "require [\"vacation\"];\n\n"
+            . "vacation\n"
+            . "  :days 1\n"
+            . "  :subject \"" . $escapeSieve($subject) . "\"\n"
+            . "  \"" . $escapeSieve($body) . "\";\n";
+        file_put_contents($scriptFile, $script);
+        @unlink($activeFile);
+        symlink($scriptFile, $activeFile);
+        shell_exec(sprintf('sievec %s 2>&1', escapeshellarg($scriptFile)));
+        shell_exec(sprintf('chown -R vmail:vmail %s 2>&1', escapeshellarg($homeDir)));
+        return ['ok' => true, 'message' => "Autoresponder enabled: {$email}"];
     }
 
     /**

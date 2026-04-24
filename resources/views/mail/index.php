@@ -123,7 +123,7 @@
                     <div class="d-flex flex-wrap gap-2 mt-3">
                         <span class="badge bg-success">1 · Roundcube</span>
                         <span class="badge bg-secondary">2 · Portal cliente</span>
-                        <span class="badge bg-secondary">3 · Sieve/filtros</span>
+                        <span class="badge bg-<?= !empty($webmailConfig['sieve_enabled']) ? 'success' : 'secondary' ?>">3 · Sieve/filtros</span>
                     </div>
                     <div class="small text-muted mt-3">
                         URL actual:
@@ -133,6 +133,23 @@
                             <span>sin instalar</span>
                         <?php endif; ?>
                     </div>
+                    <?php if (!empty($webmailConfig['aliases'])): ?>
+                        <div class="small text-muted mt-3">Hostnames adicionales</div>
+                        <div class="d-flex flex-column gap-1 mt-1">
+                            <?php foreach ($webmailConfig['aliases'] as $aliasHost): ?>
+                                <div class="d-flex justify-content-between align-items-center gap-2">
+                                    <a class="text-info small" href="https://<?= View::e($aliasHost) ?>" target="_blank"><?= View::e($aliasHost) ?></a>
+                                    <?php if (!$isSlave): ?>
+                                    <form method="post" action="/mail/webmail/aliases/delete" class="m-0">
+                                        <?= View::csrf() ?>
+                                        <input type="hidden" name="host" value="<?= View::e($aliasHost) ?>">
+                                        <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="return confirm('Eliminar hostname webmail?')" title="Eliminar"><i class="bi bi-x"></i></button>
+                                    </form>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php endif; ?>
                     <?php if ($webmailStatus !== 'idle'): ?>
                         <div class="alert <?= $webmailStatus === 'failed' ? 'alert-danger' : ($webmailStatus === 'completed' ? 'alert-success' : 'alert-info') ?> mt-3 mb-0 py-2">
                             <div class="fw-semibold">Estado: <?= View::e($webmailStatus) ?><?= $webmailStage ? ' · '.View::e($webmailStage) : '' ?></div>
@@ -190,6 +207,34 @@
                     <div class="col-md-5">
                         <button class="btn btn-success btn-sm w-100" <?= $webmailStatus === 'running' ? 'disabled' : '' ?>>
                             <i class="bi bi-download me-1"></i><?= $webmailStatus === 'running' ? 'Instalando...' : 'Instalar / reconfigurar Roundcube' ?>
+                        </button>
+                    </div>
+                </form>
+
+                <form method="post" action="/mail/webmail/aliases/store" class="row g-2 align-items-end mt-3" autocomplete="off">
+                    <?= View::csrf() ?>
+                    <div class="col-md-7">
+                        <label class="form-label small">Webmail por dominio de cliente</label>
+                        <input name="host" class="form-control form-control-sm" placeholder="webmail.cliente.com" autocomplete="off">
+                        <div class="form-text text-muted">Añade un hostname extra apuntando al mismo Roundcube. El DNS debe apuntar a este servidor.</div>
+                    </div>
+                    <div class="col-md-5">
+                        <button class="btn btn-outline-light btn-sm w-100" <?= empty($webmailConfig['enabled']) ? 'disabled' : '' ?>>
+                            <i class="bi bi-plus-lg me-1"></i>Añadir hostname webmail
+                        </button>
+                    </div>
+                </form>
+
+                <form method="post" action="/mail/webmail/sieve-enable" class="row g-2 align-items-end mt-3" autocomplete="off" onsubmit="return confirm('Activar Sieve/ManageSieve en los nodos de correo?')">
+                    <?= View::csrf() ?>
+                    <div class="col-md-7">
+                        <label class="form-label small">Filtros, reenvios y vacaciones</label>
+                        <input name="admin_password" type="password" class="form-control form-control-sm" autocomplete="new-password" placeholder="Password admin" required>
+                        <div class="form-text text-muted">Instala/activa Dovecot Sieve y ManageSieve para que Roundcube pueda gestionar filtros y autoresponder.</div>
+                    </div>
+                    <div class="col-md-5">
+                        <button class="btn btn-outline-warning btn-sm w-100">
+                            <i class="bi bi-funnel me-1"></i>Activar Sieve/ManageSieve
                         </button>
                     </div>
                 </form>

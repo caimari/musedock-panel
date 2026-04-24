@@ -352,6 +352,8 @@ class ClusterApiController
                 'mail_update_quota'     => MailService::nodeUpdateQuota($payload),
                 'mail_suspend_mailbox'  => MailService::nodeSuspendMailbox($payload),
                 'mail_activate_mailbox' => MailService::nodeActivateMailbox($payload),
+                'mail_update_autoresponder' => MailService::nodeUpdateAutoresponder($payload),
+                'mail_enable_sieve'     => MailService::nodeEnableSieve($payload),
                 'mail_setup_node'          => MailService::nodeSetupMail($payload),
                 'mail_setup_status'        => MailService::nodeSetupStatus($payload),
                 'mail_generate_setup_token' => MailService::nodeGenerateSetupToken($payload),

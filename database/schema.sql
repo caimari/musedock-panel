@@ -125,6 +125,8 @@ INSERT INTO panel_settings (key, value) VALUES
     ('mail_webmail_imap_host', ''),
     ('mail_webmail_smtp_host', ''),
     ('mail_webmail_doc_root', ''),
+    ('mail_webmail_aliases', '[]'),
+    ('mail_webmail_sieve_enabled', '0'),
     ('mail_webmail_install_task_id', ''),
     ('mail_webmail_install_status', ''),
     ('mail_webmail_installed_at', '')

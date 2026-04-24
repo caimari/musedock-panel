@@ -612,7 +612,7 @@ logLine($logFile, 'STEP', "── {$step}/{$totalSteps}: {$STEPS[$step]['label']
 // Check each package individually
 $allPackages = [
     'postfix', 'postfix-pgsql',
-    'dovecot-core', 'dovecot-imapd', 'dovecot-pop3d', 'dovecot-lmtpd', 'dovecot-pgsql',
+    'dovecot-core', 'dovecot-imapd', 'dovecot-pop3d', 'dovecot-lmtpd', 'dovecot-pgsql', 'dovecot-sieve', 'dovecot-managesieved',
     'opendkim', 'opendkim-tools', 'certbot',
 ];
 
@@ -765,6 +765,7 @@ $dovecotConf = <<<DOVECONF
 # MuseDock mail node configuration — managed by panel, do not edit manually
 
 auth_mechanisms = plain login
+protocols = imap lmtp sieve
 
 passdb {
   driver = sql
@@ -782,10 +783,13 @@ mail_gid = {$vmailGid}
 mail_privileged_group = vmail
 first_valid_uid = {$vmailUid}
 
-# Quota
-mail_plugins = \$mail_plugins quota
+# Quota + Sieve
+mail_plugins = \$mail_plugins quota sieve
 protocol imap {
   mail_plugins = \$mail_plugins imap_quota
+}
+protocol lmtp {
+  mail_plugins = \$mail_plugins sieve
 }
 
 plugin {
@@ -794,6 +798,9 @@ plugin {
   quota_status_success = DUNNO
   quota_status_nouser = DUNNO
   quota_status_overquota = "552 5.2.2 Mailbox is full"
+  sieve = file:~/sieve;active=~/.dovecot.sieve
+  sieve_default = /etc/dovecot/sieve/default.sieve
+  sieve_global_extensions = +vacation +copy +include
 }
 
 # LMTP for Postfix delivery
@@ -819,10 +826,21 @@ service auth {
   }
 }
 
+# ManageSieve for Roundcube filters/vacation
+service managesieve-login {
+  inet_listener sieve {
+    port = 4190
+  }
+}
+
 ssl = required
 DOVECONF;
 file_put_contents('/etc/dovecot/conf.d/10-musedock.conf', $dovecotConf);
 logLine($logFile, 'WRITE', '/etc/dovecot/conf.d/10-musedock.conf (auth, quota, lmtp, sasl)');
+
+@mkdir('/etc/dovecot/sieve', 0755, true);
+file_put_contents('/etc/dovecot/sieve/default.sieve', "require [\"fileinto\"];\n");
+run('sievec /etc/dovecot/sieve/default.sieve 2>/dev/null || true', $logFile, $errors, 'sieve-compile-default');
 
 // ══════════════════════════════════════════════════════════════
 // Step 6/10: SSL/TLS Certificates

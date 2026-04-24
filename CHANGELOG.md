@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.87] — 2026-04-24
+
+### New
+- Roundcube: configuracion automatica de plugins `password` y `managesieve` para cambio de password, filtros, vacaciones/autoresponder y reenvios desde webmail.
+- Mail full setup: Dovecot instala y activa `Sieve/ManageSieve` en nuevas instalaciones de correo completo.
+- `/mail`: boton para activar `Sieve/ManageSieve` en instalaciones existentes, localmente o encolado a nodos mail remotos.
+- `/mail`: hostnames webmail adicionales para publicar el mismo Roundcube como `webmail.cliente.com`.
+- Admin mailbox edit: autoresponder conectado a Sieve en el nodo de correo.
+
+### Improved
+- Roundcube queda preparado para multi-dominio webmail sin instalar varias copias del cliente.
+- `repair-caddy-routes.php` reinyecta tambien los hostnames webmail adicionales configurados.
+
 ## [1.0.86] — 2026-04-24
 
 ### New

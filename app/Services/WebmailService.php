@@ -45,6 +45,8 @@ class WebmailService
             'imap_host' => Settings::get('mail_webmail_imap_host', ''),
             'smtp_host' => Settings::get('mail_webmail_smtp_host', ''),
             'doc_root' => Settings::get('mail_webmail_doc_root', ''),
+            'aliases' => self::aliases(),
+            'sieve_enabled' => Settings::get('mail_webmail_sieve_enabled', '0') === '1',
             'task_id' => Settings::get('mail_webmail_install_task_id', ''),
             'install_status' => Settings::get('mail_webmail_install_status', ''),
             'installed_at' => Settings::get('mail_webmail_installed_at', ''),
@@ -85,7 +87,7 @@ class WebmailService
         $host = strtolower(trim($host));
         $imapHost = trim($imapHost) ?: self::defaultMailHost();
         $smtpHost = trim($smtpHost) ?: $imapHost;
-        if ($host === '' || !preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/', $host)) {
+        if (!self::isValidHostname($host)) {
             return ['ok' => false, 'error' => 'Hostname webmail no valido'];
         }
         if (self::providers()[$provider]['status'] !== 'supported') {
@@ -97,6 +99,58 @@ class WebmailService
         Settings::set('mail_webmail_url', 'https://' . $host);
         Settings::set('mail_webmail_imap_host', $imapHost);
         Settings::set('mail_webmail_smtp_host', $smtpHost);
+        return ['ok' => true];
+    }
+
+    public static function aliases(): array
+    {
+        $raw = Settings::get('mail_webmail_aliases', '[]') ?: '[]';
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) return [];
+        $aliases = [];
+        foreach ($decoded as $host) {
+            $host = strtolower(trim((string)$host));
+            if ($host !== '' && self::isValidHostname($host)) {
+                $aliases[] = $host;
+            }
+        }
+        return array_values(array_unique($aliases));
+    }
+
+    public static function addAlias(string $host): array
+    {
+        $host = strtolower(trim($host));
+        if (!self::isValidHostname($host)) {
+            return ['ok' => false, 'error' => 'Hostname webmail no valido'];
+        }
+        $cfg = self::config();
+        if ($host === ($cfg['host'] ?? '')) {
+            return ['ok' => false, 'error' => 'Ese hostname ya es el principal'];
+        }
+        $aliases = self::aliases();
+        if (!in_array($host, $aliases, true)) {
+            $aliases[] = $host;
+            Settings::set('mail_webmail_aliases', json_encode(array_values($aliases), JSON_UNESCAPED_SLASHES));
+        }
+        $repair = self::repairConfiguredRoute();
+        return ($repair['ok'] ?? false) ? ['ok' => true] : $repair;
+    }
+
+    public static function deleteAlias(string $host): array
+    {
+        $host = strtolower(trim($host));
+        $aliases = array_values(array_filter(self::aliases(), static fn($h) => $h !== $host));
+        Settings::set('mail_webmail_aliases', json_encode($aliases, JSON_UNESCAPED_SLASHES));
+
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = rtrim($config['caddy']['api_url'], '/');
+        $routeId = self::routeIdForHost($host);
+        if ($routeId !== '') {
+            $del = curl_init("{$caddyApi}/id/{$routeId}");
+            curl_setopt_array($del, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
+            curl_exec($del);
+            curl_close($del);
+        }
         return ['ok' => true];
     }
 
@@ -150,7 +204,7 @@ class WebmailService
             return ['ok' => false, 'error' => 'Caddy API no disponible'];
         }
 
-        $routeId = 'webmail-' . preg_replace('/[^a-z0-9]/', '', $host);
+        $routeId = self::routeIdForHost($host);
         $socket = "/run/php/php{$phpVersion}-fpm.sock";
         if (!is_file($socket)) $socket = '/run/php/php-fpm.sock';
         if (!is_file($socket)) $socket = "/run/php/php{$phpVersion}-fpm-www.sock";
@@ -187,10 +241,12 @@ class WebmailService
             'terminal' => true,
         ];
 
-        $del = curl_init("{$caddyApi}/id/{$routeId}");
-        curl_setopt_array($del, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
-        curl_exec($del);
-        curl_close($del);
+        foreach (array_unique([$routeId, 'webmail-' . preg_replace('/[^a-z0-9]/', '', $host)]) as $deleteId) {
+            $del = curl_init("{$caddyApi}/id/{$deleteId}");
+            curl_setopt_array($del, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
+            curl_exec($del);
+            curl_close($del);
+        }
 
         $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
         curl_setopt_array($ch, [
@@ -230,6 +286,32 @@ class WebmailService
         }
 
         $phpVersion = Env::get('FPM_PHP_VERSION', '8.3');
-        return self::ensureRoundcubeCaddyRoute((string)$cfg['host'], $docRoot, $phpVersion);
+        $hosts = array_values(array_unique(array_filter(array_merge([(string)$cfg['host']], self::aliases()))));
+        $errors = [];
+        $applied = [];
+        foreach ($hosts as $host) {
+            $result = self::ensureRoundcubeCaddyRoute($host, $docRoot, $phpVersion);
+            if ($result['ok'] ?? false) {
+                $applied[] = $host;
+            } else {
+                $errors[] = $host . ': ' . ($result['error'] ?? 'error desconocido');
+            }
+        }
+        if ($errors) {
+            return ['ok' => false, 'error' => implode('; ', $errors), 'applied' => $applied];
+        }
+        return ['ok' => true, 'applied' => $applied];
+    }
+
+    private static function isValidHostname(string $host): bool
+    {
+        return $host !== '' && (bool)preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/', $host);
+    }
+
+    private static function routeIdForHost(string $host): string
+    {
+        $host = strtolower(trim($host));
+        if ($host === '') return '';
+        return 'webmail-' . substr(sha1($host), 0, 12) . '-' . preg_replace('/[^a-z0-9]/', '', $host);
     }
 }

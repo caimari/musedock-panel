@@ -20,6 +20,39 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.87',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Roundcube configura automaticamente plugins `password` y `managesieve` para cambio de password, filtros, vacaciones/autoresponder y reenvios',
+                            'Mail full setup instala y activa Dovecot `Sieve/ManageSieve` en nuevas instalaciones',
+                            '`/mail`: boton para activar `Sieve/ManageSieve` en instalaciones existentes, local o en nodos mail remotos',
+                            '`/mail`: hostnames webmail adicionales para publicar el mismo Roundcube como `webmail.cliente.com`',
+                            'Edicion de buzon: autoresponder conectado a Sieve en el nodo de correo',
+                        ],
+                        'en' => [
+                            'Roundcube now configures `password` and `managesieve` plugins for password changes, filters, vacation/autoreply and forwards',
+                            'Full mail setup installs and enables Dovecot `Sieve/ManageSieve` on new installations',
+                            '`/mail`: button to enable `Sieve/ManageSieve` on existing local or remote mail nodes',
+                            '`/mail`: additional webmail hostnames to publish the same Roundcube as `webmail.customer.com`',
+                            'Mailbox edit: autoresponder connected to Sieve on the mail node',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Roundcube queda preparado para multi-dominio webmail sin instalar varias copias',
+                            '`repair-caddy-routes.php` reinyecta tambien los hostnames webmail adicionales configurados',
+                        ],
+                        'en' => [
+                            'Roundcube is ready for multi-domain webmail without installing multiple copies',
+                            '`repair-caddy-routes.php` also reapplies configured additional webmail hostnames',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.86',
                 'date' => '2026-04-24',
                 'badge' => 'primary',

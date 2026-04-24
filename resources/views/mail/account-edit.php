@@ -38,6 +38,27 @@
                         </div>
                     </div>
 
+                    <div class="mt-4 p-3 rounded" style="background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.18);">
+                        <div class="form-check form-switch mb-3">
+                            <?php $autoresponderOn = in_array((string)($account['autoresponder_enabled'] ?? ''), ['1', 't', 'true', 'yes', 'on'], true); ?>
+                            <input class="form-check-input" type="checkbox" name="autoresponder_enabled" value="1" id="autoresponder_enabled" <?= $autoresponderOn ? 'checked' : '' ?>>
+                            <label class="form-check-label fw-semibold" for="autoresponder_enabled">Autoresponder / vacaciones</label>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-12">
+                                <label class="form-label">Asunto</label>
+                                <input type="text" name="autoresponder_subject" class="form-control" value="<?= View::e($account['autoresponder_subject'] ?? '') ?>" placeholder="Estoy fuera de la oficina">
+                            </div>
+                            <div class="col-md-12">
+                                <label class="form-label">Mensaje</label>
+                                <textarea name="autoresponder_body" class="form-control" rows="4" placeholder="Gracias por tu email. Responderé lo antes posible."><?= View::e($account['autoresponder_body'] ?? '') ?></textarea>
+                                <div class="form-text text-muted">
+                                    Esto genera un script Sieve en el nodo de correo. Si el usuario gestiona filtros desde Roundcube, Roundcube puede sustituir el script activo.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Usage info -->
                     <div class="mt-3 p-3 rounded" style="background: rgba(56,189,248,0.05);">
                         <div class="row text-center">

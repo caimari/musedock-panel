@@ -132,7 +132,7 @@ debconf-set-selections <<< "postfix postfix/main_mailer_type string 'Internet Si
 
 apt-get install -yqq \
     postfix postfix-pgsql \
-    dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-pgsql \
+    dovecot-core dovecot-imapd dovecot-pop3d dovecot-lmtpd dovecot-pgsql dovecot-sieve dovecot-managesieved \
     opendkim opendkim-tools \
     certbot
 
@@ -289,6 +289,7 @@ cat > "$DOVECOT_DIR/conf.d/10-musedock.conf" <<'DOVECONF'
 
 # Auth
 auth_mechanisms = plain login
+protocols = imap lmtp sieve
 
 passdb {
   driver = sql
@@ -307,10 +308,13 @@ mail_gid = 5000
 mail_privileged_group = vmail
 first_valid_uid = 5000
 
-# Quota
-mail_plugins = $mail_plugins quota
+# Quota + Sieve
+mail_plugins = $mail_plugins quota sieve
 protocol imap {
   mail_plugins = $mail_plugins imap_quota
+}
+protocol lmtp {
+  mail_plugins = $mail_plugins sieve
 }
 
 plugin {
@@ -319,6 +323,9 @@ plugin {
   quota_status_success = DUNNO
   quota_status_nouser = DUNNO
   quota_status_overquota = "552 5.2.2 Mailbox is full"
+  sieve = file:~/sieve;active=~/.dovecot.sieve
+  sieve_default = /etc/dovecot/sieve/default.sieve
+  sieve_global_extensions = +vacation +copy +include
 }
 
 # LMTP for Postfix delivery
@@ -344,9 +351,20 @@ service auth {
   }
 }
 
+# ManageSieve for Roundcube filters/vacation
+service managesieve-login {
+  inet_listener sieve {
+    port = 4190
+  }
+}
+
 # SSL (paths set by certbot/manual below)
 ssl = required
 DOVECONF
+
+mkdir -p /etc/dovecot/sieve
+echo 'require ["fileinto"];' > /etc/dovecot/sieve/default.sieve
+sievec /etc/dovecot/sieve/default.sieve 2>/dev/null || true
 
 log "Dovecot configured"
 

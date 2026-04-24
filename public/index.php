@@ -417,6 +417,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/mail/webmail/save', 'MailController@webmailSave');
 \MuseDockPanel\Router::post('/mail/webmail/install', 'MailController@webmailInstall');
 \MuseDockPanel\Router::get('/mail/webmail/status', 'MailController@webmailStatus');
+\MuseDockPanel\Router::post('/mail/webmail/aliases/store', 'MailController@webmailAliasStore');
+\MuseDockPanel\Router::post('/mail/webmail/aliases/delete', 'MailController@webmailAliasDelete');
+\MuseDockPanel\Router::post('/mail/webmail/sieve-enable', 'MailController@webmailEnableSieve');
 
 // Settings
 \MuseDockPanel\Router::get('/settings/services', 'SettingsController@services');

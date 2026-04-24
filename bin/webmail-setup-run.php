@@ -108,7 +108,7 @@ try {
 
     webmail_run('apt-get update -y', true);
     $versionedPkgs = [
-        'curl', 'ca-certificates', 'tar', 'gzip', 'sqlite3', 'unzip',
+        'curl', 'ca-certificates', 'tar', 'gzip', 'sqlite3', 'unzip', 'dovecot-core',
         "php{$phpVersion}-imap", "php{$phpVersion}-mbstring", "php{$phpVersion}-intl",
         "php{$phpVersion}-xml", "php{$phpVersion}-curl", "php{$phpVersion}-sqlite3",
         "php{$phpVersion}-gd", "php{$phpVersion}-zip",
@@ -116,7 +116,7 @@ try {
     try {
         webmail_run('DEBIAN_FRONTEND=noninteractive apt-get install -y ' . implode(' ', array_map('escapeshellarg', $versionedPkgs)));
     } catch (Throwable $e) {
-        $genericPkgs = ['curl', 'ca-certificates', 'tar', 'gzip', 'sqlite3', 'unzip', 'php-imap', 'php-mbstring', 'php-intl', 'php-xml', 'php-curl', 'php-sqlite3', 'php-gd', 'php-zip'];
+        $genericPkgs = ['curl', 'ca-certificates', 'tar', 'gzip', 'sqlite3', 'unzip', 'dovecot-core', 'php-imap', 'php-mbstring', 'php-intl', 'php-xml', 'php-curl', 'php-sqlite3', 'php-gd', 'php-zip'];
         webmail_log('Versioned PHP package install failed, retrying generic packages: ' . $e->getMessage());
         webmail_run('DEBIAN_FRONTEND=noninteractive apt-get install -y ' . implode(' ', array_map('escapeshellarg', $genericPkgs)));
     }
@@ -158,6 +158,19 @@ try {
     }
 
     $desKey = bin2hex(random_bytes(16));
+    $dbHost = \MuseDockPanel\Env::get('DB_HOST', '127.0.0.1');
+    $dbPort = \MuseDockPanel\Env::get('DB_PORT', '5432');
+    $dbName = \MuseDockPanel\Env::get('DB_NAME', 'musedock_panel');
+    $dbUser = \MuseDockPanel\Env::get('DB_USER', 'musedock_panel');
+    $dbPass = \MuseDockPanel\Env::get('DB_PASS', '');
+    $roundcubePasswordDsn = sprintf(
+        'pgsql://%s:%s@%s:%s/%s',
+        rawurlencode($dbUser),
+        rawurlencode($dbPass),
+        rawurlencode($dbHost),
+        rawurlencode($dbPort),
+        rawurlencode($dbName)
+    );
     $config = "<?php\n"
         . "\$config = [];\n"
         . "\$config['db_dsnw'] = " . webmail_php_value('sqlite:///' . $dbPath) . ";\n"
@@ -169,10 +182,25 @@ try {
         . "\$config['smtp_pass'] = '%p';\n"
         . "\$config['product_name'] = 'MuseDock Webmail';\n"
         . "\$config['des_key'] = " . webmail_php_value($desKey) . ";\n"
-        . "\$config['plugins'] = ['archive', 'zipdownload'];\n"
+        . "\$config['plugins'] = ['archive', 'zipdownload', 'password', 'managesieve'];\n"
         . "\$config['temp_dir'] = " . webmail_php_value($dataDir . '/temp') . ";\n"
         . "\$config['log_dir'] = " . webmail_php_value($dataDir . '/logs') . ";\n"
-        . "\$config['enable_installer'] = false;\n";
+        . "\$config['enable_installer'] = false;\n"
+        . "\n"
+        . "// Password plugin: changes MuseDock mailbox password in panel DB.\n"
+        . "\$config['password_driver'] = 'sql';\n"
+        . "\$config['password_db_dsn'] = " . webmail_php_value($roundcubePasswordDsn) . ";\n"
+        . "\$config['password_query'] = \"UPDATE mail_accounts SET password_hash = %P, updated_at = NOW() WHERE email = %u AND status = 'active'\";\n"
+        . "\$config['password_algorithm'] = 'dovecot';\n"
+        . "\$config['password_dovecotpw'] = '/usr/bin/doveadm pw';\n"
+        . "\$config['password_dovecotpw_method'] = 'BLF-CRYPT';\n"
+        . "\$config['password_dovecotpw_with_method'] = true;\n"
+        . "\n"
+        . "// ManageSieve plugin: filters, vacation/autoresponder and forwards.\n"
+        . "\$config['managesieve_host'] = " . webmail_php_value($imapHost) . ";\n"
+        . "\$config['managesieve_port'] = 4190;\n"
+        . "\$config['managesieve_usetls'] = true;\n"
+        . "\$config['managesieve_auth_type'] = null;\n";
     file_put_contents($currentDir . '/config/config.inc.php', $config);
 
     $docRoot = is_file($currentDir . '/public_html/index.php') ? ($currentDir . '/public_html') : $currentDir;

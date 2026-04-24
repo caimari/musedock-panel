@@ -367,6 +367,9 @@ class MailController
             'display_name' => trim($_POST['display_name'] ?? ''),
             'quota_mb'     => (int)($_POST['quota_mb'] ?? $account['quota_mb']),
             'status'       => $_POST['status'] ?? $account['status'],
+            'autoresponder_enabled' => !empty($_POST['autoresponder_enabled']),
+            'autoresponder_subject' => trim((string)($_POST['autoresponder_subject'] ?? '')),
+            'autoresponder_body' => trim((string)($_POST['autoresponder_body'] ?? '')),
         ];
 
         if (!empty($_POST['password'])) {
@@ -662,6 +665,66 @@ class MailController
     {
         header('Content-Type: application/json');
         echo json_encode(WebmailService::installStatus(), JSON_UNESCAPED_SLASHES);
+    }
+
+    public function webmailAliasStore(): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail#webmail');
+            return;
+        }
+        $result = WebmailService::addAlias((string)($_POST['host'] ?? ''));
+        Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
+            ? 'Hostname adicional de webmail publicado.'
+            : ($result['error'] ?? 'No se pudo añadir el hostname webmail.'));
+        Router::redirect('/mail#webmail');
+    }
+
+    public function webmailAliasDelete(): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail#webmail');
+            return;
+        }
+        $result = WebmailService::deleteAlias((string)($_POST['host'] ?? ''));
+        Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
+            ? 'Hostname adicional de webmail eliminado.'
+            : ($result['error'] ?? 'No se pudo eliminar el hostname webmail.'));
+        Router::redirect('/mail#webmail');
+    }
+
+    public function webmailEnableSieve(): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail#webmail');
+            return;
+        }
+        $adminPassword = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPassword($adminPassword)) {
+            Flash::set('error', 'Password de admin incorrecta.');
+            Router::redirect('/mail#webmail');
+            return;
+        }
+
+        $messages = [];
+        if (Settings::get('mail_local_configured', '') === '1') {
+            $result = MailService::nodeEnableSieve([]);
+            $messages[] = ($result['ok'] ?? false) ? 'local OK' : ('local ERROR: ' . ($result['error'] ?? 'unknown'));
+        }
+        foreach (MailService::getMailNodes() as $node) {
+            ClusterService::enqueue((int)$node['id'], 'mail_enable_sieve', []);
+            $messages[] = 'nodo ' . ($node['name'] ?? ('#' . $node['id'])) . ' encolado';
+        }
+        if (!$messages) {
+            Flash::set('warning', 'No hay servidor de correo completo configurado donde activar Sieve.');
+        } else {
+            Settings::set('mail_webmail_sieve_enabled', '1');
+            Flash::set('success', 'Activacion Sieve/ManageSieve: ' . implode('; ', $messages));
+        }
+        Router::redirect('/mail#webmail');
     }
 
     private function verifyAdminPassword(string $password): bool
