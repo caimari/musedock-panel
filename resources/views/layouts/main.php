@@ -45,6 +45,18 @@
         .progress { background: #334155; height: 8px; border-radius: 4px; }
         .form-control, .form-select { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; }
         .form-control:focus, .form-select:focus { background: #0f172a; border-color: #38bdf8; color: #e2e8f0; box-shadow: 0 0 0 2px rgba(56,189,248,0.2); }
+        .form-control:-webkit-autofill,
+        .form-control:-webkit-autofill:hover,
+        .form-control:-webkit-autofill:focus,
+        .form-select:-webkit-autofill,
+        .form-select:-webkit-autofill:hover,
+        .form-select:-webkit-autofill:focus {
+            -webkit-text-fill-color: #f1f5f9 !important;
+            caret-color: #f1f5f9 !important;
+            box-shadow: 0 0 0 1000px #0f172a inset !important;
+            transition: background-color 9999s ease-in-out 0s;
+            border-color: #38bdf8;
+        }
         .btn-primary { background: #0ea5e9; border-color: #0ea5e9; }
         .btn-primary:hover { background: #0284c7; border-color: #0284c7; }
         .btn-outline-light { border-color: #334155; color: #94a3b8; }

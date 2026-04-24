@@ -554,8 +554,7 @@ function startMailSetup(e) {
 
     const url = isLocal ? '/settings/cluster/setup-mail-local' : '/settings/cluster/setup-mail-node';
 
-    fetch(url, { method: 'POST', body: fd })
-        .then(r => r.json())
+    fetchJson(url, { method: 'POST', body: fd })
         .then(data => {
             if (data.ok && data.async && data.task_id) {
                 pollNodeId = data.node_id;
@@ -576,6 +575,24 @@ function startMailSetup(e) {
         });
 
     return false;
+}
+
+function fetchJson(url, options) {
+    return fetch(url, options).then(async response => {
+        const text = await response.text();
+        let data = null;
+        try {
+            data = text ? JSON.parse(text) : {};
+        } catch (e) {
+            throw new Error('Respuesta no JSON (' + response.status + '): ' + text.slice(0, 240));
+        }
+
+        if (!response.ok) {
+            throw new Error(data.error || ('HTTP ' + response.status));
+        }
+
+        return data;
+    });
 }
 
 toggleMailMode();
@@ -600,9 +617,27 @@ function pollProgress() {
         ? `/settings/cluster/mail-setup-progress-local?task_id=${encodeURIComponent(pollTaskId)}`
         : `/settings/cluster/mail-setup-progress?node_id=${pollNodeId}&task_id=${encodeURIComponent(pollTaskId)}`;
 
-    fetch(url)
-        .then(r => r.json())
+    fetchJson(url)
         .then(data => {
+            if (data.ok === false) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+                const failedProgress = {
+                    status: 'failed',
+                    step: 0,
+                    total_steps: 10,
+                    errors: [{
+                        step: 'polling',
+                        command: 'progress_endpoint',
+                        exit: -5,
+                        output: data.error || 'No se pudo leer el progreso.'
+                    }]
+                };
+                updateProgressUI(failedProgress);
+                showFinalResult(failedProgress);
+                return;
+            }
+
             const p = data.progress || data;
             if (!p || !p.status) return;
 
@@ -620,8 +655,10 @@ function pollProgress() {
                 document.getElementById('progress-label').textContent = 'Nodo no accesible, reintentando...';
             }
         })
-        .catch(() => {
+        .catch(err => {
             document.getElementById('progress-label').textContent = 'Error de conexion, reintentando...';
+            document.getElementById('setup-errors').style.display = '';
+            document.getElementById('error-details').textContent = err.message || String(err);
         });
 }
 

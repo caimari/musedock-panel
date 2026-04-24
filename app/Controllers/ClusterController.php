@@ -8,6 +8,7 @@ use MuseDockPanel\Settings;
 use MuseDockPanel\Env;
 use MuseDockPanel\Services\ClusterService;
 use MuseDockPanel\Services\FileSyncService;
+use MuseDockPanel\Services\MailService;
 use MuseDockPanel\Services\ReplicationService;
 use MuseDockPanel\Services\LogService;
 use MuseDockPanel\Services\SystemService;
@@ -1475,7 +1476,6 @@ class ClusterController
             echo json_encode(['ok' => false, 'error' => 'Relay Privado requiere IP WireGuard IPv4 valida.']);
             exit;
         }
-
         $node = ClusterService::getNode($nodeId);
         if (!$node) {
             echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado']);
@@ -1719,6 +1719,13 @@ class ClusterController
             echo json_encode(['ok' => false, 'error' => 'Relay Privado requiere IP WireGuard IPv4 valida.']);
             exit;
         }
+        if ($mailMode === 'relay' && !$this->localIpv4IsAssigned($wireguardIp)) {
+            echo json_encode([
+                'ok' => false,
+                'error' => "La IP WireGuard {$wireguardIp} no esta asignada a este servidor. Usa la IP WireGuard real de este nodo o configura WireGuard antes de instalar el relay.",
+            ]);
+            exit;
+        }
 
         // Validate hostname uniqueness (across nodes + local)
         if ($mailHostname !== '') {
@@ -1861,65 +1868,89 @@ class ClusterController
     {
         header('Content-Type: application/json');
 
-        $taskId = $_GET['task_id'] ?? '';
-        if (!$taskId) {
-            echo json_encode(['ok' => false, 'error' => 'task_id requerido']);
-            exit;
-        }
-
-        // Master-side timeout
-        $setupStarted = Settings::get('mail_setup_started_at', '');
-        if ($setupStarted) {
-            $elapsedMin = (time() - strtotime($setupStarted)) / 60;
-            if ($elapsedMin > 15) {
-                echo json_encode([
-                    'ok' => true,
-                    'progress' => [
-                        'status'  => 'timeout',
-                        'step'    => 0,
-                        'total_steps' => 10,
-                        'current' => 'master_timeout',
-                        'label'   => 'Timeout',
-                        'errors'  => [[
-                            'step'    => 'master_timeout',
-                            'command' => 'polling_timeout',
-                            'exit'    => -3,
-                            'output'  => "No se completo en 15 minutos. Revisa los logs en storage/logs/.",
-                        ]],
-                        'elapsed_min' => round($elapsedMin, 1),
-                    ],
-                ]);
-                Settings::set('mail_setup_started_at', '');
+        try {
+            $taskId = $_GET['task_id'] ?? '';
+            if (!$taskId) {
+                echo json_encode(['ok' => false, 'error' => 'task_id requerido']);
                 exit;
             }
-        }
 
-        // Read progress directly from local file (same as nodeSetupStatus but without cluster API)
-        $result = MailService::nodeSetupStatus(['task_id' => $taskId]);
-
-        // If completed, clean up tracking and mark local mail as configured
-        $status = $result['progress']['status'] ?? '';
-        if (in_array($status, ['completed', 'completed_with_errors', 'failed', 'stale', 'timeout'])) {
-            Settings::set('mail_setup_started_at', '');
-            Settings::set('mail_setup_task_id', '');
-
-            if (in_array($status, ['completed', 'completed_with_errors'], true)) {
-                $detectedRelayPublicIp = trim((string)($result['progress']['relay_public_ip'] ?? ''));
-                if ($detectedRelayPublicIp !== '') {
-                    Settings::set('mail_relay_public_ip', $detectedRelayPublicIp);
+            // Master-side timeout
+            $setupStarted = Settings::get('mail_setup_started_at', '');
+            if ($setupStarted) {
+                $elapsedMin = (time() - strtotime($setupStarted)) / 60;
+                if ($elapsedMin > 15) {
+                    echo json_encode([
+                        'ok' => true,
+                        'progress' => [
+                            'status'  => 'timeout',
+                            'step'    => 0,
+                            'total_steps' => 10,
+                            'current' => 'master_timeout',
+                            'label'   => 'Timeout',
+                            'errors'  => [[
+                                'step'    => 'master_timeout',
+                                'command' => 'polling_timeout',
+                                'exit'    => -3,
+                                'output'  => "No se completo en 15 minutos. Revisa los logs en storage/logs/.",
+                            ]],
+                            'elapsed_min' => round($elapsedMin, 1),
+                        ],
+                    ]);
+                    Settings::set('mail_setup_started_at', '');
+                    exit;
                 }
             }
 
-            if ($status === 'completed') {
-                Settings::set('mail_node_configured', '1');
-                Settings::set('mail_local_configured', '1');
+            // Read progress directly from local file (same as nodeSetupStatus but without cluster API)
+            $result = MailService::nodeSetupStatus(['task_id' => $taskId]);
+
+            // If completed, clean up tracking and mark local mail as configured
+            $status = $result['progress']['status'] ?? '';
+            if (in_array($status, ['completed', 'completed_with_errors', 'failed', 'stale', 'timeout'])) {
+                Settings::set('mail_setup_started_at', '');
+                Settings::set('mail_setup_task_id', '');
+
+                if (in_array($status, ['completed', 'completed_with_errors'], true)) {
+                    $detectedRelayPublicIp = trim((string)($result['progress']['relay_public_ip'] ?? ''));
+                    if ($detectedRelayPublicIp !== '') {
+                        Settings::set('mail_relay_public_ip', $detectedRelayPublicIp);
+                    }
+                }
+
+                if ($status === 'completed') {
+                    Settings::set('mail_node_configured', '1');
+                    Settings::set('mail_local_configured', '1');
+                }
+
+                LogService::log('cluster.mail', "local-setup-{$status}", "Mail setup local {$status}");
             }
 
-            LogService::log('cluster.mail', "local-setup-{$status}", "Mail setup local {$status}");
+            echo json_encode($result);
+            exit;
+        } catch (\Throwable $e) {
+            echo json_encode([
+                'ok' => false,
+                'error' => 'Error leyendo progreso local: ' . $e->getMessage(),
+            ]);
+            exit;
+        }
+    }
+
+    private function localIpv4IsAssigned(string $ip): bool
+    {
+        $output = (string)shell_exec('ip -o -4 addr show 2>/dev/null');
+        foreach (explode("\n", $output) as $line) {
+            if (preg_match_all('/\binet\s+(\d{1,3}(?:\.\d{1,3}){3})\//', $line, $matches)) {
+                foreach ($matches[1] as $assignedIp) {
+                    if ($assignedIp === $ip) {
+                        return true;
+                    }
+                }
+            }
         }
 
-        echo json_encode($result);
-        exit;
+        return false;
     }
 
     /**

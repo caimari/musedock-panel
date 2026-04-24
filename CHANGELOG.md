@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.91] — 2026-04-24
+
+### Fixed
+- Instalador mail local: corregido el endpoint de progreso para importar `MailService`, evitando errores 500 que la UI mostraba como "Error de conexion, reintentando...".
+- Instalador mail local: Relay Privado valida que la IP WireGuard indicada este asignada realmente al servidor antes de lanzar Postfix.
+- Tema oscuro: inputs con autofill de Chrome mantienen fondo oscuro y texto blanco.
+
+### Improved
+- Instalador mail: las respuestas no JSON o errores del endpoint de progreso se muestran en pantalla con detalle en vez de quedar en reintentos silenciosos.
+
 ## [1.0.90] — 2026-04-24
 
 ### Improved

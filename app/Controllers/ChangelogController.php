@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.91',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Instalador mail local: corregido el endpoint de progreso para importar `MailService`, evitando errores 500 que la UI mostraba como "Error de conexion, reintentando..."',
+                            'Instalador mail local: Relay Privado valida que la IP WireGuard indicada este asignada realmente al servidor antes de lanzar Postfix',
+                            'Tema oscuro: inputs con autofill de Chrome mantienen fondo oscuro y texto blanco',
+                        ],
+                        'en' => [
+                            'Local mail installer: fixed progress endpoint by importing `MailService`, preventing 500 errors shown by the UI as "connection error, retrying"',
+                            'Local mail installer: Private Relay now validates that the selected WireGuard IP is actually assigned to the server before launching Postfix',
+                            'Dark theme: Chrome autofilled inputs keep a dark background and white text',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Instalador mail: respuestas no JSON o errores del endpoint de progreso se muestran en pantalla con detalle en vez de quedar en reintentos silenciosos',
+                        ],
+                        'en' => [
+                            'Mail installer: non-JSON responses or progress endpoint errors are shown on screen with detail instead of silent retries',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.90',
                 'date' => '2026-04-24',
                 'badge' => 'primary',
