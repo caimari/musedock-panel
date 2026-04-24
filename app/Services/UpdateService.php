@@ -191,14 +191,16 @@ class UpdateService
      */
     private static function fetchRemoteVersion(): ?string
     {
+        $rawBaseUrl = self::remoteRawBaseUrl();
+
         // Primary: read version from config/panel.php
-        $content = self::httpGet(self::REPO_RAW_URL . '/config/panel.php');
+        $content = self::httpGet($rawBaseUrl . '/config/panel.php');
         if ($content !== null && preg_match("/'version'\s*=>\s*'([^']+)'/", $content, $m)) {
             return $m[1];
         }
 
         // Fallback: legacy index.php with define('PANEL_VERSION', ...)
-        $content = self::httpGet(self::REPO_RAW_URL . '/public/index.php');
+        $content = self::httpGet($rawBaseUrl . '/public/index.php');
         if ($content !== null && preg_match("/define\(\s*'PANEL_VERSION'\s*,\s*'([^']+)'\s*\)/", $content, $m)) {
             return $m[1];
         }
@@ -211,7 +213,7 @@ class UpdateService
      */
     public static function fetchRemoteChangelog(): array
     {
-        $url = self::REPO_RAW_URL . '/app/Controllers/ChangelogController.php';
+        $url = self::remoteRawBaseUrl() . '/app/Controllers/ChangelogController.php';
         $content = self::httpGet($url);
         if ($content === null) return [];
 
@@ -277,6 +279,31 @@ class UpdateService
         ]);
         $content = @file_get_contents($url, false, $ctx);
         return $content !== false ? $content : null;
+    }
+
+    /**
+     * Resolve the immutable raw URL for origin/main when possible.
+     *
+     * GitHub's raw branch URL can lag behind after a push. Reading by commit
+     * SHA avoids stale "latest version" checks on slave nodes.
+     */
+    private static function remoteRawBaseUrl(): string
+    {
+        if (!self::commandExists('git') || !is_dir(PANEL_ROOT . '/.git')) {
+            return self::REPO_RAW_URL;
+        }
+
+        $cmd = sprintf(
+            'git -C %s ls-remote origin refs/heads/main 2>/dev/null',
+            escapeshellarg(PANEL_ROOT)
+        );
+        $output = trim((string) shell_exec($cmd));
+
+        if (preg_match('/^([a-f0-9]{40})\s+refs\/heads\/main$/', $output, $m)) {
+            return 'https://raw.githubusercontent.com/caimari/musedock-panel/' . $m[1];
+        }
+
+        return self::REPO_RAW_URL;
     }
 
     private static function commandExists(string $command): bool

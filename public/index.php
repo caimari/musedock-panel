@@ -634,6 +634,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // Changelog
 \MuseDockPanel\Router::get('/changelog', 'ChangelogController@index');
 
+// Docs
+\MuseDockPanel\Router::get('/docs/mail-modes', 'DocsController@mailModes');
+
 // Profile
 \MuseDockPanel\Router::get('/profile', 'ProfileController@index');
 \MuseDockPanel\Router::post('/profile/username', 'ProfileController@updateUsername');

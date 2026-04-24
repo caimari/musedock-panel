@@ -4,12 +4,33 @@
 <div class="card mb-4" id="mail-setup-card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-gear-wide-connected me-2"></i>Configurar Servidor de Mail</span>
-        <span id="setup-status-badge" class="badge bg-secondary">Pendiente</span>
+        <div class="d-flex align-items-center gap-2">
+            <button type="button" class="btn btn-outline-info btn-sm" data-bs-toggle="modal" data-bs-target="#mailSetupHelpModal">
+                <i class="bi bi-info-circle me-1"></i> Ayuda para elegir
+            </button>
+            <a href="/docs/mail-modes" class="btn btn-outline-light btn-sm">
+                <i class="bi bi-journal-text me-1"></i> Docs
+            </a>
+            <span id="setup-status-badge" class="badge bg-secondary">Pendiente</span>
+        </div>
     </div>
     <div class="card-body">
 
         <!-- Phase 1: Setup form (visible when no setup running) -->
         <div id="setup-form-section">
+            <div class="alert mb-4" style="background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.25);">
+                <div class="d-flex gap-3">
+                    <i class="bi bi-lightbulb text-info fs-4"></i>
+                    <div>
+                        <strong>Antes de instalar, decide el uso real.</strong>
+                        <div class="small text-muted mt-1">
+                            Si solo este SaaS envia desde la misma maquina, usa <strong>Solo Envio</strong>.
+                            Si otros servidores como mortadelo enviaran por WireGuard, usa <strong>Relay Privado</strong>.
+                            Si necesitas buzones IMAP, recibir correo y webmail, usa <strong>Correo Completo</strong>.
+                        </div>
+                    </div>
+                </div>
+            </div>
 
             <!-- Mode selector: local vs remote -->
             <div class="row g-3 mb-3">
@@ -20,12 +41,14 @@
                             <input class="form-check-input" type="radio" name="setup_mode" id="mode-local" value="local" checked onchange="toggleSetupMode()">
                             <label class="form-check-label" for="mode-local">
                                 <i class="bi bi-pc-display me-1"></i> Este servidor (local)
+                                <small class="d-block text-muted ms-4">Instala mail en la misma maquina donde estas viendo el panel.</small>
                             </label>
                         </div>
                         <div class="form-check form-check-inline flex-fill">
                             <input class="form-check-input" type="radio" name="setup_mode" id="mode-remote" value="remote" onchange="toggleSetupMode()" <?= empty($clusterNodes) ? 'disabled' : '' ?>>
                             <label class="form-check-label <?= empty($clusterNodes) ? 'text-muted' : '' ?>" for="mode-remote">
                                 <i class="bi bi-hdd-network me-1"></i> Nodo remoto del cluster
+                                <small class="d-block text-muted ms-4">Instala mail en un slave/nodo dedicado, gestionado desde este master.</small>
                                 <?php if (empty($clusterNodes)): ?>
                                     <small class="text-muted">(sin nodos)</small>
                                 <?php endif; ?>
@@ -41,9 +64,8 @@
                     <i class="bi bi-pc-display me-1 text-success"></i>
                     <strong class="small">Modo local:</strong>
                     <span class="small text-muted">
-                        Postfix, Dovecot, OpenDKIM y Rspamd se instalaran en este mismo servidor.
-                        La base de datos es local (localhost:<?= \MuseDockPanel\Env::int('DB_PORT', 5433) ?>), no necesita replica.
-                        Ideal para servidores individuales o para probar antes de escalar a nodos remotos.
+                        Se instala en esta misma maquina. En Solo Envio y Relay Privado no hay buzones; en Correo Completo
+                        se anaden Dovecot, Rspamd, IMAP y recepcion SMTP.
                     </span>
                 </div>
             </div>
@@ -54,9 +76,9 @@
                     <i class="bi bi-database me-1 text-info"></i>
                     <strong class="small">Requisito:</strong>
                     <span class="small text-muted">
-                        El nodo debe tener una replica local de PostgreSQL (configurada en
-                        <a href="/settings/cluster#nodos" class="text-info">Cluster &rarr; Nodos</a>).
-                        Postfix y Dovecot consultaran la base de datos local para resolver dominios, cuentas y aliases.
+                        El nodo remoto debe estar online y preparado en
+                        <a href="/settings/cluster#nodos" class="text-info">Cluster &rarr; Nodos</a>.
+                        El master guarda dominios, cuentas y aliases; el nodo ejecuta los servicios de mail.
                     </span>
                 </div>
             </div>
@@ -70,35 +92,49 @@
 
                 <div class="row g-3">
                     <div class="col-12">
-                        <label class="form-label fw-semibold">Modo de correo</label>
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="form-label fw-semibold mb-0">Modo de correo</label>
+                            <button type="button" class="btn btn-outline-info btn-sm" data-bs-toggle="modal" data-bs-target="#mailSetupHelpModal">
+                                <i class="bi bi-question-circle me-1"></i> Que modo necesito?
+                            </button>
+                        </div>
                         <div class="row g-2">
                             <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(56,189,248,.35);background:rgba(56,189,248,.06);cursor:pointer;">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="satellite" onchange="toggleMailMode()">
                                     <strong>Solo Envio</strong>
-                                    <small class="d-block text-muted mt-1">Para SaaS y notificaciones. Envia emails, no recibe correo y no abre puertos de entrada. Instala Postfix + OpenDKIM.</small>
+                                    <small class="d-block text-muted mt-1">Para SaaS local, formularios y notificaciones. Escucha en localhost, firma DKIM y no recibe correo publico.</small>
                                 </label>
                             </div>
                             <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(14,165,233,.35);background:rgba(14,165,233,.08);cursor:pointer;">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="relay" onchange="toggleMailMode()">
                                     <strong>Relay Privado</strong>
-                                    <small class="d-block text-muted mt-1">Relay SMTP privado por WireGuard. Otros servidores envian por VPN con usuario SMTP. DKIM independiente por dominio.</small>
+                                    <small class="d-block text-muted mt-1">Para que otros servidores envien por WireGuard con usuario SMTP. Incluye lo de Solo Envio y centraliza la salida.</small>
                                 </label>
                             </div>
                             <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(34,197,94,.35);background:rgba(34,197,94,.06);cursor:pointer;">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="full" checked onchange="toggleMailMode()">
                                     <strong>Correo Completo</strong>
-                                    <small class="d-block text-muted mt-1">Envia y recibe correo, con buzones IMAP. Requiere MX, PTR y puertos abiertos. Instala Postfix + Dovecot + OpenDKIM + Rspamd.</small>
+                                    <small class="d-block text-muted mt-1">Para buzones IMAP, recepcion, webmail y antispam. Requiere MX, PTR y puertos 25/587/993 abiertos.</small>
                                 </label>
                             </div>
                             <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(251,191,36,.35);background:rgba(251,191,36,.06);cursor:pointer;">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="external" onchange="toggleMailMode()">
                                     <strong>SMTP Externo</strong>
-                                    <small class="d-block text-muted mt-1">Usa SES, Mailgun, Brevo u otro proveedor. No instala servidor de correo local.</small>
+                                    <small class="d-block text-muted mt-1">Para delegar envio en SES, Mailgun, Brevo, Sweego u otro proveedor. No instala servidor local.</small>
                                 </label>
+                            </div>
+                        </div>
+                        <div id="mail-mode-advice" class="mt-3 p-3 rounded" style="border:1px solid rgba(56,189,248,.22);background:rgba(15,23,42,.35);">
+                            <div class="d-flex gap-3">
+                                <i class="bi bi-info-circle text-info"></i>
+                                <div>
+                                    <strong id="mail-mode-advice-title">Correo Completo</strong>
+                                    <div id="mail-mode-advice-body" class="small text-muted mt-1"></div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -115,32 +151,32 @@
                     </div>
                     <div class="col-md-6 mb-2">
                         <label class="form-label">Hostname de mail</label>
-                        <input type="text" name="mail_hostname" class="form-control" placeholder="mail.dominio.com" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true" required>
-                        <small class="text-muted mode-help mode-full">Nombre publico del servidor de correo. Se usara para MX, certificado TLS y conexiones SMTP/IMAP. Ej: mail.dominio.com.</small>
-                        <small class="text-muted mode-help mode-satellite" style="display:none;">Nombre de salida/EHLO del servidor. Debe tener A y PTR/rDNS correctos. Ej: mailout.dominio.com.</small>
-                        <small class="text-muted mode-help mode-relay" style="display:none;">Nombre publico del relay. Debe coincidir con el PTR/rDNS de la IP publica. Ej: relay.dominio.com.</small>
+                        <input type="text" name="mail_hostname" class="form-control" placeholder="mail.muserelay.com" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true" required>
+                        <small class="text-muted mode-help mode-full">Nombre publico del servidor. Debe tener A hacia esta IP, MX del dominio apuntando aqui, PTR/rDNS idealmente igual y puertos 25/587/993 abiertos. Ej: mail.muserelay.com.</small>
+                        <small class="text-muted mode-help mode-satellite" style="display:none;">Nombre de salida/EHLO del servidor. Debe tener A y PTR/rDNS correctos. Ej: mail.muserelay.com o mailout.muserelay.com.</small>
+                        <small class="text-muted mode-help mode-relay" style="display:none;">Nombre publico del relay para reputacion, SPF, PTR y DKIM. Los clientes remotos conectan por la IP WireGuard, no por la IP publica. Ej: mail.muserelay.com.</small>
                     </div>
                     <div class="col-md-6 mb-2 mode-satellite-field mode-relay-field" style="display:none;">
                         <label class="form-label">Dominio remitente</label>
                         <input type="text" name="outbound_domain" class="form-control" placeholder="dominio.com" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
-                        <small class="text-muted">Dominio que firmara DKIM y tendra SPF/DMARC. Ej: una aplicacion envia desde noreply@dominio.com.</small>
+                        <small class="text-muted">Dominio que firmara DKIM y tendra SPF/DMARC. Ej: si la app envia desde noreply@muserelay.com, escribe muserelay.com.</small>
                     </div>
                     <div class="col-12 mt-2 mode-relay-field" style="display:none;">
                         <div class="row g-3 p-3 rounded" style="border:1px solid rgba(14,165,233,.25);background:rgba(14,165,233,.06);">
                             <div class="col-md-4">
                                 <label class="form-label">IP WireGuard del relay</label>
                                 <input type="text" name="wireguard_ip" class="form-control" placeholder="10.10.70.10" autocomplete="off" inputmode="decimal" data-lpignore="true" data-1p-ignore="true">
-                                <small class="text-muted">Postfix 587 escuchara solo en esta IP privada, no en la IP publica.</small>
+                                <small class="text-muted">Postfix 587 escuchara en esta IP privada. Los servidores remotos usaran esta IP como MAIL_HOST.</small>
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">Red WireGuard autorizada</label>
                                 <input type="text" name="wireguard_cidr" class="form-control" value="10.10.70.0/24" autocomplete="off" inputmode="decimal" data-lpignore="true" data-1p-ignore="true">
-                                <small class="text-muted">Rango privado que podra usar el relay. Normalmente 10.10.70.0/24.</small>
+                                <small class="text-muted">Rango privado que podra llegar al relay. Normalmente 10.10.70.0/24.</small>
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">IP publica del relay</label>
                                 <input type="text" name="relay_public_ip" class="form-control" placeholder="Se detecta automaticamente si lo dejas vacio" autocomplete="off" inputmode="decimal" data-lpignore="true" data-1p-ignore="true">
-                                <small class="text-muted">Opcional. Si se deja vacia, el instalador detecta la IPv4 publica del nodo. Se usa para SPF, PTR y blacklists.</small>
+                                <small class="text-muted">Opcional. Si se deja vacia, se detecta. Se usa para SPF, PTR/rDNS y comprobaciones de reputacion.</small>
                             </div>
                         </div>
                     </div>
@@ -148,7 +184,7 @@
                         <div class="row g-3 p-3 rounded" style="border:1px solid rgba(56,189,248,.22);background:rgba(56,189,248,.05);">
                             <div class="col-12">
                                 <strong class="small">Failover opcional: relay privado → SMTP externo</strong>
-                                <div class="small text-muted">Si rellenas estos campos, Postfix local enviara por el relay WireGuard y cambiara al SMTP externo si el relay no responde.</div>
+                                <div class="small text-muted">Si rellenas estos campos, Postfix local enviara por el relay WireGuard y cambiara al SMTP externo si el relay no responde. Para SaaS local puro puedes dejarlos vacios.</div>
                             </div>
                             <div class="col-md-3"><label class="form-label">Relay host/IP</label><input name="relay_host" class="form-control" placeholder="10.10.70.10" autocomplete="off" data-lpignore="true" data-1p-ignore="true"></div>
                             <div class="col-md-2"><label class="form-label">Puerto relay</label><input name="relay_port" type="number" class="form-control" value="587" autocomplete="off"></div>
@@ -169,7 +205,7 @@
                         </select>
                         <small class="text-muted">
                             Solo aplica a <strong>Correo Completo</strong>. El certificado se instala en el servidor elegido:
-                            si eliges modo local, en este master; si eliges nodo remoto, en ese slave. Se usa para SMTP/IMAP seguros del hostname indicado.
+                            si eliges modo local, en este master; si eliges nodo remoto, en ese slave. Let's Encrypt necesita que el hostname resuelva a este servidor y que el puerto 80 este accesible.
                         </small>
                     </div>
                     <div class="col-12 mt-3 mode-external-field" style="display:none;">
@@ -214,7 +250,7 @@
                     <div class="col-md-6">
                         <label class="form-label">Tu contrase&ntilde;a del panel</label>
                         <input type="password" name="admin_password" class="form-control" value="" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true" required>
-                        <small class="text-muted">Para confirmar esta operacion.</small>
+                        <small class="text-muted">Confirma que eres el admin antes de instalar paquetes, cambiar Postfix o guardar credenciales SMTP.</small>
                     </div>
                     <div class="col-12">
                         <button type="submit" class="btn btn-primary" id="btn-start-setup">
@@ -283,6 +319,134 @@
     </div>
 </div>
 
+<div class="modal fade" id="mailSetupHelpModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content" style="background:#1e293b;border:1px solid #334155;color:#e2e8f0;">
+            <div class="modal-header" style="border-bottom:1px solid #334155;">
+                <h5 class="modal-title"><i class="bi bi-envelope-gear me-2 text-info"></i>Como elegir la instalacion de mail</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row g-4">
+                    <div class="col-lg-6">
+                        <div class="p-3 rounded h-100" style="background:rgba(15,23,42,.35);border:1px solid #334155;">
+                            <h6>1. Donde instalar</h6>
+                            <p class="small text-muted mb-2">
+                                <strong>Este servidor</strong> es correcto cuando quieres que el mail viva en la misma maquina que el panel.
+                                <strong>Nodo remoto</strong> es para dedicar un slave al correo y gestionarlo desde el master.
+                            </p>
+                            <p class="small text-muted mb-0">
+                                En ambos casos el panel sigue siendo el cerebro: dominios, cuentas, aliases y ajustes se guardan en MuseDock.
+                                El nodo elegido ejecuta Postfix, Dovecot, OpenDKIM o Rspamd segun el modo.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-6">
+                        <div class="p-3 rounded h-100" style="background:rgba(15,23,42,.35);border:1px solid #334155;">
+                            <h6>2. Hostname, DNS y certificado</h6>
+                            <p class="small text-muted mb-2">
+                                Usa un hostname real, por ejemplo <code>mail.muserelay.com</code>. Debe tener un registro A hacia la IP publica del servidor.
+                                Para buena entrega, el PTR/rDNS de esa IP deberia resolver al mismo hostname.
+                            </p>
+                            <p class="small text-muted mb-0">
+                                Let's Encrypt automatico necesita que el hostname ya resuelva correctamente y que el puerto 80 este accesible.
+                                Si el 80 esta cerrado, usa certificado manual o temporalmente auto-firmado.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-6">
+                        <div class="p-3 rounded h-100" style="background:rgba(56,189,248,.06);border:1px solid rgba(56,189,248,.22);">
+                            <h6>Solo Envio (Satellite)</h6>
+                            <p class="small text-muted mb-2">
+                                Instala Postfix + OpenDKIM para enviar desde esta maquina. No recibe correo, no crea buzones y no abre IMAP.
+                                Es ideal para un SaaS local que envia por <code>localhost:25</code> sin usuario ni password.
+                            </p>
+                            <p class="small text-muted mb-0">
+                                Puedes empezar en Satellite y pasar despues a Correo Completo. El panel reconfigura Postfix y anade Dovecot,
+                                Rspamd, recepcion SMTP e IMAP sin romper lo que ya funcionaba.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-6">
+                        <div class="p-3 rounded h-100" style="background:rgba(14,165,233,.08);border:1px solid rgba(14,165,233,.25);">
+                            <h6>Relay Privado (WireGuard)</h6>
+                            <p class="small text-muted mb-2">
+                                Es Satellite mas SMTP autenticado por VPN. La app local puede seguir enviando por localhost sin credenciales.
+                                Servidores remotos, por ejemplo mortadelo, conectan por WireGuard a <code>10.10.70.x:587</code> con usuario y password.
+                            </p>
+                            <p class="small text-muted mb-0">
+                                Usa este modo si quieres que varios servidores envien por una maquina central. Las credenciales se crean luego en
+                                Mail &rarr; Relay &rarr; Usuarios.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-6">
+                        <div class="p-3 rounded h-100" style="background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.22);">
+                            <h6>Correo Completo</h6>
+                            <p class="small text-muted mb-2">
+                                Es para hosting de correo real: buzones IMAP, recepcion de mensajes, webmail, antispam y cuotas.
+                                Requiere MX apuntando al servidor y puertos 25, 587 y 993 abiertos.
+                            </p>
+                            <p class="small text-muted mb-0">
+                                No lo elijas solo para enviar notificaciones. Es mas potente, pero tambien exige DNS, PTR, certificados y monitorizacion de entrega.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-6">
+                        <div class="p-3 rounded h-100" style="background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.22);">
+                            <h6>SMTP Externo</h6>
+                            <p class="small text-muted mb-2">
+                                Guarda credenciales de un proveedor como SES, Mailgun, Brevo, Cloudflare/Sweego u otro. No instala servidor local.
+                            </p>
+                            <p class="small text-muted mb-0">
+                                Es la opcion menos invasiva cuando solo quieres que el panel o una app envie usando un proveedor ya validado.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-6">
+                        <div class="p-3 rounded h-100" style="background:rgba(15,23,42,.35);border:1px solid #334155;">
+                            <h6>DKIM con Sweego y DKIM propio</h6>
+                            <p class="small text-muted mb-2">
+                                Pueden convivir. DKIM funciona por selector. Por ejemplo:
+                                <code>selector1._domainkey.muserelay.com</code> puede ser Sweego y
+                                <code>default._domainkey.muserelay.com</code> puede ser OpenDKIM de MuseDock.
+                            </p>
+                            <p class="small text-muted mb-0">
+                                Gmail lee el selector usado en cada email y verifica contra esa clave publica. No se confunde mientras cada selector exista en DNS.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-6">
+                        <div class="p-3 rounded h-100" style="background:rgba(15,23,42,.35);border:1px solid #334155;">
+                            <h6>SPF durante la migracion</h6>
+                            <p class="small text-muted mb-2">
+                                SPF debe autorizar todos los emisores activos. Si ahora usas Cloudflare/Sweego y anades tu servidor:
+                            </p>
+                            <pre class="small mb-2 p-2 rounded" style="background:#0f172a;color:#e2e8f0;">v=spf1 ip4:TU_IP_SERVIDOR include:_spf.mx.cloudflare.net ~all</pre>
+                            <p class="small text-muted mb-0">
+                                Cuando dejes de usar el proveedor externo, quitas su <code>include</code> y, si quieres, su selector DKIM.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer" style="border-top:1px solid #334155;">
+                <a href="/docs/mail-modes" class="btn btn-outline-info">
+                    <i class="bi bi-journal-text me-1"></i> Abrir documentacion
+                </a>
+                <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Entendido</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
 let pollTimer = null;
 let pollNodeId = null;
@@ -324,6 +488,36 @@ function toggleMailMode() {
                 ? '<i class="bi bi-hdd-network me-1"></i> Instalar relay privado'
                 : '<i class="bi bi-play-fill me-1"></i> Iniciar instalacion');
     }
+
+    updateMailModeAdvice(mode);
+}
+
+function updateMailModeAdvice(mode) {
+    const title = document.getElementById('mail-mode-advice-title');
+    const body = document.getElementById('mail-mode-advice-body');
+    if (!title || !body) return;
+
+    const advice = {
+        satellite: [
+            'Solo Envio',
+            'Elige esto si la app vive en esta misma maquina y solo necesita enviar correos de sistema, facturas, avisos o formularios. La app puede usar localhost:25 sin credenciales. Si mas adelante quieres buzones, puedes cambiar a Correo Completo.'
+        ],
+        relay: [
+            'Relay Privado',
+            'Elige esto si mortadelo u otros servidores enviaran a traves de esta maquina por WireGuard. El SaaS local puede usar localhost; los servidores remotos usan MAIL_HOST=IP_WIREGUARD, puerto 587, usuario y password SMTP.'
+        ],
+        full: [
+            'Correo Completo',
+            'Elige esto si necesitas recibir correo y crear buzones IMAP/webmail para clientes. Requiere MX correcto, PTR/rDNS, puertos 25/587/993 abiertos y una configuracion DNS cuidada.'
+        ],
+        external: [
+            'SMTP Externo',
+            'Elige esto si quieres seguir enviando por un proveedor como Sweego, SES, Mailgun o Brevo. MuseDock guarda las credenciales, pero no instala Postfix, Dovecot ni DKIM local.'
+        ]
+    };
+
+    title.textContent = advice[mode][0];
+    body.textContent = advice[mode][1];
 }
 
 function toggleSetupMode() {

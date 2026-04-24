@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.89] — 2026-04-24
+
+### New
+- `/docs/mail-modes`: primera pagina de documentacion interna para explicar los modos Satellite, Relay Privado, Correo Completo y SMTP Externo.
+
+### Improved
+- `/mail?tab=general`: instalador de mail con modal de ayuda para elegir modo, ejemplos de uso y diferencias claras entre SaaS local, relay WireGuard y buzones completos.
+- `/mail?tab=general`: textos ampliados para hostname, DNS, PTR/rDNS, Let's Encrypt, WireGuard, credenciales SMTP y confirmacion de admin.
+- `/mail?tab=general`: recomendacion dinamica segun el modo seleccionado, incluyendo ejemplos para mortadelo enviando por VPN y convivencia gradual con Sweego/Cloudflare.
+- `/settings/updates`: el check remoto resuelve primero el SHA real de `origin/main` y lee GitHub raw por commit para evitar cache stale de `main`.
+
 ## [1.0.88] — 2026-04-24
 
 ### Improved

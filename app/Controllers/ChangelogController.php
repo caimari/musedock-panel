@@ -20,6 +20,35 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.89',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            '`/docs/mail-modes`: primera pagina de documentacion interna para explicar Satellite, Relay Privado, Correo Completo y SMTP Externo',
+                        ],
+                        'en' => [
+                            '`/docs/mail-modes`: first internal documentation page explaining Satellite, Private Relay, Full Mail and External SMTP',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=general`: instalador de mail con modal de ayuda para elegir modo, ejemplos de uso y diferencias entre SaaS local, relay WireGuard y buzones completos',
+                            '`/mail?tab=general`: textos ampliados para hostname, DNS, PTR/rDNS, Let\'s Encrypt, WireGuard, credenciales SMTP y confirmacion de admin',
+                            '`/mail?tab=general`: recomendacion dinamica segun el modo seleccionado, incluyendo convivencia gradual con Sweego/Cloudflare',
+                            '`/settings/updates`: el check remoto resuelve el SHA real de `origin/main` y lee GitHub raw por commit para evitar cache stale de `main`',
+                        ],
+                        'en' => [
+                            '`/mail?tab=general`: mail installer now includes a help modal to choose the mode, with practical examples for local SaaS, WireGuard relay and full mailboxes',
+                            '`/mail?tab=general`: expanded copy for hostname, DNS, PTR/rDNS, Let\'s Encrypt, WireGuard, SMTP credentials and admin confirmation',
+                            '`/mail?tab=general`: dynamic recommendation based on selected mode, including gradual coexistence with Sweego/Cloudflare',
+                            '`/settings/updates`: remote check resolves the real `origin/main` SHA and reads GitHub raw by commit to avoid stale `main` cache',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.88',
                 'date' => '2026-04-24',
                 'badge' => 'primary',
