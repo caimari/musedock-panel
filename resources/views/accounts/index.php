@@ -14,6 +14,58 @@ elseif ($totalBwBytes > 0) $totalBwStr = round($totalBwBytes / 1024, 1) . ' KB';
 else $totalBwStr = '0';
 ?>
 
+<style>
+.accounts-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+}
+.accounts-summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    color: #94a3b8;
+    line-height: 1.25;
+}
+.accounts-summary .metric {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+}
+.accounts-summary-note {
+    width: 100%;
+    font-size: 0.9rem;
+    color: #7f8da8;
+}
+.accounts-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+    flex: 1 1 480px;
+}
+.accounts-actions .input-group {
+    width: min(320px, 100%);
+}
+.accounts-actions .btn {
+    white-space: nowrap;
+}
+.accounts-action-btn {
+    padding-inline: .8rem;
+}
+@media (max-width: 1100px) {
+    .accounts-actions {
+        justify-content: flex-start;
+    }
+}
+</style>
+
 <?php if ($clusterRole === 'slave'): ?>
 <div class="alert d-flex align-items-center mb-3" style="background:rgba(13,202,240,0.1);border:1px solid rgba(13,202,240,0.3);color:#0dcaf0;">
     <i class="bi bi-lock me-2"></i>
@@ -21,15 +73,16 @@ else $totalBwStr = '0';
 </div>
 <?php endif; ?>
 
-<div class="d-flex justify-content-between align-items-center mb-3">
-    <div>
-        <span class="text-muted">
+<div class="accounts-toolbar">
+    <div class="accounts-summary">
+        <span class="metric">
             <?= $totalAccounts ?> hosting<?= $totalAccounts !== 1 ? 's' : '' ?>
             <span class="ms-2 badge bg-success" style="font-size:0.7rem;"><?= $totalActive ?> activo<?= $totalActive !== 1 ? 's' : '' ?></span>
             <?php if ($totalSuspended > 0): ?>
                 <span class="badge bg-danger ms-1" style="font-size:0.7rem;"><?= $totalSuspended ?> suspendido<?= $totalSuspended !== 1 ? 's' : '' ?></span>
             <?php endif; ?>
-            <span class="ms-3"><i class="bi bi-hdd me-1"></i><?= $totalDiskStr ?></span>
+        </span>
+        <span class="metric"><i class="bi bi-hdd me-1"></i><?= $totalDiskStr ?></span>
             <?php if ($clusterRole === 'master' && !empty($replicaDiskTotals)): ?>
                 <?php foreach ($replicaDiskTotals as $replica): ?>
                     <?php
@@ -43,12 +96,11 @@ else $totalBwStr = '0';
                         $replicaTitle .= ' · ' . (int)$replica['accounts'] . ' cuentas';
                     }
                     ?>
-                    <span class="ms-2" title="<?= View::e($replicaTitle) ?>"><i class="bi bi-cloud-arrow-down me-1"></i><?= $replicaStr ?></span>
+                    <span class="metric" title="<?= View::e($replicaTitle) ?>"><i class="bi bi-cloud-arrow-down me-1"></i><?= $replicaStr ?></span>
                 <?php endforeach; ?>
             <?php endif; ?>
-            <span class="ms-2"><i class="bi bi-speedometer2 me-1"></i><?= $totalBwStr ?>/mes</span>
-        </span>
-        <div class="small text-muted mt-1">
+        <span class="metric"><i class="bi bi-speedometer2 me-1"></i><?= $totalBwStr ?>/mes</span>
+        <div class="accounts-summary-note">
             <i class="bi bi-info-circle me-1"></i>
             Disco local: cache en BD (refresh ~5 min por monitor-collector).
             <?php if ($clusterRole === 'master'): ?>
@@ -56,9 +108,9 @@ else $totalBwStr = '0';
             <?php endif; ?>
         </div>
     </div>
-    <div class="d-flex gap-2 align-items-center">
+    <div class="accounts-actions">
         <?php if ($totalAccounts > 5): ?>
-        <div class="input-group input-group-sm" style="width:250px;">
+        <div class="input-group input-group-sm">
             <span class="input-group-text" style="background:#1e293b;border-color:#334155;color:#94a3b8;"><i class="bi bi-search"></i></span>
             <input type="text" id="accountSearch" class="form-control form-control-sm" style="background:#0f172a;border-color:#334155;color:#e2e8f0;" placeholder="Buscar dominio, usuario, cliente...">
         </div>
@@ -66,10 +118,10 @@ else $totalBwStr = '0';
         <?php if ($clusterRole !== 'slave'): ?>
         <form method="POST" action="/accounts/bulk-disable-wp-cron" class="d-inline" id="bulkWpCronForm">
             <?= View::csrf() ?>
-            <button type="button" class="btn btn-outline-warning btn-sm" onclick="confirmBulkWpCron()" title="Desactivar WP-Cron en todos los WordPress"><i class="bi bi-wordpress me-1"></i>Desactivar WP-Cron</button>
+            <button type="button" class="btn btn-outline-warning btn-sm accounts-action-btn" onclick="confirmBulkWpCron()" title="Desactivar WP-Cron en todos los WordPress"><i class="bi bi-wordpress me-1"></i>Desactivar WP-Cron</button>
         </form>
-        <a href="/accounts/import" class="btn btn-outline-light btn-sm"><i class="bi bi-box-arrow-in-down me-1"></i>Importar Existente</a>
-        <a href="/accounts/create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i> New Account</a>
+        <a href="/accounts/import" class="btn btn-outline-light btn-sm accounts-action-btn"><i class="bi bi-box-arrow-in-down me-1"></i>Importar Existente</a>
+        <a href="/accounts/create" class="btn btn-primary btn-sm accounts-action-btn"><i class="bi bi-plus-lg me-1"></i>New Account</a>
         <?php endif; ?>
     </div>
 </div>
