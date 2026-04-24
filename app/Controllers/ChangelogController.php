@@ -20,6 +20,31 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.75',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/accounts` (solo Master): nuevo indicador de disco replicado por slave (`cloud-arrow-down`) para comparar facilmente local vs replica',
+                            'Contexto en UI: aclarado que `disk_used_mb` local viene de cache en BD (~5 min por monitor-collector) y que la replica se refresca por ciclo de filesync-worker',
+                        ],
+                        'en' => [
+                            '`/accounts` (Master only): new replicated-disk indicator per slave (`cloud-arrow-down`) to clearly compare local vs replica usage',
+                            'UI context: clarified that local `disk_used_mb` is DB-cached (~5 min via monitor-collector) and replica totals refresh on filesync-worker cycles',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'filesync-worker ahora persiste total remoto por slave + timestamp en `panel_settings` (`filesync_remote_total_mb_node_{id}`) para alimentar la vista sin calculos ad-hoc',
+                        ],
+                        'en' => [
+                            'filesync-worker now persists per-slave remote totals + timestamp in `panel_settings` (`filesync_remote_total_mb_node_{id}`) so UI can read stable values without ad-hoc calculations',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.74',
                 'date' => '2026-04-23',
                 'badge' => 'primary',

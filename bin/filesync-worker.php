@@ -99,6 +99,18 @@ try {
         $diskResult = \MuseDockPanel\Services\FileSyncService::updateRemoteDiskUsage($node, $accounts);
         if ($diskResult['ok']) {
             $log("  Disk usage updated: {$diskResult['updated']} accounts");
+            // Cache remote total disk usage on master for UI (/accounts)
+            $nodeId = (int)($node['id'] ?? 0);
+            if ($nodeId > 0) {
+                $diskMap = (is_array($diskResult['disk_map'] ?? null)) ? $diskResult['disk_map'] : [];
+                $remoteTotalMb = 0;
+                foreach ($diskMap as $mb) {
+                    $remoteTotalMb += (int)$mb;
+                }
+                \MuseDockPanel\Settings::set("filesync_remote_total_mb_node_{$nodeId}", (string)$remoteTotalMb);
+                \MuseDockPanel\Settings::set("filesync_remote_total_updated_at_node_{$nodeId}", date('Y-m-d H:i:s'));
+                \MuseDockPanel\Settings::set("filesync_remote_total_accounts_node_{$nodeId}", (string)(int)($diskResult['updated'] ?? 0));
+            }
         } else {
             $log("  Disk usage update FAILED: " . ($diskResult['error'] ?? ''));
         }

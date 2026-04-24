@@ -6,6 +6,7 @@ $totalActive = count(array_filter($accounts, fn($a) => $a['status'] === 'active'
 $totalSuspended = $totalAccounts - $totalActive;
 $totalDiskMb = array_sum(array_column($accounts, 'disk_used_mb'));
 $totalBwBytes = array_sum(array_column($accounts, 'bw_bytes'));
+$replicaDiskTotals = $replicaDiskTotals ?? [];
 $totalDiskStr = $totalDiskMb >= 1024 ? round($totalDiskMb / 1024, 1) . ' GB' : $totalDiskMb . ' MB';
 if ($totalBwBytes >= 1073741824) $totalBwStr = round($totalBwBytes / 1073741824, 1) . ' GB';
 elseif ($totalBwBytes >= 1048576) $totalBwStr = round($totalBwBytes / 1048576, 1) . ' MB';
@@ -29,8 +30,31 @@ else $totalBwStr = '0';
                 <span class="badge bg-danger ms-1" style="font-size:0.7rem;"><?= $totalSuspended ?> suspendido<?= $totalSuspended !== 1 ? 's' : '' ?></span>
             <?php endif; ?>
             <span class="ms-3"><i class="bi bi-hdd me-1"></i><?= $totalDiskStr ?></span>
+            <?php if ($clusterRole === 'master' && !empty($replicaDiskTotals)): ?>
+                <?php foreach ($replicaDiskTotals as $replica): ?>
+                    <?php
+                    $replicaMb = (int)($replica['total_mb'] ?? 0);
+                    $replicaStr = $replicaMb >= 1024 ? round($replicaMb / 1024, 1) . ' GB' : $replicaMb . ' MB';
+                    $replicaTitle = 'Replica en ' . ($replica['node_name'] ?? ('Node #' . (int)$replica['node_id']));
+                    if (!empty($replica['updated_at'])) {
+                        $replicaTitle .= ' · actualizado ' . $replica['updated_at'] . ' UTC';
+                    }
+                    if (!empty($replica['accounts'])) {
+                        $replicaTitle .= ' · ' . (int)$replica['accounts'] . ' cuentas';
+                    }
+                    ?>
+                    <span class="ms-2" title="<?= View::e($replicaTitle) ?>"><i class="bi bi-cloud-arrow-down me-1"></i><?= $replicaStr ?></span>
+                <?php endforeach; ?>
+            <?php endif; ?>
             <span class="ms-2"><i class="bi bi-speedometer2 me-1"></i><?= $totalBwStr ?>/mes</span>
         </span>
+        <div class="small text-muted mt-1">
+            <i class="bi bi-info-circle me-1"></i>
+            Disco local: cache en BD (refresh ~5 min por monitor-collector).
+            <?php if ($clusterRole === 'master'): ?>
+                Replica slave: refresh por filesync-worker (~intervalo configurado).
+            <?php endif; ?>
+        </div>
     </div>
     <div class="d-flex gap-2 align-items-center">
         <?php if ($totalAccounts > 5): ?>

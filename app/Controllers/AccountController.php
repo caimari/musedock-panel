@@ -125,10 +125,35 @@ class AccountController
             }
         }
 
+        $replicaDiskTotals = [];
+        if (Settings::get('cluster_role', 'standalone') === 'master') {
+            $nodes = ClusterService::getActiveNodes();
+            foreach ($nodes as $node) {
+                $nodeId = (int)($node['id'] ?? 0);
+                if ($nodeId < 1) {
+                    continue;
+                }
+
+                $remoteMbRaw = Settings::get("filesync_remote_total_mb_node_{$nodeId}", '');
+                if ($remoteMbRaw === '' || !is_numeric($remoteMbRaw)) {
+                    continue;
+                }
+
+                $replicaDiskTotals[] = [
+                    'node_id' => $nodeId,
+                    'node_name' => (string)($node['name'] ?? ("Node #{$nodeId}")),
+                    'total_mb' => (int)$remoteMbRaw,
+                    'updated_at' => (string)Settings::get("filesync_remote_total_updated_at_node_{$nodeId}", ''),
+                    'accounts' => (int)Settings::get("filesync_remote_total_accounts_node_{$nodeId}", '0'),
+                ];
+            }
+        }
+
         View::render('accounts/index', [
             'layout' => 'main',
             'pageTitle' => 'Hosting Accounts',
             'accounts' => $accounts,
+            'replicaDiskTotals' => $replicaDiskTotals,
         ]);
     }
 

@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.75] — 2026-04-24
+
+### Improved
+- `/accounts` (solo Master): ahora muestra totales de disco replicado por nodo slave (`cloud-arrow-down`) para comparar local vs replica sin confusión.
+- Contexto de refresco en UI: se aclara que `disk_used_mb` local viene de cache BD (~5 min por `monitor-collector`) y que el total replicado se refresca en ciclos de `filesync-worker`.
+
+### Fixed
+- `filesync-worker`: persiste en `panel_settings` el total remoto por slave (`filesync_remote_total_mb_node_{id}`) y timestamp para que la vista no dependa de cálculos ad-hoc.
+
 ## [1.0.74] — 2026-04-23
 
 ### Fixed
