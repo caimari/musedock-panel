@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.79',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`Settings → Cluster → Archivos`: exclusiones base visibles y editables desde UI para `rsync/HTTPS` y `lsyncd`',
+                            '`FileSyncService`: las exclusiones internas se cargan desde settings con defaults seguros como fallback, en vez de depender solo de constantes hardcodeadas',
+                            'El calculo de `Esperado slave` usa las mismas exclusiones editables que el sync real',
+                        ],
+                        'en' => [
+                            '`Settings → Cluster → Files`: base exclusions are now visible and editable from the UI for `rsync/HTTPS` and `lsyncd`',
+                            '`FileSyncService`: internal exclusions are loaded from settings with safe defaults as fallback instead of relying only on hardcoded constants',
+                            '`Expected slave` calculation now uses the same editable exclusions as the real sync path',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.78',
                 'date' => '2026-04-24',
                 'badge' => 'primary',

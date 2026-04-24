@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.79] — 2026-04-24
+
+### Improved
+- `Settings → Cluster → Archivos`: las exclusiones base de sync ya son visibles y editables desde UI (`rsync/HTTPS` y `lsyncd`).
+- `FileSyncService`: las exclusiones internas dejan de depender solo de constantes hardcodeadas; se cargan desde settings con defaults seguros como fallback.
+- El calculo de `Esperado slave` usa las mismas exclusiones editables que el sync real, evitando diferencias entre lo que se sincroniza y lo que se compara.
+
 ## [1.0.78] — 2026-04-24
 
 ### Improved

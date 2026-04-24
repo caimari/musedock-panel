@@ -33,6 +33,8 @@
 
     $fsEnabled = ($settings['filesync_enabled'] ?? '0') === '1';
     $sshKeyExists = file_exists($settings['filesync_ssh_key_path'] ?? '/root/.ssh/id_ed25519');
+    $filesyncRsyncDefaultExcludes = $filesyncRsyncDefaultExcludes ?? [];
+    $filesyncLsyncdDefaultExcludes = $filesyncLsyncdDefaultExcludes ?? [];
 ?>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
@@ -1037,11 +1039,36 @@
                         <small class="text-muted">0 = sin límite</small>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Patrones a excluir</label>
-                        <input type="text" name="filesync_exclude" class="form-control"
-                               value="<?= View::e($fsConfig['exclude_patterns']) ?>">
-                        <small class="text-muted">Separados por coma (ej: <code>*.log</code>, <code>node_modules</code>, <code>*.tmp</code>)</small>
+                        <label class="form-label">Patrones personalizados a excluir</label>
+                        <textarea name="filesync_exclude" class="form-control font-monospace" rows="3" placeholder="*.log&#10;node_modules&#10;*.tmp"><?= View::e(str_replace(',', "\n", (string)$fsConfig['exclude_patterns'])) ?></textarea>
+                        <small class="text-muted">Uno por linea o separados por coma. Se suman a las exclusiones base y específicas.</small>
                     </div>
+                </div>
+
+                <div class="mb-3">
+                    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+                        <label class="form-label mb-0">Exclusiones base editables</label>
+                        <span class="badge bg-info text-dark">Aplican antes que las personalizadas</span>
+                    </div>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <div class="p-3 rounded" style="background:rgba(15,23,42,0.55);border:1px solid rgba(148,163,184,0.18);">
+                                <div class="fw-semibold mb-1"><i class="bi bi-arrow-repeat me-1"></i>Rsync / HTTPS periódico</div>
+                                <textarea name="filesync_rsync_default_excludes" class="form-control font-monospace" rows="8"><?= View::e(implode("\n", $filesyncRsyncDefaultExcludes)) ?></textarea>
+                                <small class="text-muted d-block mt-2">Defaults seguros para sync periódico. Puedes añadir, quitar o modificar patrones.</small>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="p-3 rounded" style="background:rgba(15,23,42,0.55);border:1px solid rgba(148,163,184,0.18);">
+                                <div class="fw-semibold mb-1"><i class="bi bi-lightning-charge me-1"></i>Lsyncd realtime</div>
+                                <textarea name="filesync_lsyncd_default_excludes" class="form-control font-monospace" rows="8"><?= View::e(implode("\n", $filesyncLsyncdDefaultExcludes)) ?></textarea>
+                                <small class="text-muted d-block mt-2">Incluye caches/temporales que disparan demasiados eventos en tiempo real.</small>
+                            </div>
+                        </div>
+                    </div>
+                    <small class="text-muted d-block mt-2">
+                        Estos valores ya no estan hardcodeados: se guardan en settings y los usan rsync, HTTPS sync, lsyncd y el calculo de "Esperado slave".
+                    </small>
                 </div>
 
                 <!-- Specific exclusions -->

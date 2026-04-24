@@ -80,6 +80,8 @@ class ClusterController
             'failoverStatus'  => $failoverStatus,
             'failoverServers' => $failoverServers,
             'cfAccounts'      => $cfAccounts,
+            'filesyncRsyncDefaultExcludes' => FileSyncService::getRsyncDefaultExcludes(),
+            'filesyncLsyncdDefaultExcludes' => FileSyncService::getLsyncdDefaultExcludes(),
         ]);
     }
 
@@ -867,6 +869,8 @@ class ClusterController
             'filesync_interval'        => (string)max(1, (int)($_POST['filesync_interval'] ?? 10)),
             'filesync_bwlimit'         => (string)max(0, (int)($_POST['filesync_bwlimit'] ?? 0)),
             'filesync_exclude'         => trim($_POST['filesync_exclude'] ?? '.cache,*.log,*.tmp,node_modules'),
+            'filesync_rsync_default_excludes' => trim($_POST['filesync_rsync_default_excludes'] ?? ''),
+            'filesync_lsyncd_default_excludes' => trim($_POST['filesync_lsyncd_default_excludes'] ?? ''),
             'filesync_ssl_certs'       => isset($_POST['filesync_ssl_certs']) ? '1' : '0',
             'filesync_ssl_cert_path'   => trim($_POST['filesync_ssl_cert_path'] ?? ''),
             'filesync_rewrite_dbhost'  => isset($_POST['filesync_rewrite_dbhost']) ? '1' : '0',

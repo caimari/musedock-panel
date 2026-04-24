@@ -30,6 +30,8 @@ class FileSyncService
             'interval_minutes' => (int)Settings::get('filesync_interval', '10'),
             'bandwidth_limit'  => (int)Settings::get('filesync_bwlimit', '0'), // KB/s, 0=unlimited
             'exclude_patterns' => Settings::get('filesync_exclude', '.cache,*.log,*.tmp,node_modules'),
+            'rsync_default_excludes' => Settings::get('filesync_rsync_default_excludes', implode("\n", self::FALLBACK_RSYNC_DEFAULT_EXCLUDES)),
+            'lsyncd_default_excludes' => Settings::get('filesync_lsyncd_default_excludes', implode("\n", self::FALLBACK_LSYNCD_DEFAULT_EXCLUDES)),
             'sync_ssl_certs'   => Settings::get('filesync_ssl_certs', '0') === '1',
             'ssl_cert_path'    => Settings::get('filesync_ssl_cert_path', ''),
             'rewrite_db_host'  => Settings::get('filesync_rewrite_dbhost', '1') === '1',
@@ -46,6 +48,7 @@ class FileSyncService
             'filesync_enabled', 'filesync_sync_mode', 'filesync_method',
             'filesync_ssh_port', 'filesync_ssh_key_path', 'filesync_ssh_user',
             'filesync_interval', 'filesync_bwlimit', 'filesync_exclude',
+            'filesync_rsync_default_excludes', 'filesync_lsyncd_default_excludes',
             'filesync_ssl_certs', 'filesync_ssl_cert_path', 'filesync_rewrite_dbhost',
             'filesync_db_dumps', 'filesync_db_dump_mysql', 'filesync_db_dump_pgsql',
             'filesync_db_dump_path',
@@ -55,6 +58,30 @@ class FileSyncService
                 Settings::set($key, $data[$key]);
             }
         }
+    }
+
+    public static function parseExcludePatterns(string $raw): array
+    {
+        $parts = preg_split('/[\r\n,]+/', $raw) ?: [];
+        $parts = array_map('trim', $parts);
+        $parts = array_filter($parts, static fn($p) => $p !== '');
+        return array_values(array_unique($parts));
+    }
+
+    public static function getRsyncDefaultExcludes(): array
+    {
+        return self::parseExcludePatterns(Settings::get(
+            'filesync_rsync_default_excludes',
+            implode("\n", self::FALLBACK_RSYNC_DEFAULT_EXCLUDES)
+        ));
+    }
+
+    public static function getLsyncdDefaultExcludes(): array
+    {
+        return self::parseExcludePatterns(Settings::get(
+            'filesync_lsyncd_default_excludes',
+            implode("\n", self::FALLBACK_LSYNCD_DEFAULT_EXCLUDES)
+        ));
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -176,7 +203,7 @@ class FileSyncService
         $keyPath = $options['ssh_key_path'] ?? $config['ssh_key_path'];
         $user = $options['ssh_user'] ?? $config['ssh_user'];
         $bwLimit = $options['bandwidth_limit'] ?? $config['bandwidth_limit'];
-        $excludes = array_filter(array_map('trim', explode(',', $options['excludes'] ?? $config['exclude_patterns'])));
+        $excludes = self::parseExcludePatterns((string)($options['excludes'] ?? $config['exclude_patterns']));
         $ownerUser = $options['owner_user'] ?? '';
 
         if (!is_dir($localPath)) {
@@ -203,7 +230,7 @@ class FileSyncService
         }
 
         // Built-in excludes (AI tools, IDE dirs — large, machine-specific)
-        foreach (self::RSYNC_DEFAULT_EXCLUDES as $builtIn) {
+        foreach (self::getRsyncDefaultExcludes() as $builtIn) {
             $cmd .= ' --exclude=' . escapeshellarg($builtIn);
         }
 
@@ -213,7 +240,7 @@ class FileSyncService
         }
 
         // Specific path exclusions (from visual browser)
-        $specificExclusions = array_filter(array_map('trim', explode("\n", Settings::get('filesync_exclusions_list', ''))));
+        $specificExclusions = self::parseExcludePatterns(Settings::get('filesync_exclusions_list', ''));
         foreach ($specificExclusions as $excPath) {
             $cmd .= ' --exclude=' . escapeshellarg($excPath);
         }
@@ -296,12 +323,13 @@ class FileSyncService
 
         // Create a temporary tar.gz of the directory
         $tmpFile = sys_get_temp_dir() . '/filesync_' . md5($localPath) . '_' . time() . '.tar.gz';
-        $excludes = array_filter(array_map('trim', explode(',', self::getConfig()['exclude_patterns'])));
-        $specificExclusions = array_filter(array_map('trim', explode("\n", Settings::get('filesync_exclusions_list', ''))));
+        $config = self::getConfig();
+        $excludes = self::parseExcludePatterns((string)($config['exclude_patterns'] ?? ''));
+        $specificExclusions = self::parseExcludePatterns(Settings::get('filesync_exclusions_list', ''));
 
         $excludeArgs = '';
-        // Built-in excludes (AI tools, IDE dirs)
-        foreach (self::RSYNC_DEFAULT_EXCLUDES as $builtIn) {
+        // Built-in/default excludes (AI tools, IDE dirs)
+        foreach (self::getRsyncDefaultExcludes() as $builtIn) {
             $excludeArgs .= ' --exclude=' . escapeshellarg($builtIn);
         }
         foreach ($excludes as $pattern) {
@@ -1376,10 +1404,10 @@ class FileSyncService
         // Also update local (master) disk usage
         $syncMode = (string)($config['sync_mode'] ?? 'periodic');
         $modeDefaults = $syncMode === 'lsyncd'
-            ? self::LSYNCD_DEFAULT_EXCLUDES
-            : self::RSYNC_DEFAULT_EXCLUDES;
-        $userExcludes = array_filter(array_map('trim', explode(',', (string)($config['exclude_patterns'] ?? ''))));
-        $specificExclusions = array_filter(array_map('trim', explode("\n", Settings::get('filesync_exclusions_list', ''))));
+            ? self::getLsyncdDefaultExcludes()
+            : self::getRsyncDefaultExcludes();
+        $userExcludes = self::parseExcludePatterns((string)($config['exclude_patterns'] ?? ''));
+        $specificExclusions = self::parseExcludePatterns(Settings::get('filesync_exclusions_list', ''));
         $duExcludePatterns = array_values(array_unique(array_merge($modeDefaults, $userExcludes, $specificExclusions)));
 
         $localTotalMb = 0;
@@ -1496,7 +1524,7 @@ class FileSyncService
      * Default exclusion patterns always applied to periodic rsync.
      * IDE/AI tool directories that are large, machine-specific, and auto-recreate.
      */
-    private const RSYNC_DEFAULT_EXCLUDES = [
+    private const FALLBACK_RSYNC_DEFAULT_EXCLUDES = [
         '.claude',
         '.codex',
         '.cline',
@@ -1506,7 +1534,7 @@ class FileSyncService
         '.cache',
     ];
 
-    private const LSYNCD_DEFAULT_EXCLUDES = [
+    private const FALLBACK_LSYNCD_DEFAULT_EXCLUDES = [
         '.vscode-server',
         '.claude',
         '.codex',
@@ -1538,7 +1566,7 @@ class FileSyncService
         $keyPath = $config['ssh_key_path'] ?? '/root/.ssh/id_ed25519';
         $user = $config['ssh_user'] ?? 'root';
         $bwLimit = $config['bandwidth_limit'] ?? 0;
-        $userExcludes = array_filter(array_map('trim', explode(',', $config['exclude_patterns'] ?? '')));
+        $userExcludes = self::parseExcludePatterns((string)($config['exclude_patterns'] ?? ''));
 
         $lua = "-- lsyncd configuration — auto-generated by MuseDock Panel\n";
         $lua .= "-- Do not edit manually; changes will be overwritten.\n\n";
@@ -1563,8 +1591,8 @@ class FileSyncService
             $lua .= "    delete = true,\n";
 
             // Merge built-in excludes + user pattern excludes + specific path exclusions
-            $specificExclusions = array_filter(array_map('trim', explode("\n", Settings::get('filesync_exclusions_list', ''))));
-            $allExcludes = array_unique(array_merge(self::LSYNCD_DEFAULT_EXCLUDES, $userExcludes, $specificExclusions));
+            $specificExclusions = self::parseExcludePatterns(Settings::get('filesync_exclusions_list', ''));
+            $allExcludes = array_unique(array_merge(self::getLsyncdDefaultExcludes(), $userExcludes, $specificExclusions));
             if (!empty($allExcludes)) {
                 $lua .= "    exclude = {\n";
                 foreach ($allExcludes as $ex) {
