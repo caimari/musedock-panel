@@ -4,7 +4,7 @@
 <div class="card mb-4" id="mail-setup-card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-gear-wide-connected me-2"></i>Configurar Servidor de Mail</span>
-        <div class="d-flex align-items-center gap-2">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
             <button type="button" class="btn btn-outline-info btn-sm" data-bs-toggle="modal" data-bs-target="#mailSetupHelpModal">
                 <i class="bi bi-info-circle me-1"></i> Ayuda para elegir
             </button>
@@ -103,28 +103,28 @@
                                 <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(56,189,248,.35);background:rgba(56,189,248,.06);cursor:pointer;">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="satellite" onchange="toggleMailMode()">
                                     <strong>Solo Envio</strong>
-                                    <small class="d-block text-muted mt-1">Para SaaS local, formularios y notificaciones. Escucha en localhost, firma DKIM y no recibe correo publico.</small>
+                                    <small class="d-block mt-1" style="color:#cbd5e1;">Para SaaS local, formularios y notificaciones. Escucha en localhost, firma DKIM y no recibe correo publico.</small>
                                 </label>
                             </div>
                             <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(14,165,233,.35);background:rgba(14,165,233,.08);cursor:pointer;">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="relay" onchange="toggleMailMode()">
                                     <strong>Relay Privado</strong>
-                                    <small class="d-block text-muted mt-1">Para que otros servidores envien por WireGuard con usuario SMTP. Incluye lo de Solo Envio y centraliza la salida.</small>
+                                    <small class="d-block mt-1" style="color:#cbd5e1;">Para que otros servidores envien por WireGuard con usuario SMTP. Incluye lo de Solo Envio y centraliza la salida.</small>
                                 </label>
                             </div>
                             <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(34,197,94,.35);background:rgba(34,197,94,.06);cursor:pointer;">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="full" checked onchange="toggleMailMode()">
                                     <strong>Correo Completo</strong>
-                                    <small class="d-block text-muted mt-1">Para buzones IMAP, recepcion, webmail y antispam. Requiere MX, PTR y puertos 25/587/993 abiertos.</small>
+                                    <small class="d-block mt-1" style="color:#cbd5e1;">Para buzones IMAP, recepcion, webmail y antispam. Requiere MX, PTR y puertos 25/587/993 abiertos.</small>
                                 </label>
                             </div>
                             <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(251,191,36,.35);background:rgba(251,191,36,.06);cursor:pointer;">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="external" onchange="toggleMailMode()">
                                     <strong>SMTP Externo</strong>
-                                    <small class="d-block text-muted mt-1">Para delegar envio en SES, Mailgun, Brevo u otro proveedor. No instala servidor local.</small>
+                                    <small class="d-block mt-1" style="color:#cbd5e1;">Para delegar envio en SES, Mailgun, Brevo u otro proveedor. No instala servidor local.</small>
                                 </label>
                             </div>
                         </div>

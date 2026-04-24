@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.92] — 2026-04-24
+
+### Fixed
+- Relay/Satellite mail setup: prepara `/run/opendkim`, tmpfiles y override systemd antes de reiniciar OpenDKIM para evitar timeouts del servicio.
+- Relay/Satellite mail setup: normaliza `UserID opendkim:opendkim` y `/etc/default/opendkim` con el socket esperado.
+- Tema oscuro: alertas `danger`, `warning`, `success` e `info` usan fondos oscuros y texto legible.
+
+### Improved
+- Instalador mail: las tarjetas de modo tienen descripcion mas clara y legible sobre fondo oscuro.
+
 ## [1.0.91] — 2026-04-24
 
 ### Fixed

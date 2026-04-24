@@ -120,6 +120,45 @@ function writePostfixMap(string $path, string $content, string $logFile, array &
     run('chmod 600 ' . escapeshellarg($path) . ' ' . escapeshellarg($path . '.db') . ' 2>/dev/null || true', $logFile, $errors, 'postmap-perms');
 }
 
+function prepareOpenDkimRuntime(string $socketDir, string $logFile, array &$errors): void
+{
+    if ($socketDir === '') {
+        return;
+    }
+
+    @mkdir($socketDir, 0755, true);
+    run('chown opendkim:opendkim ' . escapeshellarg($socketDir), $logFile, $errors, 'opendkim-runtime-chown');
+    run('chmod 0755 ' . escapeshellarg($socketDir), $logFile, $errors, 'opendkim-runtime-chmod');
+
+    if ($socketDir === '/run/opendkim') {
+        @mkdir('/etc/tmpfiles.d', 0755, true);
+        file_put_contents('/etc/tmpfiles.d/opendkim.conf', "d /run/opendkim 0755 opendkim opendkim -\n");
+        logLine($logFile, 'WRITE', '/etc/tmpfiles.d/opendkim.conf');
+
+        @mkdir('/etc/systemd/system/opendkim.service.d', 0755, true);
+        file_put_contents(
+            '/etc/systemd/system/opendkim.service.d/runtime.conf',
+            "[Service]\nRuntimeDirectory=opendkim\nRuntimeDirectoryMode=0755\n"
+        );
+        logLine($logFile, 'WRITE', '/etc/systemd/system/opendkim.service.d/runtime.conf');
+        run('systemctl daemon-reload 2>&1', $logFile, $errors, 'systemd-daemon-reload-opendkim');
+
+        $default = "SOCKET=\"local:/run/opendkim/opendkim.sock\"\n";
+        if (is_file('/etc/default/opendkim')) {
+            $content = (string)file_get_contents('/etc/default/opendkim');
+            if (preg_match('/^SOCKET=.*/m', $content)) {
+                $content = preg_replace('/^SOCKET=.*/m', trim($default), $content);
+            } else {
+                $content .= "\n" . $default;
+            }
+            file_put_contents('/etc/default/opendkim', $content);
+        } else {
+            file_put_contents('/etc/default/opendkim', $default);
+        }
+        logLine($logFile, 'WRITE', '/etc/default/opendkim');
+    }
+}
+
 function configureSatelliteRelayFailover(array $payload, string $logFile, array &$errors): void
 {
     $relay = $payload['relay'] ?? [];
@@ -370,7 +409,8 @@ if ($mailMode === 'relay') {
     $step = 3;
     writeProgress($progressFile, $relaySteps[$step], $step, $totalSteps, 'running', $errors);
     @mkdir('/etc/opendkim/keys', 0700, true);
-    $dkimConf = "Syslog yes\nUMask 007\nMode s\nCanonicalization relaxed/simple\nKeyTable /etc/opendkim/key.table\nSigningTable refile:/etc/opendkim/signing.table\nExternalIgnoreList /etc/opendkim/trusted.hosts\nInternalHosts /etc/opendkim/trusted.hosts\nSocket local:/run/opendkim/opendkim.sock\nOversignHeaders From\nUserID opendkim\n";
+    prepareOpenDkimRuntime('/run/opendkim', $logFile, $errors);
+    $dkimConf = "Syslog yes\nUMask 007\nMode s\nCanonicalization relaxed/simple\nKeyTable /etc/opendkim/key.table\nSigningTable refile:/etc/opendkim/signing.table\nExternalIgnoreList /etc/opendkim/trusted.hosts\nInternalHosts /etc/opendkim/trusted.hosts\nSocket local:/run/opendkim/opendkim.sock\nOversignHeaders From\nUserID opendkim:opendkim\n";
     file_put_contents('/etc/opendkim.conf', $dkimConf);
     foreach (['/etc/opendkim/key.table', '/etc/opendkim/signing.table'] as $file) {
         if (!is_file($file)) touch($file);
@@ -382,6 +422,8 @@ if ($mailMode === 'relay') {
     writeProgress($progressFile, $relaySteps[$step], $step, $totalSteps, 'running', $errors);
     run('systemctl disable --now dovecot rspamd 2>/dev/null || true', $logFile, $errors, 'disable-unused-mail-services');
     run('systemctl enable postfix opendkim saslauthd 2>&1 || true', $logFile, $errors, 'systemd-enable-relay');
+    prepareOpenDkimRuntime('/run/opendkim', $logFile, $errors);
+    run('systemctl reset-failed opendkim 2>&1 || true', $logFile, $errors, 'reset-failed-opendkim');
     run('systemctl restart opendkim 2>&1', $logFile, $errors, 'restart-opendkim');
     run('systemctl restart postfix 2>&1', $logFile, $errors, 'restart-postfix');
 
@@ -474,11 +516,12 @@ if ($mailMode === 'satellite') {
     $dkimDomain = $domain;
     $dkimDir = "/etc/opendkim/keys/{$dkimDomain}";
     @mkdir($dkimDir, 0700, true);
+    prepareOpenDkimRuntime('/run/opendkim', $logFile, $errors);
     if (!is_file("{$dkimDir}/default.private")) {
         run("opendkim-genkey -D " . escapeshellarg($dkimDir) . " -d " . escapeshellarg($dkimDomain) . " -s default", $logFile, $errors, 'dkim-genkey');
     }
     run('chown -R opendkim:opendkim /etc/opendkim', $logFile, $errors, 'dkim-chown');
-    $dkimConf = "Syslog yes\nUMask 007\nMode s\nCanonicalization relaxed/simple\nDomain {$dkimDomain}\nSelector default\nKeyFile {$dkimDir}/default.private\nSocket local:/run/opendkim/opendkim.sock\nOversignHeaders From\nUserID opendkim\n";
+    $dkimConf = "Syslog yes\nUMask 007\nMode s\nCanonicalization relaxed/simple\nDomain {$dkimDomain}\nSelector default\nKeyFile {$dkimDir}/default.private\nSocket local:/run/opendkim/opendkim.sock\nOversignHeaders From\nUserID opendkim:opendkim\n";
     file_put_contents('/etc/opendkim.conf', $dkimConf);
     logLine($logFile, 'WRITE', '/etc/opendkim.conf (satellite)');
 
@@ -486,6 +529,8 @@ if ($mailMode === 'satellite') {
     writeProgress($progressFile, $satSteps[$step], $step, $totalSteps, 'running', $errors);
     run('systemctl disable --now dovecot rspamd 2>/dev/null || true', $logFile, $errors, 'disable-unused-mail-services');
     run('systemctl enable postfix opendkim 2>&1', $logFile, $errors, 'systemd-enable-satellite');
+    prepareOpenDkimRuntime('/run/opendkim', $logFile, $errors);
+    run('systemctl reset-failed opendkim 2>&1 || true', $logFile, $errors, 'reset-failed-opendkim');
     run('systemctl restart opendkim 2>&1', $logFile, $errors, 'restart-opendkim');
     run('systemctl restart postfix 2>&1', $logFile, $errors, 'restart-postfix');
 

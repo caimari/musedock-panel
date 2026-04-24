@@ -71,6 +71,10 @@
         small { color: #94a3b8; }
         code { color: #38bdf8; }
         .alert { color: #e2e8f0; }
+        .alert-danger { background: rgba(127,29,29,0.34) !important; border-color: rgba(248,113,113,0.35) !important; color: #fecaca !important; }
+        .alert-warning { background: rgba(120,53,15,0.34) !important; border-color: rgba(251,191,36,0.35) !important; color: #fde68a !important; }
+        .alert-success { background: rgba(20,83,45,0.34) !important; border-color: rgba(34,197,94,0.35) !important; color: #bbf7d0 !important; }
+        .alert-info { background: rgba(12,74,110,0.34) !important; border-color: rgba(56,189,248,0.35) !important; color: #bae6fd !important; }
         .form-control::placeholder { color: #475569; }
         option { background: #1e293b; color: #e2e8f0; }
         .card-body { background: transparent; }

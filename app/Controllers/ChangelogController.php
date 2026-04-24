@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.92',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Relay/Satellite mail setup: prepara `/run/opendkim`, tmpfiles y override systemd antes de reiniciar OpenDKIM para evitar timeouts del servicio',
+                            'Relay/Satellite mail setup: normaliza `UserID opendkim:opendkim` y `/etc/default/opendkim` con el socket esperado',
+                            'Tema oscuro: alertas `danger`, `warning`, `success` e `info` usan fondos oscuros y texto legible',
+                        ],
+                        'en' => [
+                            'Relay/Satellite mail setup: prepares `/run/opendkim`, tmpfiles and a systemd override before restarting OpenDKIM to avoid service timeouts',
+                            'Relay/Satellite mail setup: normalizes `UserID opendkim:opendkim` and `/etc/default/opendkim` with the expected socket',
+                            'Dark theme: `danger`, `warning`, `success` and `info` alerts now use dark backgrounds and readable text',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Instalador mail: las tarjetas de modo tienen descripcion mas clara y legible sobre fondo oscuro',
+                        ],
+                        'en' => [
+                            'Mail installer: mode cards now have clearer, more readable descriptions on dark backgrounds',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.91',
                 'date' => '2026-04-24',
                 'badge' => 'primary',
