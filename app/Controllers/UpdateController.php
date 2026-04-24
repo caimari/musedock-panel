@@ -102,7 +102,7 @@ class UpdateController
             'started_at'   => $status['started_at'],
             'elapsed'      => $status['elapsed'],
             'output'       => $status['output'],
-            'completed'    => !$status['in_progress'] && str_contains((string)$status['output'], 'Update complete'),
+            'completed'    => (bool)($status['completed'] ?? false),
         ]);
         exit;
     }

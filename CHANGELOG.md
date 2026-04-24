@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.88] — 2026-04-24
+
+### Improved
+- `/mail`: reorganizacion en tabs persistentes (`General`, `Dominios`, `Webmail`, `Migracion`, `Infra`, `Entregabilidad`) para reducir la densidad de la pagina y mantener el tab activo al recargar.
+- `/mail`: estado real del servicio de correo visible en `General`, diferenciando servidor instalado, no instalado, slave gestionado desde master, SMTP externo y estados con alertas.
+- `/mail/domains/create`: formulario adaptado al tema oscuro y con bloqueo visual si no hay backend de correo disponible.
+
+### Fixed
+- `/settings/updates`: las actualizaciones lanzadas desde la web ahora se ejecutan fuera del cgroup del panel usando `systemd-run`, evitando que el reinicio del servicio mate el updater antes de limpiar el estado.
+- `/settings/updates`: recuperacion robusta de updates atascados; si la version local ya alcanzo la remota y no hay unidad de update activa, se limpia `update_in_progress`.
+- `/mail/domains/create`: bloqueo backend para impedir crear dominios de mail cuando no existe servidor local configurado ni nodo remoto online.
+
 ## [1.0.87] — 2026-04-24
 
 ### New

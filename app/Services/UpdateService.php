@@ -14,7 +14,7 @@ class UpdateService
      */
     public static function checkForUpdate(bool $force = false): array
     {
-        $current = PANEL_VERSION;
+        $current = self::currentVersion();
         $cached = self::getCachedUpdateInfo();
 
         if (!$force && $cached && (time() - ($cached['checked_at_epoch'] ?? 0)) < self::CHECK_INTERVAL) {
@@ -52,7 +52,8 @@ class UpdateService
 
         // Re-evaluate against actual running version — the DB flag may be stale
         // after an update that didn't clear it properly.
-        $hasUpdate = $remote && version_compare(PANEL_VERSION, $remote, '<');
+        $current = self::currentVersion();
+        $hasUpdate = $remote && version_compare($current, $remote, '<');
 
         // Auto-clear stale flag if we're already up to date
         if (!$hasUpdate && Settings::get('update_has_update', '0') === '1') {
@@ -60,7 +61,7 @@ class UpdateService
         }
 
         return [
-            'current'          => PANEL_VERSION,
+            'current'          => $current,
             'remote'           => $remote,
             'has_update'       => $hasUpdate,
             'checked_at'       => date('Y-m-d H:i:s', $lastCheck),
@@ -75,20 +76,51 @@ class UpdateService
     {
         $panelDir = PANEL_ROOT;
         $logFile = $panelDir . '/storage/logs/update.log';
+        $unitName = 'musedock-panel-update-' . time();
 
-        // Run update.sh in background with --auto flag
-        // We use nohup so the service restart doesn't kill our response
-        $cmd = sprintf(
-            'nohup bash %s/bin/update.sh --auto > %s 2>&1 &',
-            escapeshellarg($panelDir),
-            escapeshellarg($logFile)
-        );
+        @file_put_contents($logFile, '');
 
-        shell_exec($cmd);
-
-        // Mark that update is in progress
+        // Mark progress before launching the child process so the UI can start
+        // polling immediately. The update process must run outside the panel
+        // service cgroup; otherwise systemctl restart musedock-panel kills it
+        // before it can clear flags or print the final completion line.
         Settings::set('update_in_progress', '1');
         Settings::set('update_started_at', (string) time());
+        Settings::set('update_unit', $unitName);
+
+        if (self::commandExists('systemd-run')) {
+            $inner = sprintf(
+                'exec bash %s/bin/update.sh --auto > %s 2>&1',
+                escapeshellarg($panelDir),
+                escapeshellarg($logFile)
+            );
+            $cmd = sprintf(
+                'systemd-run --unit=%s --collect --property=WorkingDirectory=%s /bin/bash -lc %s',
+                escapeshellarg($unitName),
+                escapeshellarg($panelDir),
+                escapeshellarg($inner)
+            );
+
+            $output = [];
+            $rc = 0;
+            exec($cmd . ' 2>&1', $output, $rc);
+            if ($rc !== 0) {
+                Settings::set('update_in_progress', '0');
+                @file_put_contents($logFile, implode("\n", $output) . "\n", FILE_APPEND);
+                return [
+                    'success' => false,
+                    'message' => 'Could not start update unit: ' . trim(implode("\n", $output)),
+                    'log_file' => $logFile,
+                ];
+            }
+        } else {
+            $cmd = sprintf(
+                'nohup setsid bash %s/bin/update.sh --auto > %s 2>&1 < /dev/null &',
+                escapeshellarg($panelDir),
+                escapeshellarg($logFile)
+            );
+            shell_exec($cmd);
+        }
 
         return [
             'success'  => true,
@@ -108,6 +140,12 @@ class UpdateService
         $output = file_exists($logFile) ? file_get_contents($logFile) : '';
         // Strip ANSI escape codes (color, bold, etc.) for web display
         $output = preg_replace('/\033\[[0-9;]*m/', '', $output);
+        $completed = false;
+        $remote = Settings::get('update_remote_version', '');
+        $unitName = Settings::get('update_unit', '');
+
+        $currentAtOrPastRemote = $remote !== '' && version_compare(self::currentVersion(), $remote, '>=');
+        $unitStillRunning = $unitName !== '' && self::systemdUnitActive($unitName);
 
         // If started more than 2 minutes ago, assume it finished
         if ($inProgress && (time() - $startedAt) > 120) {
@@ -120,6 +158,23 @@ class UpdateService
             Settings::set('update_in_progress', '0');
             Settings::set('update_has_update', '0');
             $inProgress = false;
+            $completed = true;
+        }
+
+        // Robust completion detection for updates launched from the web UI.
+        // Older updater runs could be killed during service restart before
+        // writing "Update complete" or clearing DB flags.
+        if ($inProgress && $currentAtOrPastRemote && !$unitStillRunning) {
+            Settings::set('update_in_progress', '0');
+            Settings::set('update_has_update', '0');
+            Settings::set('update_last_check', (string) time());
+            $inProgress = false;
+            $completed = true;
+        }
+
+        if (!$inProgress && $currentAtOrPastRemote) {
+            Settings::set('update_has_update', '0');
+            $completed = true;
         }
 
         return [
@@ -127,6 +182,7 @@ class UpdateService
             'started_at'  => $startedAt > 0 ? date('Y-m-d H:i:s', $startedAt) : null,
             'output'      => $output,
             'elapsed'     => $startedAt > 0 ? time() - $startedAt : 0,
+            'completed'   => $completed,
         ];
     }
 
@@ -161,7 +217,7 @@ class UpdateService
 
         // Extract version entries using regex
         $entries = [];
-        $current = PANEL_VERSION;
+        $current = self::currentVersion();
 
         // Match version strings in the changelog
         preg_match_all("/'version'\s*=>\s*'([^']+)'/", $content, $versions);
@@ -187,7 +243,7 @@ class UpdateService
      */
     private static function httpGet(string $url, int $timeout = 10): ?string
     {
-        $userAgent = 'MuseDockPanel/' . PANEL_VERSION;
+        $userAgent = 'MuseDockPanel/' . self::currentVersion();
 
         if (function_exists('curl_init')) {
             $ch = curl_init($url);
@@ -221,5 +277,38 @@ class UpdateService
         ]);
         $content = @file_get_contents($url, false, $ctx);
         return $content !== false ? $content : null;
+    }
+
+    private static function commandExists(string $command): bool
+    {
+        $result = trim((string) shell_exec('command -v ' . escapeshellarg($command) . ' 2>/dev/null'));
+        return $result !== '';
+    }
+
+    private static function systemdUnitActive(string $unitName): bool
+    {
+        if (!preg_match('/^[a-zA-Z0-9_.@-]+$/', $unitName)) {
+            return false;
+        }
+
+        exec('systemctl is-active --quiet ' . escapeshellarg($unitName), $out, $rc);
+        return $rc === 0;
+    }
+
+    private static function currentVersion(): string
+    {
+        if (defined('PANEL_VERSION')) {
+            return (string) constant('PANEL_VERSION');
+        }
+
+        $configFile = PANEL_ROOT . '/config/panel.php';
+        if (is_file($configFile)) {
+            $config = require $configFile;
+            if (is_array($config) && !empty($config['version'])) {
+                return (string) $config['version'];
+            }
+        }
+
+        return '0.0.0';
     }
 }

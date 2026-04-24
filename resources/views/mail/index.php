@@ -63,7 +63,109 @@
         'external' => ['SMTP Externo', 'Usa un proveedor como SES, Mailgun o Brevo. No instala servidor de correo local.'],
     ];
     $modeInfo = $modeLabels[$mailMode ?? 'full'] ?? $modeLabels['full'];
+    $mailModeValue = (string)($mailMode ?? 'full');
+    $remoteNodeCount = 0;
+    $remoteOnlineCount = 0;
+    foreach (($mailNodes ?? []) as $node) {
+        $remoteNodeCount++;
+        if ((string)($node['status'] ?? '') === 'online') {
+            $remoteOnlineCount++;
+        }
+    }
+    $masterIp = \MuseDockPanel\Settings::get('cluster_master_ip', '');
+    $mailInstallStatusClass = 'success';
+    $mailInstallStatusTitle = 'Instalado y operativo';
+    $mailInstallStatusDetail = '';
+
+    if ($isSlave) {
+        $mailInstallStatusClass = 'warning text-dark';
+        $mailInstallStatusTitle = 'Servidor Slave (gestionado desde master)';
+        $mailInstallStatusDetail = $masterIp !== ''
+            ? 'Este nodo no se administra aqui. Gestiona correo en el master: https://' . $masterIp . ':8444/mail'
+            : 'Este nodo no se administra aqui. Gestiona correo desde el panel master.';
+    } elseif ($mailModeValue === 'external') {
+        $smtpHost = trim((string)($smtpConfig['host'] ?? ''));
+        $smtpUser = trim((string)($smtpConfig['username'] ?? ''));
+        if ($smtpHost === '' || $smtpUser === '') {
+            $mailInstallStatusClass = 'warning text-dark';
+            $mailInstallStatusTitle = 'SMTP externo pendiente de configurar';
+            $mailInstallStatusDetail = 'No hay servidor local de correo en este modo. Configura host/usuario SMTP externo para operar.';
+        } else {
+            $mailInstallStatusClass = 'info';
+            $mailInstallStatusTitle = 'Operativo con SMTP externo';
+            $mailInstallStatusDetail = 'Sin servidor local. El envio se realiza por proveedor externo configurado.';
+        }
+    } elseif (!($mailLocalConfigured ?? false) && $remoteNodeCount === 0) {
+        $mailInstallStatusClass = 'danger';
+        $mailInstallStatusTitle = 'No instalado';
+        $mailInstallStatusDetail = 'No hay servidor de correo local ni nodos de mail remotos configurados.';
+    } else {
+        $parts = [];
+        if (($mailLocalConfigured ?? false)) {
+            $parts[] = 'local activo';
+        }
+        if ($remoteNodeCount > 0) {
+            $parts[] = "nodos remotos online {$remoteOnlineCount}/{$remoteNodeCount}";
+        }
+        $mailInstallStatusDetail = 'Servicio detectado en: ' . implode(' · ', $parts) . '.';
+
+        if ($remoteNodeCount > 0 && $remoteOnlineCount === 0 && !($mailLocalConfigured ?? false)) {
+            $mailInstallStatusClass = 'danger';
+            $mailInstallStatusTitle = 'Instalado pero no operativo';
+            $mailInstallStatusDetail = 'Hay nodos remotos definidos, pero ninguno esta online y no hay mail local activo.';
+        } elseif (!empty($mailHealthAlerts)) {
+            $mailInstallStatusClass = 'warning text-dark';
+            $mailInstallStatusTitle = 'Operativo con alertas';
+            $mailInstallStatusDetail .= ' Revisa alertas de healthcheck.';
+        }
+    }
+    $tabCandidates = ['general', 'webmail', 'deliverability', 'domains', 'infra'];
+    if (($mailMode ?? 'full') === 'relay') {
+        $tabCandidates[] = 'relay';
+    }
+    if (!$isSlave) {
+        $tabCandidates[] = 'migration';
+    }
+    $requestedTab = (string)($_GET['tab'] ?? '');
+    $activeTab = in_array($requestedTab, $tabCandidates, true) ? $requestedTab : '';
+    if ($activeTab === '') {
+        $activeTab = (!empty($_GET['setup']) && !$isSlave) ? 'infra' : 'general';
+    }
+    $tabLink = static function (string $tab): string {
+        $query = $_GET;
+        $query['tab'] = $tab;
+        if ($tab !== 'infra') {
+            unset($query['setup']);
+        }
+        $url = '/mail';
+        if (!empty($query)) {
+            $url .= '?' . http_build_query($query);
+        }
+        if ($tab === 'webmail') {
+            $url .= '#webmail';
+        }
+        return $url;
+    };
 ?>
+<div class="card mb-4" style="border-color: rgba(148,163,184,.22);">
+    <div class="card-body py-2">
+        <div class="nav nav-pills gap-2 flex-wrap" role="tablist" aria-label="Navegacion Mail">
+            <a class="btn btn-sm <?= $activeTab === 'general' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('general')) ?>" data-mail-tab-link="general">General</a>
+            <a class="btn btn-sm <?= $activeTab === 'domains' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('domains')) ?>" data-mail-tab-link="domains">Dominios</a>
+            <a class="btn btn-sm <?= $activeTab === 'webmail' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('webmail')) ?>" data-mail-tab-link="webmail">Webmail</a>
+            <?php if (($mailMode ?? 'full') === 'relay'): ?>
+                <a class="btn btn-sm <?= $activeTab === 'relay' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('relay')) ?>" data-mail-tab-link="relay">Relay</a>
+            <?php endif; ?>
+            <?php if (!$isSlave): ?>
+                <a class="btn btn-sm <?= $activeTab === 'migration' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('migration')) ?>" data-mail-tab-link="migration">Migracion</a>
+            <?php endif; ?>
+            <a class="btn btn-sm <?= $activeTab === 'infra' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('infra')) ?>" data-mail-tab-link="infra">Infra</a>
+            <a class="btn btn-sm <?= $activeTab === 'deliverability' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('deliverability')) ?>" data-mail-tab-link="deliverability">Entregabilidad</a>
+        </div>
+    </div>
+</div>
+
+<div class="mail-tab-pane<?= $activeTab === 'general' ? '' : ' d-none' ?>" data-mail-tab="general">
 <div class="card mb-4" style="border-color: rgba(56,189,248,.28);">
     <div class="card-body">
         <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
@@ -73,10 +175,17 @@
                     <span class="badge bg-info"><?= View::e($modeInfo[0]) ?></span>
                     <span class="text-muted small"><?= View::e($modeInfo[1]) ?></span>
                 </div>
+                <div class="d-flex align-items-center flex-wrap gap-2 mt-2">
+                    <span class="text-muted small">Estado real:</span>
+                    <span class="badge bg-<?= $mailInstallStatusClass ?>"><?= View::e($mailInstallStatusTitle) ?></span>
+                    <?php if ($mailInstallStatusDetail !== ''): ?>
+                        <span class="text-muted small"><?= View::e($mailInstallStatusDetail) ?></span>
+                    <?php endif; ?>
+                </div>
             </div>
             <?php if (!$isSlave): ?>
             <div class="d-flex flex-wrap gap-2">
-                <a href="/mail?setup=1" class="btn btn-outline-light btn-sm"><i class="bi bi-sliders me-1"></i>Cambiar modo</a>
+                <a href="/mail?tab=infra&amp;setup=1" class="btn btn-outline-light btn-sm"><i class="bi bi-sliders me-1"></i>Cambiar modo</a>
                 <button class="btn btn-outline-info btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#smtpIntegrationBox">
                     <i class="bi bi-code-square me-1"></i>Integracion apps
                 </button>
@@ -95,6 +204,7 @@
         </div>
     </div>
 </div>
+</div>
 
 <?php
     $webmailConfig = $webmailConfig ?? [];
@@ -106,6 +216,7 @@
     $webmailStage = (string)($webmailInstallStatus['stage'] ?? '');
     $webmailMessage = (string)($webmailInstallStatus['message'] ?? '');
 ?>
+<div class="mail-tab-pane<?= $activeTab === 'webmail' ? '' : ' d-none' ?>" data-mail-tab="webmail">
 <div id="webmail" class="card mb-4" style="border-color:rgba(34,197,94,.22);">
     <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
         <span><i class="bi bi-envelope-at me-2"></i>Webmail</span>
@@ -243,6 +354,7 @@
         </div>
     </div>
 </div>
+</div>
 
 <?php if (($mailMode ?? 'full') === 'relay'): ?>
 <?php
@@ -251,6 +363,7 @@
     $relayPublicIp = \MuseDockPanel\Settings::get('mail_relay_public_ip', '');
     $relayTruthy = static fn($v): bool => in_array((string)$v, ['1', 't', 'true', 'yes', 'on'], true) || $v === true;
 ?>
+<div class="mail-tab-pane<?= $activeTab === 'relay' ? '' : ' d-none' ?>" data-mail-tab="relay">
 <div class="row g-3 mb-4">
     <div class="col-lg-6">
         <div class="card h-100" style="border-color:rgba(14,165,233,.28);">
@@ -425,9 +538,11 @@
         </div>
     </div>
 </div>
+</div>
 <?php endif; ?>
 
 <?php if (!$isSlave): ?>
+<div class="mail-tab-pane<?= $activeTab === 'migration' ? '' : ' d-none' ?>" data-mail-tab="migration">
 <div class="card mb-4" style="border-color:rgba(59,130,246,.22);">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-truck me-2"></i>Migrador de correo</span>
@@ -540,9 +655,11 @@
         <?php endif; ?>
     </div>
 </div>
+</div>
 <?php endif; ?>
 
 <!-- Stats cards -->
+<div class="mail-tab-pane<?= $activeTab === 'general' ? '' : ' d-none' ?>" data-mail-tab="general">
 <div class="row g-3 mb-4">
     <div class="col-md-3">
         <div class="card">
@@ -577,8 +694,10 @@
         </div>
     </div>
 </div>
+</div>
 
 <!-- Local Mail Server Status -->
+<div class="mail-tab-pane<?= $activeTab === 'infra' ? '' : ' d-none' ?>" data-mail-tab="infra">
 <?php if (($mailLocalConfigured ?? false) && !$isSlave): ?>
 <div class="card mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -699,17 +818,19 @@
     <?php if ($showSetup ?? false): ?>
         <?php include __DIR__ . '/setup-node.php'; ?>
     <?php elseif (empty($mailNodes) && !($mailLocalConfigured ?? false)): ?>
-        <div class="card mb-0" style="border: 1px solid rgba(13, 202, 240, 0.25);">
+        <div class="card mb-4" style="border: 1px solid rgba(13, 202, 240, 0.25);">
             <div class="card-body py-3">
                 <i class="bi bi-info-circle text-info me-2"></i>
                 <strong>Mail Setup:</strong> Para usar correo, primero
-                <a href="/mail?setup=1" class="text-info">configura un servidor de mail</a> (local o en un nodo remoto del cluster).
+                <a href="/mail?tab=infra&amp;setup=1" class="text-info">configura un servidor de mail</a> (local o en un nodo remoto del cluster).
             </div>
         </div>
     <?php endif; ?>
 <?php endif; ?>
+</div>
 
 <!-- Deliverability -->
+<div class="mail-tab-pane<?= $activeTab === 'deliverability' ? '' : ' d-none' ?>" data-mail-tab="deliverability">
 <div class="card mt-4 mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-shield-check me-2"></i>Entregabilidad DNS</span>
@@ -810,14 +931,17 @@
         <?php endif; ?>
     </div>
 </div>
+</div>
 
 <!-- Domains list -->
+<div class="mail-tab-pane<?= $activeTab === 'domains' ? '' : ' d-none' ?>" data-mail-tab="domains">
 <div class="mb-4"></div>
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h6 class="mb-0"><i class="bi bi-globe2 me-2"></i>Mail Domains</h6>
     <?php if (!$isSlave): ?>
     <a href="/mail/domains/create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i> New Domain</a>
     <?php endif; ?>
+</div>
 </div>
 
 <div class="card">
@@ -906,6 +1030,79 @@ function copyDnsRecords(btn) {
         setTimeout(() => btn.innerHTML = original, 1500);
     }).catch(() => alert(text));
 }
+
+(function initMailTabs() {
+    const links = Array.from(document.querySelectorAll('[data-mail-tab-link]'));
+    const panes = Array.from(document.querySelectorAll('.mail-tab-pane[data-mail-tab]'));
+    if (!links.length || !panes.length) return;
+
+    const validTabs = Array.from(new Set(panes.map((pane) => pane.dataset.mailTab)));
+    const initialFallback = <?= json_encode($activeTab, JSON_UNESCAPED_SLASHES) ?>;
+
+    const pickTabFromUrl = () => {
+        const url = new URL(window.location.href);
+        const fromQuery = url.searchParams.get('tab');
+        if (fromQuery && validTabs.includes(fromQuery)) return fromQuery;
+        if (url.hash === '#webmail' && validTabs.includes('webmail')) return 'webmail';
+        return '';
+    };
+
+    const applyTab = (tab, updateUrl) => {
+        let nextTab = validTabs.includes(tab) ? tab : initialFallback;
+        if (!validTabs.includes(nextTab)) {
+            nextTab = validTabs[0];
+        }
+
+        panes.forEach((pane) => pane.classList.toggle('d-none', pane.dataset.mailTab !== nextTab));
+
+        links.forEach((link) => {
+            const active = link.dataset.mailTabLink === nextTab;
+            link.classList.toggle('btn-info', active);
+            link.classList.toggle('btn-outline-light', !active);
+            if (active) {
+                link.setAttribute('aria-current', 'page');
+            } else {
+                link.removeAttribute('aria-current');
+            }
+        });
+
+        try { sessionStorage.setItem('musedock_mail_tab', nextTab); } catch (err) {}
+
+        if (!updateUrl) return;
+
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', nextTab);
+        if (nextTab !== 'infra') {
+            url.searchParams.delete('setup');
+        }
+        url.hash = nextTab === 'webmail' ? 'webmail' : '';
+        history.replaceState(null, '', url.toString());
+    };
+
+    let initialTab = pickTabFromUrl();
+    if (!initialTab) {
+        try {
+            const savedTab = sessionStorage.getItem('musedock_mail_tab');
+            if (savedTab && validTabs.includes(savedTab)) {
+                initialTab = savedTab;
+            }
+        } catch (err) {}
+    }
+    if (!initialTab) initialTab = initialFallback;
+
+    links.forEach((link) => {
+        link.addEventListener('click', (event) => {
+            event.preventDefault();
+            applyTab(link.dataset.mailTabLink || '', true);
+        });
+    });
+
+    window.addEventListener('popstate', () => {
+        applyTab(pickTabFromUrl() || initialFallback, false);
+    });
+
+    applyTab(initialTab, false);
+})();
 
 <?php if (!empty($mailNodes) || ($mailLocalConfigured ?? false)): ?>
 function rotateMailDbPassword() {

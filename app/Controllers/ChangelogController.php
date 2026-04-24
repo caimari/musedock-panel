@@ -20,6 +20,37 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.88',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/mail` reorganizado en tabs persistentes para reducir densidad y conservar el tab activo al recargar',
+                            '`/mail`: estado real del servicio visible en General (instalado, no instalado, slave gestionado desde master, SMTP externo o con alertas)',
+                            '`/mail/domains/create`: formulario adaptado al tema oscuro y bloqueo visual cuando no hay backend de correo disponible',
+                        ],
+                        'en' => [
+                            '`/mail` reorganized into persistent tabs to reduce density and keep the active tab after reload',
+                            '`/mail`: real service state shown in General (installed, not installed, slave managed from master, external SMTP or with alerts)',
+                            '`/mail/domains/create`: form adjusted for the dark theme and visually blocked when no mail backend is available',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            '`/settings/updates`: los updates web se ejecutan fuera del cgroup del panel con `systemd-run`, evitando que el reinicio mate el updater',
+                            '`/settings/updates`: recuperacion de updates atascados cuando la version local ya alcanzo la remota y no hay unidad activa',
+                            '`/mail/domains/create`: bloqueo backend para impedir crear dominios sin servidor local configurado ni nodo remoto online',
+                        ],
+                        'en' => [
+                            '`/settings/updates`: web updates now run outside the panel cgroup with `systemd-run`, preventing service restart from killing the updater',
+                            '`/settings/updates`: recovery for stuck updates when the local version already reached the remote one and no update unit is active',
+                            '`/mail/domains/create`: backend guard prevents creating domains without configured local mail or an online remote node',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.87',
                 'date' => '2026-04-24',
                 'badge' => 'primary',

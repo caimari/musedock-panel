@@ -101,12 +101,17 @@ class MailController
 
         $customers = Database::fetchAll("SELECT id, name, email FROM customers WHERE status = 'active' ORDER BY name");
         $mailNodes = MailService::getMailNodes();
+        $mailCreateAvailable = $this->hasMailBackendAvailable();
 
         View::render('mail/domain-create', [
             'layout'    => 'main',
             'pageTitle' => 'Mail - New Domain',
             'customers' => $customers,
             'mailNodes' => $mailNodes,
+            'mailCreateAvailable' => $mailCreateAvailable,
+            'mailCreateBlockedReason' => $mailCreateAvailable
+                ? ''
+                : 'No hay servidor de correo operativo (ni local ni nodo remoto online). Configuralo primero en Mail > Infra.',
         ]);
     }
 
@@ -115,6 +120,12 @@ class MailController
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
             Router::redirect('/mail');
+            return;
+        }
+
+        if (!$this->hasMailBackendAvailable()) {
+            Flash::set('error', 'No puedes crear dominios de mail: no hay servidor de correo operativo (ni local ni nodo remoto online).');
+            Router::redirect('/mail/domains/create');
             return;
         }
 
@@ -154,6 +165,21 @@ class MailController
             Flash::set('error', 'Error: ' . $e->getMessage());
             Router::redirect('/mail/domains/create');
         }
+    }
+
+    private function hasMailBackendAvailable(): bool
+    {
+        if (Settings::get('mail_local_configured', '') === '1') {
+            return true;
+        }
+
+        foreach (MailService::getMailNodes() as $node) {
+            if ((string)($node['status'] ?? '') === 'online') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function domainShow(array $params): void
@@ -481,7 +507,7 @@ class MailController
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail');
+            Router::redirect('/mail?tab=relay');
             return;
         }
 
@@ -491,40 +517,40 @@ class MailController
         } else {
             Flash::set('error', $result['error'] ?? 'No se pudo crear el dominio relay.');
         }
-        Router::redirect('/mail');
+        Router::redirect('/mail?tab=relay');
     }
 
     public function relayDomainRefresh(array $params): void
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail');
+            Router::redirect('/mail?tab=relay');
             return;
         }
 
         $result = MailService::refreshRelayDomain((int)$params['id']);
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false) ? 'DNS del dominio relay actualizado.' : ($result['error'] ?? 'Error verificando DNS.'));
-        Router::redirect('/mail');
+        Router::redirect('/mail?tab=relay');
     }
 
     public function relayDomainDelete(array $params): void
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail');
+            Router::redirect('/mail?tab=relay');
             return;
         }
 
         $result = MailService::deleteRelayDomain((int)$params['id']);
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false) ? 'Dominio relay eliminado.' : ($result['error'] ?? 'Error eliminando dominio relay.'));
-        Router::redirect('/mail');
+        Router::redirect('/mail?tab=relay');
     }
 
     public function relayUserStore(): void
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail');
+            Router::redirect('/mail?tab=relay');
             return;
         }
 
@@ -549,27 +575,27 @@ class MailController
         } else {
             Flash::set('error', $result['error'] ?? 'No se pudo crear el usuario relay.');
         }
-        Router::redirect('/mail');
+        Router::redirect('/mail?tab=relay');
     }
 
     public function relayUserDelete(array $params): void
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail');
+            Router::redirect('/mail?tab=relay');
             return;
         }
 
         $result = MailService::deleteRelayUser((int)$params['id']);
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false) ? 'Usuario relay eliminado.' : ($result['error'] ?? 'Error eliminando usuario relay.'));
-        Router::redirect('/mail');
+        Router::redirect('/mail?tab=relay');
     }
 
     public function migrationPreflight(): void
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail');
+            Router::redirect('/mail?tab=migration');
             return;
         }
 
@@ -582,21 +608,21 @@ class MailController
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
             ? ('Preflight de migracion creado: ' . ($result['status'] ?? 'ok'))
             : ($result['error'] ?? 'No se pudo ejecutar el preflight.'));
-        Router::redirect('/mail');
+        Router::redirect('/mail?tab=migration');
     }
 
     public function migrationRelayExecute(): void
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail');
+            Router::redirect('/mail?tab=migration');
             return;
         }
 
         $adminPassword = (string)($_POST['admin_password'] ?? '');
         if (!$this->verifyAdminPassword($adminPassword)) {
             Flash::set('error', 'Password de admin incorrecta.');
-            Router::redirect('/mail');
+            Router::redirect('/mail?tab=migration');
             return;
         }
 
@@ -609,14 +635,14 @@ class MailController
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
             ? 'Migracion de relay completada.'
             : ($result['error'] ?? 'No se pudo migrar el relay.'));
-        Router::redirect('/mail');
+        Router::redirect('/mail?tab=migration');
     }
 
     public function webmailSave(): void
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail');
+            Router::redirect('/mail?tab=webmail#webmail');
             return;
         }
 
@@ -630,21 +656,21 @@ class MailController
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
             ? 'Configuracion de webmail guardada.'
             : ($result['error'] ?? 'No se pudo guardar webmail.'));
-        Router::redirect('/mail#webmail');
+        Router::redirect('/mail?tab=webmail#webmail');
     }
 
     public function webmailInstall(): void
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail');
+            Router::redirect('/mail?tab=webmail#webmail');
             return;
         }
 
         $adminPassword = (string)($_POST['admin_password'] ?? '');
         if (!$this->verifyAdminPassword($adminPassword)) {
             Flash::set('error', 'Password de admin incorrecta.');
-            Router::redirect('/mail#webmail');
+            Router::redirect('/mail?tab=webmail#webmail');
             return;
         }
 
@@ -658,7 +684,7 @@ class MailController
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
             ? 'Instalacion de Roundcube iniciada. Puedes refrescar esta pagina para ver el estado.'
             : ($result['error'] ?? 'No se pudo iniciar la instalacion de webmail.'));
-        Router::redirect('/mail#webmail');
+        Router::redirect('/mail?tab=webmail#webmail');
     }
 
     public function webmailStatus(): void
@@ -671,41 +697,41 @@ class MailController
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail#webmail');
+            Router::redirect('/mail?tab=webmail#webmail');
             return;
         }
         $result = WebmailService::addAlias((string)($_POST['host'] ?? ''));
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
             ? 'Hostname adicional de webmail publicado.'
             : ($result['error'] ?? 'No se pudo añadir el hostname webmail.'));
-        Router::redirect('/mail#webmail');
+        Router::redirect('/mail?tab=webmail#webmail');
     }
 
     public function webmailAliasDelete(): void
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail#webmail');
+            Router::redirect('/mail?tab=webmail#webmail');
             return;
         }
         $result = WebmailService::deleteAlias((string)($_POST['host'] ?? ''));
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
             ? 'Hostname adicional de webmail eliminado.'
             : ($result['error'] ?? 'No se pudo eliminar el hostname webmail.'));
-        Router::redirect('/mail#webmail');
+        Router::redirect('/mail?tab=webmail#webmail');
     }
 
     public function webmailEnableSieve(): void
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail#webmail');
+            Router::redirect('/mail?tab=webmail#webmail');
             return;
         }
         $adminPassword = (string)($_POST['admin_password'] ?? '');
         if (!$this->verifyAdminPassword($adminPassword)) {
             Flash::set('error', 'Password de admin incorrecta.');
-            Router::redirect('/mail#webmail');
+            Router::redirect('/mail?tab=webmail#webmail');
             return;
         }
 
@@ -724,7 +750,7 @@ class MailController
             Settings::set('mail_webmail_sieve_enabled', '1');
             Flash::set('success', 'Activacion Sieve/ManageSieve: ' . implode('; ', $messages));
         }
-        Router::redirect('/mail#webmail');
+        Router::redirect('/mail?tab=webmail#webmail');
     }
 
     private function verifyAdminPassword(string $password): bool
@@ -740,14 +766,14 @@ class MailController
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail');
+            Router::redirect('/mail?tab=deliverability');
             return;
         }
 
         $to = trim((string)($_POST['test_email'] ?? ''));
         if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
             Flash::set('error', 'Email de destino no valido.');
-            Router::redirect('/mail');
+            Router::redirect('/mail?tab=deliverability');
             return;
         }
 
@@ -787,7 +813,7 @@ class MailController
             Flash::set('success', "Test entregado a la cola local para {$to}. Si no llega, revisa /var/log/mail.log. Marker: {$marker}");
         }
 
-        Router::redirect('/mail');
+        Router::redirect('/mail?tab=deliverability');
     }
 
     public function internalSmtpConfig(): void
