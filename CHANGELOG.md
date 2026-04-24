@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.83] — 2026-04-24
+
+### New
+- Mail setup: cuarto modo `Relay Privado (WireGuard)` para montar un relay SMTP propio accesible solo por VPN.
+- Relay privado: Postfix + OpenDKIM multi-dominio + SASL, sin Dovecot/Rspamd ni recepcion publica de correo.
+- `/mail`: gestion de dominios autorizados del relay con DKIM independiente, verificacion SPF/DKIM/DMARC y usuarios SMTP SASL.
+- Satellite mode: failover opcional de relay privado a SMTP externo/Sweego mediante transport map y healthcheck local.
+
+### Improved
+- Entregabilidad: puntuacion SPF/DKIM/DMARC/PTR/blacklists por dominio y soporte para dominios del relay privado.
+- Setup full mail: preseed de Postfix compatible con shells sin here-string.
+
 ## [1.0.82] — 2026-04-24
 
 ### New

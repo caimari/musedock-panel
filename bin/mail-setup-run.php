@@ -113,6 +113,73 @@ function run(string $cmd, string $logFile, array &$errors, string $context = '')
     }
 }
 
+function writePostfixMap(string $path, string $content, string $logFile, array &$errors): void
+{
+    file_put_contents($path, $content);
+    run('postmap ' . escapeshellarg($path), $logFile, $errors, 'postmap:' . basename($path));
+    run('chmod 600 ' . escapeshellarg($path) . ' ' . escapeshellarg($path . '.db') . ' 2>/dev/null || true', $logFile, $errors, 'postmap-perms');
+}
+
+function configureSatelliteRelayFailover(array $payload, string $logFile, array &$errors): void
+{
+    $relay = $payload['relay'] ?? [];
+    $fallback = $payload['fallback_smtp'] ?? [];
+    $relayHost = trim((string)($relay['host'] ?? ''));
+    if ($relayHost === '') {
+        return;
+    }
+
+    $relayPort = (int)($relay['port'] ?? 587);
+    $relayUser = trim((string)($relay['username'] ?? ''));
+    $relayPass = (string)($relay['password'] ?? '');
+    $fallbackHost = trim((string)($fallback['host'] ?? ''));
+    $fallbackPort = (int)($fallback['port'] ?? 2525);
+    $fallbackUser = trim((string)($fallback['username'] ?? ''));
+    $fallbackPass = (string)($fallback['password'] ?? '');
+
+    $primary = "[{$relayHost}]:{$relayPort}";
+    $fallbackTarget = $fallbackHost !== '' ? "[{$fallbackHost}]:{$fallbackPort}" : '';
+
+    writePostfixMap('/etc/postfix/transport', "*   smtp:{$primary}\n", $logFile, $errors);
+    $sasl = '';
+    if ($relayUser !== '' && $relayPass !== '') {
+        $sasl .= "{$primary} {$relayUser}:{$relayPass}\n";
+    }
+    if ($fallbackTarget !== '' && $fallbackUser !== '' && $fallbackPass !== '') {
+        $sasl .= "{$fallbackTarget} {$fallbackUser}:{$fallbackPass}\n";
+    }
+    if ($sasl !== '') {
+        writePostfixMap('/etc/postfix/sasl_passwords', $sasl, $logFile, $errors);
+        run('postconf -e ' . escapeshellarg('smtp_sasl_auth_enable = yes'), $logFile, $errors, 'postconf:smtp_sasl_auth_enable');
+        run('postconf -e ' . escapeshellarg('smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwords'), $logFile, $errors, 'postconf:smtp_sasl_password_maps');
+        run('postconf -e ' . escapeshellarg('smtp_sasl_security_options = noanonymous'), $logFile, $errors, 'postconf:smtp_sasl_security_options');
+    }
+
+    run('postconf -e ' . escapeshellarg('transport_maps = hash:/etc/postfix/transport'), $logFile, $errors, 'postconf:transport_maps');
+    run('postconf -e ' . escapeshellarg('smtp_tls_security_level = encrypt'), $logFile, $errors, 'postconf:smtp_tls_security_level');
+
+    if ($fallbackTarget !== '') {
+        @mkdir(PANEL_ROOT . '/bin', 0755, true);
+        $script = "#!/bin/bash\n" .
+            "RELAY_HOST=" . escapeshellarg($relayHost) . "\n" .
+            "RELAY_PORT=" . escapeshellarg((string)$relayPort) . "\n" .
+            "PRIMARY=" . escapeshellarg($primary) . "\n" .
+            "FALLBACK=" . escapeshellarg($fallbackTarget) . "\n" .
+            "if timeout 5 bash -c \"echo QUIT | openssl s_client -starttls smtp -connect \\$RELAY_HOST:\\$RELAY_PORT\" >/dev/null 2>&1; then\n" .
+            "  echo \"*   smtp:\\$PRIMARY\" > /etc/postfix/transport\n" .
+            "else\n" .
+            "  echo \"*   smtp:\\$FALLBACK\" > /etc/postfix/transport\n" .
+            "  logger -t musedock-mail \"WARN: private relay \\$RELAY_HOST down, switching to fallback \\$FALLBACK\"\n" .
+            "fi\n" .
+            "postmap /etc/postfix/transport\n" .
+            "postfix reload >/dev/null 2>&1 || true\n";
+        file_put_contents(PANEL_ROOT . '/bin/check-relay-health.sh', $script);
+        chmod(PANEL_ROOT . '/bin/check-relay-health.sh', 0755);
+        file_put_contents('/etc/cron.d/musedock-relay-health', "* * * * * root " . PANEL_ROOT . "/bin/check-relay-health.sh\n");
+        run(PANEL_ROOT . '/bin/check-relay-health.sh', $logFile, $errors, 'relay-health-initial');
+    }
+}
+
 // ── Extract payload ──────────────────────────────────────────
 
 $dbHost    = $payload['db_host'] ?? 'localhost';
@@ -122,8 +189,11 @@ $dbUser    = $payload['db_user'] ?? 'musedock_mail';
 $dbPass    = $payload['db_pass'] ?? '';
 $hostname  = $payload['mail_hostname'] ?? '';
 $sslMode   = $payload['ssl_mode'] ?? 'letsencrypt';
-$mailMode  = in_array(($payload['mail_mode'] ?? 'full'), ['satellite', 'full', 'external'], true) ? $payload['mail_mode'] : 'full';
+$mailMode  = in_array(($payload['mail_mode'] ?? 'full'), ['satellite', 'relay', 'full', 'external'], true) ? $payload['mail_mode'] : 'full';
 $outboundDomain = strtolower(trim((string)($payload['outbound_domain'] ?? '')));
+$wireguardIp = trim((string)($payload['wireguard_ip'] ?? ''));
+$wireguardCidr = trim((string)($payload['wireguard_cidr'] ?? '10.10.70.0/24'));
+$relayPublicIp = trim((string)($payload['relay_public_ip'] ?? ''));
 $localMode = !empty($payload['local_mode']);
 $vmailUid  = 5000;
 $vmailGid  = 5000;
@@ -193,6 +263,140 @@ if ($mailMode === 'external') {
     exit(0);
 }
 
+if ($mailMode === 'relay') {
+    $relaySteps = [
+        1 => ['id' => 'install_packages', 'label' => 'Instalar Postfix + OpenDKIM + SASL'],
+        2 => ['id' => 'configure_postfix', 'label' => 'Configurar relay privado WireGuard'],
+        3 => ['id' => 'configure_opendkim', 'label' => 'Configurar DKIM multi-dominio'],
+        4 => ['id' => 'start_services', 'label' => 'Iniciar servicios'],
+        5 => ['id' => 'verify', 'label' => 'Verificar escucha solo en WireGuard'],
+    ];
+    $totalSteps = count($relaySteps);
+
+    if ($hostname === '' || $wireguardIp === '') {
+        $errors[] = ['step' => 'validate_relay', 'command' => 'validate payload', 'exit' => 1, 'output' => 'relay requiere hostname y wireguard_ip'];
+        writeProgress($progressFile, ['id' => 'validate_relay', 'label' => 'Validar relay'], 1, $totalSteps, 'failed', $errors, ['finished_at' => date('Y-m-d H:i:s')]);
+        exit(1);
+    }
+
+    $domain = $outboundDomain ?: (str_contains($hostname, '.') ? implode('.', array_slice(explode('.', $hostname), -2)) : $hostname);
+
+    $step = 1;
+    writeProgress($progressFile, $relaySteps[$step], $step, $totalSteps, 'running', $errors);
+    run('export DEBIAN_FRONTEND=noninteractive && apt-get update -qq', $logFile, $errors, 'apt-update');
+    run("printf %s\\\\n " . escapeshellarg("postfix postfix/mailname string {$hostname}") . " | debconf-set-selections", $logFile, $errors, 'postfix-preseed');
+    run("printf %s\\\\n " . escapeshellarg("postfix postfix/main_mailer_type string Satellite system") . " | debconf-set-selections", $logFile, $errors, 'postfix-preseed');
+    run('export DEBIAN_FRONTEND=noninteractive && apt-get install -yqq postfix opendkim opendkim-tools sasl2-bin libsasl2-modules ca-certificates openssl', $logFile, $errors, 'apt-install-relay');
+
+    $step = 2;
+    writeProgress($progressFile, $relaySteps[$step], $step, $totalSteps, 'running', $errors);
+    @mkdir('/etc/ssl/private', 0710, true);
+    if (!is_file("/etc/ssl/certs/{$hostname}.pem") || !is_file("/etc/ssl/private/{$hostname}.key")) {
+        run("openssl req -new -x509 -days 3650 -nodes -out " . escapeshellarg("/etc/ssl/certs/{$hostname}.pem") . " -keyout " . escapeshellarg("/etc/ssl/private/{$hostname}.key") . " -subj " . escapeshellarg("/CN={$hostname}"), $logFile, $errors, 'relay-selfsigned-cert');
+    }
+
+    $relayPostconf = [
+        'myhostname' => $hostname,
+        'mydomain' => $domain,
+        'myorigin' => '$mydomain',
+        'inet_interfaces' => "127.0.0.1, {$wireguardIp}",
+        'inet_protocols' => 'ipv4',
+        'mydestination' => '',
+        'local_transport' => 'error:local mail delivery is disabled',
+        'mynetworks' => "127.0.0.0/8, {$wireguardCidr}",
+        'smtpd_sasl_auth_enable' => 'yes',
+        'smtpd_sasl_type' => 'cyrus',
+        'smtpd_sasl_path' => 'smtpd',
+        'smtpd_sasl_security_options' => 'noanonymous',
+        'smtpd_sasl_local_domain' => '$mydomain',
+        'smtpd_recipient_restrictions' => 'permit_mynetworks,permit_sasl_authenticated,reject_unauth_destination',
+        'smtp_tls_security_level' => 'may',
+        'smtp_tls_loglevel' => '1',
+        'smtp_tls_CAfile' => '/etc/ssl/certs/ca-certificates.crt',
+        'smtpd_tls_security_level' => 'may',
+        'smtpd_tls_cert_file' => "/etc/ssl/certs/{$hostname}.pem",
+        'smtpd_tls_key_file' => "/etc/ssl/private/{$hostname}.key",
+        'milter_default_action' => 'accept',
+        'milter_protocol' => '6',
+        'smtpd_milters' => 'unix:/run/opendkim/opendkim.sock',
+        'non_smtpd_milters' => 'unix:/run/opendkim/opendkim.sock',
+        'smtpd_client_message_rate_limit' => '200',
+        'smtpd_client_recipient_rate_limit' => '500',
+        'anvil_rate_time_unit' => '3600s',
+        'maximal_queue_lifetime' => '3d',
+        'bounce_queue_lifetime' => '1d',
+        'message_size_limit' => '26214400',
+        'header_checks' => 'regexp:/etc/postfix/header_checks',
+    ];
+    foreach ($relayPostconf as $key => $val) {
+        run('postconf -e ' . escapeshellarg("{$key} = {$val}"), $logFile, $errors, "postconf:{$key}");
+    }
+    @mkdir('/etc/postfix/sasl', 0755, true);
+    file_put_contents('/etc/postfix/sasl/smtpd.conf', "pwcheck_method: auxprop\nauxprop_plugin: sasldb\nmech_list: PLAIN LOGIN\n");
+    file_put_contents('/etc/postfix/header_checks', "/^Received:.*127\\.0\\.0\\.1/    IGNORE\n/^X-Originating-IP:/          IGNORE\n/^X-Mailer:/                  IGNORE\n");
+
+    $master = is_file('/etc/postfix/master.cf') ? file_get_contents('/etc/postfix/master.cf') : '';
+    if (!str_contains($master, "{$wireguardIp}:587 inet")) {
+        $master .= "\n{$wireguardIp}:587 inet n - n - - smtpd\n" .
+            "  -o syslog_name=postfix/submission\n" .
+            "  -o smtpd_tls_security_level=encrypt\n" .
+            "  -o smtpd_sasl_auth_enable=yes\n" .
+            "  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject\n" .
+            "  -o milter_macro_daemon_name=ORIGINATING\n";
+        file_put_contents('/etc/postfix/master.cf', $master);
+    }
+
+    $step = 3;
+    writeProgress($progressFile, $relaySteps[$step], $step, $totalSteps, 'running', $errors);
+    @mkdir('/etc/opendkim/keys', 0700, true);
+    $dkimConf = "Syslog yes\nUMask 007\nMode s\nCanonicalization relaxed/simple\nKeyTable /etc/opendkim/key.table\nSigningTable refile:/etc/opendkim/signing.table\nExternalIgnoreList /etc/opendkim/trusted.hosts\nInternalHosts /etc/opendkim/trusted.hosts\nSocket local:/run/opendkim/opendkim.sock\nOversignHeaders From\nUserID opendkim\n";
+    file_put_contents('/etc/opendkim.conf', $dkimConf);
+    foreach (['/etc/opendkim/key.table', '/etc/opendkim/signing.table'] as $file) {
+        if (!is_file($file)) touch($file);
+    }
+    file_put_contents('/etc/opendkim/trusted.hosts', "127.0.0.1\n::1\nlocalhost\n{$wireguardCidr}\n");
+    run('chown -R opendkim:opendkim /etc/opendkim', $logFile, $errors, 'dkim-chown');
+
+    $step = 4;
+    writeProgress($progressFile, $relaySteps[$step], $step, $totalSteps, 'running', $errors);
+    run('systemctl disable --now dovecot rspamd 2>/dev/null || true', $logFile, $errors, 'disable-unused-mail-services');
+    run('systemctl enable postfix opendkim saslauthd 2>&1 || true', $logFile, $errors, 'systemd-enable-relay');
+    run('systemctl restart opendkim 2>&1', $logFile, $errors, 'restart-opendkim');
+    run('systemctl restart postfix 2>&1', $logFile, $errors, 'restart-postfix');
+
+    $step = 5;
+    writeProgress($progressFile, $relaySteps[$step], $step, $totalSteps, 'running', $errors);
+    $serviceStatus = [];
+    foreach (['postfix', 'opendkim'] as $svc) {
+        exec("systemctl is-active {$svc} 2>&1", $svcOut, $svcCode);
+        $serviceStatus[$svc] = $svcCode === 0 ? 'running' : 'failed';
+    }
+    $listenOut = [];
+    exec("ss -tlnp 2>/dev/null | grep ':587 ' | grep " . escapeshellarg($wireguardIp) . " || true", $listenOut);
+
+    Settings::set('mail_mode', 'relay');
+    Settings::set('mail_node_configured', '1');
+    Settings::set('mail_hostname', $hostname);
+    Settings::set('mail_outbound_hostname', $hostname);
+    Settings::set('mail_outbound_domain', $domain);
+    Settings::set('mail_relay_wireguard_ip', $wireguardIp);
+    Settings::set('mail_relay_wireguard_cidr', $wireguardCidr);
+    Settings::set('mail_relay_primary_domain', $domain);
+    Settings::set('mail_relay_host', $hostname);
+    Settings::set('mail_relay_public_ip', $relayPublicIp);
+    Settings::set('mail_relay_port', '587');
+    Settings::set('mail_enabled', '1');
+
+    writeProgress($progressFile, $relaySteps[$step], $step, $totalSteps, empty($errors) ? 'completed' : 'completed_with_errors', $errors, [
+        'mail_mode' => 'relay',
+        'services' => $serviceStatus,
+        'wireguard_ip' => $wireguardIp,
+        'submission_wireguard_only' => !empty($listenOut),
+        'finished_at' => date('Y-m-d H:i:s'),
+    ]);
+    exit(0);
+}
+
 if ($mailMode === 'satellite') {
     $satSteps = [
         1 => ['id' => 'install_packages', 'label' => 'Instalar Postfix + OpenDKIM'],
@@ -239,6 +443,7 @@ if ($mailMode === 'satellite') {
     foreach ($satPostconf as $key => $val) {
         run('postconf -e ' . escapeshellarg("{$key} = {$val}"), $logFile, $errors, "postconf:{$key}");
     }
+    configureSatelliteRelayFailover($payload, $logFile, $errors);
     file_put_contents('/etc/postfix/header_checks', "/^Received:.*127\\.0\\.0\\.1/    IGNORE\n/^X-Originating-IP:/          IGNORE\n/^X-Mailer:/                  IGNORE\n");
     logLine($logFile, 'WRITE', '/etc/postfix/header_checks');
 
@@ -279,6 +484,19 @@ if ($mailMode === 'satellite') {
     Settings::set('mail_outbound_hostname', $hostname);
     Settings::set('mail_outbound_domain', $domain);
     Settings::set('mail_enabled', '1');
+    if (!empty($payload['relay']['host'])) {
+        Settings::set('mail_relay_host', (string)$payload['relay']['host']);
+        Settings::set('mail_relay_port', (string)($payload['relay']['port'] ?? '587'));
+        Settings::set('mail_relay_user', (string)($payload['relay']['username'] ?? ''));
+        Settings::set('mail_relay_password_enc', \MuseDockPanel\Services\ReplicationService::encryptPassword((string)($payload['relay']['password'] ?? '')));
+    }
+    if (!empty($payload['fallback_smtp']['host'])) {
+        Settings::set('mail_relay_fallback_enabled', '1');
+        Settings::set('mail_relay_fallback_host', (string)$payload['fallback_smtp']['host']);
+        Settings::set('mail_relay_fallback_port', (string)($payload['fallback_smtp']['port'] ?? '2525'));
+        Settings::set('mail_relay_fallback_user', (string)($payload['fallback_smtp']['username'] ?? ''));
+        Settings::set('mail_relay_fallback_password_enc', \MuseDockPanel\Services\ReplicationService::encryptPassword((string)($payload['fallback_smtp']['password'] ?? '')));
+    }
 
     $dnsTxt = is_file("{$dkimDir}/default.txt") ? trim((string)file_get_contents("{$dkimDir}/default.txt")) : '';
     Settings::set('mail_satellite_dkim_domain', $dkimDomain);
@@ -398,8 +616,8 @@ if (!empty($missing)) {
     run('export DEBIAN_FRONTEND=noninteractive && apt-get update -qq', $logFile, $errors, 'apt-update');
 
     if (in_array('postfix', $missing)) {
-        run("debconf-set-selections <<< 'postfix postfix/mailname string {$hostname}'", $logFile, $errors, 'postfix-preseed');
-        run("debconf-set-selections <<< \"postfix postfix/main_mailer_type string 'Internet Site'\"", $logFile, $errors, 'postfix-preseed');
+        run("printf %s\\\\n " . escapeshellarg("postfix postfix/mailname string {$hostname}") . " | debconf-set-selections", $logFile, $errors, 'postfix-preseed');
+        run("printf %s\\\\n " . escapeshellarg("postfix postfix/main_mailer_type string Internet Site") . " | debconf-set-selections", $logFile, $errors, 'postfix-preseed');
     }
 
     $pkgList = implode(' ', $missing);

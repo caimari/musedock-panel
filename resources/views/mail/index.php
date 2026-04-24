@@ -58,6 +58,7 @@
 <?php
     $modeLabels = [
         'satellite' => ['Solo Envio (Satellite)', 'Postfix + OpenDKIM solo para enviar. No recibe correo ni abre puertos de entrada. Ideal para SaaS y notificaciones.'],
+        'relay' => ['Relay Privado (WireGuard)', 'Postfix + OpenDKIM multi-dominio + SASL. Otros servidores envian por VPN; no recibe correo publico ni buzones.'],
         'full' => ['Correo Completo', 'Envia y recibe correo con buzones IMAP. Requiere MX, PTR y puertos 25/587/993 abiertos.'],
         'external' => ['SMTP Externo', 'Usa un proveedor como SES, Mailgun o Brevo. No instala servidor de correo local.'],
     ];
@@ -94,6 +95,181 @@
         </div>
     </div>
 </div>
+
+<?php if (($mailMode ?? 'full') === 'relay'): ?>
+<?php
+    $relayHost = \MuseDockPanel\Settings::get('mail_relay_wireguard_ip', '') ?: \MuseDockPanel\Settings::get('mail_relay_host', '');
+    $relayPort = \MuseDockPanel\Settings::get('mail_relay_port', '587');
+    $relayPublicIp = \MuseDockPanel\Settings::get('mail_relay_public_ip', '');
+    $relayTruthy = static fn($v): bool => in_array((string)$v, ['1', 't', 'true', 'yes', 'on'], true) || $v === true;
+?>
+<div class="row g-3 mb-4">
+    <div class="col-lg-6">
+        <div class="card h-100" style="border-color:rgba(14,165,233,.28);">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-globe2 me-2"></i>Dominios autorizados para relay</span>
+                <span class="text-muted small">DKIM por dominio</span>
+            </div>
+            <div class="card-body">
+                <?php if (!empty($relayNewCredentials)): ?>
+                    <div class="alert alert-warning mb-3" style="background:rgba(251,191,36,.12);border-color:rgba(251,191,36,.3);">
+                        <div class="fw-semibold mb-1">Credenciales SMTP creadas. Copia la contrasena ahora.</div>
+                        <pre class="mb-2 small p-2 rounded" style="background:#020617;color:#e2e8f0;">Host: <?= View::e($relayNewCredentials['host'] ?? $relayHost) . "\n" ?>Puerto: <?= View::e($relayNewCredentials['port'] ?? $relayPort) . "\n" ?>Usuario: <?= View::e($relayNewCredentials['username'] ?? '') . "\n" ?>Password: <?= View::e($relayNewCredentials['password'] ?? '') . "\n" ?>Cifrado: STARTTLS</pre>
+                        <button class="btn btn-outline-light btn-sm" type="button" onclick="copyDnsRecords(this)" data-records="<?= View::e("Host: ".($relayNewCredentials['host'] ?? $relayHost)."\nPuerto: ".($relayNewCredentials['port'] ?? $relayPort)."\nUsuario: ".($relayNewCredentials['username'] ?? '')."\nPassword: ".($relayNewCredentials['password'] ?? '')."\nCifrado: STARTTLS") ?>">
+                            <i class="bi bi-clipboard me-1"></i>Copiar credenciales
+                        </button>
+                    </div>
+                <?php endif; ?>
+
+                <div class="small text-muted mb-3">
+                    El relay escucha en <code><?= View::e($relayHost ?: '-') ?>:<?= View::e($relayPort) ?></code> por WireGuard. IP publica para SPF/PTR: <code><?= View::e($relayPublicIp ?: '-') ?></code>.
+                </div>
+
+                <?php if (!$isSlave): ?>
+                <form method="post" action="/mail/relay/domains/store" class="row g-2 mb-3">
+                    <?= View::csrf() ?>
+                    <div class="col">
+                        <input class="form-control form-control-sm" name="domain" placeholder="picalias.com" required>
+                    </div>
+                    <div class="col-auto">
+                        <button class="btn btn-info btn-sm"><i class="bi bi-plus-lg me-1"></i>Añadir dominio</button>
+                    </div>
+                </form>
+                <?php endif; ?>
+
+                <?php if (empty($relayDomains)): ?>
+                    <div class="text-muted small">Aun no hay dominios autorizados. Al añadir uno se genera DKIM y se muestran los TXT en Entregabilidad.</div>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Dominio</th>
+                                    <th>SPF</th>
+                                    <th>DKIM</th>
+                                    <th>DMARC</th>
+                                    <th>Estado</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($relayDomains as $rd): ?>
+                                <?php
+                                    $okBadge = static fn($ok) => $ok ? '<span class="badge bg-success">OK</span>' : '<span class="badge bg-warning text-dark">Pendiente</span>';
+                                    $status = (string)($rd['status'] ?? 'pending');
+                                ?>
+                                <tr>
+                                    <td class="fw-semibold"><?= View::e($rd['domain']) ?></td>
+                                    <td><?= $okBadge($relayTruthy($rd['spf_verified'] ?? false)) ?></td>
+                                    <td><?= $okBadge($relayTruthy($rd['dkim_verified'] ?? false)) ?></td>
+                                    <td><?= $okBadge($relayTruthy($rd['dmarc_verified'] ?? false)) ?></td>
+                                    <td><span class="badge bg-<?= $status === 'active' ? 'success' : 'secondary' ?>"><?= View::e($status) ?></span></td>
+                                    <td class="text-end">
+                                        <?php if (!$isSlave): ?>
+                                            <form method="post" action="/mail/relay/domains/<?= (int)$rd['id'] ?>/refresh" class="d-inline">
+                                                <?= View::csrf() ?>
+                                                <button class="btn btn-outline-info btn-sm" title="Revisar DNS"><i class="bi bi-arrow-clockwise"></i></button>
+                                            </form>
+                                            <form method="post" action="/mail/relay/domains/<?= (int)$rd['id'] ?>/delete" class="d-inline" onsubmit="return confirm('Eliminar dominio del relay?')">
+                                                <?= View::csrf() ?>
+                                                <button class="btn btn-outline-danger btn-sm" title="Eliminar"><i class="bi bi-trash"></i></button>
+                                            </form>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100" style="border-color:rgba(14,165,233,.28);">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-person-lock me-2"></i>Usuarios SMTP del relay</span>
+                <span class="text-muted small">SASL / sasldb2</span>
+            </div>
+            <div class="card-body">
+                <?php if (!$isSlave): ?>
+                <form method="post" action="/mail/relay/users/store" class="row g-2 mb-3">
+                    <?= View::csrf() ?>
+                    <div class="col-md-4"><input class="form-control form-control-sm" name="username" placeholder="mortadelo-relay" required></div>
+                    <div class="col-md-4"><input class="form-control form-control-sm" name="description" placeholder="Apps de mortadelo"></div>
+                    <div class="col-md-2"><input class="form-control form-control-sm" name="rate_limit_per_hour" type="number" min="1" value="200"></div>
+                    <div class="col-md-2"><button class="btn btn-info btn-sm w-100">Crear</button></div>
+                    <div class="col-12"><input class="form-control form-control-sm" name="allowed_from_domains" placeholder="Dominios permitidos opcional: picalias.com, factubase.com"></div>
+                </form>
+                <?php endif; ?>
+
+                <?php if (empty($relayUsers)): ?>
+                    <div class="text-muted small">Aun no hay usuarios SMTP. Cada servidor/app cliente debe tener su propio usuario para poder rotarlo sin afectar al resto.</div>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table table-sm table-hover align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Usuario</th>
+                                    <th>Descripcion</th>
+                                    <th>Limite</th>
+                                    <th>Estado</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($relayUsers as $ru): ?>
+                                <tr>
+                                    <td class="fw-semibold"><?= View::e($ru['username']) ?></td>
+                                    <td class="text-muted"><?= View::e($ru['description'] ?: '-') ?></td>
+                                    <td><?= (int)($ru['rate_limit_per_hour'] ?? 200) ?>/h</td>
+                                    <td><?= $relayTruthy($ru['enabled'] ?? true) ? '<span class="badge bg-success">Activo</span>' : '<span class="badge bg-secondary">Off</span>' ?></td>
+                                    <td class="text-end">
+                                        <?php if (!$isSlave): ?>
+                                            <form method="post" action="/mail/relay/users/<?= (int)$ru['id'] ?>/delete" onsubmit="return confirm('Eliminar usuario SMTP del relay?')" class="d-inline">
+                                                <?= View::csrf() ?>
+                                                <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
+                                            </form>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="card" style="border-color:rgba(14,165,233,.18);">
+            <div class="card-header"><i class="bi bi-activity me-2"></i>Ultimos envios del relay</div>
+            <div class="card-body p-0">
+                <?php if (empty($relayLogs)): ?>
+                    <div class="p-3 text-muted small">Sin entradas recientes con estado <code>sent</code>, <code>deferred</code> o <code>bounced</code> en mail.log.</div>
+                <?php else: ?>
+                    <table class="table table-sm mb-0">
+                        <thead><tr><th class="ps-3">Hora</th><th>Dominio</th><th>From</th><th>To</th><th>Estado</th></tr></thead>
+                        <tbody>
+                            <?php foreach ($relayLogs as $log): ?>
+                            <tr>
+                                <td class="ps-3 text-muted"><?= View::e($log['timestamp'] ?? '') ?></td>
+                                <td><?= View::e($log['domain'] ?: '-') ?></td>
+                                <td class="text-muted"><?= View::e($log['from'] ?: '-') ?></td>
+                                <td class="text-muted"><?= View::e($log['to'] ?: '-') ?></td>
+                                <td><span class="badge bg-<?= ($log['status'] ?? '') === 'sent' ? 'success' : (($log['status'] ?? '') === 'bounced' ? 'danger' : 'warning') ?>"><?= View::e($log['status'] ?? '-') ?></span></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- Stats cards -->
 <div class="row g-3 mb-4">
@@ -302,6 +478,8 @@
                         if ($ok === false) return '<span class="badge bg-warning text-dark">Revisar</span>';
                         return '<span class="badge bg-secondary">N/D</span>';
                     };
+                    $score = (int)($row['score'] ?? 0);
+                    $scoreTotal = (int)($row['score_total'] ?? 5);
                 ?>
                 <div class="p-3 rounded mb-3" style="background:#0f172a;border:1px solid #334155;">
                     <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
@@ -313,9 +491,14 @@
                                 IP: <code><?= View::e($row['ip'] ?? '-') ?></code>
                             </div>
                         </div>
-                        <button class="btn btn-outline-light btn-sm" type="button" onclick="copyDnsRecords(this)" data-records="<?= View::e($copyText) ?>">
-                            <i class="bi bi-clipboard me-1"></i>Copiar DNS
-                        </button>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="badge bg-<?= $score >= $scoreTotal ? 'success' : ($score >= 3 ? 'warning text-dark' : 'danger') ?>">
+                                Puntuacion <?= $score ?>/<?= $scoreTotal ?>
+                            </span>
+                            <button class="btn btn-outline-light btn-sm" type="button" onclick="copyDnsRecords(this)" data-records="<?= View::e($copyText) ?>">
+                                <i class="bi bi-clipboard me-1"></i>Copiar DNS
+                            </button>
+                        </div>
                     </div>
 
                     <div class="row g-2 mb-3">

@@ -70,21 +70,28 @@
                     <div class="col-12">
                         <label class="form-label fw-semibold">Modo de correo</label>
                         <div class="row g-2">
-                            <div class="col-md-4">
+                            <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(56,189,248,.35);background:rgba(56,189,248,.06);cursor:pointer;">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="satellite" onchange="toggleMailMode()">
                                     <strong>Solo Envio</strong>
                                     <small class="d-block text-muted mt-1">Para SaaS y notificaciones. Envia emails, no recibe correo y no abre puertos de entrada. Instala Postfix + OpenDKIM.</small>
                                 </label>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-3">
+                                <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(14,165,233,.35);background:rgba(14,165,233,.08);cursor:pointer;">
+                                    <input class="form-check-input me-2" type="radio" name="mail_mode" value="relay" onchange="toggleMailMode()">
+                                    <strong>Relay Privado</strong>
+                                    <small class="d-block text-muted mt-1">Tu propio Sweego por WireGuard. Otros servidores envian por VPN con usuario SMTP. DKIM independiente por dominio.</small>
+                                </label>
+                            </div>
+                            <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(34,197,94,.35);background:rgba(34,197,94,.06);cursor:pointer;">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="full" checked onchange="toggleMailMode()">
                                     <strong>Correo Completo</strong>
                                     <small class="d-block text-muted mt-1">Envia y recibe correo, con buzones IMAP. Requiere MX, PTR y puertos abiertos. Instala Postfix + Dovecot + OpenDKIM + Rspamd.</small>
                                 </label>
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(251,191,36,.35);background:rgba(251,191,36,.06);cursor:pointer;">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="external" onchange="toggleMailMode()">
                                     <strong>SMTP Externo</strong>
@@ -109,11 +116,46 @@
                         <input type="text" name="mail_hostname" class="form-control" placeholder="mail.example.com" required>
                         <small class="text-muted mode-help mode-full">FQDN para registros MX y certificado TLS (ej: mail.tudominio.com)</small>
                         <small class="text-muted mode-help mode-satellite" style="display:none;">Hostname de salida/EHLO. Debe tener A y PTR correctos (ej: mailout.tudominio.com)</small>
+                        <small class="text-muted mode-help mode-relay" style="display:none;">Hostname publico del relay. Debe coincidir con el PTR/rDNS de la IP publica.</small>
                     </div>
-                    <div class="col-md-6 mode-satellite-field" style="display:none;">
+                    <div class="col-md-6 mode-satellite-field mode-relay-field" style="display:none;">
                         <label class="form-label">Dominio remitente</label>
                         <input type="text" name="outbound_domain" class="form-control" placeholder="example.com">
                         <small class="text-muted">Dominio que firmara DKIM y tendra SPF/DMARC. Ej: tu SaaS envia desde noreply@example.com.</small>
+                    </div>
+                    <div class="col-12 mode-relay-field" style="display:none;">
+                        <div class="row g-3 p-3 rounded" style="border:1px solid rgba(14,165,233,.25);background:rgba(14,165,233,.06);">
+                            <div class="col-md-4">
+                                <label class="form-label">IP WireGuard del relay</label>
+                                <input type="text" name="wireguard_ip" class="form-control" placeholder="10.10.70.X">
+                                <small class="text-muted">Postfix 587 escuchara solo aqui, no en la IP publica.</small>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Red WireGuard autorizada</label>
+                                <input type="text" name="wireguard_cidr" class="form-control" value="10.10.70.0/24">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">IP publica del relay</label>
+                                <input type="text" name="relay_public_ip" class="form-control" placeholder="X.X.X.X">
+                                <small class="text-muted">Para SPF, PTR y blacklists.</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 mode-satellite-field" style="display:none;">
+                        <div class="row g-3 p-3 rounded" style="border:1px solid rgba(56,189,248,.22);background:rgba(56,189,248,.05);">
+                            <div class="col-12">
+                                <strong class="small">Failover opcional: relay privado → SMTP externo</strong>
+                                <div class="small text-muted">Si rellenas estos campos, Postfix local enviara por tu relay WireGuard y cambiara a Sweego/SMTP externo si el relay cae.</div>
+                            </div>
+                            <div class="col-md-3"><label class="form-label">Relay host/IP</label><input name="relay_host" class="form-control" placeholder="10.10.70.X"></div>
+                            <div class="col-md-2"><label class="form-label">Puerto relay</label><input name="relay_port" type="number" class="form-control" value="587"></div>
+                            <div class="col-md-3"><label class="form-label">Usuario relay</label><input name="relay_user" class="form-control"></div>
+                            <div class="col-md-4"><label class="form-label">Password relay</label><input name="relay_password" type="password" class="form-control"></div>
+                            <div class="col-md-3"><label class="form-label">Fallback SMTP</label><input name="fallback_smtp_host" class="form-control" placeholder="prod-mta-06.swg-srv.net"></div>
+                            <div class="col-md-2"><label class="form-label">Puerto fallback</label><input name="fallback_smtp_port" type="number" class="form-control" value="2525"></div>
+                            <div class="col-md-3"><label class="form-label">Usuario fallback</label><input name="fallback_smtp_user" class="form-control"></div>
+                            <div class="col-md-4"><label class="form-label">Password fallback</label><input name="fallback_smtp_password" type="password" class="form-control"></div>
+                        </div>
                     </div>
                     <div class="col-md-6 mode-full-field">
                         <label class="form-label">Certificado SSL</label>
@@ -247,6 +289,7 @@ function toggleMailMode() {
     const mode = currentMailMode();
     document.querySelectorAll('.mode-full-field').forEach(el => el.style.display = mode === 'full' ? '' : 'none');
     document.querySelectorAll('.mode-satellite-field').forEach(el => el.style.display = mode === 'satellite' ? '' : 'none');
+    document.querySelectorAll('.mode-relay-field').forEach(el => el.style.display = mode === 'relay' ? '' : 'none');
     document.querySelectorAll('.mode-external-field').forEach(el => el.style.display = mode === 'external' ? '' : 'none');
     document.querySelectorAll('.mode-help').forEach(el => el.style.display = 'none');
     document.querySelectorAll('.mode-' + mode).forEach(el => {
@@ -257,8 +300,10 @@ function toggleMailMode() {
     const outbound = document.querySelector('[name="outbound_domain"]');
     const smtpHost = document.querySelector('[name="smtp_host"]');
     const fromAddress = document.querySelector('[name="from_address"]');
+    const wgIp = document.querySelector('[name="wireguard_ip"]');
     if (hostname) hostname.required = mode !== 'external';
-    if (outbound) outbound.required = mode === 'satellite';
+    if (outbound) outbound.required = mode === 'satellite' || mode === 'relay';
+    if (wgIp) wgIp.required = mode === 'relay';
     if (smtpHost) smtpHost.required = mode === 'external';
     if (fromAddress) fromAddress.required = mode === 'external';
 
@@ -266,7 +311,9 @@ function toggleMailMode() {
     if (btn) {
         btn.innerHTML = mode === 'external'
             ? '<i class="bi bi-save me-1"></i> Guardar SMTP externo'
-            : '<i class="bi bi-play-fill me-1"></i> Iniciar instalacion';
+            : (mode === 'relay'
+                ? '<i class="bi bi-hdd-network me-1"></i> Instalar relay privado'
+                : '<i class="bi bi-play-fill me-1"></i> Iniciar instalacion');
     }
 }
 

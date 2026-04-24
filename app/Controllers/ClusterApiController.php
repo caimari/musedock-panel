@@ -358,6 +358,10 @@ class ClusterApiController
                 'mail_rotate_db_password'  => MailService::nodeRotateDbPassword($payload),
                 'mail_check_configured'   => MailService::nodeCheckConfigured(),
                 'mail_db_health'          => MailService::nodeMailDbHealth($payload),
+                'mail_relay_create_domain' => MailService::nodeRelayCreateDomain($payload),
+                'mail_relay_delete_domain' => MailService::nodeRelayDeleteDomain($payload),
+                'mail_relay_create_user'   => MailService::nodeRelayCreateUser($payload),
+                'mail_relay_delete_user'   => MailService::nodeRelayDeleteUser($payload),
 
                 // ── Standby management ─────────────────────
                 'set-standby' => $this->handleSetStandby($payload),

@@ -407,6 +407,11 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/mail/domains/{id}/aliases/{alias_id}/delete', 'MailController@aliasDelete');
 \MuseDockPanel\Router::get('/mail/nodes/health', 'MailController@nodeHealth');
 \MuseDockPanel\Router::post('/mail/test-send', 'MailController@testSend');
+\MuseDockPanel\Router::post('/mail/relay/domains/store', 'MailController@relayDomainStore');
+\MuseDockPanel\Router::post('/mail/relay/domains/{id}/refresh', 'MailController@relayDomainRefresh');
+\MuseDockPanel\Router::post('/mail/relay/domains/{id}/delete', 'MailController@relayDomainDelete');
+\MuseDockPanel\Router::post('/mail/relay/users/store', 'MailController@relayUserStore');
+\MuseDockPanel\Router::post('/mail/relay/users/{id}/delete', 'MailController@relayUserDelete');
 
 // Settings
 \MuseDockPanel\Router::get('/settings/services', 'SettingsController@services');

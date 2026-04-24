@@ -20,6 +20,37 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.83',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Mail setup incorpora `Relay Privado (WireGuard)`: un relay SMTP propio accesible solo por VPN',
+                            'Relay privado instala Postfix + OpenDKIM multi-dominio + SASL, sin Dovecot/Rspamd ni recepcion publica',
+                            '`/mail`: gestion de dominios autorizados del relay con DKIM independiente y usuarios SMTP SASL',
+                            'Satellite mode puede usar relay privado primario y SMTP externo/Sweego como fallback mediante healthcheck local',
+                        ],
+                        'en' => [
+                            'Mail setup adds `Private Relay (WireGuard)`: a self-hosted SMTP relay reachable only over VPN',
+                            'Private relay installs Postfix + multi-domain OpenDKIM + SASL, without Dovecot/Rspamd or public inbound mail',
+                            '`/mail`: manage relay authorized domains with independent DKIM and SMTP SASL users',
+                            'Satellite mode can use a private relay as primary and external SMTP/Sweego as fallback through local health checks',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Entregabilidad muestra puntuacion SPF/DKIM/DMARC/PTR/blacklists y soporta dominios del relay privado',
+                            'Setup full mail evita here-strings en el preseed de Postfix para funcionar en shells no interactivos',
+                        ],
+                        'en' => [
+                            'Deliverability now shows SPF/DKIM/DMARC/PTR/blacklist score and supports private relay domains',
+                            'Full mail setup avoids here-strings during Postfix preseed for non-interactive shells',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.82',
                 'date' => '2026-04-24',
                 'badge' => 'primary',

@@ -1448,9 +1448,12 @@ class ClusterController
 
         $nodeId       = (int)($_POST['node_id'] ?? 0);
         $mailHostname = trim($_POST['mail_hostname'] ?? '');
-        $mailMode     = in_array($_POST['mail_mode'] ?? '', ['satellite', 'full', 'external'], true)
+        $mailMode     = in_array($_POST['mail_mode'] ?? '', ['satellite', 'relay', 'full', 'external'], true)
                          ? $_POST['mail_mode'] : 'full';
         $outboundDomain = strtolower(trim($_POST['outbound_domain'] ?? ''));
+        $wireguardIp = trim($_POST['wireguard_ip'] ?? '');
+        $wireguardCidr = trim($_POST['wireguard_cidr'] ?? '10.10.70.0/24');
+        $relayPublicIp = trim($_POST['relay_public_ip'] ?? '');
         $sslMode      = in_array($_POST['ssl_mode'] ?? '', ['letsencrypt', 'selfsigned', 'manual'])
                          ? $_POST['ssl_mode'] : 'letsencrypt';
         $dbHost       = trim($_POST['db_host'] ?? 'localhost');
@@ -1466,6 +1469,10 @@ class ClusterController
 
         if (!$nodeId || ($mailMode !== 'external' && !$mailHostname)) {
             echo json_encode(['ok' => false, 'error' => 'Faltan campos obligatorios: node_id, mail_hostname']);
+            exit;
+        }
+        if ($mailMode === 'relay' && !filter_var($wireguardIp, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            echo json_encode(['ok' => false, 'error' => 'Relay Privado requiere IP WireGuard IPv4 valida.']);
             exit;
         }
 
@@ -1553,6 +1560,9 @@ class ClusterController
                 'mail_hostname' => $mailHostname,
                 'mail_mode'     => $mailMode,
                 'outbound_domain' => $outboundDomain,
+                'wireguard_ip'  => $wireguardIp,
+                'wireguard_cidr' => $wireguardCidr,
+                'relay_public_ip' => $relayPublicIp,
                 'ssl_mode'      => $sslMode,
                 'smtp'          => [
                     'host' => trim($_POST['smtp_host'] ?? ''),
@@ -1562,6 +1572,18 @@ class ClusterController
                     'encryption' => $_POST['smtp_encryption'] ?? 'tls',
                     'from_address' => trim($_POST['from_address'] ?? ''),
                     'from_name' => trim($_POST['from_name'] ?? 'MuseDock'),
+                ],
+                'relay' => [
+                    'host' => trim($_POST['relay_host'] ?? ''),
+                    'port' => (int)($_POST['relay_port'] ?? 587),
+                    'username' => trim($_POST['relay_user'] ?? ''),
+                    'password' => (string)($_POST['relay_password'] ?? ''),
+                ],
+                'fallback_smtp' => [
+                    'host' => trim($_POST['fallback_smtp_host'] ?? ''),
+                    'port' => (int)($_POST['fallback_smtp_port'] ?? 2525),
+                    'username' => trim($_POST['fallback_smtp_user'] ?? ''),
+                    'password' => (string)($_POST['fallback_smtp_password'] ?? ''),
                 ],
                 'setup_token'   => $setupToken,
             ],
@@ -1580,6 +1602,9 @@ class ClusterController
         Settings::set('mail_setup_task_id', $taskId);
         Settings::set('mail_setup_hostname', $mailHostname);
         Settings::set('mail_mode', $mailMode);
+        Settings::set('mail_relay_wireguard_ip', $wireguardIp);
+        Settings::set('mail_relay_wireguard_cidr', $wireguardCidr);
+        Settings::set('mail_relay_public_ip', $relayPublicIp);
         Settings::set('mail_setup_started_at', date('Y-m-d H:i:s'));
 
         // Update node services to include "mail" and save hostname
@@ -1668,9 +1693,12 @@ class ClusterController
         header('Content-Type: application/json');
 
         $mailHostname = trim($_POST['mail_hostname'] ?? '');
-        $mailMode     = in_array($_POST['mail_mode'] ?? '', ['satellite', 'full', 'external'], true)
+        $mailMode     = in_array($_POST['mail_mode'] ?? '', ['satellite', 'relay', 'full', 'external'], true)
                          ? $_POST['mail_mode'] : 'full';
         $outboundDomain = strtolower(trim($_POST['outbound_domain'] ?? ''));
+        $wireguardIp = trim($_POST['wireguard_ip'] ?? '');
+        $wireguardCidr = trim($_POST['wireguard_cidr'] ?? '10.10.70.0/24');
+        $relayPublicIp = trim($_POST['relay_public_ip'] ?? '');
         $sslMode      = in_array($_POST['ssl_mode'] ?? '', ['letsencrypt', 'selfsigned', 'manual'])
                          ? $_POST['ssl_mode'] : 'letsencrypt';
 
@@ -1685,6 +1713,10 @@ class ClusterController
 
         if ($mailMode !== 'external' && !$mailHostname) {
             echo json_encode(['ok' => false, 'error' => 'Falta el hostname de mail']);
+            exit;
+        }
+        if ($mailMode === 'relay' && !filter_var($wireguardIp, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            echo json_encode(['ok' => false, 'error' => 'Relay Privado requiere IP WireGuard IPv4 valida.']);
             exit;
         }
 
@@ -1741,6 +1773,9 @@ class ClusterController
             'mail_hostname' => $mailHostname,
             'mail_mode'     => $mailMode,
             'outbound_domain' => $outboundDomain,
+            'wireguard_ip'  => $wireguardIp,
+            'wireguard_cidr' => $wireguardCidr,
+            'relay_public_ip' => $relayPublicIp,
             'ssl_mode'      => $sslMode,
             'smtp'          => [
                 'host' => trim($_POST['smtp_host'] ?? ''),
@@ -1750,6 +1785,18 @@ class ClusterController
                 'encryption' => $_POST['smtp_encryption'] ?? 'tls',
                 'from_address' => trim($_POST['from_address'] ?? ''),
                 'from_name' => trim($_POST['from_name'] ?? 'MuseDock'),
+            ],
+            'relay' => [
+                'host' => trim($_POST['relay_host'] ?? ''),
+                'port' => (int)($_POST['relay_port'] ?? 587),
+                'username' => trim($_POST['relay_user'] ?? ''),
+                'password' => (string)($_POST['relay_password'] ?? ''),
+            ],
+            'fallback_smtp' => [
+                'host' => trim($_POST['fallback_smtp_host'] ?? ''),
+                'port' => (int)($_POST['fallback_smtp_port'] ?? 2525),
+                'username' => trim($_POST['fallback_smtp_user'] ?? ''),
+                'password' => (string)($_POST['fallback_smtp_password'] ?? ''),
             ],
             'setup_token'   => 'local',  // Not validated for local setup
             'local_mode'    => true,
@@ -1784,6 +1831,9 @@ class ClusterController
         Settings::set('mail_setup_task_id', $taskId);
         Settings::set('mail_setup_hostname', $mailHostname);
         Settings::set('mail_mode', $mailMode);
+        Settings::set('mail_relay_wireguard_ip', $wireguardIp);
+        Settings::set('mail_relay_wireguard_cidr', $wireguardCidr);
+        Settings::set('mail_relay_public_ip', $relayPublicIp);
         Settings::set('mail_setup_started_at', date('Y-m-d H:i:s'));
         Settings::set('mail_local_enabled', '1');
         Settings::set('mail_enabled', '1');

@@ -37,6 +37,11 @@ class MailController
         $smtpConfig = MailService::getSmtpConfig(false);
         $deliverabilityRows = MailService::getDeliverabilityRows();
         $internalSmtpToken = MailService::getInternalSmtpToken(true);
+        $relayDomains = MailService::getRelayDomains();
+        $relayUsers = MailService::getRelayUsers();
+        $relayLogs = ($mailMode === 'relay') ? MailService::getRelayLogEntries(30) : [];
+        $relayNewCredentials = $_SESSION['relay_new_credentials'] ?? null;
+        unset($_SESSION['relay_new_credentials']);
 
         // Slaves cannot setup mail — only show read-only data
         $showSetup = false;
@@ -68,6 +73,10 @@ class MailController
             'smtpConfig'          => $smtpConfig,
             'deliverabilityRows'  => $deliverabilityRows,
             'internalSmtpToken'   => $internalSmtpToken,
+            'relayDomains'        => $relayDomains,
+            'relayUsers'          => $relayUsers,
+            'relayLogs'           => $relayLogs,
+            'relayNewCredentials' => $relayNewCredentials,
         ]);
     }
 
@@ -456,6 +465,94 @@ class MailController
 
         echo json_encode(['ok' => true, 'nodes' => $results]);
         exit;
+    }
+
+    public function relayDomainStore(): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail');
+            return;
+        }
+
+        $result = MailService::createRelayDomain((string)($_POST['domain'] ?? ''));
+        if ($result['ok'] ?? false) {
+            Flash::set('success', 'Dominio relay creado. Copia el TXT DKIM/SPF/DMARC desde Entregabilidad.');
+        } else {
+            Flash::set('error', $result['error'] ?? 'No se pudo crear el dominio relay.');
+        }
+        Router::redirect('/mail');
+    }
+
+    public function relayDomainRefresh(array $params): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail');
+            return;
+        }
+
+        $result = MailService::refreshRelayDomain((int)$params['id']);
+        Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false) ? 'DNS del dominio relay actualizado.' : ($result['error'] ?? 'Error verificando DNS.'));
+        Router::redirect('/mail');
+    }
+
+    public function relayDomainDelete(array $params): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail');
+            return;
+        }
+
+        $result = MailService::deleteRelayDomain((int)$params['id']);
+        Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false) ? 'Dominio relay eliminado.' : ($result['error'] ?? 'Error eliminando dominio relay.'));
+        Router::redirect('/mail');
+    }
+
+    public function relayUserStore(): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail');
+            return;
+        }
+
+        $result = MailService::createRelayUser(
+            (string)($_POST['username'] ?? ''),
+            (string)($_POST['description'] ?? ''),
+            (int)($_POST['rate_limit_per_hour'] ?? 200),
+            (string)($_POST['allowed_from_domains'] ?? '')
+        );
+        if ($result['ok'] ?? false) {
+            $relayHost = \MuseDockPanel\Settings::get('mail_relay_wireguard_ip', '');
+            if ($relayHost === '') {
+                $relayHost = \MuseDockPanel\Settings::get('mail_relay_host', '');
+            }
+            $_SESSION['relay_new_credentials'] = [
+                'username' => $result['username'],
+                'password' => $result['password'],
+                'host' => $relayHost,
+                'port' => \MuseDockPanel\Settings::get('mail_relay_port', '587'),
+            ];
+            Flash::set('success', 'Usuario relay creado. Copia la contrasena ahora; no se volvera a mostrar.');
+        } else {
+            Flash::set('error', $result['error'] ?? 'No se pudo crear el usuario relay.');
+        }
+        Router::redirect('/mail');
+    }
+
+    public function relayUserDelete(array $params): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail');
+            return;
+        }
+
+        $result = MailService::deleteRelayUser((int)$params['id']);
+        Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false) ? 'Usuario relay eliminado.' : ($result['error'] ?? 'Error eliminando usuario relay.'));
+        Router::redirect('/mail');
     }
 
     public function testSend(): void

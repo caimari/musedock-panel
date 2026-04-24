@@ -440,7 +440,7 @@ class MailService
     public static function getCurrentMailMode(): string
     {
         $mode = Settings::get('mail_mode', 'full');
-        return in_array($mode, ['satellite', 'full', 'external'], true) ? $mode : 'full';
+        return in_array($mode, ['satellite', 'relay', 'full', 'external'], true) ? $mode : 'full';
     }
 
     public static function getSmtpConfig(bool $includeSecret = false): array
@@ -478,7 +478,7 @@ class MailService
             'password' => null,
             'from_address' => Settings::get('mail_from_address', '') ?: ('noreply@' . (Settings::get('mail_outbound_domain', '') ?: gethostname())),
             'from_name' => Settings::get('mail_from_name', 'MuseDock'),
-            'dkim_configured' => self::satelliteDkimConfigured(),
+            'dkim_configured' => $mode === 'relay' ? !empty(self::getRelayDomains()) : self::satelliteDkimConfigured(),
             'deliverability_score' => 'unknown',
         ];
     }
@@ -502,10 +502,26 @@ class MailService
     public static function getDeliverabilityRows(): array
     {
         $mode = self::getCurrentMailMode();
-        $ip = self::detectPublicIp();
+        $ip = $mode === 'relay' && Settings::get('mail_relay_public_ip', '') !== ''
+            ? Settings::get('mail_relay_public_ip', '')
+            : self::detectPublicIp();
         $rows = [];
 
         $domains = self::getDomains();
+        if ($mode === 'relay') {
+            foreach (self::getRelayDomains() as $relayDomain) {
+                $domains[] = [
+                    'id' => 0,
+                    'domain' => $relayDomain['domain'],
+                    'mail_node_id' => null,
+                    'dkim_selector' => $relayDomain['dkim_selector'] ?: 'default',
+                    'dkim_public_key' => $relayDomain['dkim_public_key'] ?? '',
+                    'spf_record' => '',
+                    'dmarc_policy' => 'quarantine',
+                    'mail_mode' => 'relay',
+                ];
+            }
+        }
         if (empty($domains) && in_array($mode, ['satellite', 'external'], true)) {
             $fallbackDomain = Settings::get('mail_outbound_domain', '');
             if ($fallbackDomain === '' && Settings::get('mail_from_address', '') && str_contains(Settings::get('mail_from_address', ''), '@')) {
@@ -527,16 +543,20 @@ class MailService
 
         foreach ($domains as $domain) {
             $domainName = (string)$domain['domain'];
+            $rowMode = $domain['mail_mode'] ?? $mode;
             $mailHostname = self::resolveMailHostnameForDomain($domain);
-            $recommended = self::recommendedDeliverabilityRecords($domain, $ip, $mailHostname, $mode);
+            $recommended = self::recommendedDeliverabilityRecords($domain, $ip, $mailHostname, $rowMode);
             $checks = self::runDeliverabilityChecks($domainName, $mailHostname, $ip, $recommended);
+            $score = self::deliverabilityScore($checks);
             $rows[] = [
                 'domain' => $domainName,
-                'mode' => $domain['mail_mode'] ?? $mode,
+                'mode' => $rowMode,
                 'mail_hostname' => $mailHostname,
                 'ip' => $ip,
                 'checks' => $checks,
                 'recommended' => $recommended,
+                'score' => $score['ok'],
+                'score_total' => $score['total'],
             ];
         }
 
@@ -545,6 +565,11 @@ class MailService
 
     private static function resolveMailHostnameForDomain(array $domain): string
     {
+        if (($domain['mail_mode'] ?? '') === 'relay') {
+            return Settings::get('mail_outbound_hostname', '')
+                ?: Settings::get('mail_relay_host', '')
+                ?: ('relay.' . (string)$domain['domain']);
+        }
         if (!empty($domain['mail_node_id'])) {
             $node = ClusterService::getNode((int)$domain['mail_node_id']);
             if (!empty($node['mail_hostname'])) return (string)$node['mail_hostname'];
@@ -675,6 +700,310 @@ class MailService
             }
         }
         return ['ok' => empty($listed), 'listed' => $listed, 'message' => empty($listed) ? 'Limpio' : ('Listado en: ' . implode(', ', $listed))];
+    }
+
+    private static function deliverabilityScore(array $checks): array
+    {
+        $keys = ['spf', 'dkim', 'dmarc', 'ptr', 'blacklists'];
+        $ok = 0;
+        foreach ($keys as $key) {
+            if (($checks[$key]['ok'] ?? false) === true) {
+                $ok++;
+            }
+        }
+        return ['ok' => $ok, 'total' => count($keys)];
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Private Relay Domains / Users ───────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    public static function getRelayDomains(): array
+    {
+        try {
+            return Database::fetchAll("SELECT * FROM mail_relay_domains ORDER BY domain");
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    public static function getRelayUsers(): array
+    {
+        try {
+            return Database::fetchAll("SELECT id, username, description, enabled, rate_limit_per_hour, allowed_from_domains, created_at, updated_at FROM mail_relay_users ORDER BY username");
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    public static function createRelayDomain(string $domain): array
+    {
+        $domain = self::normalizeDomain($domain);
+        if ($domain === '') return ['ok' => false, 'error' => 'Dominio no valido'];
+        if (Database::fetchOne("SELECT id FROM mail_relay_domains WHERE domain = :d", ['d' => $domain])) {
+            return ['ok' => false, 'error' => 'El dominio ya existe en el relay'];
+        }
+
+        $nodeResult = self::runRelayNodeAction('mail_relay_create_domain', ['domain' => $domain]);
+        if (!($nodeResult['ok'] ?? false)) return $nodeResult;
+
+        $data = $nodeResult['data'] ?? $nodeResult;
+        $publicKey = (string)($data['dkim_public_key'] ?? '');
+        $privateKey = (string)($data['dkim_private_key'] ?? '');
+        $selector = (string)($data['dkim_selector'] ?? 'default');
+        $checks = self::checkRelayDomainDns($domain, $publicKey);
+        $active = ($checks['spf']['ok'] ?? false) && ($checks['dkim']['ok'] ?? false) && ($checks['dmarc']['ok'] ?? false);
+
+        Database::insert('mail_relay_domains', [
+            'domain' => $domain,
+            'dkim_selector' => $selector,
+            'dkim_private_key' => ReplicationService::encryptPassword($privateKey),
+            'dkim_public_key' => $publicKey,
+            'spf_verified' => $checks['spf']['ok'] ?? false,
+            'dkim_verified' => $checks['dkim']['ok'] ?? false,
+            'dmarc_verified' => $checks['dmarc']['ok'] ?? false,
+            'status' => $active ? 'active' : 'pending',
+            'last_dns_check_at' => date('Y-m-d H:i:s'),
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        return ['ok' => true, 'domain' => $domain, 'dkim_public_key' => $publicKey, 'dkim_txt' => self::dkimTxtValue($publicKey)];
+    }
+
+    public static function refreshRelayDomain(int $id): array
+    {
+        $row = Database::fetchOne("SELECT * FROM mail_relay_domains WHERE id = :id", ['id' => $id]);
+        if (!$row) return ['ok' => false, 'error' => 'Dominio no encontrado'];
+
+        $checks = self::checkRelayDomainDns((string)$row['domain'], (string)($row['dkim_public_key'] ?? ''));
+        $active = ($checks['spf']['ok'] ?? false) && ($checks['dkim']['ok'] ?? false) && ($checks['dmarc']['ok'] ?? false);
+        Database::update('mail_relay_domains', [
+            'spf_verified' => $checks['spf']['ok'] ?? false,
+            'dkim_verified' => $checks['dkim']['ok'] ?? false,
+            'dmarc_verified' => $checks['dmarc']['ok'] ?? false,
+            'status' => $active ? 'active' : 'pending',
+            'last_dns_check_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ], 'id = :id', ['id' => $id]);
+
+        return ['ok' => true, 'checks' => $checks, 'status' => $active ? 'active' : 'pending'];
+    }
+
+    public static function deleteRelayDomain(int $id): array
+    {
+        $row = Database::fetchOne("SELECT * FROM mail_relay_domains WHERE id = :id", ['id' => $id]);
+        if (!$row) return ['ok' => false, 'error' => 'Dominio no encontrado'];
+
+        $nodeResult = self::runRelayNodeAction('mail_relay_delete_domain', ['domain' => $row['domain']]);
+        if (!($nodeResult['ok'] ?? false)) return $nodeResult;
+        Database::delete('mail_relay_domains', 'id = :id', ['id' => $id]);
+        return ['ok' => true];
+    }
+
+    public static function createRelayUser(string $username, string $description, int $limit, string $domains = ''): array
+    {
+        $username = strtolower(trim($username));
+        if (!preg_match('/^[a-z0-9][a-z0-9_.-]{2,120}$/', $username)) {
+            return ['ok' => false, 'error' => 'Usuario no valido. Usa letras, numeros, punto, guion o guion bajo.'];
+        }
+        if (Database::fetchOne("SELECT id FROM mail_relay_users WHERE username = :u", ['u' => $username])) {
+            return ['ok' => false, 'error' => 'El usuario ya existe'];
+        }
+
+        $password = bin2hex(random_bytes(24));
+        $nodeResult = self::runRelayNodeAction('mail_relay_create_user', ['username' => $username, 'password' => $password]);
+        if (!($nodeResult['ok'] ?? false)) return $nodeResult;
+
+        Database::insert('mail_relay_users', [
+            'username' => $username,
+            'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+            'description' => trim($description),
+            'enabled' => true,
+            'rate_limit_per_hour' => max(1, $limit),
+            'allowed_from_domains' => trim($domains),
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        return ['ok' => true, 'username' => $username, 'password' => $password];
+    }
+
+    public static function deleteRelayUser(int $id): array
+    {
+        $row = Database::fetchOne("SELECT * FROM mail_relay_users WHERE id = :id", ['id' => $id]);
+        if (!$row) return ['ok' => false, 'error' => 'Usuario no encontrado'];
+
+        $nodeResult = self::runRelayNodeAction('mail_relay_delete_user', ['username' => $row['username']]);
+        if (!($nodeResult['ok'] ?? false)) return $nodeResult;
+        Database::delete('mail_relay_users', 'id = :id', ['id' => $id]);
+        return ['ok' => true];
+    }
+
+    public static function getRelayLogEntries(int $limit = 30): array
+    {
+        $file = is_readable('/var/log/mail.log') ? '/var/log/mail.log' : (is_readable('/var/log/maillog') ? '/var/log/maillog' : '');
+        if ($file === '') return [];
+
+        $lines = explode("\n", trim((string)shell_exec('tail -n 400 ' . escapeshellarg($file) . ' 2>/dev/null')));
+        $entries = [];
+        foreach (array_reverse($lines) as $line) {
+            if (!str_contains($line, 'postfix/') || !preg_match('/status=(sent|deferred|bounced)/', $line, $sm)) continue;
+            preg_match('/from=<([^>]*)>/', $line, $fm);
+            preg_match('/to=<([^>]*)>/', $line, $tm);
+            $from = $fm[1] ?? '';
+            $domain = str_contains($from, '@') ? substr(strrchr($from, '@'), 1) : '';
+            $entries[] = [
+                'timestamp' => substr($line, 0, 15),
+                'domain' => $domain,
+                'from' => $from,
+                'to' => $tm[1] ?? '',
+                'status' => $sm[1],
+                'line' => $line,
+            ];
+            if (count($entries) >= $limit) break;
+        }
+        return $entries;
+    }
+
+    private static function runRelayNodeAction(string $action, array $payload): array
+    {
+        $target = Settings::get('mail_setup_node_id', 'local');
+        if ($target !== '' && $target !== 'local' && ctype_digit($target)) {
+            $node = ClusterService::getNode((int)$target);
+            if ($node) {
+                $token = ReplicationService::decryptPassword($node['auth_token'] ?? '');
+                $result = ClusterService::callNodeDirect($node['api_url'], $token, 'POST', 'api/cluster/action', [
+                    'action' => $action,
+                    'payload' => $payload,
+                ], 60, ['metadata' => $node['metadata'] ?? null]);
+                return $result['data'] ?? ['ok' => false, 'error' => $result['error'] ?? 'Remote action failed'];
+            }
+        }
+
+        return match ($action) {
+            'mail_relay_create_domain' => self::nodeRelayCreateDomain($payload),
+            'mail_relay_delete_domain' => self::nodeRelayDeleteDomain($payload),
+            'mail_relay_create_user' => self::nodeRelayCreateUser($payload),
+            'mail_relay_delete_user' => self::nodeRelayDeleteUser($payload),
+            default => ['ok' => false, 'error' => 'Unknown relay action'],
+        };
+    }
+
+    public static function nodeRelayCreateDomain(array $payload): array
+    {
+        $domain = self::normalizeDomain((string)($payload['domain'] ?? ''));
+        if ($domain === '') return ['ok' => false, 'error' => 'Dominio no valido'];
+
+        $selector = 'default';
+        $dkimDir = "/etc/opendkim/keys/{$domain}";
+        @mkdir($dkimDir, 0700, true);
+        if (!is_file("{$dkimDir}/{$selector}.private")) {
+            exec('opendkim-genkey -b 2048 -D ' . escapeshellarg($dkimDir) . ' -d ' . escapeshellarg($domain) . ' -s ' . escapeshellarg($selector) . ' 2>&1', $out, $code);
+            if ($code !== 0) return ['ok' => false, 'error' => implode("\n", $out)];
+        }
+        shell_exec('chown -R opendkim:opendkim ' . escapeshellarg($dkimDir) . ' 2>&1');
+
+        self::ensureRelayOpenDkimFiles(Settings::get('mail_relay_wireguard_cidr', '10.10.70.0/24'));
+        self::upsertLine('/etc/opendkim/signing.table', "*@{$domain} {$selector}._domainkey.{$domain}", "*@{$domain}");
+        self::upsertLine('/etc/opendkim/key.table', "{$selector}._domainkey.{$domain} {$domain}:{$selector}:{$dkimDir}/{$selector}.private", "{$selector}._domainkey.{$domain}");
+        shell_exec('systemctl reload opendkim 2>&1 || systemctl restart opendkim 2>&1');
+
+        $private = is_file("{$dkimDir}/{$selector}.private") ? (string)file_get_contents("{$dkimDir}/{$selector}.private") : '';
+        $public = self::parseDkimPublicKey(is_file("{$dkimDir}/{$selector}.txt") ? (string)file_get_contents("{$dkimDir}/{$selector}.txt") : '');
+        return ['ok' => true, 'domain' => $domain, 'dkim_selector' => $selector, 'dkim_private_key' => $private, 'dkim_public_key' => $public];
+    }
+
+    public static function nodeRelayDeleteDomain(array $payload): array
+    {
+        $domain = self::normalizeDomain((string)($payload['domain'] ?? ''));
+        if ($domain === '') return ['ok' => false, 'error' => 'Dominio no valido'];
+        self::removeMatchingLines('/etc/opendkim/signing.table', $domain);
+        self::removeMatchingLines('/etc/opendkim/key.table', $domain);
+        shell_exec('systemctl reload opendkim 2>&1 || true');
+        return ['ok' => true];
+    }
+
+    public static function nodeRelayCreateUser(array $payload): array
+    {
+        $username = strtolower(trim((string)($payload['username'] ?? '')));
+        $password = (string)($payload['password'] ?? '');
+        if (!preg_match('/^[a-z0-9][a-z0-9_.-]{2,120}$/', $username) || $password === '') {
+            return ['ok' => false, 'error' => 'Usuario/password no validos'];
+        }
+        $realm = Settings::get('mail_outbound_hostname', '') ?: Settings::get('mail_relay_host', '') ?: (gethostname() ?: 'relay');
+        @mkdir('/etc/postfix/sasl', 0755, true);
+        file_put_contents('/etc/postfix/sasl/smtpd.conf', "pwcheck_method: auxprop\nauxprop_plugin: sasldb\nmech_list: PLAIN LOGIN\n");
+        $cmd = 'printf %s\\\\n ' . escapeshellarg($password) . ' | saslpasswd2 -p -c -u ' . escapeshellarg($realm) . ' ' . escapeshellarg($username) . ' 2>&1';
+        exec($cmd, $out, $code);
+        if ($code !== 0) return ['ok' => false, 'error' => implode("\n", $out)];
+        shell_exec('chgrp postfix /etc/sasldb2 2>/dev/null || true; chmod 640 /etc/sasldb2 2>/dev/null || true');
+        shell_exec('systemctl reload postfix 2>&1 || true');
+        return ['ok' => true, 'username' => $username, 'realm' => $realm];
+    }
+
+    public static function nodeRelayDeleteUser(array $payload): array
+    {
+        $username = strtolower(trim((string)($payload['username'] ?? '')));
+        if ($username === '') return ['ok' => false, 'error' => 'Usuario no valido'];
+        $realm = Settings::get('mail_outbound_hostname', '') ?: Settings::get('mail_relay_host', '') ?: (gethostname() ?: 'relay');
+        exec('saslpasswd2 -d -u ' . escapeshellarg($realm) . ' ' . escapeshellarg($username) . ' 2>&1', $out, $code);
+        return ['ok' => $code === 0, 'error' => $code === 0 ? '' : implode("\n", $out)];
+    }
+
+    private static function checkRelayDomainDns(string $domain, string $publicKey = ''): array
+    {
+        $ip = Settings::get('mail_relay_public_ip', '') ?: self::detectPublicIp();
+        $host = Settings::get('mail_outbound_hostname', '') ?: Settings::get('mail_relay_host', '');
+        $checks = self::runDeliverabilityChecks($domain, $host, $ip, []);
+        if ($publicKey !== '') {
+            $dkimTxt = strtolower((string)($checks['dkim']['value'] ?? ''));
+            $checks['dkim']['ok'] = str_contains($dkimTxt, strtolower(substr($publicKey, 0, 32)));
+        }
+        return $checks;
+    }
+
+    private static function normalizeDomain(string $domain): string
+    {
+        $domain = strtolower(trim($domain));
+        return preg_match('/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/', $domain) ? $domain : '';
+    }
+
+    private static function parseDkimPublicKey(string $txt): string
+    {
+        $txt = trim($txt);
+        if (preg_match('/\\((.*)\\)/s', $txt, $m)) $txt = $m[1];
+        $txt = str_replace(['"', "\n", "\r", "\t", ' '], '', $txt);
+        return preg_match('/p=([^;]+)/', $txt, $m) ? $m[1] : '';
+    }
+
+    private static function dkimTxtValue(string $publicKey): string
+    {
+        return $publicKey !== '' ? "v=DKIM1; k=rsa; p={$publicKey}" : '';
+    }
+
+    private static function ensureRelayOpenDkimFiles(string $wgCidr): void
+    {
+        @mkdir('/etc/opendkim/keys', 0700, true);
+        foreach (['/etc/opendkim/key.table', '/etc/opendkim/signing.table'] as $file) {
+            if (!is_file($file)) @touch($file);
+        }
+        file_put_contents('/etc/opendkim/trusted.hosts', "127.0.0.1\n::1\nlocalhost\n{$wgCidr}\n");
+    }
+
+    private static function upsertLine(string $file, string $line, string $needle): void
+    {
+        $content = is_file($file) ? (string)file_get_contents($file) : '';
+        $lines = array_filter(explode("\n", $content), static fn($l) => trim($l) !== '' && !str_contains($l, $needle));
+        $lines[] = $line;
+        file_put_contents($file, implode("\n", $lines) . "\n");
+    }
+
+    private static function removeMatchingLines(string $file, string $needle): void
+    {
+        if (!is_file($file)) return;
+        $lines = array_filter(explode("\n", (string)file_get_contents($file)), static fn($l) => trim($l) !== '' && !str_contains($l, $needle));
+        file_put_contents($file, implode("\n", $lines) . "\n");
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -899,7 +1228,7 @@ class MailService
         $host = parse_url($node['api_url'] ?? '', PHP_URL_HOST) ?? '';
         if (!$host) return ['ok' => false, 'error' => 'Cannot determine node IP'];
 
-        $mailMode = in_array(($node['mail_mode'] ?? 'full'), ['satellite', 'full', 'external'], true)
+        $mailMode = in_array(($node['mail_mode'] ?? 'full'), ['satellite', 'relay', 'full', 'external'], true)
             ? (string)$node['mail_mode']
             : 'full';
         $services = [];
@@ -941,9 +1270,11 @@ class MailService
         ];
 
         if ($mailMode !== 'full') {
-            $dbHealth['message'] = $mailMode === 'satellite'
-                ? 'Modo Solo Envio: no usa PostgreSQL/Dovecot para buzones y no abre puertos de entrada.'
-                : 'Modo SMTP Externo: no hay servidor de correo local que comprobar.';
+            $dbHealth['message'] = match ($mailMode) {
+                'satellite' => 'Modo Solo Envio: no usa PostgreSQL/Dovecot para buzones y no abre puertos de entrada.',
+                'relay' => 'Modo Relay Privado: no usa DB de buzones; debe escuchar 587 solo en WireGuard.',
+                default => 'Modo SMTP Externo: no hay servidor de correo local que comprobar.',
+            };
             $dbHealth = array_merge($dbHealth, self::checkPtr([
                 'node_host' => $host,
                 'expected_hostname' => (string)($node['mail_hostname'] ?? ''),
@@ -997,14 +1328,16 @@ class MailService
     private static function evaluateMailDbHealth(array $health): array
     {
         $mode = (string)($health['mode'] ?? 'full');
-        if (in_array($mode, ['satellite', 'external'], true)) {
+        if (in_array($mode, ['satellite', 'relay', 'external'], true)) {
             return [
                 'status' => 'active',
                 'pause_queue' => false,
                 'reason' => '',
-                'message' => $mode === 'satellite'
-                    ? 'Modo Solo Envio activo: no requiere DB de buzones ni puertos entrantes.'
-                    : 'Modo SMTP Externo activo: no hay servicios mail locales que pausar.',
+                'message' => match ($mode) {
+                    'satellite' => 'Modo Solo Envio activo: no requiere DB de buzones ni puertos entrantes.',
+                    'relay' => 'Modo Relay Privado activo: no requiere DB de buzones; se controla por WireGuard/SASL.',
+                    default => 'Modo SMTP Externo activo: no hay servicios mail locales que pausar.',
+                },
             ];
         }
 
@@ -1330,13 +1663,16 @@ class MailService
     {
         $dbPass   = $payload['db_pass'] ?? '';
         $hostname = $payload['mail_hostname'] ?? '';
-        $mailMode = in_array(($payload['mail_mode'] ?? 'full'), ['satellite', 'full', 'external'], true) ? $payload['mail_mode'] : 'full';
+        $mailMode = in_array(($payload['mail_mode'] ?? 'full'), ['satellite', 'relay', 'full', 'external'], true) ? $payload['mail_mode'] : 'full';
 
         if ($mailMode === 'full' && (!$dbPass || !$hostname)) {
             return ['ok' => false, 'error' => 'Missing db_pass or mail_hostname'];
         }
         if ($mailMode === 'satellite' && !$hostname) {
             return ['ok' => false, 'error' => 'Missing mail_hostname'];
+        }
+        if ($mailMode === 'relay' && (!$hostname || empty($payload['wireguard_ip']))) {
+            return ['ok' => false, 'error' => 'Missing mail_hostname or wireguard_ip'];
         }
 
         // Verify setup token (one-time, generated by master)
@@ -1647,6 +1983,23 @@ class MailService
                     'setting' => $configured,
                     'postfix' => $hasPostfix,
                     'opendkim' => $hasDkim,
+                ],
+            ];
+        }
+
+        if ($mode === 'relay') {
+            $hasPostfix = is_file('/etc/postfix/main.cf');
+            $hasDkim = is_file('/etc/opendkim/key.table') && is_file('/etc/opendkim/signing.table');
+            $hasSasl = is_file('/etc/sasldb2') || trim((string)shell_exec('command -v saslpasswd2 2>/dev/null')) !== '';
+            return [
+                'ok' => true,
+                'configured' => $configured && $hasPostfix && $hasDkim && $hasSasl,
+                'details' => [
+                    'mode' => 'relay',
+                    'setting' => $configured,
+                    'postfix' => $hasPostfix,
+                    'opendkim_multi_domain' => $hasDkim,
+                    'sasl' => $hasSasl,
                 ],
             ];
         }
