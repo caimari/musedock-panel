@@ -648,8 +648,8 @@ class MailService
     // ═══════════════════════════════════════════════════════════
 
     /**
-     * Check mail services on a node (ports 25, 587, 993).
-     * Returns array of service statuses.
+     * Check mail services and the local PostgreSQL replica used by Postfix/Dovecot.
+     * This runs from the master and asks the remote node to inspect its own DB.
      */
     public static function checkMailNodeHealth(int $nodeId): array
     {
@@ -681,7 +681,332 @@ class MailService
         $services['panel_api'] = ['ok' => $apiResult['ok'], 'error' => $apiResult['error'] ?? ''];
         if (!$apiResult['ok']) $allOk = false;
 
-        return ['ok' => $allOk, 'services' => $services, 'node' => $node['name']];
+        $dbHealth = [
+            'pg_alive' => false,
+            'pg_read_ok' => false,
+            'is_replica' => false,
+            'replication_lag_seconds' => null,
+            'maildir_ok' => false,
+            'mail_domains_count' => 0,
+            'ptr_ok' => null,
+            'ptr_value' => '',
+            'expected_hostname' => (string)($node['mail_hostname'] ?? ''),
+            'timestamp' => gmdate('c'),
+        ];
+
+        if ($apiResult['ok']) {
+            $dbResult = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', [
+                'action' => 'mail_db_health',
+                'payload' => [
+                    'node_host' => $host,
+                    'expected_hostname' => (string)($node['mail_hostname'] ?? ''),
+                ],
+            ]);
+            if ($dbResult['ok'] && isset($dbResult['data']['mail_db_health']) && is_array($dbResult['data']['mail_db_health'])) {
+                $dbHealth = array_merge($dbHealth, $dbResult['data']['mail_db_health']);
+            } else {
+                $dbHealth['error'] = $dbResult['error'] ?? 'mail_db_health failed';
+            }
+        } else {
+            $dbHealth['error'] = 'panel API unreachable';
+        }
+
+        $decision = self::evaluateMailDbHealth($dbHealth);
+        $dbHealth['status'] = $decision['status'];
+        $dbHealth['message'] = $decision['message'];
+        $dbHealth['pause_queue'] = $decision['pause_queue'];
+
+        self::recordMailNodeHealth($nodeId, $dbHealth);
+
+        if ($decision['pause_queue']) {
+            ClusterService::pauseMailQueueForNode($nodeId, $decision['reason']);
+        } elseif ($decision['status'] === 'active') {
+            ClusterService::resumeMailQueueForNode($nodeId);
+        }
+
+        $metadata = json_decode((string)($node['metadata'] ?? '{}'), true);
+        $metadata = is_array($metadata) ? $metadata : [];
+        $metadata['mail_db_health'] = $dbHealth;
+        ClusterService::updateNode($nodeId, [
+            'status' => $decision['status'] === 'active' && $allOk ? 'online' : 'error',
+            'metadata' => json_encode($metadata, JSON_UNESCAPED_SLASHES),
+        ]);
+
+        return [
+            'ok' => $allOk && $decision['status'] === 'active',
+            'services' => $services,
+            'db_health' => $dbHealth,
+            'node' => $node['name'],
+        ];
+    }
+
+    private static function evaluateMailDbHealth(array $health): array
+    {
+        $warnLag = (float)Settings::get('mail_db_lag_warn_seconds', '30');
+        $pauseLag = (float)Settings::get('mail_db_lag_pause_seconds', '120');
+        $lag = isset($health['replication_lag_seconds']) && $health['replication_lag_seconds'] !== null
+            ? (float)$health['replication_lag_seconds']
+            : 0.0;
+
+        if (empty($health['pg_alive'])) {
+            return [
+                'status' => 'down',
+                'pause_queue' => true,
+                'reason' => 'node_mail_db_down',
+                'message' => 'PostgreSQL local no responde en el nodo de mail.',
+            ];
+        }
+
+        if (empty($health['pg_read_ok'])) {
+            return [
+                'status' => 'degraded',
+                'pause_queue' => true,
+                'reason' => 'node_mail_db_read_failed',
+                'message' => 'PostgreSQL responde pero el usuario musedock_mail no puede leer las tablas de mail.',
+            ];
+        }
+
+        if (!empty($health['is_replica']) && $lag > $pauseLag) {
+            return [
+                'status' => 'degraded',
+                'pause_queue' => true,
+                'reason' => 'node_mail_db_lag_high',
+                'message' => "Replica PostgreSQL con {$lag}s de retraso; cola mail pausada.",
+            ];
+        }
+
+        if (!empty($health['is_replica']) && $lag > $warnLag) {
+            return [
+                'status' => 'degraded',
+                'pause_queue' => false,
+                'reason' => 'node_mail_db_lag_warning',
+                'message' => "Replica PostgreSQL con {$lag}s de retraso.",
+            ];
+        }
+
+        if (empty($health['maildir_ok'])) {
+            return [
+                'status' => 'degraded',
+                'pause_queue' => false,
+                'reason' => 'node_maildir_permissions',
+                'message' => '/var/mail/vhosts no existe o no pertenece a vmail:vmail.',
+            ];
+        }
+
+        return [
+            'status' => 'active',
+            'pause_queue' => false,
+            'reason' => '',
+            'message' => 'Mail DB healthy.',
+        ];
+    }
+
+    private static function recordMailNodeHealth(int $nodeId, array $health): void
+    {
+        try {
+            Database::insert('mail_node_health', [
+                'node_id' => $nodeId,
+                'pg_alive' => !empty($health['pg_alive']),
+                'pg_read_ok' => !empty($health['pg_read_ok']),
+                'is_replica' => !empty($health['is_replica']),
+                'replication_lag_seconds' => $health['replication_lag_seconds'] ?? null,
+                'maildir_ok' => !empty($health['maildir_ok']),
+                'mail_domains_count' => (int)($health['mail_domains_count'] ?? 0),
+                'ptr_ok' => array_key_exists('ptr_ok', $health) && $health['ptr_ok'] !== null ? (bool)$health['ptr_ok'] : null,
+                'ptr_value' => (string)($health['ptr_value'] ?? ''),
+                'expected_hostname' => (string)($health['expected_hostname'] ?? ''),
+                'status' => (string)($health['status'] ?? 'unknown'),
+                'pause_queue' => !empty($health['pause_queue']),
+                'message' => (string)($health['message'] ?? ''),
+                'checked_at' => date('Y-m-d H:i:s'),
+                'created_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            // Keep the table bounded without expensive window deletes.
+            Database::query(
+                "DELETE FROM mail_node_health
+                 WHERE node_id = :nid
+                   AND id NOT IN (
+                       SELECT id FROM mail_node_health
+                       WHERE node_id = :nid2
+                       ORDER BY checked_at DESC
+                       LIMIT 1000
+                   )",
+                ['nid' => $nodeId, 'nid2' => $nodeId]
+            );
+        } catch (\Throwable) {
+            // Health persistence must never break the worker.
+        }
+    }
+
+    public static function getLatestMailHealthByNode(): array
+    {
+        try {
+            $rows = Database::fetchAll(
+                "SELECT DISTINCT ON (node_id) *
+                 FROM mail_node_health
+                 ORDER BY node_id, checked_at DESC"
+            );
+        } catch (\Throwable) {
+            return [];
+        }
+
+        $byNode = [];
+        foreach ($rows as $row) {
+            $byNode[(int)$row['node_id']] = $row;
+        }
+        return $byNode;
+    }
+
+    public static function getMailHealthAlerts(): array
+    {
+        $latest = self::getLatestMailHealthByNode();
+        $alerts = [];
+        foreach ($latest as $nodeId => $health) {
+            $status = (string)($health['status'] ?? '');
+            if (in_array($status, ['down', 'degraded'], true)) {
+                $alerts[$nodeId] = $health;
+            }
+        }
+        return $alerts;
+    }
+
+    /**
+     * Runs on the mail node through ClusterApiController.
+     */
+    public static function nodeMailDbHealth(array $payload = []): array
+    {
+        $db = self::detectMailDbConfig();
+        $result = [
+            'pg_alive' => false,
+            'pg_read_ok' => false,
+            'mail_domains_count' => 0,
+            'is_replica' => false,
+            'replication_lag_seconds' => null,
+            'maildir_ok' => self::maildirIsHealthy(),
+            'ptr_ok' => null,
+            'ptr_value' => '',
+            'expected_hostname' => trim((string)($payload['expected_hostname'] ?? '')),
+            'timestamp' => gmdate('c'),
+        ];
+
+        if (empty($db['password'])) {
+            $result['error'] = 'mail DB password not found in Postfix/Dovecot config';
+            return ['ok' => true, 'mail_db_health' => array_merge($result, self::checkPtr($payload))];
+        }
+
+        try {
+            $dsn = sprintf('pgsql:host=%s;port=%s;dbname=%s', $db['host'], $db['port'], $db['dbname']);
+            $pdo = new \PDO($dsn, $db['user'], $db['password'], [
+                \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+                \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+                \PDO::ATTR_TIMEOUT => 5,
+            ]);
+            $result['pg_alive'] = true;
+
+            $count = $pdo->query("SELECT COUNT(*) AS total FROM mail_domains WHERE status = 'active'")->fetch();
+            $result['pg_read_ok'] = true;
+            $result['mail_domains_count'] = (int)($count['total'] ?? 0);
+
+            $replica = $pdo->query('SELECT pg_is_in_recovery() AS is_replica')->fetch();
+            $isReplica = filter_var($replica['is_replica'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            $result['is_replica'] = $isReplica;
+
+            if ($isReplica) {
+                $lag = $pdo->query("
+                    SELECT CASE
+                      WHEN pg_last_wal_receive_lsn() = pg_last_wal_replay_lsn() THEN 0
+                      ELSE COALESCE(EXTRACT(EPOCH FROM now() - pg_last_xact_replay_timestamp()), 0)
+                    END AS replication_lag_seconds
+                ")->fetch();
+                $result['replication_lag_seconds'] = round((float)($lag['replication_lag_seconds'] ?? 0), 2);
+            } else {
+                $result['replication_lag_seconds'] = 0.0;
+            }
+        } catch (\Throwable $e) {
+            $result['error'] = $e->getMessage();
+        }
+
+        $ptr = self::checkPtr($payload);
+        return ['ok' => true, 'mail_db_health' => array_merge($result, $ptr)];
+    }
+
+    private static function detectMailDbConfig(): array
+    {
+        $cfg = [
+            'host' => 'localhost',
+            'port' => '5433',
+            'dbname' => 'musedock_panel',
+            'user' => 'musedock_mail',
+            'password' => '',
+        ];
+
+        $postfix = '/etc/postfix/pgsql-virtual-domains.cf';
+        if (is_file($postfix)) {
+            foreach (file($postfix, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+                if (!str_contains($line, '=')) {
+                    continue;
+                }
+                [$key, $value] = array_map('trim', explode('=', $line, 2));
+                if ($key === 'hosts') $cfg['host'] = preg_split('/\s+/', $value)[0] ?? $cfg['host'];
+                if ($key === 'port') $cfg['port'] = $value;
+                if ($key === 'dbname') $cfg['dbname'] = $value;
+                if ($key === 'user') $cfg['user'] = $value;
+                if ($key === 'password') $cfg['password'] = $value;
+            }
+        }
+
+        $dovecot = '/etc/dovecot/dovecot-sql.conf';
+        if ($cfg['password'] === '' && is_file($dovecot)) {
+            $content = (string)file_get_contents($dovecot);
+            if (preg_match('/connect\s*=\s*(.+)$/m', $content, $m)) {
+                preg_match_all('/(host|port|dbname|user|password)=([^\\s]+)/', $m[1], $pairs, PREG_SET_ORDER);
+                foreach ($pairs as $pair) {
+                    $cfg[$pair[1]] = $pair[2];
+                }
+            }
+        }
+
+        return $cfg;
+    }
+
+    private static function maildirIsHealthy(): bool
+    {
+        $dir = '/var/mail/vhosts';
+        if (!is_dir($dir)) {
+            return false;
+        }
+        return (int)@fileowner($dir) === 5000 && (int)@filegroup($dir) === 5000;
+    }
+
+    private static function checkPtr(array $payload): array
+    {
+        $expected = rtrim(strtolower(trim((string)($payload['expected_hostname'] ?? ''))), '.');
+        $host = trim((string)($payload['node_host'] ?? ''));
+        $ip = '';
+
+        if (filter_var($host, FILTER_VALIDATE_IP)) {
+            $ip = $host;
+        } elseif ($host !== '') {
+            $records = @dns_get_record($host, DNS_A);
+            if (is_array($records) && !empty($records[0]['ip'])) {
+                $ip = (string)$records[0]['ip'];
+            }
+        }
+
+        if ($ip === '') {
+            return ['ptr_ok' => null, 'ptr_value' => '', 'ptr_ip' => ''];
+        }
+
+        $ptr = @gethostbyaddr($ip);
+        $ptrClean = $ptr && $ptr !== $ip ? rtrim(strtolower($ptr), '.') : '';
+        $ptrOk = $ptrClean !== '' && ($expected === '' || $ptrClean === $expected);
+
+        return [
+            'ptr_ok' => $ptrOk,
+            'ptr_value' => $ptrClean,
+            'ptr_ip' => $ip,
+        ];
     }
 
     /**

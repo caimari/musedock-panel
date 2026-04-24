@@ -20,6 +20,41 @@
 </div>
 <?php endif; ?>
 
+<?php if (!empty($mailHealthAlerts) && !$isSlave): ?>
+    <?php foreach ($mailHealthAlerts as $nodeId => $health): ?>
+        <?php
+            $nodeName = '#'.$nodeId;
+            foreach (($mailNodes ?? []) as $mn) {
+                if ((int)$mn['id'] === (int)$nodeId) {
+                    $nodeName = $mn['name'];
+                    break;
+                }
+            }
+            $status = (string)($health['status'] ?? 'degraded');
+            $isDown = $status === 'down';
+            $lag = $health['replication_lag_seconds'] !== null ? (float)$health['replication_lag_seconds'] : null;
+        ?>
+        <div class="alert <?= $isDown ? 'alert-danger' : 'alert-warning' ?> mb-3">
+            <div class="fw-semibold">
+                <i class="bi bi-<?= $isDown ? 'x-octagon' : 'exclamation-triangle' ?> me-1"></i>
+                Nodo de correo <?= View::e($nodeName) ?> <?= $isDown ? 'caido' : 'degradado' ?>
+            </div>
+            <div class="small mt-1">
+                <?= View::e($health['message'] ?? 'Healthcheck de mail no saludable.') ?>
+                <?php if ($lag !== null && $lag > 0): ?>
+                    Lag replica: <strong><?= number_format($lag, 1) ?>s</strong>.
+                <?php endif; ?>
+                <?php if (array_key_exists('ptr_ok', $health) && $health['ptr_ok'] !== null && !$health['ptr_ok']): ?>
+                    PTR/rDNS no coincide<?= !empty($health['ptr_value']) ? ': '.View::e($health['ptr_value']) : '' ?>.
+                <?php endif; ?>
+            </div>
+            <div class="small text-muted mt-1">
+                Las acciones `mail_*` se pausan automaticamente si PostgreSQL no responde, si `musedock_mail` no puede leer o si el lag supera el umbral critico.
+            </div>
+        </div>
+    <?php endforeach; ?>
+<?php endif; ?>
+
 <!-- Stats cards -->
 <div class="row g-3 mb-4">
     <div class="col-md-3">
@@ -114,18 +149,46 @@
                 <tr>
                     <th class="ps-3">Node</th>
                     <th>Status</th>
+                    <th>DB Mail</th>
+                    <th>Replica Lag</th>
+                    <th>PTR</th>
                     <th>Last Seen</th>
                     <th>Domains</th>
                 </tr>
             </thead>
             <tbody>
                 <?php foreach ($mailNodes as $node): ?>
+                <?php
+                    $mh = $mailHealthByNode[(int)$node['id']] ?? null;
+                    $mhStatus = $mh['status'] ?? 'unknown';
+                    $mhClass = $mhStatus === 'active' ? 'success' : ($mhStatus === 'down' ? 'danger' : 'warning');
+                    $lag = ($mh && $mh['replication_lag_seconds'] !== null) ? (float)$mh['replication_lag_seconds'] : null;
+                    $ptrOk = $mh['ptr_ok'] ?? null;
+                ?>
                 <tr>
                     <td class="ps-3 fw-semibold"><?= View::e($node['name']) ?></td>
                     <td>
                         <span class="badge badge-<?= $node['status'] === 'online' ? 'active' : 'suspended' ?>">
                             <?= $node['status'] ?>
                         </span>
+                    </td>
+                    <td>
+                        <?php if ($mh): ?>
+                            <span class="badge bg-<?= $mhClass ?>"><?= View::e($mhStatus) ?></span>
+                            <small class="d-block text-muted"><?= View::e($mh['checked_at'] ?? '') ?></small>
+                        <?php else: ?>
+                            <span class="badge bg-secondary">pending</span>
+                        <?php endif; ?>
+                    </td>
+                    <td><?= $lag !== null ? number_format($lag, 1).'s' : '-' ?></td>
+                    <td>
+                        <?php if ($ptrOk === null): ?>
+                            <span class="text-muted">-</span>
+                        <?php elseif ($ptrOk): ?>
+                            <span class="badge bg-success">OK</span>
+                        <?php else: ?>
+                            <span class="badge bg-warning text-dark" title="<?= View::e($mh['ptr_value'] ?? '') ?>">Revisar</span>
+                        <?php endif; ?>
                     </td>
                     <td class="text-muted"><?= $node['last_seen_at'] ?? 'Never' ?></td>
                     <td>

@@ -357,6 +357,7 @@ class ClusterApiController
                 'mail_generate_setup_token' => MailService::nodeGenerateSetupToken($payload),
                 'mail_rotate_db_password'  => MailService::nodeRotateDbPassword($payload),
                 'mail_check_configured'   => MailService::nodeCheckConfigured(),
+                'mail_db_health'          => MailService::nodeMailDbHealth($payload),
 
                 // ── Standby management ─────────────────────
                 'set-standby' => $this->handleSetStandby($payload),

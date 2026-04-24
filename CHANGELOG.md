@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.81] — 2026-04-24
+
+### New
+- Mail node DB healthcheck: el worker comprueba PostgreSQL local, lectura real con `musedock_mail`, lag de replica, Maildir y PTR/rDNS en nodos con servicio `mail`.
+- `/mail`: banners de alerta y columnas de salud DB/lag/PTR para detectar nodos de correo degradados aunque los puertos SMTP/IMAP sigan abiertos.
+- Cola cluster: las acciones `mail_*` se pausan automaticamente cuando la DB local del nodo mail esta caida o el lag supera el umbral critico, y se reanudan al recuperar.
+
+### Improved
+- Acciones `mail_*` en `cluster_queue`: idempotency key para evitar duplicados pendientes por accion/nodo/dominio o mailbox.
+- Documentado el procedimiento manual de failover PostgreSQL en `docs/FAILOVER.md`.
+
 ## [1.0.80] — 2026-04-24
 
 ### Improved

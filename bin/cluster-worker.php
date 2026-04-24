@@ -184,28 +184,49 @@ if (Settings::get('mail_enabled', '0') === '1') {
                 foreach ($health['services'] ?? [] as $svc => $info) {
                     if (!$info['ok']) $failedSvcs[] = "{$svc} (port {$info['port']}): {$info['error']}";
                 }
-                $failMsg = implode(', ', $failedSvcs);
+                $dbHealth = $health['db_health'] ?? [];
+                if (!empty($dbHealth['message'])) {
+                    $failedSvcs[] = 'db: ' . $dbHealth['message'];
+                }
+                $failMsg = implode(', ', $failedSvcs) ?: 'unknown mail health failure';
                 logMsg("  Mail node #{$mn['id']} ({$mn['name']}): DEGRADED - {$failMsg}");
 
-                // Update node status to degraded
-                ClusterService::updateNode((int)$mn['id'], ['status' => 'error', 'metadata' => json_encode(
-                    array_merge(json_decode($mn['metadata'] ?? '{}', true) ?: [], ['mail_health' => $health['services']])
-                )]);
-
-                // Send alert
-                try {
-                    \MuseDockPanel\Services\NotificationService::send(
-                        "Mail Node Degraded: {$mn['name']}",
-                        "Mail node {$mn['name']} has degraded services:\n{$failMsg}\n\nCheck mail services on this node.",
-                        'warning'
-                    );
-                } catch (\Throwable $ne) {
-                    logMsg("  Failed to send mail node alert: " . $ne->getMessage());
+                $alertKey = 'mail_node_degraded_alert_' . (int)$mn['id'];
+                $lastAlert = (int)Settings::get($alertKey, '0');
+                if ($lastAlert < time() - 3600) {
+                    try {
+                        \MuseDockPanel\Services\NotificationService::send(
+                            "Mail Node Degraded: {$mn['name']}",
+                            "Mail node {$mn['name']} has degraded services:\n{$failMsg}\n\nCheck mail services and local PostgreSQL replica on this node.",
+                            'warning'
+                        );
+                        Settings::set($alertKey, (string)time());
+                    } catch (\Throwable $ne) {
+                        logMsg("  Failed to send mail node alert: " . $ne->getMessage());
+                    }
                 }
             }
         }
         if (empty($mailNodes)) {
             logMsg("  No mail nodes configured.");
+        }
+
+        $oldPaused = ClusterService::getOldPausedMailQueueItems(24);
+        if (!empty($oldPaused)) {
+            $lastAlert = (int)Settings::get('mail_queue_paused_alert_last', '0');
+            if ($lastAlert < time() - 21600) {
+                $first = $oldPaused[0];
+                $count = count($oldPaused);
+                \MuseDockPanel\Services\NotificationService::send(
+                    "Cola mail pausada >24h",
+                    "{$count} accion(es) de mail llevan mas de 24h pausadas. Primer nodo: " .
+                    ($first['node_name'] ?? ('#' . ($first['node_id'] ?? '?'))) .
+                    ". Motivo: " . ($first['paused_reason'] ?? '?'),
+                    'warning'
+                );
+                Settings::set('mail_queue_paused_alert_last', (string)time());
+            }
+            logMsg("  Mail queue: " . count($oldPaused) . " item(s) paused for more than 24h.");
         }
     } catch (\Throwable $e) {
         logMsg("ERROR checking mail nodes: " . $e->getMessage());

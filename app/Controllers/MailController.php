@@ -31,6 +31,8 @@ class MailController
         $stats = MailService::getStats();
         $domains = MailService::getDomains();
         $mailNodes = MailService::getMailNodes();
+        $mailHealthByNode = MailService::getLatestMailHealthByNode();
+        $mailHealthAlerts = MailService::getMailHealthAlerts();
 
         // Slaves cannot setup mail — only show read-only data
         $showSetup = false;
@@ -51,6 +53,8 @@ class MailController
             'stats'               => $stats,
             'domains'             => $domains,
             'mailNodes'           => $mailNodes,
+            'mailHealthByNode'    => $mailHealthByNode,
+            'mailHealthAlerts'    => $mailHealthAlerts,
             'showSetup'           => $showSetup,
             'clusterNodes'        => $clusterNodes,
             'mailLocalConfigured' => $mailLocalConfigured,

@@ -417,17 +417,91 @@ class ClusterService
 
     public static function enqueue(int $nodeId, string $action, array $payload, int $priority = 5): int
     {
+        $idempotencyKey = self::buildQueueIdempotencyKey($nodeId, $action, $payload);
+        if ($idempotencyKey !== null) {
+            $existing = Database::fetchOne(
+                "SELECT id FROM cluster_queue WHERE status = 'pending' AND idempotency_key = :k LIMIT 1",
+                ['k' => $idempotencyKey]
+            );
+            if ($existing) {
+                Database::update('cluster_queue', [
+                    'payload'      => json_encode($payload),
+                    'priority'     => $priority,
+                    'scheduled_at' => date('Y-m-d H:i:s'),
+                ], 'id = :id', ['id' => (int)$existing['id']]);
+                return (int)$existing['id'];
+            }
+        }
+
+        $pausedReason = null;
+        $pausedAt = null;
+        if (str_starts_with($action, 'mail_')) {
+            $latestHealth = self::getLatestMailQueuePauseState($nodeId);
+            if (!empty($latestHealth['pause_queue'])) {
+                $pausedReason = (string)($latestHealth['reason'] ?: 'node_mail_db_degraded');
+                $pausedAt = date('Y-m-d H:i:s');
+            }
+        }
+
         return Database::insert('cluster_queue', [
             'node_id'      => $nodeId,
             'action'       => $action,
             'payload'      => json_encode($payload),
             'status'       => 'pending',
+            'idempotency_key' => $idempotencyKey,
+            'paused_reason' => $pausedReason,
+            'paused_at' => $pausedAt,
             'priority'     => $priority,
             'attempts'     => 0,
             'max_attempts' => 3,
             'scheduled_at' => date('Y-m-d H:i:s'),
             'created_at'   => date('Y-m-d H:i:s'),
         ]);
+    }
+
+    private static function buildQueueIdempotencyKey(int $nodeId, string $action, array $payload): ?string
+    {
+        if (!str_starts_with($action, 'mail_')) {
+            return null;
+        }
+
+        $target = $payload['email']
+            ?? $payload['domain']
+            ?? $payload['home_dir']
+            ?? $payload['mail_hostname']
+            ?? '';
+
+        $target = trim((string)$target);
+        if ($target === '') {
+            return null;
+        }
+
+        return hash('sha256', $nodeId . '|' . $action . '|' . strtolower($target));
+    }
+
+    private static function getLatestMailQueuePauseState(int $nodeId): array
+    {
+        try {
+            $row = Database::fetchOne(
+                "SELECT pause_queue, status, message
+                 FROM mail_node_health
+                 WHERE node_id = :nid
+                 ORDER BY checked_at DESC
+                 LIMIT 1",
+                ['nid' => $nodeId]
+            );
+            if (!$row) {
+                return ['pause_queue' => false, 'reason' => ''];
+            }
+            $pause = filter_var($row['pause_queue'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            return [
+                'pause_queue' => $pause,
+                'reason' => $pause ? ((string)($row['status'] ?? 'node_mail_db_degraded')) : '',
+                'message' => (string)($row['message'] ?? ''),
+            ];
+        } catch (\Throwable) {
+            return ['pause_queue' => false, 'reason' => ''];
+        }
     }
 
     public static function getPendingQueue(int $nodeId = 0): array
@@ -442,6 +516,7 @@ class ClusterService
                  FROM cluster_queue q
                  LEFT JOIN cluster_nodes n ON n.id = q.node_id
                  WHERE q.status = 'pending'
+                   AND q.paused_reason IS NULL
                    AND q.node_id = :nid{$standbyFilter}
                  ORDER BY q.priority ASC, q.scheduled_at ASC",
                 ['nid' => $nodeId]
@@ -451,8 +526,52 @@ class ClusterService
             "SELECT q.*, n.name AS node_name
              FROM cluster_queue q
              LEFT JOIN cluster_nodes n ON n.id = q.node_id
-             WHERE q.status = 'pending'{$standbyFilter}
+             WHERE q.status = 'pending'
+               AND q.paused_reason IS NULL{$standbyFilter}
              ORDER BY q.priority ASC, q.scheduled_at ASC"
+        );
+    }
+
+    public static function pauseMailQueueForNode(int $nodeId, string $reason): int
+    {
+        $stmt = Database::query(
+            "UPDATE cluster_queue
+             SET paused_reason = :reason, paused_at = COALESCE(paused_at, NOW())
+             WHERE node_id = :nid
+               AND status = 'pending'
+               AND action LIKE 'mail\\_%' ESCAPE '\\'
+               AND paused_reason IS NULL",
+            ['nid' => $nodeId, 'reason' => $reason]
+        );
+        return $stmt->rowCount();
+    }
+
+    public static function resumeMailQueueForNode(int $nodeId): int
+    {
+        $stmt = Database::query(
+            "UPDATE cluster_queue
+             SET paused_reason = NULL, paused_at = NULL
+             WHERE node_id = :nid
+               AND status = 'pending'
+               AND action LIKE 'mail\\_%' ESCAPE '\\'
+               AND paused_reason IS NOT NULL",
+            ['nid' => $nodeId]
+        );
+        return $stmt->rowCount();
+    }
+
+    public static function getOldPausedMailQueueItems(int $hours = 24): array
+    {
+        return Database::fetchAll(
+            "SELECT q.*, n.name AS node_name
+             FROM cluster_queue q
+             LEFT JOIN cluster_nodes n ON n.id = q.node_id
+             WHERE q.status = 'pending'
+               AND q.action LIKE 'mail\\_%' ESCAPE '\\'
+               AND q.paused_reason IS NOT NULL
+               AND q.paused_at < NOW() - (:hours * INTERVAL '1 hour')
+             ORDER BY q.paused_at ASC",
+            ['hours' => $hours]
         );
     }
 

@@ -20,6 +20,35 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.81',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Mail node DB healthcheck: `cluster-worker` valida PostgreSQL local, lectura real con `musedock_mail`, lag de replica, Maildir y PTR/rDNS en nodos con servicio `mail`',
+                            '`/mail`: banners y columnas de salud DB/lag/PTR para detectar nodos de correo degradados aunque SMTP/IMAP sigan escuchando',
+                            'Cola cluster: acciones `mail_*` pausadas automaticamente cuando la DB local del nodo mail cae o el lag supera el umbral critico',
+                        ],
+                        'en' => [
+                            'Mail node DB healthcheck: `cluster-worker` validates local PostgreSQL, real `musedock_mail` reads, replica lag, Maildir and PTR/rDNS on nodes with the `mail` service',
+                            '`/mail`: DB/lag/PTR health banners and columns detect degraded mail nodes even when SMTP/IMAP ports are still open',
+                            'Cluster queue: `mail_*` actions are automatically paused when the mail node local DB is down or lag exceeds the critical threshold',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Acciones `mail_*` con idempotency key para evitar duplicados pendientes por nodo y destino',
+                            'Documentado procedimiento manual de failover PostgreSQL en `docs/FAILOVER.md`',
+                        ],
+                        'en' => [
+                            '`mail_*` actions now use idempotency keys to avoid duplicate pending node/target operations',
+                            'Manual PostgreSQL failover procedure documented in `docs/FAILOVER.md`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.80',
                 'date' => '2026-04-24',
                 'badge' => 'primary',
