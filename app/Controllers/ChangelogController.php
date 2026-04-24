@@ -20,6 +20,37 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.86',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            '`/mail`: proveedor webmail configurable con Roundcube como primer proveedor soportado',
+                            'Instalador bajo demanda de Roundcube con configuracion IMAP/SMTP y ruta Caddy para el hostname webmail',
+                            'Settings `mail_webmail_*` para preparar futuros proveedores como SnappyMail o SOGo',
+                        ],
+                        'en' => [
+                            '`/mail`: configurable webmail provider with Roundcube as the first supported provider',
+                            'On-demand Roundcube installer with IMAP/SMTP config and Caddy route for the webmail hostname',
+                            '`mail_webmail_*` settings prepare future providers such as SnappyMail or SOGo',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            '`/mail`: nueva tarjeta Webmail con fases, estado de instalacion y enlace directo',
+                            'La instalacion de webmail requiere accion explicita y password admin; no se ejecuta durante updates',
+                            '`repair-caddy-routes.php` repara tambien la ruta webmail instalada tras reinicios o reloads de Caddy',
+                        ],
+                        'en' => [
+                            '`/mail`: new Webmail card with phases, install status and direct link',
+                            'Webmail installation requires explicit admin action and password; it does not run during updates',
+                            '`repair-caddy-routes.php` also repairs the installed webmail route after Caddy restarts or reloads',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.85',
                 'date' => '2026-04-24',
                 'badge' => 'primary',

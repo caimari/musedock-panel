@@ -414,6 +414,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/mail/relay/users/{id}/delete', 'MailController@relayUserDelete');
 \MuseDockPanel\Router::post('/mail/migrations/preflight', 'MailController@migrationPreflight');
 \MuseDockPanel\Router::post('/mail/migrations/relay/execute', 'MailController@migrationRelayExecute');
+\MuseDockPanel\Router::post('/mail/webmail/save', 'MailController@webmailSave');
+\MuseDockPanel\Router::post('/mail/webmail/install', 'MailController@webmailInstall');
+\MuseDockPanel\Router::get('/mail/webmail/status', 'MailController@webmailStatus');
 
 // Settings
 \MuseDockPanel\Router::get('/settings/services', 'SettingsController@services');

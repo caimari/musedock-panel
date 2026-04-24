@@ -42,10 +42,27 @@ if (!is_array($listen) || !array_is_list($listen) || !is_array($routes) || !arra
 
 echo "[repair-caddy] OK: srv0/listeners activos.\n";
 
+$repairWebmailRoute = static function (): void {
+    try {
+        $result = \MuseDockPanel\Services\WebmailService::repairConfiguredRoute();
+        if (!empty($result['skipped'])) {
+            return;
+        }
+        if ($result['ok'] ?? false) {
+            echo "[repair-caddy] OK: ruta webmail aplicada.\n";
+        } else {
+            fwrite(STDERR, "[repair-caddy] WARNING webmail: " . ($result['error'] ?? 'error desconocido') . "\n");
+        }
+    } catch (\Throwable $e) {
+        fwrite(STDERR, "[repair-caddy] WARNING webmail: " . $e->getMessage() . "\n");
+    }
+};
+
 $panelOwner = \MuseDockPanel\Services\SystemService::panelPortOwner($caddyApi);
 $panelManaged = \MuseDockPanel\Services\SystemService::panelRuntimeManagedByPanel($caddyApi);
 if (!$panelManaged) {
     echo "[repair-caddy] INFO: PANEL_PORT gestionado por {$panelOwner}; se omite auto-repair de TLS/rutas del panel en runtime API.\n";
+    $repairWebmailRoute();
     echo "[repair-caddy] DONE\n";
     exit(0);
 }
@@ -98,5 +115,7 @@ if (!empty($result['skipped'])) {
 } else {
     fwrite(STDERR, "[repair-caddy] WARNING route: " . ($result['error'] ?? 'error desconocido') . "\n");
 }
+
+$repairWebmailRoute();
 
 echo "[repair-caddy] DONE\n";

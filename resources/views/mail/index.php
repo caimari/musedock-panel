@@ -96,6 +96,109 @@
     </div>
 </div>
 
+<?php
+    $webmailConfig = $webmailConfig ?? [];
+    $webmailProviders = $webmailProviders ?? [];
+    $webmailInstallStatus = $webmailInstallStatus ?? ['status' => 'idle'];
+    $webmailHostValue = ($webmailConfig['host'] ?? '') ?: \MuseDockPanel\Services\WebmailService::defaultHost();
+    $webmailMailHost = ($webmailConfig['imap_host'] ?? '') ?: \MuseDockPanel\Services\WebmailService::defaultMailHost();
+    $webmailStatus = (string)($webmailInstallStatus['status'] ?? 'idle');
+    $webmailStage = (string)($webmailInstallStatus['stage'] ?? '');
+    $webmailMessage = (string)($webmailInstallStatus['message'] ?? '');
+?>
+<div id="webmail" class="card mb-4" style="border-color:rgba(34,197,94,.22);">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span><i class="bi bi-envelope-at me-2"></i>Webmail</span>
+        <span class="text-muted small">Proveedor configurable · Roundcube disponible</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-lg-5">
+                <div class="p-3 rounded h-100" style="background:#0f172a;border:1px solid #334155;">
+                    <div class="fw-semibold mb-2">Fases</div>
+                    <div class="small text-muted mb-2">
+                        Fase 1 instala Roundcube como webmail IMAP/SMTP. Fase 2 lo enlaza desde dominios y portal de cliente.
+                        Fase 3 queda preparada para filtros/autoresponder cuando se active ManageSieve.
+                    </div>
+                    <div class="d-flex flex-wrap gap-2 mt-3">
+                        <span class="badge bg-success">1 · Roundcube</span>
+                        <span class="badge bg-secondary">2 · Portal cliente</span>
+                        <span class="badge bg-secondary">3 · Sieve/filtros</span>
+                    </div>
+                    <div class="small text-muted mt-3">
+                        URL actual:
+                        <?php if (!empty($webmailConfig['enabled']) && !empty($webmailConfig['url'])): ?>
+                            <a href="<?= View::e($webmailConfig['url']) ?>" target="_blank" class="text-info"><?= View::e($webmailConfig['url']) ?> <i class="bi bi-box-arrow-up-right"></i></a>
+                        <?php else: ?>
+                            <span>sin instalar</span>
+                        <?php endif; ?>
+                    </div>
+                    <?php if ($webmailStatus !== 'idle'): ?>
+                        <div class="alert <?= $webmailStatus === 'failed' ? 'alert-danger' : ($webmailStatus === 'completed' ? 'alert-success' : 'alert-info') ?> mt-3 mb-0 py-2">
+                            <div class="fw-semibold">Estado: <?= View::e($webmailStatus) ?><?= $webmailStage ? ' · '.View::e($webmailStage) : '' ?></div>
+                            <?php if ($webmailMessage): ?><div class="small"><?= View::e($webmailMessage) ?></div><?php endif; ?>
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <div class="col-lg-7">
+                <?php if ($isSlave): ?>
+                    <div class="text-muted small">La configuracion de webmail se gestiona desde el master.</div>
+                <?php else: ?>
+                <form method="post" action="/mail/webmail/save" class="row g-3 mb-3" autocomplete="off">
+                    <?= View::csrf() ?>
+                    <div class="col-md-4">
+                        <label class="form-label">Proveedor</label>
+                        <select id="webmail_provider" name="provider" class="form-select">
+                            <?php foreach ($webmailProviders as $key => $provider): ?>
+                                <option value="<?= View::e($key) ?>" <?= ($webmailConfig['provider'] ?? 'roundcube') === $key ? 'selected' : '' ?> <?= ($provider['status'] ?? '') !== 'supported' ? 'disabled' : '' ?>>
+                                    <?= View::e($provider['label']) ?><?= ($provider['status'] ?? '') !== 'supported' ? ' (futuro)' : '' ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="col-md-8">
+                        <label class="form-label">Hostname webmail</label>
+                        <input id="webmail_host" name="host" class="form-control" value="<?= View::e($webmailHostValue) ?>" placeholder="webmail.dominio.com" autocomplete="off" required>
+                        <div class="form-text text-muted">Debe apuntar por DNS a este servidor o al nodo donde publiques Roundcube.</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Servidor IMAP</label>
+                        <input id="webmail_imap_host" name="imap_host" class="form-control" value="<?= View::e($webmailMailHost) ?>" placeholder="mail.dominio.com" autocomplete="off">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Servidor SMTP</label>
+                        <input id="webmail_smtp_host" name="smtp_host" class="form-control" value="<?= View::e(($webmailConfig['smtp_host'] ?? '') ?: $webmailMailHost) ?>" placeholder="mail.dominio.com" autocomplete="off">
+                    </div>
+                    <div class="col-12 d-flex flex-wrap gap-2">
+                        <button class="btn btn-outline-info btn-sm"><i class="bi bi-save me-1"></i>Guardar configuracion</button>
+                    </div>
+                </form>
+
+                <form method="post" action="/mail/webmail/install" class="row g-2 align-items-end" autocomplete="off" onsubmit="syncWebmailInstallForm(); return confirm('Instalar o reconfigurar Roundcube ahora?')">
+                    <?= View::csrf() ?>
+                    <input id="webmail_install_provider" type="hidden" name="provider" value="<?= View::e($webmailConfig['provider'] ?? 'roundcube') ?>">
+                    <input id="webmail_install_host" type="hidden" name="host" value="<?= View::e($webmailHostValue) ?>">
+                    <input id="webmail_install_imap_host" type="hidden" name="imap_host" value="<?= View::e($webmailMailHost) ?>">
+                    <input id="webmail_install_smtp_host" type="hidden" name="smtp_host" value="<?= View::e(($webmailConfig['smtp_host'] ?? '') ?: $webmailMailHost) ?>">
+                    <div class="col-md-7">
+                        <label class="form-label small">Password admin</label>
+                        <input name="admin_password" type="password" class="form-control form-control-sm" autocomplete="new-password" required>
+                        <div class="form-text text-muted">Instala paquetes, descarga Roundcube y crea la ruta Caddy del hostname webmail.</div>
+                    </div>
+                    <div class="col-md-5">
+                        <button class="btn btn-success btn-sm w-100" <?= $webmailStatus === 'running' ? 'disabled' : '' ?>>
+                            <i class="bi bi-download me-1"></i><?= $webmailStatus === 'running' ? 'Instalando...' : 'Instalar / reconfigurar Roundcube' ?>
+                        </button>
+                    </div>
+                </form>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+
 <?php if (($mailMode ?? 'full') === 'relay'): ?>
 <?php
     $relayHost = \MuseDockPanel\Settings::get('mail_relay_wireguard_ip', '') ?: \MuseDockPanel\Settings::get('mail_relay_host', '');
@@ -736,6 +839,20 @@
 </div>
 
 <script>
+function syncWebmailInstallForm() {
+    const map = [
+        ['webmail_provider', 'webmail_install_provider'],
+        ['webmail_host', 'webmail_install_host'],
+        ['webmail_imap_host', 'webmail_install_imap_host'],
+        ['webmail_smtp_host', 'webmail_install_smtp_host'],
+    ];
+    for (const [src, dst] of map) {
+        const s = document.getElementById(src);
+        const d = document.getElementById(dst);
+        if (s && d) d.value = s.value;
+    }
+}
+
 function copyDnsRecords(btn) {
     const text = btn.getAttribute('data-records') || '';
     navigator.clipboard.writeText(text).then(() => {

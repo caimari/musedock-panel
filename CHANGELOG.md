@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.86] — 2026-04-24
+
+### New
+- `/mail`: proveedor webmail configurable con Roundcube como primer proveedor soportado y SnappyMail/SOGo reservados para futuras versiones.
+- Nuevo instalador bajo demanda `bin/webmail-setup-run.php` para descargar Roundcube, crear su configuracion IMAP/SMTP y publicar el hostname en Caddy.
+- Settings persistentes `mail_webmail_*` para separar proveedor, hostname webmail, servidor IMAP y servidor SMTP.
+
+### Improved
+- `/mail`: nueva tarjeta Webmail con fases de implantacion, estado de instalacion y enlace directo al webmail publicado.
+- La instalacion de webmail no se ejecuta durante `update.sh`; requiere accion explicita del admin y password del panel.
+- `repair-caddy-routes.php`: repara tambien la ruta webmail instalada para recuperarla tras reinicios o reloads de Caddy.
+
 ## [1.0.85] — 2026-04-24
 
 ### New

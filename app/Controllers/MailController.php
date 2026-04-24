@@ -9,6 +9,7 @@ use MuseDockPanel\View;
 use MuseDockPanel\Services\LogService;
 use MuseDockPanel\Services\MailService;
 use MuseDockPanel\Services\ClusterService;
+use MuseDockPanel\Services\WebmailService;
 
 class MailController
 {
@@ -41,6 +42,9 @@ class MailController
         $relayUsers = MailService::getRelayUsers();
         $relayLogs = ($mailMode === 'relay') ? MailService::getRelayLogEntries(30) : [];
         $mailMigrations = MailService::getMailMigrations(8);
+        $webmailConfig = WebmailService::config();
+        $webmailProviders = WebmailService::providers();
+        $webmailInstallStatus = WebmailService::installStatus();
         $relayNewCredentials = $_SESSION['relay_new_credentials'] ?? null;
         unset($_SESSION['relay_new_credentials']);
 
@@ -76,6 +80,9 @@ class MailController
             'relayUsers'          => $relayUsers,
             'relayLogs'           => $relayLogs,
             'mailMigrations'      => $mailMigrations,
+            'webmailConfig'       => $webmailConfig,
+            'webmailProviders'    => $webmailProviders,
+            'webmailInstallStatus'=> $webmailInstallStatus,
             'relayNewCredentials' => $relayNewCredentials,
         ]);
     }
@@ -600,6 +607,61 @@ class MailController
             ? 'Migracion de relay completada.'
             : ($result['error'] ?? 'No se pudo migrar el relay.'));
         Router::redirect('/mail');
+    }
+
+    public function webmailSave(): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail');
+            return;
+        }
+
+        $result = WebmailService::saveConfig(
+            (string)($_POST['provider'] ?? 'roundcube'),
+            (string)($_POST['host'] ?? ''),
+            (string)($_POST['imap_host'] ?? ''),
+            (string)($_POST['smtp_host'] ?? '')
+        );
+
+        Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
+            ? 'Configuracion de webmail guardada.'
+            : ($result['error'] ?? 'No se pudo guardar webmail.'));
+        Router::redirect('/mail#webmail');
+    }
+
+    public function webmailInstall(): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail');
+            return;
+        }
+
+        $adminPassword = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPassword($adminPassword)) {
+            Flash::set('error', 'Password de admin incorrecta.');
+            Router::redirect('/mail#webmail');
+            return;
+        }
+
+        $result = WebmailService::startInstall(
+            (string)($_POST['provider'] ?? 'roundcube'),
+            (string)($_POST['host'] ?? ''),
+            (string)($_POST['imap_host'] ?? ''),
+            (string)($_POST['smtp_host'] ?? '')
+        );
+
+        Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
+            ? 'Instalacion de Roundcube iniciada. Puedes refrescar esta pagina para ver el estado.'
+            : ($result['error'] ?? 'No se pudo iniciar la instalacion de webmail.'));
+        Router::redirect('/mail#webmail');
+    }
+
+    public function webmailStatus(): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode(WebmailService::installStatus(), JSON_UNESCAPED_SLASHES);
     }
 
     private function verifyAdminPassword(string $password): bool
