@@ -1374,20 +1374,73 @@ class FileSyncService
         }
 
         // Also update local (master) disk usage
+        $syncMode = (string)($config['sync_mode'] ?? 'periodic');
+        $modeDefaults = $syncMode === 'lsyncd'
+            ? self::LSYNCD_DEFAULT_EXCLUDES
+            : self::RSYNC_DEFAULT_EXCLUDES;
+        $userExcludes = array_filter(array_map('trim', explode(',', (string)($config['exclude_patterns'] ?? ''))));
+        $specificExclusions = array_filter(array_map('trim', explode("\n", Settings::get('filesync_exclusions_list', ''))));
+        $duExcludePatterns = array_values(array_unique(array_merge($modeDefaults, $userExcludes, $specificExclusions)));
+
+        $localTotalMb = 0;
+        $localReplicableMb = 0;
         foreach ($accounts as $acc) {
             $homeDir = rtrim($acc['home_dir'] ?? '', '/');
             if ($homeDir && is_dir($homeDir)) {
                 $localMb = (int)trim((string)shell_exec(sprintf('/opt/musedock-panel/bin/du-throttled -sm %s 2>/dev/null | cut -f1', escapeshellarg($homeDir))));
+                $localTotalMb += max(0, $localMb);
                 if ($localMb > 0) {
                     Database::query(
                         "UPDATE hosting_accounts SET disk_used_mb = :mb WHERE id = :id",
                         ['mb' => $localMb, 'id' => (int)$acc['id']]
                     );
                 }
+
+                $excludeArgs = '';
+                foreach ($duExcludePatterns as $pattern) {
+                    $normalized = self::normalizeDuExcludePattern((string)$pattern);
+                    if ($normalized !== '') {
+                        $excludeArgs .= ' --exclude=' . escapeshellarg($normalized);
+                    }
+                }
+                $localRepMb = (int)trim((string)shell_exec(sprintf(
+                    '/opt/musedock-panel/bin/du-throttled -sm%s %s 2>/dev/null | cut -f1',
+                    $excludeArgs,
+                    escapeshellarg($homeDir)
+                )));
+                $localReplicableMb += max(0, $localRepMb);
             }
         }
 
-        return ['ok' => true, 'updated' => $updated, 'disk_map' => $diskMap];
+        return [
+            'ok' => true,
+            'updated' => $updated,
+            'disk_map' => $diskMap,
+            'local_total_mb' => $localTotalMb,
+            'local_replicable_mb' => $localReplicableMb,
+        ];
+    }
+
+    private static function normalizeDuExcludePattern(string $pattern): string
+    {
+        $pattern = trim($pattern);
+        if ($pattern === '') {
+            return '';
+        }
+
+        // Keep explicit absolute paths and wildcard patterns as user-provided.
+        if (str_starts_with($pattern, '/')
+            || str_contains($pattern, '*')
+            || str_contains($pattern, '?')
+            || str_contains($pattern, '[')
+        ) {
+            return $pattern;
+        }
+
+        // Match at any depth under each hosting home.
+        return str_contains($pattern, '/')
+            ? '*/' . ltrim($pattern, '/')
+            : '*/' . $pattern;
     }
 
     // ═══════════════════════════════════════════════════════════════

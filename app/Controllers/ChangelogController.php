@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.76',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/accounts` header UX: acciones arriba y resumen debajo para evitar cabecera rota, botones desproporcionados y saltos de layout',
+                            '`/accounts` (solo Master): comparativa por slave con `local` (master bruto), `real slave` (du remoto) y `estimado` (master con mismas exclusiones de sync)',
+                            'Nuevo gap `estimado vs real` por slave para distinguir desviaciones reales de sincronizacion frente a diferencias esperadas por exclusiones',
+                        ],
+                        'en' => [
+                            '`/accounts` header UX: actions moved above and summary below to avoid broken header layout and oversized buttons',
+                            '`/accounts` (Master only): per-slave comparison with `local` (master raw), `real slave` (remote du) and `estimated` (master with same sync exclusions)',
+                            'New `estimated vs real` gap per slave to distinguish actual sync drift from expected exclusion-driven differences',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'filesync-worker ahora persiste por nodo `master_total_mb`, `master_replicable_mb` y `remote_total_mb` para que `/accounts` use datos consistentes y auditables',
+                        ],
+                        'en' => [
+                            'filesync-worker now persists per-node `master_total_mb`, `master_replicable_mb` and `remote_total_mb` so `/accounts` can render consistent, auditable values',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.75',
                 'date' => '2026-04-24',
                 'badge' => 'primary',

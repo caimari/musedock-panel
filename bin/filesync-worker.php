@@ -107,9 +107,16 @@ try {
                 foreach ($diskMap as $mb) {
                     $remoteTotalMb += (int)$mb;
                 }
+                $masterTotalMb = (int)($diskResult['local_total_mb'] ?? 0);
+                $masterReplicableMb = (int)($diskResult['local_replicable_mb'] ?? 0);
+                $replicaGapMb = $masterReplicableMb - $remoteTotalMb;
                 \MuseDockPanel\Settings::set("filesync_remote_total_mb_node_{$nodeId}", (string)$remoteTotalMb);
                 \MuseDockPanel\Settings::set("filesync_remote_total_updated_at_node_{$nodeId}", date('Y-m-d H:i:s'));
                 \MuseDockPanel\Settings::set("filesync_remote_total_accounts_node_{$nodeId}", (string)(int)($diskResult['updated'] ?? 0));
+                \MuseDockPanel\Settings::set("filesync_master_total_mb_node_{$nodeId}", (string)$masterTotalMb);
+                \MuseDockPanel\Settings::set("filesync_master_replicable_mb_node_{$nodeId}", (string)$masterReplicableMb);
+                \MuseDockPanel\Settings::set("filesync_replica_gap_mb_node_{$nodeId}", (string)$replicaGapMb);
+                $log("  Replica compare ({$nodeName}): master bruto={$masterTotalMb}MB, esperado replica={$masterReplicableMb}MB, real slave={$remoteTotalMb}MB, gap={$replicaGapMb}MB");
             }
         } else {
             $log("  Disk usage update FAILED: " . ($diskResult['error'] ?? ''));

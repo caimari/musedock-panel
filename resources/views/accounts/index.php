@@ -12,30 +12,37 @@ if ($totalBwBytes >= 1073741824) $totalBwStr = round($totalBwBytes / 1073741824,
 elseif ($totalBwBytes >= 1048576) $totalBwStr = round($totalBwBytes / 1048576, 1) . ' MB';
 elseif ($totalBwBytes > 0) $totalBwStr = round($totalBwBytes / 1024, 1) . ' KB';
 else $totalBwStr = '0';
+$fmtMb = static function (?int $mb): string {
+    if ($mb === null) return '-';
+    return $mb >= 1024 ? round($mb / 1024, 1) . ' GB' : $mb . ' MB';
+};
 ?>
 
 <style>
 .accounts-toolbar {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-    flex-wrap: wrap;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
     margin-bottom: 14px;
 }
 .accounts-summary {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 10px 14px;
+    gap: 8px 14px;
     color: #94a3b8;
     line-height: 1.25;
+    width: 100%;
 }
 .accounts-summary .metric {
     display: inline-flex;
     align-items: center;
     gap: 5px;
     white-space: nowrap;
+}
+.accounts-summary .metric-sep {
+    color: #4b5b77;
 }
 .accounts-summary-note {
     width: 100%;
@@ -48,10 +55,10 @@ else $totalBwStr = '0';
     justify-content: flex-end;
     flex-wrap: wrap;
     gap: 8px;
-    flex: 1 1 480px;
+    width: 100%;
 }
 .accounts-actions .input-group {
-    width: min(320px, 100%);
+    width: min(360px, 100%);
 }
 .accounts-actions .btn {
     white-space: nowrap;
@@ -74,40 +81,6 @@ else $totalBwStr = '0';
 <?php endif; ?>
 
 <div class="accounts-toolbar">
-    <div class="accounts-summary">
-        <span class="metric">
-            <?= $totalAccounts ?> hosting<?= $totalAccounts !== 1 ? 's' : '' ?>
-            <span class="ms-2 badge bg-success" style="font-size:0.7rem;"><?= $totalActive ?> activo<?= $totalActive !== 1 ? 's' : '' ?></span>
-            <?php if ($totalSuspended > 0): ?>
-                <span class="badge bg-danger ms-1" style="font-size:0.7rem;"><?= $totalSuspended ?> suspendido<?= $totalSuspended !== 1 ? 's' : '' ?></span>
-            <?php endif; ?>
-        </span>
-        <span class="metric"><i class="bi bi-hdd me-1"></i><?= $totalDiskStr ?></span>
-            <?php if ($clusterRole === 'master' && !empty($replicaDiskTotals)): ?>
-                <?php foreach ($replicaDiskTotals as $replica): ?>
-                    <?php
-                    $replicaMb = (int)($replica['total_mb'] ?? 0);
-                    $replicaStr = $replicaMb >= 1024 ? round($replicaMb / 1024, 1) . ' GB' : $replicaMb . ' MB';
-                    $replicaTitle = 'Replica en ' . ($replica['node_name'] ?? ('Node #' . (int)$replica['node_id']));
-                    if (!empty($replica['updated_at'])) {
-                        $replicaTitle .= ' · actualizado ' . $replica['updated_at'] . ' UTC';
-                    }
-                    if (!empty($replica['accounts'])) {
-                        $replicaTitle .= ' · ' . (int)$replica['accounts'] . ' cuentas';
-                    }
-                    ?>
-                    <span class="metric" title="<?= View::e($replicaTitle) ?>"><i class="bi bi-cloud-arrow-down me-1"></i><?= $replicaStr ?></span>
-                <?php endforeach; ?>
-            <?php endif; ?>
-        <span class="metric"><i class="bi bi-speedometer2 me-1"></i><?= $totalBwStr ?>/mes</span>
-        <div class="accounts-summary-note">
-            <i class="bi bi-info-circle me-1"></i>
-            Disco local: cache en BD (refresh ~5 min por monitor-collector).
-            <?php if ($clusterRole === 'master'): ?>
-                Replica slave: refresh por filesync-worker (~intervalo configurado).
-            <?php endif; ?>
-        </div>
-    </div>
     <div class="accounts-actions">
         <?php if ($totalAccounts > 5): ?>
         <div class="input-group input-group-sm">
@@ -123,6 +96,63 @@ else $totalBwStr = '0';
         <a href="/accounts/import" class="btn btn-outline-light btn-sm accounts-action-btn"><i class="bi bi-box-arrow-in-down me-1"></i>Importar Existente</a>
         <a href="/accounts/create" class="btn btn-primary btn-sm accounts-action-btn"><i class="bi bi-plus-lg me-1"></i>New Account</a>
         <?php endif; ?>
+    </div>
+    <div class="accounts-summary">
+        <span class="metric">
+            <?= $totalAccounts ?> hosting<?= $totalAccounts !== 1 ? 's' : '' ?>
+            <span class="ms-2 badge bg-success" style="font-size:0.7rem;"><?= $totalActive ?> activo<?= $totalActive !== 1 ? 's' : '' ?></span>
+            <?php if ($totalSuspended > 0): ?>
+                <span class="badge bg-danger ms-1" style="font-size:0.7rem;"><?= $totalSuspended ?> suspendido<?= $totalSuspended !== 1 ? 's' : '' ?></span>
+            <?php endif; ?>
+        </span>
+        <span class="metric metric-sep">•</span>
+        <span class="metric"><i class="bi bi-hdd me-1"></i><?= $totalDiskStr ?></span>
+        <?php if ($clusterRole === 'master' && !empty($replicaDiskTotals)): ?>
+            <?php foreach ($replicaDiskTotals as $replica): ?>
+                <?php
+                $replicaMb = (int)($replica['total_mb'] ?? 0);
+                $replicaStr = $fmtMb($replicaMb);
+                $expectedMb = isset($replica['master_replicable_mb']) ? (int)$replica['master_replicable_mb'] : null;
+                $expectedStr = $fmtMb($expectedMb);
+                $gapMb = isset($replica['replica_gap_mb']) ? (int)$replica['replica_gap_mb'] : (($expectedMb !== null) ? ($expectedMb - $replicaMb) : null);
+                $gapStr = $gapMb === null ? '-' : $fmtMb(abs($gapMb));
+                $nodeName = (string)($replica['node_name'] ?? ('Node #' . (int)$replica['node_id']));
+                $replicaTitle = "{$nodeName} · real slave: {$replicaStr}";
+                if ($expectedMb !== null) {
+                    $replicaTitle .= " · esperado: {$expectedStr}";
+                }
+                if ($gapMb !== null) {
+                    $replicaTitle .= " · gap: " . ($gapMb >= 0 ? '+' : '-') . $gapStr;
+                }
+                if (!empty($replica['updated_at'])) {
+                    $replicaTitle .= " · actualizado {$replica['updated_at']} UTC";
+                }
+                ?>
+                <span class="metric metric-sep">•</span>
+                <span class="metric" title="<?= View::e($replicaTitle) ?>">
+                    <i class="bi bi-cloud-arrow-down me-1"></i><?= $replicaStr ?>
+                </span>
+                <?php if ($expectedMb !== null): ?>
+                    <span class="metric" title="Estimado en slave segun exclusiones activas de sync">
+                        <i class="bi bi-bullseye me-1"></i><?= $expectedStr ?>
+                    </span>
+                <?php endif; ?>
+                <?php if ($gapMb !== null): ?>
+                    <span class="metric <?= abs($gapMb) <= 256 ? 'text-success' : 'text-warning' ?>" title="Diferencia esperado vs real en slave">
+                        <i class="bi bi-arrows-collapse-vertical me-1"></i><?= ($gapMb >= 0 ? '+' : '-') . $gapStr ?>
+                    </span>
+                <?php endif; ?>
+            <?php endforeach; ?>
+        <?php endif; ?>
+        <span class="metric metric-sep">•</span>
+        <span class="metric"><i class="bi bi-speedometer2 me-1"></i><?= $totalBwStr ?>/mes</span>
+        <div class="accounts-summary-note">
+            <i class="bi bi-info-circle me-1"></i>
+            Disco local: cache en BD (~5 min por monitor-collector).
+            <?php if ($clusterRole === 'master'): ?>
+                Replica slave: <strong>real</strong> leido en el slave por `du`; <strong>estimado</strong> calculado en master con las mismas exclusiones de sync.
+            <?php endif; ?>
+        </div>
     </div>
 </div>
 

@@ -139,10 +139,17 @@ class AccountController
                     continue;
                 }
 
+                $masterTotalRaw = Settings::get("filesync_master_total_mb_node_{$nodeId}", '');
+                $masterReplicableRaw = Settings::get("filesync_master_replicable_mb_node_{$nodeId}", '');
+                $replicaGapRaw = Settings::get("filesync_replica_gap_mb_node_{$nodeId}", '');
+
                 $replicaDiskTotals[] = [
                     'node_id' => $nodeId,
                     'node_name' => (string)($node['name'] ?? ("Node #{$nodeId}")),
                     'total_mb' => (int)$remoteMbRaw,
+                    'master_total_mb' => is_numeric($masterTotalRaw) ? (int)$masterTotalRaw : null,
+                    'master_replicable_mb' => is_numeric($masterReplicableRaw) ? (int)$masterReplicableRaw : null,
+                    'replica_gap_mb' => is_numeric($replicaGapRaw) ? (int)$replicaGapRaw : null,
                     'updated_at' => (string)Settings::get("filesync_remote_total_updated_at_node_{$nodeId}", ''),
                     'accounts' => (int)Settings::get("filesync_remote_total_accounts_node_{$nodeId}", '0'),
                 ];

@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.76] — 2026-04-24
+
+### Improved
+- `/accounts` header UX: acciones arriba y resumen debajo para evitar cabecera rota, botones desproporcionados y saltos de layout.
+- `/accounts` (solo Master): comparativa de disco por slave con tres referencias claras:
+  - `local` (master bruto),
+  - `real slave` (medido por `du` remoto),
+  - `estimado` (calculado en master con mismas exclusiones activas de sync).
+- Indicador de gap `estimado vs real` por slave para detectar desviaciones reales de sincronizacion y no confundirlas con exclusiones esperadas.
+
+### Fixed
+- `filesync-worker` ahora persiste por nodo los totales `master_total_mb`, `master_replicable_mb` y `remote_total_mb` para alimentar `/accounts` con datos consistentes y auditables.
+
 ## [1.0.75] — 2026-04-24
 
 ### Improved
