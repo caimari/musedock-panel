@@ -493,7 +493,14 @@
                             <?php $isStandby = !empty($node['standby']); ?>
                             <tr id="node-row-<?= (int)$node['id'] ?>" <?= $isStandby ? 'style="opacity:0.6;"' : '' ?>>
                                 <td>
-                                    <strong><?= View::e($node['name']) ?></strong>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <strong><?= View::e($node['name']) ?></strong>
+                                        <button type="button" class="btn btn-outline-info btn-sm py-0 px-2"
+                                                onclick='openEditNodeModal(<?= (int)$node['id'] ?>, <?= json_encode((string)$node['name'], JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_HEX_TAG) ?>)'
+                                                title="Editar nombre visible del nodo">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                    </div>
                                     <?php if ($isStandby): ?>
                                         <br><span class="badge bg-warning text-dark"><i class="bi bi-pause-circle me-1"></i>Standby</span>
                                         <?php if ($node['standby_reason']): ?>
@@ -752,6 +759,35 @@
                         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
                         <button type="submit" class="btn btn-primary">
                             <i class="bi bi-plus-circle me-1"></i>Añadir Nodo
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Editar Nodo -->
+    <div class="modal fade" id="editNodeModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content bg-dark text-light">
+                <div class="modal-header border-secondary">
+                    <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Editar nombre del nodo</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form method="post" action="/settings/cluster/update-node">
+                    <?= View::csrf() ?>
+                    <input type="hidden" name="node_id" id="edit-node-id">
+                    <div class="modal-body">
+                        <label class="form-label">Nombre visible</label>
+                        <input type="text" name="node_name" id="edit-node-name" class="form-control" maxlength="80" required>
+                        <small class="text-muted d-block mt-2">
+                            Cambia solo la etiqueta local del nodo en el master. No modifica URL, token, hostname ni servicios del slave.
+                        </small>
+                    </div>
+                    <div class="modal-footer border-secondary">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-save me-1"></i>Guardar
                         </button>
                     </div>
                 </form>
@@ -3081,6 +3117,12 @@ function viewNodeStatus(nodeId, nodeName) {
         .catch(function() {
             document.getElementById('node-status-content').innerHTML = '<div class="text-danger">Error al obtener el estado</div>';
         });
+}
+
+function openEditNodeModal(nodeId, nodeName) {
+    document.getElementById('edit-node-id').value = nodeId;
+    document.getElementById('edit-node-name').value = nodeName || '';
+    new bootstrap.Modal(document.getElementById('editNodeModal')).show();
 }
 
 function toggleNodeService(nodeId, service, confirmed) {

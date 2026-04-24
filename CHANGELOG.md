@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.80] — 2026-04-24
+
+### Improved
+- `Settings → Cluster → Nodos`: nuevo boton de edicion rapida junto al nombre del nodo para cambiar la etiqueta visible.
+- La edicion usa el endpoint existente `update-node` y solo modifica el nombre local; no toca URL, token, servicios ni configuracion remota del slave.
+
 ## [1.0.79] — 2026-04-24
 
 ### Improved

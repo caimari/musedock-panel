@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.80',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`Settings → Cluster → Nodos`: boton de edicion rapida junto al nombre para cambiar la etiqueta visible del nodo',
+                            'La edicion reutiliza `update-node` y solo cambia el nombre local; no toca URL, token, servicios ni configuracion remota del slave',
+                        ],
+                        'en' => [
+                            '`Settings → Cluster → Nodes`: quick edit button next to the node name to rename the visible node label',
+                            'The edit action reuses `update-node` and only changes the local name; URL, token, services and remote slave configuration are untouched',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.79',
                 'date' => '2026-04-24',
                 'badge' => 'primary',
