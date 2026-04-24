@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.77',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/accounts`: resumen con metricas etiquetadas (`Hostings`, `Local`, `Slave real`, `Esperado slave`, `Estado replica`, `BW`) en vez de numeros sueltos',
+                            'Estado de replica explicito: muestra `OK`, `Faltan X`, `Sobran X` o `Pendiente` segun diferencia entre esperado en slave y real medido en slave',
+                            'Si todavia no existe calculo esperado, la UI muestra `Esperado slave: pendiente` hasta el siguiente ciclo de `filesync-worker`',
+                        ],
+                        'en' => [
+                            '`/accounts`: summary now uses labeled metrics (`Hostings`, `Local`, `Slave real`, `Expected slave`, `Replica status`, `BW`) instead of loose numbers',
+                            'Explicit replica status: shows `OK`, `Missing X`, `Extra X` or `Pending` based on expected-vs-real slave size',
+                            'When the expected calculation is not available yet, UI shows `Expected slave: pending` until the next `filesync-worker` cycle',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.76',
                 'date' => '2026-04-24',
                 'badge' => 'primary',

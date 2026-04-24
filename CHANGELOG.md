@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.77] — 2026-04-24
+
+### Improved
+- `/accounts`: el resumen deja de mostrar numeros sueltos y pasa a mostrar metricas etiquetadas (`Hostings`, `Local`, `Slave real`, `Esperado slave`, `Estado replica`, `BW`).
+- Estado de replica explicito: muestra `OK`, `Faltan X`, `Sobran X` o `Pendiente` segun la diferencia entre el tamano esperado en slave y el tamano real medido en slave.
+- Cuando el calculo esperado aun no existe (antes del siguiente ciclo de `filesync-worker`), la UI muestra `Esperado slave: pendiente` en vez de ocultar la comparativa.
+
 ## [1.0.76] — 2026-04-24
 
 ### Improved

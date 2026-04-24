@@ -28,21 +28,42 @@ $fmtMb = static function (?int $mb): string {
 }
 .accounts-summary {
     display: flex;
-    align-items: center;
+    align-items: stretch;
     flex-wrap: wrap;
-    gap: 8px 14px;
+    gap: 8px;
     color: #94a3b8;
     line-height: 1.25;
     width: 100%;
 }
-.accounts-summary .metric {
+.accounts-summary .stat {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 7px;
+    min-height: 30px;
+    padding: 5px 9px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 6px;
+    background: rgba(15, 23, 42, 0.35);
     white-space: nowrap;
 }
-.accounts-summary .metric-sep {
-    color: #4b5b77;
+.accounts-summary .stat-label {
+    color: #7f8da8;
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: .02em;
+}
+.accounts-summary .stat-value {
+    color: #cbd5e1;
+    font-weight: 600;
+}
+.accounts-summary .stat-ok .stat-value {
+    color: #22c55e;
+}
+.accounts-summary .stat-warn .stat-value {
+    color: #f59e0b;
+}
+.accounts-summary .stat-muted .stat-value {
+    color: #94a3b8;
 }
 .accounts-summary-note {
     width: 100%;
@@ -98,15 +119,18 @@ $fmtMb = static function (?int $mb): string {
         <?php endif; ?>
     </div>
     <div class="accounts-summary">
-        <span class="metric">
-            <?= $totalAccounts ?> hosting<?= $totalAccounts !== 1 ? 's' : '' ?>
-            <span class="ms-2 badge bg-success" style="font-size:0.7rem;"><?= $totalActive ?> activo<?= $totalActive !== 1 ? 's' : '' ?></span>
+        <span class="stat">
+            <span class="stat-label">Hostings</span>
+            <span class="stat-value"><?= $totalAccounts ?></span>
+            <span class="badge bg-success" style="font-size:0.68rem;"><?= $totalActive ?> activos</span>
             <?php if ($totalSuspended > 0): ?>
-                <span class="badge bg-danger ms-1" style="font-size:0.7rem;"><?= $totalSuspended ?> suspendido<?= $totalSuspended !== 1 ? 's' : '' ?></span>
+                <span class="badge bg-danger" style="font-size:0.68rem;"><?= $totalSuspended ?> suspendidos</span>
             <?php endif; ?>
         </span>
-        <span class="metric metric-sep">•</span>
-        <span class="metric"><i class="bi bi-hdd me-1"></i><?= $totalDiskStr ?></span>
+        <span class="stat">
+            <span class="stat-label"><i class="bi bi-hdd me-1"></i>Local</span>
+            <span class="stat-value"><?= $totalDiskStr ?></span>
+        </span>
         <?php if ($clusterRole === 'master' && !empty($replicaDiskTotals)): ?>
             <?php foreach ($replicaDiskTotals as $replica): ?>
                 <?php
@@ -117,9 +141,25 @@ $fmtMb = static function (?int $mb): string {
                 $gapMb = isset($replica['replica_gap_mb']) ? (int)$replica['replica_gap_mb'] : (($expectedMb !== null) ? ($expectedMb - $replicaMb) : null);
                 $gapStr = $gapMb === null ? '-' : $fmtMb(abs($gapMb));
                 $nodeName = (string)($replica['node_name'] ?? ('Node #' . (int)$replica['node_id']));
+                $statusClass = 'stat-muted';
+                $statusText = 'Pendiente';
+                if ($gapMb !== null) {
+                    if (abs($gapMb) <= 256) {
+                        $statusClass = 'stat-ok';
+                        $statusText = 'OK';
+                    } elseif ($gapMb > 0) {
+                        $statusClass = 'stat-warn';
+                        $statusText = 'Faltan ' . $gapStr;
+                    } else {
+                        $statusClass = 'stat-warn';
+                        $statusText = 'Sobran ' . $gapStr;
+                    }
+                }
                 $replicaTitle = "{$nodeName} · real slave: {$replicaStr}";
                 if ($expectedMb !== null) {
                     $replicaTitle .= " · esperado: {$expectedStr}";
+                } else {
+                    $replicaTitle .= " · esperado pendiente del proximo ciclo de filesync";
                 }
                 if ($gapMb !== null) {
                     $replicaTitle .= " · gap: " . ($gapMb >= 0 ? '+' : '-') . $gapStr;
@@ -128,29 +168,29 @@ $fmtMb = static function (?int $mb): string {
                     $replicaTitle .= " · actualizado {$replica['updated_at']} UTC";
                 }
                 ?>
-                <span class="metric metric-sep">•</span>
-                <span class="metric" title="<?= View::e($replicaTitle) ?>">
-                    <i class="bi bi-cloud-arrow-down me-1"></i><?= $replicaStr ?>
+                <span class="stat" title="<?= View::e($replicaTitle) ?>">
+                    <span class="stat-label"><i class="bi bi-cloud-arrow-down me-1"></i><?= View::e($nodeName) ?> real</span>
+                    <span class="stat-value"><?= $replicaStr ?></span>
                 </span>
-                <?php if ($expectedMb !== null): ?>
-                    <span class="metric" title="Estimado en slave segun exclusiones activas de sync">
-                        <i class="bi bi-bullseye me-1"></i><?= $expectedStr ?>
-                    </span>
-                <?php endif; ?>
-                <?php if ($gapMb !== null): ?>
-                    <span class="metric <?= abs($gapMb) <= 256 ? 'text-success' : 'text-warning' ?>" title="Diferencia esperado vs real en slave">
-                        <i class="bi bi-arrows-collapse-vertical me-1"></i><?= ($gapMb >= 0 ? '+' : '-') . $gapStr ?>
-                    </span>
-                <?php endif; ?>
+                <span class="stat <?= $expectedMb === null ? 'stat-muted' : '' ?>" title="Calculado en master con las exclusiones activas de sync">
+                    <span class="stat-label"><i class="bi bi-bullseye me-1"></i>Esperado slave</span>
+                    <span class="stat-value"><?= $expectedMb === null ? 'pendiente' : $expectedStr ?></span>
+                </span>
+                <span class="stat <?= $statusClass ?>" title="Comparativa esperado vs real en slave">
+                    <span class="stat-label"><i class="bi bi-check2-circle me-1"></i>Estado replica</span>
+                    <span class="stat-value"><?= View::e($statusText) ?></span>
+                </span>
             <?php endforeach; ?>
         <?php endif; ?>
-        <span class="metric metric-sep">•</span>
-        <span class="metric"><i class="bi bi-speedometer2 me-1"></i><?= $totalBwStr ?>/mes</span>
+        <span class="stat">
+            <span class="stat-label"><i class="bi bi-speedometer2 me-1"></i>BW</span>
+            <span class="stat-value"><?= $totalBwStr ?>/mes</span>
+        </span>
         <div class="accounts-summary-note">
             <i class="bi bi-info-circle me-1"></i>
-            Disco local: cache en BD (~5 min por monitor-collector).
+            Local: cache BD (~5 min).
             <?php if ($clusterRole === 'master'): ?>
-                Replica slave: <strong>real</strong> leido en el slave por `du`; <strong>estimado</strong> calculado en master con las mismas exclusiones de sync.
+                Slave real: leido por `du` remoto. Esperado slave: calculado en master con las exclusiones activas.
             <?php endif; ?>
         </div>
     </div>
