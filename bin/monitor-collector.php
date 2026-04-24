@@ -726,11 +726,11 @@ if ($alertDiskThreshold > 0 && !empty($diskData)) {
     }
 }
 
-// ─── Update disk usage for all hosting accounts (every 5 min, not every 30s) ─
+// ─── Update disk usage for all hosting accounts (every 10 min, not every 30s) ─
 // du is expensive even with throttling — no need to run it every collector cycle
 $duLockFile = '/tmp/musedock-du-lastrun';
 $duLastRun = file_exists($duLockFile) ? (int)file_get_contents($duLockFile) : 0;
-$duInterval = 300; // 5 minutes
+$duInterval = 600; // 10 minutes
 
 if ((time() - $duLastRun) >= $duInterval) {
     try {

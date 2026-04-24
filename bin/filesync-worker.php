@@ -42,20 +42,27 @@ try {
         exit(0);
     }
 
-    // Check interval — only run if enough time has elapsed
-    $lastRun = \MuseDockPanel\Settings::get('filesync_last_run', '0');
-    $intervalSeconds = $config['interval_minutes'] * 60;
+    // File sync and disk accounting have separate clocks:
+    // - file sync follows the configured sync interval
+    // - disk usage runs every 10 minutes so /accounts reads fresh cached DB values
+    $lastRun = (int)\MuseDockPanel\Settings::get('filesync_last_run', '0');
+    $intervalSeconds = max(60, (int)$config['interval_minutes'] * 60);
+    $diskLastRun = (int)\MuseDockPanel\Settings::get('filesync_disk_usage_last_run', '0');
+    $diskIntervalSeconds = 600;
     $now = time();
+    $syncDue = (($now - $lastRun) >= $intervalSeconds);
+    $diskDue = (($now - $diskLastRun) >= $diskIntervalSeconds);
 
-    if (($now - (int)$lastRun) < $intervalSeconds) {
+    if (!$syncDue && !$diskDue) {
         exit(0); // Not time yet
     }
 
-    // Update last run timestamp
-    \MuseDockPanel\Settings::set('filesync_last_run', (string)$now);
+    if ($syncDue) {
+        \MuseDockPanel\Settings::set('filesync_last_run', (string)$now);
+    }
 
     $syncMode = $config['sync_mode'] ?? 'periodic';
-    $log('File sync worker started (mode: ' . $syncMode . ', method: ' . $config['method'] . ')');
+    $log('File sync worker started (mode: ' . $syncMode . ', method: ' . $config['method'] . ', sync_due: ' . ($syncDue ? 'yes' : 'no') . ', disk_due: ' . ($diskDue ? 'yes' : 'no') . ')');
 
     // Get only active nodes (excludes standby/maintenance)
     $nodes = \MuseDockPanel\Services\ClusterService::getActiveNodes();
@@ -72,58 +79,66 @@ try {
 
     $totalOk = 0;
     $totalFail = 0;
+    $diskUsageRan = false;
 
     foreach ($nodes as $node) {
         $nodeName = $node['name'] ?? 'Unknown';
         $log("Syncing to node: {$nodeName}");
 
-        // File sync — skip when lsyncd handles it in real-time
-        if ($syncMode === 'lsyncd') {
-            $log("  File sync skipped — lsyncd handles real-time sync");
+        if (!$syncDue) {
+            $log("  File sync skipped — next scheduled sync not due");
         } else {
-            // Sync entire /var/www/vhosts/ in one rsync — mirrors everything, not just panel hostings
-            $log("  Syncing /var/www/vhosts/ ...");
-            $result = \MuseDockPanel\Services\FileSyncService::syncVhostsToNode($node);
-            if ($result['ok']) {
-                $totalOk++;
-                $elapsed = $result['elapsed_seconds'] ?? 0;
-                $log("  OK: /var/www/vhosts/ ({$elapsed}s)");
+            // File sync — skip when lsyncd handles it in real-time
+            if ($syncMode === 'lsyncd') {
+                $log("  File sync skipped — lsyncd handles real-time sync");
             } else {
-                $totalFail++;
-                $error = $result['error'] ?? 'Unknown error';
-                $log("  FAIL: /var/www/vhosts/ — {$error}");
+                // Sync entire /var/www/vhosts/ in one rsync — mirrors everything, not just panel hostings
+                $log("  Syncing /var/www/vhosts/ ...");
+                $result = \MuseDockPanel\Services\FileSyncService::syncVhostsToNode($node);
+                if ($result['ok']) {
+                    $totalOk++;
+                    $elapsed = $result['elapsed_seconds'] ?? 0;
+                    $log("  OK: /var/www/vhosts/ ({$elapsed}s)");
+                } else {
+                    $totalFail++;
+                    $error = $result['error'] ?? 'Unknown error';
+                    $log("  FAIL: /var/www/vhosts/ — {$error}");
+                }
             }
         }
 
-        // Update disk_used_mb on master and slave (always runs)
-        $diskResult = \MuseDockPanel\Services\FileSyncService::updateRemoteDiskUsage($node, $accounts);
-        if ($diskResult['ok']) {
-            $log("  Disk usage updated: {$diskResult['updated']} accounts");
-            // Cache remote total disk usage on master for UI (/accounts)
-            $nodeId = (int)($node['id'] ?? 0);
-            if ($nodeId > 0) {
-                $diskMap = (is_array($diskResult['disk_map'] ?? null)) ? $diskResult['disk_map'] : [];
-                $remoteTotalMb = 0;
-                foreach ($diskMap as $mb) {
-                    $remoteTotalMb += (int)$mb;
+        // Update disk_used_mb on master/slave and cache replica comparison for /accounts.
+        if ($diskDue) {
+            $diskUsageRan = true;
+            $diskResult = \MuseDockPanel\Services\FileSyncService::updateRemoteDiskUsage($node, $accounts);
+            if ($diskResult['ok']) {
+                $log("  Disk usage updated: {$diskResult['updated']} accounts");
+                // Cache remote total disk usage on master for UI (/accounts)
+                $nodeId = (int)($node['id'] ?? 0);
+                if ($nodeId > 0) {
+                    $diskMap = (is_array($diskResult['disk_map'] ?? null)) ? $diskResult['disk_map'] : [];
+                    $remoteTotalMb = 0;
+                    foreach ($diskMap as $mb) {
+                        $remoteTotalMb += (int)$mb;
+                    }
+                    $masterTotalMb = (int)($diskResult['local_total_mb'] ?? 0);
+                    $masterReplicableMb = (int)($diskResult['local_replicable_mb'] ?? 0);
+                    $replicaGapMb = $masterReplicableMb - $remoteTotalMb;
+                    \MuseDockPanel\Settings::set("filesync_remote_total_mb_node_{$nodeId}", (string)$remoteTotalMb);
+                    \MuseDockPanel\Settings::set("filesync_remote_total_updated_at_node_{$nodeId}", date('Y-m-d H:i:s'));
+                    \MuseDockPanel\Settings::set("filesync_remote_total_accounts_node_{$nodeId}", (string)(int)($diskResult['updated'] ?? 0));
+                    \MuseDockPanel\Settings::set("filesync_master_total_mb_node_{$nodeId}", (string)$masterTotalMb);
+                    \MuseDockPanel\Settings::set("filesync_master_replicable_mb_node_{$nodeId}", (string)$masterReplicableMb);
+                    \MuseDockPanel\Settings::set("filesync_replica_gap_mb_node_{$nodeId}", (string)$replicaGapMb);
+                    $log("  Replica compare ({$nodeName}): master bruto={$masterTotalMb}MB, esperado replica={$masterReplicableMb}MB, real slave={$remoteTotalMb}MB, gap={$replicaGapMb}MB");
                 }
-                $masterTotalMb = (int)($diskResult['local_total_mb'] ?? 0);
-                $masterReplicableMb = (int)($diskResult['local_replicable_mb'] ?? 0);
-                $replicaGapMb = $masterReplicableMb - $remoteTotalMb;
-                \MuseDockPanel\Settings::set("filesync_remote_total_mb_node_{$nodeId}", (string)$remoteTotalMb);
-                \MuseDockPanel\Settings::set("filesync_remote_total_updated_at_node_{$nodeId}", date('Y-m-d H:i:s'));
-                \MuseDockPanel\Settings::set("filesync_remote_total_accounts_node_{$nodeId}", (string)(int)($diskResult['updated'] ?? 0));
-                \MuseDockPanel\Settings::set("filesync_master_total_mb_node_{$nodeId}", (string)$masterTotalMb);
-                \MuseDockPanel\Settings::set("filesync_master_replicable_mb_node_{$nodeId}", (string)$masterReplicableMb);
-                \MuseDockPanel\Settings::set("filesync_replica_gap_mb_node_{$nodeId}", (string)$replicaGapMb);
-                $log("  Replica compare ({$nodeName}): master bruto={$masterTotalMb}MB, esperado replica={$masterReplicableMb}MB, real slave={$remoteTotalMb}MB, gap={$replicaGapMb}MB");
+            } else {
+                $log("  Disk usage update FAILED: " . ($diskResult['error'] ?? ''));
             }
-        } else {
-            $log("  Disk usage update FAILED: " . ($diskResult['error'] ?? ''));
         }
 
         // Sync SSL certs if enabled
-        if ($config['sync_ssl_certs']) {
+        if ($syncDue && $config['sync_ssl_certs']) {
             $log("  Syncing SSL certificates...");
             $sslResult = \MuseDockPanel\Services\FileSyncService::syncSslCerts($node);
             if ($sslResult['ok']) {
@@ -135,7 +150,7 @@ try {
 
         // Sync database dumps if enabled (Nivel 1 — simple cluster sync)
         // Check streaming replication per engine — only skip dumps for engines with active streaming
-        if ($config['db_dumps'] ?? false) {
+        if ($syncDue && ($config['db_dumps'] ?? false)) {
             $streamingStatus = \MuseDockPanel\Services\ReplicationService::isStreamingActive();
 
             $skipPgsql = $streamingStatus['pg'] ?? false;
@@ -180,7 +195,13 @@ try {
         }
     }
 
-    if ($syncMode === 'lsyncd') {
+    if ($diskUsageRan) {
+        \MuseDockPanel\Settings::set('filesync_disk_usage_last_run', (string)$now);
+    }
+
+    if (!$syncDue && $diskUsageRan) {
+        $log("Disk usage refresh completed");
+    } elseif ($syncMode === 'lsyncd') {
         $log("Periodic tasks completed (lsyncd handles file sync)");
     } else {
         $log("Sync completed: {$totalOk} OK, {$totalFail} failed");

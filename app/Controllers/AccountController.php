@@ -631,7 +631,7 @@ class AccountController
 
         $domains = Database::fetchAll("SELECT * FROM hosting_domains WHERE account_id = :id", ['id' => $params['id']]);
         $databases = Database::fetchAll("SELECT * FROM hosting_databases WHERE account_id = :id", ['id' => $params['id']]);
-        // Use cached disk value from DB (updated by monitor-collector every 5 min)
+        // Use cached disk value from DB (updated by monitor-collector every 10 min)
         // Avoids slow du on large directories blocking page load
         if (empty($account['disk_used_mb'])) {
             $account['disk_used_mb'] = 0;

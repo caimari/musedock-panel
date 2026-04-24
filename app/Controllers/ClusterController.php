@@ -864,7 +864,7 @@ class ClusterController
             'filesync_ssh_port'        => (string)max(1, (int)($_POST['filesync_ssh_port'] ?? 22)),
             'filesync_ssh_key_path'    => trim($_POST['filesync_ssh_key_path'] ?? '/root/.ssh/id_ed25519'),
             'filesync_ssh_user'        => trim($_POST['filesync_ssh_user'] ?? 'root'),
-            'filesync_interval'        => (string)max(1, (int)($_POST['filesync_interval'] ?? 15)),
+            'filesync_interval'        => (string)max(1, (int)($_POST['filesync_interval'] ?? 10)),
             'filesync_bwlimit'         => (string)max(0, (int)($_POST['filesync_bwlimit'] ?? 0)),
             'filesync_exclude'         => trim($_POST['filesync_exclude'] ?? '.cache,*.log,*.tmp,node_modules'),
             'filesync_ssl_certs'       => isset($_POST['filesync_ssl_certs']) ? '1' : '0',

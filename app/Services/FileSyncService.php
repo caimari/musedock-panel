@@ -27,7 +27,7 @@ class FileSyncService
             'ssh_port'         => (int)Settings::get('filesync_ssh_port', '22'),
             'ssh_key_path'     => Settings::get('filesync_ssh_key_path', '/root/.ssh/id_ed25519'),
             'ssh_user'         => Settings::get('filesync_ssh_user', 'root'),
-            'interval_minutes' => (int)Settings::get('filesync_interval', '15'),
+            'interval_minutes' => (int)Settings::get('filesync_interval', '10'),
             'bandwidth_limit'  => (int)Settings::get('filesync_bwlimit', '0'), // KB/s, 0=unlimited
             'exclude_patterns' => Settings::get('filesync_exclude', '.cache,*.log,*.tmp,node_modules'),
             'sync_ssl_certs'   => Settings::get('filesync_ssl_certs', '0') === '1',

@@ -188,9 +188,9 @@ $fmtMb = static function (?int $mb): string {
         </span>
         <div class="accounts-summary-note">
             <i class="bi bi-info-circle me-1"></i>
-            Local: cache BD (~5 min).
+            Local: cache BD (`du` cada 10 min).
             <?php if ($clusterRole === 'master'): ?>
-                Slave real: leido por `du` remoto. Esperado slave: calculado en master con las exclusiones activas.
+                Slave real y esperado: cache BD por `filesync-worker` (`du` cada 10 min, no en cada carga de pagina).
             <?php endif; ?>
         </div>
     </div>

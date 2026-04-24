@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.78] — 2026-04-24
+
+### Improved
+- `/accounts`: el texto de la cabecera aclara que los datos de disco vienen de cache/BD y que no se ejecuta `du` en cada carga de pagina.
+- `monitor-collector`: el calculo local de `disk_used_mb` pasa a ejecutarse cada 10 minutos para reducir carga.
+- `filesync-worker`: refresco de disco remoto/esperado desacoplado del intervalo de sincronizacion; el slave real y el esperado se recalculan y persisten cada 10 minutos.
+
 ## [1.0.77] — 2026-04-24
 
 ### Improved

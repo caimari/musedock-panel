@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.78',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/accounts`: la cabecera aclara que el disco se lee de cache/BD y no ejecuta `du` en cada carga de pagina',
+                            '`monitor-collector`: el calculo local de `disk_used_mb` se limita a un ciclo de 10 minutos para evitar carga innecesaria',
+                            '`filesync-worker`: el disco real del slave y el esperado en master se recalculan y persisten cada 10 minutos, desacoplados del intervalo de sync de archivos',
+                        ],
+                        'en' => [
+                            '`/accounts`: header now states that disk values are read from DB/cache and no `du` runs on page load',
+                            '`monitor-collector`: local `disk_used_mb` calculation is throttled to a 10-minute cycle to avoid unnecessary load',
+                            '`filesync-worker`: real slave disk and expected master replica values are recalculated and persisted every 10 minutes, independently from the file sync interval',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.77',
                 'date' => '2026-04-24',
                 'badge' => 'primary',

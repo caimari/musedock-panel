@@ -653,7 +653,7 @@
                     <div>
                         <?php if ($fsEnabled && $sshKeyExists): ?>
                             <span class="badge bg-success"><i class="bi bi-check me-1"></i>Archivos</span>
-                            <span class="text-muted ms-1">Contenido web via SSH cada <?= (int)($settings['filesync_interval'] ?? 15) ?> min</span>
+                            <span class="text-muted ms-1">Contenido web via SSH cada <?= (int)($settings['filesync_interval'] ?? 10) ?> min</span>
                         <?php else: ?>
                             <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Archivos</span>
                             <span class="text-muted ms-1">
