@@ -40,6 +40,7 @@ class MailController
         $relayDomains = MailService::getRelayDomains();
         $relayUsers = MailService::getRelayUsers();
         $relayLogs = ($mailMode === 'relay') ? MailService::getRelayLogEntries(30) : [];
+        $mailMigrations = MailService::getMailMigrations(8);
         $relayNewCredentials = $_SESSION['relay_new_credentials'] ?? null;
         unset($_SESSION['relay_new_credentials']);
 
@@ -48,9 +49,7 @@ class MailController
         $clusterNodes = [];
         if ($clusterRole !== 'slave') {
             $showSetup = ($_GET['setup'] ?? '') === '1';
-            if ($showSetup || empty($mailNodes)) {
-                $clusterNodes = ClusterService::getNodes();
-            }
+            $clusterNodes = ClusterService::getNodes();
         }
 
         $mailLocalConfigured = Settings::get('mail_local_configured', '') === '1';
@@ -76,6 +75,7 @@ class MailController
             'relayDomains'        => $relayDomains,
             'relayUsers'          => $relayUsers,
             'relayLogs'           => $relayLogs,
+            'mailMigrations'      => $mailMigrations,
             'relayNewCredentials' => $relayNewCredentials,
         ]);
     }
@@ -553,6 +553,62 @@ class MailController
         $result = MailService::deleteRelayUser((int)$params['id']);
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false) ? 'Usuario relay eliminado.' : ($result['error'] ?? 'Error eliminando usuario relay.'));
         Router::redirect('/mail');
+    }
+
+    public function migrationPreflight(): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail');
+            return;
+        }
+
+        $result = MailService::createMailMigrationPreflight(
+            (string)($_POST['mode'] ?? 'relay'),
+            (int)($_POST['target_node_id'] ?? 0),
+            (int)($_SESSION['panel_user']['id'] ?? 0) ?: null
+        );
+
+        Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
+            ? ('Preflight de migracion creado: ' . ($result['status'] ?? 'ok'))
+            : ($result['error'] ?? 'No se pudo ejecutar el preflight.'));
+        Router::redirect('/mail');
+    }
+
+    public function migrationRelayExecute(): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail');
+            return;
+        }
+
+        $adminPassword = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPassword($adminPassword)) {
+            Flash::set('error', 'Password de admin incorrecta.');
+            Router::redirect('/mail');
+            return;
+        }
+
+        $result = MailService::migrateRelayToNode(
+            (int)($_POST['target_node_id'] ?? 0),
+            !empty($_POST['switch_routing']),
+            (int)($_SESSION['panel_user']['id'] ?? 0) ?: null
+        );
+
+        Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
+            ? 'Migracion de relay completada.'
+            : ($result['error'] ?? 'No se pudo migrar el relay.'));
+        Router::redirect('/mail');
+    }
+
+    private function verifyAdminPassword(string $password): bool
+    {
+        if ($password === '') return false;
+        $adminId = (int)($_SESSION['panel_user']['id'] ?? 0);
+        if ($adminId <= 0) return false;
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        return $admin && password_verify($password, (string)$admin['password_hash']);
     }
 
     public function testSend(): void

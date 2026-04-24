@@ -469,6 +469,8 @@ class MailService
             ];
         }
 
+        $relayUserCountRow = $mode === 'relay' ? Database::fetchOne("SELECT COUNT(*) AS cnt FROM mail_relay_users") : ['cnt' => 0];
+
         return [
             'mode' => $mode,
             'host' => '127.0.0.1',
@@ -730,7 +732,9 @@ class MailService
     public static function getRelayUsers(): array
     {
         try {
-            return Database::fetchAll("SELECT id, username, description, enabled, rate_limit_per_hour, allowed_from_domains, created_at, updated_at FROM mail_relay_users ORDER BY username");
+            return Database::fetchAll("SELECT id, username, description, enabled, rate_limit_per_hour, allowed_from_domains,
+                created_at, updated_at, (COALESCE(password_encrypted, '') <> '') AS has_recoverable_password
+                FROM mail_relay_users ORDER BY username");
         } catch (\Throwable) {
             return [];
         }
@@ -818,6 +822,7 @@ class MailService
         Database::insert('mail_relay_users', [
             'username' => $username,
             'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+            'password_encrypted' => ReplicationService::encryptPassword($password),
             'description' => trim($description),
             'enabled' => true,
             'rate_limit_per_hour' => max(1, $limit),
@@ -827,6 +832,156 @@ class MailService
         ]);
 
         return ['ok' => true, 'username' => $username, 'password' => $password];
+    }
+
+    public static function getMailMigrations(int $limit = 10): array
+    {
+        try {
+            $limit = max(1, min(50, $limit));
+            return Database::fetchAll("SELECT mm.*, src.name AS source_node_name, dst.name AS target_node_name
+                FROM mail_migrations mm
+                LEFT JOIN cluster_nodes src ON src.id = mm.source_node_id
+                LEFT JOIN cluster_nodes dst ON dst.id = mm.target_node_id
+                ORDER BY mm.created_at DESC
+                LIMIT {$limit}");
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    public static function createMailMigrationPreflight(string $mode, int $targetNodeId, ?int $createdBy = null): array
+    {
+        $mode = self::normalizeMailMigrationMode($mode);
+        if ($mode === '') return ['ok' => false, 'error' => 'Modo de migracion no valido'];
+
+        $target = ClusterService::getNode($targetNodeId);
+        if (!$target) return ['ok' => false, 'error' => 'Nodo destino no encontrado'];
+
+        $progress = self::buildMailMigrationPreflight($mode, $target);
+        $status = empty($progress['blocking']) ? 'preflight_ok' : 'blocked';
+        $id = self::insertMailMigration([
+            'mode' => $mode,
+            'source_node_id' => self::currentMailSourceNodeId($mode),
+            'target_node_id' => $targetNodeId,
+            'status' => $status,
+            'stage' => 'preflight',
+            'dry_run' => true,
+            'switch_routing' => false,
+            'domains_json' => json_encode($progress['domains'] ?? []),
+            'progress_json' => json_encode($progress),
+            'error_message' => $progress['summary'] ?? null,
+            'created_by' => $createdBy,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        return ['ok' => true, 'id' => $id, 'status' => $status, 'progress' => $progress];
+    }
+
+    public static function migrateRelayToNode(int $targetNodeId, bool $switchRouting, ?int $createdBy = null): array
+    {
+        $target = ClusterService::getNode($targetNodeId);
+        if (!$target) return ['ok' => false, 'error' => 'Nodo destino no encontrado'];
+
+        $preflight = self::buildMailMigrationPreflight('relay', $target);
+        if (!empty($preflight['blocking'])) {
+            $id = self::insertMailMigration([
+                'mode' => 'relay',
+                'source_node_id' => self::currentMailSourceNodeId('relay'),
+                'target_node_id' => $targetNodeId,
+                'status' => 'blocked',
+                'stage' => 'preflight',
+                'dry_run' => false,
+                'switch_routing' => $switchRouting,
+                'domains_json' => json_encode($preflight['domains'] ?? []),
+                'progress_json' => json_encode($preflight),
+                'error_message' => $preflight['summary'] ?? 'Preflight bloqueado',
+                'created_by' => $createdBy,
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+            return ['ok' => false, 'id' => $id, 'error' => $preflight['summary'] ?? 'Preflight bloqueado', 'progress' => $preflight];
+        }
+
+        $id = self::insertMailMigration([
+            'mode' => 'relay',
+            'source_node_id' => self::currentMailSourceNodeId('relay'),
+            'target_node_id' => $targetNodeId,
+            'status' => 'running',
+            'stage' => 'importing_relay',
+            'dry_run' => false,
+            'switch_routing' => $switchRouting,
+            'domains_json' => json_encode($preflight['domains'] ?? []),
+            'progress_json' => json_encode($preflight),
+            'created_by' => $createdBy,
+            'started_at' => date('Y-m-d H:i:s'),
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        $progress = $preflight;
+        $progress['imported_domains'] = [];
+        $progress['imported_users'] = [];
+
+        try {
+            foreach (Database::fetchAll("SELECT * FROM mail_relay_domains ORDER BY domain") as $domain) {
+                $privateKey = self::decryptOrPlainPem((string)($domain['dkim_private_key'] ?? ''));
+                if ($privateKey === '') {
+                    throw new \RuntimeException('No se puede migrar DKIM de ' . $domain['domain'] . ': clave privada no recuperable');
+                }
+                $result = self::callMailNodeAction($target, 'mail_relay_import_domain', [
+                    'domain' => (string)$domain['domain'],
+                    'selector' => (string)($domain['dkim_selector'] ?? 'default'),
+                    'dkim_private_key' => $privateKey,
+                    'dkim_public_key' => (string)($domain['dkim_public_key'] ?? ''),
+                ], 120);
+                if (!($result['ok'] ?? false)) {
+                    throw new \RuntimeException('Error importando dominio relay ' . $domain['domain'] . ': ' . ($result['error'] ?? 'error remoto'));
+                }
+                $progress['imported_domains'][] = (string)$domain['domain'];
+            }
+
+            foreach (Database::fetchAll("SELECT * FROM mail_relay_users ORDER BY username") as $user) {
+                $password = ReplicationService::decryptPassword((string)($user['password_encrypted'] ?? ''));
+                if ($password === '') {
+                    throw new \RuntimeException('Usuario relay legacy sin password recuperable: ' . $user['username'] . '. Regenera ese usuario antes de migrar.');
+                }
+                $result = self::callMailNodeAction($target, 'mail_relay_import_user', [
+                    'username' => (string)$user['username'],
+                    'password' => $password,
+                ], 120);
+                if (!($result['ok'] ?? false)) {
+                    throw new \RuntimeException('Error importando usuario relay ' . $user['username'] . ': ' . ($result['error'] ?? 'error remoto'));
+                }
+                $progress['imported_users'][] = (string)$user['username'];
+            }
+
+            if ($switchRouting) {
+                Settings::set('mail_setup_node_id', (string)$targetNodeId);
+                $progress['routing_switched'] = true;
+            }
+
+            Database::update('mail_migrations', [
+                'status' => 'completed',
+                'stage' => 'completed',
+                'progress_json' => json_encode($progress),
+                'completed_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ], 'id = :id', ['id' => $id]);
+
+            return ['ok' => true, 'id' => $id, 'progress' => $progress];
+        } catch (\Throwable $e) {
+            $progress['error'] = $e->getMessage();
+            Database::update('mail_migrations', [
+                'status' => 'failed',
+                'stage' => 'failed',
+                'progress_json' => json_encode($progress),
+                'error_message' => $e->getMessage(),
+                'completed_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ], 'id = :id', ['id' => $id]);
+            return ['ok' => false, 'id' => $id, 'error' => $e->getMessage(), 'progress' => $progress];
+        }
     }
 
     public static function deleteRelayUser(int $id): array
@@ -866,6 +1021,107 @@ class MailService
         return $entries;
     }
 
+    private static function normalizeMailMigrationMode(string $mode): string
+    {
+        $mode = strtolower(trim($mode));
+        return in_array($mode, ['satellite', 'relay', 'full'], true) ? $mode : '';
+    }
+
+    private static function decryptOrPlainPem(string $stored): string
+    {
+        $decrypted = ReplicationService::decryptPassword($stored);
+        if ($decrypted !== '') return $decrypted;
+        return str_contains($stored, 'BEGIN') ? $stored : '';
+    }
+
+    private static function currentMailSourceNodeId(string $mode): ?int
+    {
+        $setting = Settings::get('mail_setup_node_id', 'local');
+        if ($mode === 'relay' && ctype_digit((string)$setting)) {
+            return (int)$setting;
+        }
+        return null;
+    }
+
+    private static function insertMailMigration(array $data): int
+    {
+        $columns = array_keys($data);
+        $quoted = implode(', ', $columns);
+        $placeholders = implode(', ', array_map(static fn($k) => ':' . $k, $columns));
+        $stmt = Database::query("INSERT INTO mail_migrations ({$quoted}) VALUES ({$placeholders}) RETURNING id", $data);
+        return (int)$stmt->fetchColumn();
+    }
+
+    private static function callMailNodeAction(array $node, string $action, array $payload, int $timeout = 60): array
+    {
+        $token = ReplicationService::decryptPassword($node['auth_token'] ?? '');
+        $result = ClusterService::callNodeDirect((string)$node['api_url'], $token, 'POST', 'api/cluster/action', [
+            'action' => $action,
+            'payload' => $payload,
+        ], $timeout, [
+            'metadata' => $node['metadata'] ?? null,
+            'node_id' => (int)($node['id'] ?? 0),
+        ]);
+        return $result['data'] ?? ['ok' => false, 'error' => $result['error'] ?? 'Remote action failed'];
+    }
+
+    private static function buildMailMigrationPreflight(string $mode, array $target): array
+    {
+        $blocking = [];
+        $warnings = [];
+        $domains = [];
+        $sourceNodeId = self::currentMailSourceNodeId($mode);
+
+        if ($sourceNodeId !== null && $sourceNodeId === (int)$target['id']) {
+            $blocking[] = 'El nodo destino ya es el nodo activo para este modo.';
+        }
+
+        if ($mode === 'relay') {
+            $domains = array_map(static fn($r) => $r['domain'], Database::fetchAll("SELECT domain FROM mail_relay_domains ORDER BY domain"));
+            $legacy = Database::fetchOne("SELECT COUNT(*) AS cnt FROM mail_relay_users WHERE COALESCE(password_encrypted, '') = ''");
+            if ((int)($legacy['cnt'] ?? 0) > 0) {
+                $blocking[] = (int)$legacy['cnt'] . ' usuario(s) relay legacy no tienen password recuperable. Regeneralos antes de migrar.';
+            }
+            $missingDkim = Database::fetchOne("SELECT COUNT(*) AS cnt FROM mail_relay_domains WHERE COALESCE(dkim_private_key, '') = ''");
+            if ((int)($missingDkim['cnt'] ?? 0) > 0) {
+                $blocking[] = (int)$missingDkim['cnt'] . ' dominio(s) relay no tienen clave DKIM privada recuperable.';
+            }
+        } elseif ($mode === 'full') {
+            $domains = array_map(static fn($r) => $r['domain'], Database::fetchAll("SELECT domain FROM mail_domains ORDER BY domain"));
+            $blocking[] = 'La migracion full mail requiere rsync de Maildirs, pausa de cola y corte controlado. En esta version solo se ejecuta preflight.';
+        } elseif ($mode === 'satellite') {
+            $warnings[] = 'Satellite no tiene buzones. La migracion copia/recrea Postfix + OpenDKIM; confirma DKIM antes de cambiar el emisor.';
+        }
+
+        $remote = self::callMailNodeAction($target, 'mail_migration_preflight', ['mode' => $mode], 30);
+        if (!($remote['ok'] ?? false)) {
+            $blocking[] = 'No se pudo consultar el nodo destino: ' . ($remote['error'] ?? 'error remoto');
+        } else {
+            $remoteData = $remote['data'] ?? $remote;
+            foreach (($remoteData['blocking'] ?? []) as $issue) {
+                $blocking[] = (string)$issue;
+            }
+            foreach (($remoteData['warnings'] ?? []) as $warning) {
+                $warnings[] = (string)$warning;
+            }
+        }
+
+        return [
+            'summary' => empty($blocking) ? 'Preflight correcto' : implode(' ', $blocking),
+            'mode' => $mode,
+            'source_node_id' => $sourceNodeId,
+            'target_node_id' => (int)$target['id'],
+            'target_node' => $target['name'] ?? ('#' . (int)$target['id']),
+            'domains' => $domains,
+            'domain_count' => count($domains),
+            'relay_user_count' => (int)($relayUserCountRow['cnt'] ?? 0),
+            'blocking' => $blocking,
+            'warnings' => $warnings,
+            'remote' => $remote['data'] ?? $remote,
+            'checked_at' => gmdate('c'),
+        ];
+    }
+
     private static function runRelayNodeAction(string $action, array $payload): array
     {
         $target = Settings::get('mail_setup_node_id', 'local');
@@ -886,6 +1142,9 @@ class MailService
             'mail_relay_delete_domain' => self::nodeRelayDeleteDomain($payload),
             'mail_relay_create_user' => self::nodeRelayCreateUser($payload),
             'mail_relay_delete_user' => self::nodeRelayDeleteUser($payload),
+            'mail_relay_import_domain' => self::nodeRelayImportDomain($payload),
+            'mail_relay_import_user' => self::nodeRelayImportUser($payload),
+            'mail_migration_preflight' => self::nodeMailMigrationPreflight($payload),
             default => ['ok' => false, 'error' => 'Unknown relay action'],
         };
     }
@@ -924,6 +1183,78 @@ class MailService
         return ['ok' => true];
     }
 
+    public static function nodeMailMigrationPreflight(array $payload): array
+    {
+        $mode = self::normalizeMailMigrationMode((string)($payload['mode'] ?? ''));
+        if ($mode === '') return ['ok' => false, 'error' => 'Modo de migracion no valido'];
+
+        $blocking = [];
+        $warnings = [];
+        $cmdOk = static fn(string $cmd): bool => trim((string)shell_exec('command -v ' . escapeshellarg($cmd) . ' 2>/dev/null')) !== '';
+        $checks = [
+            'postfix' => $cmdOk('postfix') || is_file('/usr/sbin/postfix'),
+            'opendkim' => $cmdOk('opendkim') || is_file('/usr/sbin/opendkim'),
+            'saslpasswd2' => $cmdOk('saslpasswd2'),
+            'rsync' => $cmdOk('rsync'),
+            'maildirs' => is_dir('/var/mail/vhosts'),
+            'sasldb2' => is_file('/etc/sasldb2'),
+        ];
+
+        if (in_array($mode, ['relay', 'satellite', 'full'], true)) {
+            if (!$checks['postfix']) $blocking[] = 'Postfix no esta instalado en el nodo destino.';
+            if (!$checks['opendkim']) $blocking[] = 'OpenDKIM no esta instalado en el nodo destino.';
+        }
+        if ($mode === 'relay' && !$checks['saslpasswd2']) {
+            $blocking[] = 'saslpasswd2 no esta disponible; no se pueden importar usuarios SMTP.';
+        }
+        if ($mode === 'full') {
+            if (!$checks['rsync']) $blocking[] = 'rsync no esta instalado; no se pueden copiar Maildirs.';
+            if (!$checks['maildirs']) $warnings[] = '/var/mail/vhosts no existe todavia; se creara al preparar el nodo.';
+        }
+
+        $df = trim((string)shell_exec("df -Pm /var/mail 2>/dev/null | awk 'NR==2{print $4}'"));
+        $freeMb = is_numeric($df) ? (int)$df : null;
+
+        return [
+            'ok' => empty($blocking),
+            'mode' => $mode,
+            'hostname' => gethostname() ?: php_uname('n'),
+            'mail_mode_setting' => Settings::get('mail_mode', ''),
+            'mail_setup_node_id' => Settings::get('mail_setup_node_id', 'local'),
+            'checks' => $checks,
+            'free_mb' => $freeMb,
+            'blocking' => $blocking,
+            'warnings' => $warnings,
+        ];
+    }
+
+    public static function nodeRelayImportDomain(array $payload): array
+    {
+        $domain = self::normalizeDomain((string)($payload['domain'] ?? ''));
+        $selector = preg_replace('/[^a-zA-Z0-9_-]/', '', (string)($payload['selector'] ?? 'default')) ?: 'default';
+        $private = (string)($payload['dkim_private_key'] ?? '');
+        $public = preg_replace('/\s+/', '', (string)($payload['dkim_public_key'] ?? ''));
+        if ($domain === '' || $private === '') {
+            return ['ok' => false, 'error' => 'Dominio o clave DKIM no validos'];
+        }
+
+        $dkimDir = "/etc/opendkim/keys/{$domain}";
+        @mkdir($dkimDir, 0700, true);
+        file_put_contents("{$dkimDir}/{$selector}.private", $private);
+        chmod("{$dkimDir}/{$selector}.private", 0600);
+        if ($public !== '') {
+            file_put_contents("{$dkimDir}/{$selector}.txt", "{$selector}._domainkey IN TXT \"v=DKIM1; k=rsa; p={$public}\"\n");
+        }
+        shell_exec('chown -R opendkim:opendkim ' . escapeshellarg($dkimDir) . ' 2>&1');
+
+        self::ensureRelayOpenDkimFiles(Settings::get('mail_relay_wireguard_cidr', '10.10.70.0/24'));
+        self::upsertLine('/etc/opendkim/signing.table', "*@{$domain} {$selector}._domainkey.{$domain}", "*@{$domain}");
+        self::upsertLine('/etc/opendkim/key.table', "{$selector}._domainkey.{$domain} {$domain}:{$selector}:{$dkimDir}/{$selector}.private", "{$selector}._domainkey.{$domain}");
+        shell_exec('systemctl reload opendkim 2>&1 || systemctl restart opendkim 2>&1 || true');
+
+        return ['ok' => true, 'domain' => $domain, 'selector' => $selector];
+    }
+
     public static function nodeRelayCreateUser(array $payload): array
     {
         $username = strtolower(trim((string)($payload['username'] ?? '')));
@@ -940,6 +1271,11 @@ class MailService
         shell_exec('chgrp postfix /etc/sasldb2 2>/dev/null || true; chmod 640 /etc/sasldb2 2>/dev/null || true');
         shell_exec('systemctl reload postfix 2>&1 || true');
         return ['ok' => true, 'username' => $username, 'realm' => $realm];
+    }
+
+    public static function nodeRelayImportUser(array $payload): array
+    {
+        return self::nodeRelayCreateUser($payload);
     }
 
     public static function nodeRelayDeleteUser(array $payload): array

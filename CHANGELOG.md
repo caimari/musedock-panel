@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.85] — 2026-04-24
+
+### New
+- Relay privado: los nuevos usuarios SMTP guardan la contraseña cifrada y recuperable en BD para permitir futuras migraciones sin regenerar credenciales.
+- `/mail`: nuevo migrador de correo con preflight seguro para `satellite`, `relay` y `full`.
+- `/mail`: migracion operativa de `relay privado` a otro nodo, importando dominios DKIM y usuarios SASL recuperables.
+
+### Improved
+- `/mail`: la tabla de usuarios relay indica si la credencial es recuperable (`cifrada`) o legacy, para saber si se puede migrar sin reset.
+- Migrador full mail: queda bloqueado en preflight con aviso explicito hasta implementar rsync/corte controlado de Maildirs.
+
 ## [1.0.84] — 2026-04-24
 
 ### Improved

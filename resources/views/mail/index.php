@@ -214,6 +214,7 @@
                                     <th>Usuario</th>
                                     <th>Descripcion</th>
                                     <th>Limite</th>
+                                    <th>Recovery</th>
                                     <th>Estado</th>
                                     <th></th>
                                 </tr>
@@ -224,6 +225,13 @@
                                     <td class="fw-semibold"><?= View::e($ru['username']) ?></td>
                                     <td class="text-muted"><?= View::e($ru['description'] ?: '-') ?></td>
                                     <td><?= (int)($ru['rate_limit_per_hour'] ?? 200) ?>/h</td>
+                                    <td>
+                                        <?php if ($relayTruthy($ru['has_recoverable_password'] ?? false)): ?>
+                                            <span class="badge bg-success">cifrada</span>
+                                        <?php else: ?>
+                                            <span class="badge bg-warning text-dark" title="Usuario creado antes de guardar password recuperable. Regeneralo antes de migrar.">legacy</span>
+                                        <?php endif; ?>
+                                    </td>
                                     <td><?= $relayTruthy($ru['enabled'] ?? true) ? '<span class="badge bg-success">Activo</span>' : '<span class="badge bg-secondary">Off</span>' ?></td>
                                     <td class="text-end">
                                         <?php if (!$isSlave): ?>
@@ -267,6 +275,121 @@
                 <?php endif; ?>
             </div>
         </div>
+    </div>
+</div>
+<?php endif; ?>
+
+<?php if (!$isSlave): ?>
+<div class="card mb-4" style="border-color:rgba(59,130,246,.22);">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-truck me-2"></i>Migrador de correo</span>
+        <span class="text-muted small">Preflight seguro y migracion relay privado</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-lg-6">
+                <div class="p-3 rounded h-100" style="background:#0f172a;border:1px solid #334155;">
+                    <div class="fw-semibold mb-2">Preflight</div>
+                    <div class="small text-muted mb-3">
+                        Comprueba el nodo destino antes de mover nada: paquetes instalados, claves recuperables, usuarios SASL, espacio y bloqueos conocidos.
+                    </div>
+                    <form method="post" action="/mail/migrations/preflight" class="row g-2 align-items-end">
+                        <?= View::csrf() ?>
+                        <div class="col-md-4">
+                            <label class="form-label small">Modo</label>
+                            <select name="mode" class="form-select form-select-sm">
+                                <option value="relay" <?= ($mailMode ?? '') === 'relay' ? 'selected' : '' ?>>Relay privado</option>
+                                <option value="satellite" <?= ($mailMode ?? '') === 'satellite' ? 'selected' : '' ?>>Solo envio</option>
+                                <option value="full" <?= ($mailMode ?? '') === 'full' ? 'selected' : '' ?>>Correo completo</option>
+                            </select>
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label small">Nodo destino</label>
+                            <select name="target_node_id" class="form-select form-select-sm" required>
+                                <option value="">Selecciona nodo</option>
+                                <?php foreach (($clusterNodes ?? []) as $node): ?>
+                                    <option value="<?= (int)$node['id'] ?>"><?= View::e($node['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-outline-info btn-sm w-100">Comprobar</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+
+            <div class="col-lg-6">
+                <div class="p-3 rounded h-100" style="background:#0f172a;border:1px solid #334155;">
+                    <div class="fw-semibold mb-2">Migrar relay privado</div>
+                    <div class="small text-muted mb-3">
+                        Copia dominios DKIM y usuarios SASL al nodo destino. Los usuarios antiguos sin password cifrada deben regenerarse antes.
+                    </div>
+                    <form method="post" action="/mail/migrations/relay/execute" class="row g-2 align-items-end">
+                        <?= View::csrf() ?>
+                        <div class="col-md-5">
+                            <label class="form-label small">Nodo destino</label>
+                            <select name="target_node_id" class="form-select form-select-sm" required>
+                                <option value="">Selecciona nodo</option>
+                                <?php foreach (($clusterNodes ?? []) as $node): ?>
+                                    <option value="<?= (int)$node['id'] ?>"><?= View::e($node['name']) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small">Password admin</label>
+                            <input name="admin_password" type="password" class="form-control form-control-sm" autocomplete="new-password" required>
+                        </div>
+                        <div class="col-md-3">
+                            <button class="btn btn-warning btn-sm w-100" onclick="return confirm('Migrar relay privado al nodo destino?')">Migrar</button>
+                        </div>
+                        <div class="col-12">
+                            <label class="small text-muted">
+                                <input type="checkbox" name="switch_routing" value="1" class="form-check-input me-1">
+                                Cambiar el nodo activo del relay al terminar
+                            </label>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <?php if (!empty($mailMigrations)): ?>
+            <div class="table-responsive mt-3">
+                <table class="table table-sm align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Modo</th>
+                            <th>Destino</th>
+                            <th>Estado</th>
+                            <th>Etapa</th>
+                            <th>Resumen</th>
+                            <th>Fecha</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($mailMigrations as $mig): ?>
+                            <?php
+                                $progress = json_decode((string)($mig['progress_json'] ?? '{}'), true);
+                                $progress = is_array($progress) ? $progress : [];
+                                $status = (string)($mig['status'] ?? 'pending');
+                                $statusClass = $status === 'completed' || $status === 'preflight_ok' ? 'success' : (in_array($status, ['failed', 'blocked'], true) ? 'danger' : 'warning');
+                            ?>
+                            <tr>
+                                <td>#<?= (int)$mig['id'] ?></td>
+                                <td><?= View::e($mig['mode'] ?? '-') ?></td>
+                                <td><?= View::e($mig['target_node_name'] ?? '-') ?></td>
+                                <td><span class="badge bg-<?= $statusClass ?>"><?= View::e($status) ?></span></td>
+                                <td class="text-muted"><?= View::e($mig['stage'] ?? '-') ?></td>
+                                <td class="small text-muted"><?= View::e($progress['summary'] ?? ($mig['error_message'] ?? '-')) ?></td>
+                                <td class="small text-muted"><?= View::e($mig['created_at'] ?? '') ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
     </div>
 </div>
 <?php endif; ?>

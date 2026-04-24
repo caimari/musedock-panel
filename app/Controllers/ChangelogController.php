@@ -20,6 +20,35 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.85',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Relay privado: los nuevos usuarios SMTP guardan la password cifrada y recuperable para poder migrar el relay sin reconfigurar apps cliente',
+                            '`/mail`: nuevo migrador de correo con preflight seguro para `satellite`, `relay` y `full`',
+                            '`/mail`: migracion de `relay privado` a otro nodo, importando dominios DKIM y usuarios SASL recuperables',
+                        ],
+                        'en' => [
+                            'Private relay: new SMTP users store a recoverable encrypted password so the relay can be migrated without reconfiguring client apps',
+                            '`/mail`: new mail migrator with safe preflight for `satellite`, `relay` and `full`',
+                            '`/mail`: private relay migration to another node, importing DKIM domains and recoverable SASL users',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            '`/mail`: la tabla de usuarios relay indica si la credencial es recuperable (`cifrada`) o legacy',
+                            'Migrador full mail: bloqueado en preflight hasta implementar rsync/corte controlado de Maildirs',
+                        ],
+                        'en' => [
+                            '`/mail`: relay users table shows whether credentials are recoverable (`encrypted`) or legacy',
+                            'Full mail migrator: blocked at preflight until controlled Maildir rsync/cutover is implemented',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.84',
                 'date' => '2026-04-24',
                 'badge' => 'primary',

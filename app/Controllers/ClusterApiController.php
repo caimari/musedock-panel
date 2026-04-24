@@ -362,6 +362,9 @@ class ClusterApiController
                 'mail_relay_delete_domain' => MailService::nodeRelayDeleteDomain($payload),
                 'mail_relay_create_user'   => MailService::nodeRelayCreateUser($payload),
                 'mail_relay_delete_user'   => MailService::nodeRelayDeleteUser($payload),
+                'mail_migration_preflight' => MailService::nodeMailMigrationPreflight($payload),
+                'mail_relay_import_domain' => MailService::nodeRelayImportDomain($payload),
+                'mail_relay_import_user'   => MailService::nodeRelayImportUser($payload),
 
                 // ── Standby management ─────────────────────
                 'set-standby' => $this->handleSetStandby($payload),
