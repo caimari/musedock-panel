@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.82] — 2026-04-24
+
+### New
+- Mail setup: selector de modo `Solo Envio (Satellite)`, `Correo Completo` y `SMTP Externo`, con explicaciones claras en la UI.
+- Satellite mode: instalacion outbound-only con Postfix + OpenDKIM, sin Dovecot/Rspamd y sin abrir puertos de entrada.
+- SMTP externo: guarda proveedor SMTP cifrado y genera `config/smtp-relay.json` para integraciones locales.
+- `/mail`: nueva seccion de entregabilidad DNS con SPF, DKIM, DMARC, A, PTR/rDNS, blacklists y registros recomendados copiables.
+- Endpoint local `GET /api/internal/smtp-config` para apps PHP/Laravel del mismo servidor, protegido por token y limitado a localhost.
+
+### Improved
+- Healthcheck de nodos mail: distingue `full`, `satellite` y `external`; Satellite/SMTP externo ya no se degradan por no tener Dovecot, DB de buzones ni puertos entrantes.
+- Ejemplo `config/examples/laravel-mail-config.php` para consumir la configuracion SMTP desde apps Laravel locales.
+
 ## [1.0.81] — 2026-04-24
 
 ### New

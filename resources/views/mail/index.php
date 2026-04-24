@@ -55,6 +55,46 @@
     <?php endforeach; ?>
 <?php endif; ?>
 
+<?php
+    $modeLabels = [
+        'satellite' => ['Solo Envio (Satellite)', 'Postfix + OpenDKIM solo para enviar. No recibe correo ni abre puertos de entrada. Ideal para SaaS y notificaciones.'],
+        'full' => ['Correo Completo', 'Envia y recibe correo con buzones IMAP. Requiere MX, PTR y puertos 25/587/993 abiertos.'],
+        'external' => ['SMTP Externo', 'Usa un proveedor como SES, Mailgun o Brevo. No instala servidor de correo local.'],
+    ];
+    $modeInfo = $modeLabels[$mailMode ?? 'full'] ?? $modeLabels['full'];
+?>
+<div class="card mb-4" style="border-color: rgba(56,189,248,.28);">
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+            <div>
+                <div class="text-muted small mb-1">Modo actual de correo</div>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-info"><?= View::e($modeInfo[0]) ?></span>
+                    <span class="text-muted small"><?= View::e($modeInfo[1]) ?></span>
+                </div>
+            </div>
+            <?php if (!$isSlave): ?>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="/mail?setup=1" class="btn btn-outline-light btn-sm"><i class="bi bi-sliders me-1"></i>Cambiar modo</a>
+                <button class="btn btn-outline-info btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#smtpIntegrationBox">
+                    <i class="bi bi-code-square me-1"></i>Integracion apps
+                </button>
+            </div>
+            <?php endif; ?>
+        </div>
+        <div class="collapse mt-3" id="smtpIntegrationBox">
+            <div class="p-3 rounded" style="background:#0f172a;border:1px solid #334155;">
+                <div class="fw-semibold mb-2">Endpoint local para apps Laravel/PHP</div>
+                <div class="small text-muted mb-2">
+                    Solo responde desde localhost. Las apps del mismo servidor pueden leer esta configuracion para no duplicar SMTP en cada <code>.env</code>.
+                </div>
+                <code>GET http://localhost:8444/api/internal/smtp-config</code>
+                <div class="small mt-2">Bearer token: <code><?= View::e(substr((string)($internalSmtpToken ?? ''), 0, 10)) ?>...<?= View::e(substr((string)($internalSmtpToken ?? ''), -6)) ?></code></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Stats cards -->
 <div class="row g-3 mb-4">
     <div class="col-md-3">
@@ -222,6 +262,101 @@
     <?php endif; ?>
 <?php endif; ?>
 
+<!-- Deliverability -->
+<div class="card mb-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-shield-check me-2"></i>Entregabilidad DNS</span>
+        <span class="text-muted small">SPF, DKIM, DMARC, PTR y blacklists</span>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            Esta seccion te dice, en cristiano, si el dominio esta preparado para enviar sin caer en spam.
+            Los checks leen DNS en tiempo real; los registros recomendados son los que debes copiar en tu proveedor DNS.
+        </p>
+
+        <?php if (($mailMode ?? 'full') === 'external'): ?>
+            <div class="alert alert-info" style="background:rgba(56,189,248,.12);border-color:rgba(56,189,248,.25);">
+                <strong>SMTP externo:</strong> la reputacion, DKIM y entrega final dependen principalmente del proveedor configurado.
+                Aqui se muestran los DNS del remitente si hay <code>from_address</code>.
+            </div>
+        <?php endif; ?>
+
+        <?php if (empty($deliverabilityRows)): ?>
+            <div class="text-muted">No hay dominios de mail ni dominio remitente configurado todavia.</div>
+        <?php else: ?>
+            <?php foreach ($deliverabilityRows as $row): ?>
+                <?php
+                    $checks = $row['checks'] ?? [];
+                    $recommendedLines = [];
+                    foreach (($row['recommended'] ?? []) as $rec) {
+                        $name = $rec['name'] ?? '';
+                        $value = $rec['value'] ?? '';
+                        $type = $rec['type'] ?? '';
+                        $prio = isset($rec['priority']) ? (' ' . $rec['priority']) : '';
+                        $recommendedLines[] = trim("{$type}{$prio} {$name} {$value}");
+                    }
+                    $copyText = implode("\n", $recommendedLines);
+                    $badge = static function ($check) {
+                        $ok = $check['ok'] ?? null;
+                        if ($ok === true) return '<span class="badge bg-success">OK</span>';
+                        if ($ok === false) return '<span class="badge bg-warning text-dark">Revisar</span>';
+                        return '<span class="badge bg-secondary">N/D</span>';
+                    };
+                ?>
+                <div class="p-3 rounded mb-3" style="background:#0f172a;border:1px solid #334155;">
+                    <div class="d-flex flex-wrap justify-content-between gap-2 mb-3">
+                        <div>
+                            <div class="fw-semibold"><?= View::e($row['domain'] ?? '') ?></div>
+                            <div class="small text-muted">
+                                Modo: <?= View::e($row['mode'] ?? ($mailMode ?? 'full')) ?> ·
+                                Host salida: <code><?= View::e($row['mail_hostname'] ?? '-') ?></code> ·
+                                IP: <code><?= View::e($row['ip'] ?? '-') ?></code>
+                            </div>
+                        </div>
+                        <button class="btn btn-outline-light btn-sm" type="button" onclick="copyDnsRecords(this)" data-records="<?= View::e($copyText) ?>">
+                            <i class="bi bi-clipboard me-1"></i>Copiar DNS
+                        </button>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <?php foreach (['spf' => 'SPF', 'dkim' => 'DKIM', 'dmarc' => 'DMARC', 'a' => 'A hostname', 'ptr' => 'PTR/rDNS'] as $key => $label): ?>
+                            <?php $c = $checks[$key] ?? ['ok' => null, 'message' => 'No comprobado', 'value' => '']; ?>
+                            <div class="col-md-2 col-sm-4">
+                                <div class="small text-muted"><?= $label ?></div>
+                                <div><?= $badge($c) ?></div>
+                                <div class="small text-muted text-truncate" title="<?= View::e($c['value'] ?? '') ?>"><?= View::e($c['message'] ?? '') ?></div>
+                            </div>
+                        <?php endforeach; ?>
+                        <?php $bl = $checks['blacklists'] ?? ['ok' => null, 'message' => 'No comprobado']; ?>
+                        <div class="col-md-2 col-sm-4">
+                            <div class="small text-muted">Blacklists</div>
+                            <div><?= $badge($bl) ?></div>
+                            <div class="small text-muted text-truncate" title="<?= View::e($bl['message'] ?? '') ?>"><?= View::e($bl['message'] ?? '') ?></div>
+                        </div>
+                    </div>
+
+                    <div class="small text-muted mb-1">Registros recomendados</div>
+                    <pre class="mb-0 p-2 rounded small" style="background:#020617;color:#cbd5e1;white-space:pre-wrap;"><?= View::e($copyText) ?></pre>
+                </div>
+            <?php endforeach; ?>
+        <?php endif; ?>
+
+        <?php if (!$isSlave): ?>
+        <form method="post" action="/mail/test-send" class="row g-2 align-items-end mt-3">
+            <?= View::csrf() ?>
+            <div class="col-md-5">
+                <label class="form-label">Test de envio</label>
+                <input type="email" name="test_email" class="form-control" placeholder="tu@email.com" required>
+                <div class="form-text text-muted">Envia un correo simple y mira si Postfix lo acepta, lo envia, lo difiere o lo rebota.</div>
+            </div>
+            <div class="col-md-auto">
+                <button class="btn btn-outline-info"><i class="bi bi-send me-1"></i>Enviar test</button>
+            </div>
+        </form>
+        <?php endif; ?>
+    </div>
+</div>
+
 <!-- Domains list -->
 <div class="mb-4"></div>
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -294,8 +429,17 @@
     </div>
 </div>
 
-<?php if (!empty($mailNodes) || ($mailLocalConfigured ?? false)): ?>
 <script>
+function copyDnsRecords(btn) {
+    const text = btn.getAttribute('data-records') || '';
+    navigator.clipboard.writeText(text).then(() => {
+        const original = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Copiado';
+        setTimeout(() => btn.innerHTML = original, 1500);
+    }).catch(() => alert(text));
+}
+
+<?php if (!empty($mailNodes) || ($mailLocalConfigured ?? false)): ?>
 function rotateMailDbPassword() {
     const pwd = prompt('Esta accion regenera la contraseña de musedock_mail en el master y la propaga a todos los nodos de mail.\n\nIntroduce tu contraseña del panel para confirmar:');
     if (!pwd) return;
@@ -334,5 +478,5 @@ function rotateMailDbPassword() {
             alert('Error de conexion: ' + err.message);
         });
 }
-</script>
 <?php endif; ?>
+</script>

@@ -25,8 +25,13 @@ spl_autoload_register(function ($class) {
 $config = require PANEL_ROOT . '/config/panel.php';
 define('PANEL_VERSION', $config['version']);
 
-// IP allowlist (ALLOWED_IPS in .env)
 $requestPath = strtok($_SERVER['REQUEST_URI'] ?? '/', '?') ?: '/';
+if (rtrim($requestPath, '/') === '/api/internal/smtp-config') {
+    (new \MuseDockPanel\Controllers\MailController())->internalSmtpConfig();
+    exit;
+}
+
+// IP allowlist (ALLOWED_IPS in .env)
 $allowedIps = array_values($config['allowed_ips'] ?? []);
 if (!empty($allowedIps)) {
     $clientIp = (static function (): string {
@@ -401,6 +406,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/mail/domains/{id}/aliases/store', 'MailController@aliasStore');
 \MuseDockPanel\Router::post('/mail/domains/{id}/aliases/{alias_id}/delete', 'MailController@aliasDelete');
 \MuseDockPanel\Router::get('/mail/nodes/health', 'MailController@nodeHealth');
+\MuseDockPanel\Router::post('/mail/test-send', 'MailController@testSend');
 
 // Settings
 \MuseDockPanel\Router::get('/settings/services', 'SettingsController@services');

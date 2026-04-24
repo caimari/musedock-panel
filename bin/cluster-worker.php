@@ -182,7 +182,10 @@ if (Settings::get('mail_enabled', '0') === '1') {
             } else {
                 $failedSvcs = [];
                 foreach ($health['services'] ?? [] as $svc => $info) {
-                    if (!$info['ok']) $failedSvcs[] = "{$svc} (port {$info['port']}): {$info['error']}";
+                    if (!$info['ok']) {
+                        $portLabel = isset($info['port']) ? " (port {$info['port']})" : '';
+                        $failedSvcs[] = "{$svc}{$portLabel}: " . ($info['error'] ?? '');
+                    }
                 }
                 $dbHealth = $health['db_health'] ?? [];
                 if (!empty($dbHealth['message'])) {

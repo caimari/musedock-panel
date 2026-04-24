@@ -122,6 +122,8 @@ $dbUser    = $payload['db_user'] ?? 'musedock_mail';
 $dbPass    = $payload['db_pass'] ?? '';
 $hostname  = $payload['mail_hostname'] ?? '';
 $sslMode   = $payload['ssl_mode'] ?? 'letsencrypt';
+$mailMode  = in_array(($payload['mail_mode'] ?? 'full'), ['satellite', 'full', 'external'], true) ? $payload['mail_mode'] : 'full';
+$outboundDomain = strtolower(trim((string)($payload['outbound_domain'] ?? '')));
 $localMode = !empty($payload['local_mode']);
 $vmailUid  = 5000;
 $vmailGid  = 5000;
@@ -132,10 +134,166 @@ $GLOBALS['_startedAt'] = date('Y-m-d H:i:s');
 
 logLine($logFile, 'INFO', '═══════════════════════════════════════════════════');
 logLine($logFile, 'INFO', "Mail node setup started — task: {$taskId}");
-logLine($logFile, 'INFO', "PID: " . getmypid() . " | hostname: {$hostname} | ssl: {$sslMode}");
+logLine($logFile, 'INFO', "PID: " . getmypid() . " | hostname: {$hostname} | ssl: {$sslMode} | mail_mode: {$mailMode}");
 logLine($logFile, 'INFO', "DB: {$dbUser}@{$dbHost}:{$dbPort}/{$dbName}");
 logLine($logFile, 'INFO', 'Modo: ' . ($localMode ? 'LOCAL (master)' : 'REMOTO (nodo)'));
 logLine($logFile, 'INFO', '═══════════════════════════════════════════════════');
+
+if ($outboundDomain === '' && str_contains($hostname, '.')) {
+    $parts = explode('.', $hostname);
+    $outboundDomain = implode('.', array_slice($parts, -2));
+}
+
+if ($mailMode === 'external') {
+    $step = 1;
+    writeProgress($progressFile, ['id' => 'save_external_smtp', 'label' => 'Guardar SMTP externo'], $step, 1, 'running', $errors);
+    $smtp = $payload['smtp'] ?? [];
+    $smtpHost = trim((string)($smtp['host'] ?? ''));
+    $smtpPort = (int)($smtp['port'] ?? 587);
+    $smtpUser = trim((string)($smtp['username'] ?? ''));
+    $smtpPass = (string)($smtp['password'] ?? '');
+    $smtpEncryption = in_array(($smtp['encryption'] ?? 'tls'), ['tls', 'ssl', 'none'], true) ? $smtp['encryption'] : 'tls';
+    $fromAddress = trim((string)($smtp['from_address'] ?? ''));
+    $fromName = trim((string)($smtp['from_name'] ?? 'MuseDock'));
+
+    if ($smtpHost === '' || $fromAddress === '') {
+        $errors[] = ['step' => 'save_external_smtp', 'command' => 'validate smtp payload', 'exit' => 1, 'output' => 'smtp_host y from_address son obligatorios'];
+        writeProgress($progressFile, ['id' => 'save_external_smtp', 'label' => 'Guardar SMTP externo'], $step, 1, 'failed', $errors, ['finished_at' => date('Y-m-d H:i:s')]);
+        exit(1);
+    }
+
+    Settings::set('mail_mode', 'external');
+    Settings::set('mail_smtp_host', $smtpHost);
+    Settings::set('mail_smtp_port', (string)$smtpPort);
+    Settings::set('mail_smtp_user', $smtpUser);
+    Settings::set('mail_smtp_password_enc', \MuseDockPanel\Services\ReplicationService::encryptPassword($smtpPass));
+    Settings::set('mail_smtp_encryption', $smtpEncryption);
+    Settings::set('mail_from_address', $fromAddress);
+    Settings::set('mail_from_name', $fromName);
+    Settings::set('mail_enabled', '1');
+
+    @mkdir(PANEL_ROOT . '/config', 0750, true);
+    file_put_contents(PANEL_ROOT . '/config/smtp-relay.json', json_encode([
+        'mode' => 'external',
+        'host' => $smtpHost,
+        'port' => $smtpPort,
+        'username' => $smtpUser,
+        'password' => $smtpPass !== '' ? '***' : '',
+        'encryption' => $smtpEncryption,
+        'from_address' => $fromAddress,
+        'from_name' => $fromName,
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    @chmod(PANEL_ROOT . '/config/smtp-relay.json', 0640);
+
+    logLine($logFile, 'OK', "SMTP externo guardado: {$smtpHost}:{$smtpPort}");
+    writeProgress($progressFile, ['id' => 'save_external_smtp', 'label' => 'Guardar SMTP externo'], 1, 1, 'completed', $errors, [
+        'mail_mode' => 'external',
+        'finished_at' => date('Y-m-d H:i:s'),
+    ]);
+    exit(0);
+}
+
+if ($mailMode === 'satellite') {
+    $satSteps = [
+        1 => ['id' => 'install_packages', 'label' => 'Instalar Postfix + OpenDKIM'],
+        2 => ['id' => 'configure_postfix', 'label' => 'Configurar Postfix solo envio'],
+        3 => ['id' => 'configure_opendkim', 'label' => 'Configurar DKIM saliente'],
+        4 => ['id' => 'start_services', 'label' => 'Iniciar servicios'],
+        5 => ['id' => 'verify', 'label' => 'Verificar modo satellite'],
+    ];
+    $totalSteps = count($satSteps);
+
+    $step = 1;
+    writeProgress($progressFile, $satSteps[$step], $step, $totalSteps, 'running', $errors);
+    run('export DEBIAN_FRONTEND=noninteractive && apt-get update -qq', $logFile, $errors, 'apt-update');
+    run("printf %s\\\\n " . escapeshellarg("postfix postfix/mailname string {$hostname}") . " | debconf-set-selections", $logFile, $errors, 'postfix-preseed');
+    run("printf %s\\\\n " . escapeshellarg("postfix postfix/main_mailer_type string Satellite system") . " | debconf-set-selections", $logFile, $errors, 'postfix-preseed');
+    run('export DEBIAN_FRONTEND=noninteractive && apt-get install -yqq postfix opendkim opendkim-tools', $logFile, $errors, 'apt-install-satellite');
+
+    $step = 2;
+    writeProgress($progressFile, $satSteps[$step], $step, $totalSteps, 'running', $errors);
+    $domain = $outboundDomain ?: $hostname;
+    $satPostconf = [
+        'myhostname' => $hostname,
+        'mydomain' => $domain,
+        'myorigin' => '$mydomain',
+        'inet_interfaces' => 'loopback-only',
+        'inet_protocols' => 'ipv4',
+        'mydestination' => '',
+        'local_transport' => 'error:local mail delivery is disabled',
+        'mynetworks' => '127.0.0.0/8',
+        'smtp_tls_security_level' => 'may',
+        'smtp_tls_loglevel' => '1',
+        'smtp_tls_CAfile' => '/etc/ssl/certs/ca-certificates.crt',
+        'milter_default_action' => 'accept',
+        'milter_protocol' => '6',
+        'smtpd_milters' => 'unix:/run/opendkim/opendkim.sock',
+        'non_smtpd_milters' => 'unix:/run/opendkim/opendkim.sock',
+        'default_destination_concurrency_limit' => '5',
+        'default_destination_rate_delay' => '1s',
+        'maximal_queue_lifetime' => '3d',
+        'bounce_queue_lifetime' => '1d',
+        'message_size_limit' => '26214400',
+        'header_checks' => 'regexp:/etc/postfix/header_checks',
+    ];
+    foreach ($satPostconf as $key => $val) {
+        run('postconf -e ' . escapeshellarg("{$key} = {$val}"), $logFile, $errors, "postconf:{$key}");
+    }
+    file_put_contents('/etc/postfix/header_checks', "/^Received:.*127\\.0\\.0\\.1/    IGNORE\n/^X-Originating-IP:/          IGNORE\n/^X-Mailer:/                  IGNORE\n");
+    logLine($logFile, 'WRITE', '/etc/postfix/header_checks');
+
+    $step = 3;
+    writeProgress($progressFile, $satSteps[$step], $step, $totalSteps, 'running', $errors);
+    $dkimDomain = $domain;
+    $dkimDir = "/etc/opendkim/keys/{$dkimDomain}";
+    @mkdir($dkimDir, 0700, true);
+    if (!is_file("{$dkimDir}/default.private")) {
+        run("opendkim-genkey -D " . escapeshellarg($dkimDir) . " -d " . escapeshellarg($dkimDomain) . " -s default", $logFile, $errors, 'dkim-genkey');
+    }
+    run('chown -R opendkim:opendkim /etc/opendkim', $logFile, $errors, 'dkim-chown');
+    $dkimConf = "Syslog yes\nUMask 007\nMode s\nCanonicalization relaxed/simple\nDomain {$dkimDomain}\nSelector default\nKeyFile {$dkimDir}/default.private\nSocket local:/run/opendkim/opendkim.sock\nOversignHeaders From\nUserID opendkim\n";
+    file_put_contents('/etc/opendkim.conf', $dkimConf);
+    logLine($logFile, 'WRITE', '/etc/opendkim.conf (satellite)');
+
+    $step = 4;
+    writeProgress($progressFile, $satSteps[$step], $step, $totalSteps, 'running', $errors);
+    run('systemctl disable --now dovecot rspamd 2>/dev/null || true', $logFile, $errors, 'disable-unused-mail-services');
+    run('systemctl enable postfix opendkim 2>&1', $logFile, $errors, 'systemd-enable-satellite');
+    run('systemctl restart opendkim 2>&1', $logFile, $errors, 'restart-opendkim');
+    run('systemctl restart postfix 2>&1', $logFile, $errors, 'restart-postfix');
+
+    $step = 5;
+    writeProgress($progressFile, $satSteps[$step], $step, $totalSteps, 'running', $errors);
+    $serviceStatus = [];
+    foreach (['postfix', 'opendkim'] as $svc) {
+        exec("systemctl is-active {$svc} 2>&1", $svcOut, $svcCode);
+        $serviceStatus[$svc] = $svcCode === 0 ? 'running' : 'failed';
+    }
+    $listenOut = [];
+    exec("ss -tlnp 2>/dev/null | grep ':25 ' | grep -E '127\\.0\\.0\\.1|localhost' || true", $listenOut);
+    $loopbackOnly = !empty($listenOut);
+
+    Settings::set('mail_mode', 'satellite');
+    Settings::set('mail_node_configured', '1');
+    Settings::set('mail_hostname', $hostname);
+    Settings::set('mail_outbound_hostname', $hostname);
+    Settings::set('mail_outbound_domain', $domain);
+    Settings::set('mail_enabled', '1');
+
+    $dnsTxt = is_file("{$dkimDir}/default.txt") ? trim((string)file_get_contents("{$dkimDir}/default.txt")) : '';
+    Settings::set('mail_satellite_dkim_domain', $dkimDomain);
+    Settings::set('mail_satellite_dkim_txt', $dnsTxt);
+
+    writeProgress($progressFile, $satSteps[$step], $step, $totalSteps, empty($errors) ? 'completed' : 'completed_with_errors', $errors, [
+        'mail_mode' => 'satellite',
+        'services' => $serviceStatus,
+        'smtp_loopback_only' => $loopbackOnly,
+        'dkim_domain' => $dkimDomain,
+        'dkim_txt' => $dnsTxt,
+        'finished_at' => date('Y-m-d H:i:s'),
+    ]);
+    exit(0);
+}
 
 // ══════════════════════════════════════════════════════════════
 // Step 1/10: Verify PostgreSQL connectivity
@@ -590,6 +748,7 @@ logLine($logFile, $dbOk ? 'OK' : 'WARN', 'Database connectivity: ' . ($dbOk ? 'O
 Settings::set('mail_node_configured', '1');
 Settings::set('mail_hostname', $hostname);
 Settings::set('mail_ssl_mode', $sslMode);
+Settings::set('mail_mode', 'full');
 
 // ── Final status ─────────────────────────────────────────────
 $elapsed = round(microtime(true) - $_SERVER['REQUEST_TIME_FLOAT'], 1);

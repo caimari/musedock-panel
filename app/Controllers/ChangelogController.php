@@ -20,6 +20,37 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.82',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Mail setup con tres modos: `Solo Envio (Satellite)`, `Correo Completo` y `SMTP Externo`, explicados en cristiano desde la UI',
+                            'Satellite mode instala solo Postfix + OpenDKIM para enviar notificaciones, sin Dovecot/Rspamd y sin abrir puertos de entrada',
+                            '`/mail`: panel de entregabilidad DNS con SPF, DKIM, DMARC, A, PTR/rDNS, blacklists y registros recomendados copiables',
+                            'Endpoint local `GET /api/internal/smtp-config` para que apps PHP/Laravel del mismo servidor lean la configuracion SMTP con token',
+                        ],
+                        'en' => [
+                            'Mail setup now supports three modes: `Send Only (Satellite)`, `Full Mail` and `External SMTP`, with plain-language UI explanations',
+                            'Satellite mode installs only Postfix + OpenDKIM for outbound notifications, without Dovecot/Rspamd and without opening inbound ports',
+                            '`/mail`: deliverability dashboard with SPF, DKIM, DMARC, A, PTR/rDNS, blacklists and copyable recommended DNS records',
+                            'Local `GET /api/internal/smtp-config` endpoint lets same-server PHP/Laravel apps read SMTP config via token',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Healthcheck mail distingue `full`, `satellite` y `external`; los modos sin buzones ya no se marcan degradados por no tener DB/Dovecot/puertos entrantes',
+                            'Ejemplo Laravel en `config/examples/laravel-mail-config.php` para integrar apps locales con el SMTP del panel',
+                        ],
+                        'en' => [
+                            'Mail healthcheck now distinguishes `full`, `satellite` and `external`; mailbox-less modes are no longer degraded for missing DB/Dovecot/inbound ports',
+                            'Laravel example added at `config/examples/laravel-mail-config.php` for local app integration with panel SMTP',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.81',
                 'date' => '2026-04-24',
                 'badge' => 'primary',

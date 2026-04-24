@@ -1448,6 +1448,9 @@ class ClusterController
 
         $nodeId       = (int)($_POST['node_id'] ?? 0);
         $mailHostname = trim($_POST['mail_hostname'] ?? '');
+        $mailMode     = in_array($_POST['mail_mode'] ?? '', ['satellite', 'full', 'external'], true)
+                         ? $_POST['mail_mode'] : 'full';
+        $outboundDomain = strtolower(trim($_POST['outbound_domain'] ?? ''));
         $sslMode      = in_array($_POST['ssl_mode'] ?? '', ['letsencrypt', 'selfsigned', 'manual'])
                          ? $_POST['ssl_mode'] : 'letsencrypt';
         $dbHost       = trim($_POST['db_host'] ?? 'localhost');
@@ -1461,7 +1464,7 @@ class ClusterController
             exit;
         }
 
-        if (!$nodeId || !$mailHostname) {
+        if (!$nodeId || ($mailMode !== 'external' && !$mailHostname)) {
             echo json_encode(['ok' => false, 'error' => 'Faltan campos obligatorios: node_id, mail_hostname']);
             exit;
         }
@@ -1473,50 +1476,55 @@ class ClusterController
         }
 
         // Validate hostname uniqueness (across nodes + local)
-        $existingHostname = Database::fetchOne(
-            "SELECT id, name FROM cluster_nodes WHERE mail_hostname = :h AND id != :nid",
-            ['h' => $mailHostname, 'nid' => $nodeId]
-        );
-        if ($existingHostname) {
-            echo json_encode(['ok' => false, 'error' => "El hostname '{$mailHostname}' ya esta asignado al nodo '{$existingHostname['name']}'."]);
-            exit;
-        }
-        $localHostname = Settings::get('mail_local_hostname', '');
-        if ($localHostname && $localHostname === $mailHostname) {
-            echo json_encode(['ok' => false, 'error' => "El hostname '{$mailHostname}' ya esta asignado al servidor local."]);
-            exit;
+        if ($mailHostname !== '') {
+            $existingHostname = Database::fetchOne(
+                "SELECT id, name FROM cluster_nodes WHERE mail_hostname = :h AND id != :nid",
+                ['h' => $mailHostname, 'nid' => $nodeId]
+            );
+            if ($existingHostname) {
+                echo json_encode(['ok' => false, 'error' => "El hostname '{$mailHostname}' ya esta asignado al nodo '{$existingHostname['name']}'."]);
+                exit;
+            }
+            $localHostname = Settings::get('mail_local_hostname', '');
+            if ($localHostname && $localHostname === $mailHostname) {
+                echo json_encode(['ok' => false, 'error' => "El hostname '{$mailHostname}' ya esta asignado al servidor local."]);
+                exit;
+            }
         }
 
         $token = \MuseDockPanel\Services\ReplicationService::decryptPassword($node['auth_token'] ?? '');
         $dbPort = \MuseDockPanel\Env::int('DB_PORT', 5433);
 
-        // Step 0: Create/reuse musedock_mail PostgreSQL user on master
+        // Step 0: Create/reuse musedock_mail PostgreSQL user on master (full mode only).
         // Replicas are read-only — CREATE USER must run on master, then replicates to all nodes.
         // Password is auto-generated once and stored encrypted in Settings for reuse across nodes.
-        $encryptedDbPass = Settings::get('mail_db_password_enc', '');
-        if ($encryptedDbPass) {
-            $dbPass = \MuseDockPanel\Services\ReplicationService::decryptPassword($encryptedDbPass);
-        } else {
-            $dbPass = bin2hex(random_bytes(20));
-            Settings::set('mail_db_password_enc', \MuseDockPanel\Services\ReplicationService::encryptPassword($dbPass));
-        }
-
-        try {
-            $existing = Database::fetchOne("SELECT 1 FROM pg_roles WHERE rolname = 'musedock_mail'");
-            $escapedPass = str_replace("'", "''", $dbPass);
-            if (!$existing) {
-                Database::execute("CREATE USER musedock_mail WITH PASSWORD '{$escapedPass}'");
-                Database::execute("GRANT CONNECT ON DATABASE musedock_panel TO musedock_mail");
-                Database::execute("GRANT USAGE ON SCHEMA public TO musedock_mail");
-                Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+        $dbPass = '';
+        if ($mailMode === 'full') {
+            $encryptedDbPass = Settings::get('mail_db_password_enc', '');
+            if ($encryptedDbPass) {
+                $dbPass = \MuseDockPanel\Services\ReplicationService::decryptPassword($encryptedDbPass);
             } else {
-                // User exists — ensure password and grants are current
-                Database::execute("ALTER USER musedock_mail WITH PASSWORD '{$escapedPass}'");
-                Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+                $dbPass = bin2hex(random_bytes(20));
+                Settings::set('mail_db_password_enc', \MuseDockPanel\Services\ReplicationService::encryptPassword($dbPass));
             }
-        } catch (\Exception $e) {
-            echo json_encode(['ok' => false, 'error' => 'Error creando usuario musedock_mail en el master: ' . $e->getMessage()]);
-            exit;
+
+            try {
+                $existing = Database::fetchOne("SELECT 1 FROM pg_roles WHERE rolname = 'musedock_mail'");
+                $escapedPass = str_replace("'", "''", $dbPass);
+                if (!$existing) {
+                    Database::execute("CREATE USER musedock_mail WITH PASSWORD '{$escapedPass}'");
+                    Database::execute("GRANT CONNECT ON DATABASE musedock_panel TO musedock_mail");
+                    Database::execute("GRANT USAGE ON SCHEMA public TO musedock_mail");
+                    Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+                } else {
+                    // User exists — ensure password and grants are current
+                    Database::execute("ALTER USER musedock_mail WITH PASSWORD '{$escapedPass}'");
+                    Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+                }
+            } catch (\Exception $e) {
+                echo json_encode(['ok' => false, 'error' => 'Error creando usuario musedock_mail en el master: ' . $e->getMessage()]);
+                exit;
+            }
         }
 
         // Step 1: Generate one-time setup token on the remote node
@@ -1543,7 +1551,18 @@ class ClusterController
                 'db_user'       => 'musedock_mail',
                 'db_pass'       => $dbPass,
                 'mail_hostname' => $mailHostname,
+                'mail_mode'     => $mailMode,
+                'outbound_domain' => $outboundDomain,
                 'ssl_mode'      => $sslMode,
+                'smtp'          => [
+                    'host' => trim($_POST['smtp_host'] ?? ''),
+                    'port' => (int)($_POST['smtp_port'] ?? 587),
+                    'username' => trim($_POST['smtp_user'] ?? ''),
+                    'password' => (string)($_POST['smtp_password'] ?? ''),
+                    'encryption' => $_POST['smtp_encryption'] ?? 'tls',
+                    'from_address' => trim($_POST['from_address'] ?? ''),
+                    'from_name' => trim($_POST['from_name'] ?? 'MuseDock'),
+                ],
                 'setup_token'   => $setupToken,
             ],
         ], 30, [
@@ -1560,6 +1579,7 @@ class ClusterController
         Settings::set('mail_setup_node_id', (string)$nodeId);
         Settings::set('mail_setup_task_id', $taskId);
         Settings::set('mail_setup_hostname', $mailHostname);
+        Settings::set('mail_mode', $mailMode);
         Settings::set('mail_setup_started_at', date('Y-m-d H:i:s'));
 
         // Update node services to include "mail" and save hostname
@@ -1570,6 +1590,7 @@ class ClusterController
         ClusterService::updateNode($nodeId, [
             'services' => json_encode($services),
             'mail_hostname' => $mailHostname,
+            'mail_mode' => $mailMode,
         ]);
         Settings::set('mail_enabled', '1');
 
@@ -1647,6 +1668,9 @@ class ClusterController
         header('Content-Type: application/json');
 
         $mailHostname = trim($_POST['mail_hostname'] ?? '');
+        $mailMode     = in_array($_POST['mail_mode'] ?? '', ['satellite', 'full', 'external'], true)
+                         ? $_POST['mail_mode'] : 'full';
+        $outboundDomain = strtolower(trim($_POST['outbound_domain'] ?? ''));
         $sslMode      = in_array($_POST['ssl_mode'] ?? '', ['letsencrypt', 'selfsigned', 'manual'])
                          ? $_POST['ssl_mode'] : 'letsencrypt';
 
@@ -1659,47 +1683,52 @@ class ClusterController
             exit;
         }
 
-        if (!$mailHostname) {
+        if ($mailMode !== 'external' && !$mailHostname) {
             echo json_encode(['ok' => false, 'error' => 'Falta el hostname de mail']);
             exit;
         }
 
         // Validate hostname uniqueness (across nodes + local)
-        $existingHostname = Database::fetchOne(
-            "SELECT id, name FROM cluster_nodes WHERE mail_hostname = :h",
-            ['h' => $mailHostname]
-        );
-        if ($existingHostname) {
-            echo json_encode(['ok' => false, 'error' => "El hostname '{$mailHostname}' ya esta asignado al nodo '{$existingHostname['name']}'."]);
-            exit;
+        if ($mailHostname !== '') {
+            $existingHostname = Database::fetchOne(
+                "SELECT id, name FROM cluster_nodes WHERE mail_hostname = :h",
+                ['h' => $mailHostname]
+            );
+            if ($existingHostname) {
+                echo json_encode(['ok' => false, 'error' => "El hostname '{$mailHostname}' ya esta asignado al nodo '{$existingHostname['name']}'."]);
+                exit;
+            }
         }
 
         $dbPort = \MuseDockPanel\Env::int('DB_PORT', 5433);
 
-        // Create/reuse musedock_mail PostgreSQL user on this (master) server
-        $encryptedDbPass = Settings::get('mail_db_password_enc', '');
-        if ($encryptedDbPass) {
-            $dbPass = \MuseDockPanel\Services\ReplicationService::decryptPassword($encryptedDbPass);
-        } else {
-            $dbPass = bin2hex(random_bytes(20));
-            Settings::set('mail_db_password_enc', \MuseDockPanel\Services\ReplicationService::encryptPassword($dbPass));
-        }
-
-        try {
-            $existing = Database::fetchOne("SELECT 1 FROM pg_roles WHERE rolname = 'musedock_mail'");
-            $escapedPass = str_replace("'", "''", $dbPass);
-            if (!$existing) {
-                Database::execute("CREATE USER musedock_mail WITH PASSWORD '{$escapedPass}'");
-                Database::execute("GRANT CONNECT ON DATABASE musedock_panel TO musedock_mail");
-                Database::execute("GRANT USAGE ON SCHEMA public TO musedock_mail");
-                Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+        // Create/reuse musedock_mail PostgreSQL user on this (master) server (full mode only).
+        $dbPass = '';
+        if ($mailMode === 'full') {
+            $encryptedDbPass = Settings::get('mail_db_password_enc', '');
+            if ($encryptedDbPass) {
+                $dbPass = \MuseDockPanel\Services\ReplicationService::decryptPassword($encryptedDbPass);
             } else {
-                Database::execute("ALTER USER musedock_mail WITH PASSWORD '{$escapedPass}'");
-                Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+                $dbPass = bin2hex(random_bytes(20));
+                Settings::set('mail_db_password_enc', \MuseDockPanel\Services\ReplicationService::encryptPassword($dbPass));
             }
-        } catch (\Exception $e) {
-            echo json_encode(['ok' => false, 'error' => 'Error creando usuario musedock_mail: ' . $e->getMessage()]);
-            exit;
+
+            try {
+                $existing = Database::fetchOne("SELECT 1 FROM pg_roles WHERE rolname = 'musedock_mail'");
+                $escapedPass = str_replace("'", "''", $dbPass);
+                if (!$existing) {
+                    Database::execute("CREATE USER musedock_mail WITH PASSWORD '{$escapedPass}'");
+                    Database::execute("GRANT CONNECT ON DATABASE musedock_panel TO musedock_mail");
+                    Database::execute("GRANT USAGE ON SCHEMA public TO musedock_mail");
+                    Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+                } else {
+                    Database::execute("ALTER USER musedock_mail WITH PASSWORD '{$escapedPass}'");
+                    Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+                }
+            } catch (\Exception $e) {
+                echo json_encode(['ok' => false, 'error' => 'Error creando usuario musedock_mail: ' . $e->getMessage()]);
+                exit;
+            }
         }
 
         // Launch mail-setup-run.php locally (same code that runs on remote nodes)
@@ -1710,7 +1739,18 @@ class ClusterController
             'db_user'       => 'musedock_mail',
             'db_pass'       => $dbPass,
             'mail_hostname' => $mailHostname,
+            'mail_mode'     => $mailMode,
+            'outbound_domain' => $outboundDomain,
             'ssl_mode'      => $sslMode,
+            'smtp'          => [
+                'host' => trim($_POST['smtp_host'] ?? ''),
+                'port' => (int)($_POST['smtp_port'] ?? 587),
+                'username' => trim($_POST['smtp_user'] ?? ''),
+                'password' => (string)($_POST['smtp_password'] ?? ''),
+                'encryption' => $_POST['smtp_encryption'] ?? 'tls',
+                'from_address' => trim($_POST['from_address'] ?? ''),
+                'from_name' => trim($_POST['from_name'] ?? 'MuseDock'),
+            ],
             'setup_token'   => 'local',  // Not validated for local setup
             'local_mode'    => true,
         ];
@@ -1743,6 +1783,7 @@ class ClusterController
         Settings::set('mail_setup_node_id', 'local');
         Settings::set('mail_setup_task_id', $taskId);
         Settings::set('mail_setup_hostname', $mailHostname);
+        Settings::set('mail_mode', $mailMode);
         Settings::set('mail_setup_started_at', date('Y-m-d H:i:s'));
         Settings::set('mail_local_enabled', '1');
         Settings::set('mail_enabled', '1');

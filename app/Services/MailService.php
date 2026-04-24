@@ -437,6 +437,246 @@ class MailService
         return $records;
     }
 
+    public static function getCurrentMailMode(): string
+    {
+        $mode = Settings::get('mail_mode', 'full');
+        return in_array($mode, ['satellite', 'full', 'external'], true) ? $mode : 'full';
+    }
+
+    public static function getSmtpConfig(bool $includeSecret = false): array
+    {
+        $mode = self::getCurrentMailMode();
+        $password = '';
+        $enc = Settings::get('mail_smtp_password_enc', '');
+        if ($includeSecret && $enc !== '') {
+            try {
+                $password = ReplicationService::decryptPassword($enc);
+            } catch (\Throwable) {
+                $password = '';
+            }
+        }
+
+        if ($mode === 'external') {
+            return [
+                'mode' => 'external',
+                'host' => Settings::get('mail_smtp_host', ''),
+                'port' => (int)Settings::get('mail_smtp_port', '587'),
+                'encryption' => Settings::get('mail_smtp_encryption', 'tls') ?: null,
+                'username' => Settings::get('mail_smtp_user', ''),
+                'password' => $includeSecret ? $password : ($enc !== '' ? '***' : ''),
+                'from_address' => Settings::get('mail_from_address', ''),
+                'from_name' => Settings::get('mail_from_name', 'MuseDock'),
+            ];
+        }
+
+        return [
+            'mode' => $mode,
+            'host' => '127.0.0.1',
+            'port' => 25,
+            'encryption' => null,
+            'username' => null,
+            'password' => null,
+            'from_address' => Settings::get('mail_from_address', '') ?: ('noreply@' . (Settings::get('mail_outbound_domain', '') ?: gethostname())),
+            'from_name' => Settings::get('mail_from_name', 'MuseDock'),
+            'dkim_configured' => self::satelliteDkimConfigured(),
+            'deliverability_score' => 'unknown',
+        ];
+    }
+
+    public static function getInternalSmtpToken(bool $create = true): string
+    {
+        $token = Settings::get('internal_smtp_token', '');
+        if ($token === '' && $create) {
+            $token = bin2hex(random_bytes(32));
+            Settings::set('internal_smtp_token', $token);
+        }
+        return $token;
+    }
+
+    private static function satelliteDkimConfigured(): bool
+    {
+        return Settings::get('mail_satellite_dkim_txt', '') !== ''
+            || (bool)Database::fetchOne("SELECT id FROM mail_domains WHERE dkim_public_key IS NOT NULL AND dkim_public_key != '' LIMIT 1");
+    }
+
+    public static function getDeliverabilityRows(): array
+    {
+        $mode = self::getCurrentMailMode();
+        $ip = self::detectPublicIp();
+        $rows = [];
+
+        $domains = self::getDomains();
+        if (empty($domains) && in_array($mode, ['satellite', 'external'], true)) {
+            $fallbackDomain = Settings::get('mail_outbound_domain', '');
+            if ($fallbackDomain === '' && Settings::get('mail_from_address', '') && str_contains(Settings::get('mail_from_address', ''), '@')) {
+                $fallbackDomain = substr(strrchr(Settings::get('mail_from_address', ''), '@'), 1);
+            }
+            if ($fallbackDomain !== '') {
+                $domains[] = [
+                    'id' => 0,
+                    'domain' => $fallbackDomain,
+                    'mail_node_id' => null,
+                    'dkim_selector' => 'default',
+                    'dkim_public_key' => '',
+                    'spf_record' => '',
+                    'dmarc_policy' => 'quarantine',
+                    'mail_mode' => $mode,
+                ];
+            }
+        }
+
+        foreach ($domains as $domain) {
+            $domainName = (string)$domain['domain'];
+            $mailHostname = self::resolveMailHostnameForDomain($domain);
+            $recommended = self::recommendedDeliverabilityRecords($domain, $ip, $mailHostname, $mode);
+            $checks = self::runDeliverabilityChecks($domainName, $mailHostname, $ip, $recommended);
+            $rows[] = [
+                'domain' => $domainName,
+                'mode' => $domain['mail_mode'] ?? $mode,
+                'mail_hostname' => $mailHostname,
+                'ip' => $ip,
+                'checks' => $checks,
+                'recommended' => $recommended,
+            ];
+        }
+
+        return $rows;
+    }
+
+    private static function resolveMailHostnameForDomain(array $domain): string
+    {
+        if (!empty($domain['mail_node_id'])) {
+            $node = ClusterService::getNode((int)$domain['mail_node_id']);
+            if (!empty($node['mail_hostname'])) return (string)$node['mail_hostname'];
+        }
+        return Settings::get('mail_outbound_hostname', '')
+            ?: Settings::get('mail_local_hostname', '')
+            ?: ('mail.' . (string)$domain['domain']);
+    }
+
+    private static function recommendedDeliverabilityRecords(array $domain, string $ip, string $mailHostname, string $mode): array
+    {
+        $domainName = (string)$domain['domain'];
+        $selector = $domain['dkim_selector'] ?: 'default';
+        $dkimValue = '';
+        if (!empty($domain['dkim_public_key'])) {
+            $dkimValue = "v=DKIM1; k=rsa; p={$domain['dkim_public_key']}";
+        } elseif (Settings::get('mail_satellite_dkim_txt', '') !== '' && Settings::get('mail_satellite_dkim_domain', '') === $domainName) {
+            $txt = Settings::get('mail_satellite_dkim_txt', '');
+            if (preg_match('/\\((.*)\\)/s', $txt, $m)) {
+                $dkimValue = trim(str_replace(['"', "\n", "\t"], '', $m[1]));
+            } else {
+                $dkimValue = trim($txt);
+            }
+        }
+
+        $spf = $ip !== '' ? "v=spf1 ip4:{$ip} -all" : 'v=spf1 -all';
+        if ($mode === 'full') {
+            $spf = $ip !== '' ? "v=spf1 mx ip4:{$ip} ~all" : 'v=spf1 mx ~all';
+        }
+
+        $records = [
+            ['type' => 'TXT', 'name' => $domainName, 'value' => $spf],
+            ['type' => 'TXT', 'name' => "_dmarc.{$domainName}", 'value' => "v=DMARC1; p=quarantine; rua=mailto:dmarc@{$domainName}"],
+        ];
+        if ($dkimValue !== '') {
+            $records[] = ['type' => 'TXT', 'name' => "{$selector}._domainkey.{$domainName}", 'value' => $dkimValue];
+        }
+        if ($mailHostname !== '' && $ip !== '') {
+            $records[] = ['type' => 'A', 'name' => $mailHostname, 'value' => $ip];
+            $records[] = ['type' => 'PTR', 'name' => $ip, 'value' => $mailHostname];
+        }
+        if ($mode === 'full') {
+            $records[] = ['type' => 'MX', 'name' => $domainName, 'value' => $mailHostname, 'priority' => 10];
+        }
+        return $records;
+    }
+
+    private static function runDeliverabilityChecks(string $domain, string $mailHostname, string $ip, array $recommended): array
+    {
+        $txt = self::dnsTxtValues($domain);
+        $spf = '';
+        foreach ($txt as $value) {
+            if (str_starts_with(strtolower($value), 'v=spf1')) {
+                $spf = $value;
+                break;
+            }
+        }
+
+        $dkimName = 'default._domainkey.' . $domain;
+        $dkim = implode(' ', self::dnsTxtValues($dkimName));
+        $dmarc = implode(' ', self::dnsTxtValues('_dmarc.' . $domain));
+        $a = $mailHostname !== '' ? @dns_get_record($mailHostname, DNS_A) : [];
+        $aIps = is_array($a) ? array_values(array_filter(array_map(fn($r) => $r['ip'] ?? '', $a))) : [];
+        $ptr = $ip !== '' ? @gethostbyaddr($ip) : '';
+        $ptrClean = $ptr && $ptr !== $ip ? rtrim(strtolower($ptr), '.') : '';
+
+        return [
+            'spf' => [
+                'ok' => $spf !== '' && ($ip === '' || str_contains($spf, $ip) || str_contains($spf, ' mx ') || str_contains($spf, 'mx')),
+                'value' => $spf,
+                'message' => $spf === '' ? 'Falta SPF' : 'SPF encontrado',
+            ],
+            'dkim' => [
+                'ok' => str_contains(strtolower($dkim), 'v=dkim1'),
+                'value' => $dkim,
+                'message' => $dkim === '' ? 'Falta DKIM default' : 'DKIM encontrado',
+            ],
+            'dmarc' => [
+                'ok' => str_contains(strtolower($dmarc), 'v=dmarc1'),
+                'value' => $dmarc,
+                'message' => $dmarc === '' ? 'Falta DMARC' : 'DMARC encontrado',
+            ],
+            'a' => [
+                'ok' => $ip !== '' && in_array($ip, $aIps, true),
+                'value' => implode(', ', $aIps),
+                'message' => $mailHostname === '' ? 'Sin hostname' : 'A record',
+            ],
+            'ptr' => [
+                'ok' => $ptrClean !== '' && ($mailHostname === '' || $ptrClean === rtrim(strtolower($mailHostname), '.')),
+                'value' => $ptrClean,
+                'message' => $ptrClean === '' ? 'PTR no configurado' : 'PTR detectado',
+            ],
+            'blacklists' => self::checkBlacklists($ip),
+        ];
+    }
+
+    private static function dnsTxtValues(string $name): array
+    {
+        $records = @dns_get_record($name, DNS_TXT);
+        if (!is_array($records)) return [];
+        $values = [];
+        foreach ($records as $record) {
+            if (!empty($record['txt'])) $values[] = (string)$record['txt'];
+            elseif (!empty($record['entries']) && is_array($record['entries'])) $values[] = implode('', $record['entries']);
+        }
+        return $values;
+    }
+
+    private static function detectPublicIp(): string
+    {
+        $ctx = stream_context_create(['http' => ['timeout' => 2]]);
+        $ip = trim((string)@file_get_contents('https://api.ipify.org', false, $ctx));
+        return filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) ? $ip : '';
+    }
+
+    private static function checkBlacklists(string $ip): array
+    {
+        if ($ip === '' || !filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return ['ok' => null, 'listed' => [], 'message' => 'IP no disponible'];
+        }
+        $reversed = implode('.', array_reverse(explode('.', $ip)));
+        $lists = ['zen.spamhaus.org', 'bl.spamcop.net', 'b.barracudacentral.org', 'dnsbl.sorbs.net', 'psbl.surriel.com'];
+        $listed = [];
+        foreach ($lists as $list) {
+            $records = @dns_get_record($reversed . '.' . $list, DNS_A);
+            if (is_array($records) && !empty($records)) {
+                $listed[] = $list;
+            }
+        }
+        return ['ok' => empty($listed), 'listed' => $listed, 'message' => empty($listed) ? 'Limpio' : ('Listado en: ' . implode(', ', $listed))];
+    }
+
     // ═══════════════════════════════════════════════════════════
     // ─── Mail Node Actions (executed ON the mail node) ───────
     // ═══════════════════════════════════════════════════════════
@@ -659,12 +899,17 @@ class MailService
         $host = parse_url($node['api_url'] ?? '', PHP_URL_HOST) ?? '';
         if (!$host) return ['ok' => false, 'error' => 'Cannot determine node IP'];
 
+        $mailMode = in_array(($node['mail_mode'] ?? 'full'), ['satellite', 'full', 'external'], true)
+            ? (string)$node['mail_mode']
+            : 'full';
         $services = [];
-        $checks = [
-            'smtp'       => 25,
-            'submission' => 587,
-            'imaps'      => 993,
-        ];
+        $checks = $mailMode === 'full'
+            ? [
+                'smtp'       => 25,
+                'submission' => 587,
+                'imaps'      => 993,
+            ]
+            : [];
 
         $allOk = true;
         foreach ($checks as $name => $port) {
@@ -682,11 +927,12 @@ class MailService
         if (!$apiResult['ok']) $allOk = false;
 
         $dbHealth = [
-            'pg_alive' => false,
-            'pg_read_ok' => false,
+            'mode' => $mailMode,
+            'pg_alive' => $mailMode !== 'full',
+            'pg_read_ok' => $mailMode !== 'full',
             'is_replica' => false,
             'replication_lag_seconds' => null,
-            'maildir_ok' => false,
+            'maildir_ok' => true,
             'mail_domains_count' => 0,
             'ptr_ok' => null,
             'ptr_value' => '',
@@ -694,7 +940,15 @@ class MailService
             'timestamp' => gmdate('c'),
         ];
 
-        if ($apiResult['ok']) {
+        if ($mailMode !== 'full') {
+            $dbHealth['message'] = $mailMode === 'satellite'
+                ? 'Modo Solo Envio: no usa PostgreSQL/Dovecot para buzones y no abre puertos de entrada.'
+                : 'Modo SMTP Externo: no hay servidor de correo local que comprobar.';
+            $dbHealth = array_merge($dbHealth, self::checkPtr([
+                'node_host' => $host,
+                'expected_hostname' => (string)($node['mail_hostname'] ?? ''),
+            ]));
+        } elseif ($apiResult['ok']) {
             $dbResult = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', [
                 'action' => 'mail_db_health',
                 'payload' => [
@@ -742,6 +996,18 @@ class MailService
 
     private static function evaluateMailDbHealth(array $health): array
     {
+        $mode = (string)($health['mode'] ?? 'full');
+        if (in_array($mode, ['satellite', 'external'], true)) {
+            return [
+                'status' => 'active',
+                'pause_queue' => false,
+                'reason' => '',
+                'message' => $mode === 'satellite'
+                    ? 'Modo Solo Envio activo: no requiere DB de buzones ni puertos entrantes.'
+                    : 'Modo SMTP Externo activo: no hay servicios mail locales que pausar.',
+            ];
+        }
+
         $warnLag = (float)Settings::get('mail_db_lag_warn_seconds', '30');
         $pauseLag = (float)Settings::get('mail_db_lag_pause_seconds', '120');
         $lag = isset($health['replication_lag_seconds']) && $health['replication_lag_seconds'] !== null
@@ -1064,9 +1330,13 @@ class MailService
     {
         $dbPass   = $payload['db_pass'] ?? '';
         $hostname = $payload['mail_hostname'] ?? '';
+        $mailMode = in_array(($payload['mail_mode'] ?? 'full'), ['satellite', 'full', 'external'], true) ? $payload['mail_mode'] : 'full';
 
-        if (!$dbPass || !$hostname) {
+        if ($mailMode === 'full' && (!$dbPass || !$hostname)) {
             return ['ok' => false, 'error' => 'Missing db_pass or mail_hostname'];
+        }
+        if ($mailMode === 'satellite' && !$hostname) {
+            return ['ok' => false, 'error' => 'Missing mail_hostname'];
         }
 
         // Verify setup token (one-time, generated by master)
@@ -1092,7 +1362,7 @@ class MailService
         }
 
         // Generate task ID
-        $taskId = 'mail-setup-' . time() . '-' . bin2hex(random_bytes(4));
+        $taskId = 'mail-setup-' . $mailMode . '-' . time() . '-' . bin2hex(random_bytes(4));
         Settings::set('mail_setup_task_id', $taskId);
 
         // Write initial progress
@@ -1353,8 +1623,35 @@ class MailService
     public static function nodeCheckConfigured(): array
     {
         $configured = Settings::get('mail_node_configured', '') === '1';
+        $mode = self::getCurrentMailMode();
 
-        // Double-check: verify key config files exist
+        if ($mode === 'external') {
+            return [
+                'ok' => true,
+                'configured' => Settings::get('mail_smtp_host', '') !== '',
+                'details' => [
+                    'mode' => 'external',
+                    'smtp_host' => Settings::get('mail_smtp_host', '') !== '',
+                ],
+            ];
+        }
+
+        if ($mode === 'satellite') {
+            $hasPostfix = is_file('/etc/postfix/main.cf');
+            $hasDkim = is_file('/etc/opendkim.conf');
+            return [
+                'ok' => true,
+                'configured' => $configured && $hasPostfix && $hasDkim,
+                'details' => [
+                    'mode' => 'satellite',
+                    'setting' => $configured,
+                    'postfix' => $hasPostfix,
+                    'opendkim' => $hasDkim,
+                ],
+            ];
+        }
+
+        // Full mode: verify key config files exist
         $hasPostfix  = is_file('/etc/postfix/pgsql-virtual-domains.cf');
         $hasDovecot  = is_file('/etc/dovecot/dovecot-sql.conf');
 
@@ -1362,6 +1659,7 @@ class MailService
             'ok'         => true,
             'configured' => $configured && $hasPostfix && $hasDovecot,
             'details'    => [
+                'mode' => 'full',
                 'setting'  => $configured,
                 'postfix'  => $hasPostfix,
                 'dovecot'  => $hasDovecot,

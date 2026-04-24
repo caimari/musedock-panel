@@ -30,6 +30,11 @@ class Database
         return $stmt;
     }
 
+    public static function execute(string $sql, array $params = []): int
+    {
+        return self::query($sql, $params)->rowCount();
+    }
+
     public static function fetchAll(string $sql, array $params = []): array
     {
         return self::query($sql, $params)->fetchAll();
