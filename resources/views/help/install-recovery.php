@@ -30,17 +30,27 @@
 <div class="card mb-4">
     <div class="card-header"><i class="bi bi-download me-2"></i>Primera instalacion desde GitHub</div>
     <div class="card-body">
-        <p class="small text-muted">
-            En un servidor limpio Ubuntu/Debian, entra por SSH y ejecuta como root:
+        <p class="small text-muted mb-2">
+            En un servidor limpio Ubuntu/Debian, entra por SSH. Si ya estas como <code>root</code>, ejecuta:
         </p>
-        <pre class="small p-3 rounded" style="background:#0f172a;color:#e2e8f0;">sudo -i
-apt-get update
+        <pre class="small p-3 rounded" style="background:#0f172a;color:#e2e8f0;">apt-get update
 apt-get install -y git ca-certificates curl
 cd /opt
 git clone https://github.com/caimari/musedock-panel.git musedock-panel
 cd /opt/musedock-panel
 bash install.sh</pre>
+        <p class="small text-muted mb-2">
+            Si entras con un usuario con sudo, no pegues <code>sudo -i</code> junto con todo el bloque. Usa comandos con <code>sudo</code> explicito:
+        </p>
+        <pre class="small p-3 rounded" style="background:#0f172a;color:#e2e8f0;">sudo apt-get update
+sudo apt-get install -y git ca-certificates curl
+cd /opt
+sudo git clone https://github.com/caimari/musedock-panel.git musedock-panel
+cd /opt/musedock-panel
+sudo bash install.sh</pre>
         <div class="small text-muted">
+            <code>install.sh</code> es interactivo: debe mostrar seleccion de idioma, opciones de instalacion y progreso. Si no ves nada, confirma que estas en
+            <code>/opt/musedock-panel</code> y ejecuta <code>sudo bash -x install.sh</code> para ver trazas.
             Si ya tienes el repo descargado, no vuelvas a clonar encima: entra en <code>/opt/musedock-panel</code> y ejecuta el instalador/update segun corresponda.
         </div>
     </div>

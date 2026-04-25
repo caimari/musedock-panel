@@ -254,6 +254,15 @@ const SwalDark = Swal.mixin({
 window.SwalDark = SwalDark;
 if (window.Swal && window.Swal.fire) {
     const musedockSwalBaseFire = window.Swal.fire.bind(window.Swal);
+    const musedockSwalDarkDefaults = {
+        background: '#1e293b',
+        color: '#e2e8f0',
+        confirmButtonColor: '#0ea5e9',
+        cancelButtonColor: '#475569',
+        customClass: {
+            popup: 'swal-dark-popup'
+        }
+    };
     const musedockSwalIsDarkBackground = function(background) {
         const bg = String(background || '').trim().toLowerCase();
         if (!bg) return true;
@@ -271,19 +280,37 @@ if (window.Swal && window.Swal.fire) {
         const b = parseInt(hex.slice(4, 6), 16);
         return ((r * 299 + g * 587 + b * 114) / 1000) < 128;
     };
-    window.Swal.fire = function(...args) {
+    const musedockSwalNormalizeArgs = function(args) {
         const first = args[0];
-        if (first && typeof first === 'object' && !Array.isArray(first) && first.background && String(first.background).toLowerCase() !== '#1e293b') {
+        if (first && typeof first === 'object' && !Array.isArray(first)) {
+            const hasCustomBackground = first.background && String(first.background).toLowerCase() !== '#1e293b';
             const currentClass = first.customClass || {};
-            const popupClass = musedockSwalIsDarkBackground(first.background) ? 'swal-dark-popup' : 'swal-light-readable';
-            return musedockSwalBaseFire(Object.assign({}, first, {
+            const popupClass = hasCustomBackground
+                ? (musedockSwalIsDarkBackground(first.background) ? 'swal-dark-popup' : 'swal-light-readable')
+                : 'swal-dark-popup';
+
+            return [Object.assign({}, musedockSwalDarkDefaults, first, {
                 color: first.color || (popupClass === 'swal-dark-popup' ? '#e2e8f0' : '#334155'),
-                customClass: Object.assign({}, currentClass, {
-                    popup: [currentClass.popup, popupClass].filter(Boolean).join(' ')
+                customClass: Object.assign({}, musedockSwalDarkDefaults.customClass, currentClass, {
+                    popup: [currentClass.popup || musedockSwalDarkDefaults.customClass.popup, popupClass]
+                        .filter(Boolean)
+                        .filter((value, index, all) => all.indexOf(value) === index)
+                        .join(' ')
                 })
-            }));
+            })];
         }
-        return SwalDark.fire(...args);
+
+        if (typeof first === 'string') {
+            const title = first;
+            const text = args.length > 1 ? args[1] : undefined;
+            const icon = args.length > 2 ? args[2] : undefined;
+            return [Object.assign({}, musedockSwalDarkDefaults, {title, text, icon})];
+        }
+
+        return [musedockSwalDarkDefaults];
+    };
+    window.Swal.fire = function(...args) {
+        return musedockSwalBaseFire(...musedockSwalNormalizeArgs(args));
     };
 }
 

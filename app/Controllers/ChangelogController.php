@@ -20,6 +20,31 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.129',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'SweetAlert global: corregida recursion infinita en `window.Swal.fire` que provocaba `Maximum call stack size exceeded` y bloqueaba botones como `/settings/updates`',
+                        ],
+                        'en' => [
+                            'Global SweetAlert: fixed infinite recursion in `window.Swal.fire` causing `Maximum call stack size exceeded` and blocking buttons such as `/settings/updates`',
+                        ],
+                    ],
+                    'docs' => [
+                        'es' => [
+                            '`/docs/install-recovery`: comandos de primera instalacion separados para usuario `root` y usuario con `sudo`, evitando el bloque confuso con `sudo -i`',
+                            '`/docs/install-recovery`: nota de diagnostico si `install.sh` no muestra salida, usando `sudo bash -x install.sh`',
+                        ],
+                        'en' => [
+                            '`/docs/install-recovery`: first-install commands split for `root` and sudo users, avoiding the confusing `sudo -i` block',
+                            '`/docs/install-recovery`: diagnostic note when `install.sh` shows no output, using `sudo bash -x install.sh`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.128',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

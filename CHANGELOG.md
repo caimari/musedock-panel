@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.129] — 2026-04-25
+
+### Fixed
+- SweetAlert global: corregida recursion infinita en `window.Swal.fire` que provocaba `Maximum call stack size exceeded` y bloqueaba botones como `/settings/updates`.
+
+### Docs
+- `/docs/install-recovery`: comandos de primera instalacion separados para usuario `root` y usuario con `sudo`, evitando el bloque confuso con `sudo -i`.
+- `/docs/install-recovery`: nota de diagnostico si `install.sh` no muestra salida, usando `sudo bash -x install.sh`.
+
 ## [1.0.128] — 2026-04-25
 
 ### Docs
