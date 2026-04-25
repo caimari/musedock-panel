@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.149',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`install.sh`: si `psql` por TCP a `127.0.0.1:5433` hace timeout pero PostgreSQL escucha, el instalador prueba socket Unix `/var/run/postgresql` y guarda `DB_HOST=/var/run/postgresql` si funciona',
+                            '`install.sh`: en reinstalaciones ya migradas a `5433`, vuelve a normalizar `pg_hba.conf` con reglas `local` y `host` especificas para el usuario del panel antes de aplicar `schema.sql`',
+                        ],
+                        'en' => [
+                            '`install.sh`: if TCP `psql` to `127.0.0.1:5433` times out but PostgreSQL is listening, the installer tries Unix socket `/var/run/postgresql` and stores `DB_HOST=/var/run/postgresql` when it works',
+                            '`install.sh`: on reinstalls already migrated to `5433`, it normalizes `pg_hba.conf` again with specific `local` and `host` rules for the panel user before applying `schema.sql`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.148',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

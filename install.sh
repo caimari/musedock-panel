@@ -2616,7 +2616,14 @@ ensure_panel_cluster() {
 update_panel_pg_hba() {
     local PG_HBA="/etc/postgresql/${PG_VER}/panel/pg_hba.conf"
     if [ -f "$PG_HBA" ]; then
-        if ! grep -q "${DB_USER}" "$PG_HBA" 2>/dev/null; then
+        if ! grep -Eq "^[[:space:]]*local[[:space:]]+${DB_NAME}[[:space:]]+${DB_USER}[[:space:]]+md5" "$PG_HBA" 2>/dev/null; then
+            cp "$PG_HBA" "${PG_HBA}.bak.$(date +%Y%m%d%H%M%S)"
+            sed -i "1ilocal    ${DB_NAME}    ${DB_USER}    md5" "$PG_HBA" 2>/dev/null || \
+                echo "local    ${DB_NAME}    ${DB_USER}    md5" >> "$PG_HBA"
+            pg_ctlcluster "$PG_VER" panel reload 2>/dev/null || true
+            ok "pg_hba.conf actualizado para socket local del panel"
+        fi
+        if ! grep -Eq "^[[:space:]]*host[[:space:]]+${DB_NAME}[[:space:]]+${DB_USER}[[:space:]]+127\.0\.0\.1/32[[:space:]]+md5" "$PG_HBA" 2>/dev/null; then
             cp "$PG_HBA" "${PG_HBA}.bak.$(date +%Y%m%d%H%M%S)"
             sed -i "/^# IPv4 local connections/a host    ${DB_NAME}    ${DB_USER}    127.0.0.1/32    md5" "$PG_HBA" 2>/dev/null || \
                 echo "host    ${DB_NAME}    ${DB_USER}    127.0.0.1/32    md5" >> "$PG_HBA"
@@ -2625,6 +2632,23 @@ update_panel_pg_hba() {
             ok "$(t pgsql_hba_updated)"
         fi
     fi
+}
+
+choose_panel_db_host() {
+    PANEL_DB_HOST="127.0.0.1"
+
+    if PGCONNECT_TIMEOUT=5 PGPASSWORD="${DB_PASS}" psql -v ON_ERROR_STOP=1 -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -c "SELECT 1;" > /dev/null 2>&1; then
+        ok "PostgreSQL panel accesible por TCP 127.0.0.1:5433"
+        return 0
+    fi
+
+    if PGCONNECT_TIMEOUT=5 PGPASSWORD="${DB_PASS}" psql -v ON_ERROR_STOP=1 -U "${DB_USER}" -h /var/run/postgresql -p 5433 -d "${DB_NAME}" -c "SELECT 1;" > /dev/null 2>&1; then
+        PANEL_DB_HOST="/var/run/postgresql"
+        warn "PostgreSQL TCP 127.0.0.1:5433 no responde; usando socket Unix ${PANEL_DB_HOST}"
+        return 0
+    fi
+
+    return 1
 }
 
 # Try peer auth first as the postgres system user, fallback to password auth.
@@ -2696,6 +2720,7 @@ if [ "$REINSTALL" = true ]; then
         # Scenario C — already migrated to 5433
         ok "$(t pgsql_already_5433)"
         ensure_panel_cluster
+        update_panel_pg_hba
         ok "$(t pgsql_panel_cluster "$PG_VER" "panel" "5433")"
     else
         # Scenario B — needs migration from 5432 to 5433
@@ -2751,6 +2776,14 @@ else
     ok "$(t pgsql_db_created "$DB_NAME" "$DB_USER")"
     ok "$(t pgsql_5432_free)"
     ok "$(t pgsql_panel_cluster "$PG_VER" "panel" "5433")"
+fi
+
+PANEL_DB_HOST="127.0.0.1"
+if ! choose_panel_db_host; then
+    warn "No se pudo conectar a la BD del panel ni por TCP ni por socket Unix"
+    echo "    Prueba manual TCP:    PGPASSWORD='***' psql -U ${DB_USER} -h 127.0.0.1 -p 5433 -d ${DB_NAME} -c 'SELECT 1;'"
+    echo "    Prueba manual socket: PGPASSWORD='***' psql -U ${DB_USER} -h /var/run/postgresql -p 5433 -d ${DB_NAME} -c 'SELECT 1;'"
+    fail "PostgreSQL del panel no acepta conexion autenticada. Revisa pg_hba.conf y credenciales."
 fi
 
 # ============================================================
@@ -3221,7 +3254,7 @@ PANEL_PORT=${PANEL_PORT}
 PANEL_DEBUG=false
 PANEL_HSTS_ENABLED=false
 
-DB_HOST=127.0.0.1
+DB_HOST=${PANEL_DB_HOST}
 DB_PORT=5433
 DB_NAME=${DB_NAME}
 DB_USER=${DB_USER}
@@ -3255,7 +3288,7 @@ ok "$(t env_created)"
 
 # Run database schema (safe — uses IF NOT EXISTS)
 SCHEMA_INSTALL_LOG="/tmp/musedock-panel-install-schema.log"
-if ! PGCONNECT_TIMEOUT=5 PGPASSWORD="${DB_PASS}" psql -v ON_ERROR_STOP=1 -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > "$SCHEMA_INSTALL_LOG" 2>&1; then
+if ! PGCONNECT_TIMEOUT=5 PGPASSWORD="${DB_PASS}" psql -v ON_ERROR_STOP=1 -U "${DB_USER}" -h "${PANEL_DB_HOST}" -p 5433 -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > "$SCHEMA_INSTALL_LOG" 2>&1; then
     tail -n 80 "$SCHEMA_INSTALL_LOG" | sed 's/^/    /'
     fail "No se pudo aplicar database/schema.sql. Revisa PostgreSQL, pg_hba.conf y credenciales en ${PANEL_DIR}/.env."
 fi

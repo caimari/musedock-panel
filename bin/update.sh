@@ -76,7 +76,7 @@ env_value() {
 
 is_local_db_host() {
     case "$1" in
-        ""|"127.0.0.1"|"localhost"|"::1") return 0 ;;
+        ""|"127.0.0.1"|"localhost"|"::1"|"/var/run/postgresql"|"/tmp") return 0 ;;
         *) return 1 ;;
     esac
 }

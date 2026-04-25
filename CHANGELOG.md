@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.149] — 2026-04-26
+
+### Fixed
+- `install.sh`: si `psql` por TCP a `127.0.0.1:5433` hace timeout pero PostgreSQL escucha, el instalador prueba socket Unix `/var/run/postgresql` y guarda `DB_HOST=/var/run/postgresql` si funciona.
+- `install.sh`: en reinstalaciones ya migradas a `5433`, vuelve a normalizar `pg_hba.conf` con reglas `local` y `host` especificas para el usuario del panel antes de aplicar `schema.sql`.
+
 ## [1.0.148] — 2026-04-25
 
 ### Fixed
