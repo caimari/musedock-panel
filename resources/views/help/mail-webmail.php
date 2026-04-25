@@ -156,3 +156,13 @@
         </ul>
     </div>
 </div>
+
+<div class="card mt-4">
+    <div class="card-header"><i class="bi bi-person-check me-2"></i>Autenticacion de usuarios webmail</div>
+    <div class="card-body">
+        <p class="small text-muted mb-0">
+            Los usuarios que crees en el sistema de correo (modo Correo Completo) se autentican en Webmail contra IMAP/SMTP del servidor configurado.
+            Si Webmail esta enlazado a un backend remoto correcto, los buzones instalados funcionan con las mismas credenciales del dominio.
+        </p>
+    </div>
+</div>

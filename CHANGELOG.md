@@ -2,6 +2,25 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.112] — 2026-04-25
+
+### Improved
+- `/mail?tab=deliverability`: bloque de test externo de reputacion con enlace directo a `https://mail-tester.com/`, recomendaciones de validacion (`SPF/DKIM/DMARC PASS`, `rDNS OK`) y UI alineada para envio de test.
+- `/mail?tab=deliverability`: formulario de `Test de envio` ampliado con selector de origen de remitente (`Recomendado`, `mail_from_address`, `Email admin`) y envelope sender forzado para pruebas SPF/DMARC mas realistas.
+- `/mail?tab=deliverability`: aviso contextual cuando `non_smtpd_milters` no incluye OpenDKIM, para detectar rapidamente por que un test local puede salir sin firma DKIM.
+- `/mail` (General): nueva card de mantenimiento `Normalizar DKIM` visible tambien cuando el sistema esta estable, para reaplicar socket/permisos/milters de OpenDKIM sin esperar a estado de fallo.
+- Reparador local de mail: ahora normaliza `smtpd_milters` y `non_smtpd_milters` asegurando OpenDKIM sin eliminar otros milters ya existentes.
+
+### Security
+- `/mail/repair-local`: bloqueo defensivo si no se detecta instalacion local de mail (`repair_available=false`), evitando ejecutar reparaciones en nodos sin huella local.
+- Modal de reparacion: texto explicito de seguridad indicando que no se sobrescriben dominios, cuentas, buzones, aliases, cola ni DNS.
+
+### Docs
+- `/docs/mail/deliverability`: ampliada con caso anonimo de arquitectura hibrida multi-proveedor, tabla de referencia tipo Cloudflare y notas de coexistencia SPF/DKIM/DMARC/MX/PTR.
+- `/docs/mail/deliverability`: nuevas recomendaciones operativas de cuentas `dmarc@`, `postgresql@`, `root@` y flujo de test de reputacion.
+- `/docs/mail/relay`: documentacion nueva sobre SaaS autenticado por Relay Privado (cuando se cumplen DKIM/SPF/DMARC) y aplicacion al portal de clientes/apps.
+- `/docs/mail/webmail`: seccion anadida sobre autenticacion de usuarios webmail contra backend IMAP/SMTP configurado.
+
 ## [1.0.111] — 2026-04-25
 
 ### Improved

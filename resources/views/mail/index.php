@@ -295,6 +295,37 @@
     </div>
 </div>
 <?php endif; ?>
+
+<?php if (!$isSlave && empty($localRepair['needs_repair']) && !empty($localRepair['repair_available'])): ?>
+<div class="card mb-4" style="border-color:rgba(56,189,248,.32);">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span><i class="bi bi-shield-check me-2 text-info"></i>Mantenimiento DKIM / milters local</span>
+        <span class="badge bg-info text-dark">Disponible</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-lg-7">
+                <div class="small text-muted mb-2">
+                    Reaplica configuracion segura de OpenDKIM/Postfix (socket, permisos, <code>smtpd_milters</code> y <code>non_smtpd_milters</code>)
+                    para evitar tests sin DKIM por desajuste local.
+                </div>
+                <div class="small text-muted mb-0">
+                    Esta accion no elimina ni sobreescribe dominios, cuentas, buzones, aliases, cola ni DNS.
+                </div>
+            </div>
+            <div class="col-lg-5">
+                <form method="post" action="/mail/repair-local" class="d-flex gap-2" data-mail-repair-form>
+                    <?= View::csrf() ?>
+                    <input type="password" name="admin_password" class="form-control form-control-sm" placeholder="Password admin" required autocomplete="current-password">
+                    <button class="btn btn-outline-info btn-sm fw-semibold">
+                        <i class="bi bi-wrench-adjustable me-1"></i>Normalizar DKIM
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 </div>
 
 <?php
@@ -1292,9 +1323,9 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
         <span><i class="bi bi-shield-check me-2"></i>Entregabilidad DNS</span>
         <div class="d-flex align-items-center gap-2">
             <?php if (!$isSlave): ?>
-                <form method="post" action="/mail/deliverability/check" class="d-inline">
+                <form method="post" action="/mail/deliverability/check" class="d-inline" data-deliverability-check-form>
                     <?= View::csrf() ?>
-                    <button class="btn btn-outline-light btn-sm">
+                    <button class="btn btn-outline-light btn-sm" data-deliverability-check-btn>
                         <i class="bi bi-search me-1"></i>Comprobar DNS ahora
                     </button>
                 </form>
@@ -1310,6 +1341,19 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                 En modo relay, ese boton tambien sincroniza estado en BD.
             <?php endif; ?>
         </p>
+
+        <div class="alert alert-secondary mb-3" style="background:rgba(15,23,42,.6);border-color:#334155;">
+            <div class="small">
+                <strong>Nota operativa (ejemplo anonimo):</strong> arquitectura hibrida valida:
+                <code>DNS Provider</code> publica SPF/DKIM/DMARC/MX/A,
+                <code>Servidor SMTP propio</code> envia y firma DKIM propio,
+                <code>Relay externo</code> actua como emisor alternativo.
+                Reglas clave: un solo SPF combinado, DKIM por selector (uno por servicio), DMARC unico, y PTR solo en proveedor de IP.
+            </div>
+        </div>
+        <div class="small text-muted mb-3">
+            Buzones/aliases sugeridos para operacion: <code>dmarc@tu-dominio.com</code>, <code>postgresql@tu-dominio.com</code>, <code>root@tu-dominio.com</code>.
+        </div>
 
         <?php if (($mailMode ?? 'full') === 'external'): ?>
             <div class="alert alert-info" style="background:rgba(56,189,248,.12);border-color:rgba(56,189,248,.25);">
@@ -1458,15 +1502,48 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
         <?php endif; ?>
 
         <?php if (!$isSlave): ?>
-        <form method="post" action="/mail/test-send" class="row g-2 align-items-end mt-3">
+        <div class="card mt-3 mb-2" style="background:#0b1220;border:1px solid #334155;">
+            <div class="card-body">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
+                    <div class="small text-muted">
+                        <strong>Test externo de reputacion:</strong> ejecuta prueba end-to-end en Mail-Tester y verifica SPF/DKIM/DMARC/PTR/blacklists.
+                        Haz dos pruebas separadas: <code>Envio servidor propio</code> y <code>Envio relay externo</code>.
+                    </div>
+                    <a href="https://mail-tester.com/" target="_blank" rel="noopener noreferrer" class="btn btn-outline-info btn-sm">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>Abrir Mail-Tester
+                    </a>
+                </div>
+                <div class="small text-muted">
+                    Revisa especialmente: <strong>SPF PASS</strong>, <strong>DKIM PASS</strong>, <strong>DMARC PASS</strong>, <strong>rDNS OK</strong>.
+                </div>
+            </div>
+        </div>
+
+        <form method="post" action="/mail/test-send" class="row g-2 mt-3">
             <?= View::csrf() ?>
-            <div class="col-md-5">
+            <div class="col-lg-4 col-md-6">
                 <label class="form-label">Test de envio</label>
                 <input type="email" name="test_email" class="form-control" placeholder="tu@email.com" required>
-                <div class="form-text text-muted">Envia un correo de prueba y muestra si Postfix lo entrega, lo deja en cola o lo rechaza.</div>
             </div>
-            <div class="col-md-auto">
+            <div class="col-lg-4 col-md-6">
+                <label class="form-label">Remitente de prueba</label>
+                <?php
+                    $testProfile = is_array($testSendProfile ?? null) ? $testSendProfile : [];
+                    $cfgFrom = (string)($testProfile['configured'] ?? ($smtpConfig['from_address'] ?? ''));
+                    $adminFrom = (string)($testProfile['admin'] ?? ($adminEmail ?? ''));
+                    $selectedSource = (string)($testProfile['source'] ?? 'recommended');
+                ?>
+                <select name="test_from_source" class="form-select">
+                    <option value="recommended" <?= $selectedSource === 'recommended' ? 'selected' : '' ?>>Recomendado automatico</option>
+                    <option value="configured" <?= $selectedSource === 'configured' ? 'selected' : '' ?>><?= View::e($cfgFrom !== '' ? ('mail_from_address: ' . $cfgFrom) : 'mail_from_address no configurado') ?></option>
+                    <option value="admin" <?= $selectedSource === 'admin' ? 'selected' : '' ?>><?= View::e($adminFrom !== '' ? ('Email admin: ' . $adminFrom) : 'Email admin no disponible') ?></option>
+                </select>
+            </div>
+            <div class="col-md-auto d-flex align-items-end">
                 <button class="btn btn-outline-info"><i class="bi bi-send me-1"></i>Enviar test</button>
+            </div>
+            <div class="col-12">
+                <div class="form-text text-muted mb-0">Envia un correo de prueba y muestra si Postfix lo entrega, lo deja en cola o lo rechaza. El panel fuerza Return-Path con el remitente elegido para pruebas SPF/DMARC mas reales.</div>
             </div>
         </form>
         <?php endif; ?>
@@ -2034,7 +2111,8 @@ initWebmailConfigLock();
                 icon: 'warning',
                 title: 'Reparar instalacion local de mail',
                 html: '<div class="text-start small">'
-                    + '<p>Se preparara OpenDKIM, se corregira el socket local, se reiniciaran <code>opendkim</code> y <code>postfix</code>, y el panel solo marcara mail como instalado si ambos servicios quedan activos.</p>'
+                    + '<p>Se preparara OpenDKIM, se corregira el socket local, se normalizaran milters DKIM en Postfix y se reiniciaran <code>opendkim</code>/<code>postfix</code>.</p>'
+                    + '<p><strong>No toca ni sobreescribe</strong> dominios, cuentas, buzones, aliases, cola de correo ni DNS.</p>'
                     + '<p class="mb-0 text-warning">Puede tardar uno o dos minutos si systemd o apt estan lentos.</p>'
                     + '</div>',
                 showCancelButton: true,
@@ -2120,6 +2198,19 @@ initWebmailConfigLock();
                 }
             }
         });
+    });
+})();
+
+(function initDeliverabilityCheckForm() {
+    const form = document.querySelector('form[data-deliverability-check-form]');
+    if (!form) return;
+
+    const button = form.querySelector('[data-deliverability-check-btn]');
+    if (!button) return;
+
+    form.addEventListener('submit', function () {
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Comprobando...';
     });
 })();
 

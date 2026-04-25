@@ -9,4 +9,26 @@
 
 <div class="card mb-4"><div class="card-header"><i class="bi bi-check2-square me-2"></i>Que revisar</div><div class="card-body"><ul class="small text-muted mb-0"><li>Host de salida y IP coinciden con DNS publicado.</li><li>Usuario SMTP con password guardada de forma segura.</li><li>TLS/puerto correctos en cliente SMTP.</li><li>Si todo esta OK, la card de activacion puede quedar plegada automaticamente.</li></ul></div></div>
 
+<div class="card mb-4">
+    <div class="card-header"><i class="bi bi-shield-check me-2"></i>SaaS autenticado: cuando DKIM/SPF se cumplen</div>
+    <div class="card-body">
+        <ul class="small text-muted mb-0">
+            <li>Si el SaaS envia autenticado por Relay Privado (SMTP AUTH), el servidor aplica politicas del dominio remitente autorizado.</li>
+            <li>DKIM se firma si el dominio/selector esta registrado en relay y OpenDKIM esta activo en el nodo de mail.</li>
+            <li>SPF pasa cuando la IP/host emisor usado por el relay esta incluido en el SPF del dominio.</li>
+            <li>DMARC pasa cuando From esta alineado con SPF y/o DKIM del mismo dominio.</li>
+        </ul>
+    </div>
+</div>
+
+<div class="card mb-4">
+    <div class="card-header"><i class="bi bi-people me-2"></i>Portal de clientes y apps SaaS</div>
+    <div class="card-body">
+        <p class="small text-muted mb-0">
+            Si el Portal de clientes o una app SaaS usa SMTP autenticado contra el relay privado, el flujo de envio es el mismo:
+            credenciales SMTP + dominio autorizado + DNS correcto (SPF/DKIM/DMARC). No se requiere recepcion local para poder enviar bien.
+        </p>
+    </div>
+</div>
+
 <div class="card"><div class="card-header"><i class="bi bi-exclamation-triangle me-2"></i>Errores tipicos</div><div class="card-body"><ul class="small text-muted mb-0"><li>DKIM no publicado o selector incorrecto.</li><li>SPF sin IP de salida real.</li><li>Cliente SMTP apuntando a host/puerto equivocado.</li><li>WireGuard sin ruta hacia el relay.</li></ul></div></div>

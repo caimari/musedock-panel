@@ -512,6 +512,134 @@ class MailService
         return $token;
     }
 
+    public static function isAuthorizedSenderEmail(string $email): bool
+    {
+        $email = strtolower(trim($email));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return false;
+        }
+        $parts = explode('@', $email);
+        $domain = strtolower(trim((string)end($parts)));
+        return self::isAuthorizedSenderDomain($domain);
+    }
+
+    public static function isAuthorizedSenderDomain(string $domain): bool
+    {
+        $domain = strtolower(trim($domain));
+        if ($domain === '' || !preg_match('/^[a-z0-9.-]+$/', $domain)) {
+            return false;
+        }
+
+        $allowed = [];
+        foreach ([
+            (string)Settings::get('mail_outbound_domain', ''),
+            (string)Settings::get('mail_relay_domain', ''),
+        ] as $candidate) {
+            $candidate = strtolower(trim($candidate));
+            if ($candidate !== '') {
+                $allowed[$candidate] = true;
+            }
+        }
+
+        $fromAddress = strtolower(trim((string)Settings::get('mail_from_address', '')));
+        if ($fromAddress !== '' && str_contains($fromAddress, '@')) {
+            $fromDomain = substr((string)strrchr($fromAddress, '@'), 1);
+            $fromDomain = strtolower(trim($fromDomain));
+            if ($fromDomain !== '') {
+                $allowed[$fromDomain] = true;
+            }
+        }
+
+        if (isset($allowed[$domain])) {
+            return true;
+        }
+
+        try {
+            $relay = Database::fetchOne(
+                "SELECT id FROM mail_relay_domains WHERE lower(domain) = :d LIMIT 1",
+                ['d' => $domain]
+            );
+            if ($relay) {
+                return true;
+            }
+        } catch (\Throwable) {
+        }
+
+        try {
+            $mailDomain = Database::fetchOne(
+                "SELECT id FROM mail_domains WHERE lower(domain) = :d LIMIT 1",
+                ['d' => $domain]
+            );
+            if ($mailDomain) {
+                return true;
+            }
+        } catch (\Throwable) {
+        }
+
+        return false;
+    }
+
+    public static function resolveTestFromAddress(string $source, string $configuredFrom, string $adminEmail = ''): array
+    {
+        $source = trim(strtolower($source));
+        if (!in_array($source, ['recommended', 'configured', 'admin'], true)) {
+            $source = 'recommended';
+        }
+
+        $configured = strtolower(trim($configuredFrom));
+        $admin = strtolower(trim($adminEmail));
+        $warnings = [];
+        $selected = '';
+
+        if ($source === 'configured') {
+            if ($configured !== '' && self::isAuthorizedSenderEmail($configured)) {
+                $selected = $configured;
+            } else {
+                $warnings[] = 'El remitente configurado no es valido o no pertenece a un dominio autorizado. Se usara recomendado.';
+            }
+        } elseif ($source === 'admin') {
+            if ($admin !== '' && self::isAuthorizedSenderEmail($admin)) {
+                $selected = $admin;
+            } else {
+                $warnings[] = 'El email admin no es valido o no pertenece a un dominio autorizado. Se usara recomendado.';
+            }
+        }
+
+        if ($selected === '') {
+            if ($configured !== '' && self::isAuthorizedSenderEmail($configured)) {
+                $selected = $configured;
+                $source = 'configured';
+            } elseif ($admin !== '' && self::isAuthorizedSenderEmail($admin)) {
+                $selected = $admin;
+                $source = 'admin';
+            } else {
+                $domain = strtolower(trim((string)Settings::get('mail_outbound_domain', '')));
+                if ($domain === '') {
+                    $domain = strtolower(trim((string)Settings::get('mail_relay_domain', '')));
+                }
+                if ($domain === '' && $configured !== '' && str_contains($configured, '@')) {
+                    $domain = substr((string)strrchr($configured, '@'), 1);
+                }
+                if ($domain === '' && $admin !== '' && str_contains($admin, '@')) {
+                    $domain = substr((string)strrchr($admin, '@'), 1);
+                }
+                if ($domain === '') {
+                    $domain = strtolower((string)(gethostname() ?: 'localhost'));
+                }
+                $selected = 'noreply@' . $domain;
+                $source = 'recommended';
+            }
+        }
+
+        return [
+            'from' => $selected,
+            'source' => $source,
+            'warnings' => $warnings,
+            'configured' => $configured,
+            'admin' => $admin,
+        ];
+    }
+
     private static function satelliteDkimConfigured(): bool
     {
         return Settings::get('mail_satellite_dkim_txt', '') !== ''

@@ -13,6 +13,8 @@ use MuseDockPanel\Services\WebmailService;
 
 class MailController
 {
+    private const OPENDKIM_MILTER_SOCKET = 'unix:/run/opendkim/opendkim.sock';
+
     private static function isSlave(): bool
     {
         $role = Settings::get('cluster_role', '');
@@ -57,6 +59,8 @@ class MailController
         $mailHealthAlerts = MailService::getMailHealthAlerts();
         $mailMode = MailService::getCurrentMailMode();
         $smtpConfig = MailService::getSmtpConfig(false);
+        $adminEmail = $this->currentAdminEmail();
+        $testSendProfile = MailService::resolveTestFromAddress('recommended', (string)($smtpConfig['from_address'] ?? ''), $adminEmail);
         $requestedTab = (string)($_GET['tab'] ?? '');
         $deliverabilityRequested = $requestedTab === 'deliverability';
         $deliverabilityRunChecks = $deliverabilityRequested && !empty($_SESSION['mail_deliverability_check_once']);
@@ -113,6 +117,8 @@ class MailController
             'clusterRole'         => $clusterRole,
             'mailMode'            => $mailMode,
             'smtpConfig'          => $smtpConfig,
+            'adminEmail'          => $adminEmail,
+            'testSendProfile'     => $testSendProfile,
             'deliverabilityRows'  => $deliverabilityRows,
             'internalSmtpToken'   => $internalSmtpToken,
             'relayDomains'        => $relayDomains,
@@ -631,6 +637,7 @@ class MailController
     public function repairLocal(): void
     {
         $ajax = $this->isJsonRequest();
+        $repairStatus = $this->getLocalMailRepairStatus();
 
         if (self::isSlave()) {
             if ($ajax) {
@@ -648,6 +655,17 @@ class MailController
                 return;
             }
             Flash::set('error', 'Token CSRF invalido.');
+            Router::redirect('/mail?tab=infra');
+            return;
+        }
+
+        if (empty($repairStatus['repair_available'])) {
+            $msg = 'No hay instalacion local de mail detectada en este nodo. Se bloquea la reparacion para evitar cambios no deseados.';
+            if ($ajax) {
+                $this->jsonResponse(['ok' => false, 'error' => $msg, 'status' => $repairStatus], 409);
+                return;
+            }
+            Flash::set('warning', $msg);
             Router::redirect('/mail?tab=infra');
             return;
         }
@@ -718,11 +736,13 @@ class MailController
         $needsRepair = $partial
             || ($configured && (!$postfixActive || !$opendkimActive))
             || ($mailMode === 'relay' && $relayIpAssigned === false);
+        $repairAvailable = $configured || $postfixInstalled || $opendkimInstalled;
 
         return [
             'configured' => $configured,
             'partial' => $partial,
             'needs_repair' => $needsRepair,
+            'repair_available' => $repairAvailable,
             'postfix_installed' => $postfixInstalled,
             'opendkim_installed' => $opendkimInstalled,
             'postfix_active' => $postfixActive,
@@ -793,6 +813,7 @@ class MailController
 
         $run('permisos opendkim', 'chown -R opendkim:opendkim /etc/opendkim /run/opendkim');
         $run('postfix en grupo opendkim', 'usermod -aG opendkim postfix || true');
+        $this->ensureOpenDkimMiltersConfigured($run);
         if (MailService::getCurrentMailMode() === 'relay') {
             $run('limpiar relayhost antiguo', "postconf -e 'relayhost ='");
             $run('limpiar transport antiguo', "postconf -e 'transport_maps ='");
@@ -828,6 +849,45 @@ class MailController
         if (!$opendkimActive) $errors[] = 'opendkim no quedo activo';
         LogService::log('mail.repair_local_failed', 'local', implode('; ', $errors));
         return ['ok' => false, 'messages' => array_merge($messages, $errors)];
+    }
+
+    private function normalizeMiltersWithOpenDkim(string $value): string
+    {
+        $parts = array_values(array_filter(array_map(static function (string $part): string {
+            return trim($part);
+        }, explode(',', $value)), static function (string $part): bool {
+            return $part !== '';
+        }));
+
+        $normalized = [];
+        foreach ($parts as $part) {
+            $key = strtolower($part);
+            if (!isset($normalized[$key])) {
+                $normalized[$key] = $part;
+            }
+        }
+
+        $opendkimLower = strtolower(self::OPENDKIM_MILTER_SOCKET);
+        if (!isset($normalized[$opendkimLower])) {
+            // Put OpenDKIM first to ensure signing path is always present.
+            $normalized = [$opendkimLower => self::OPENDKIM_MILTER_SOCKET] + $normalized;
+        }
+
+        return implode(',', array_values($normalized));
+    }
+
+    private function ensureOpenDkimMiltersConfigured(callable $run): void
+    {
+        $currentSmtpd = trim((string)shell_exec('postconf -h smtpd_milters 2>/dev/null'));
+        $currentNonSmtpd = trim((string)shell_exec('postconf -h non_smtpd_milters 2>/dev/null'));
+
+        $targetSmtpd = $this->normalizeMiltersWithOpenDkim($currentSmtpd);
+        $targetNonSmtpd = $this->normalizeMiltersWithOpenDkim($currentNonSmtpd);
+
+        $run('postfix milter_default_action', "postconf -e 'milter_default_action = accept'");
+        $run('postfix milter_protocol', "postconf -e 'milter_protocol = 6'");
+        $run('postfix smtpd_milters', 'postconf -e ' . escapeshellarg('smtpd_milters = ' . $targetSmtpd));
+        $run('postfix non_smtpd_milters', 'postconf -e ' . escapeshellarg('non_smtpd_milters = ' . $targetNonSmtpd));
     }
 
     private function systemctlIsActive(string $service): bool
@@ -1319,6 +1379,17 @@ class MailController
         return $admin && password_verify($password, (string)$admin['password_hash']);
     }
 
+    private function currentAdminEmail(): string
+    {
+        $adminId = (int)($_SESSION['panel_user']['id'] ?? 0);
+        if ($adminId <= 0) {
+            return '';
+        }
+        $row = Database::fetchOne('SELECT email FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        $email = strtolower(trim((string)($row['email'] ?? '')));
+        return filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : '';
+    }
+
     public function testSend(): void
     {
         if (self::isSlave()) {
@@ -1335,16 +1406,31 @@ class MailController
         }
 
         $cfg = MailService::getSmtpConfig(false);
-        $from = $cfg['from_address'] ?: ('noreply@' . (gethostname() ?: 'localhost'));
+        $source = trim((string)($_POST['test_from_source'] ?? 'recommended'));
+        $resolvedFrom = MailService::resolveTestFromAddress(
+            $source,
+            (string)($cfg['from_address'] ?? ''),
+            $this->currentAdminEmail()
+        );
+        $from = (string)($resolvedFrom['from'] ?? '');
+        if (!filter_var($from, FILTER_VALIDATE_EMAIL)) {
+            Flash::set('error', 'No hay remitente valido para test. Revisa mail_from_address o email admin.');
+            Router::redirect('/mail?tab=deliverability');
+            return;
+        }
+
         $marker = 'MuseDock-Test-' . date('YmdHis') . '-' . bin2hex(random_bytes(3));
         $subject = "Test de envio MuseDock {$marker}";
         $body = "Este es un email de prueba de MuseDock Panel.\n\nSi lo ves, el envio funciona.\n\nMarker: {$marker}\n";
         $headers = [
             'From: ' . $from,
+            'Reply-To: ' . $from,
+            'Auto-Submitted: auto-generated',
             'X-MuseDock-Test: ' . $marker,
         ];
 
-        $sent = @mail($to, $subject, $body, implode("\r\n", $headers));
+        $envelope = '-f ' . escapeshellarg($from);
+        $sent = @mail($to, $subject, $body, implode("\r\n", $headers), $envelope);
         usleep(400000);
 
         $log = '';
@@ -1365,9 +1451,16 @@ class MailController
         } elseif (stripos($log, 'status=deferred') !== false) {
             Flash::set('warning', "Test en cola/deferred. Log: {$log}");
         } elseif (stripos($log, 'status=sent') !== false) {
-            Flash::set('success', "Test enviado correctamente a {$to}.");
+            $postfixMilters = trim((string)shell_exec('postconf -h non_smtpd_milters 2>/dev/null'));
+            $milterWarn = '';
+            if ($postfixMilters === '' || stripos($postfixMilters, 'opendkim') === false) {
+                $milterWarn = ' Aviso: non_smtpd_milters no incluye OpenDKIM; el test local podria salir sin firma DKIM.';
+            }
+            $extraWarn = !empty($resolvedFrom['warnings']) ? (' ' . implode(' ', (array)$resolvedFrom['warnings'])) : '';
+            Flash::set('success', "Test enviado correctamente a {$to} con From/Return-Path {$from}.{$extraWarn}{$milterWarn}");
         } else {
-            Flash::set('success', "Test entregado a la cola local para {$to}. Si no llega, revisa /var/log/mail.log. Marker: {$marker}");
+            $extraWarn = !empty($resolvedFrom['warnings']) ? (' ' . implode(' ', (array)$resolvedFrom['warnings'])) : '';
+            Flash::set('success', "Test entregado a la cola local para {$to} usando {$from}. Si no llega, revisa /var/log/mail.log. Marker: {$marker}.{$extraWarn}");
         }
 
         Router::redirect('/mail?tab=deliverability');
