@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.157] — 2026-04-26
+
+### Added
+- Nuevo `bin/backup-caddy-config.sh`: guarda snapshots de `/etc/caddy/Caddyfile`, conserva 15 dias por defecto y mantiene una copia `last-known-good` validada con `caddy validate`.
+- `install.sh` y `bin/update.sh`: instalan `/etc/cron.d/musedock-caddy-backup` para backup diario de Caddy y crean snapshot inmediato.
+- Docs/Bugs: nuevo articulo `Backups de Caddy y reconstruccion sin backup`, con politica de retencion, restauracion y reconstruccion manual desde `/var/www/vhosts`.
+
+### Improved
+- `install.sh`: crea snapshot de Caddy antes de entrar en el paso de configuracion Caddy.
+- `bin/repair-panel-tls.sh`: ejecuta un snapshot de Caddy antes de reescribir el Caddyfile.
+
 ## [1.0.156] — 2026-04-26
 
 ### Added

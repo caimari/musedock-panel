@@ -86,6 +86,27 @@ local_pg_port_listening() {
     ss -tln 2>/dev/null | grep -qE "127\\.0\\.0\\.1:${port}\\b|\\*:${port}\\b|0\\.0\\.0\\.0:${port}\\b|\\[::\\]:${port}\\b"
 }
 
+install_caddy_backup_cron() {
+    if [ ! -x "${PANEL_DIR}/bin/backup-caddy-config.sh" ]; then
+        return 0
+    fi
+
+    mkdir -p "${PANEL_DIR}/storage/backups/caddy" "${PANEL_DIR}/storage/logs" 2>/dev/null || true
+    chown root:root "${PANEL_DIR}/storage/backups/caddy" 2>/dev/null || true
+    chmod 0750 "${PANEL_DIR}/storage/backups/caddy" 2>/dev/null || true
+    cat > /etc/cron.d/musedock-caddy-backup << CRONEOF
+# MuseDock Panel — Daily Caddy config backup (15d rotation + last-known-good)
+17 3 * * * root ${PANEL_DIR}/bin/backup-caddy-config.sh >> ${PANEL_DIR}/storage/logs/caddy-backup.log 2>&1
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-caddy-backup
+    ok "Caddy config backup cron installed/updated"
+
+    # Create an immediate snapshot after update so recovery is available before
+    # the next daily cron window.
+    "${PANEL_DIR}/bin/backup-caddy-config.sh" >> "${PANEL_DIR}/storage/logs/caddy-backup.log" 2>&1 || \
+        warn "Caddy config backup snapshot failed; see storage/logs/caddy-backup.log"
+}
+
 ensure_database_ready() {
     local db_host db_port db_name db_user cluster_line pg_ver pg_cluster pg_status
 
@@ -403,6 +424,8 @@ CRONEOF
     chmod 644 /etc/cron.d/musedock-backup
     ok "Panel backup cron hardened and staggered to :02/:07"
 fi
+
+install_caddy_backup_cron
 
 # Install audit log purge cron if missing
 if [ ! -f /etc/cron.d/musedock-audit-purge ]; then

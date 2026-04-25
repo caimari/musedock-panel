@@ -191,6 +191,14 @@ class DocsController
                 'keywords' => 'bug caddy recovery recuperar restaurar backup caddyfile reinstalacion accidental panel only 8444 web caida permission denied root root chmod 0644 muserelay asterisk mabelle',
                 'view' => 'bug-caddy-recovery',
             ],
+            'caddy-backups' => [
+                'title' => 'Backups de Caddy y reconstruccion sin backup',
+                'summary' => 'Politica de snapshots diarios, last-known-good y reconstruccion manual de dominios si no hay backup.',
+                'panel_url' => '/settings/caddy',
+                'icon' => 'bi-shield-check',
+                'keywords' => 'bug caddy backups caddyfile rotacion 15 dias last-known-good reconstruccion sin backup vhosts php-fpm reverse proxy certificados restaurar',
+                'view' => 'bug-caddy-backups',
+            ],
         ];
     }
 

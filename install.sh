@@ -109,6 +109,27 @@ prompt_read_secret() {
     return "$rc"
 }
 
+install_caddy_backup_cron() {
+    if [ ! -x "${PANEL_DIR}/bin/backup-caddy-config.sh" ]; then
+        return 0
+    fi
+
+    mkdir -p "${PANEL_DIR}/storage/backups/caddy" "${PANEL_DIR}/storage/logs" 2>/dev/null || true
+    chown root:root "${PANEL_DIR}/storage/backups/caddy" 2>/dev/null || true
+    chmod 0750 "${PANEL_DIR}/storage/backups/caddy" 2>/dev/null || true
+    cat > /etc/cron.d/musedock-caddy-backup << CRONEOF
+# MuseDock Panel — Daily Caddy config backup (15d rotation + last-known-good)
+17 3 * * * root ${PANEL_DIR}/bin/backup-caddy-config.sh >> ${PANEL_DIR}/storage/logs/caddy-backup.log 2>&1
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-caddy-backup
+}
+
+run_caddy_config_snapshot() {
+    if [ -x "${PANEL_DIR}/bin/backup-caddy-config.sh" ]; then
+        "${PANEL_DIR}/bin/backup-caddy-config.sh" >> "${PANEL_DIR}/storage/logs/caddy-backup.log" 2>&1 || true
+    fi
+}
+
 ok()     { echo -e "  ${GREEN}✓${NC} [$(elapsed_step)] $1"; }
 warn()   { echo -e "  ${YELLOW}!${NC} [$(elapsed_step)] $1"; }
 fail()   { stop_step_timer; echo -e "  ${RED}✗${NC} [$(elapsed_step)] $1"; exit 1; }
@@ -1378,7 +1399,7 @@ if [ "$REPAIR_MODE" = true ]; then
     echo ""
     echo -e "  ${CYAN}$(t repair_check_crons)${NC}"
     CRONS_FIXED=0
-    for cronfile in musedock-cluster musedock-backup musedock-filesync musedock-monitor musedock-failover; do
+    for cronfile in musedock-cluster musedock-backup musedock-caddy-backup musedock-filesync musedock-monitor musedock-failover; do
         if [ ! -f "/etc/cron.d/${cronfile}" ]; then
             warn "  /etc/cron.d/${cronfile} — faltante"
             CRONS_FIXED=$((CRONS_FIXED + 1))
@@ -1400,6 +1421,9 @@ CRONEOF
 5 * * * * root find ${PANEL_DIR}/storage/backups/ -name "panel-*.sql.gz" -mmin +2880 -delete 2>/dev/null
 CRONEOF
         chmod 644 /etc/cron.d/musedock-backup
+
+        install_caddy_backup_cron
+        run_caddy_config_snapshot
 
         cat > /etc/cron.d/musedock-filesync << CRONEOF
 # MuseDock Panel — File sync worker (master -> slave file replication)
@@ -1848,6 +1872,9 @@ CRONEOF
 5 * * * * root find ${PANEL_DIR}/storage/backups/ -name "panel-*.sql.gz" -mmin +2880 -delete 2>/dev/null
 CRONEOF
     chmod 644 /etc/cron.d/musedock-backup
+
+    install_caddy_backup_cron
+    run_caddy_config_snapshot
 
     # File sync worker
     cat > /etc/cron.d/musedock-filesync << CRONEOF
@@ -2851,6 +2878,7 @@ header "$(t step_caddy)"
 CADDY_FILE="/etc/caddy/Caddyfile"
 CADDY_WAS_RUNNING=false
 CADDY_EXISTING=false
+run_caddy_config_snapshot
 
 # Detect existing Caddy
 if command -v caddy &> /dev/null; then
@@ -3568,6 +3596,10 @@ cat > "$CRON_BACKUP" << CRONEOF
 CRONEOF
 chmod 644 "$CRON_BACKUP"
 ok "Cron: backup panel DB cada hora (retiene 48h)"
+
+install_caddy_backup_cron
+run_caddy_config_snapshot
+ok "Cron: backup Caddy diario (15 dias + last-known-good)"
 
 # File sync worker — syncs hosting files from master to slave nodes (every minute, respects interval setting)
 CRON_FILESYNC="/etc/cron.d/musedock-filesync"

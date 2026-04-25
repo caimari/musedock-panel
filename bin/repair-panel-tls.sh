@@ -57,6 +57,9 @@ fi
 
 TMP_FILE="$(mktemp)"
 BACKUP_FILE="${CADDY_FILE}.bak.$(date +%Y%m%d%H%M%S)"
+if [ -x "${PANEL_DIR}/bin/backup-caddy-config.sh" ]; then
+    "${PANEL_DIR}/bin/backup-caddy-config.sh" >> "${PANEL_DIR}/storage/logs/caddy-backup.log" 2>&1 || true
+fi
 cp "$CADDY_FILE" "$BACKUP_FILE"
 
 EXISTING_SITES=$(awk -v panel_port="$PANEL_PORT" '

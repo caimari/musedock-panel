@@ -20,6 +20,35 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.157',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Nuevo `bin/backup-caddy-config.sh`: guarda snapshots de `/etc/caddy/Caddyfile`, conserva 15 dias por defecto y mantiene una copia `last-known-good` validada con `caddy validate`',
+                            '`install.sh` y `bin/update.sh`: instalan `/etc/cron.d/musedock-caddy-backup` para backup diario de Caddy y crean snapshot inmediato',
+                            'Docs/Bugs: nuevo articulo `Backups de Caddy y reconstruccion sin backup`, con politica de retencion, restauracion y reconstruccion manual desde `/var/www/vhosts`',
+                        ],
+                        'en' => [
+                            'New `bin/backup-caddy-config.sh`: stores `/etc/caddy/Caddyfile` snapshots, keeps 15 days by default and maintains a `last-known-good` copy validated with `caddy validate`',
+                            '`install.sh` and `bin/update.sh`: install `/etc/cron.d/musedock-caddy-backup` for daily Caddy backups and create an immediate snapshot',
+                            'Docs/Bugs: new `Caddy backups and reconstruction without backups` article, covering retention policy, restore and manual reconstruction from `/var/www/vhosts`',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            '`install.sh`: crea snapshot de Caddy antes de entrar en el paso de configuracion Caddy',
+                            '`bin/repair-panel-tls.sh`: ejecuta un snapshot de Caddy antes de reescribir el Caddyfile',
+                        ],
+                        'en' => [
+                            '`install.sh`: creates a Caddy snapshot before entering the Caddy configuration step',
+                            '`bin/repair-panel-tls.sh`: runs a Caddy snapshot before rewriting the Caddyfile',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.156',
                 'date' => '2026-04-26',
                 'badge' => 'primary',
