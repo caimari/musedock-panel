@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.118',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=relay`: los botones de verificacion DNS muestran spinner y quedan deshabilitados mientras se ejecuta la comprobacion',
+                            'Relay: el refresco global `Refrescar DNS + BD` y el refresco individual `Revisar DNS` tienen feedback visual inmediato para evitar dobles envios',
+                        ],
+                        'en' => [
+                            '`/mail?tab=relay`: DNS verification buttons now show a spinner and remain disabled while checks run',
+                            'Relay: global `Refresh DNS + DB` and per-domain `Check DNS` actions now provide immediate visual feedback to avoid duplicate submissions',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.117',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

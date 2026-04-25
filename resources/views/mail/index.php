@@ -657,10 +657,10 @@
         <span><i class="bi bi-signpost-split me-2"></i>Como activar un dominio en Relay Privado</span>
         <div class="d-flex flex-wrap align-items-center gap-2">
             <?php if (!$isSlave): ?>
-                <form method="post" action="/mail/relay/domains/refresh-all" class="d-inline">
+                <form method="post" action="/mail/relay/domains/refresh-all" class="d-inline" data-relay-dns-check-form>
                     <?= View::csrf() ?>
                     <input type="hidden" name="tab" value="relay">
-                    <button class="btn btn-outline-light btn-sm" type="submit">
+                    <button class="btn btn-outline-light btn-sm" type="submit" data-relay-dns-check-btn>
                         <i class="bi bi-arrow-repeat me-1"></i>Refrescar DNS + BD
                     </button>
                 </form>
@@ -808,9 +808,9 @@
                                     </td>
                                     <td class="text-end">
                                         <?php if (!$isSlave): ?>
-                                            <form method="post" action="/mail/relay/domains/<?= (int)$rd['id'] ?>/refresh" class="d-inline">
+                                            <form method="post" action="/mail/relay/domains/<?= (int)$rd['id'] ?>/refresh" class="d-inline" data-relay-dns-check-form>
                                                 <?= View::csrf() ?>
-                                                <button class="btn btn-outline-info btn-sm" title="Revisar DNS"><i class="bi bi-arrow-clockwise"></i></button>
+                                                <button class="btn btn-outline-info btn-sm" title="Revisar DNS" data-relay-dns-check-btn><i class="bi bi-arrow-clockwise"></i></button>
                                             </form>
                                             <form method="post" action="/mail/relay/domains/<?= (int)$rd['id'] ?>/delete" class="d-inline" data-relay-domain-delete-form data-relay-domain="<?= View::e($rd['domain']) ?>">
                                                 <?= View::csrf() ?>
@@ -2290,6 +2290,25 @@ initWebmailConfigLock();
     form.addEventListener('submit', function () {
         button.disabled = true;
         button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Comprobando...';
+    });
+})();
+
+(function initRelayDnsCheckForms() {
+    document.querySelectorAll('form[data-relay-dns-check-form]').forEach((form) => {
+        const button = form.querySelector('[data-relay-dns-check-btn]');
+        if (!button) return;
+        const originalHtml = button.innerHTML;
+
+        form.addEventListener('submit', function () {
+            button.disabled = true;
+            button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Comprobando...';
+            form.querySelectorAll('button').forEach((btn) => {
+                if (btn !== button) btn.disabled = true;
+            });
+            setTimeout(() => {
+                button.innerHTML = originalHtml;
+            }, 30000);
+        });
     });
 })();
 

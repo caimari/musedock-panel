@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.118] — 2026-04-25
+
+### Improved
+- `/mail?tab=relay`: los botones de verificacion DNS muestran spinner y quedan deshabilitados mientras se ejecuta la comprobacion.
+- Relay: el refresco global `Refrescar DNS + BD` y el refresco individual `Revisar DNS` tienen feedback visual inmediato para evitar dobles envios o dudas durante la espera.
+
 ## [1.0.117] — 2026-04-25
 
 ### New
