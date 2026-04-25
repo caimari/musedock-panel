@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.109] — 2026-04-25
+
+### Improved
+- `/mail` (tabs Relay, Queue, Webmail, Migracion e Infra): se reemplazan confirmaciones nativas (`confirm/alert/prompt`) por modales SweetAlert2 para una UX consistente.
+- `/mail?tab=relay` y `/mail?tab=deliverability`: accion unificada `Refrescar DNS + BD` (sin botones redundantes por fila) con feedback mas claro de dominios pendientes.
+- `/mail?tab=infra&setup=1`: cuando ya hay configuracion, el estado inicial aparece como `Configurado` y el CTA pasa a `Actualizar ...` segun el modo en lugar de `Instalar ...`.
+- `/mail?tab=infra&setup=1`: nuevos avisos de coherencia entre hostname de mail, DNS (A/MX/PTR) y parametros de Webmail.
+
+### Fixed
+- Relay deliverability: la validacion DKIM ahora usa el selector real del dominio (no solo `default` fijo), evitando falsos `pending` cuando el selector cambia.
+- DNS checks de entregabilidad: se refuerzan TXT/A/PTR combinando `dns_get_record` con consultas `dig` (resolver local + 1.1.1.1 + 8.8.8.8) para reducir resultados inconsistentes por cache/resolver local.
+- Acciones delicadas de Relay (`borrar dominio`, `borrar usuario`, `borrar cola`, `borrar mensaje`, `borrar historico`) ahora requieren password admin tambien en backend, no solo en frontend.
+
 ## [1.0.108] — 2026-04-25
 
 ### New

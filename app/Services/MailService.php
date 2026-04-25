@@ -568,7 +568,8 @@ class MailService
             $rowMode = $domain['mail_mode'] ?? $mode;
             $mailHostname = self::resolveMailHostnameForDomain($domain);
             $recommended = self::recommendedDeliverabilityRecords($domain, $ip, $mailHostname, $rowMode);
-            $checks = self::runDeliverabilityChecks($domainName, $mailHostname, $ip, $recommended);
+            $dkimSelector = trim((string)($domain['dkim_selector'] ?? 'default')) ?: 'default';
+            $checks = self::runDeliverabilityChecks($domainName, $mailHostname, $ip, $recommended, $dkimSelector);
             $score = self::deliverabilityScore($checks);
             $rows[] = [
                 'domain' => $domainName,
@@ -642,7 +643,7 @@ class MailService
         return $records;
     }
 
-    private static function runDeliverabilityChecks(string $domain, string $mailHostname, string $ip, array $recommended): array
+    private static function runDeliverabilityChecks(string $domain, string $mailHostname, string $ip, array $recommended, string $dkimSelector = 'default'): array
     {
         $txt = self::dnsTxtValues($domain);
         $spf = '';
@@ -653,13 +654,12 @@ class MailService
             }
         }
 
-        $dkimName = 'default._domainkey.' . $domain;
+        $selector = trim($dkimSelector) !== '' ? trim($dkimSelector) : 'default';
+        $dkimName = $selector . '._domainkey.' . $domain;
         $dkim = implode(' ', self::dnsTxtValues($dkimName));
         $dmarc = implode(' ', self::dnsTxtValues('_dmarc.' . $domain));
-        $a = $mailHostname !== '' ? @dns_get_record($mailHostname, DNS_A) : [];
-        $aIps = is_array($a) ? array_values(array_filter(array_map(fn($r) => $r['ip'] ?? '', $a))) : [];
-        $ptr = $ip !== '' ? @gethostbyaddr($ip) : '';
-        $ptrClean = $ptr && $ptr !== $ip ? rtrim(strtolower($ptr), '.') : '';
+        $aIps = $mailHostname !== '' ? self::dnsAValues($mailHostname) : [];
+        $ptrClean = $ip !== '' ? self::dnsPtrValue($ip) : '';
 
         return [
             'spf' => [
@@ -670,7 +670,7 @@ class MailService
             'dkim' => [
                 'ok' => str_contains(strtolower($dkim), 'v=dkim1'),
                 'value' => $dkim,
-                'message' => $dkim === '' ? 'Falta DKIM default' : 'DKIM encontrado',
+                'message' => $dkim === '' ? ('Falta DKIM ' . $selector) : ('DKIM ' . $selector . ' encontrado'),
             ],
             'dmarc' => [
                 'ok' => str_contains(strtolower($dmarc), 'v=dmarc1'),
@@ -693,14 +693,120 @@ class MailService
 
     private static function dnsTxtValues(string $name): array
     {
-        $records = @dns_get_record($name, DNS_TXT);
-        if (!is_array($records)) return [];
         $values = [];
-        foreach ($records as $record) {
-            if (!empty($record['txt'])) $values[] = (string)$record['txt'];
-            elseif (!empty($record['entries']) && is_array($record['entries'])) $values[] = implode('', $record['entries']);
+
+        $records = @dns_get_record($name, DNS_TXT);
+        if (is_array($records)) {
+            foreach ($records as $record) {
+                if (!empty($record['txt'])) {
+                    $values[] = (string)$record['txt'];
+                } elseif (!empty($record['entries']) && is_array($record['entries'])) {
+                    $values[] = implode('', $record['entries']);
+                }
+            }
         }
+
+        foreach (self::dnsDigTxtValues($name) as $value) {
+            $values[] = $value;
+        }
+
+        $values = array_values(array_unique(array_filter(array_map(
+            static fn($v) => trim((string)$v),
+            $values
+        ), static fn($v) => $v !== '')));
+
         return $values;
+    }
+
+    private static function dnsDigTxtValues(string $name): array
+    {
+        $resolvers = ['', '@1.1.1.1', '@8.8.8.8'];
+        $values = [];
+
+        foreach ($resolvers as $resolver) {
+            $cmd = 'dig +time=2 +tries=1 +short TXT '
+                . escapeshellarg($name)
+                . ($resolver !== '' ? (' ' . $resolver) : '')
+                . ' 2>/dev/null';
+            $output = trim((string)shell_exec($cmd));
+            if ($output === '') {
+                continue;
+            }
+            foreach (preg_split('/\r?\n/', $output) as $line) {
+                $line = trim((string)$line);
+                if ($line === '') {
+                    continue;
+                }
+                if (preg_match_all('/"([^"]*)"/', $line, $m) && !empty($m[1])) {
+                    $values[] = implode('', $m[1]);
+                } else {
+                    $values[] = trim($line, "\"' ");
+                }
+            }
+        }
+
+        return array_values(array_unique(array_filter(array_map(
+            static fn($v) => trim((string)$v),
+            $values
+        ), static fn($v) => $v !== '')));
+    }
+
+    private static function dnsAValues(string $name): array
+    {
+        $ips = [];
+        $records = @dns_get_record($name, DNS_A);
+        if (is_array($records)) {
+            foreach ($records as $record) {
+                $ip = (string)($record['ip'] ?? '');
+                if (filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                    $ips[] = $ip;
+                }
+            }
+        }
+
+        foreach (['', '@1.1.1.1', '@8.8.8.8'] as $resolver) {
+            $cmd = 'dig +time=2 +tries=1 +short A '
+                . escapeshellarg($name)
+                . ($resolver !== '' ? (' ' . $resolver) : '')
+                . ' 2>/dev/null';
+            $output = trim((string)shell_exec($cmd));
+            if ($output === '') {
+                continue;
+            }
+            foreach (preg_split('/\r?\n/', $output) as $line) {
+                $line = trim((string)$line);
+                if (filter_var($line, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                    $ips[] = $line;
+                }
+            }
+        }
+
+        return array_values(array_unique($ips));
+    }
+
+    private static function dnsPtrValue(string $ip): string
+    {
+        $ptr = @gethostbyaddr($ip);
+        if (is_string($ptr) && $ptr !== '' && $ptr !== $ip) {
+            return rtrim(strtolower($ptr), '.');
+        }
+
+        foreach (['@1.1.1.1', '@8.8.8.8'] as $resolver) {
+            $cmd = 'dig +time=2 +tries=1 +short -x '
+                . escapeshellarg($ip)
+                . ' ' . $resolver
+                . ' 2>/dev/null';
+            $output = trim((string)shell_exec($cmd));
+            if ($output === '') {
+                continue;
+            }
+            $line = trim((string)preg_split('/\r?\n/', $output)[0]);
+            if ($line !== '') {
+                return rtrim(strtolower($line), '.');
+            }
+        }
+
+        return '';
     }
 
     private static function detectPublicIp(): string
@@ -783,7 +889,7 @@ class MailService
                 return ['ok' => false, 'error' => 'OpenDKIM creo el dominio, pero no devolvio clave DKIM completa. Revisa permisos de /etc/opendkim/keys.'];
             }
 
-            $checks = self::checkRelayDomainDns($domain, $publicKey);
+            $checks = self::checkRelayDomainDns($domain, $publicKey, $selector);
             $active = ($checks['spf']['ok'] ?? false) && ($checks['dkim']['ok'] ?? false) && ($checks['dmarc']['ok'] ?? false);
 
             Database::insert('mail_relay_domains', [
@@ -811,7 +917,11 @@ class MailService
         $row = Database::fetchOne("SELECT * FROM mail_relay_domains WHERE id = :id", ['id' => $id]);
         if (!$row) return ['ok' => false, 'error' => 'Dominio no encontrado'];
 
-        $checks = self::checkRelayDomainDns((string)$row['domain'], (string)($row['dkim_public_key'] ?? ''));
+        $checks = self::checkRelayDomainDns(
+            (string)$row['domain'],
+            (string)($row['dkim_public_key'] ?? ''),
+            (string)($row['dkim_selector'] ?? 'default')
+        );
         $active = ($checks['spf']['ok'] ?? false) && ($checks['dkim']['ok'] ?? false) && ($checks['dmarc']['ok'] ?? false);
         Database::update('mail_relay_domains', [
             'spf_verified' => self::pgBool($checks['spf']['ok'] ?? false),
@@ -843,6 +953,7 @@ class MailService
         $active = 0;
         $pending = 0;
         $errors = [];
+        $pendingDomains = [];
 
         foreach ($rows as $row) {
             $id = (int)($row['id'] ?? 0);
@@ -865,6 +976,18 @@ class MailService
                 $active++;
             } else {
                 $pending++;
+                $checks = is_array($result['checks'] ?? null) ? $result['checks'] : [];
+                $missing = [];
+                foreach (['spf', 'dkim', 'dmarc', 'a', 'ptr'] as $key) {
+                    if (($checks[$key]['ok'] ?? false) !== true) {
+                        $missing[] = $key;
+                    }
+                }
+                $pendingDomains[] = [
+                    'id' => $id,
+                    'domain' => (string)($row['domain'] ?? ''),
+                    'missing' => $missing,
+                ];
             }
         }
 
@@ -874,6 +997,7 @@ class MailService
             'updated' => $updated,
             'active' => $active,
             'pending' => $pending,
+            'pending_domains' => $pendingDomains,
             'errors' => $errors,
         ];
     }
@@ -1543,14 +1667,25 @@ class MailService
         return strtolower($realm);
     }
 
-    private static function checkRelayDomainDns(string $domain, string $publicKey = ''): array
+    private static function checkRelayDomainDns(string $domain, string $publicKey = '', string $dkimSelector = 'default'): array
     {
         $ip = Settings::get('mail_relay_public_ip', '') ?: self::detectPublicIp();
         $host = Settings::get('mail_outbound_hostname', '') ?: Settings::get('mail_relay_host', '');
-        $checks = self::runDeliverabilityChecks($domain, $host, $ip, []);
+        $selector = trim($dkimSelector) !== '' ? trim($dkimSelector) : 'default';
+        $checks = self::runDeliverabilityChecks($domain, $host, $ip, [], $selector);
         if ($publicKey !== '') {
-            $dkimTxt = strtolower((string)($checks['dkim']['value'] ?? ''));
-            $checks['dkim']['ok'] = str_contains($dkimTxt, strtolower(substr($publicKey, 0, 32)));
+            $dkimTxt = strtolower(preg_replace('/\s+/', '', (string)($checks['dkim']['value'] ?? '')));
+            $expected = strtolower(substr(preg_replace('/\s+/', '', $publicKey), 0, 32));
+            $hasDkimVersion = str_contains($dkimTxt, 'v=dkim1');
+            $matchesKey = $expected !== '' && str_contains($dkimTxt, $expected);
+            $checks['dkim']['ok'] = $hasDkimVersion && $matchesKey;
+            if ($checks['dkim']['ok']) {
+                $checks['dkim']['message'] = 'DKIM ' . $selector . ' validado';
+            } elseif ($hasDkimVersion) {
+                $checks['dkim']['message'] = 'DKIM ' . $selector . ' encontrado pero no coincide con la clave esperada';
+            } else {
+                $checks['dkim']['message'] = 'Falta DKIM ' . $selector;
+            }
         }
         return $checks;
     }

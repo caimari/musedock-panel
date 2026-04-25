@@ -894,7 +894,15 @@ class MailController
         }
 
         $result = MailService::refreshRelayDomain((int)$params['id']);
-        Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false) ? 'DNS del dominio relay actualizado.' : ($result['error'] ?? 'Error verificando DNS.'));
+        if ($result['ok'] ?? false) {
+            $status = (string)($result['status'] ?? 'pending');
+            $msg = $status === 'active'
+                ? 'DNS del dominio relay validado y BD sincronizada (active).'
+                : 'DNS refrescado y BD sincronizada, pero el dominio sigue pending.';
+            Flash::set($status === 'active' ? 'success' : 'warning', $msg);
+        } else {
+            Flash::set('error', $result['error'] ?? 'Error verificando DNS.');
+        }
         $tab = (string)($_POST['tab'] ?? 'relay');
         Router::redirect('/mail?tab=' . (in_array($tab, ['relay', 'deliverability'], true) ? $tab : 'relay'));
     }
@@ -908,23 +916,34 @@ class MailController
         }
 
         $result = MailService::refreshAllRelayDomains();
+        $updated = (int)($result['updated'] ?? 0);
+        $active = (int)($result['active'] ?? 0);
+        $pending = (int)($result['pending'] ?? 0);
         if ($result['ok'] ?? false) {
-            Flash::set(
-                'success',
-                sprintf(
-                    'DNS sincronizado en BD: %d dominio(s) actualizado(s), %d active, %d pending.',
-                    (int)($result['updated'] ?? 0),
-                    (int)($result['active'] ?? 0),
-                    (int)($result['pending'] ?? 0)
-                )
+            $message = sprintf(
+                'Refresco DNS + BD completado: %d dominio(s), %d active, %d pending.',
+                $updated,
+                $active,
+                $pending
             );
+            if ($pending > 0) {
+                $firstPending = $result['pending_domains'][0] ?? [];
+                $pendingDomain = (string)($firstPending['domain'] ?? '');
+                $missing = is_array($firstPending['missing'] ?? null) ? implode(', ', $firstPending['missing']) : '';
+                if ($pendingDomain !== '') {
+                    $message .= ' Ejemplo pendiente: ' . $pendingDomain . ($missing !== '' ? (' (faltan: ' . $missing . ').') : '.');
+                }
+                Flash::set('warning', $message);
+            } else {
+                Flash::set('success', $message);
+            }
         } else {
             $firstError = (string)(($result['errors'][0]['error'] ?? '') ?: 'Error desconocido');
             Flash::set(
                 'warning',
                 sprintf(
-                    'Sincronizacion parcial: %d actualizados, %d errores. Primer error: %s',
-                    (int)($result['updated'] ?? 0),
+                    'Sincronizacion parcial DNS + BD: %d actualizados, %d errores. Primer error: %s',
+                    $updated,
                     count($result['errors'] ?? []),
                     $firstError
                 )
@@ -940,6 +959,11 @@ class MailController
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail?tab=relay');
+            return;
+        }
+        if (!$this->verifyAdminPassword((string)($_POST['admin_password'] ?? ''))) {
+            Flash::set('error', 'Password de admin incorrecta.');
             Router::redirect('/mail?tab=relay');
             return;
         }
@@ -993,6 +1017,11 @@ class MailController
             Router::redirect('/mail?tab=relay');
             return;
         }
+        if (!$this->verifyAdminPassword((string)($_POST['admin_password'] ?? ''))) {
+            Flash::set('error', 'Password de admin incorrecta.');
+            Router::redirect('/mail?tab=relay');
+            return;
+        }
 
         $result = MailService::deleteRelayUser((int)$params['id']);
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false) ? 'Usuario relay eliminado.' : ($result['error'] ?? 'Error eliminando usuario relay.'));
@@ -1019,6 +1048,11 @@ class MailController
             $this->redirectQueueWithRelayLogState();
             return;
         }
+        if (!$this->verifyAdminPassword((string)($_POST['admin_password'] ?? ''))) {
+            Flash::set('error', 'Password de admin incorrecta.');
+            $this->redirectQueueWithRelayLogState();
+            return;
+        }
 
         $scope = (string)($_POST['scope'] ?? 'deferred');
         $scope = $scope === 'all' ? 'all' : 'deferred';
@@ -1035,6 +1069,11 @@ class MailController
             $this->redirectQueueWithRelayLogState();
             return;
         }
+        if (!$this->verifyAdminPassword((string)($_POST['admin_password'] ?? ''))) {
+            Flash::set('error', 'Password de admin incorrecta.');
+            $this->redirectQueueWithRelayLogState();
+            return;
+        }
 
         $queueId = (string)($_POST['queue_id'] ?? '');
         $result = MailService::deleteMailQueueMessage($queueId);
@@ -1046,6 +1085,11 @@ class MailController
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
+            $this->redirectQueueWithRelayLogState(1);
+            return;
+        }
+        if (!$this->verifyAdminPassword((string)($_POST['admin_password'] ?? ''))) {
+            Flash::set('error', 'Password de admin incorrecta.');
             $this->redirectQueueWithRelayLogState(1);
             return;
         }

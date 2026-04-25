@@ -20,6 +20,16 @@ $pf = static function (string $key, string $default = '') use ($prefill): string
     $value = $prefill[$key] ?? $default;
     return is_scalar($value) ? (string)$value : $default;
 };
+$hasExistingMailConfig =
+    !empty($mailLocalConfigured)
+    || !empty($mailNodes)
+    || trim($pf('mail_hostname')) !== ''
+    || trim($pf('outbound_domain')) !== ''
+    || trim($pf('wireguard_ip')) !== ''
+    || trim($pf('smtp_host')) !== ''
+    || trim($pf('from_address')) !== '';
+$initialStatusBadgeClass = $hasExistingMailConfig ? 'bg-success' : 'bg-secondary';
+$initialStatusBadgeText = $hasExistingMailConfig ? 'Configurado' : 'Pendiente';
 ?>
 
 <!-- Mail Node Setup — launched from mail index or cluster settings -->
@@ -81,7 +91,7 @@ $pf = static function (string $key, string $default = '') use ($prefill): string
             <a href="/docs/mail-modes" class="btn btn-outline-light btn-sm">
                 <i class="bi bi-journal-text me-1"></i> Docs
             </a>
-            <span id="setup-status-badge" class="badge bg-secondary">Pendiente</span>
+            <span id="setup-status-badge" class="badge <?= $initialStatusBadgeClass ?>"><?= View::e($initialStatusBadgeText) ?></span>
         </div>
     </div>
     <div class="card-body">
@@ -169,6 +179,11 @@ $pf = static function (string $key, string $default = '') use ($prefill): string
                 <div class="small text-muted mt-2">
                     Los datos aparecen precargados y bloqueados por defecto. Pulsa el candado para desbloquear la edicion manual.
                 </div>
+                <?php if ($hasExistingMailConfig): ?>
+                <div class="small text-warning mt-2">
+                    Este servidor ya tiene configuracion de mail. Al aplicar, se hara una <strong>actualizacion/reconfiguracion</strong> del modo elegido, no una instalacion desde cero.
+                </div>
+                <?php endif; ?>
             </div>
 
             <form id="form-mail-setup" class="setup-form-locked" onsubmit="return startMailSetup(event)" autocomplete="off">
@@ -243,6 +258,7 @@ $pf = static function (string $key, string $default = '') use ($prefill): string
                         <small class="text-muted mode-help mode-full">Nombre publico del servidor. Debe tener A hacia esta IP, MX del dominio apuntando aqui, PTR/rDNS idealmente igual y puertos 25/587/993 abiertos. Ej: mail.example.com.</small>
                         <small class="text-muted mode-help mode-satellite" style="display:none;">Nombre de salida/EHLO del servidor. Debe tener A y PTR/rDNS correctos. Ej: mail.example.com o mailout.example.com.</small>
                         <small class="text-muted mode-help mode-relay" style="display:none;">Nombre publico del relay para reputacion, SPF, PTR y DKIM. Los clientes remotos conectan por la IP WireGuard, no por la IP publica. Ej: relay.example.net.</small>
+                        <small class="text-warning d-block mt-1">Si cambias este hostname, actualiza tambien DNS (A/MX/PTR) y revisa Webmail para mantener Hostname/IMAP/SMTP coherentes con el servidor real.</small>
                     </div>
                     <div class="col-md-6 mb-2 mode-satellite-field mode-relay-field" style="display:none;">
                         <label class="form-label setup-lock-label">Dominio remitente</label>
@@ -342,7 +358,7 @@ $pf = static function (string $key, string $default = '') use ($prefill): string
                     </div>
                     <div class="col-12">
                         <button type="submit" class="btn btn-primary" id="btn-start-setup">
-                            <i class="bi bi-play-fill me-1"></i> Iniciar instalacion
+                            <i class="bi bi-gear-fill me-1"></i> Aplicar configuracion
                         </button>
                     </div>
                 </div>
@@ -544,9 +560,45 @@ let setupMode = document.getElementById('hidden-setup-mode')?.value === 'remote'
 let setupFormLocked = true;
 let lockedSetupMode = setupMode;
 let lockedMailMode = null;
+const setupHasExistingConfig = <?= $hasExistingMailConfig ? 'true' : 'false' ?>;
+
+function showSetupModal(message, title = 'Atencion', icon = 'warning') {
+    const swal = window.SwalDark || window.Swal || null;
+    if (swal && typeof swal.fire === 'function') {
+        return swal.fire({
+            icon,
+            title,
+            text: String(message || ''),
+            confirmButtonText: 'Cerrar',
+            showCancelButton: false
+        });
+    }
+    return Promise.resolve();
+}
 
 function currentMailMode() {
     return document.querySelector('input[name="mail_mode"]:checked')?.value || 'full';
+}
+
+function getSetupActionMeta(mode) {
+    if (mode === 'external') {
+        return {
+            icon: 'bi-save',
+            idleText: setupHasExistingConfig ? 'Actualizar SMTP externo' : 'Guardar SMTP externo',
+            busyText: setupHasExistingConfig ? 'Actualizando...' : 'Guardando...'
+        };
+    }
+    const labels = {
+        relay: 'Relay Privado',
+        satellite: 'Solo Envio',
+        full: 'Correo Completo'
+    };
+    const modeLabel = labels[mode] || 'Servidor de Mail';
+    return {
+        icon: 'bi-gear-fill',
+        idleText: setupHasExistingConfig ? ('Actualizar ' + modeLabel) : ('Instalar ' + modeLabel),
+        busyText: setupHasExistingConfig ? 'Actualizando...' : (setupMode === 'local' ? 'Iniciando...' : 'Conectando...')
+    };
 }
 
 function toggleMailMode(force = false) {
@@ -578,11 +630,8 @@ function toggleMailMode(force = false) {
 
     const btn = document.getElementById('btn-start-setup');
     if (btn) {
-        btn.innerHTML = mode === 'external'
-            ? '<i class="bi bi-save me-1"></i> Guardar SMTP externo'
-            : (mode === 'relay'
-                ? '<i class="bi bi-hdd-network me-1"></i> Instalar relay privado'
-                : '<i class="bi bi-play-fill me-1"></i> Iniciar instalacion');
+        const action = getSetupActionMeta(mode);
+        btn.innerHTML = '<i class="bi ' + action.icon + ' me-1"></i> ' + action.idleText;
     }
 
     updateMailModeAdvice(mode);
@@ -689,12 +738,13 @@ function startMailSetup(e) {
     const mode = currentMailMode();
 
     if (!isLocal && !fd.get('node_id')) {
-        alert('Selecciona un nodo del cluster');
+        showSetupModal('Selecciona un nodo del cluster', 'Nodo requerido', 'warning');
         return false;
     }
 
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> ' + (mode === 'external' ? 'Guardando...' : (isLocal ? 'Iniciando...' : 'Conectando...'));
+    const action = getSetupActionMeta(mode);
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> ' + action.busyText;
 
     const url = isLocal ? '/settings/cluster/setup-mail-local' : '/settings/cluster/setup-mail-node';
 
@@ -709,13 +759,13 @@ function startMailSetup(e) {
             } else {
                 btn.disabled = false;
                 toggleMailMode();
-                alert('Error: ' + (data.error || JSON.stringify(data)));
+                showSetupModal(data.error || JSON.stringify(data), 'Error', 'error');
             }
         })
         .catch(err => {
             btn.disabled = false;
             toggleMailMode();
-            alert('Error de conexion: ' + err.message);
+            showSetupModal('Error de conexion: ' + err.message, 'Error de conexion', 'error');
         });
 
     return false;
@@ -941,10 +991,10 @@ function resetSetupForm() {
     document.getElementById('setup-progress-section').style.display = 'none';
     document.getElementById('setup-result').style.display = 'none';
     document.getElementById('setup-errors').style.display = 'none';
-    document.getElementById('setup-status-badge').className = 'badge bg-secondary';
-    document.getElementById('setup-status-badge').textContent = 'Pendiente';
+    document.getElementById('setup-status-badge').className = 'badge <?= $initialStatusBadgeClass ?>';
+    document.getElementById('setup-status-badge').textContent = '<?= View::e($initialStatusBadgeText) ?>';
     document.getElementById('btn-start-setup').disabled = false;
-    document.getElementById('btn-start-setup').innerHTML = '<i class="bi bi-play-fill me-1"></i> Iniciar instalacion';
+    toggleMailMode();
     document.getElementById('progress-bar').style.width = '0%';
     document.getElementById('progress-bar').className = 'progress-bar bg-info';
     for (let i = 1; i <= 10; i++) {

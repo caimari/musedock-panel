@@ -20,6 +20,39 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.109',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/mail` (tabs Relay, Queue, Webmail, Migracion e Infra): se reemplazan confirmaciones nativas (`confirm/alert/prompt`) por modales SweetAlert2 para una UX consistente',
+                            '`/mail?tab=relay` y `/mail?tab=deliverability`: accion unificada `Refrescar DNS + BD` (sin botones redundantes por fila) con feedback mas claro de dominios pendientes',
+                            '`/mail?tab=infra&setup=1`: cuando ya hay configuracion, el estado inicial aparece como `Configurado` y el CTA pasa a `Actualizar ...` segun el modo en lugar de `Instalar ...`',
+                            '`/mail?tab=infra&setup=1`: nuevos avisos de coherencia entre hostname de mail, DNS (A/MX/PTR) y parametros de Webmail',
+                        ],
+                        'en' => [
+                            '`/mail` (Relay, Queue, Webmail, Migration and Infra tabs): native browser confirmations (`confirm/alert/prompt`) are replaced with SweetAlert2 dialogs for consistent UX',
+                            '`/mail?tab=relay` and `/mail?tab=deliverability`: unified `Refresh DNS + DB` action (no redundant per-row buttons) with clearer feedback for pending domains',
+                            '`/mail?tab=infra&setup=1`: when mail is already configured, initial status shows `Configured` and CTA switches to `Update ...` per mode instead of `Install ...`',
+                            '`/mail?tab=infra&setup=1`: new consistency hints between mail hostname, DNS (A/MX/PTR) and Webmail parameters',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Relay deliverability: la validacion DKIM ahora usa el selector real del dominio (no solo `default` fijo), evitando falsos `pending` cuando el selector cambia',
+                            'Checks DNS de entregabilidad: refuerzo de TXT/A/PTR combinando `dns_get_record` con consultas `dig` (resolver local + 1.1.1.1 + 8.8.8.8) para reducir resultados inconsistentes por cache/resolver local',
+                            'Acciones delicadas de Relay (`borrar dominio`, `borrar usuario`, `borrar cola`, `borrar mensaje`, `borrar historico`) ahora requieren password admin tambien en backend, no solo en frontend',
+                        ],
+                        'en' => [
+                            'Relay deliverability: DKIM validation now uses each domain real selector (instead of fixed `default`), preventing false `pending` states when selector differs',
+                            'Deliverability DNS checks: TXT/A/PTR now combine `dns_get_record` with `dig` queries (local resolver + 1.1.1.1 + 8.8.8.8) to reduce inconsistent cache/local-resolver results',
+                            'Sensitive Relay actions (`delete domain`, `delete user`, `delete queue`, `delete message`, `clear history`) now require admin password on backend too, not just frontend',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.108',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

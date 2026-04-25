@@ -377,10 +377,10 @@
                                 <div class="d-flex justify-content-between align-items-center gap-2">
                                     <a class="text-info small" href="https://<?= View::e($aliasHost) ?>" target="_blank"><?= View::e($aliasHost) ?></a>
                                     <?php if (!$isSlave): ?>
-                                    <form method="post" action="/mail/webmail/aliases/delete" class="m-0">
+                                    <form method="post" action="/mail/webmail/aliases/delete" class="m-0" data-webmail-alias-delete-form data-alias-host="<?= View::e($aliasHost) ?>">
                                         <?= View::csrf() ?>
                                         <input type="hidden" name="host" value="<?= View::e($aliasHost) ?>">
-                                        <button class="btn btn-outline-danger btn-sm py-0 px-1" onclick="return confirm('Eliminar hostname webmail?')" title="Eliminar"><i class="bi bi-x"></i></button>
+                                        <button class="btn btn-outline-danger btn-sm py-0 px-1" type="submit" title="Eliminar"><i class="bi bi-x"></i></button>
                                     </form>
                                     <?php endif; ?>
                                 </div>
@@ -415,7 +415,11 @@
                             <i class="bi bi-lock-fill me-1"></i>Datos protegidos
                         </button>
                     </div>
-                    <div class="small text-muted mt-2">Cuando Webmail ya esta configurado, la edicion queda bloqueada por defecto. Pulsa el candado para desbloquear cambios.</div>
+                    <div class="small text-muted mt-2">
+                        Cuando Webmail ya esta configurado, la edicion queda bloqueada por defecto. Pulsa el candado para desbloquear cambios.
+                        Estos valores se precargan desde la configuracion actual de correo cuando existe backend local/remoto.
+                        Cambiarlos aqui solo actualiza la configuracion de Webmail (Roundcube/Caddy en `mail_webmail_*`), no reescribe Postfix, Dovecot ni OpenDKIM del servidor de correo.
+                    </div>
                 </div>
 
                 <div id="webmailConfigCollapse" class="collapse<?= $webmailConfigCollapsed ? '' : ' show' ?>">
@@ -450,7 +454,8 @@
                                 <div class="small text-warning">
                                     <i class="bi bi-lock-fill me-1"></i>
                                     IMAP/SMTP estan gestionados por el modo de correo actual para evitar desincronizacion.
-                                    Si necesitas cambiarlos, hazlo desde <a href="/mail?tab=infra&amp;setup=1" class="text-info">Infra → Configurar servidor de mail</a>.
+                                    Si necesitas cambiarlos de forma estructural, hazlo desde <a href="/mail?tab=infra&amp;setup=1" class="text-info">Infra → Configurar servidor de mail</a>.
+                                    Editar Webmail no cambia Postfix/Dovecot: solo cambia a que host intenta conectar Roundcube.
                                 </div>
                             </div>
                             <?php endif; ?>
@@ -459,7 +464,7 @@
                             </div>
                         </form>
 
-                        <form method="post" action="/mail/webmail/install" class="row g-2" autocomplete="off" onsubmit="syncWebmailInstallForm(); return confirm('Instalar o reconfigurar Roundcube ahora?')">
+                        <form method="post" action="/mail/webmail/install" class="row g-2" autocomplete="off" data-webmail-install-form>
                             <?= View::csrf() ?>
                             <input id="webmail_install_provider" type="hidden" name="provider" value="<?= View::e($webmailConfig['provider'] ?? 'roundcube') ?>">
                             <input id="webmail_install_host" type="hidden" name="host" value="<?= View::e($webmailHostValue) ?>">
@@ -491,7 +496,7 @@
                             </div>
                         </form>
 
-                        <form method="post" action="/mail/webmail/sieve-enable" class="row g-2 mt-3" autocomplete="off" onsubmit="return confirm('Activar Sieve/ManageSieve en los nodos de correo?')">
+                        <form method="post" action="/mail/webmail/sieve-enable" class="row g-2 mt-3" autocomplete="off" data-webmail-sieve-form>
                             <?= View::csrf() ?>
                             <div class="col-12">
                                 <label class="form-label small">Filtros, reenvios y vacaciones</label>
@@ -556,7 +561,7 @@
                     <?= View::csrf() ?>
                     <input type="hidden" name="tab" value="relay">
                     <button class="btn btn-outline-light btn-sm" type="submit">
-                        <i class="bi bi-arrow-repeat me-1"></i>Actualizar estados DNS
+                        <i class="bi bi-arrow-repeat me-1"></i>Refrescar DNS + BD
                     </button>
                 </form>
             <?php endif; ?>
@@ -616,7 +621,7 @@
                     <div class="small text-muted mt-2">
                         Despues de cambiar hostname o dominio, revisa
                         <a href="/mail?tab=deliverability" class="text-info">Entregabilidad</a>, actualiza los TXT/A/PTR en tu DNS
-                        y pulsa <i class="bi bi-arrow-clockwise"></i> en cada dominio para refrescar SPF/DKIM/DMARC.
+                        y pulsa <strong>Refrescar DNS + BD</strong> para sincronizar checks y estado del relay.
                     </div>
                 </div>
                 <?php if (!$isSlave): ?>
@@ -707,7 +712,7 @@
                                                 <?= View::csrf() ?>
                                                 <button class="btn btn-outline-info btn-sm" title="Revisar DNS"><i class="bi bi-arrow-clockwise"></i></button>
                                             </form>
-                                            <form method="post" action="/mail/relay/domains/<?= (int)$rd['id'] ?>/delete" class="d-inline" onsubmit="return confirm('Eliminar dominio del relay?')">
+                                            <form method="post" action="/mail/relay/domains/<?= (int)$rd['id'] ?>/delete" class="d-inline" data-relay-domain-delete-form data-relay-domain="<?= View::e($rd['domain']) ?>">
                                                 <?= View::csrf() ?>
                                                 <button class="btn btn-outline-danger btn-sm" title="Eliminar"><i class="bi bi-trash"></i></button>
                                             </form>
@@ -795,7 +800,7 @@
                                     <td><?= $relayTruthy($ru['enabled'] ?? true) ? '<span class="badge bg-success">Activo</span>' : '<span class="badge bg-secondary">Off</span>' ?></td>
                                     <td class="text-end">
                                         <?php if (!$isSlave): ?>
-                                            <form method="post" action="/mail/relay/users/<?= (int)$ru['id'] ?>/delete" onsubmit="return confirm('Eliminar usuario SMTP del relay?')" class="d-inline">
+                                            <form method="post" action="/mail/relay/users/<?= (int)$ru['id'] ?>/delete" class="d-inline" data-relay-user-delete-form data-relay-user="<?= View::e($ru['username']) ?>">
                                                 <?= View::csrf() ?>
                                                 <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
                                             </form>
@@ -1022,7 +1027,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                     <div class="small text-muted mb-3">
                         Copia dominios DKIM y usuarios SASL al nodo destino. Los usuarios antiguos sin password cifrada deben regenerarse antes.
                     </div>
-                    <form method="post" action="/mail/migrations/relay/execute" class="row g-2 align-items-end">
+                    <form method="post" action="/mail/migrations/relay/execute" class="row g-2 align-items-end" data-mail-migration-execute-form>
                         <?= View::csrf() ?>
                         <div class="col-md-5">
                             <label class="form-label small">Nodo destino</label>
@@ -1038,7 +1043,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                             <input name="admin_password" type="password" class="form-control form-control-sm" autocomplete="new-password" required>
                         </div>
                         <div class="col-md-3">
-                            <button class="btn btn-warning btn-sm w-100" onclick="return confirm('Migrar relay privado al nodo destino?')">Migrar</button>
+                            <button class="btn btn-warning btn-sm w-100" type="submit">Migrar</button>
                         </div>
                         <div class="col-12">
                             <label class="small text-muted">
@@ -1291,7 +1296,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                     <?= View::csrf() ?>
                     <input type="hidden" name="tab" value="deliverability">
                     <button class="btn btn-outline-light btn-sm">
-                        <i class="bi bi-arrow-repeat me-1"></i>Actualizar estado BD relay
+                        <i class="bi bi-arrow-repeat me-1"></i>Refrescar DNS + BD
                     </button>
                 </form>
             <?php endif; ?>
@@ -1302,6 +1307,9 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
         <p class="text-muted small mb-3">
             Comprueba si el dominio tiene los registros necesarios para una entrega de correo correcta.
             Los checks leen DNS en tiempo real; los registros recomendados se pueden copiar al proveedor DNS.
+            <?php if (($mailMode ?? 'full') === 'relay' && !$isSlave): ?>
+                El boton <strong>Refrescar DNS + BD</strong> hace ambas cosas en una sola accion.
+            <?php endif; ?>
         </p>
 
         <?php if (($mailMode ?? 'full') === 'external'): ?>
@@ -1358,15 +1366,6 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                             <span class="badge bg-<?= $score >= $scoreTotal ? 'success' : ($score >= 3 ? 'warning text-dark' : 'danger') ?>">
                                 Puntuacion <?= $score ?>/<?= $scoreTotal ?>
                             </span>
-                            <?php if (($row['mode'] ?? '') === 'relay' && !empty($row['relay_domain_id']) && !$isSlave): ?>
-                                <form method="post" action="/mail/relay/domains/<?= (int)$row['relay_domain_id'] ?>/refresh" class="d-inline">
-                                    <?= View::csrf() ?>
-                                    <input type="hidden" name="tab" value="deliverability">
-                                    <button class="btn btn-outline-info btn-sm" type="submit">
-                                        <i class="bi bi-arrow-clockwise me-1"></i>Refrescar BD
-                                    </button>
-                                </form>
-                            <?php endif; ?>
                             <button class="btn btn-outline-light btn-sm" type="button" onclick="copyDnsRecords(this)" data-records="<?= View::e($copyText) ?>">
                                 <i class="bi bi-clipboard me-1"></i>Copiar DNS
                             </button>
@@ -1493,6 +1492,64 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
 </div>
 
 <script>
+function getSwal() {
+    return window.SwalDark || window.Swal || null;
+}
+
+function getSwalOptions(base) {
+    return Object.assign({
+        showCancelButton: true,
+        cancelButtonText: 'Cancelar',
+        reverseButtons: true
+    }, base || {});
+}
+
+async function fireSwal(options) {
+    const swal = getSwal();
+    if (!swal || typeof swal.fire !== 'function') {
+        throw new Error('SweetAlert no disponible en esta vista.');
+    }
+    return swal.fire(options);
+}
+
+function setHiddenField(form, name, value) {
+    if (!form) return;
+    let input = form.querySelector('input[name="' + name + '"]');
+    if (!input) {
+        input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        form.appendChild(input);
+    }
+    input.value = value;
+}
+
+async function requestAdminPassword(title, html) {
+    const result = await fireSwal(getSwalOptions({
+        icon: 'warning',
+        title: title || 'Confirmar accion',
+        html: html || '<div class="text-start small">Introduce tu password admin para continuar.</div>',
+        input: 'password',
+        inputLabel: 'Password admin',
+        inputPlaceholder: 'Password del panel',
+        inputAttributes: { autocapitalize: 'off', autocorrect: 'off', autocomplete: 'current-password' },
+        confirmButtonText: 'Confirmar',
+        preConfirm: (value) => {
+            const pwd = String(value || '').trim();
+            if (pwd === '') {
+                const swal = getSwal();
+                if (swal && typeof swal.showValidationMessage === 'function') {
+                    swal.showValidationMessage('Debes introducir tu password admin.');
+                }
+                return false;
+            }
+            return pwd;
+        }
+    }));
+    if (!result.isConfirmed) return null;
+    return String(result.value || '').trim();
+}
+
 function syncWebmailInstallForm() {
     const map = [
         ['webmail_provider', 'webmail_install_provider'],
@@ -1562,7 +1619,19 @@ function copyDnsRecords(btn) {
         const original = btn.innerHTML;
         btn.innerHTML = '<i class="bi bi-check-lg me-1"></i>Copiado';
         setTimeout(() => btn.innerHTML = original, 1500);
-    }).catch(() => alert(text));
+    }).catch(async () => {
+        await fireSwal({
+            icon: 'info',
+            title: 'Copia manual',
+            html: '<pre class="text-start small mb-0 p-2 rounded" style="background:#0f172a;color:#e2e8f0;white-space:pre-wrap;max-height:320px;overflow:auto;">'
+                + String(text || '').replace(/[&<>"']/g, (ch) => ({
+                    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+                }[ch]))
+                + '</pre>',
+            showCancelButton: false,
+            confirmButtonText: 'Cerrar'
+        });
+    });
 }
 
 (function initMailTabs() {
@@ -1640,6 +1709,142 @@ function copyDnsRecords(btn) {
 
 initWebmailConfigLock();
 
+(function initWebmailActionConfirmations() {
+    const installForm = document.querySelector('form[data-webmail-install-form]');
+    if (installForm) {
+        installForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            syncWebmailInstallForm();
+            const pwdInput = installForm.querySelector('input[name="admin_password"]');
+            if (pwdInput && String(pwdInput.value || '').trim() === '') {
+                await fireSwal({ icon: 'warning', title: 'Password requerida', text: 'Introduce tu password admin para instalar/reconfigurar Roundcube.' });
+                pwdInput.focus();
+                return;
+            }
+            const result = await fireSwal(getSwalOptions({
+                icon: 'question',
+                title: 'Instalar o reconfigurar Roundcube',
+                html: '<div class="text-start small">Se aplicara la configuracion de Webmail y se ejecutara el instalador/reconfigurador.</div>',
+                confirmButtonText: 'Continuar',
+                confirmButtonColor: '#22c55e'
+            }));
+            if (result.isConfirmed) {
+                installForm.submit();
+            }
+        });
+    }
+
+    const sieveForm = document.querySelector('form[data-webmail-sieve-form]');
+    if (sieveForm) {
+        sieveForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const pwdInput = sieveForm.querySelector('input[name="admin_password"]');
+            if (pwdInput && String(pwdInput.value || '').trim() === '') {
+                await fireSwal({ icon: 'warning', title: 'Password requerida', text: 'Introduce tu password admin para activar Sieve/ManageSieve.' });
+                pwdInput.focus();
+                return;
+            }
+            const result = await fireSwal(getSwalOptions({
+                icon: 'warning',
+                title: 'Activar Sieve/ManageSieve',
+                html: '<div class="text-start small">Se activara ManageSieve en los nodos de correo completo para filtros/reenvios/vacaciones.</div>',
+                confirmButtonText: 'Activar',
+                confirmButtonColor: '#f59e0b'
+            }));
+            if (result.isConfirmed) {
+                sieveForm.submit();
+            }
+        });
+    }
+
+    document.querySelectorAll('form[data-webmail-alias-delete-form]').forEach((form) => {
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const host = (form.dataset.aliasHost || '').trim();
+            const result = await fireSwal(getSwalOptions({
+                icon: 'warning',
+                title: 'Eliminar hostname webmail',
+                html: '<div class="text-start small">Se eliminara el alias <code>' + host + '</code> de Roundcube/Caddy.</div>',
+                confirmButtonText: 'Eliminar',
+                confirmButtonColor: '#ef4444'
+            }));
+            if (result.isConfirmed) {
+                form.submit();
+            }
+        });
+    });
+})();
+
+(function initRelayDeleteConfirmations() {
+    document.querySelectorAll('form[data-relay-domain-delete-form]').forEach((form) => {
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const domain = (form.dataset.relayDomain || '').trim();
+            const confirm = await fireSwal(getSwalOptions({
+                icon: 'warning',
+                title: 'Eliminar dominio del relay',
+                html: '<div class="text-start small">Se eliminara <code>' + domain + '</code> del relay y su estado DKIM/SPF/DMARC en el panel.</div>',
+                confirmButtonText: 'Eliminar dominio',
+                confirmButtonColor: '#ef4444'
+            }));
+            if (!confirm.isConfirmed) return;
+            const pwd = await requestAdminPassword(
+                'Confirmar eliminacion de dominio',
+                '<div class="text-start small">Introduce tu password admin para confirmar esta eliminacion.</div>'
+            );
+            if (!pwd) return;
+            setHiddenField(form, 'admin_password', pwd);
+            form.submit();
+        });
+    });
+
+    document.querySelectorAll('form[data-relay-user-delete-form]').forEach((form) => {
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const username = (form.dataset.relayUser || '').trim();
+            const confirm = await fireSwal(getSwalOptions({
+                icon: 'warning',
+                title: 'Eliminar usuario SMTP',
+                html: '<div class="text-start small">Se eliminara el usuario <code>' + username + '</code> del relay SMTP.</div>',
+                confirmButtonText: 'Eliminar usuario',
+                confirmButtonColor: '#ef4444'
+            }));
+            if (!confirm.isConfirmed) return;
+            const pwd = await requestAdminPassword(
+                'Confirmar eliminacion de usuario',
+                '<div class="text-start small">Introduce tu password admin para confirmar esta eliminacion.</div>'
+            );
+            if (!pwd) return;
+            setHiddenField(form, 'admin_password', pwd);
+            form.submit();
+        });
+    });
+})();
+
+(function initMailMigrationConfirmations() {
+    const form = document.querySelector('form[data-mail-migration-execute-form]');
+    if (!form) return;
+    form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const pwdInput = form.querySelector('input[name="admin_password"]');
+        if (pwdInput && String(pwdInput.value || '').trim() === '') {
+            await fireSwal({ icon: 'warning', title: 'Password requerida', text: 'Introduce tu password admin para migrar relay.' });
+            pwdInput.focus();
+            return;
+        }
+        const result = await fireSwal(getSwalOptions({
+            icon: 'warning',
+            title: 'Migrar relay privado',
+            html: '<div class="text-start small">Se copiaran dominios DKIM y usuarios SMTP al nodo destino seleccionado.</div>',
+            confirmButtonText: 'Iniciar migracion',
+            confirmButtonColor: '#f59e0b'
+        }));
+        if (result.isConfirmed) {
+            form.submit();
+        }
+    });
+})();
+
 (function initRelayQueueConfirmations() {
     const forms = Array.from(document.querySelectorAll('form[data-relay-queue-form]'));
     if (!forms.length) return;
@@ -1650,35 +1855,40 @@ initWebmailConfigLock();
             title: 'Reintentar cola de correo',
             html: '<div class="text-start small">Se ejecutara <code>postqueue -f</code> para reintentar entregas pendientes.</div>',
             confirmButtonText: 'Si, reintentar',
-            confirmButtonColor: '#0ea5e9'
+            confirmButtonColor: '#0ea5e9',
+            requirePassword: false
         },
         'delete-deferred': {
             icon: 'warning',
             title: 'Borrar mensajes deferred',
             html: '<div class="text-start small">Se eliminaran todos los mensajes en cola <code>deferred</code>.</div>',
             confirmButtonText: 'Si, borrar deferred',
-            confirmButtonColor: '#f59e0b'
+            confirmButtonColor: '#f59e0b',
+            requirePassword: true
         },
         'delete-all': {
             icon: 'warning',
             title: 'Borrar toda la cola',
             html: '<div class="text-start small">Se eliminara <strong>toda</strong> la cola de Postfix. Esta accion no se puede deshacer.</div>',
             confirmButtonText: 'Si, borrar toda',
-            confirmButtonColor: '#ef4444'
+            confirmButtonColor: '#ef4444',
+            requirePassword: true
         },
         'delete-message': {
             icon: 'warning',
             title: 'Eliminar mensaje de la cola',
             html: '<div class="text-start small">Se eliminara el mensaje seleccionado de la cola de Postfix.</div>',
             confirmButtonText: 'Si, eliminar mensaje',
-            confirmButtonColor: '#ef4444'
+            confirmButtonColor: '#ef4444',
+            requirePassword: true
         },
         'clear-log': {
             icon: 'warning',
             title: 'Borrar historico del relay',
             html: '<div class="text-start small">Se vaciara <code>mail.log</code> (y/o <code>maillog</code>) en este nodo. Esta accion no se puede deshacer.</div>',
             confirmButtonText: 'Si, borrar historico',
-            confirmButtonColor: '#ef4444'
+            confirmButtonColor: '#ef4444',
+            requirePassword: true
         }
     };
 
@@ -1701,7 +1911,7 @@ initWebmailConfigLock();
                 }
             }
 
-            const result = await SwalDark.fire({
+            const result = await fireSwal({
                 icon: cfg.icon,
                 title: cfg.title,
                 html: html,
@@ -1713,6 +1923,14 @@ initWebmailConfigLock();
             });
 
             if (result.isConfirmed) {
+                if (cfg.requirePassword) {
+                    const pwd = await requestAdminPassword(
+                        'Confirmar accion delicada',
+                        '<div class="text-start small">Esta accion puede eliminar datos de cola/historico. Introduce tu password admin para continuar.</div>'
+                    );
+                    if (!pwd) return;
+                    setHiddenField(form, 'admin_password', pwd);
+                }
                 form.submit();
             }
         });
@@ -1745,12 +1963,12 @@ initWebmailConfigLock();
 
             const passwordInput = form.querySelector('[name="admin_password"]');
             if (passwordInput && !passwordInput.value) {
-                await SwalDark.fire({ icon: 'warning', title: 'Password requerido', text: 'Introduce tu password admin para reparar mail.' });
+                await fireSwal({ icon: 'warning', title: 'Password requerido', text: 'Introduce tu password admin para reparar mail.' });
                 passwordInput.focus();
                 return;
             }
 
-            const confirm = await SwalDark.fire({
+            const confirm = await fireSwal({
                 icon: 'warning',
                 title: 'Reparar instalacion local de mail',
                 html: '<div class="text-start small">'
@@ -1771,7 +1989,7 @@ initWebmailConfigLock();
                 button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Reparando...';
             }
 
-            SwalDark.fire({
+            fireSwal({
                 title: 'Reparando mail local...',
                 html: '<div class="text-start small">'
                     + '<div>1. Preparando runtime de OpenDKIM</div>'
@@ -1782,7 +2000,12 @@ initWebmailConfigLock();
                 allowOutsideClick: false,
                 allowEscapeKey: false,
                 showConfirmButton: false,
-                didOpen: () => Swal.showLoading(),
+                didOpen: () => {
+                    const swal = getSwal();
+                    if (swal && typeof swal.showLoading === 'function') {
+                        swal.showLoading();
+                    }
+                },
             });
 
             try {
@@ -1804,7 +2027,7 @@ initWebmailConfigLock();
                 }
 
                 if (!response.ok || !data.ok) {
-                    await SwalDark.fire({
+                    await fireSwal({
                         icon: 'error',
                         title: data.message || 'No se pudo reparar',
                         html: '<div class="text-start small mb-2">' + escapeHtml(data.error || 'El reparador devolvio error.') + '</div>' + formatMessages(data.messages),
@@ -1813,7 +2036,7 @@ initWebmailConfigLock();
                     return;
                 }
 
-                await SwalDark.fire({
+                await fireSwal({
                     icon: 'success',
                     title: data.message || 'Mail reparado',
                     html: formatMessages(data.messages),
@@ -1822,7 +2045,7 @@ initWebmailConfigLock();
                 });
                 window.location.href = '/mail?tab=infra';
             } catch (err) {
-                await SwalDark.fire({
+                await fireSwal({
                     icon: 'error',
                     title: 'Error interno o de conexion',
                     html: '<pre class="text-start small mb-0 p-2 rounded" style="background:#0f172a;color:#fca5a5;white-space:pre-wrap;max-height:320px;overflow:auto;">' + escapeHtml(err.message || err) + '</pre>',
@@ -1839,43 +2062,70 @@ initWebmailConfigLock();
 })();
 
 <?php if (!empty($mailNodes) || ($mailLocalConfigured ?? false)): ?>
-function rotateMailDbPassword() {
-    const pwd = prompt('Esta accion regenera la contraseña de musedock_mail en el master y la propaga a todos los nodos de mail.\n\nIntroduce tu contraseña del panel para confirmar:');
+async function rotateMailDbPassword() {
+    const pwd = await requestAdminPassword(
+        'Rotar password DB de mail',
+        '<div class="text-start small">Esta accion regenera la contraseña de <code>musedock_mail</code> en el master y la propaga a todos los nodos de mail.</div>'
+    );
     if (!pwd) return;
 
-    const btn = document.querySelector('[onclick="rotateMailDbPassword()"]');
-    const origHtml = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Rotando...';
+    const buttons = Array.from(document.querySelectorAll('[onclick="rotateMailDbPassword()"]'));
+    const original = buttons.map((btn) => ({ btn, html: btn.innerHTML }));
+    original.forEach(({ btn }) => {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Rotando...';
+    });
 
     const fd = new FormData();
     fd.append('_csrf_token', '<?= View::csrfToken() ?>');
     fd.append('admin_password', pwd);
 
-    fetch('/settings/cluster/rotate-mail-db-password', { method: 'POST', body: fd })
-        .then(r => r.json())
-        .then(data => {
-            btn.disabled = false;
-            btn.innerHTML = origHtml;
-            if (data.ok) {
-                let msg = 'Password rotada correctamente.\n\n';
-                if (data.nodes && data.nodes.length > 0) {
-                    data.nodes.forEach(n => {
-                        msg += (n.ok ? '✓' : '✗') + ' ' + n.node + (n.error ? ': ' + n.error : '') + '\n';
-                    });
-                } else {
-                    msg += 'No hay nodos de mail activos. La password se actualizo en el master.';
-                }
-                alert(msg);
+    try {
+        const response = await fetch('/settings/cluster/rotate-mail-db-password', { method: 'POST', body: fd });
+        const data = await response.json();
+
+        if (data.ok) {
+            let lines = [];
+            if (Array.isArray(data.nodes) && data.nodes.length > 0) {
+                lines = data.nodes.map((n) => (n.ok ? 'OK' : 'ERROR') + ' · ' + (n.node || '-') + (n.error ? (': ' + n.error) : ''));
             } else {
-                alert('Error: ' + (data.error || 'Error desconocido'));
+                lines = ['No hay nodos de mail activos. La password se actualizo en el master.'];
             }
-        })
-        .catch(err => {
-            btn.disabled = false;
-            btn.innerHTML = origHtml;
-            alert('Error de conexion: ' + err.message);
+
+            await fireSwal({
+                icon: 'success',
+                title: 'Password rotada correctamente',
+                html: '<pre class="text-start small mb-0 p-2 rounded" style="background:#0f172a;color:#e2e8f0;white-space:pre-wrap;max-height:320px;overflow:auto;">'
+                    + lines.join("\n").replace(/[&<>"']/g, (ch) => ({
+                        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+                    }[ch]))
+                    + '</pre>',
+                showCancelButton: false,
+                confirmButtonText: 'Cerrar'
+            });
+        } else {
+            await fireSwal({
+                icon: 'error',
+                title: 'No se pudo rotar la password',
+                text: data.error || 'Error desconocido',
+                showCancelButton: false,
+                confirmButtonText: 'Cerrar'
+            });
+        }
+    } catch (err) {
+        await fireSwal({
+            icon: 'error',
+            title: 'Error de conexion',
+            text: err.message || String(err),
+            showCancelButton: false,
+            confirmButtonText: 'Cerrar'
         });
+    } finally {
+        original.forEach(({ btn, html }) => {
+            btn.disabled = false;
+            btn.innerHTML = html;
+        });
+    }
 }
 <?php endif; ?>
 </script>
