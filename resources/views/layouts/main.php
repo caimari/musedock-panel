@@ -1,4 +1,9 @@
 <?php use MuseDockPanel\View; use MuseDockPanel\Flash; ?>
+<?php
+    $systemTimeEpochMs = (int) round(microtime(true) * 1000);
+    $systemTimezoneName = date_default_timezone_get() ?: 'UTC';
+    $systemTimezoneLabel = date('T') ?: 'UTC';
+?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -26,8 +31,14 @@
         .sidebar-footer a:hover { color: #f87171; }
         .main-content { margin-left: var(--sidebar-w); min-height: 100vh; }
         .top-bar { padding: 1rem 2rem; border-bottom: 1px solid #1e293b; display: flex;
-                   justify-content: space-between; align-items: center; background: #0f172a; }
+                   justify-content: space-between; align-items: center; gap: 1rem; background: #0f172a; }
         .top-bar h4 { margin: 0; font-size: 1.2rem; font-weight: 600; }
+        .top-bar-right { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; gap: 0.75rem; }
+        .system-time-clock { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+        @media (max-width: 768px) {
+            .top-bar { flex-wrap: wrap; }
+            .top-bar-right { width: 100%; flex-wrap: wrap; justify-content: flex-end; }
+        }
         .content-area { padding: 1.5rem 2rem; }
         .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; }
         .card-header { background: transparent; border-bottom: 1px solid #334155; padding: 1rem 1.25rem; font-weight: 600; }
@@ -160,13 +171,21 @@
 <div class="main-content">
     <div class="top-bar">
         <h4><?= View::e($pageTitle ?? 'Dashboard') ?></h4>
-        <span class="text-muted small"><?= date('d M Y, H:i') ?> (<?= date('T') ?> — System Time)</span>
-        <span id="update-banner" style="display:none;" class="ms-3">
-            <a href="/settings/updates" class="badge text-decoration-none" style="background:rgba(34,197,94,0.15);color:#22c55e;font-size:0.8rem;padding:6px 12px;">
-                <i class="bi bi-cloud-arrow-down me-1"></i>
-                v<span id="update-remote-ver"></span> disponible
-            </a>
-        </span>
+        <div class="top-bar-right">
+            <span
+                id="system-time-clock"
+                class="text-muted small system-time-clock"
+                data-server-epoch-ms="<?= $systemTimeEpochMs ?>"
+                data-server-timezone="<?= View::e($systemTimezoneName) ?>"
+                data-server-timezone-label="<?= View::e($systemTimezoneLabel) ?>"
+            ><?= date('l, d M Y, H:i:s') ?> (<?= View::e($systemTimezoneLabel) ?> — System Time)</span>
+            <span id="update-banner" style="display:none;">
+                <a href="/settings/updates" class="badge text-decoration-none" style="background:rgba(34,197,94,0.15);color:#22c55e;font-size:0.8rem;padding:6px 12px;">
+                    <i class="bi bi-cloud-arrow-down me-1"></i>
+                    v<span id="update-remote-ver"></span> disponible
+                </a>
+            </span>
+        </div>
     </div>
 
     <div class="content-area">
@@ -244,6 +263,46 @@ document.querySelectorAll('.flash-alert').forEach(function(el) {
         alert.close();
     }, 4000);
 });
+
+// Live system clock in header (server-synced, no page reload required)
+(function () {
+    var clockEl = document.getElementById('system-time-clock');
+    if (!clockEl) return;
+
+    var baseEpochMs = Number(clockEl.dataset.serverEpochMs || Date.now());
+    var serverTimezone = clockEl.dataset.serverTimezone || 'UTC';
+    var serverTimezoneLabel = clockEl.dataset.serverTimezoneLabel || 'UTC';
+    var startPerfMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+
+    var formatter = new Intl.DateTimeFormat('es-ES', {
+        timeZone: serverTimezone,
+        weekday: 'long',
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+
+    function renderClock() {
+        var currentPerfMs = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        var elapsedMs = currentPerfMs - startPerfMs;
+        var now = new Date(baseEpochMs + elapsedMs);
+        var formatted = formatter.format(now);
+        if (formatted.length > 0) {
+            formatted = formatted.charAt(0).toUpperCase() + formatted.slice(1);
+        }
+        clockEl.textContent = formatted + ' (' + serverTimezoneLabel + ' — System Time)';
+    }
+
+    renderClock();
+    var clockInterval = setInterval(renderClock, 1000);
+    window.addEventListener('beforeunload', function () {
+        clearInterval(clockInterval);
+    }, { once: true });
+})();
 </script>
 <script>
 fetch('/settings/updates/api/status').then(r=>r.json()).then(d=>{

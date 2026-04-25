@@ -1149,13 +1149,27 @@ class ClusterService
             // Re-read current row because callNodeDirect may have updated metadata (e.g. TLS bootstrap).
             $currentNode = self::getNode($nodeId) ?: $node;
             $existingMeta = json_decode($currentNode['metadata'] ?? '{}', true) ?: [];
-            $existingMeta['repl_role']         = $remoteData['repl_role'] ?? 'standalone';
-            $existingMeta['pg_replication']     = $remoteData['pg_replication'] ?? null;
-            $existingMeta['mysql_replication']  = $remoteData['mysql_replication'] ?? null;
-            $existingMeta['pg_5432_status']     = $remoteData['pg_5432_status'] ?? null;
-            $existingMeta['mysql_status']       = $remoteData['mysql_status'] ?? null;
-            $existingMeta['hosting_count']      = $remoteData['hosting_count'] ?? 0;
-            $existingMeta['panel_version']      = $remoteData['panel_version'] ?? '';
+            if (array_key_exists('repl_role', $remoteData) && (string)$remoteData['repl_role'] !== '') {
+                $existingMeta['repl_role'] = $remoteData['repl_role'];
+            }
+            if (array_key_exists('pg_replication', $remoteData)) {
+                $existingMeta['pg_replication'] = $remoteData['pg_replication'];
+            }
+            if (array_key_exists('mysql_replication', $remoteData)) {
+                $existingMeta['mysql_replication'] = $remoteData['mysql_replication'];
+            }
+            if (array_key_exists('pg_5432_status', $remoteData)) {
+                $existingMeta['pg_5432_status'] = $remoteData['pg_5432_status'];
+            }
+            if (array_key_exists('mysql_status', $remoteData)) {
+                $existingMeta['mysql_status'] = $remoteData['mysql_status'];
+            }
+            if (array_key_exists('hosting_count', $remoteData)) {
+                $existingMeta['hosting_count'] = (int)$remoteData['hosting_count'];
+            }
+            if (!empty($remoteData['panel_version'])) {
+                $existingMeta['panel_version'] = (string)$remoteData['panel_version'];
+            }
 
             Database::update('cluster_nodes', [
                 'status'       => 'online',

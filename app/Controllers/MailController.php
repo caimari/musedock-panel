@@ -20,6 +20,27 @@ class MailController
         return $role === 'slave';
     }
 
+    private function relayLogPerPageFromRequest(): int
+    {
+        $value = (int)($_POST['relay_log_per_page'] ?? $_GET['relay_log_per_page'] ?? 25);
+        return in_array($value, [25, 100, 200, 500, 1000], true) ? $value : 25;
+    }
+
+    private function relayLogPageFromRequest(): int
+    {
+        return max(1, (int)($_POST['relay_log_page'] ?? $_GET['relay_log_page'] ?? 1));
+    }
+
+    private function redirectQueueWithRelayLogState(?int $forcedPage = null): void
+    {
+        $query = [
+            'tab' => 'queue',
+            'relay_log_page' => $forcedPage !== null ? max(1, $forcedPage) : $this->relayLogPageFromRequest(),
+            'relay_log_per_page' => $this->relayLogPerPageFromRequest(),
+        ];
+        Router::redirect('/mail?' . http_build_query($query));
+    }
+
     // ═══════════════════════════════════════════════════════════
     // ─── Dashboard / Overview ────────────────────────────────
     // ═══════════════════════════════════════════════════════════
@@ -40,9 +61,14 @@ class MailController
         $internalSmtpToken = MailService::getInternalSmtpToken(true);
         $relayDomains = MailService::getRelayDomains();
         $relayUsers = MailService::getRelayUsers();
+        $relayLogPerPage = (int)($_GET['relay_log_per_page'] ?? 25);
+        $relayLogPerPageAllowed = [25, 100, 200, 500, 1000];
+        if (!in_array($relayLogPerPage, $relayLogPerPageAllowed, true)) {
+            $relayLogPerPage = 25;
+        }
         $relayLogPage = ($mailMode === 'relay')
-            ? MailService::getRelayLogPage((int)($_GET['relay_log_page'] ?? 1), 12)
-            : ['entries' => [], 'total' => 0, 'page' => 1, 'per_page' => 12, 'pages' => 1];
+            ? MailService::getRelayLogPage((int)($_GET['relay_log_page'] ?? 1), $relayLogPerPage)
+            : ['entries' => [], 'total' => 0, 'page' => 1, 'per_page' => $relayLogPerPage, 'pages' => 1];
         $relayLogs = $relayLogPage['entries'];
         $relayQueue = ($mailMode === 'relay') ? MailService::getMailQueueEntries(200) : [];
         $mailMigrations = MailService::getMailMigrations(8);
@@ -866,20 +892,20 @@ class MailController
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail?tab=queue');
+            $this->redirectQueueWithRelayLogState();
             return;
         }
 
         $result = MailService::flushMailQueue();
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false) ? 'Cola reintentada con postqueue -f.' : ($result['error'] ?? 'No se pudo reintentar la cola.'));
-        Router::redirect('/mail?tab=queue');
+        $this->redirectQueueWithRelayLogState();
     }
 
     public function relayQueueDelete(): void
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail?tab=queue');
+            $this->redirectQueueWithRelayLogState();
             return;
         }
 
@@ -888,21 +914,39 @@ class MailController
         $result = MailService::deleteMailQueue($scope);
         $label = $scope === 'all' ? 'toda la cola' : 'mensajes deferred';
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false) ? "Eliminados {$label}." : ($result['error'] ?? 'No se pudo limpiar la cola.'));
-        Router::redirect('/mail?tab=queue');
+        $this->redirectQueueWithRelayLogState();
     }
 
     public function relayQueueDeleteMessage(): void
     {
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
-            Router::redirect('/mail?tab=queue');
+            $this->redirectQueueWithRelayLogState();
             return;
         }
 
         $queueId = (string)($_POST['queue_id'] ?? '');
         $result = MailService::deleteMailQueueMessage($queueId);
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false) ? 'Mensaje eliminado de la cola.' : ($result['error'] ?? 'No se pudo eliminar el mensaje.'));
-        Router::redirect('/mail?tab=queue');
+        $this->redirectQueueWithRelayLogState();
+    }
+
+    public function relayLogClear(): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            $this->redirectQueueWithRelayLogState(1);
+            return;
+        }
+
+        $result = MailService::clearRelayLog();
+        if ($result['ok'] ?? false) {
+            Flash::set('success', 'Historico del relay vaciado.');
+        } else {
+            Flash::set('error', $result['error'] ?? 'No se pudo vaciar el historico del relay.');
+        }
+
+        $this->redirectQueueWithRelayLogState(1);
     }
 
     public function migrationPreflight(): void

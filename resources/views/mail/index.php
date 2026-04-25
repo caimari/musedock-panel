@@ -426,11 +426,17 @@
     $relayPublicHost = \MuseDockPanel\Settings::get('mail_outbound_hostname', '') ?: \MuseDockPanel\Settings::get('mail_relay_host', '');
     $relayTruthy = static fn($v): bool => in_array((string)$v, ['1', 't', 'true', 'yes', 'on'], true) || $v === true;
     $relayQueue = $relayQueue ?? [];
-    $relayLogPage = $relayLogPage ?? ['entries' => ($relayLogs ?? []), 'total' => count($relayLogs ?? []), 'page' => 1, 'per_page' => 12, 'pages' => 1];
+    $relayLogPage = $relayLogPage ?? ['entries' => ($relayLogs ?? []), 'total' => count($relayLogs ?? []), 'page' => 1, 'per_page' => 25, 'pages' => 1];
+    $relayPerPageOptions = [25, 100, 200, 500, 1000];
+    $relayCurrentPerPage = (int)($relayLogPage['per_page'] ?? 25);
+    if (!in_array($relayCurrentPerPage, $relayPerPageOptions, true)) {
+        $relayCurrentPerPage = 25;
+    }
     $relayLogUrl = static function (int $page): string {
         $query = $_GET;
         $query['tab'] = 'queue';
         $query['relay_log_page'] = max(1, $page);
+        $query['relay_log_per_page'] = (int)($query['relay_log_per_page'] ?? 25);
         unset($query['setup']);
         return '/mail?' . http_build_query($query);
     };
@@ -698,16 +704,22 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
         <div class="d-flex flex-wrap gap-2">
             <form method="post" action="/mail/relay/queue/flush" class="d-inline">
                 <?= View::csrf() ?>
+                <input type="hidden" name="relay_log_page" value="<?= (int)($relayLogPage['page'] ?? 1) ?>">
+                <input type="hidden" name="relay_log_per_page" value="<?= $relayCurrentPerPage ?>">
                 <button class="btn btn-outline-info btn-sm"><i class="bi bi-arrow-repeat me-1"></i>Reintentar cola</button>
             </form>
             <form method="post" action="/mail/relay/queue/delete" class="d-inline" onsubmit="return confirm('Eliminar todos los mensajes deferred de la cola?')">
                 <?= View::csrf() ?>
                 <input type="hidden" name="scope" value="deferred">
+                <input type="hidden" name="relay_log_page" value="<?= (int)($relayLogPage['page'] ?? 1) ?>">
+                <input type="hidden" name="relay_log_per_page" value="<?= $relayCurrentPerPage ?>">
                 <button class="btn btn-outline-warning btn-sm"><i class="bi bi-eraser me-1"></i>Borrar deferred</button>
             </form>
             <form method="post" action="/mail/relay/queue/delete" class="d-inline" onsubmit="return confirm('Eliminar TODA la cola de Postfix? Esta accion no se puede deshacer.')">
                 <?= View::csrf() ?>
                 <input type="hidden" name="scope" value="all">
+                <input type="hidden" name="relay_log_page" value="<?= (int)($relayLogPage['page'] ?? 1) ?>">
+                <input type="hidden" name="relay_log_per_page" value="<?= $relayCurrentPerPage ?>">
                 <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash3 me-1"></i>Borrar toda</button>
             </form>
         </div>
@@ -750,6 +762,8 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                                 <form method="post" action="/mail/relay/queue/delete-message" class="d-inline" onsubmit="return confirm('Eliminar este mensaje de la cola?')">
                                     <?= View::csrf() ?>
                                     <input type="hidden" name="queue_id" value="<?= View::e($item['queue_id']) ?>">
+                                    <input type="hidden" name="relay_log_page" value="<?= (int)($relayLogPage['page'] ?? 1) ?>">
+                                    <input type="hidden" name="relay_log_per_page" value="<?= $relayCurrentPerPage ?>">
                                     <button class="btn btn-outline-danger btn-sm" title="Eliminar este mensaje"><i class="bi bi-trash"></i></button>
                                 </form>
                                 <?php endif; ?>
@@ -766,7 +780,29 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
 <div class="card" style="border-color:rgba(14,165,233,.18);">
     <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
         <span><i class="bi bi-activity me-2"></i>Historico reciente del relay</span>
-        <span class="text-muted small"><?= (int)($relayLogPage['total'] ?? 0) ?> eventos encontrados en mail.log</span>
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <span class="text-muted small"><?= (int)($relayLogPage['total'] ?? 0) ?> eventos encontrados en mail.log</span>
+            <form method="get" action="/mail" class="d-flex align-items-center gap-2">
+                <input type="hidden" name="tab" value="queue">
+                <input type="hidden" name="relay_log_page" value="1">
+                <label class="small text-muted mb-0" for="relayLogPerPage">Mostrar</label>
+                <select id="relayLogPerPage" name="relay_log_per_page" class="form-select form-select-sm" style="min-width:100px;" onchange="this.form.submit()">
+                    <?php foreach ($relayPerPageOptions as $opt): ?>
+                        <option value="<?= $opt ?>" <?= $relayCurrentPerPage === $opt ? 'selected' : '' ?>><?= $opt ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
+            <?php if (!$isSlave): ?>
+            <form method="post" action="/mail/relay/log/clear" class="d-inline" data-relay-log-clear-form>
+                <?= View::csrf() ?>
+                <input type="hidden" name="relay_log_page" value="<?= (int)($relayLogPage['page'] ?? 1) ?>">
+                <input type="hidden" name="relay_log_per_page" value="<?= $relayCurrentPerPage ?>">
+                <button type="submit" class="btn btn-outline-danger btn-sm">
+                    <i class="bi bi-trash3 me-1"></i>Borrar historico
+                </button>
+            </form>
+            <?php endif; ?>
+        </div>
     </div>
     <div class="card-body p-0">
         <?php if (empty($relayLogs)): ?>
@@ -1393,6 +1429,27 @@ function copyDnsRecords(btn) {
     });
 
     applyTab(initialTab, false);
+})();
+
+(function initRelayLogClearForm() {
+    const form = document.querySelector('[data-relay-log-clear-form]');
+    if (!form) return;
+
+    form.addEventListener('submit', async function (event) {
+        event.preventDefault();
+        const result = await SwalDark.fire({
+            icon: 'warning',
+            title: 'Borrar historico del relay',
+            html: '<div class="text-start small">Se vaciara <code>mail.log</code> (y/o <code>maillog</code>) en este nodo. Esta accion no se puede deshacer.</div>',
+            showCancelButton: true,
+            confirmButtonText: 'Si, borrar historico',
+            cancelButtonText: 'Cancelar',
+            reverseButtons: true
+        });
+        if (result.isConfirmed) {
+            form.submit();
+        }
+    });
 })();
 
 (function initMailRepairForms() {

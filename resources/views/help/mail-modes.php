@@ -5,9 +5,14 @@
         <h4 class="mb-1">Modos de correo</h4>
         <div class="text-muted small">Guia rapida para elegir Satellite, Relay Privado, Correo Completo o SMTP Externo.</div>
     </div>
-    <a href="/mail?tab=general#mail-setup-card" class="btn btn-outline-info">
-        <i class="bi bi-arrow-left me-1"></i> Volver al instalador
-    </a>
+    <div class="d-flex gap-2">
+        <a href="/mail?tab=general#mail-setup-card" class="btn btn-outline-info">
+            <i class="bi bi-arrow-left me-1"></i> Volver al instalador
+        </a>
+        <a href="/docs" class="btn btn-outline-light">
+            <i class="bi bi-journal-text me-1"></i> Volver a Docs
+        </a>
+    </div>
 </div>
 
 <div class="row g-4">

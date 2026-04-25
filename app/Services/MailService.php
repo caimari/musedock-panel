@@ -1038,8 +1038,9 @@ class MailService
         }
 
         $page = max(1, $page);
-        $perPage = max(5, min(100, $perPage));
-        $lines = explode("\n", trim((string)shell_exec('tail -n 2500 ' . escapeshellarg($file) . ' 2>/dev/null')));
+        $perPage = max(5, min(1000, $perPage));
+        $scanLines = (int)min(60000, max(2500, ($perPage * 30), ($page * $perPage * 3)));
+        $lines = explode("\n", trim((string)shell_exec('tail -n ' . $scanLines . ' ' . escapeshellarg($file) . ' 2>/dev/null')));
         $entries = [];
         foreach (array_reverse($lines) as $line) {
             if (!str_contains($line, 'postfix/') || !preg_match('/status=(sent|deferred|bounced)/', $line, $sm)) continue;
@@ -1076,6 +1077,45 @@ class MailService
             'per_page' => $perPage,
             'pages' => $pages,
         ];
+    }
+
+    public static function clearRelayLog(): array
+    {
+        $candidates = ['/var/log/mail.log', '/var/log/maillog'];
+        $targets = [];
+        foreach ($candidates as $candidate) {
+            if (!is_file($candidate)) {
+                continue;
+            }
+            $real = realpath($candidate) ?: $candidate;
+            $targets[$real] = $real;
+        }
+
+        if (empty($targets)) {
+            return ['ok' => false, 'error' => 'No se encontro mail.log/maillog en este nodo.'];
+        }
+
+        $errors = [];
+        $cleared = [];
+        foreach ($targets as $path) {
+            $ok = @file_put_contents($path, '') !== false;
+            if (!$ok) {
+                $output = trim((string)shell_exec('truncate -s 0 ' . escapeshellarg($path) . ' 2>&1'));
+                $ok = $output === '';
+                if (!$ok) {
+                    $errors[] = basename($path) . ': ' . $output;
+                }
+            }
+            if ($ok) {
+                $cleared[] = $path;
+            }
+        }
+
+        if (!empty($errors)) {
+            return ['ok' => false, 'error' => implode(' | ', $errors)];
+        }
+
+        return ['ok' => true, 'files' => $cleared];
     }
 
     public static function getMailQueueEntries(int $limit = 200): array

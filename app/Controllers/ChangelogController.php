@@ -20,6 +20,51 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.107',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Docs Settings: nueva estructura de guias padre/hijas con rutas dedicadas (`/docs/settings-sections`, `/docs/settings/{slug}`), incluyendo guias base de Cluster, Federation y replica espejo PostgreSQL master/slave',
+                            '`/docs/settings/{slug}`: boton real de estrella para anadir/quitar una guia en "Accesos directos especiales", guardado de forma persistente en configuracion del panel',
+                            '`/mail?tab=queue`: nuevo boton para vaciar el historico del relay (`mail.log`/`maillog`) con confirmacion previa',
+                        ],
+                        'en' => [
+                            'Settings Docs: new parent/child guide structure with dedicated routes (`/docs/settings-sections`, `/docs/settings/{slug}`), including baseline guides for Cluster, Federation and PostgreSQL master/slave mirror replication',
+                            '`/docs/settings/{slug}`: real star button to add/remove a guide from "Special shortcuts", persisted in panel settings',
+                            '`/mail?tab=queue`: new button to clear relay history (`mail.log`/`maillog`) with confirmation',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            '`/docs`: la busqueda ahora indexa tambien contenido interno de las paginas, no solo titulos/descripciones',
+                            '`/docs`: home reorganizada para mostrar guias padre, accesos directos especiales y guias especiales, con iconos mas consistentes visualmente',
+                            '`/mail?tab=queue`: selector de paginado del historico relay (`25/100/200/500/1000`) y conservacion del estado de pagina/tamano tras acciones de cola',
+                            'Header del panel: hora del sistema en tiempo real con dia de la semana y segundos, sincronizada con zona horaria del servidor',
+                            'Header del panel: reloj y boton de update/version alineados juntos a la derecha',
+                            '`/docs/mail-modes`: anadido boton "Volver a Docs" junto al acceso de vuelta al instalador',
+                        ],
+                        'en' => [
+                            '`/docs`: search now indexes internal page content as well, not only titles/descriptions',
+                            '`/docs`: home reorganized to show parent guides, special shortcuts and special guides, with more visually consistent icons',
+                            '`/mail?tab=queue`: relay history pagination size selector (`25/100/200/500/1000`) and preserved page/size state after queue actions',
+                            'Panel header: real-time system clock with weekday and seconds, synced with server timezone',
+                            'Panel header: clock and update/version badge aligned together on the right side',
+                            '`/docs/mail-modes`: added a "Back to Docs" button next to the installer back action',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            '`/mail?tab=queue`: acciones de cola (reintentar/borrar) ya no resetean contexto del historico; mantienen paginacion seleccionada',
+                        ],
+                        'en' => [
+                            '`/mail?tab=queue`: queue actions (retry/delete) no longer reset history context; selected pagination is kept',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.106',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

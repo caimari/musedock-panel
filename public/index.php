@@ -416,6 +416,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/mail/relay/queue/flush', 'MailController@relayQueueFlush');
 \MuseDockPanel\Router::post('/mail/relay/queue/delete', 'MailController@relayQueueDelete');
 \MuseDockPanel\Router::post('/mail/relay/queue/delete-message', 'MailController@relayQueueDeleteMessage');
+\MuseDockPanel\Router::post('/mail/relay/log/clear', 'MailController@relayLogClear');
 \MuseDockPanel\Router::post('/mail/migrations/preflight', 'MailController@migrationPreflight');
 \MuseDockPanel\Router::post('/mail/migrations/relay/execute', 'MailController@migrationRelayExecute');
 \MuseDockPanel\Router::post('/mail/webmail/save', 'MailController@webmailSave');
@@ -640,7 +641,14 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 
 // Docs
 \MuseDockPanel\Router::get('/docs', 'DocsController@index');
+\MuseDockPanel\Router::get('/docs/settings-sections', 'DocsController@settingsSections');
+\MuseDockPanel\Router::get('/docs/settings/cluster', 'DocsController@clusterBasics');
+\MuseDockPanel\Router::get('/docs/settings/federation', 'DocsController@federationBasics');
+\MuseDockPanel\Router::post('/docs/settings/{slug}/shortcut-toggle', 'DocsController@settingsGuideShortcutToggle');
+\MuseDockPanel\Router::get('/docs/settings/{slug}', 'DocsController@settingsGuide');
+\MuseDockPanel\Router::get('/docs/cluster-basics', 'DocsController@clusterBasics');
 \MuseDockPanel\Router::get('/docs/mail-modes', 'DocsController@mailModes');
+\MuseDockPanel\Router::get('/docs/postgresql-mirror-master-slave', 'DocsController@postgresqlMirrorMasterSlave');
 
 // Profile
 \MuseDockPanel\Router::get('/profile', 'ProfileController@index');

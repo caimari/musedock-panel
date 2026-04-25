@@ -275,6 +275,7 @@ class ClusterApiController
             'timestamp'         => date('Y-m-d H:i:s'),
             'role'              => $effectiveRole,
             'cluster_role'      => $clusterRole ?: $envRole,
+            'panel_version'     => defined('PANEL_VERSION') ? PANEL_VERSION : 'unknown',
             'db_hash_mismatch'  => $dbHashMismatch,
         ]);
         exit;

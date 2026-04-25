@@ -2,6 +2,34 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.107] — 2026-04-25
+
+### New
+- Docs Settings: nueva estructura de guias padre/hijas con rutas dedicadas (`/docs/settings-sections`, `/docs/settings/{slug}`), incluyendo guias base de Cluster, Federation y replica espejo PostgreSQL master/slave.
+- `/docs/settings/{slug}`: boton real de estrella para anadir/quitar una guia en "Accesos directos especiales", guardado de forma persistente en configuracion del panel.
+- `/mail?tab=queue`: nuevo boton para vaciar el historico del relay (`mail.log`/`maillog`) con confirmacion previa.
+
+### Improved
+- `/docs`: la busqueda ahora indexa tambien contenido interno de las paginas, no solo titulos/descripciones.
+- `/docs`: home reorganizada para mostrar guias padre, accesos directos especiales y guias especiales, con iconos mas consistentes visualmente.
+- `/mail?tab=queue`: selector de paginado del historico relay (`25/100/200/500/1000`) y conservacion del estado de pagina/tamano tras acciones de cola.
+- Header del panel: hora del sistema en tiempo real con dia de la semana y segundos, sincronizada con zona horaria del servidor.
+- Header del panel: reloj y boton de update/version alineados juntos a la derecha.
+- `/docs/mail-modes`: anadido boton "Volver a Docs" junto al acceso de vuelta al instalador.
+
+### Fixed
+- `/mail?tab=queue`: acciones de cola (reintentar/borrar) ya no resetean contexto del historico; mantienen paginacion seleccionada.
+
+## [1.0.106] — 2026-04-25
+
+### New
+- `/docs`: nueva home de documentacion interna con indice de temas y busqueda simple; los enlaces globales de Docs ahora apuntan a esta home.
+
+## [1.0.105] — 2026-04-25
+
+### Improved
+- Docs Mail: enlace global en el footer lateral y acceso directo desde Settings para abrir `/docs/mail-modes` sin entrar primero al instalador de Mail.
+
 ## [1.0.104] — 2026-04-25
 
 ### New
