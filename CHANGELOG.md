@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.126] — 2026-04-25
+
+### Improved
+- `install.sh`: deteccion de firewall mas segura y explicita: distingue UFW activo, UFW instalado pero inactivo, iptables restrictivo, iptables instalado sin politica restrictiva y ausencia de firewall.
+- `install.sh`: si iptables ya esta activo/restrictivo, se respeta iptables aunque UFW este instalado pero inactivo; no se activa UFW por sorpresa.
+- `install.sh`: la restriccion del puerto del panel permite introducir IP o rango CIDR para abrir `PANEL_PORT`/`8444` solo a fuentes de confianza y guardar `ALLOWED_IPS`.
+- `install.sh`: Fail2Ban ya no se toca automaticamente sin confirmacion; si esta instalado pregunta si sincronizar jails MuseDock, y si no esta instalado pregunta si instalarlo.
+
+### Fixed
+- Instalador: opcion real para saltar firewall/Fail2Ban sin instalar ni modificar servicios existentes.
+
 ## [1.0.125] — 2026-04-25
 
 ### Fixed

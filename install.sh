@@ -344,8 +344,11 @@ t() {
                 fw_setup_skip) text="Omitido — RECUERDA proteger el puerto $1 cuanto antes!" ;;
                 fw_setup_skip_warn) text="Sin proteccion, cualquiera puede acceder al panel como root." ;;
                 fw_setup_detect_ufw) text="UFW detectado y activo" ;;
+                fw_setup_detect_ufw_inactive) text="UFW instalado pero inactivo" ;;
                 fw_setup_detect_ipt) text="iptables detectado (sin UFW)" ;;
-                fw_setup_detect_none) text="Sin firewall detectado — se instalara UFW" ;;
+                fw_setup_detect_ipt_open) text="iptables instalado, pero sin politica restrictiva activa" ;;
+                fw_setup_detect_none) text="Sin firewall activo detectado" ;;
+                fw_setup_selected) text="Modo firewall seleccionado: $1" ;;
                 caddy_choose) text="Elige [1/2] (por defecto: 1): " ;;
                 caddy_proxy_ok) text="Caddy HTTPS reverse proxy → https://0.0.0.0:$1 → 127.0.0.1:$2" ;;
                 caddy_tls_internal) text="TLS interno (certificado autofirmado para acceso por IP)" ;;
@@ -666,8 +669,11 @@ t() {
                 fw_setup_skip) text="Skipped — REMEMBER to protect port $1 ASAP!" ;;
                 fw_setup_skip_warn) text="Without protection, anyone can access the panel as root." ;;
                 fw_setup_detect_ufw) text="UFW detected and active" ;;
+                fw_setup_detect_ufw_inactive) text="UFW installed but inactive" ;;
                 fw_setup_detect_ipt) text="iptables detected (no UFW)" ;;
-                fw_setup_detect_none) text="No firewall detected — UFW will be installed" ;;
+                fw_setup_detect_ipt_open) text="iptables installed, but no restrictive policy is active" ;;
+                fw_setup_detect_none) text="No active firewall detected" ;;
+                fw_setup_selected) text="Selected firewall mode: $1" ;;
                 verify_complete) text="Verification complete" ;;
                 verify_all_ok) text="Everything OK! The panel is running correctly." ;;
                 verify_has_errors) text="Found $1 issue(s). Review above." ;;
@@ -3166,9 +3172,35 @@ ok "Cron jobs instalados"
 # ============================================================
 header "Configurando Fail2Ban (proteccion contra fuerza bruta)..."
 
+F2B_CONFIGURE=false
 if command -v fail2ban-client >/dev/null 2>&1; then
     ok "Fail2Ban detectado"
+    read -rp "  Fail2Ban ya esta instalado. Instalar/sincronizar jails MuseDock? [S/n] " F2B_CONFIRM
+    F2B_CONFIRM=${F2B_CONFIRM:-s}
+    if [[ "$F2B_CONFIRM" =~ ^[YySs]$ ]]; then
+        F2B_CONFIGURE=true
+    else
+        warn "Fail2Ban existente preservado sin cambios por eleccion del usuario"
+    fi
+else
+    warn "Fail2Ban no instalado."
+    read -rp "  Instalar Fail2Ban y configurar jails MuseDock ahora? [S/n] " F2B_CONFIRM
+    F2B_CONFIRM=${F2B_CONFIRM:-s}
+    if [[ "$F2B_CONFIRM" =~ ^[YySs]$ ]]; then
+        apt-get install -y -qq fail2ban > /dev/null 2>&1 || true
+        if command -v fail2ban-client >/dev/null 2>&1; then
+            ok "Fail2Ban instalado"
+            F2B_CONFIGURE=true
+        else
+            warn "No se pudo instalar Fail2Ban. Podras instalarlo despues con: apt install fail2ban -y"
+        fi
+    else
+        warn "Fail2Ban omitido por eleccion del usuario"
+        warn "Podras instalarlo despues con: apt install fail2ban -y && bash ${PANEL_DIR}/bin/update.sh --auto"
+    fi
+fi
 
+if [ "$F2B_CONFIGURE" = true ]; then
     # Create log files
     touch /var/log/musedock-panel-auth.log /var/log/musedock-portal-auth.log
     chmod 644 /var/log/musedock-panel-auth.log /var/log/musedock-portal-auth.log
@@ -3199,9 +3231,6 @@ if command -v fail2ban-client >/dev/null 2>&1; then
         systemctl enable --now fail2ban >/dev/null 2>&1 || true
         ok "Fail2Ban iniciado"
     fi
-else
-    warn "Fail2Ban no instalado. Instala con: apt install fail2ban -y"
-    warn "Despues, ejecuta el updater para activar la proteccion: bash ${PANEL_DIR}/bin/update.sh"
 fi
 
 # ============================================================
@@ -3369,27 +3398,52 @@ echo ""
 echo -e "  ${RED}${BOLD}$(t fw_setup_desc "$PANEL_PORT")${NC}"
 echo ""
 
-# Detect what firewall is available
+# Detect what firewall is available without changing it.
 FW_ENGINE="none"
-if command -v ufw &> /dev/null && ufw status 2>/dev/null | grep -q "Status: active"; then
+FW_UFW_INSTALLED=false
+FW_UFW_ACTIVE=false
+FW_IPTABLES_INSTALLED=false
+FW_IPTABLES_RESTRICTIVE=false
+
+if command -v ufw &> /dev/null; then
+    FW_UFW_INSTALLED=true
+    if ufw status 2>/dev/null | grep -q "Status: active"; then
+        FW_UFW_ACTIVE=true
+    fi
+fi
+
+if command -v iptables &> /dev/null; then
+    FW_IPTABLES_INSTALLED=true
+    if iptables -L INPUT -n 2>/dev/null | head -1 | grep -qE "policy (DROP|REJECT)"; then
+        FW_IPTABLES_RESTRICTIVE=true
+    fi
+fi
+
+if [ "$FW_UFW_ACTIVE" = true ]; then
     FW_ENGINE="ufw"
     ok "$(t fw_setup_detect_ufw)"
-elif iptables -L INPUT -n 2>/dev/null | head -1 | grep -qE "policy (DROP|REJECT)"; then
-    # iptables has a restrictive default policy — real firewall active
+elif [ "$FW_IPTABLES_RESTRICTIVE" = true ]; then
     FW_ENGINE="iptables"
     ok "$(t fw_setup_detect_ipt)"
-    # If UFW is also available (but inactive), prefer using it for management
-    if command -v ufw &> /dev/null; then
-        FW_ENGINE="ufw_inactive"
-        ok "$(t fw_setup_detect_ipt) + UFW available"
-    fi
-elif command -v ufw &> /dev/null; then
+elif [ "$FW_UFW_INSTALLED" = true ]; then
     FW_ENGINE="ufw_inactive"
-    ok "$(t fw_setup_detect_none)"
+    ok "$(t fw_setup_detect_ufw_inactive)"
+elif [ "$FW_IPTABLES_INSTALLED" = true ]; then
+    FW_ENGINE="iptables_open"
+    ok "$(t fw_setup_detect_ipt_open)"
 else
     FW_ENGINE="install_ufw"
     ok "$(t fw_setup_detect_none)"
 fi
+
+case "$FW_ENGINE" in
+    ufw) FW_MODE_LABEL=$([ "$LANG_CODE" = "es" ] && echo "UFW existente activo" || echo "existing active UFW") ;;
+    iptables) FW_MODE_LABEL=$([ "$LANG_CODE" = "es" ] && echo "iptables existente activo" || echo "existing active iptables") ;;
+    ufw_inactive) FW_MODE_LABEL=$([ "$LANG_CODE" = "es" ] && echo "activar UFW existente si confirmas" || echo "activate existing UFW only if confirmed") ;;
+    iptables_open) FW_MODE_LABEL=$([ "$LANG_CODE" = "es" ] && echo "usar iptables existente si confirmas" || echo "use existing iptables only if confirmed") ;;
+    install_ufw) FW_MODE_LABEL=$([ "$LANG_CODE" = "es" ] && echo "instalar UFW solo si confirmas" || echo "install UFW only if confirmed") ;;
+esac
+ok "$(t fw_setup_selected "$FW_MODE_LABEL")"
 
 echo ""
 read -rp "  $(t fw_setup_ask)" FW_SETUP_CONFIRM
@@ -3463,7 +3517,7 @@ if [[ "$FW_SETUP_CONFIRM" =~ ^[YySs]$ ]] || [ -z "$FW_SETUP_CONFIRM" ]; then
                 ok "$(t fw_setup_ufw_deny "$PANEL_PORT")"
                 ufw --force enable > /dev/null 2>&1
                 ;;
-            iptables)
+            iptables|iptables_open)
                 echo ""
                 ok "$(t fw_setup_applying_ipt)"
                 # Remove existing rules for PANEL_PORT

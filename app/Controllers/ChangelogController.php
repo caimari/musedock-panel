@@ -20,6 +20,35 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.126',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`install.sh`: deteccion de firewall mas segura y explicita: distingue UFW activo, UFW instalado pero inactivo, iptables restrictivo, iptables instalado sin politica restrictiva y ausencia de firewall',
+                            '`install.sh`: si iptables ya esta activo/restrictivo, se respeta iptables aunque UFW este instalado pero inactivo; no se activa UFW por sorpresa',
+                            '`install.sh`: la restriccion del puerto del panel permite introducir IP o rango CIDR para abrir `PANEL_PORT`/`8444` solo a fuentes de confianza y guardar `ALLOWED_IPS`',
+                            '`install.sh`: Fail2Ban ya no se toca automaticamente sin confirmacion; si esta instalado pregunta si sincronizar jails MuseDock, y si no esta instalado pregunta si instalarlo',
+                        ],
+                        'en' => [
+                            '`install.sh`: safer and explicit firewall detection: active UFW, installed inactive UFW, restrictive iptables, installed non-restrictive iptables, and no firewall are handled separately',
+                            '`install.sh`: if iptables is already active/restrictive, iptables is respected even when UFW is installed but inactive; UFW is not activated unexpectedly',
+                            '`install.sh`: panel-port restriction accepts an IP or CIDR range to open `PANEL_PORT`/`8444` only to trusted sources and persist `ALLOWED_IPS`',
+                            '`install.sh`: Fail2Ban is no longer touched automatically without confirmation; if installed it asks before syncing MuseDock jails, and if missing it asks before installing',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Instalador: opcion real para saltar firewall/Fail2Ban sin instalar ni modificar servicios existentes',
+                        ],
+                        'en' => [
+                            'Installer: real option to skip firewall/Fail2Ban without installing or modifying existing services',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.125',
                 'date' => '2026-04-25',
                 'badge' => 'primary',
