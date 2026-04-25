@@ -347,6 +347,14 @@ class DocsController
                 'icon' => 'bi-tools',
                 'keywords' => 'instalacion instalar github git clone update actualizar shell recuperacion rotura postgres postgresql runuser env db_pass db_user musedock_panel setup admin firewall fail2ban',
             ],
+            [
+                'title' => 'Backups por defecto',
+                'description' => 'Que guarda el sistema automaticamente: BD del panel, Caddy, snapshots de instalacion, retenciones y limites.',
+                'url' => '/docs/default-backups',
+                'category' => 'Guia especial',
+                'icon' => 'bi-shield-check',
+                'keywords' => 'backups defecto backup panel base datos caddy caddyfile last-known-good retencion 48 horas 15 dias install-backup snapshot restore restaurar vhosts correo bases clientes',
+            ],
         ]);
     }
 
@@ -404,6 +412,10 @@ class DocsController
 
         if ($url === '/docs/install-recovery') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'install-recovery.php');
+        }
+
+        if ($url === '/docs/default-backups') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'default-backups.php');
         }
 
         if ($url === '/docs/mail-sections') {
@@ -1205,6 +1217,14 @@ class DocsController
         View::render('help/install-recovery', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Instalacion y Recuperacion',
+        ]);
+    }
+
+    public function defaultBackups(): void
+    {
+        View::render('help/default-backups', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Backups por defecto',
         ]);
     }
 }

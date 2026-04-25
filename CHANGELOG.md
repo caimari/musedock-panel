@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.158] — 2026-04-26
+
+### Added
+- Docs: nueva guia especial `/docs/default-backups` explicando backups por defecto del sistema: BD del panel, Caddy, `last-known-good`, snapshots de instalacion, retenciones, restauracion y limites.
+
 ## [1.0.157] — 2026-04-26
 
 ### Added

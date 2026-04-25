@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.158',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Docs: nueva guia especial `/docs/default-backups` explicando backups por defecto del sistema: BD del panel, Caddy, `last-known-good`, snapshots de instalacion, retenciones, restauracion y limites',
+                        ],
+                        'en' => [
+                            'Docs: new special guide `/docs/default-backups` explaining default system backups: panel DB, Caddy, `last-known-good`, install snapshots, retention, restore and limits',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.157',
                 'date' => '2026-04-26',
                 'badge' => 'primary',
