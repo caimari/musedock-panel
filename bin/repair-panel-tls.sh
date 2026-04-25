@@ -37,8 +37,18 @@ PANEL_PORT="${PANEL_PORT:-8444}"
 PANEL_INTERNAL_PORT="$(env_value PANEL_INTERNAL_PORT)"
 PANEL_INTERNAL_PORT="${PANEL_INTERNAL_PORT:-$((PANEL_PORT + 1))}"
 SERVER_IP="$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([^ ]*\).*/\1/p' | head -1)"
-[ -n "$SERVER_IP" ] || SERVER_IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
+ALL_PANEL_IPS="$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -u | tr '\n' ' ')"
+[ -n "$SERVER_IP" ] || SERVER_IP="$(echo "$ALL_PANEL_IPS" | awk '{print $1}')"
 [ -n "$SERVER_IP" ] || SERVER_IP="127.0.0.1"
+PANEL_SITE_LABELS="https://${SERVER_IP}:${PANEL_PORT}"
+for ip in $ALL_PANEL_IPS 127.0.0.1; do
+    [ -n "$ip" ] || continue
+    case ",$PANEL_SITE_LABELS," in
+        *,"https://${ip}:${PANEL_PORT}",*) ;;
+        *) PANEL_SITE_LABELS="${PANEL_SITE_LABELS}, https://${ip}:${PANEL_PORT}" ;;
+    esac
+done
+PANEL_SITE_LABELS="${PANEL_SITE_LABELS}, https://localhost:${PANEL_PORT}"
 
 if ! [[ "$PANEL_PORT" =~ ^[0-9]+$ ]] || ! [[ "$PANEL_INTERNAL_PORT" =~ ^[0-9]+$ ]]; then
     echo "Invalid ports: PANEL_PORT=${PANEL_PORT}, PANEL_INTERNAL_PORT=${PANEL_INTERNAL_PORT}" >&2
@@ -84,7 +94,7 @@ cat > "$TMP_FILE" <<CADDYEOF
     admin localhost:2019
 }
 
-https://${SERVER_IP}:${PANEL_PORT}, https://127.0.0.1:${PANEL_PORT}, https://localhost:${PANEL_PORT} {
+${PANEL_SITE_LABELS} {
     tls internal
     reverse_proxy 127.0.0.1:${PANEL_INTERNAL_PORT} {
         header_up X-Forwarded-Proto https

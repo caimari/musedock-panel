@@ -467,13 +467,23 @@ repair_panel_tls_caddy() {
         return 0
     fi
 
-    local panel_port panel_internal_port server_ip existing_sites backup_file
+    local panel_port panel_internal_port server_ip all_panel_ips panel_site_labels existing_sites backup_file ip
     panel_port=$(grep -E '^PANEL_PORT=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'')
     panel_port=${panel_port:-8444}
     panel_internal_port=$((panel_port + 1))
-    server_ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')
-    [ -z "$server_ip" ] && server_ip=$(hostname -I | awk '{print $1}')
+    server_ip=$(ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* src \([^ ]*\).*/\1/p' | head -1)
+    all_panel_ips=$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort -u | tr '\n' ' ')
+    [ -z "$server_ip" ] && server_ip=$(echo "$all_panel_ips" | awk '{print $1}')
     [ -z "$server_ip" ] && server_ip="127.0.0.1"
+    panel_site_labels="https://${server_ip}:${panel_port}"
+    for ip in $all_panel_ips 127.0.0.1; do
+        [ -n "$ip" ] || continue
+        case ",$panel_site_labels," in
+            *,"https://${ip}:${panel_port}",*) ;;
+            *) panel_site_labels="${panel_site_labels}, https://${ip}:${panel_port}" ;;
+        esac
+    done
+    panel_site_labels="${panel_site_labels}, https://localhost:${panel_port}"
 
     existing_sites=$(awk '
         /^{$/ && NR<=5 { in_global=1; next }
@@ -510,7 +520,7 @@ repair_panel_tls_caddy() {
     admin localhost:2019
 }
 
-https://${server_ip}:${panel_port}, https://127.0.0.1:${panel_port}, https://localhost:${panel_port} {
+${panel_site_labels} {
     tls internal
     reverse_proxy 127.0.0.1:${panel_internal_port} {
         header_up X-Forwarded-Proto https

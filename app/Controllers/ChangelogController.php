@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.145',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'TLS admin/cluster: el bloque Caddy del panel ahora incluye todas las IPv4 locales del nodo, incluyendo IP privada/WireGuard `10.x.x.x`, evitando `tlsv1 alert internal error` cuando el cluster conecta a `https://10.x.x.x:8444`',
+                            '`install.sh`, `bin/update.sh` y `bin/repair-panel-tls.sh`: generan site labels Caddy multi-IP para IP publica, IPs privadas, `127.0.0.1` y `localhost`',
+                        ],
+                        'en' => [
+                            'Admin/cluster TLS: the panel Caddy block now includes all local IPv4 addresses, including private/WireGuard `10.x.x.x`, preventing `tlsv1 alert internal error` when the cluster connects to `https://10.x.x.x:8444`',
+                            '`install.sh`, `bin/update.sh` and `bin/repair-panel-tls.sh`: generate multi-IP Caddy site labels for public IP, private IPs, `127.0.0.1` and `localhost`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.144',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

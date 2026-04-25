@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.145] — 2026-04-25
+
+### Fixed
+- TLS admin/cluster: el bloque Caddy del panel ahora incluye todas las IPv4 locales del nodo, incluyendo IP privada/WireGuard `10.x.x.x`, evitando `tlsv1 alert internal error` cuando el cluster conecta a `https://10.x.x.x:8444`.
+- `install.sh`, `bin/update.sh` y `bin/repair-panel-tls.sh`: generan site labels Caddy multi-IP para IP publica, IPs privadas, `127.0.0.1` y `localhost`.
+
 ## [1.0.144] — 2026-04-25
 
 ### Fixed
