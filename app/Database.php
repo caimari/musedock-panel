@@ -11,16 +11,56 @@ class Database
             $config = require __DIR__ . '/../config/panel.php';
             $db = $config['db'];
 
-            $dsn = "pgsql:host={$db['host']};port={$db['port']};dbname={$db['database']}";
+            $host = (string)($db['host'] ?? '127.0.0.1');
+            $port = (int)($db['port'] ?? 5432);
+            $timeout = max(1, (int)($db['connect_timeout'] ?? 5));
+            $dsn = self::buildPgDsn($host, $port, (string)$db['database'], $timeout);
 
-            self::$instance = new \PDO($dsn, $db['username'], $db['password'], [
-                \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
-                \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
-                \PDO::ATTR_EMULATE_PREPARES => false,
-            ]);
+            try {
+                self::$instance = self::newPdo($dsn, $db, $timeout);
+            } catch (\PDOException $primaryError) {
+                $socketDir = '/var/run/postgresql';
+                $socketFile = "{$socketDir}/.s.PGSQL.{$port}";
+
+                if (in_array($host, ['127.0.0.1', 'localhost', '::1'], true) && file_exists($socketFile)) {
+                    try {
+                        self::$instance = self::newPdo(
+                            self::buildPgDsn($socketDir, $port, (string)$db['database'], $timeout),
+                            $db,
+                            $timeout
+                        );
+                    } catch (\PDOException $socketError) {
+                        throw new \RuntimeException(
+                            'PostgreSQL connection failed via TCP and Unix socket. TCP: '
+                            . $primaryError->getMessage()
+                            . ' | socket: '
+                            . $socketError->getMessage(),
+                            0,
+                            $socketError
+                        );
+                    }
+                } else {
+                    throw $primaryError;
+                }
+            }
         }
 
         return self::$instance;
+    }
+
+    private static function buildPgDsn(string $host, int $port, string $database, int $timeout): string
+    {
+        return "pgsql:host={$host};port={$port};dbname={$database};connect_timeout={$timeout}";
+    }
+
+    private static function newPdo(string $dsn, array $db, int $timeout): \PDO
+    {
+        return new \PDO($dsn, $db['username'], $db['password'], [
+            \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
+            \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
+            \PDO::ATTR_EMULATE_PREPARES => false,
+            \PDO::ATTR_TIMEOUT => $timeout,
+        ]);
     }
 
     public static function query(string $sql, array $params = []): \PDOStatement

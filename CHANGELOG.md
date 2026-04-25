@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.151] — 2026-04-26
+
+### Fixed
+- Runtime DB: `Database::connect()` usa `connect_timeout` configurable (`DB_CONNECT_TIMEOUT`, 5s por defecto) para que una conexion PostgreSQL colgada no bloquee todo el panel.
+- Runtime DB: si `DB_HOST=127.0.0.1/localhost` falla y existe socket local PostgreSQL, el panel intenta `/var/run/postgresql` antes de romper la request.
+
 ## [1.0.150] — 2026-04-26
 
 ### Fixed

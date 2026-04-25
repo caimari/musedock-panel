@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.151',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`Database::connect()`: usa `connect_timeout` configurable (`DB_CONNECT_TIMEOUT`, 5s por defecto) para que una conexion PostgreSQL colgada no bloquee todo el panel',
+                            '`Database::connect()`: si `DB_HOST=127.0.0.1/localhost` falla y existe socket local PostgreSQL, intenta `/var/run/postgresql` antes de romper la request',
+                        ],
+                        'en' => [
+                            '`Database::connect()`: uses configurable `connect_timeout` (`DB_CONNECT_TIMEOUT`, 5s default) so a hung PostgreSQL connection does not block the whole panel',
+                            '`Database::connect()`: if `DB_HOST=127.0.0.1/localhost` fails and the local PostgreSQL socket exists, it tries `/var/run/postgresql` before failing the request',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.150',
                 'date' => '2026-04-26',
                 'badge' => 'primary',

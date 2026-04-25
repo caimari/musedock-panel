@@ -17,7 +17,7 @@ $panelCfgRoot = dirname(__DIR__);
 
 return [
     'name' => \MuseDockPanel\Env::get('PANEL_NAME', 'MuseDock Panel'),
-    'version' => '1.0.150',
+    'version' => '1.0.151',
     'port' => \MuseDockPanel\Env::int('PANEL_PORT', 8444),
     'debug' => \MuseDockPanel\Env::bool('PANEL_DEBUG', false),
 
@@ -29,6 +29,7 @@ return [
         'database' => \MuseDockPanel\Env::get('DB_NAME', 'musedock_panel'),
         'username' => \MuseDockPanel\Env::get('DB_USER', 'musedock_panel'),
         'password' => \MuseDockPanel\Env::get('DB_PASS', ''),
+        'connect_timeout' => \MuseDockPanel\Env::int('DB_CONNECT_TIMEOUT', 5),
     ],
 
     // Session
