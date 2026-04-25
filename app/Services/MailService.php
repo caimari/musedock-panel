@@ -785,9 +785,9 @@ class MailService
                 'dkim_selector' => $selector,
                 'dkim_private_key' => ReplicationService::encryptPassword($privateKey),
                 'dkim_public_key' => $publicKey,
-                'spf_verified' => $checks['spf']['ok'] ?? false,
-                'dkim_verified' => $checks['dkim']['ok'] ?? false,
-                'dmarc_verified' => $checks['dmarc']['ok'] ?? false,
+                'spf_verified' => self::pgBool($checks['spf']['ok'] ?? false),
+                'dkim_verified' => self::pgBool($checks['dkim']['ok'] ?? false),
+                'dmarc_verified' => self::pgBool($checks['dmarc']['ok'] ?? false),
                 'status' => $active ? 'active' : 'pending',
                 'last_dns_check_at' => date('Y-m-d H:i:s'),
                 'created_at' => date('Y-m-d H:i:s'),
@@ -808,9 +808,9 @@ class MailService
         $checks = self::checkRelayDomainDns((string)$row['domain'], (string)($row['dkim_public_key'] ?? ''));
         $active = ($checks['spf']['ok'] ?? false) && ($checks['dkim']['ok'] ?? false) && ($checks['dmarc']['ok'] ?? false);
         Database::update('mail_relay_domains', [
-            'spf_verified' => $checks['spf']['ok'] ?? false,
-            'dkim_verified' => $checks['dkim']['ok'] ?? false,
-            'dmarc_verified' => $checks['dmarc']['ok'] ?? false,
+            'spf_verified' => self::pgBool($checks['spf']['ok'] ?? false),
+            'dkim_verified' => self::pgBool($checks['dkim']['ok'] ?? false),
+            'dmarc_verified' => self::pgBool($checks['dmarc']['ok'] ?? false),
             'status' => $active ? 'active' : 'pending',
             'last_dns_check_at' => date('Y-m-d H:i:s'),
             'updated_at' => date('Y-m-d H:i:s'),
@@ -1063,6 +1063,11 @@ class MailService
         return str_contains($stored, 'BEGIN') ? $stored : '';
     }
 
+    private static function pgBool(mixed $value): string
+    {
+        return filter_var($value, FILTER_VALIDATE_BOOLEAN) ? 't' : 'f';
+    }
+
     private static function currentMailSourceNodeId(string $mode): ?int
     {
         $setting = Settings::get('mail_setup_node_id', 'local');
@@ -1297,8 +1302,9 @@ class MailService
         $cmd = 'printf %s\\\\n ' . escapeshellarg($password) . ' | saslpasswd2 -p -c -u ' . escapeshellarg($realm) . ' ' . escapeshellarg($username) . ' 2>&1';
         exec($cmd, $out, $code);
         if ($code !== 0) return ['ok' => false, 'error' => implode("\n", $out)];
-        shell_exec('chgrp postfix /etc/sasldb2 2>/dev/null || true; chmod 640 /etc/sasldb2 2>/dev/null || true');
-        shell_exec('systemctl reload postfix 2>&1 || true');
+        shell_exec('usermod -aG sasl postfix 2>/dev/null || true');
+        shell_exec('chown root:postfix /etc/sasldb2 2>/dev/null || chgrp postfix /etc/sasldb2 2>/dev/null || true; chmod 0640 /etc/sasldb2 2>/dev/null || true');
+        shell_exec('systemctl restart postfix 2>&1 || true');
         return ['ok' => true, 'username' => $username, 'realm' => $realm];
     }
 

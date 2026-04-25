@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.98] — 2026-04-25
+
+### Fixed
+- Relay domains: guarda `spf_verified`, `dkim_verified` y `dmarc_verified` como booleanos PostgreSQL explicitos (`t/f`) para evitar `invalid input syntax for type boolean: ""`.
+- Relay SMTP: al crear usuarios SASL, refuerza permisos de `/etc/sasldb2` para que Postfix pueda leer la base de autenticacion y reinicia Postfix.
+
 ## [1.0.97] — 2026-04-25
 
 ### Fixed
