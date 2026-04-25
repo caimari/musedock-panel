@@ -20,6 +20,29 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.143',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Nuevo `bin/repair-panel-tls.sh`: reparador SSH independiente para recuperar `https://IP:8444` cuando aparece `ERR_SSL_PROTOCOL_ERROR`, sin depender de la BD ni del panel web',
+                        ],
+                        'en' => [
+                            'New `bin/repair-panel-tls.sh`: standalone SSH repair tool to recover `https://IP:8444` when `ERR_SSL_PROTOCOL_ERROR` appears, without depending on the DB or web panel',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'El reparador TLS del panel reconstruye el bloque Caddy `https://IP:PANEL_PORT` con `tls internal`, preserva bloques no-panel, elimina override `--resume`, valida Caddy y verifica HTTPS local',
+                        ],
+                        'en' => [
+                            'Panel TLS repair rebuilds the Caddy `https://IP:PANEL_PORT` block with `tls internal`, preserves non-panel blocks, removes the `--resume` override, validates Caddy and verifies local HTTPS',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.142',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

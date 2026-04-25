@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.143] — 2026-04-25
+
+### Added
+- Nuevo `bin/repair-panel-tls.sh`: reparador SSH independiente para recuperar `https://IP:8444` cuando aparece `ERR_SSL_PROTOCOL_ERROR`, sin depender de la BD ni del panel web.
+
+### Improved
+- El reparador TLS del panel reconstruye el bloque Caddy `https://IP:PANEL_PORT` con `tls internal`, preserva bloques no-panel, elimina override `--resume`, valida Caddy y verifica HTTPS local.
+
 ## [1.0.142] — 2026-04-25
 
 ### Improved
