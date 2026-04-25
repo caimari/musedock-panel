@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.139] — 2026-04-25
+
+### Fixed
+- `install.sh`: instalaciones parciales ya no dejan desincronizado el password de PostgreSQL; si el rol `musedock_panel` ya existe, se actualiza con el `DB_PASS` actual.
+- `install.sh`: si la BD `musedock_panel` ya existe, se normaliza el owner antes de aplicar esquema.
+- `install.sh`: la aplicacion de `database/schema.sql` deja log en `/tmp/musedock-panel-install-schema.log` y muestra el error real de `psql` en vez de morir silenciosamente.
+
 ## [1.0.138] — 2026-04-25
 
 ### Improved

@@ -2560,13 +2560,17 @@ if [ "$REINSTALL" = true ]; then
         ok "$(t pgsql_migration_backup "$MIGRATION_BACKUP")"
 
         # Create role in new cluster if not exists
-        pg_exec "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" 5433 | grep -q 1 || \
+        if pg_exec "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" 5433 | grep -q 1; then
+            pg_exec "ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASS}';" 5433 > /dev/null 2>&1
+        else
             pg_exec "CREATE ROLE ${DB_USER} WITH LOGIN PASSWORD '${DB_PASS}';" 5433 > /dev/null 2>&1
+        fi
 
         # Create database in new cluster if not exists
         pg_exec_quiet 5433 | cut -d \| -f 1 | grep -qw "${DB_NAME}" || \
             pg_exec "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" 5433 > /dev/null 2>&1
 
+        pg_exec "ALTER DATABASE ${DB_NAME} OWNER TO ${DB_USER};" 5433 > /dev/null 2>&1 || true
         pg_exec "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" 5433 > /dev/null 2>&1
 
         # Copy data from 5432 to 5433
@@ -2582,13 +2586,17 @@ else
     update_panel_pg_hba
 
     # Create user if not exists (on port 5433 — panel cluster)
-    pg_exec "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" 5433 | grep -q 1 || \
+    if pg_exec "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" 5433 | grep -q 1; then
+        pg_exec "ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASS}';" 5433 > /dev/null 2>&1
+    else
         pg_exec "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';" 5433 > /dev/null 2>&1
+    fi
 
     # Create database if not exists (on port 5433 — panel cluster)
     pg_exec_quiet 5433 | cut -d \| -f 1 | grep -qw "${DB_NAME}" || \
         pg_exec "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};" 5433 > /dev/null 2>&1
 
+    pg_exec "ALTER DATABASE ${DB_NAME} OWNER TO ${DB_USER};" 5433 > /dev/null 2>&1 || true
     pg_exec "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" 5433 > /dev/null 2>&1
 
     ok "$(t pgsql_db_created "$DB_NAME" "$DB_USER")"
@@ -3097,7 +3105,11 @@ DB_PORT=5433  # Keep in bash scope for health check
 ok "$(t env_created)"
 
 # Run database schema (safe — uses IF NOT EXISTS)
-PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > /dev/null 2>&1
+SCHEMA_INSTALL_LOG="/tmp/musedock-panel-install-schema.log"
+if ! PGPASSWORD="${DB_PASS}" psql -v ON_ERROR_STOP=1 -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > "$SCHEMA_INSTALL_LOG" 2>&1; then
+    tail -n 80 "$SCHEMA_INSTALL_LOG" | sed 's/^/    /'
+    fail "No se pudo aplicar database/schema.sql. Revisa PostgreSQL, pg_hba.conf y credenciales en ${PANEL_DIR}/.env."
+fi
 ok "$(t schema_applied)"
 
 # Set permissions

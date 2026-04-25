@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.139',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`install.sh`: instalaciones parciales ya no dejan desincronizado el password de PostgreSQL; si el rol `musedock_panel` ya existe, se actualiza con el `DB_PASS` actual',
+                            '`install.sh`: si la BD `musedock_panel` ya existe, se normaliza el owner antes de aplicar esquema',
+                            '`install.sh`: la aplicacion de `database/schema.sql` deja log en `/tmp/musedock-panel-install-schema.log` y muestra el error real de `psql` en vez de morir silenciosamente',
+                        ],
+                        'en' => [
+                            '`install.sh`: partial installs no longer leave the PostgreSQL password out of sync; if role `musedock_panel` already exists, it is updated with the current `DB_PASS`',
+                            '`install.sh`: if database `musedock_panel` already exists, ownership is normalized before applying the schema',
+                            '`install.sh`: applying `database/schema.sql` logs to `/tmp/musedock-panel-install-schema.log` and shows the real `psql` error instead of dying silently',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.138',
                 'date' => '2026-04-25',
                 'badge' => 'primary',
