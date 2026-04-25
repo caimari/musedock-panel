@@ -81,6 +81,11 @@ is_local_db_host() {
     esac
 }
 
+local_pg_port_listening() {
+    local port="${1:-5433}"
+    ss -tln 2>/dev/null | grep -qE "127\\.0\\.0\\.1:${port}\\b|\\*:${port}\\b|0\\.0\\.0\\.0:${port}\\b|\\[::\\]:${port}\\b"
+}
+
 ensure_database_ready() {
     local db_host db_port db_name db_user cluster_line pg_ver pg_cluster pg_status
 
@@ -101,6 +106,10 @@ ensure_database_ready() {
 
     if pg_isready -h "$db_host" -p "$db_port" -d "$db_name" -U "$db_user" -t 5 >/dev/null 2>&1; then
         ok "PostgreSQL panel DB is reachable (${db_host}:${db_port})"
+        return 0
+    fi
+    if is_local_db_host "$db_host" && local_pg_port_listening "$db_port"; then
+        ok "PostgreSQL panel port is listening (${db_host}:${db_port}); continuing to migration auth check"
         return 0
     fi
 
@@ -124,6 +133,10 @@ ensure_database_ready() {
 
     if pg_isready -h "$db_host" -p "$db_port" -d "$db_name" -U "$db_user" -t 5 >/dev/null 2>&1; then
         ok "PostgreSQL panel DB recovered (${db_host}:${db_port})"
+        return 0
+    fi
+    if is_local_db_host "$db_host" && local_pg_port_listening "$db_port"; then
+        ok "PostgreSQL panel port recovered (${db_host}:${db_port}); continuing to migration auth check"
         return 0
     fi
 

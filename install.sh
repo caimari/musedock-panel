@@ -135,8 +135,7 @@ read_env_value() {
 quick_pg_port_ready() {
     local port="${1:-5433}"
     if command -v pg_isready >/dev/null 2>&1; then
-        pg_isready -h 127.0.0.1 -p "$port" -t 1 >/dev/null 2>&1
-        return $?
+        pg_isready -h 127.0.0.1 -p "$port" -t 1 >/dev/null 2>&1 && return 0
     fi
     ss -tln 2>/dev/null | grep -qE "127\\.0\\.0\\.1:${port}\\b|\\*:${port}\\b|0\\.0\\.0\\.0:${port}\\b|\\[::\\]:${port}\\b"
 }
@@ -2555,8 +2554,7 @@ header "$(t pgsql_dual_header)"
 pg_port_ready() {
     local PORT="${1:-5433}"
     if command -v pg_isready >/dev/null 2>&1; then
-        pg_isready -h 127.0.0.1 -p "$PORT" -t 1 >/dev/null 2>&1
-        return $?
+        pg_isready -h 127.0.0.1 -p "$PORT" -t 1 >/dev/null 2>&1 && return 0
     fi
     ss -tln 2>/dev/null | grep -qE "127\\.0\\.0\\.1:${PORT}\\b|\\*:${PORT}\\b|0\\.0\\.0\\.0:${PORT}\\b|\\[::\\]:${PORT}\\b"
 }

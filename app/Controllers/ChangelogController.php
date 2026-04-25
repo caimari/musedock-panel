@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.148',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`install.sh`: los checks de PostgreSQL `panel/5433` ya no dependen exclusivamente de `pg_isready`; si `ss` confirma que el puerto local escucha, la reinstalacion continua y `psql` valida credenciales en el paso siguiente',
+                            '`bin/update.sh`: mismo fallback para updates, evitando falsos negativos cuando PostgreSQL esta online pero `pg_isready` falla por configuracion local de sockets/stats/localhost',
+                        ],
+                        'en' => [
+                            '`install.sh`: PostgreSQL `panel/5433` checks no longer depend exclusively on `pg_isready`; if `ss` confirms the local port is listening, reinstall continues and `psql` validates credentials in the next step',
+                            '`bin/update.sh`: same fallback for updates, avoiding false negatives when PostgreSQL is online but `pg_isready` fails due to local sockets/stats/localhost configuration',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.147',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

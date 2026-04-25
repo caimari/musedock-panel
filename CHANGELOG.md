@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.148] — 2026-04-25
+
+### Fixed
+- `install.sh`: los checks de PostgreSQL `panel/5433` ya no dependen exclusivamente de `pg_isready`; si `ss` confirma que el puerto local escucha, la reinstalacion continua y `psql` valida credenciales en el paso siguiente.
+- `bin/update.sh`: mismo fallback para updates, evitando falsos negativos cuando PostgreSQL esta online pero `pg_isready` falla por configuracion local de sockets/stats/localhost.
+
 ## [1.0.147] — 2026-04-25
 
 ### Fixed
