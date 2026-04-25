@@ -20,6 +20,39 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.115',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            '`/mail?tab=deliverability`: nuevo canal `Relay autenticado (SASL/STARTTLS)` para probar credenciales reales creadas en `Usuarios SMTP del relay`',
+                        ],
+                        'en' => [
+                            '`/mail?tab=deliverability`: new `Authenticated relay (SASL/STARTTLS)` channel to test real credentials created under relay SMTP users',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'El test autenticado del relay usa flujo de SaaS remoto: STARTTLS, AUTH LOGIN/SASL, `MAIL FROM` con el remitente elegido y mensaje `texto + HTML`',
+                            'Health repair cron: el template de `musedock-backup` prepara `storage/backups` para `postgres:www-data` y evita errores de permisos en redireccion',
+                        ],
+                        'en' => [
+                            'Authenticated relay test uses the same remote SaaS flow: STARTTLS, AUTH LOGIN/SASL, selected `MAIL FROM`, and `text + HTML` message',
+                            'Health repair cron: `musedock-backup` template now prepares `storage/backups` for `postgres:www-data` and avoids redirect permission errors',
+                        ],
+                    ],
+                    'notes' => [
+                        'es' => [
+                            'La password del relay no se re-muestra por seguridad; para probar credenciales hay que introducir la password generada al crear el usuario SMTP',
+                        ],
+                        'en' => [
+                            'Relay passwords are not re-displayed for security; credential tests require entering the password generated when the SMTP user was created',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.114',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

@@ -1445,16 +1445,37 @@ class MailController
         ];
 
         $transport = strtolower(trim((string)($_POST['test_transport'] ?? 'auto')));
-        if (!in_array($transport, ['auto', 'local', 'smtp'], true)) {
+        if (!in_array($transport, ['auto', 'local', 'smtp', 'relay_auth'], true)) {
             $transport = 'auto';
         }
 
         $smtpCfg = MailService::getSmtpConfig(true);
+        if ($transport === 'relay_auth') {
+            $relayHost = trim((string)($_POST['relay_smtp_host'] ?? ''));
+            $relayPort = (int)($_POST['relay_smtp_port'] ?? 587);
+            $relayUser = trim((string)($_POST['relay_smtp_user'] ?? ''));
+            $relayPass = (string)($_POST['relay_smtp_password'] ?? '');
+
+            if ($relayHost === '' || $relayPort <= 0 || $relayUser === '' || $relayPass === '') {
+                Flash::set('error', 'Para probar SMTP autenticado del relay indica host, puerto, usuario y password.');
+                Router::redirect('/mail?tab=deliverability');
+                return;
+            }
+
+            $smtpCfg = [
+                'mode' => 'relay_auth',
+                'host' => $relayHost,
+                'port' => $relayPort,
+                'encryption' => 'tls',
+                'username' => $relayUser,
+                'password' => $relayPass,
+            ];
+        }
         $mode = (string)($smtpCfg['mode'] ?? '');
         $hasSmtpTarget = trim((string)($smtpCfg['host'] ?? '')) !== '';
         $hasSmtpAuth = trim((string)($smtpCfg['username'] ?? '')) !== '';
         $canUseSmtp = $hasSmtpTarget && ($mode === 'external' || $hasSmtpAuth);
-        $useSmtp = $transport === 'smtp' || ($transport === 'auto' && $mode === 'external' && $canUseSmtp);
+        $useSmtp = $transport === 'smtp' || $transport === 'relay_auth' || ($transport === 'auto' && $mode === 'external' && $canUseSmtp);
 
         $smtpError = '';
         $smtpDetail = '';
@@ -1518,7 +1539,8 @@ class MailController
         } elseif ($useSmtp) {
             $extraWarn = !empty($resolvedFrom['warnings']) ? (' ' . implode(' ', (array)$resolvedFrom['warnings'])) : '';
             $detail = $smtpDetail !== '' ? (" Respuesta SMTP: {$smtpDetail}.") : '';
-            Flash::set('success', "Test SMTP autenticado enviado (texto+HTML) a {$to} con From {$from}.{$detail}{$extraWarn}");
+            $channel = $transport === 'relay_auth' ? 'relay autenticado SASL/STARTTLS' : 'SMTP autenticado';
+            Flash::set('success', "Test {$channel} enviado (texto+HTML) a {$to} con From {$from}.{$detail}{$extraWarn}");
         } else {
             $extraWarn = !empty($resolvedFrom['warnings']) ? (' ' . implode(' ', (array)$resolvedFrom['warnings'])) : '';
             Flash::set('success', "Test entregado a la cola local (texto+HTML) para {$to} usando {$from}. Si no llega, revisa /var/log/mail.log. Marker: {$marker}.{$extraWarn}");

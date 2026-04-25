@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.115] — 2026-04-25
+
+### New
+- `/mail?tab=deliverability`: nuevo canal de test `Relay autenticado (SASL/STARTTLS)` para probar credenciales creadas en `Usuarios SMTP del relay` contra host/puerto/usuario/password reales.
+
+### Improved
+- El test autenticado del relay usa el mismo flujo que un SaaS remoto: STARTTLS, AUTH LOGIN/SASL, `MAIL FROM` con el remitente elegido y mensaje `texto + HTML`.
+- Health repair cron: el template de `musedock-backup` pasa a ejecutarse como root preparando `storage/backups` para `postgres:www-data`, evitando errores de redireccion por permisos del usuario `postgres`.
+
+### Notes
+- La password del relay no se muestra desde la BD por seguridad; para probar credenciales hay que introducir la password generada al crear el usuario SMTP.
+
 ## [1.0.114] — 2026-04-25
 
 ### Improved

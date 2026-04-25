@@ -1550,8 +1550,38 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                 <select name="test_transport" class="form-select">
                     <option value="auto" selected>Auto (recomendado)</option>
                     <option value="local">Local (mail()/Postfix)</option>
+                    <option value="relay_auth">Relay autenticado (SASL/STARTTLS)</option>
                     <option value="smtp" <?= $smtpReady ? '' : 'disabled' ?>>SMTP autenticado<?= $smtpReady ? '' : ' (no disponible)' ?></option>
                 </select>
+            </div>
+            <div class="col-12 d-none" data-relay-auth-fields>
+                <div class="row g-2 p-3 rounded" style="background:#0b1220;border:1px solid #334155;">
+                    <?php
+                        $defaultRelayAuthHost = \MuseDockPanel\Settings::get('mail_relay_wireguard_ip', '') ?: \MuseDockPanel\Settings::get('mail_relay_host', '10.10.70.2');
+                        $defaultRelayAuthPort = \MuseDockPanel\Settings::get('mail_relay_port', '587') ?: '587';
+                    ?>
+                    <div class="col-lg-3 col-md-6">
+                        <label class="form-label">Host relay</label>
+                        <input type="text" name="relay_smtp_host" class="form-control" value="<?= View::e($defaultRelayAuthHost) ?>" placeholder="10.10.70.2">
+                    </div>
+                    <div class="col-lg-2 col-md-6">
+                        <label class="form-label">Puerto</label>
+                        <input type="number" name="relay_smtp_port" class="form-control" value="<?= View::e($defaultRelayAuthPort) ?>" min="1" max="65535">
+                    </div>
+                    <div class="col-lg-3 col-md-6">
+                        <label class="form-label">Usuario SMTP</label>
+                        <input type="text" name="relay_smtp_user" class="form-control" placeholder="web01-relay" autocomplete="username">
+                    </div>
+                    <div class="col-lg-4 col-md-6">
+                        <label class="form-label">Password SMTP</label>
+                        <input type="password" name="relay_smtp_password" class="form-control" placeholder="Password generada al crear el usuario" autocomplete="current-password">
+                    </div>
+                    <div class="col-12">
+                        <div class="form-text text-muted">
+                            Este modo prueba el mismo flujo que un SaaS remoto: <code>STARTTLS</code> contra el relay, autenticacion SASL y envio con el remitente elegido. Si DKIM sigue fallando aqui, el problema ya no es la password: hay que revisar firma OpenDKIM/milters del relay.
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="col-md-auto d-flex align-items-end">
                 <button class="btn btn-outline-info"><i class="bi bi-send me-1"></i>Enviar test</button>
@@ -2230,6 +2260,19 @@ initWebmailConfigLock();
         button.disabled = true;
         button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Comprobando...';
     });
+})();
+
+(function initMailTestTransportFields() {
+    const select = document.querySelector('select[name="test_transport"]');
+    const fields = document.querySelector('[data-relay-auth-fields]');
+    if (!select || !fields) return;
+
+    const sync = () => {
+        fields.classList.toggle('d-none', select.value !== 'relay_auth');
+    };
+
+    select.addEventListener('change', sync);
+    sync();
 })();
 
 <?php if (!empty($mailNodes) || ($mailLocalConfigured ?? false)): ?>
