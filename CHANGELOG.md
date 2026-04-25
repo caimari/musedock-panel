@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.96] — 2026-04-25
+
+### Fixed
+- `/mail`: en modo Relay Privado, `Mail Domains` deja de aparecer fuera de su pestaña y ya no se ofrece como flujo principal para crear buzones.
+- Relay: crear dominio o usuario SMTP ya no puede terminar en 500 sin contexto; las excepciones se capturan y se muestran como error legible.
+
+### Improved
+- `/mail?tab=relay`: añade instrucciones claras para Laravel/SaaS con `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD` y STARTTLS.
+- `/mail/domains/create`: bloquea la creacion de dominios de buzones cuando el modo actual no es Correo Completo y redirige al flujo correcto del relay.
+
 ## [1.0.95] — 2026-04-25
 
 ### Fixed

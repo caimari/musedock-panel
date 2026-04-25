@@ -422,6 +422,12 @@
                 <div class="small text-muted mb-3">
                     El relay escucha en <code><?= View::e($relayHost ?: '-') ?>:<?= View::e($relayPort) ?></code> por WireGuard. IP publica para SPF/PTR: <code><?= View::e($relayPublicIp ?: '-') ?></code>.
                 </div>
+                <div class="alert alert-info py-2 mb-3">
+                    <div class="fw-semibold mb-1">Flujo correcto en Relay Privado</div>
+                    <div class="small">
+                        Aqui no se crean buzones. Primero autoriza el dominio remitente para DKIM/SPF; despues crea un usuario SMTP en la tarjeta de la derecha.
+                    </div>
+                </div>
 
                 <?php if (!$isSlave): ?>
                 <form method="post" action="/mail/relay/domains/store" class="row g-2 mb-3">
@@ -491,6 +497,10 @@
                 <span class="text-muted small">SASL / sasldb2</span>
             </div>
             <div class="card-body">
+                <div class="small text-muted mb-3">
+                    Laravel/SaaS remotos usan <code><?= View::e($relayHost ?: 'IP_WIREGUARD') ?>:<?= View::e($relayPort) ?></code>,
+                    cifrado <code>STARTTLS</code>, usuario SMTP y la password generada al crear el usuario.
+                </div>
                 <?php if (!$isSlave): ?>
                 <form method="post" action="/mail/relay/users/store" class="row g-2 mb-3">
                     <?= View::csrf() ?>
@@ -545,6 +555,14 @@
                         </table>
                     </div>
                 <?php endif; ?>
+                <div class="mt-3 p-3 rounded" style="background:#0f172a;border:1px solid #334155;">
+                    <div class="fw-semibold small mb-2">Ejemplo Laravel</div>
+                    <pre class="small mb-0" style="color:#cbd5e1;white-space:pre-wrap;">MAIL_MAILER=smtp
+MAIL_HOST=<?= View::e($relayHost ?: 'IP_WIREGUARD') . "\n" ?>MAIL_PORT=<?= View::e($relayPort) . "\n" ?>MAIL_USERNAME=USUARIO_RELAY
+MAIL_PASSWORD=PASSWORD_GENERADA
+MAIL_ENCRYPTION=tls
+MAIL_FROM_ADDRESS=noreply@example.com</pre>
+                </div>
             </div>
         </div>
     </div>
@@ -992,19 +1010,23 @@
 <div class="mb-4"></div>
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h6 class="mb-0"><i class="bi bi-globe2 me-2"></i>Mail Domains</h6>
-    <?php if (!$isSlave): ?>
+    <?php if (!$isSlave && ($mailModeValue ?? '') === 'full'): ?>
     <a href="/mail/domains/create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i> New Domain</a>
     <?php endif; ?>
 </div>
-</div>
-
+<?php if (($mailModeValue ?? '') !== 'full'): ?>
+    <div class="alert alert-info">
+        <strong>Este modo no usa Mail Domains de buzones.</strong>
+        En <?= View::e($modeInfo[0] ?? 'este modo') ?> gestiona el correo desde su pestaña correspondiente. Para Relay Privado usa <a class="text-info" href="/mail?tab=relay">Dominios autorizados para relay</a>.
+    </div>
+<?php endif; ?>
 <div class="card">
     <div class="card-body p-0">
         <?php if (empty($domains)): ?>
             <div class="p-4 text-center text-muted">
                 <i class="bi bi-envelope" style="font-size: 2rem;"></i>
                 <p class="mt-2">No mail domains yet.</p>
-                <?php if (!$isSlave): ?>
+                <?php if (!$isSlave && ($mailModeValue ?? '') === 'full'): ?>
                 <a href="/mail/domains/create" class="btn btn-primary btn-sm">Add first mail domain</a>
                 <?php endif; ?>
             </div>
@@ -1059,6 +1081,7 @@
             </table>
         <?php endif; ?>
     </div>
+</div>
 </div>
 
 <script>

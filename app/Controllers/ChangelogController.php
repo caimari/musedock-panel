@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.96',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`/mail`: en modo Relay Privado, `Mail Domains` deja de aparecer fuera de su pestaña y ya no se ofrece como flujo principal para crear buzones',
+                            'Relay: crear dominio o usuario SMTP ya no puede terminar en 500 sin contexto; las excepciones se capturan y se muestran como error legible',
+                        ],
+                        'en' => [
+                            '`/mail`: in Private Relay mode, `Mail Domains` no longer appears outside its tab and is no longer offered as the main mailbox flow',
+                            'Relay: creating a domain or SMTP user can no longer end in a contextless 500; exceptions are captured and shown as readable errors',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=relay`: añade instrucciones claras para Laravel/SaaS con `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD` y STARTTLS',
+                            '`/mail/domains/create`: bloquea la creacion de dominios de buzones cuando el modo actual no es Correo Completo y redirige al flujo correcto del relay',
+                        ],
+                        'en' => [
+                            '`/mail?tab=relay`: adds clear Laravel/SaaS instructions with `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD` and STARTTLS',
+                            '`/mail/domains/create`: blocks mailbox domain creation when the current mode is not Full Mail and redirects to the correct relay flow',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.95',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

@@ -759,37 +759,45 @@ class MailService
 
     public static function createRelayDomain(string $domain): array
     {
-        $domain = self::normalizeDomain($domain);
-        if ($domain === '') return ['ok' => false, 'error' => 'Dominio no valido'];
-        if (Database::fetchOne("SELECT id FROM mail_relay_domains WHERE domain = :d", ['d' => $domain])) {
-            return ['ok' => false, 'error' => 'El dominio ya existe en el relay'];
+        try {
+            $domain = self::normalizeDomain($domain);
+            if ($domain === '') return ['ok' => false, 'error' => 'Dominio no valido'];
+            if (Database::fetchOne("SELECT id FROM mail_relay_domains WHERE domain = :d", ['d' => $domain])) {
+                return ['ok' => false, 'error' => 'El dominio ya existe en el relay'];
+            }
+
+            $nodeResult = self::runRelayNodeAction('mail_relay_create_domain', ['domain' => $domain]);
+            if (!($nodeResult['ok'] ?? false)) return $nodeResult;
+
+            $data = $nodeResult['data'] ?? $nodeResult;
+            $publicKey = (string)($data['dkim_public_key'] ?? '');
+            $privateKey = (string)($data['dkim_private_key'] ?? '');
+            $selector = (string)($data['dkim_selector'] ?? 'default');
+            if ($publicKey === '' || $privateKey === '') {
+                return ['ok' => false, 'error' => 'OpenDKIM creo el dominio, pero no devolvio clave DKIM completa. Revisa permisos de /etc/opendkim/keys.'];
+            }
+
+            $checks = self::checkRelayDomainDns($domain, $publicKey);
+            $active = ($checks['spf']['ok'] ?? false) && ($checks['dkim']['ok'] ?? false) && ($checks['dmarc']['ok'] ?? false);
+
+            Database::insert('mail_relay_domains', [
+                'domain' => $domain,
+                'dkim_selector' => $selector,
+                'dkim_private_key' => ReplicationService::encryptPassword($privateKey),
+                'dkim_public_key' => $publicKey,
+                'spf_verified' => $checks['spf']['ok'] ?? false,
+                'dkim_verified' => $checks['dkim']['ok'] ?? false,
+                'dmarc_verified' => $checks['dmarc']['ok'] ?? false,
+                'status' => $active ? 'active' : 'pending',
+                'last_dns_check_at' => date('Y-m-d H:i:s'),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            return ['ok' => true, 'domain' => $domain, 'dkim_public_key' => $publicKey, 'dkim_txt' => self::dkimTxtValue($publicKey)];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => 'Error creando dominio relay: ' . $e->getMessage()];
         }
-
-        $nodeResult = self::runRelayNodeAction('mail_relay_create_domain', ['domain' => $domain]);
-        if (!($nodeResult['ok'] ?? false)) return $nodeResult;
-
-        $data = $nodeResult['data'] ?? $nodeResult;
-        $publicKey = (string)($data['dkim_public_key'] ?? '');
-        $privateKey = (string)($data['dkim_private_key'] ?? '');
-        $selector = (string)($data['dkim_selector'] ?? 'default');
-        $checks = self::checkRelayDomainDns($domain, $publicKey);
-        $active = ($checks['spf']['ok'] ?? false) && ($checks['dkim']['ok'] ?? false) && ($checks['dmarc']['ok'] ?? false);
-
-        Database::insert('mail_relay_domains', [
-            'domain' => $domain,
-            'dkim_selector' => $selector,
-            'dkim_private_key' => ReplicationService::encryptPassword($privateKey),
-            'dkim_public_key' => $publicKey,
-            'spf_verified' => $checks['spf']['ok'] ?? false,
-            'dkim_verified' => $checks['dkim']['ok'] ?? false,
-            'dmarc_verified' => $checks['dmarc']['ok'] ?? false,
-            'status' => $active ? 'active' : 'pending',
-            'last_dns_check_at' => date('Y-m-d H:i:s'),
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
-
-        return ['ok' => true, 'domain' => $domain, 'dkim_public_key' => $publicKey, 'dkim_txt' => self::dkimTxtValue($publicKey)];
     }
 
     public static function refreshRelayDomain(int $id): array
@@ -824,31 +832,35 @@ class MailService
 
     public static function createRelayUser(string $username, string $description, int $limit, string $domains = ''): array
     {
-        $username = strtolower(trim($username));
-        if (!preg_match('/^[a-z0-9][a-z0-9_.-]{2,120}$/', $username)) {
-            return ['ok' => false, 'error' => 'Usuario no valido. Usa letras, numeros, punto, guion o guion bajo.'];
+        try {
+            $username = strtolower(trim($username));
+            if (!preg_match('/^[a-z0-9][a-z0-9_.-]{2,120}$/', $username)) {
+                return ['ok' => false, 'error' => 'Usuario no valido. Usa letras, numeros, punto, guion o guion bajo.'];
+            }
+            if (Database::fetchOne("SELECT id FROM mail_relay_users WHERE username = :u", ['u' => $username])) {
+                return ['ok' => false, 'error' => 'El usuario ya existe'];
+            }
+
+            $password = bin2hex(random_bytes(24));
+            $nodeResult = self::runRelayNodeAction('mail_relay_create_user', ['username' => $username, 'password' => $password]);
+            if (!($nodeResult['ok'] ?? false)) return $nodeResult;
+
+            Database::insert('mail_relay_users', [
+                'username' => $username,
+                'password_hash' => password_hash($password, PASSWORD_DEFAULT),
+                'password_encrypted' => ReplicationService::encryptPassword($password),
+                'description' => trim($description),
+                'enabled' => true,
+                'rate_limit_per_hour' => max(1, $limit),
+                'allowed_from_domains' => trim($domains),
+                'created_at' => date('Y-m-d H:i:s'),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ]);
+
+            return ['ok' => true, 'username' => $username, 'password' => $password];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => 'Error creando usuario relay: ' . $e->getMessage()];
         }
-        if (Database::fetchOne("SELECT id FROM mail_relay_users WHERE username = :u", ['u' => $username])) {
-            return ['ok' => false, 'error' => 'El usuario ya existe'];
-        }
-
-        $password = bin2hex(random_bytes(24));
-        $nodeResult = self::runRelayNodeAction('mail_relay_create_user', ['username' => $username, 'password' => $password]);
-        if (!($nodeResult['ok'] ?? false)) return $nodeResult;
-
-        Database::insert('mail_relay_users', [
-            'username' => $username,
-            'password_hash' => password_hash($password, PASSWORD_DEFAULT),
-            'password_encrypted' => ReplicationService::encryptPassword($password),
-            'description' => trim($description),
-            'enabled' => true,
-            'rate_limit_per_hour' => max(1, $limit),
-            'allowed_from_domains' => trim($domains),
-            'created_at' => date('Y-m-d H:i:s'),
-            'updated_at' => date('Y-m-d H:i:s'),
-        ]);
-
-        return ['ok' => true, 'username' => $username, 'password' => $password];
     }
 
     public static function getMailMigrations(int $limit = 10): array

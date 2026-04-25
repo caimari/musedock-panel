@@ -101,6 +101,12 @@ class MailController
             return;
         }
 
+        if (MailService::getCurrentMailMode() !== 'full') {
+            Flash::set('warning', 'Los Mail Domains son solo para buzones en modo Correo Completo. En Relay Privado usa Mail > Relay > Dominios autorizados.');
+            Router::redirect('/mail?tab=relay');
+            return;
+        }
+
         $customers = Database::fetchAll("SELECT id, name, email FROM customers WHERE status = 'active' ORDER BY name");
         $mailNodes = MailService::getMailNodes();
         $mailCreateAvailable = $this->hasMailBackendAvailable();
@@ -122,6 +128,12 @@ class MailController
         if (self::isSlave()) {
             Flash::set('error', 'Este servidor es Slave.');
             Router::redirect('/mail');
+            return;
+        }
+
+        if (MailService::getCurrentMailMode() !== 'full') {
+            Flash::set('warning', 'No se crean buzones en este modo. En Relay Privado autoriza el dominio desde Mail > Relay.');
+            Router::redirect('/mail?tab=relay');
             return;
         }
 
@@ -746,9 +758,14 @@ class MailController
             return;
         }
 
-        $result = MailService::createRelayDomain((string)($_POST['domain'] ?? ''));
+        try {
+            $result = MailService::createRelayDomain((string)($_POST['domain'] ?? ''));
+        } catch (\Throwable $e) {
+            LogService::log('mail.relay_domain.create_failed', (string)($_POST['domain'] ?? ''), $e->getMessage());
+            $result = ['ok' => false, 'error' => $e->getMessage()];
+        }
         if ($result['ok'] ?? false) {
-            Flash::set('success', 'Dominio relay creado. Copia el TXT DKIM/SPF/DMARC desde Entregabilidad.');
+            Flash::set('success', 'Dominio relay creado. Revisa los TXT DKIM/SPF/DMARC en Entregabilidad.');
         } else {
             Flash::set('error', $result['error'] ?? 'No se pudo crear el dominio relay.');
         }
@@ -789,12 +806,17 @@ class MailController
             return;
         }
 
-        $result = MailService::createRelayUser(
-            (string)($_POST['username'] ?? ''),
-            (string)($_POST['description'] ?? ''),
-            (int)($_POST['rate_limit_per_hour'] ?? 200),
-            (string)($_POST['allowed_from_domains'] ?? '')
-        );
+        try {
+            $result = MailService::createRelayUser(
+                (string)($_POST['username'] ?? ''),
+                (string)($_POST['description'] ?? ''),
+                (int)($_POST['rate_limit_per_hour'] ?? 200),
+                (string)($_POST['allowed_from_domains'] ?? '')
+            );
+        } catch (\Throwable $e) {
+            LogService::log('mail.relay_user.create_failed', (string)($_POST['username'] ?? ''), $e->getMessage());
+            $result = ['ok' => false, 'error' => $e->getMessage()];
+        }
         if ($result['ok'] ?? false) {
             $relayHost = \MuseDockPanel\Settings::get('mail_relay_wireguard_ip', '');
             if ($relayHost === '') {
