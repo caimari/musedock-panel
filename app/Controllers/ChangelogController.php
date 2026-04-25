@@ -20,6 +20,31 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.127',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`install.sh`: en servidores virgenes/minimos ya no depende de `sudo` para ejecutar comandos como usuario `postgres`; usa `runuser -u postgres -- ...`',
+                            'Instalador PostgreSQL: evita que un servidor limpio sin `sudo` parezca necesitar credenciales manuales del superusuario `postgres`',
+                        ],
+                        'en' => [
+                            '`install.sh`: fresh/minimal servers no longer require `sudo` to run commands as `postgres`; it uses `runuser -u postgres -- ...`',
+                            'PostgreSQL installer: prevents a clean server without `sudo` from looking like it needs manual `postgres` superuser credentials',
+                        ],
+                    ],
+                    'notes' => [
+                        'es' => [
+                            'El usuario de base de datos del panel (`musedock_panel`) y su password los crea el instalador shell y los escribe en `.env`; el setup web solo crea el primer admin del panel',
+                        ],
+                        'en' => [
+                            'The panel database user (`musedock_panel`) and password are created by the shell installer and written to `.env`; the web setup only creates the first panel admin',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.126',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

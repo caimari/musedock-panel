@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.127] — 2026-04-25
+
+### Fixed
+- `install.sh`: en servidores virgenes/minimos ya no depende de `sudo` para ejecutar comandos como usuario `postgres`; usa `runuser -u postgres -- ...`.
+- Instalador PostgreSQL: evita que un servidor limpio sin `sudo` parezca necesitar credenciales manuales del superusuario `postgres`.
+
+### Notes
+- El usuario de base de datos del panel (`musedock_panel`) y su password los crea el instalador shell y los escribe en `.env`; el setup web solo crea el primer admin del panel.
+
 ## [1.0.126] — 2026-04-25
 
 ### Improved

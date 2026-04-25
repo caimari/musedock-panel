@@ -2344,11 +2344,12 @@ update_panel_pg_hba() {
     fi
 }
 
-# Try peer auth first (sudo -u postgres), fallback to password auth
+# Try peer auth first as the postgres system user, fallback to password auth.
+# Use runuser instead of sudo so a minimal fresh server does not need sudo installed.
 PG_AUTH_METHOD="peer"
 PG_PASS_ENV=""
 
-if ! sudo -u postgres psql -c "SELECT 1;" > /dev/null 2>&1; then
+if ! runuser -u postgres -- psql -c "SELECT 1;" > /dev/null 2>&1; then
     PG_AUTH_METHOD="password"
     echo ""
     echo -e "  ${YELLOW}${BOLD}$(t pgsql_peer_fail)${NC}"
@@ -2377,7 +2378,7 @@ pg_exec() {
     local SQL="$1"
     local PORT="${2:-5433}"
     if [ "$PG_AUTH_METHOD" = "peer" ]; then
-        sudo -u postgres psql -p "$PORT" -c "$SQL" 2>/dev/null
+        runuser -u postgres -- psql -p "$PORT" -c "$SQL" 2>/dev/null
     else
         PGPASSWORD="$PG_PASS_ENV" psql -U postgres -h 127.0.0.1 -p "$PORT" -c "$SQL" 2>/dev/null
     fi
@@ -2386,7 +2387,7 @@ pg_exec() {
 pg_exec_quiet() {
     local PORT="${1:-5433}"
     if [ "$PG_AUTH_METHOD" = "peer" ]; then
-        sudo -u postgres psql -p "$PORT" -lqt 2>/dev/null
+        runuser -u postgres -- psql -p "$PORT" -lqt 2>/dev/null
     else
         PGPASSWORD="$PG_PASS_ENV" psql -U postgres -h 127.0.0.1 -p "$PORT" -lqt 2>/dev/null
     fi
@@ -2421,7 +2422,7 @@ if [ "$REINSTALL" = true ]; then
 
         # Safety backup from old port
         MIGRATION_BACKUP="/tmp/backup-panel-pre-migration-$(date +%Y%m%d_%H%M%S).sql"
-        sudo -u postgres pg_dump -p 5432 "${DB_NAME}" > "$MIGRATION_BACKUP" 2>/dev/null || true
+        runuser -u postgres -- pg_dump -p 5432 "${DB_NAME}" > "$MIGRATION_BACKUP" 2>/dev/null || true
         ok "$(t pgsql_migration_backup "$MIGRATION_BACKUP")"
 
         # Create role in new cluster if not exists
@@ -2435,7 +2436,7 @@ if [ "$REINSTALL" = true ]; then
         pg_exec "GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};" 5433 > /dev/null 2>&1
 
         # Copy data from 5432 to 5433
-        sudo -u postgres pg_dump -p 5432 "${DB_NAME}" 2>/dev/null | sudo -u postgres psql -p 5433 "${DB_NAME}" > /dev/null 2>&1 || true
+        runuser -u postgres -- pg_dump -p 5432 "${DB_NAME}" 2>/dev/null | runuser -u postgres -- psql -p 5433 "${DB_NAME}" > /dev/null 2>&1 || true
 
         ok "$(t pgsql_migration_done)"
         ok "$(t pgsql_5432_free)"
