@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.134] — 2026-04-25
+
+### Docs
+- Nueva seccion padre `/docs/bugs-sections` para articulos de incidencias reales: sintomas, diagnostico, causa raiz, fix y prevencion.
+- Nuevo articulo `/docs/bugs/err-ssl-protocol-error` documentando el bug de `ERR_SSL_PROTOCOL_ERROR` por IP/dominio en `8444`, Caddy/PHP, `wrong version number`, runtime API y Caddyfile.
+- `/docs`: nueva card padre "Bugs: incidencias y diagnostico"; la busqueda indexa tambien los articulos de Bugs.
+
 ## [1.0.133] — 2026-04-25
 
 ### Fixed

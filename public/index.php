@@ -647,6 +647,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/docs/settings-sections', 'DocsController@settingsSections');
 \MuseDockPanel\Router::get('/docs/mail-sections', 'DocsController@mailSections');
 \MuseDockPanel\Router::get('/docs/mail/{slug}', 'DocsController@mailGuide');
+\MuseDockPanel\Router::get('/docs/bugs-sections', 'DocsController@bugSections');
+\MuseDockPanel\Router::get('/docs/bugs/{slug}', 'DocsController@bugGuide');
 \MuseDockPanel\Router::get('/docs/settings/cluster', 'DocsController@clusterBasics');
 \MuseDockPanel\Router::get('/docs/settings/federation', 'DocsController@federationBasics');
 \MuseDockPanel\Router::post('/docs/settings/{slug}/shortcut-toggle', 'DocsController@settingsGuideShortcutToggle');

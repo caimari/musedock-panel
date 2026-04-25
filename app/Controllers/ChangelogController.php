@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.134',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'docs' => [
+                        'es' => [
+                            'Nueva seccion padre `/docs/bugs-sections` para articulos de incidencias reales: sintomas, diagnostico, causa raiz, fix y prevencion',
+                            'Nuevo articulo `/docs/bugs/err-ssl-protocol-error` documentando el bug de `ERR_SSL_PROTOCOL_ERROR` por IP/dominio en `8444`, Caddy/PHP, `wrong version number`, runtime API y Caddyfile',
+                            '`/docs`: nueva card padre "Bugs: incidencias y diagnostico"; la busqueda indexa tambien los articulos de Bugs',
+                        ],
+                        'en' => [
+                            'New parent section `/docs/bugs-sections` for real incident articles: symptoms, diagnosis, root cause, fix, and prevention',
+                            'New article `/docs/bugs/err-ssl-protocol-error` documenting the `ERR_SSL_PROTOCOL_ERROR` bug by IP/domain on `8444`, Caddy/PHP, `wrong version number`, runtime API, and Caddyfile',
+                            '`/docs`: new parent card "Bugs: incidencias y diagnostico"; search also indexes Bug articles',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.133',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

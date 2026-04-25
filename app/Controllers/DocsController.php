@@ -172,6 +172,38 @@ class DocsController
         return $this->dedupeTopics($topics);
     }
 
+    private function bugGuides(): array
+    {
+        return [
+            'err-ssl-protocol-error' => [
+                'title' => 'ERR_SSL_PROTOCOL_ERROR en panel por IP/dominio',
+                'summary' => 'Como diagnosticar cuando Chrome no muestra "Avanzado" y el puerto HTTPS responde mal.',
+                'panel_url' => '/settings/server',
+                'icon' => 'bi-bug',
+                'keywords' => 'bug err_ssl_protocol_error ssl protocol error wrong version number tls caddy ip dominio 8444 certificado autofirmado avanzado chrome curl reverse proxy',
+                'view' => 'bug-err-ssl-protocol-error',
+            ],
+        ];
+    }
+
+    private function bugChildTopics(): array
+    {
+        $topics = [];
+        foreach ($this->bugGuides() as $slug => $guide) {
+            $topics[] = [
+                'title' => 'Bug: ' . (string)($guide['title'] ?? $slug),
+                'description' => (string)($guide['summary'] ?? ''),
+                'url' => '/docs/bugs/' . $slug,
+                'panel_url' => (string)($guide['panel_url'] ?? ''),
+                'category' => 'Bugs / Articulo',
+                'icon' => (string)($guide['icon'] ?? 'bi-bug'),
+                'keywords' => mb_strtolower((string)($guide['keywords'] ?? 'bug incidencia')),
+            ];
+        }
+
+        return $this->dedupeTopics($topics);
+    }
+
     private function parentTopics(array $guides): array
     {
         return $this->dedupeTopics([
@@ -190,6 +222,14 @@ class DocsController
                 'category' => 'Guia padre',
                 'icon' => 'bi-envelope-fill',
                 'keywords' => 'mail padre hijos secciones mapa relay infra entregabilidad webmail',
+            ],
+            [
+                'title' => 'Bugs: incidencias y diagnostico',
+                'description' => 'Articulos tecnicos de bugs reales: sintomas, causa raiz, diagnostico y correccion.',
+                'url' => '/docs/bugs-sections',
+                'category' => 'Guia padre',
+                'icon' => 'bi-bug-fill',
+                'keywords' => 'bugs incidencias diagnostico troubleshooting errores ssl caddy update instalador',
             ],
         ]);
     }
@@ -354,11 +394,26 @@ class DocsController
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'mail-sections.php');
         }
 
+        if ($url === '/docs/bugs-sections') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'bugs-sections.php');
+        }
+
         if (str_starts_with($url, '/docs/mail/')) {
             $slug = trim(substr($url, strlen('/docs/mail/')));
             if ($slug !== '' && !str_contains($slug, '/')) {
                 $mailGuides = $this->mailGuides();
                 $view = (string)($mailGuides[$slug]['view'] ?? '');
+                if ($view !== '') {
+                    return $this->extractViewText(self::DOCS_VIEW_BASE . $view . '.php');
+                }
+            }
+        }
+
+        if (str_starts_with($url, '/docs/bugs/')) {
+            $slug = trim(substr($url, strlen('/docs/bugs/')));
+            if ($slug !== '' && !str_contains($slug, '/')) {
+                $bugGuides = $this->bugGuides();
+                $view = (string)($bugGuides[$slug]['view'] ?? '');
                 if ($view !== '') {
                     return $this->extractViewText(self::DOCS_VIEW_BASE . $view . '.php');
                 }
@@ -914,12 +969,13 @@ class DocsController
         $parentTopics = $this->parentTopics($guides);
         $childTopics = $this->childTopics($guides);
         $mailChildTopics = $this->mailChildTopics();
+        $bugChildTopics = $this->bugChildTopics();
         $specialShortcutTopics = $this->specialShortcutTopics($childTopics);
         $specialTopics = $this->specialTopics();
         $topics = [];
 
         if ($query !== '') {
-            $topics = $this->dedupeTopics(array_merge($parentTopics, $childTopics, $mailChildTopics, $specialTopics));
+            $topics = $this->dedupeTopics(array_merge($parentTopics, $childTopics, $mailChildTopics, $bugChildTopics, $specialTopics));
             $needle = mb_strtolower($query);
             $matched = [];
 
@@ -952,6 +1008,7 @@ class DocsController
             'parentTopics' => $parentTopics,
             'childTopics' => $childTopics,
             'mailChildTopics' => $mailChildTopics,
+            'bugChildTopics' => $bugChildTopics,
             'specialShortcutTopics' => $specialShortcutTopics,
             'specialTopics' => $specialTopics,
             'query' => $query,
@@ -994,6 +1051,38 @@ class DocsController
         View::render($view, [
             'layout' => 'main',
             'pageTitle' => 'Docs - Mail - ' . (string)($guide['title'] ?? 'Guide'),
+        ]);
+    }
+
+    public function bugSections(): void
+    {
+        View::render('help/bugs-sections', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Bugs',
+            'bugGuides' => $this->bugGuides(),
+        ]);
+    }
+
+    public function bugGuide(array $params): void
+    {
+        $slug = trim((string)($params['slug'] ?? ''));
+        $bugGuides = $this->bugGuides();
+        $guide = $bugGuides[$slug] ?? null;
+
+        if (!$guide) {
+            http_response_code(404);
+            View::render('help/bug-guide-not-found', [
+                'layout' => 'main',
+                'pageTitle' => 'Docs - Bug Not Found',
+                'slug' => $slug,
+            ]);
+            return;
+        }
+
+        $view = 'help/' . (string)$guide['view'];
+        View::render($view, [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Bug - ' . (string)($guide['title'] ?? 'Guide'),
         ]);
     }
 

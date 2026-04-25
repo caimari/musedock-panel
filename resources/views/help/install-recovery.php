@@ -208,6 +208,7 @@ sudo systemctl restart musedock-panel</pre>
             <li>Probar conexion DB con los datos de <code>.env</code>.</li>
             <li>Revisar logs: <code>storage/logs/panel-error.log</code> y <code>journalctl -u musedock-panel</code>.</li>
             <li>Si el problema es update, ejecutar <code>sudo bash /opt/musedock-panel/bin/update.sh --auto</code>.</li>
+            <li>Si el navegador muestra <code>ERR_SSL_PROTOCOL_ERROR</code> en <code>https://IP:8444</code>, revisar <a href="/docs/bugs/err-ssl-protocol-error" class="text-info">la guia especifica de TLS/Caddy por IP</a>.</li>
         </ol>
     </div>
 </div>

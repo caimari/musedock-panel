@@ -208,6 +208,7 @@
             La home muestra cards de guias padre. Las hijas no salen todas: solo aparecen en "Accesos directos especiales"
             si se marcan con estrella desde su propia pagina de documentacion (<code>/docs/settings/{slug}</code>).
             Las hijas de Mail se registran en <code>DocsController::mailChildTopics()</code>.
+            Los articulos de Bugs se registran en <code>DocsController::bugChildTopics()</code>.
             Para guias especiales, crea vista + ruta <code>/docs/...</code> y registra la card en <code>DocsController::specialTopics()</code>.
             La busqueda indexa metadatos y contenido.
         </p>
