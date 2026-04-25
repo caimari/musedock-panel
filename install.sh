@@ -3038,12 +3038,25 @@ if [ -f "$CADDY_FILE" ]; then
         /^{$/ && NR<=3 { in_global=1; next }
         in_global && /^}$/ { in_global=0; next }
         in_global { next }
-        /^https?:\/\/:'"${PANEL_PORT}"'/ { in_panel=1; depth=0; next }
-        /^https?:\/\/[^ ]*:'"${PANEL_PORT}"'/ { in_panel=1; depth=0; next }
-        /^:'"${PANEL_PORT}"'/ { in_panel=1; depth=0; next }
-        in_panel && /{/ { depth++ }
-        in_panel && /}/ { depth--; if(depth<=0) { in_panel=0 }; next }
-        in_panel { next }
+        /^https?:\/\/:'"${PANEL_PORT}"'/ || /^https?:\/\/[^ ]*:'"${PANEL_PORT}"'/ || /^:'"${PANEL_PORT}"'/ {
+            in_panel=1
+            line=$0
+            opens=gsub(/\{/, "{", line)
+            line=$0
+            closes=gsub(/\}/, "}", line)
+            depth=opens-closes
+            if(depth<=0) depth=1
+            next
+        }
+        in_panel {
+            line=$0
+            opens=gsub(/\{/, "{", line)
+            line=$0
+            closes=gsub(/\}/, "}", line)
+            depth += opens-closes
+            if(depth<=0) in_panel=0
+            next
+        }
         { print }
     ' "$CADDY_FILE" 2>/dev/null)
 fi

@@ -410,12 +410,25 @@ repair_panel_tls_caddy() {
         /^{$/ && NR<=5 { in_global=1; next }
         in_global && /^}$/ { in_global=0; next }
         in_global { next }
-        /^https?:\/\/:'"${panel_port}"'/ { in_panel=1; depth=0; next }
-        /^https?:\/\/[^ ]*:'"${panel_port}"'/ { in_panel=1; depth=0; next }
-        /^:'"${panel_port}"'/ { in_panel=1; depth=0; next }
-        in_panel && /{/ { depth++ }
-        in_panel && /}/ { depth--; if(depth<=0) { in_panel=0 }; next }
-        in_panel { next }
+        /^https?:\/\/:'"${panel_port}"'/ || /^https?:\/\/[^ ]*:'"${panel_port}"'/ || /^:'"${panel_port}"'/ {
+            in_panel=1
+            line=$0
+            opens=gsub(/\{/, "{", line)
+            line=$0
+            closes=gsub(/\}/, "}", line)
+            depth=opens-closes
+            if(depth<=0) depth=1
+            next
+        }
+        in_panel {
+            line=$0
+            opens=gsub(/\{/, "{", line)
+            line=$0
+            closes=gsub(/\}/, "}", line)
+            depth += opens-closes
+            if(depth<=0) in_panel=0
+            next
+        }
         { print }
     ' "$caddy_file" 2>/dev/null)
 

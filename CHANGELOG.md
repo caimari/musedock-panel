@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.133] — 2026-04-25
+
+### Fixed
+- `bin/update.sh` e `install.sh`: corregida la extraccion del bloque Caddy del panel para eliminar el bloque `:PANEL_PORT` completo, incluyendo cierres anidados de `reverse_proxy`.
+- Evita que quede una llave `}` suelta en `/etc/caddy/Caddyfile`, que provocaba `subject does not qualify for certificate: '}'` y dejaba `8444` sin TLS funcional.
+
 ## [1.0.132] — 2026-04-25
 
 ### Fixed

@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.133',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`bin/update.sh` e `install.sh`: corregida la extraccion del bloque Caddy del panel para eliminar el bloque `:PANEL_PORT` completo, incluyendo cierres anidados de `reverse_proxy`',
+                            'Evita que quede una llave `}` suelta en `/etc/caddy/Caddyfile`, que provocaba `subject does not qualify for certificate: \'}\'` y dejaba `8444` sin TLS funcional',
+                        ],
+                        'en' => [
+                            '`bin/update.sh` and `install.sh`: fixed panel Caddy block extraction so the full `:PANEL_PORT` block is removed, including nested `reverse_proxy` closing braces',
+                            'Prevents a dangling `}` in `/etc/caddy/Caddyfile`, which caused `subject does not qualify for certificate: \'}\'` and left `8444` without working TLS',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.132',
                 'date' => '2026-04-25',
                 'badge' => 'primary',
