@@ -22,6 +22,9 @@ use MuseDockPanel\Settings;
  */
 class MailService
 {
+    private const DELIVERABILITY_SNAPSHOT_KEY = 'mail_deliverability_snapshot_v1';
+    private const DELIVERABILITY_SNAPSHOT_MAX = 300;
+
     // ═══════════════════════════════════════════════════════════
     // ─── Mail Domains (Master - DB operations) ────────────────
     // ═══════════════════════════════════════════════════════════
@@ -653,6 +656,8 @@ class MailService
             ? Settings::get('mail_relay_public_ip', '')
             : self::detectPublicIp();
         $rows = [];
+        $snapshotMap = self::loadDeliverabilitySnapshots();
+        $snapshotDirty = false;
 
         $domains = self::getDomains();
         if ($mode === 'relay') {
@@ -700,10 +705,22 @@ class MailService
             $mailHostname = self::resolveMailHostnameForDomain($domain);
             $recommended = self::recommendedDeliverabilityRecords($domain, $ip, $mailHostname, $rowMode);
             $dkimSelector = trim((string)($domain['dkim_selector'] ?? 'default')) ?: 'default';
+            $snapshotKey = self::deliverabilitySnapshotKey($domainName, $rowMode);
+            $snapshot = is_array($snapshotMap[$snapshotKey] ?? null) ? $snapshotMap[$snapshotKey] : null;
             if ($runChecks) {
                 $checks = self::runDeliverabilityChecks($domainName, $mailHostname, $ip, $recommended, $dkimSelector);
+                $snapshotMap[$snapshotKey] = [
+                    'checked_at' => date('Y-m-d H:i:s'),
+                    'checks' => self::sanitizeDeliverabilityChecksForSnapshot($checks),
+                    'mode' => $rowMode,
+                    'domain' => strtolower(trim($domainName)),
+                    'mail_hostname' => $mailHostname,
+                    'ip' => $ip,
+                ];
+                $snapshot = $snapshotMap[$snapshotKey];
+                $snapshotDirty = true;
             } else {
-                $checks = self::buildDeferredDeliverabilityChecks($domain, $dkimSelector);
+                $checks = self::buildDeferredDeliverabilityChecks($domain, $dkimSelector, $snapshot);
             }
             $score = self::deliverabilityScore($checks);
             $rows[] = [
@@ -717,16 +734,26 @@ class MailService
                 'score_total' => $score['total'],
                 'relay_domain_id' => isset($domain['relay_domain_id']) ? (int)$domain['relay_domain_id'] : null,
                 'relay_db_status' => isset($domain['relay_db_status']) ? (string)$domain['relay_db_status'] : '',
-                'relay_last_dns_check_at' => isset($domain['relay_last_dns_check_at']) ? (string)$domain['relay_last_dns_check_at'] : '',
+                'relay_last_dns_check_at' => isset($domain['relay_last_dns_check_at']) && (string)$domain['relay_last_dns_check_at'] !== ''
+                    ? (string)$domain['relay_last_dns_check_at']
+                    : (string)($snapshot['checked_at'] ?? ''),
             ];
+        }
+
+        if ($snapshotDirty) {
+            self::saveDeliverabilitySnapshots($snapshotMap);
         }
 
         return $rows;
     }
 
-    private static function buildDeferredDeliverabilityChecks(array $domain, string $dkimSelector): array
+    private static function buildDeferredDeliverabilityChecks(array $domain, string $dkimSelector, ?array $snapshot = null): array
     {
+        $snapshotCheckedAt = trim((string)($snapshot['checked_at'] ?? ''));
         $checkedAt = trim((string)($domain['relay_last_dns_check_at'] ?? ''));
+        if ($checkedAt === '') {
+            $checkedAt = $snapshotCheckedAt;
+        }
         $suffix = $checkedAt !== '' ? (' (ultimo check BD: ' . $checkedAt . ')') : '';
         $notCheckedMsg = 'Sin comprobar todavia. Pulsa "Comprobar DNS ahora".';
         $selector = trim($dkimSelector) !== '' ? trim($dkimSelector) : 'default';
@@ -745,7 +772,7 @@ class MailService
             return ['ok' => null, 'value' => '', 'message' => $notCheckedMsg];
         };
 
-        return [
+        $checks = [
             'spf' => $state($spf, 'SPF verificado', 'SPF pendiente'),
             'dkim' => $state($dkim, 'DKIM ' . $selector . ' verificado', 'DKIM ' . $selector . ' pendiente'),
             'dmarc' => $state($dmarc, 'DMARC verificado', 'DMARC pendiente'),
@@ -753,6 +780,24 @@ class MailService
             'ptr' => ['ok' => null, 'value' => '', 'message' => $notCheckedMsg],
             'blacklists' => ['ok' => null, 'listed' => [], 'message' => $notCheckedMsg],
         ];
+
+        $snapshotChecks = is_array($snapshot['checks'] ?? null) ? $snapshot['checks'] : [];
+        if (!empty($snapshotChecks)) {
+            foreach (['a', 'ptr', 'blacklists'] as $key) {
+                if (is_array($snapshotChecks[$key] ?? null)) {
+                    $checks[$key] = $snapshotChecks[$key];
+                }
+            }
+            foreach (['spf', 'dkim', 'dmarc'] as $key) {
+                if (($checks[$key]['ok'] ?? null) === null && is_array($snapshotChecks[$key] ?? null)) {
+                    $checks[$key] = $snapshotChecks[$key];
+                } elseif (is_array($snapshotChecks[$key] ?? null) && isset($snapshotChecks[$key]['value'])) {
+                    $checks[$key]['value'] = (string)$snapshotChecks[$key]['value'];
+                }
+            }
+        }
+
+        return $checks;
     }
 
     private static function toNullableBool($value): ?bool
@@ -844,6 +889,25 @@ class MailService
         $dmarc = implode(' ', self::dnsTxtValues('_dmarc.' . $domain));
         $aIps = $mailHostname !== '' ? self::dnsAValues($mailHostname) : [];
         $ptrClean = $ip !== '' ? self::dnsPtrValue($ip) : '';
+        $expectedHost = self::normalizeHostName($mailHostname);
+        $ptrHost = self::normalizeHostName($ptrClean);
+        $expectedPointsToIp = $expectedHost !== '' && $ip !== '' && in_array($ip, self::dnsAValues($expectedHost), true);
+        $ptrPointsToIp = $ptrHost !== '' && $ip !== '' && in_array($ip, self::dnsAValues($ptrHost), true);
+        $ptrOk = $ptrHost !== '' && (
+            $expectedHost === ''
+            || $ptrHost === $expectedHost
+            || ($ptrPointsToIp && $expectedPointsToIp)
+        );
+        $ptrMessage = 'PTR no configurado';
+        if ($ptrHost !== '') {
+            if ($ptrOk && $expectedHost !== '' && $ptrHost !== $expectedHost) {
+                $ptrMessage = 'PTR valido (alias del hostname configurado)';
+            } elseif ($ptrOk) {
+                $ptrMessage = 'PTR coincide con hostname';
+            } else {
+                $ptrMessage = 'PTR detectado pero no coincide con hostname';
+            }
+        }
 
         return [
             'spf' => [
@@ -867,12 +931,79 @@ class MailService
                 'message' => $mailHostname === '' ? 'Sin hostname' : 'A record',
             ],
             'ptr' => [
-                'ok' => $ptrClean !== '' && ($mailHostname === '' || $ptrClean === rtrim(strtolower($mailHostname), '.')),
+                'ok' => $ptrOk,
                 'value' => $ptrClean,
-                'message' => $ptrClean === '' ? 'PTR no configurado' : 'PTR detectado',
+                'message' => $ptrMessage,
             ],
             'blacklists' => self::checkBlacklists($ip),
         ];
+    }
+
+    private static function normalizeHostName(string $host): string
+    {
+        $host = strtolower(trim($host));
+        $host = preg_replace('#^[a-z]+://#', '', $host);
+        $host = explode('/', $host, 2)[0];
+        $host = explode(':', $host, 2)[0];
+        return rtrim($host, '.');
+    }
+
+    private static function deliverabilitySnapshotKey(string $domain, string $mode): string
+    {
+        return strtolower(trim($mode)) . '|' . strtolower(trim($domain));
+    }
+
+    private static function loadDeliverabilitySnapshots(): array
+    {
+        $raw = Settings::get(self::DELIVERABILITY_SNAPSHOT_KEY, '');
+        if ($raw === '') {
+            return [];
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return [];
+        }
+        return $decoded;
+    }
+
+    private static function saveDeliverabilitySnapshots(array $snapshotMap): void
+    {
+        if (empty($snapshotMap)) {
+            Settings::set(self::DELIVERABILITY_SNAPSHOT_KEY, '');
+            return;
+        }
+
+        uasort($snapshotMap, static function (array $a, array $b): int {
+            return strcmp((string)($b['checked_at'] ?? ''), (string)($a['checked_at'] ?? ''));
+        });
+
+        if (count($snapshotMap) > self::DELIVERABILITY_SNAPSHOT_MAX) {
+            $snapshotMap = array_slice($snapshotMap, 0, self::DELIVERABILITY_SNAPSHOT_MAX, true);
+        }
+
+        $encoded = json_encode($snapshotMap, JSON_UNESCAPED_SLASHES);
+        Settings::set(self::DELIVERABILITY_SNAPSHOT_KEY, is_string($encoded) ? $encoded : '{}');
+    }
+
+    private static function sanitizeDeliverabilityChecksForSnapshot(array $checks): array
+    {
+        $result = [];
+        foreach (['spf', 'dkim', 'dmarc', 'a', 'ptr', 'blacklists'] as $key) {
+            if (!is_array($checks[$key] ?? null)) {
+                continue;
+            }
+            $entry = $checks[$key];
+            $result[$key] = [
+                'ok' => array_key_exists('ok', $entry) ? $entry['ok'] : null,
+                'value' => (string)($entry['value'] ?? ''),
+                'message' => (string)($entry['message'] ?? ''),
+            ];
+            if ($key === 'blacklists') {
+                $listed = $entry['listed'] ?? [];
+                $result[$key]['listed'] = is_array($listed) ? array_values(array_map('strval', $listed)) : [];
+            }
+        }
+        return $result;
     }
 
     private static function dnsTxtValues(string $name): array
@@ -2584,7 +2715,7 @@ class MailService
 
     private static function checkPtr(array $payload): array
     {
-        $expected = rtrim(strtolower(trim((string)($payload['expected_hostname'] ?? ''))), '.');
+        $expected = self::normalizeHostName((string)($payload['expected_hostname'] ?? ''));
         $host = trim((string)($payload['node_host'] ?? ''));
         $ip = '';
 
@@ -2602,8 +2733,14 @@ class MailService
         }
 
         $ptr = @gethostbyaddr($ip);
-        $ptrClean = $ptr && $ptr !== $ip ? rtrim(strtolower($ptr), '.') : '';
-        $ptrOk = $ptrClean !== '' && ($expected === '' || $ptrClean === $expected);
+        $ptrClean = $ptr && $ptr !== $ip ? self::normalizeHostName((string)$ptr) : '';
+        $expectedPointsToIp = $expected !== '' && in_array($ip, self::dnsAValues($expected), true);
+        $ptrPointsToIp = $ptrClean !== '' && in_array($ip, self::dnsAValues($ptrClean), true);
+        $ptrOk = $ptrClean !== '' && (
+            $expected === ''
+            || $ptrClean === $expected
+            || ($ptrPointsToIp && $expectedPointsToIp)
+        );
 
         return [
             'ptr_ok' => $ptrOk,

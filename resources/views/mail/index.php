@@ -1521,11 +1521,11 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
 
         <form method="post" action="/mail/test-send" class="row g-2 mt-3">
             <?= View::csrf() ?>
-            <div class="col-lg-4 col-md-6">
+            <div class="col-lg-3 col-md-6">
                 <label class="form-label">Test de envio</label>
                 <input type="email" name="test_email" class="form-control" placeholder="tu@email.com" required>
             </div>
-            <div class="col-lg-4 col-md-6">
+            <div class="col-lg-3 col-md-6">
                 <label class="form-label">Remitente de prueba</label>
                 <?php
                     $testProfile = is_array($testSendProfile ?? null) ? $testSendProfile : [];
@@ -1539,11 +1539,29 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                     <option value="admin" <?= $selectedSource === 'admin' ? 'selected' : '' ?>><?= View::e($adminFrom !== '' ? ('Email admin: ' . $adminFrom) : 'Email admin no disponible') ?></option>
                 </select>
             </div>
+            <div class="col-lg-3 col-md-6">
+                <label class="form-label">Canal de envio</label>
+                <?php
+                    $smtpMode = (string)($smtpConfig['mode'] ?? '');
+                    $smtpHostCfg = trim((string)($smtpConfig['host'] ?? ''));
+                    $smtpUserCfg = trim((string)($smtpConfig['username'] ?? ''));
+                    $smtpReady = $smtpHostCfg !== '' && ($smtpMode === 'external' || $smtpUserCfg !== '');
+                ?>
+                <select name="test_transport" class="form-select">
+                    <option value="auto" selected>Auto (recomendado)</option>
+                    <option value="local">Local (mail()/Postfix)</option>
+                    <option value="smtp" <?= $smtpReady ? '' : 'disabled' ?>>SMTP autenticado<?= $smtpReady ? '' : ' (no disponible)' ?></option>
+                </select>
+            </div>
             <div class="col-md-auto d-flex align-items-end">
                 <button class="btn btn-outline-info"><i class="bi bi-send me-1"></i>Enviar test</button>
             </div>
             <div class="col-12">
-                <div class="form-text text-muted mb-0">Envia un correo de prueba y muestra si Postfix lo entrega, lo deja en cola o lo rechaza. El panel fuerza Return-Path con el remitente elegido para pruebas SPF/DMARC mas reales.</div>
+                <div class="form-text text-muted mb-0">
+                    Envia un correo de prueba y muestra si Postfix/SMTP lo entrega, lo deja en cola o lo rechaza.
+                    El test sale en formato <strong>texto + HTML</strong> y fuerza Return-Path con el remitente elegido para SPF/DMARC.
+                    En <strong>Auto</strong>, modo externo usa SMTP autenticado y modos locales usan Postfix local.
+                </div>
             </div>
         </form>
         <?php endif; ?>

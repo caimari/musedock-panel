@@ -1421,49 +1421,272 @@ class MailController
 
         $marker = 'MuseDock-Test-' . date('YmdHis') . '-' . bin2hex(random_bytes(3));
         $subject = "Test de envio MuseDock {$marker}";
-        $body = "Este es un email de prueba de MuseDock Panel.\n\nSi lo ves, el envio funciona.\n\nMarker: {$marker}\n";
+        $textBody = "Este es un email de prueba de MuseDock Panel.\n\nSi lo ves, el envio funciona.\n\nMarker: {$marker}\n";
+        $htmlBody = '<!doctype html><html><body style="font-family:Arial,sans-serif;background:#0b1220;color:#e2e8f0;padding:24px;">'
+            . '<div style="max-width:680px;margin:0 auto;background:#111827;border:1px solid #334155;border-radius:12px;padding:20px;">'
+            . '<h2 style="margin:0 0 12px;color:#38bdf8;">Test de envio MuseDock</h2>'
+            . '<p style="margin:0 0 10px;">Este es un email de prueba de MuseDock Panel.</p>'
+            . '<p style="margin:0 0 16px;">Si lo ves, el envio funciona.</p>'
+            . '<p style="margin:0;font-family:monospace;color:#93c5fd;">Marker: ' . htmlspecialchars($marker, ENT_QUOTES, 'UTF-8') . '</p>'
+            . '</div></body></html>';
+        $multipart = $this->buildMultipartAlternativeBody($textBody, $htmlBody);
+
         $headers = [
             'From: ' . $from,
             'Reply-To: ' . $from,
             'Auto-Submitted: auto-generated',
             'X-MuseDock-Test: ' . $marker,
+            'MIME-Version: 1.0',
+            'Content-Type: multipart/alternative; boundary="' . $multipart['boundary'] . '"',
         ];
 
-        $envelope = '-f ' . escapeshellarg($from);
-        $sent = @mail($to, $subject, $body, implode("\r\n", $headers), $envelope);
-        usleep(400000);
+        $transport = strtolower(trim((string)($_POST['test_transport'] ?? 'auto')));
+        if (!in_array($transport, ['auto', 'local', 'smtp'], true)) {
+            $transport = 'auto';
+        }
+
+        $smtpCfg = MailService::getSmtpConfig(true);
+        $mode = (string)($smtpCfg['mode'] ?? '');
+        $hasSmtpTarget = trim((string)($smtpCfg['host'] ?? '')) !== '';
+        $hasSmtpAuth = trim((string)($smtpCfg['username'] ?? '')) !== '';
+        $canUseSmtp = $hasSmtpTarget && ($mode === 'external' || $hasSmtpAuth);
+        $useSmtp = $transport === 'smtp' || ($transport === 'auto' && $mode === 'external' && $canUseSmtp);
+
+        $smtpError = '';
+        $smtpDetail = '';
+        if ($useSmtp && !$canUseSmtp) {
+            Flash::set('error', 'No hay SMTP autenticado disponible en la configuracion actual para este test.');
+            Router::redirect('/mail?tab=deliverability');
+            return;
+        }
+
+        if ($useSmtp) {
+            $sent = $this->sendMailViaSmtp(
+                $smtpCfg,
+                $from,
+                $to,
+                $subject,
+                $headers,
+                (string)$multipart['body'],
+                $smtpError,
+                $smtpDetail
+            );
+        } else {
+            $envelope = '-f ' . escapeshellarg($from);
+            $sent = @mail($to, $subject, (string)$multipart['body'], implode("\r\n", $headers), $envelope);
+        }
+
+        if (!$useSmtp) {
+            usleep(400000);
+        }
 
         $log = '';
-        foreach (['/var/log/mail.log', '/var/log/maillog'] as $file) {
-            if (is_readable($file)) {
-                $cmd = sprintf("grep %s %s 2>/dev/null | tail -5", escapeshellarg($marker), escapeshellarg($file));
-                $log = trim((string)shell_exec($cmd));
-                if ($log !== '') {
-                    break;
+        if (!$useSmtp) {
+            foreach (['/var/log/mail.log', '/var/log/maillog'] as $file) {
+                if (is_readable($file)) {
+                    $cmd = sprintf("grep %s %s 2>/dev/null | tail -5", escapeshellarg($marker), escapeshellarg($file));
+                    $log = trim((string)shell_exec($cmd));
+                    if ($log !== '') {
+                        break;
+                    }
                 }
             }
         }
 
         if (!$sent) {
-            Flash::set('error', 'PHP no pudo entregar el mensaje a Postfix/SMTP local. Revisa configuracion de mail().');
-        } elseif (stripos($log, 'status=bounced') !== false) {
+            if ($useSmtp) {
+                Flash::set('error', 'SMTP autenticado rechazo el test: ' . ($smtpError !== '' ? $smtpError : 'error de conexion/autenticacion.'));
+            } else {
+                Flash::set('error', 'PHP no pudo entregar el mensaje a Postfix/SMTP local. Revisa configuracion de mail().');
+            }
+        } elseif (!$useSmtp && stripos($log, 'status=bounced') !== false) {
             Flash::set('error', "Test enviado pero rebotado. Log: {$log}");
-        } elseif (stripos($log, 'status=deferred') !== false) {
+        } elseif (!$useSmtp && stripos($log, 'status=deferred') !== false) {
             Flash::set('warning', "Test en cola/deferred. Log: {$log}");
-        } elseif (stripos($log, 'status=sent') !== false) {
+        } elseif (!$useSmtp && stripos($log, 'status=sent') !== false) {
             $postfixMilters = trim((string)shell_exec('postconf -h non_smtpd_milters 2>/dev/null'));
             $milterWarn = '';
             if ($postfixMilters === '' || stripos($postfixMilters, 'opendkim') === false) {
                 $milterWarn = ' Aviso: non_smtpd_milters no incluye OpenDKIM; el test local podria salir sin firma DKIM.';
             }
             $extraWarn = !empty($resolvedFrom['warnings']) ? (' ' . implode(' ', (array)$resolvedFrom['warnings'])) : '';
-            Flash::set('success', "Test enviado correctamente a {$to} con From/Return-Path {$from}.{$extraWarn}{$milterWarn}");
+            Flash::set('success', "Test enviado correctamente (texto+HTML) a {$to} con From/Return-Path {$from}. Canal: local.{$extraWarn}{$milterWarn}");
+        } elseif ($useSmtp) {
+            $extraWarn = !empty($resolvedFrom['warnings']) ? (' ' . implode(' ', (array)$resolvedFrom['warnings'])) : '';
+            $detail = $smtpDetail !== '' ? (" Respuesta SMTP: {$smtpDetail}.") : '';
+            Flash::set('success', "Test SMTP autenticado enviado (texto+HTML) a {$to} con From {$from}.{$detail}{$extraWarn}");
         } else {
             $extraWarn = !empty($resolvedFrom['warnings']) ? (' ' . implode(' ', (array)$resolvedFrom['warnings'])) : '';
-            Flash::set('success', "Test entregado a la cola local para {$to} usando {$from}. Si no llega, revisa /var/log/mail.log. Marker: {$marker}.{$extraWarn}");
+            Flash::set('success', "Test entregado a la cola local (texto+HTML) para {$to} usando {$from}. Si no llega, revisa /var/log/mail.log. Marker: {$marker}.{$extraWarn}");
         }
 
         Router::redirect('/mail?tab=deliverability');
+    }
+
+    private function buildMultipartAlternativeBody(string $textBody, string $htmlBody): array
+    {
+        $boundary = '=_musedock_' . bin2hex(random_bytes(8));
+        $body = '--' . $boundary . "\r\n"
+            . "Content-Type: text/plain; charset=UTF-8\r\n"
+            . "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
+            . quoted_printable_encode($textBody) . "\r\n"
+            . '--' . $boundary . "\r\n"
+            . "Content-Type: text/html; charset=UTF-8\r\n"
+            . "Content-Transfer-Encoding: quoted-printable\r\n\r\n"
+            . quoted_printable_encode($htmlBody) . "\r\n"
+            . '--' . $boundary . "--\r\n";
+        return ['boundary' => $boundary, 'body' => $body];
+    }
+
+    private function sendMailViaSmtp(
+        array $smtp,
+        string $from,
+        string $to,
+        string $subject,
+        array $headers,
+        string $body,
+        string &$error = '',
+        string &$detail = ''
+    ): bool {
+        $host = trim((string)($smtp['host'] ?? ''));
+        $port = (int)($smtp['port'] ?? 587);
+        $user = trim((string)($smtp['username'] ?? ''));
+        $pass = (string)($smtp['password'] ?? '');
+        $encryption = strtolower(trim((string)($smtp['encryption'] ?? '')));
+
+        if ($host === '' || $port <= 0) {
+            $error = 'host/port SMTP no validos';
+            return false;
+        }
+
+        $prefix = $encryption === 'ssl' ? 'ssl://' : '';
+        $errno = 0;
+        $errstr = '';
+        $socket = @fsockopen($prefix . $host, $port, $errno, $errstr, 12);
+        if (!$socket) {
+            $error = trim($errstr) !== '' ? $errstr : ('conexion fallida (' . $errno . ')');
+            return false;
+        }
+
+        stream_set_timeout($socket, 12);
+
+        if (!$this->smtpExpect($socket, [220], $detail)) {
+            $error = 'greeting SMTP invalido: ' . $detail;
+            fclose($socket);
+            return false;
+        }
+
+        fwrite($socket, "EHLO musedock-panel\r\n");
+        if (!$this->smtpExpect($socket, [250], $detail)) {
+            $error = 'EHLO rechazado: ' . $detail;
+            fclose($socket);
+            return false;
+        }
+
+        if ($encryption === 'tls') {
+            fwrite($socket, "STARTTLS\r\n");
+            if (!$this->smtpExpect($socket, [220], $detail)) {
+                $error = 'STARTTLS rechazado: ' . $detail;
+                fclose($socket);
+                return false;
+            }
+            $cryptoOk = @stream_socket_enable_crypto(
+                $socket,
+                true,
+                STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT
+            );
+            if (!$cryptoOk) {
+                $error = 'no se pudo negociar TLS';
+                fclose($socket);
+                return false;
+            }
+            fwrite($socket, "EHLO musedock-panel\r\n");
+            if (!$this->smtpExpect($socket, [250], $detail)) {
+                $error = 'EHLO tras STARTTLS rechazado: ' . $detail;
+                fclose($socket);
+                return false;
+            }
+        }
+
+        if ($user !== '') {
+            fwrite($socket, "AUTH LOGIN\r\n");
+            if (!$this->smtpExpect($socket, [334], $detail)) {
+                $error = 'AUTH LOGIN no disponible: ' . $detail;
+                fclose($socket);
+                return false;
+            }
+            fwrite($socket, base64_encode($user) . "\r\n");
+            if (!$this->smtpExpect($socket, [334], $detail)) {
+                $error = 'SMTP no acepto usuario: ' . $detail;
+                fclose($socket);
+                return false;
+            }
+            fwrite($socket, base64_encode($pass) . "\r\n");
+            if (!$this->smtpExpect($socket, [235], $detail)) {
+                $error = 'SMTP no acepto password: ' . $detail;
+                fclose($socket);
+                return false;
+            }
+        }
+
+        fwrite($socket, "MAIL FROM:<{$from}>\r\n");
+        if (!$this->smtpExpect($socket, [250], $detail)) {
+            $error = 'MAIL FROM rechazado: ' . $detail;
+            fclose($socket);
+            return false;
+        }
+
+        fwrite($socket, "RCPT TO:<{$to}>\r\n");
+        if (!$this->smtpExpect($socket, [250, 251], $detail)) {
+            $error = 'RCPT TO rechazado: ' . $detail;
+            fclose($socket);
+            return false;
+        }
+
+        fwrite($socket, "DATA\r\n");
+        if (!$this->smtpExpect($socket, [354], $detail)) {
+            $error = 'DATA rechazado: ' . $detail;
+            fclose($socket);
+            return false;
+        }
+
+        $wireHeaders = [
+            'Date: ' . date('r'),
+            'To: ' . $to,
+            'Subject: ' . $subject,
+        ];
+        foreach ($headers as $header) {
+            $wireHeaders[] = $header;
+        }
+        $message = implode("\r\n", $wireHeaders) . "\r\n\r\n" . $body;
+        $message = preg_replace('/(?m)^\./', '..', $message);
+        fwrite($socket, $message . "\r\n.\r\n");
+        if (!$this->smtpExpect($socket, [250], $detail)) {
+            $error = 'mensaje rechazado al finalizar DATA: ' . $detail;
+            fclose($socket);
+            return false;
+        }
+
+        fwrite($socket, "QUIT\r\n");
+        fclose($socket);
+        return true;
+    }
+
+    private function smtpExpect($socket, array $expectedCodes, string &$responseLine = ''): bool
+    {
+        $response = '';
+        while (($line = fgets($socket, 1024)) !== false) {
+            $response .= $line;
+            if (isset($line[3]) && $line[3] === '-') {
+                continue;
+            }
+            break;
+        }
+        $responseLine = trim($response);
+        if ($responseLine === '' || !preg_match('/^(\d{3})/', $responseLine, $m)) {
+            return false;
+        }
+        return in_array((int)$m[1], $expectedCodes, true);
     }
 
     public function internalSmtpConfig(): void

@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.113] — 2026-04-25
+
+### Improved
+- `/mail?tab=deliverability`: persistencia del ultimo resultado DNS (incluyendo `A hostname`, `PTR/rDNS` y `blacklists`) para que la vista no vuelva a `N/D` al recargar si ya se comprobo.
+- `/mail?tab=deliverability`: validacion de PTR mas robusta, aceptando coincidencia por alias/fcRDNS cuando apunta a la misma IP del hostname esperado.
+- `Test de envio`: ahora genera mensaje `multipart/alternative` real (`text/plain + text/html`) para mejorar validacion externa.
+- `Test de envio`: nuevo selector de canal (`Auto`, `Local`, `SMTP autenticado`); en `Auto` usa SMTP autenticado en modo externo y flujo local en modos con Postfix local.
+
+### Fixed
+- Falsos positivos de `PTR/rDNS = Revisar` cuando el PTR era valido pero no coincidia de forma literal con el hostname configurado.
+- En entregabilidad diferida, A/PTR/blacklists ya no se pierden tras recarga cuando no se ejecuta un nuevo check.
+
 ## [1.0.112] — 2026-04-25
 
 ### Improved

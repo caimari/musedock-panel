@@ -20,6 +20,37 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.113',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=deliverability`: ahora persiste el ultimo resultado DNS completo (incluyendo `A`, `PTR/rDNS` y `blacklists`) para no volver a `N/D` al recargar',
+                            '`/mail?tab=deliverability`: validacion PTR mas robusta, aceptando alias/fcRDNS validos cuando resuelven a la misma IP del hostname esperado',
+                            '`/mail?tab=deliverability` > `Test de envio`: el correo de prueba pasa a formato real `multipart` (`texto + HTML`)',
+                            '`/mail?tab=deliverability` > `Test de envio`: nuevo selector de canal (`Auto`, `Local`, `SMTP autenticado`); `Auto` usa SMTP autenticado en modo externo y flujo local en modos con Postfix local',
+                        ],
+                        'en' => [
+                            '`/mail?tab=deliverability`: now persists full last DNS results (including `A`, `PTR/rDNS`, and `blacklists`) so rows no longer fall back to `N/A` after reload',
+                            '`/mail?tab=deliverability`: stronger PTR validation now accepts valid alias/fcRDNS cases when they resolve to the same IP as expected hostname',
+                            '`/mail?tab=deliverability` > `Send test`: test email now uses real `multipart` format (`text + HTML`)',
+                            '`/mail?tab=deliverability` > `Send test`: new transport selector (`Auto`, `Local`, `Authenticated SMTP`); `Auto` uses authenticated SMTP in external mode and local Postfix flow otherwise',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Corregidos falsos positivos de `PTR/rDNS = Revisar` cuando el PTR era valido pero no coincidia literalmente con el hostname configurado',
+                            'En modo diferido de entregabilidad, `A/PTR/blacklists` ya no se pierden al refrescar la pagina',
+                        ],
+                        'en' => [
+                            'Fixed false-positive `PTR/rDNS = Review` cases when PTR was valid but not an exact literal match to configured hostname',
+                            'In deferred deliverability mode, `A/PTR/blacklists` no longer disappear after page reload',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.109',
                 'date' => '2026-04-25',
                 'badge' => 'primary',
