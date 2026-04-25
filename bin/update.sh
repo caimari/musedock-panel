@@ -426,7 +426,6 @@ repair_panel_tls_caddy() {
 {
     auto_https disable_redirects
     admin localhost:2019
-    default_sni ${server_ip}
 }
 
 https://${server_ip}:${panel_port}, https://127.0.0.1:${panel_port}, https://localhost:${panel_port} {
@@ -444,10 +443,13 @@ CADDYEOF
     fi
 
     if caddy validate --config "$caddy_file" >/dev/null 2>&1; then
+        rm -f /etc/systemd/system/caddy.service.d/override-resume.conf 2>/dev/null || true
+        systemctl daemon-reload 2>/dev/null || true
         systemctl restart caddy 2>/dev/null || true
         ok "Panel TLS Caddy block repaired for https://${server_ip}:${panel_port}"
     else
         warn "Generated Caddyfile failed validation; restoring previous file"
+        caddy validate --config "$caddy_file" 2>&1 | sed 's/^/    /' || true
         cp "$backup_file" "$caddy_file" 2>/dev/null || true
     fi
 }
@@ -471,8 +473,6 @@ if systemctl is-active --quiet musedock-panel 2>/dev/null; then
     systemctl restart musedock-panel
     ok "Panel service restarted"
 
-    repair_panel_tls_caddy
-
     # Repair Caddy runtime routes/listeners after update (best effort).
     if [ -f "${PANEL_DIR}/cli/repair-caddy-routes.php" ]; then
         REPAIR_OUT=$($PHP_BIN "${PANEL_DIR}/cli/repair-caddy-routes.php" 2>&1 || true)
@@ -483,6 +483,8 @@ if systemctl is-active --quiet musedock-panel 2>/dev/null; then
             ok "Caddy routes/listeners repaired"
         fi
     fi
+
+    repair_panel_tls_caddy
 else
     warn "Panel service not running — start it with: systemctl start musedock-panel"
 fi

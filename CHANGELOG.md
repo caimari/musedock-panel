@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.132] — 2026-04-25
+
+### Fixed
+- Caddy TLS por IP: retirado `default_sni` para compatibilidad con builds de Caddy que no lo validan.
+- `bin/update.sh`: la reparacion TLS del panel se ejecuta al final, despues de cualquier reparacion runtime por API, y elimina `--resume` para arrancar desde Caddyfile.
+- `cluster-worker.php` y `repair-caddy-routes.php`: si `PANEL_PORT` ya esta gestionado por Caddyfile con `tls internal`, no mutan el runtime del panel por API y evitan degradar `8444` a HTTP plano.
+
 ## [1.0.131] — 2026-04-25
 
 ### Fixed

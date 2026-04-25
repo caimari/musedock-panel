@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.132',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Caddy TLS por IP: retirado `default_sni` para compatibilidad con builds de Caddy que no lo validan',
+                            '`bin/update.sh`: la reparacion TLS del panel se ejecuta al final, despues de cualquier reparacion runtime por API, y elimina `--resume` para arrancar desde Caddyfile',
+                            '`cluster-worker.php` y `repair-caddy-routes.php`: si `PANEL_PORT` ya esta gestionado por Caddyfile con `tls internal`, no mutan el runtime del panel por API y evitan degradar `8444` a HTTP plano',
+                        ],
+                        'en' => [
+                            'Caddy IP TLS: removed `default_sni` for compatibility with Caddy builds that do not validate it',
+                            '`bin/update.sh`: panel TLS repair now runs last, after any runtime API repair, and removes `--resume` so Caddy starts from the Caddyfile',
+                            '`cluster-worker.php` and `repair-caddy-routes.php`: when `PANEL_PORT` is already managed by the Caddyfile with `tls internal`, they skip panel runtime API mutation and avoid degrading `8444` to plain HTTP',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.131',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

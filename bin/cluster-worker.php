@@ -656,9 +656,13 @@ if (file_exists($regenFlag)) {
 try {
     $config = require PANEL_ROOT . '/config/panel.php';
     $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
-    $panelManaged = \MuseDockPanel\Services\SystemService::panelRuntimeManagedByPanel($caddyApi);
+    $panelPort = (int)\MuseDockPanel\Env::get('PANEL_PORT', 8444);
+    $caddyfile = @file_get_contents('/etc/caddy/Caddyfile') ?: '';
+    $staticPanelTls = preg_match('/(^|\n)\s*(https?:\/\/[^\s{]+:' . preg_quote((string)$panelPort, '/') . '|:' . preg_quote((string)$panelPort, '/') . ')\b/', $caddyfile)
+        && preg_match('/\btls\s+internal\b/', $caddyfile);
+    $panelManaged = !$staticPanelTls && \MuseDockPanel\Services\SystemService::panelRuntimeManagedByPanel($caddyApi);
     if (!$panelManaged) {
-        $owner = \MuseDockPanel\Services\SystemService::panelPortOwner($caddyApi) ?? 'unknown';
+        $owner = $staticPanelTls ? 'Caddyfile static TLS' : (\MuseDockPanel\Services\SystemService::panelPortOwner($caddyApi) ?? 'unknown');
         logMsg("INFO: PANEL_PORT gestionado por {$owner}; se omite auto-repair Caddy runtime en este nodo.");
     } elseif (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi, true)) {
         logMsg("WARNING: Caddy srv0/listeners not ready — skipping TLS policy check.");

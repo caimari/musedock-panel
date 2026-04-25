@@ -3055,7 +3055,6 @@ cat > "$CADDY_FILE" << CADDYEOF
 {
     auto_https disable_redirects
     admin localhost:2019
-    default_sni ${SERVER_IP}
 }
 
 https://${SERVER_IP}:${PANEL_PORT}, https://127.0.0.1:${PANEL_PORT}, https://localhost:${PANEL_PORT} {

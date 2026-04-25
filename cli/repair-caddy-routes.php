@@ -25,6 +25,33 @@ $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
 
 echo "[repair-caddy] API: {$caddyApi}\n";
 
+$repairWebmailRoute = static function (): void {
+    try {
+        $result = \MuseDockPanel\Services\WebmailService::repairConfiguredRoute();
+        if (!empty($result['skipped'])) {
+            return;
+        }
+        if ($result['ok'] ?? false) {
+            echo "[repair-caddy] OK: ruta webmail aplicada.\n";
+        } else {
+            fwrite(STDERR, "[repair-caddy] WARNING webmail: " . ($result['error'] ?? 'error desconocido') . "\n");
+        }
+    } catch (\Throwable $e) {
+        fwrite(STDERR, "[repair-caddy] WARNING webmail: " . $e->getMessage() . "\n");
+    }
+};
+
+$panelPort = (int)\MuseDockPanel\Env::get('PANEL_PORT', 8444);
+$caddyfile = @file_get_contents('/etc/caddy/Caddyfile') ?: '';
+$staticPanelTls = preg_match('/(^|\n)\s*(https?:\/\/[^\s{]+:' . preg_quote((string)$panelPort, '/') . '|:' . preg_quote((string)$panelPort, '/') . ')\b/', $caddyfile)
+    && preg_match('/\btls\s+internal\b/', $caddyfile);
+if ($staticPanelTls) {
+    echo "[repair-caddy] INFO: PANEL_PORT {$panelPort} esta gestionado por Caddyfile con tls internal; se omite mutacion runtime del panel.\n";
+    $repairWebmailRoute();
+    echo "[repair-caddy] DONE\n";
+    exit(0);
+}
+
 if (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi, true)) {
     fwrite(STDERR, "[repair-caddy] ERROR: no se pudo preparar srv0/listeners.\n");
     exit(1);
@@ -41,22 +68,6 @@ if (!is_array($listen) || !array_is_list($listen) || !is_array($routes) || !arra
 }
 
 echo "[repair-caddy] OK: srv0/listeners activos.\n";
-
-$repairWebmailRoute = static function (): void {
-    try {
-        $result = \MuseDockPanel\Services\WebmailService::repairConfiguredRoute();
-        if (!empty($result['skipped'])) {
-            return;
-        }
-        if ($result['ok'] ?? false) {
-            echo "[repair-caddy] OK: ruta webmail aplicada.\n";
-        } else {
-            fwrite(STDERR, "[repair-caddy] WARNING webmail: " . ($result['error'] ?? 'error desconocido') . "\n");
-        }
-    } catch (\Throwable $e) {
-        fwrite(STDERR, "[repair-caddy] WARNING webmail: " . $e->getMessage() . "\n");
-    }
-};
 
 $panelOwner = \MuseDockPanel\Services\SystemService::panelPortOwner($caddyApi);
 $panelManaged = \MuseDockPanel\Services\SystemService::panelRuntimeManagedByPanel($caddyApi);
