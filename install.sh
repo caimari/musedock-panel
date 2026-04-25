@@ -1301,13 +1301,19 @@ elif [ "$VERIFY_ONLY" = true ]; then
     for TEST_URL in \
         "https://127.0.0.1:${PANEL_PORT}/" \
         "http://127.0.0.1:$((PANEL_PORT + 1))/" \
-        "http://127.0.0.1:${PANEL_PORT}/" \
     ; do
         PANEL_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 3 "$TEST_URL" 2>/dev/null || echo "000")
         PANEL_HTTP=$(echo "$PANEL_HTTP" | tr -d '[:space:]')
         [ -n "$PANEL_HTTP" ] && [ "$PANEL_HTTP" != "000" ] && break
         PANEL_HTTP="000"
     done
+    PANEL_PUBLIC_PLAIN_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000")
+    PANEL_PUBLIC_PLAIN_HTTP=$(echo "$PANEL_PUBLIC_PLAIN_HTTP" | tr -d '[:space:]')
+    if [ "$PANEL_PUBLIC_PLAIN_HTTP" = "200" ] || [ "$PANEL_PUBLIC_PLAIN_HTTP" = "302" ] || [ "$PANEL_PUBLIC_PLAIN_HTTP" = "301" ]; then
+        echo -e "  ${RED}✗ El puerto publico ${PANEL_PORT} responde por HTTP plano. Esto causa ERR_SSL_PROTOCOL_ERROR en https://IP:${PANEL_PORT}.${NC}"
+        echo -e "    ${YELLOW}Fix: musedock-panel debe escuchar en 127.0.0.1:$((PANEL_PORT + 1)) y Caddy debe servir TLS en ${PANEL_PORT}.${NC}"
+        HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
+    fi
     if [ "$PANEL_HTTP" = "200" ] || [ "$PANEL_HTTP" = "302" ] || [ "$PANEL_HTTP" = "301" ]; then
         ok "$(t health_http_ok "$PANEL_HTTP" "$PANEL_PORT")"
     elif [ "$PANEL_HTTP" = "403" ]; then
@@ -3004,10 +3010,8 @@ done
 # Preserve existing site blocks if Caddyfile has them
 CADDY_FILE="/etc/caddy/Caddyfile"
 CADDY_PANEL_BLOCK="
-https://:${PANEL_PORT} {
-    tls internal {
-        on_demand
-    }
+:${PANEL_PORT} {
+    tls internal
     reverse_proxy 127.0.0.1:${PANEL_INTERNAL_PORT} {
         header_up X-Forwarded-Proto https
         header_up X-Real-Ip {remote_host}
@@ -3047,10 +3051,8 @@ cat > "$CADDY_FILE" << CADDYEOF
     admin localhost:2019
 }
 
-https://:${PANEL_PORT} {
-    tls internal {
-        on_demand
-    }
+:${PANEL_PORT} {
+    tls internal
     reverse_proxy 127.0.0.1:${PANEL_INTERNAL_PORT} {
         header_up X-Forwarded-Proto https
         header_up X-Real-Ip {remote_host}
@@ -3101,11 +3103,8 @@ if caddy validate --config "$CADDY_FILE" > /dev/null 2>&1; then
         fi
     fi
 else
-    warn "Caddyfile invalido — usando acceso PHP directo"
-    sed -i "s|127.0.0.1:${PANEL_INTERNAL_PORT}|0.0.0.0:${PANEL_PORT}|g" /etc/systemd/system/musedock-panel.service
-    PANEL_INTERNAL_PORT=${PANEL_PORT}
-    systemctl daemon-reload
-    systemctl restart musedock-panel
+    warn "Caddyfile invalido — NO se expone PHP directo en ${PANEL_PORT} para evitar ERR_SSL_PROTOCOL_ERROR"
+    warn "El panel queda escuchando solo en 127.0.0.1:${PANEL_INTERNAL_PORT}. Corrige Caddy y reinicia."
 fi
 
 # ============================================================
@@ -3256,21 +3255,26 @@ else
     HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
 fi
 
-# 2. Panel HTTP responding?
+# 2. Panel HTTP/HTTPS responding?
 sleep 2
-# Try all possible configurations: HTTPS (Caddy proxy), HTTP internal port, HTTP main port
+# Valid layout: HTTPS on public PANEL_PORT via Caddy, HTTP only on internal PANEL_PORT+1.
 PANEL_HTTP="000"
 for TEST_URL in \
     "https://127.0.0.1:${PANEL_PORT}/" \
     "http://127.0.0.1:$((PANEL_PORT + 1))/" \
-    "http://127.0.0.1:${PANEL_PORT}/" \
-    "http://0.0.0.0:${PANEL_PORT}/" \
 ; do
     PANEL_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 3 "$TEST_URL" 2>/dev/null)
     PANEL_HTTP=$(echo "$PANEL_HTTP" | tr -d '[:space:]')
     [ -n "$PANEL_HTTP" ] && [ "$PANEL_HTTP" != "000" ] && break
     PANEL_HTTP="000"
 done
+PANEL_PUBLIC_PLAIN_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000")
+PANEL_PUBLIC_PLAIN_HTTP=$(echo "$PANEL_PUBLIC_PLAIN_HTTP" | tr -d '[:space:]')
+if [ "$PANEL_PUBLIC_PLAIN_HTTP" = "200" ] || [ "$PANEL_PUBLIC_PLAIN_HTTP" = "302" ] || [ "$PANEL_PUBLIC_PLAIN_HTTP" = "301" ]; then
+    echo -e "  ${RED}✗ El puerto publico ${PANEL_PORT} responde por HTTP plano. Esto causa ERR_SSL_PROTOCOL_ERROR en https://IP:${PANEL_PORT}.${NC}"
+    echo -e "    ${YELLOW}Fix: musedock-panel debe escuchar en 127.0.0.1:$((PANEL_PORT + 1)) y Caddy debe servir TLS en ${PANEL_PORT}.${NC}"
+    HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
+fi
 if [ "$PANEL_HTTP" = "200" ] || [ "$PANEL_HTTP" = "302" ] || [ "$PANEL_HTTP" = "301" ]; then
     ok "$(t health_http_ok "$PANEL_HTTP" "$PANEL_PORT")"
 elif [ "$PANEL_HTTP" = "403" ]; then

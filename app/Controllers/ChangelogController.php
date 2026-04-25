@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.130',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`install.sh`: el puerto publico del panel (`8444`) queda reservado para Caddy/TLS; ya no cae a PHP HTTP directo en `0.0.0.0:8444` si Caddy falla',
+                            '`install.sh`: Caddyfile del panel usa `:PANEL_PORT` con `tls internal`, valido para acceso por IP/host con certificado interno',
+                            'Health check: ya no considera correcto HTTP plano en `PANEL_PORT`; detecta y avisa del caso que provoca `ERR_SSL_PROTOCOL_ERROR`',
+                        ],
+                        'en' => [
+                            '`install.sh`: the public panel port (`8444`) is reserved for Caddy/TLS; it no longer falls back to direct PHP HTTP on `0.0.0.0:8444` when Caddy fails',
+                            '`install.sh`: panel Caddyfile uses `:PANEL_PORT` with `tls internal`, valid for IP/host access with an internal certificate',
+                            'Health check: plain HTTP on `PANEL_PORT` is no longer accepted as healthy; it detects and reports the case that causes `ERR_SSL_PROTOCOL_ERROR`',
+                        ],
+                    ],
+                    'notes' => [
+                        'es' => [
+                            '`ERR_SSL_PROTOCOL_ERROR` no es un aviso de certificado: significa que el navegador intenta HTTPS pero el puerto responde HTTP plano, por eso no aparece la opcion normal de "avanzado"',
+                        ],
+                        'en' => [
+                            '`ERR_SSL_PROTOCOL_ERROR` is not a certificate warning: it means the browser tries HTTPS but the port answers plain HTTP, so the normal "advanced" certificate option is not shown',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.129',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.130] — 2026-04-25
+
+### Fixed
+- `install.sh`: el puerto publico del panel (`8444`) queda reservado para Caddy/TLS; ya no cae a PHP HTTP directo en `0.0.0.0:8444` si Caddy falla.
+- `install.sh`: Caddyfile del panel usa `:PANEL_PORT` con `tls internal`, valido para acceso por IP/host con certificado interno.
+- Health check: ya no considera correcto HTTP plano en `PANEL_PORT`; detecta y avisa del caso que provoca `ERR_SSL_PROTOCOL_ERROR`.
+
+### Notes
+- `ERR_SSL_PROTOCOL_ERROR` no es un aviso de certificado. Significa que el navegador intenta HTTPS pero el puerto responde HTTP plano, por eso no aparece la opcion normal de "avanzado".
+
 ## [1.0.129] — 2026-04-25
 
 ### Fixed
