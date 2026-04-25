@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.137] — 2026-04-25
+
+### Fixed
+- `install.sh`: si `add-apt-repository ppa:ondrej/php` se queda colgado o falla por timeout de Launchpad, aplica fallback directo con keyring y `https://ppa.launchpadcontent.net/ondrej/php/ubuntu`.
+- `install.sh`: `add-apt-repository` queda limitado con `timeout 90` para no bloquear indefinidamente instalaciones virgenes.
+
 ## [1.0.136] — 2026-04-25
 
 ### Fixed

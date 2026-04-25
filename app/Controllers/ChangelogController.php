@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.137',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`install.sh`: si `add-apt-repository ppa:ondrej/php` se queda colgado o falla por timeout de Launchpad, aplica fallback directo con keyring y `https://ppa.launchpadcontent.net/ondrej/php/ubuntu`',
+                            '`install.sh`: `add-apt-repository` queda limitado con `timeout 90` para no bloquear indefinidamente instalaciones virgenes',
+                        ],
+                        'en' => [
+                            '`install.sh`: if `add-apt-repository ppa:ondrej/php` hangs or fails due to Launchpad timeout, it falls back to a direct keyring plus `https://ppa.launchpadcontent.net/ondrej/php/ubuntu` source',
+                            '`install.sh`: `add-apt-repository` is capped with `timeout 90` to avoid indefinitely blocking fresh installs',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.136',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

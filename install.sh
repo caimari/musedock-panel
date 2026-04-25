@@ -36,6 +36,23 @@ on_unhandled_error() {
 }
 trap 'on_unhandled_error $LINENO' ERR
 
+install_ondrej_php_repo_manual() {
+    local codename key_url keyring source_file
+    codename="$(lsb_release -sc)"
+    key_url="https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xB8DC7E53946656EFBCE4C1DD71DAEAAB4AD4CAB6"
+    keyring="/usr/share/keyrings/ondrej-php.gpg"
+    source_file="/etc/apt/sources.list.d/ondrej-php.list"
+
+    warn "add-apt-repository fallo o tardo demasiado; usando fallback directo ppa.launchpadcontent.net"
+
+    if ! curl -fsSL --connect-timeout 15 --max-time 45 "$key_url" | gpg --dearmor > "$keyring" 2>> "$PHP_INSTALL_LOG"; then
+        return 1
+    fi
+    chmod 0644 "$keyring" 2>/dev/null || true
+    echo "deb [signed-by=${keyring}] https://ppa.launchpadcontent.net/ondrej/php/ubuntu ${codename} main" > "$source_file"
+    return 0
+}
+
 # ============================================================
 # Language selection (before anything else)
 # ============================================================
@@ -2284,9 +2301,11 @@ done
 
 if [ "$PHP_REPO_EXISTS" = false ]; then
     if [ "$OS_ID" = "ubuntu" ]; then
-        if ! add-apt-repository -y ppa:ondrej/php >> "$PHP_INSTALL_LOG" 2>&1; then
-            tail -n 40 "$PHP_INSTALL_LOG" | sed 's/^/    /'
-            fail "No se pudo añadir el PPA ondrej/php. Revisa red/DNS/Launchpad o instala con PHP 8.3 si PHP ${PHP_VER} no esta disponible."
+        if ! timeout 90 add-apt-repository -y ppa:ondrej/php >> "$PHP_INSTALL_LOG" 2>&1; then
+            if ! install_ondrej_php_repo_manual; then
+                tail -n 60 "$PHP_INSTALL_LOG" | sed 's/^/    /'
+                fail "No se pudo añadir el repositorio PHP ondrej ni por add-apt-repository ni por fallback directo. Revisa red/DNS/Launchpad."
+            fi
         fi
     else
         if ! curl -sSLo /tmp/debsuryorg-archive-keyring.deb https://packages.sury.org/debsuryorg-archive-keyring.deb >> "$PHP_INSTALL_LOG" 2>&1; then
