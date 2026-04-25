@@ -2,6 +2,13 @@
 
 <?php include __DIR__ . '/_tabs.php'; ?>
 
+<?php if (!empty($updateError)): ?>
+<div class="alert py-2 px-3 small" style="background:rgba(251,191,36,0.1);border:1px solid rgba(251,191,36,0.3);color:#fbbf24;">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    La pagina de updates se ha recuperado de un error temporal: <code><?= View::e($updateError) ?></code>
+</div>
+<?php endif; ?>
+
 <?php if (!empty($_GET['updated'])): ?>
 <div class="alert py-2 px-3 small d-flex align-items-center" style="background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.25);color:#22c55e;">
     <i class="bi bi-check-circle-fill me-2"></i>

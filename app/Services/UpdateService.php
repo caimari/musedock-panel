@@ -70,6 +70,23 @@ class UpdateService
     }
 
     /**
+     * Local-only fallback for the updates page. It does not touch GitHub and is
+     * intentionally safe to call immediately after a panel restart.
+     */
+    public static function localUpdateInfo(): array
+    {
+        $current = self::currentVersion();
+
+        return [
+            'current'          => $current,
+            'remote'           => Settings::get('update_remote_version', $current) ?: $current,
+            'has_update'       => false,
+            'checked_at'       => null,
+            'checked_at_epoch' => 0,
+        ];
+    }
+
+    /**
      * Execute the update process.
      */
     public static function runUpdate(): array

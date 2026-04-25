@@ -14,9 +14,30 @@ class UpdateController
      */
     public function index(): void
     {
-        $updateInfo = UpdateService::checkForUpdate();
-        $changelog = $updateInfo['has_update'] ? UpdateService::fetchRemoteChangelog() : [];
-        $updateStatus = UpdateService::getUpdateStatus();
+        $updateError = null;
+        try {
+            // After an update/restart, render from local cache first. A remote
+            // GitHub check here can make the just-updated page look blank/slow
+            // if DNS/network is temporarily unavailable.
+            if (!empty($_GET['updated'])) {
+                $updateInfo = UpdateService::getCachedUpdateInfo() ?: UpdateService::localUpdateInfo();
+            } else {
+                $updateInfo = UpdateService::checkForUpdate();
+            }
+            $changelog = $updateInfo['has_update'] ? UpdateService::fetchRemoteChangelog() : [];
+            $updateStatus = UpdateService::getUpdateStatus();
+        } catch (\Throwable $e) {
+            $updateError = $e->getMessage();
+            $updateInfo = UpdateService::localUpdateInfo();
+            $changelog = [];
+            $updateStatus = [
+                'in_progress' => false,
+                'started_at' => null,
+                'output' => "Updates page recovered from error:\n" . $e->getMessage(),
+                'elapsed' => 0,
+                'completed' => false,
+            ];
+        }
 
         View::render('settings/updates', [
             'layout'       => 'main',
@@ -24,6 +45,7 @@ class UpdateController
             'updateInfo'   => $updateInfo,
             'changelog'    => $changelog,
             'updateStatus' => $updateStatus,
+            'updateError'  => $updateError,
         ]);
     }
 
@@ -85,25 +107,43 @@ class UpdateController
     public function apiStatus(): void
     {
         header('Content-Type: application/json');
+        try {
 
-        // Auto-check if no cache or cache expired (respects 6h TTL)
-        $cached = UpdateService::getCachedUpdateInfo();
-        if (!$cached || (time() - ($cached['checked_at_epoch'] ?? 0)) > 21600) {
-            $cached = UpdateService::checkForUpdate();
+            // Auto-check if no cache or cache expired (respects 6h TTL)
+            $cached = UpdateService::getCachedUpdateInfo();
+            if (!$cached || (time() - ($cached['checked_at_epoch'] ?? 0)) > 21600) {
+                $cached = UpdateService::checkForUpdate();
+            }
+            $status = UpdateService::getUpdateStatus();
+
+            echo json_encode([
+                'ok'           => true,
+                'has_update'   => $cached['has_update'] ?? false,
+                'current'      => PANEL_VERSION,
+                'remote'       => $cached['remote'] ?? '',
+                'checked_at'   => $cached['checked_at'] ?? null,
+                'in_progress'  => $status['in_progress'],
+                'started_at'   => $status['started_at'],
+                'elapsed'      => $status['elapsed'],
+                'output'       => $status['output'],
+                'completed'    => (bool)($status['completed'] ?? false),
+            ]);
+        } catch (\Throwable $e) {
+            http_response_code(200);
+            echo json_encode([
+                'ok' => false,
+                'error' => $e->getMessage(),
+                'has_update' => false,
+                'current' => PANEL_VERSION,
+                'remote' => '',
+                'checked_at' => null,
+                'in_progress' => false,
+                'started_at' => null,
+                'elapsed' => 0,
+                'output' => 'Update status recovered from error: ' . $e->getMessage(),
+                'completed' => false,
+            ]);
         }
-        $status = UpdateService::getUpdateStatus();
-
-        echo json_encode([
-            'has_update'   => $cached['has_update'] ?? false,
-            'current'      => PANEL_VERSION,
-            'remote'       => $cached['remote'] ?? '',
-            'checked_at'   => $cached['checked_at'] ?? null,
-            'in_progress'  => $status['in_progress'],
-            'started_at'   => $status['started_at'],
-            'elapsed'      => $status['elapsed'],
-            'output'       => $status['output'],
-            'completed'    => (bool)($status['completed'] ?? false),
-        ]);
         exit;
     }
 }

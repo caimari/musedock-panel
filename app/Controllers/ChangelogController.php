@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.147',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`/settings/updates`: tras un update con `updated=1`, la pagina usa cache local y no depende de una consulta remota inmediata a GitHub, evitando pantalla en blanco si DNS/red esta lenta tras el reinicio',
+                            '`/settings/updates`: la vista y el endpoint JSON capturan errores temporales de estado/check y muestran salida controlada en vez de romper la pagina',
+                        ],
+                        'en' => [
+                            '`/settings/updates`: after an update with `updated=1`, the page uses local cache and does not depend on an immediate remote GitHub check, avoiding blank screens if DNS/network is slow after restart',
+                            '`/settings/updates`: the view and JSON endpoint catch temporary status/check errors and show controlled output instead of breaking the page',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.146',
                 'date' => '2026-04-25',
                 'badge' => 'primary',
