@@ -853,6 +853,7 @@ if [ "$REPAIR_MODE" = true ]; then
             REPAIR_FIXED=$((REPAIR_FIXED + 1))
         fi
     done
+    install -d -o postgres -g www-data -m 0770 "${PANEL_DIR}/storage/backups"
     if [ ! -d /var/www/vhosts ]; then
         mkdir -p /var/www/vhosts
         warn "  /var/www/vhosts — $(t repair_fixed)"
@@ -1134,7 +1135,7 @@ CRONEOF
 
         cat > /etc/cron.d/musedock-backup << CRONEOF
 # MuseDock Panel — Hourly panel DB backup
-0 * * * * postgres pg_dump -p 5433 musedock_panel | gzip > ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz 2>/dev/null
+0 * * * * root install -d -o postgres -g www-data -m 0770 ${PANEL_DIR}/storage/backups && runuser -u postgres -- pg_dump -p 5433 musedock_panel | gzip > ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz && chown postgres:www-data ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz && chmod 0640 ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz
 # Cleanup backups older than 48 hours
 5 * * * * root find ${PANEL_DIR}/storage/backups/ -name "panel-*.sql.gz" -mmin +2880 -delete 2>/dev/null
 CRONEOF
@@ -1492,7 +1493,7 @@ elif [ "$UPDATE_ONLY" = true ]; then
     mkdir -p "${PANEL_DIR}/storage/sessions"
     mkdir -p "${PANEL_DIR}/storage/logs"
     mkdir -p "${PANEL_DIR}/storage/cache"
-    mkdir -p "${PANEL_DIR}/storage/backups"
+    install -d -o postgres -g www-data -m 0770 "${PANEL_DIR}/storage/backups"
     mkdir -p /var/www/vhosts
     ok "$(t update_dirs)"
 
@@ -1576,7 +1577,7 @@ CRONEOF
     # Panel DB backup
     cat > /etc/cron.d/musedock-backup << CRONEOF
 # MuseDock Panel — Hourly panel DB backup
-0 * * * * postgres pg_dump -p 5433 musedock_panel | gzip > ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz 2>/dev/null
+0 * * * * root install -d -o postgres -g www-data -m 0770 ${PANEL_DIR}/storage/backups && runuser -u postgres -- pg_dump -p 5433 musedock_panel | gzip > ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz && chown postgres:www-data ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz && chmod 0640 ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz
 # Cleanup backups older than 48 hours
 5 * * * * root find ${PANEL_DIR}/storage/backups/ -name "panel-*.sql.gz" -mmin +2880 -delete 2>/dev/null
 CRONEOF
@@ -3106,8 +3107,7 @@ fi
 header "Configurando cron jobs del panel..."
 
 # Create backups directory
-mkdir -p "${PANEL_DIR}/storage/backups"
-chown www-data:www-data "${PANEL_DIR}/storage/backups"
+install -d -o postgres -g www-data -m 0770 "${PANEL_DIR}/storage/backups"
 
 # Cluster worker — processes sync queue, heartbeats, alerts (every minute)
 CRON_WORKER="/etc/cron.d/musedock-cluster"
@@ -3122,7 +3122,7 @@ ok "Cron: cluster-worker.php (cada minuto)"
 CRON_BACKUP="/etc/cron.d/musedock-backup"
 cat > "$CRON_BACKUP" << CRONEOF
 # MuseDock Panel — Hourly panel DB backup
-0 * * * * postgres pg_dump -p 5433 musedock_panel | gzip > ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz 2>/dev/null
+0 * * * * root install -d -o postgres -g www-data -m 0770 ${PANEL_DIR}/storage/backups && runuser -u postgres -- pg_dump -p 5433 musedock_panel | gzip > ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz && chown postgres:www-data ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz && chmod 0640 ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz
 # Cleanup backups older than 48 hours
 5 * * * * root find ${PANEL_DIR}/storage/backups/ -name "panel-*.sql.gz" -mmin +2880 -delete 2>/dev/null
 CRONEOF

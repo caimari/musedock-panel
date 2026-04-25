@@ -26,6 +26,7 @@
             'added'    => ['icon' => 'bi-plus-circle',    'color' => 'success', 'es' => 'Anadido',     'en' => 'Added'],
             'improved' => ['icon' => 'bi-arrow-up-circle','color' => 'primary', 'es' => 'Mejorado',    'en' => 'Improved'],
             'fixed'    => ['icon' => 'bi-wrench',         'color' => 'info',    'es' => 'Corregido',   'en' => 'Fixed'],
+            'notes'    => ['icon' => 'bi-info-circle',    'color' => 'secondary','es' => 'Notas',       'en' => 'Notes'],
             'planned'  => ['icon' => 'bi-clock',          'color' => 'warning', 'es' => 'Planificado', 'en' => 'Planned'],
         ];
         foreach ($sections as $key => $meta):

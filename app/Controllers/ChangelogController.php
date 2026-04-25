@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.125',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Cron `musedock-backup`: corregido el backup horario de la BD del panel cuando `storage/backups` no existe o no es escribible por `postgres`',
+                            '`update.sh`: ahora normaliza `/etc/cron.d/musedock-backup`, crea `storage/backups` como `postgres:www-data` con modo `0770` y evita el error `cannot create ... Permission denied`',
+                            '`install.sh`: todas las rutas de instalacion/reparacion escriben el cron seguro, ejecutando `pg_dump` como `postgres` pero dejando la creacion/redireccion del archivo bajo `root`',
+                        ],
+                        'en' => [
+                            '`musedock-backup` cron: fixed hourly panel DB backup when `storage/backups` does not exist or is not writable by `postgres`',
+                            '`update.sh`: now normalizes `/etc/cron.d/musedock-backup`, creates `storage/backups` as `postgres:www-data` with mode `0770`, and avoids the `cannot create ... Permission denied` error',
+                            '`install.sh`: all install/repair paths write the safe cron, running `pg_dump` as `postgres` while keeping file creation/redirection under `root`',
+                        ],
+                    ],
+                    'notes' => [
+                        'es' => [
+                            'El backup lo lanza cron, no el proceso web del panel. Aunque el panel corra como root, la linea antigua fallaba porque el shell intentaba crear el `.sql.gz` como usuario `postgres`',
+                        ],
+                        'en' => [
+                            'The backup is launched by cron, not the panel web process. Even if the panel runs as root, the old line failed because the shell tried to create the `.sql.gz` as `postgres`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.124',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

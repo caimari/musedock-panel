@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.125] — 2026-04-25
+
+### Fixed
+- Cron `musedock-backup`: corregido el backup horario de la BD del panel cuando `storage/backups` no existe o no es escribible por `postgres`.
+- `update.sh`: ahora normaliza `/etc/cron.d/musedock-backup`, crea `storage/backups` como `postgres:www-data` con modo `0770` y evita el error `cannot create ... Permission denied`.
+- `install.sh`: todas las rutas de instalacion/reparacion escriben el cron seguro, ejecutando `pg_dump` como `postgres` pero dejando la creacion/redireccion del archivo bajo `root`.
+
+### Notes
+- El backup lo lanza cron, no el proceso web del panel. Aunque el panel corra como root, la linea antigua fallaba porque el shell intentaba crear el `.sql.gz` como usuario `postgres`.
+
 ## [1.0.124] — 2026-04-25
 
 ### Fixed

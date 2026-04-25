@@ -307,16 +307,19 @@ if [ -d "$CMS_DIR" ]; then
     fi
 fi
 
-# Stagger hourly panel backup to avoid collision with monitor at :00
-if grep -q '^0 \* \* \* \* postgres pg_dump' /etc/cron.d/musedock-backup 2>/dev/null; then
+# Stagger and harden hourly panel backup. The cron must run as root because
+# shell redirection happens before/around pg_dump; pg_dump itself still runs
+# as postgres.
+if [ ! -f /etc/cron.d/musedock-backup ] || grep -q 'postgres pg_dump -p 5433 musedock_panel' /etc/cron.d/musedock-backup 2>/dev/null || ! grep -q 'install -d -o postgres -g www-data -m 0770' /etc/cron.d/musedock-backup 2>/dev/null; then
+    install -d -o postgres -g www-data -m 0770 "${PANEL_DIR}/storage/backups" 2>/dev/null || true
     cat > /etc/cron.d/musedock-backup << CRONEOF
 # MuseDock Panel — Hourly panel DB backup (at :02 to avoid cron storm at :00)
-2 * * * * postgres pg_dump -p 5433 musedock_panel | gzip > ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz 2>/dev/null
+2 * * * * root install -d -o postgres -g www-data -m 0770 ${PANEL_DIR}/storage/backups && runuser -u postgres -- pg_dump -p 5433 musedock_panel | gzip > ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz && chown postgres:www-data ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz && chmod 0640 ${PANEL_DIR}/storage/backups/panel-\$(date +\%Y\%m\%d_\%H).sql.gz
 # Cleanup backups older than 48 hours (at :07)
 7 * * * * root find ${PANEL_DIR}/storage/backups/ -name "panel-*.sql.gz" -mmin +2880 -delete 2>/dev/null
 CRONEOF
     chmod 644 /etc/cron.d/musedock-backup
-    ok "Panel backup cron staggered to :02/:07"
+    ok "Panel backup cron hardened and staggered to :02/:07"
 fi
 
 # Install audit log purge cron if missing
