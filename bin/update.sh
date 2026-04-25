@@ -386,6 +386,72 @@ fi
 
 echo ""
 
+repair_panel_tls_caddy() {
+    if ! command -v caddy >/dev/null 2>&1; then
+        warn "Caddy not installed; skipping panel TLS repair"
+        return 0
+    fi
+
+    local caddy_file="/etc/caddy/Caddyfile"
+    if [ ! -f "$caddy_file" ]; then
+        warn "Caddyfile not found; skipping panel TLS repair"
+        return 0
+    fi
+
+    local panel_port panel_internal_port server_ip existing_sites backup_file
+    panel_port=$(grep -E '^PANEL_PORT=' "${PANEL_DIR}/.env" 2>/dev/null | cut -d= -f2 | tr -d ' "'"'"'')
+    panel_port=${panel_port:-8444}
+    panel_internal_port=$((panel_port + 1))
+    server_ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')
+    [ -z "$server_ip" ] && server_ip=$(hostname -I | awk '{print $1}')
+    [ -z "$server_ip" ] && server_ip="127.0.0.1"
+
+    existing_sites=$(awk '
+        /^{$/ && NR<=5 { in_global=1; next }
+        in_global && /^}$/ { in_global=0; next }
+        in_global { next }
+        /^https?:\/\/:'"${panel_port}"'/ { in_panel=1; depth=0; next }
+        /^https?:\/\/[^ ]*:'"${panel_port}"'/ { in_panel=1; depth=0; next }
+        /^:'"${panel_port}"'/ { in_panel=1; depth=0; next }
+        in_panel && /{/ { depth++ }
+        in_panel && /}/ { depth--; if(depth<=0) { in_panel=0 }; next }
+        in_panel { next }
+        { print }
+    ' "$caddy_file" 2>/dev/null)
+
+    backup_file="${caddy_file}.bak.$(date +%Y%m%d%H%M%S)"
+    cp "$caddy_file" "$backup_file" 2>/dev/null || true
+
+    cat > "$caddy_file" << CADDYEOF
+{
+    auto_https disable_redirects
+    admin localhost:2019
+    default_sni ${server_ip}
+}
+
+https://${server_ip}:${panel_port}, https://127.0.0.1:${panel_port}, https://localhost:${panel_port} {
+    tls internal
+    reverse_proxy 127.0.0.1:${panel_internal_port} {
+        header_up X-Forwarded-Proto https
+        header_up X-Real-Ip {remote_host}
+    }
+}
+CADDYEOF
+
+    if [ -n "$(echo "$existing_sites" | tr -d '[:space:]')" ]; then
+        echo "" >> "$caddy_file"
+        echo "$existing_sites" >> "$caddy_file"
+    fi
+
+    if caddy validate --config "$caddy_file" >/dev/null 2>&1; then
+        systemctl restart caddy 2>/dev/null || true
+        ok "Panel TLS Caddy block repaired for https://${server_ip}:${panel_port}"
+    else
+        warn "Generated Caddyfile failed validation; restoring previous file"
+        cp "$backup_file" "$caddy_file" 2>/dev/null || true
+    fi
+}
+
 # ============================================================
 # Step 4: Restart service
 # ============================================================
@@ -404,6 +470,8 @@ if systemctl is-active --quiet musedock-panel 2>/dev/null; then
     fi
     systemctl restart musedock-panel
     ok "Panel service restarted"
+
+    repair_panel_tls_caddy
 
     # Repair Caddy runtime routes/listeners after update (best effort).
     if [ -f "${PANEL_DIR}/cli/repair-caddy-routes.php" ]; then

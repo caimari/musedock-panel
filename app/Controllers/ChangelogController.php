@@ -20,6 +20,31 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.131',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'TLS por IP en instalaciones nuevas: Caddy declara explicitamente `https://IP:PANEL_PORT`, `https://127.0.0.1:PANEL_PORT`, `https://localhost:PANEL_PORT` y `default_sni`, evitando `tlsv1 alert internal error`',
+                            '`bin/update.sh`: repara automaticamente el bloque TLS del panel en Caddy al actualizar, preservando otros bloques no-panel del Caddyfile',
+                        ],
+                        'en' => [
+                            'IP-based TLS on new installs: Caddy now explicitly declares `https://IP:PANEL_PORT`, `https://127.0.0.1:PANEL_PORT`, `https://localhost:PANEL_PORT`, and `default_sni`, avoiding `tlsv1 alert internal error`',
+                            '`bin/update.sh`: automatically repairs the panel TLS block in Caddy during updates, preserving other non-panel Caddyfile blocks',
+                        ],
+                    ],
+                    'notes' => [
+                        'es' => [
+                            'El puerto publico sigue siendo Caddy/TLS (`8444`) y el PHP interno queda solo en `127.0.0.1:8445`',
+                        ],
+                        'en' => [
+                            'The public port remains Caddy/TLS (`8444`) and internal PHP stays bound only to `127.0.0.1:8445`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.130',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.131] — 2026-04-25
+
+### Fixed
+- TLS por IP en instalaciones nuevas: Caddy declara explicitamente `https://IP:PANEL_PORT`, `https://127.0.0.1:PANEL_PORT`, `https://localhost:PANEL_PORT` y `default_sni`, evitando `tlsv1 alert internal error`.
+- `bin/update.sh`: repara automaticamente el bloque TLS del panel en Caddy al actualizar, preservando otros bloques no-panel del Caddyfile.
+
+### Notes
+- El puerto publico sigue siendo Caddy/TLS (`8444`) y el PHP interno queda solo en `127.0.0.1:8445`.
+
 ## [1.0.130] — 2026-04-25
 
 ### Fixed

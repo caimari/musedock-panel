@@ -2996,8 +2996,13 @@ systemctl restart musedock-panel
 ok "$(t service_started "$PANEL_INTERNAL_PORT") (internal)"
 
 # Configure Caddy as HTTPS reverse proxy for the panel
-# This gives us: https://IP:PANEL_PORT with self-signed cert (tls internal)
+# This gives us: https://IP:PANEL_PORT with internal cert (tls internal).
+# IP access needs an explicit site address/default SNI; a bare :PANEL_PORT block
+# can fail TLS certificate selection and surface as ERR_SSL_PROTOCOL_ERROR.
 CADDY_API="http://localhost:2019"
+SERVER_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}')
+[ -z "$SERVER_IP" ] && SERVER_IP=$(hostname -I | awk '{print $1}')
+[ -z "$SERVER_IP" ] && SERVER_IP="127.0.0.1"
 
 # Wait for Caddy API
 for i in 1 2 3 4 5; do
@@ -3010,7 +3015,7 @@ done
 # Preserve existing site blocks if Caddyfile has them
 CADDY_FILE="/etc/caddy/Caddyfile"
 CADDY_PANEL_BLOCK="
-:${PANEL_PORT} {
+https://${SERVER_IP}:${PANEL_PORT}, https://127.0.0.1:${PANEL_PORT}, https://localhost:${PANEL_PORT} {
     tls internal
     reverse_proxy 127.0.0.1:${PANEL_INTERNAL_PORT} {
         header_up X-Forwarded-Proto https
@@ -3034,6 +3039,7 @@ if [ -f "$CADDY_FILE" ]; then
         in_global && /^}$/ { in_global=0; next }
         in_global { next }
         /^https?:\/\/:'"${PANEL_PORT}"'/ { in_panel=1; depth=0; next }
+        /^https?:\/\/[^ ]*:'"${PANEL_PORT}"'/ { in_panel=1; depth=0; next }
         /^:'"${PANEL_PORT}"'/ { in_panel=1; depth=0; next }
         in_panel && /{/ { depth++ }
         in_panel && /}/ { depth--; if(depth<=0) { in_panel=0 }; next }
@@ -3049,9 +3055,10 @@ cat > "$CADDY_FILE" << CADDYEOF
 {
     auto_https disable_redirects
     admin localhost:2019
+    default_sni ${SERVER_IP}
 }
 
-:${PANEL_PORT} {
+https://${SERVER_IP}:${PANEL_PORT}, https://127.0.0.1:${PANEL_PORT}, https://localhost:${PANEL_PORT} {
     tls internal
     reverse_proxy 127.0.0.1:${PANEL_INTERNAL_PORT} {
         header_up X-Forwarded-Proto https
