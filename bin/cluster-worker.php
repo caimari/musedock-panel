@@ -519,13 +519,13 @@ if ($clusterRole === 'slave') {
                 // false positives (master cannot deliver heartbeat here). Suppress email spam.
                 $localPanelPort = (int)\MuseDockPanel\Env::get('PANEL_PORT', 8444);
                 if ($localPanelPort <= 0) $localPanelPort = 8444;
-                $errno = 0; $errstr = '';
-                $sock = @fsockopen('127.0.0.1', $localPanelPort, $errno, $errstr, 1.0);
-                if ($sock === false) {
-                    logMsg("  [POSSIBLE-FALSE-POSITIVE] local panel port {$localPanelPort} down ({$errno}: {$errstr}); suppressing master-down alert.");
-                    LogService::log('cluster.alert', 'master-down-suppressed', "Master-down suprimido: puerto local {$localPanelPort} no accesible ({$errno}: {$errstr})");
+                $localHttpsUrl = "https://127.0.0.1:{$localPanelPort}/";
+                $localHttpsCode = trim((string)shell_exec('curl -sk -o /dev/null -w "%{http_code}" --max-time 3 ' . escapeshellarg($localHttpsUrl) . ' 2>/dev/null'));
+                $localHttpsOk = in_array($localHttpsCode, ['200', '301', '302', '403'], true);
+                if (!$localHttpsOk) {
+                    logMsg("  [POSSIBLE-FALSE-POSITIVE] local panel HTTPS check failed on {$localHttpsUrl} (HTTP {$localHttpsCode}); suppressing master-down alert.");
+                    LogService::log('cluster.alert', 'master-down-suppressed', "Master-down suprimido: HTTPS local {$localHttpsUrl} fallo (HTTP {$localHttpsCode})");
                 } else {
-                    fclose($sock);
 
                 // Master is down — escalating re-alert intervals to avoid spam
                 $lastAlert = Settings::get('cluster_master_down_alerted', '');

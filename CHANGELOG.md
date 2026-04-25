@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.144] — 2026-04-25
+
+### Fixed
+- `cluster-worker.php`: los slaves ya no envian alerta de `Master caido` si su propio panel local falla HTTPS en `https://127.0.0.1:PANEL_PORT`; esto evita falsos positivos cuando `8444` esta abierto pero degradado a HTTP plano.
+
 ## [1.0.143] — 2026-04-25
 
 ### Added
