@@ -57,7 +57,13 @@ class MailController
         $mailHealthAlerts = MailService::getMailHealthAlerts();
         $mailMode = MailService::getCurrentMailMode();
         $smtpConfig = MailService::getSmtpConfig(false);
-        $deliverabilityRows = MailService::getDeliverabilityRows();
+        $requestedTab = (string)($_GET['tab'] ?? '');
+        $deliverabilityRequested = $requestedTab === 'deliverability';
+        $deliverabilityRunChecks = $deliverabilityRequested && !empty($_SESSION['mail_deliverability_check_once']);
+        unset($_SESSION['mail_deliverability_check_once']);
+        $deliverabilityRows = $deliverabilityRequested
+            ? MailService::getDeliverabilityRows($deliverabilityRunChecks)
+            : [];
         $internalSmtpToken = MailService::getInternalSmtpToken(true);
         $relayDomains = MailService::getRelayDomains();
         $relayUsers = MailService::getRelayUsers();
@@ -953,6 +959,41 @@ class MailController
         $tab = (string)($_POST['tab'] ?? 'relay');
         $anchor = in_array($tab, ['relay', 'deliverability'], true) ? $tab : 'relay';
         Router::redirect('/mail?tab=' . $anchor);
+    }
+
+    public function deliverabilityCheck(): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail?tab=deliverability');
+            return;
+        }
+
+        $mode = MailService::getCurrentMailMode();
+        if ($mode === 'relay') {
+            $result = MailService::refreshAllRelayDomains();
+            $updated = (int)($result['updated'] ?? 0);
+            $active = (int)($result['active'] ?? 0);
+            $pending = (int)($result['pending'] ?? 0);
+            if ($result['ok'] ?? false) {
+                Flash::set(
+                    $pending > 0 ? 'warning' : 'success',
+                    sprintf('Comprobacion DNS relay completada: %d dominio(s), %d active, %d pending.', $updated, $active, $pending)
+                );
+            } else {
+                $firstError = (string)(($result['errors'][0]['error'] ?? '') ?: 'Error desconocido');
+                Flash::set(
+                    'warning',
+                    sprintf('Comprobacion parcial DNS relay: %d actualizados, %d errores. Primer error: %s', $updated, count($result['errors'] ?? []), $firstError)
+                );
+            }
+            Router::redirect('/mail?tab=deliverability');
+            return;
+        }
+
+        $_SESSION['mail_deliverability_check_once'] = '1';
+        Flash::set('success', 'Comprobacion DNS iniciada para entregabilidad.');
+        Router::redirect('/mail?tab=deliverability');
     }
 
     public function relayDomainDelete(array $params): void

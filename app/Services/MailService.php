@@ -518,7 +518,7 @@ class MailService
             || (bool)Database::fetchOne("SELECT id FROM mail_domains WHERE dkim_public_key IS NOT NULL AND dkim_public_key != '' LIMIT 1");
     }
 
-    public static function getDeliverabilityRows(): array
+    public static function getDeliverabilityRows(bool $runChecks = false): array
     {
         $mode = self::getCurrentMailMode();
         $ip = $mode === 'relay' && Settings::get('mail_relay_public_ip', '') !== ''
@@ -541,6 +541,9 @@ class MailService
                     'relay_domain_id' => (int)($relayDomain['id'] ?? 0),
                     'relay_db_status' => (string)($relayDomain['status'] ?? 'pending'),
                     'relay_last_dns_check_at' => (string)($relayDomain['last_dns_check_at'] ?? ''),
+                    'spf_verified' => $relayDomain['spf_verified'] ?? null,
+                    'dkim_verified' => $relayDomain['dkim_verified'] ?? null,
+                    'dmarc_verified' => $relayDomain['dmarc_verified'] ?? null,
                 ];
             }
         }
@@ -569,7 +572,11 @@ class MailService
             $mailHostname = self::resolveMailHostnameForDomain($domain);
             $recommended = self::recommendedDeliverabilityRecords($domain, $ip, $mailHostname, $rowMode);
             $dkimSelector = trim((string)($domain['dkim_selector'] ?? 'default')) ?: 'default';
-            $checks = self::runDeliverabilityChecks($domainName, $mailHostname, $ip, $recommended, $dkimSelector);
+            if ($runChecks) {
+                $checks = self::runDeliverabilityChecks($domainName, $mailHostname, $ip, $recommended, $dkimSelector);
+            } else {
+                $checks = self::buildDeferredDeliverabilityChecks($domain, $dkimSelector);
+            }
             $score = self::deliverabilityScore($checks);
             $rows[] = [
                 'domain' => $domainName,
@@ -587,6 +594,55 @@ class MailService
         }
 
         return $rows;
+    }
+
+    private static function buildDeferredDeliverabilityChecks(array $domain, string $dkimSelector): array
+    {
+        $checkedAt = trim((string)($domain['relay_last_dns_check_at'] ?? ''));
+        $suffix = $checkedAt !== '' ? (' (ultimo check BD: ' . $checkedAt . ')') : '';
+        $notCheckedMsg = 'Sin comprobar todavia. Pulsa "Comprobar DNS ahora".';
+        $selector = trim($dkimSelector) !== '' ? trim($dkimSelector) : 'default';
+
+        $spf = self::toNullableBool($domain['spf_verified'] ?? null);
+        $dkim = self::toNullableBool($domain['dkim_verified'] ?? null);
+        $dmarc = self::toNullableBool($domain['dmarc_verified'] ?? null);
+
+        $state = static function (?bool $ok, string $okMessage, string $pendingMessage) use ($suffix, $notCheckedMsg): array {
+            if ($ok === true) {
+                return ['ok' => true, 'value' => '', 'message' => $okMessage . $suffix];
+            }
+            if ($ok === false) {
+                return ['ok' => false, 'value' => '', 'message' => $pendingMessage . $suffix];
+            }
+            return ['ok' => null, 'value' => '', 'message' => $notCheckedMsg];
+        };
+
+        return [
+            'spf' => $state($spf, 'SPF verificado', 'SPF pendiente'),
+            'dkim' => $state($dkim, 'DKIM ' . $selector . ' verificado', 'DKIM ' . $selector . ' pendiente'),
+            'dmarc' => $state($dmarc, 'DMARC verificado', 'DMARC pendiente'),
+            'a' => ['ok' => null, 'value' => '', 'message' => $notCheckedMsg],
+            'ptr' => ['ok' => null, 'value' => '', 'message' => $notCheckedMsg],
+            'blacklists' => ['ok' => null, 'listed' => [], 'message' => $notCheckedMsg],
+        ];
+    }
+
+    private static function toNullableBool($value): ?bool
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (is_bool($value)) {
+            return $value;
+        }
+        $v = strtolower(trim((string)$value));
+        if (in_array($v, ['1', 't', 'true', 'yes', 'on'], true)) {
+            return true;
+        }
+        if (in_array($v, ['0', 'f', 'false', 'no', 'off'], true)) {
+            return false;
+        }
+        return null;
     }
 
     private static function resolveMailHostnameForDomain(array $domain): string

@@ -1291,12 +1291,11 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-shield-check me-2"></i>Entregabilidad DNS</span>
         <div class="d-flex align-items-center gap-2">
-            <?php if (($mailMode ?? 'full') === 'relay' && !$isSlave): ?>
-                <form method="post" action="/mail/relay/domains/refresh-all" class="d-inline">
+            <?php if (!$isSlave): ?>
+                <form method="post" action="/mail/deliverability/check" class="d-inline">
                     <?= View::csrf() ?>
-                    <input type="hidden" name="tab" value="deliverability">
                     <button class="btn btn-outline-light btn-sm">
-                        <i class="bi bi-arrow-repeat me-1"></i>Refrescar DNS + BD
+                        <i class="bi bi-search me-1"></i>Comprobar DNS ahora
                     </button>
                 </form>
             <?php endif; ?>
@@ -1306,9 +1305,9 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
     <div class="card-body">
         <p class="text-muted small mb-3">
             Comprueba si el dominio tiene los registros necesarios para una entrega de correo correcta.
-            Los checks leen DNS en tiempo real; los registros recomendados se pueden copiar al proveedor DNS.
+            Los checks DNS solo se ejecutan al pulsar <strong>Comprobar DNS ahora</strong>; la carga de `/mail` no dispara verificaciones.
             <?php if (($mailMode ?? 'full') === 'relay' && !$isSlave): ?>
-                El boton <strong>Refrescar DNS + BD</strong> hace ambas cosas en una sola accion.
+                En modo relay, ese boton tambien sincroniza estado en BD.
             <?php endif; ?>
         </p>
 

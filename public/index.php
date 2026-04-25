@@ -411,6 +411,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/mail/relay/domains/store', 'MailController@relayDomainStore');
 \MuseDockPanel\Router::post('/mail/relay/domains/{id}/refresh', 'MailController@relayDomainRefresh');
 \MuseDockPanel\Router::post('/mail/relay/domains/refresh-all', 'MailController@relayDomainsRefreshAll');
+\MuseDockPanel\Router::post('/mail/deliverability/check', 'MailController@deliverabilityCheck');
 \MuseDockPanel\Router::post('/mail/relay/domains/{id}/delete', 'MailController@relayDomainDelete');
 \MuseDockPanel\Router::post('/mail/relay/users/store', 'MailController@relayUserStore');
 \MuseDockPanel\Router::post('/mail/relay/users/{id}/delete', 'MailController@relayUserDelete');
@@ -643,6 +644,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // Docs
 \MuseDockPanel\Router::get('/docs', 'DocsController@index');
 \MuseDockPanel\Router::get('/docs/settings-sections', 'DocsController@settingsSections');
+\MuseDockPanel\Router::get('/docs/mail-sections', 'DocsController@mailSections');
+\MuseDockPanel\Router::get('/docs/mail/{slug}', 'DocsController@mailGuide');
 \MuseDockPanel\Router::get('/docs/settings/cluster', 'DocsController@clusterBasics');
 \MuseDockPanel\Router::get('/docs/settings/federation', 'DocsController@federationBasics');
 \MuseDockPanel\Router::post('/docs/settings/{slug}/shortcut-toggle', 'DocsController@settingsGuideShortcutToggle');

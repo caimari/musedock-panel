@@ -2,6 +2,20 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.110] — 2026-04-25
+
+### New
+- Docs Mail: nueva guia padre `/docs/mail-sections` y guias hijas por seccion en `/docs/mail/{slug}` (`general`, `domains`, `webmail`, `relay`, `queue`, `migration`, `infra`, `deliverability`), con vista 404 dedicada para slugs no registrados.
+
+### Improved
+- `/docs`: la home incorpora Mail como guia padre y la busqueda indexa tambien metadatos/contenido de las nuevas guias hijas de Mail.
+- `/mail?tab=deliverability`: la comprobacion DNS pasa a modo on-demand; al entrar en `/mail` ya no se lanzan checks automaticamente y se ejecutan solo al pulsar `Comprobar DNS ahora`.
+- `/mail?tab=deliverability` en modo relay: el boton `Comprobar DNS ahora` ejecuta chequeo DNS y sincroniza estado en BD (`active/pending`) en una sola accion.
+- Deliverability rows: cuando no se ha lanzado check on-demand, la vista muestra estado diferido usando ultimo estado guardado en BD (`spf_verified`, `dkim_verified`, `dmarc_verified`) en vez de forzar resoluciones DNS en cada carga.
+
+### Fixed
+- `/docs`: icono roto en card padre de Mail corregido usando icono compatible (`bi-envelope-fill`).
+
 ## [1.0.109] — 2026-04-25
 
 ### Improved

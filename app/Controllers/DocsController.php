@@ -76,6 +76,94 @@ class DocsController
         return $this->dedupeTopics($topics);
     }
 
+    private function mailGuides(): array
+    {
+        return [
+            'general' => [
+                'title' => 'General',
+                'summary' => 'Resumen operativo del modulo de correo, estado global y acciones base.',
+                'panel_url' => '/mail?tab=general',
+                'icon' => 'bi-envelope',
+                'keywords' => 'mail general estado setup instalacion modo correo',
+                'view' => 'mail-general',
+            ],
+            'domains' => [
+                'title' => 'Dominios',
+                'summary' => 'Dominios autorizados y estado de activacion en modo relay/completo.',
+                'panel_url' => '/mail?tab=domains',
+                'icon' => 'bi-globe',
+                'keywords' => 'mail dominios autorizados relay completo dkim smtp',
+                'view' => 'mail-domains',
+            ],
+            'webmail' => [
+                'title' => 'Webmail',
+                'summary' => 'Que configura Webmail, que queda bloqueado, y que revisar en DNS/IMAP/SMTP.',
+                'panel_url' => '/mail?tab=webmail#webmail',
+                'icon' => 'bi-envelope',
+                'keywords' => 'mail webmail roundcube imap smtp caddy sieve managesieve candado bloqueo configuracion dns verificacion',
+                'view' => 'mail-webmail',
+            ],
+            'relay' => [
+                'title' => 'Relay',
+                'summary' => 'Flujo relay privado: dominios remitentes, usuarios SMTP y estado por dominio.',
+                'panel_url' => '/mail?tab=relay',
+                'icon' => 'bi-diagram-3',
+                'keywords' => 'mail relay privado wireguard dominio remitente usuarios smtp pending active',
+                'view' => 'mail-relay',
+            ],
+            'queue' => [
+                'title' => 'Cola',
+                'summary' => 'Cola de Postfix, reintentos, borrado controlado e historico reciente de relay.',
+                'panel_url' => '/mail?tab=queue',
+                'icon' => 'bi-inboxes',
+                'keywords' => 'mail queue cola postfix deferred reintento borrar historico relay log',
+                'view' => 'mail-queue',
+            ],
+            'migration' => [
+                'title' => 'Migracion',
+                'summary' => 'Pasos para mover configuracion y operativa de correo entre modos/nodos.',
+                'panel_url' => '/mail?tab=migration',
+                'icon' => 'bi-arrow-left-right',
+                'keywords' => 'mail migracion mover modo correo nodo transferencia',
+                'view' => 'mail-migration',
+            ],
+            'infra' => [
+                'title' => 'Infra',
+                'summary' => 'Instalacion o actualizacion del servidor mail y parametros estructurales.',
+                'panel_url' => '/mail?tab=infra&setup=1',
+                'icon' => 'bi-hdd-network',
+                'keywords' => 'mail infra instalar actualizar servidor modo correo postfix dovecot opendkim',
+                'view' => 'mail-infra',
+            ],
+            'deliverability' => [
+                'title' => 'Entregabilidad',
+                'summary' => 'Checks DNS en tiempo real: SPF, DKIM, DMARC, A hostname, PTR/rDNS y blacklist.',
+                'panel_url' => '/mail?tab=deliverability',
+                'icon' => 'bi-clipboard',
+                'keywords' => 'mail entregabilidad spf dkim dmarc ptr rdns blacklist dns check',
+                'view' => 'mail-deliverability',
+            ],
+        ];
+    }
+
+    private function mailChildTopics(): array
+    {
+        $topics = [];
+        foreach ($this->mailGuides() as $slug => $guide) {
+            $topics[] = [
+                'title' => 'Mail: ' . (string)($guide['title'] ?? $slug),
+                'description' => (string)($guide['summary'] ?? ''),
+                'url' => '/docs/mail/' . $slug,
+                'panel_url' => (string)($guide['panel_url'] ?? ''),
+                'category' => 'Mail / Hijo',
+                'icon' => (string)($guide['icon'] ?? 'bi-envelope'),
+                'keywords' => mb_strtolower((string)($guide['keywords'] ?? 'mail')),
+            ];
+        }
+
+        return $this->dedupeTopics($topics);
+    }
+
     private function parentTopics(array $guides): array
     {
         return $this->dedupeTopics([
@@ -86,6 +174,14 @@ class DocsController
                 'category' => 'Guia padre',
                 'icon' => 'bi-sliders2',
                 'keywords' => 'settings padre hijos secciones mapa',
+            ],
+            [
+                'title' => 'Mail: mapa de secciones',
+                'description' => 'Mapa base. Desde aqui entras a las guias hijas de Mail.',
+                'url' => '/docs/mail-sections',
+                'category' => 'Guia padre',
+                'icon' => 'bi-envelope-fill',
+                'keywords' => 'mail padre hijos secciones mapa relay infra entregabilidad webmail',
             ],
         ]);
     }
@@ -232,6 +328,21 @@ class DocsController
 
         if ($url === '/docs/mail-modes') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'mail-modes.php');
+        }
+
+        if ($url === '/docs/mail-sections') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'mail-sections.php');
+        }
+
+        if (str_starts_with($url, '/docs/mail/')) {
+            $slug = trim(substr($url, strlen('/docs/mail/')));
+            if ($slug !== '' && !str_contains($slug, '/')) {
+                $mailGuides = $this->mailGuides();
+                $view = (string)($mailGuides[$slug]['view'] ?? '');
+                if ($view !== '') {
+                    return $this->extractViewText(self::DOCS_VIEW_BASE . $view . '.php');
+                }
+            }
         }
 
         if (!str_starts_with($url, '/docs/')) {
@@ -782,12 +893,13 @@ class DocsController
         $guides = $this->settingGuides();
         $parentTopics = $this->parentTopics($guides);
         $childTopics = $this->childTopics($guides);
+        $mailChildTopics = $this->mailChildTopics();
         $specialShortcutTopics = $this->specialShortcutTopics($childTopics);
         $specialTopics = $this->specialTopics();
         $topics = [];
 
         if ($query !== '') {
-            $topics = $this->dedupeTopics(array_merge($parentTopics, $childTopics, $specialTopics));
+            $topics = $this->dedupeTopics(array_merge($parentTopics, $childTopics, $mailChildTopics, $specialTopics));
             $needle = mb_strtolower($query);
             $matched = [];
 
@@ -819,6 +931,7 @@ class DocsController
             'topics' => $topics,
             'parentTopics' => $parentTopics,
             'childTopics' => $childTopics,
+            'mailChildTopics' => $mailChildTopics,
             'specialShortcutTopics' => $specialShortcutTopics,
             'specialTopics' => $specialTopics,
             'query' => $query,
@@ -830,6 +943,37 @@ class DocsController
         View::render('help/mail-modes', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Mail Modes',
+        ]);
+    }
+
+    public function mailSections(): void
+    {
+        View::render('help/mail-sections', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Mail Sections',
+        ]);
+    }
+
+    public function mailGuide(array $params): void
+    {
+        $slug = trim((string)($params['slug'] ?? ''));
+        $mailGuides = $this->mailGuides();
+        $guide = $mailGuides[$slug] ?? null;
+
+        if (!$guide) {
+            http_response_code(404);
+            View::render('help/mail-guide-not-found', [
+                'layout' => 'main',
+                'pageTitle' => 'Docs - Mail Guide Not Found',
+                'slug' => $slug,
+            ]);
+            return;
+        }
+
+        $view = 'help/' . (string)$guide['view'];
+        View::render($view, [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Mail - ' . (string)($guide['title'] ?? 'Guide'),
         ]);
     }
 
