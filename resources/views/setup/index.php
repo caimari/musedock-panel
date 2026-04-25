@@ -15,7 +15,7 @@
         .setup-card { background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 2.5rem; }
         .setup-header { text-align: center; margin-bottom: 2rem; }
         .setup-header h1 { color: #38bdf8; font-size: 1.5rem; font-weight: 700; }
-        .setup-header p { color: #64748b; font-size: 0.9rem; }
+        .setup-header p { color: #cbd5e1; font-size: 0.9rem; }
         .form-control { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; }
         .form-control:focus { background: #0f172a; border-color: #38bdf8; color: #e2e8f0; box-shadow: 0 0 0 2px rgba(56,189,248,0.2); }
         .form-control::placeholder { color: #475569; }
@@ -26,7 +26,7 @@
         .check-ok { color: #22c55e; }
         .check-fail { color: #ef4444; }
         .check-name { color: #e2e8f0; flex: 1; }
-        .check-detail { color: #64748b; font-size: 0.8rem; }
+        .check-detail { color: #cbd5e1; font-size: 0.8rem; }
         .divider { border: 0; border-top: 1px solid #334155; margin: 1.5rem 0; }
         .alert-danger { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); color: #ef4444; }
         .alert-success { background: rgba(34,197,94,0.15); border: 1px solid rgba(34,197,94,0.3); color: #22c55e; }
@@ -36,7 +36,13 @@
                       color: #38bdf8; text-align: center; line-height: 24px; font-size: 0.75rem; font-weight: 700; margin-right: 0.5rem; }
         .setup-option { border: 1px solid #334155; background: rgba(15,23,42,0.35); border-radius: 12px; padding: 1rem; }
         .setup-option .form-check-input { margin-top: 0.25rem; }
+        .setup-option strong { color: #f8fafc; }
+        .setup-option .setup-help { color: #e2e8f0; }
         .setup-note { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.25); color: #fbbf24; border-radius: 12px; padding: 0.9rem; }
+        .setup-help { color: #e2e8f0; }
+        .setup-help code,
+        .setup-option code { color: #7dd3fc; }
+        .setup-muted { color: #cbd5e1; }
     </style>
 </head>
 <body>
@@ -167,7 +173,7 @@
                 <input type="text" name="firewall_trusted_source" class="form-control"
                        value="<?= View::e($fwAdminIp) ?>" placeholder="203.0.113.10 o 203.0.113.0/24"
                        autocomplete="off" spellcheck="false">
-                <small class="text-muted">
+                <small class="setup-help">
                     Detectada desde tu sesion: <?= View::e($fwAdminIp ?: 'no disponible') ?>.
                     Puedes cambiarla por un CIDR IPv4 si administras desde una oficina/VPN.
                 </small>
@@ -184,27 +190,27 @@
                     <label class="setup-option">
                         <input class="form-check-input me-2" type="radio" name="firewall_mode" value="allow_existing" <?= $fwCanManage ? 'checked' : 'disabled' ?>>
                         <strong>Firewall activo detectado (<?= View::e(strtoupper($fwType === 'iptables' ? 'iptables' : 'UFW')) ?>)</strong>
-                        <span class="d-block small text-muted mt-1">
+                        <span class="d-block small setup-help mt-1">
                             Anadir reglas para permitir SSH y panel solo desde la IP/rango de confianza. Tambien guarda ese rango en <code>ALLOWED_IPS</code>.
                         </span>
                     </label>
                     <label class="setup-option">
                         <input class="form-check-input me-2" type="radio" name="firewall_mode" value="skip">
                         <strong>No tocar firewall ahora</strong>
-                        <span class="d-block small text-muted mt-1">Podras ajustarlo despues en Settings &rarr; Firewall, pero revisa manualmente que <?= View::e((string)$fwPanelPort) ?>/tcp no quede abierto a todo internet.</span>
+                        <span class="d-block small setup-help mt-1">Podras ajustarlo despues en Settings &rarr; Firewall, pero revisa manualmente que <?= View::e((string)$fwPanelPort) ?>/tcp no quede abierto a todo internet.</span>
                     </label>
                 <?php else: ?>
                     <label class="setup-option">
                         <input class="form-check-input me-2" type="radio" name="firewall_mode" value="install_ufw" <?= $fwCanManage ? 'checked' : 'disabled' ?>>
                         <strong>No hay firewall activo: preparar UFW recomendado</strong>
-                        <span class="d-block small text-muted mt-1">
+                        <span class="d-block small setup-help mt-1">
                             Instala UFW si hace falta, aplica <code>deny incoming</code>, <code>allow outgoing</code>, permite SSH y panel solo desde la IP/rango de confianza, y activa UFW.
                         </span>
                     </label>
                     <label class="setup-option">
                         <input class="form-check-input me-2" type="radio" name="firewall_mode" value="skip">
                         <strong>Dejar firewall para despues</strong>
-                        <span class="d-block small text-muted mt-1">
+                        <span class="d-block small setup-help mt-1">
                             El panel quedara instalado, pero tendras que restringir manualmente SSH y <?= View::e((string)$fwPanelPort) ?>/tcp antes de exponerlo.
                         </span>
                     </label>

@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.135] — 2026-04-25
+
+### Improved
+- Setup inicial `/setup`: textos auxiliares y notas de firewall/TLS pasan a colores claros sobre fondo azul oscuro para evitar gris sobre azul poco legible.
+- Setup inicial: codigos como `ALLOWED_IPS`, puertos y ayudas de IP/CIDR quedan con contraste alto.
+
 ## [1.0.134] — 2026-04-25
 
 ### Docs

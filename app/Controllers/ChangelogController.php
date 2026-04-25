@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.135',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'Setup inicial `/setup`: textos auxiliares y notas de firewall/TLS pasan a colores claros sobre fondo azul oscuro para evitar gris sobre azul poco legible',
+                            'Setup inicial: codigos como `ALLOWED_IPS`, puertos y ayudas de IP/CIDR quedan con contraste alto',
+                        ],
+                        'en' => [
+                            'Initial setup `/setup`: helper texts and firewall/TLS notes now use light colors on the dark blue background to avoid low-contrast grey-on-blue text',
+                            'Initial setup: code snippets such as `ALLOWED_IPS`, ports, and IP/CIDR hints now have high contrast',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.134',
                 'date' => '2026-04-25',
                 'badge' => 'primary',
