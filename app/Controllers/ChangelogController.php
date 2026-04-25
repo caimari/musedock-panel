@@ -20,6 +20,47 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.108',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            '`/mail?tab=infra&setup=1`: el instalador de mail ahora precarga la configuracion actual (modo, destino local/remoto, hostname, relay/WireGuard/SMTP) y muestra un resumen de "modo actual configurado"',
+                            '`/mail?tab=relay` y `/mail?tab=deliverability`: nuevo refresco masivo de dominios relay para sincronizar estado DNS en BD (`active/pending`) desde un solo boton',
+                        ],
+                        'en' => [
+                            '`/mail?tab=infra&setup=1`: mail setup now preloads current configuration (mode, local/remote target, hostname, relay/WireGuard/SMTP) and shows a "current configured mode" summary',
+                            '`/mail?tab=relay` and `/mail?tab=deliverability`: new bulk relay-domain refresh to sync DNS status in DB (`active/pending`) from a single button',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=webmail`: la configuracion queda plegable cuando ya esta configurada, mostrando resumen actual de proveedor/host/IMAP/SMTP',
+                            '`/mail?tab=webmail`: edicion protegida por candado con bloqueo por defecto; los parametros IMAP/SMTP gestionados por el modo de correo quedan bloqueados en duro con aviso para evitar romper la configuracion',
+                            '`/mail?tab=webmail`: los inputs solo se autocompletan con defaults cuando hay backend de mail capaz de proveerlos; si no, quedan vacios (sin placeholders forzados)',
+                            '`/mail?tab=webmail`: reorganizacion visual para dejar cada boton de accion debajo de su bloque funcional (instalacion, hostnames extra, sieve)',
+                            '`/mail?tab=queue`: todas las acciones destructivas y de mantenimiento de cola/historico usan confirmaciones SweetAlert2 en lugar de `confirm()` nativo',
+                        ],
+                        'en' => [
+                            '`/mail?tab=webmail`: config is now collapsible when already configured, with a live summary of provider/host/IMAP/SMTP',
+                            '`/mail?tab=webmail`: lock-based protected editing with default locked state; IMAP/SMTP params managed by current mail mode are hard-locked with guidance to avoid breaking config',
+                            '`/mail?tab=webmail`: inputs only auto-fill defaults when a mail backend can provide them; otherwise they stay blank (no forced placeholders)',
+                            '`/mail?tab=webmail`: visual reorganization so each action button sits below its functional section (install, extra hostnames, sieve)',
+                            '`/mail?tab=queue`: destructive and maintenance queue/log actions now use SweetAlert2 confirmations instead of native `confirm()`',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            '`/mail`: al refrescar un dominio relay se conserva la pestana de origen (`relay` o `deliverability`) y no se fuerza volver siempre a `relay`',
+                        ],
+                        'en' => [
+                            '`/mail`: refreshing one relay domain now preserves the source tab (`relay` or `deliverability`) instead of always forcing a redirect to `relay`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.107',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

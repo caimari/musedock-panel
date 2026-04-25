@@ -171,6 +171,35 @@
         color: #cbd5e1 !important;
         overflow-wrap: anywhere;
     }
+    #webmail-config-editor.webmail-config-locked .webmail-lockable:not(select):not([type="hidden"]) {
+        background-color: #111827;
+        border-color: #475569;
+        color: #93c5fd;
+    }
+    #webmail-config-editor.webmail-config-locked select.webmail-lockable {
+        pointer-events: none;
+        background-color: #111827;
+        border-color: #475569;
+        color: #93c5fd;
+    }
+    #webmail-config-editor.webmail-config-locked .webmail-lock-label::after {
+        content: " \f47a";
+        font-family: "bootstrap-icons";
+        font-size: .85em;
+        color: #f59e0b;
+    }
+    #webmail-config-editor .webmail-hard-locked {
+        background-color: #111827;
+        border-color: #475569;
+        color: #93c5fd;
+        pointer-events: none;
+    }
+    #webmail-config-editor .webmail-hard-lock-label::after {
+        content: " \f47a";
+        font-family: "bootstrap-icons";
+        font-size: .85em;
+        color: #f59e0b;
+    }
 </style>
 <div class="card mb-4" style="border-color: rgba(148,163,184,.22);">
     <div class="card-body py-2">
@@ -272,17 +301,52 @@
     $webmailConfig = $webmailConfig ?? [];
     $webmailProviders = $webmailProviders ?? [];
     $webmailInstallStatus = $webmailInstallStatus ?? ['status' => 'idle'];
-    $webmailHostValue = ($webmailConfig['host'] ?? '') ?: \MuseDockPanel\Services\WebmailService::defaultHost();
-    $webmailMailHost = ($webmailConfig['imap_host'] ?? '') ?: \MuseDockPanel\Services\WebmailService::defaultMailHost();
+    $mailModeSupportsWebmailHost = in_array((string)($mailMode ?? ''), ['satellite', 'relay', 'full'], true);
+    $mailBackendPresent = !empty($mailLocalConfigured) || !empty($mailNodes);
+    $mailCanProvideWebmailDefaults = $mailModeSupportsWebmailHost && $mailBackendPresent;
+    $defaultWebmailHost = \MuseDockPanel\Services\WebmailService::defaultHost();
+    $defaultWebmailMailHost = \MuseDockPanel\Services\WebmailService::defaultMailHost();
+
+    $webmailHostValue = (string)($webmailConfig['host'] ?? '');
+    $webmailImapValue = (string)($webmailConfig['imap_host'] ?? '');
+    $webmailSmtpValue = (string)($webmailConfig['smtp_host'] ?? '');
+
+    if ($webmailHostValue === '' && $mailCanProvideWebmailDefaults) {
+        $webmailHostValue = $defaultWebmailHost;
+    }
+    if ($webmailImapValue === '' && $mailCanProvideWebmailDefaults) {
+        $webmailImapValue = $defaultWebmailMailHost;
+    }
+    if ($webmailSmtpValue === '' && $mailCanProvideWebmailDefaults) {
+        $webmailSmtpValue = $defaultWebmailMailHost;
+    }
+
+    $webmailHostPlaceholder = $mailCanProvideWebmailDefaults ? 'webmail.dominio.com' : '';
+    $webmailImapPlaceholder = $mailCanProvideWebmailDefaults ? 'mail.dominio.com' : '';
+    $webmailSmtpPlaceholder = $mailCanProvideWebmailDefaults ? 'mail.dominio.com' : '';
     $webmailStatus = (string)($webmailInstallStatus['status'] ?? 'idle');
     $webmailStage = (string)($webmailInstallStatus['stage'] ?? '');
     $webmailMessage = (string)($webmailInstallStatus['message'] ?? '');
+    $webmailProviderKey = (string)($webmailConfig['provider'] ?? 'roundcube');
+    $webmailProviderLabel = $webmailProviders[$webmailProviderKey]['label'] ?? ucfirst($webmailProviderKey);
+    $webmailConfigured = !empty($webmailConfig['enabled']) || $webmailStatus === 'completed';
+    $webmailConfigCollapsed = $webmailConfigured;
+    $webmailConfigLockedDefault = $webmailConfigured;
+    $webmailMailParamsManaged = $mailCanProvideWebmailDefaults;
 ?>
 <div class="mail-tab-pane<?= $activeTab === 'webmail' ? '' : ' d-none' ?>" data-mail-tab="webmail">
 <div id="webmail" class="card mb-4" style="border-color:rgba(34,197,94,.22);">
     <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
         <span><i class="bi bi-envelope-at me-2"></i>Webmail</span>
-        <span class="text-muted small">Proveedor configurable · Roundcube disponible</span>
+        <div class="d-flex align-items-center gap-2">
+            <?php if (!$isSlave): ?>
+                <span class="badge bg-<?= $webmailConfigured ? 'success' : 'secondary' ?>"><?= $webmailConfigured ? 'Configurado' : 'Pendiente' ?></span>
+                <button class="btn btn-outline-light btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#webmailConfigCollapse" aria-expanded="<?= $webmailConfigCollapsed ? 'false' : 'true' ?>" aria-controls="webmailConfigCollapse">
+                    <i class="bi bi-chevron-down me-1"></i>Configuracion
+                </button>
+            <?php endif; ?>
+            <span class="text-muted small">Proveedor configurable · Roundcube disponible</span>
+        </div>
     </div>
     <div class="card-body">
         <div class="row g-3">
@@ -336,81 +400,112 @@
                 <?php if ($isSlave): ?>
                     <div class="text-muted small">La configuracion de webmail se gestiona desde el master.</div>
                 <?php else: ?>
-                <form method="post" action="/mail/webmail/save" class="row g-3 mb-3" autocomplete="off">
-                    <?= View::csrf() ?>
-                    <div class="col-md-4">
-                        <label class="form-label">Proveedor</label>
-                        <select id="webmail_provider" name="provider" class="form-select">
-                            <?php foreach ($webmailProviders as $key => $provider): ?>
-                                <option value="<?= View::e($key) ?>" <?= ($webmailConfig['provider'] ?? 'roundcube') === $key ? 'selected' : '' ?> <?= ($provider['status'] ?? '') !== 'supported' ? 'disabled' : '' ?>>
-                                    <?= View::e($provider['label']) ?><?= ($provider['status'] ?? '') !== 'supported' ? ' (futuro)' : '' ?>
-                                </option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div class="col-md-8">
-                        <label class="form-label">Hostname webmail</label>
-                        <input id="webmail_host" name="host" class="form-control" value="<?= View::e($webmailHostValue) ?>" placeholder="webmail.dominio.com" autocomplete="off" required>
-                        <div class="form-text text-muted">Debe apuntar por DNS a este servidor o al nodo donde publiques Roundcube.</div>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Servidor IMAP</label>
-                        <input id="webmail_imap_host" name="imap_host" class="form-control" value="<?= View::e($webmailMailHost) ?>" placeholder="mail.dominio.com" autocomplete="off">
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label">Servidor SMTP</label>
-                        <input id="webmail_smtp_host" name="smtp_host" class="form-control" value="<?= View::e(($webmailConfig['smtp_host'] ?? '') ?: $webmailMailHost) ?>" placeholder="mail.dominio.com" autocomplete="off">
-                    </div>
-                    <div class="col-12 d-flex flex-wrap gap-2">
-                        <button class="btn btn-outline-info btn-sm"><i class="bi bi-save me-1"></i>Guardar configuracion</button>
-                    </div>
-                </form>
-
-                <form method="post" action="/mail/webmail/install" class="row g-2 align-items-end" autocomplete="off" onsubmit="syncWebmailInstallForm(); return confirm('Instalar o reconfigurar Roundcube ahora?')">
-                    <?= View::csrf() ?>
-                    <input id="webmail_install_provider" type="hidden" name="provider" value="<?= View::e($webmailConfig['provider'] ?? 'roundcube') ?>">
-                    <input id="webmail_install_host" type="hidden" name="host" value="<?= View::e($webmailHostValue) ?>">
-                    <input id="webmail_install_imap_host" type="hidden" name="imap_host" value="<?= View::e($webmailMailHost) ?>">
-                    <input id="webmail_install_smtp_host" type="hidden" name="smtp_host" value="<?= View::e(($webmailConfig['smtp_host'] ?? '') ?: $webmailMailHost) ?>">
-                    <div class="col-md-7">
-                        <label class="form-label small">Password admin</label>
-                        <input name="admin_password" type="password" class="form-control form-control-sm" autocomplete="new-password" required>
-                        <div class="form-text text-muted">Instala paquetes, descarga Roundcube y crea la ruta Caddy del hostname webmail.</div>
-                    </div>
-                    <div class="col-md-5">
-                        <button class="btn btn-success btn-sm w-100" <?= $webmailStatus === 'running' ? 'disabled' : '' ?>>
-                            <i class="bi bi-download me-1"></i><?= $webmailStatus === 'running' ? 'Instalando...' : 'Instalar / reconfigurar Roundcube' ?>
+                <div class="p-3 rounded mb-3" style="background:#0f172a;border:1px solid #334155;">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                        <div>
+                            <div class="small text-uppercase text-info fw-semibold">Configuracion actual</div>
+                            <div class="small text-muted mt-1">
+                                Proveedor: <strong><?= View::e($webmailProviderLabel) ?></strong> ·
+                                Hostname: <code><?= View::e($webmailHostValue !== '' ? $webmailHostValue : '-') ?></code> ·
+                                IMAP: <code><?= View::e($webmailImapValue !== '' ? $webmailImapValue : '-') ?></code> ·
+                                SMTP: <code><?= View::e($webmailSmtpValue !== '' ? $webmailSmtpValue : '-') ?></code>
+                            </div>
+                        </div>
+                        <button type="button" id="btn-webmail-config-lock" class="btn btn-outline-warning btn-sm" data-locked-default="<?= $webmailConfigLockedDefault ? '1' : '0' ?>">
+                            <i class="bi bi-lock-fill me-1"></i>Datos protegidos
                         </button>
                     </div>
-                </form>
+                    <div class="small text-muted mt-2">Cuando Webmail ya esta configurado, la edicion queda bloqueada por defecto. Pulsa el candado para desbloquear cambios.</div>
+                </div>
 
-                <form method="post" action="/mail/webmail/aliases/store" class="row g-2 align-items-end mt-3" autocomplete="off">
-                    <?= View::csrf() ?>
-                    <div class="col-md-7">
-                        <label class="form-label small">Webmail por dominio de cliente</label>
-                        <input name="host" class="form-control form-control-sm" placeholder="webmail.cliente.com" autocomplete="off">
-                        <div class="form-text text-muted">Añade un hostname extra apuntando al mismo Roundcube. El DNS debe apuntar a este servidor.</div>
-                    </div>
-                    <div class="col-md-5">
-                        <button class="btn btn-outline-light btn-sm w-100" <?= empty($webmailConfig['enabled']) ? 'disabled' : '' ?>>
-                            <i class="bi bi-plus-lg me-1"></i>Añadir hostname webmail
-                        </button>
-                    </div>
-                </form>
+                <div id="webmailConfigCollapse" class="collapse<?= $webmailConfigCollapsed ? '' : ' show' ?>">
+                    <div id="webmail-config-editor" class="<?= $webmailConfigLockedDefault ? 'webmail-config-locked' : '' ?>">
+                        <form method="post" action="/mail/webmail/save" class="row g-3 mb-3" autocomplete="off">
+                            <?= View::csrf() ?>
+                            <div class="col-md-4">
+                                <label class="form-label webmail-lock-label">Proveedor</label>
+                                <select id="webmail_provider" name="provider" class="form-select webmail-lockable">
+                                    <?php foreach ($webmailProviders as $key => $provider): ?>
+                                        <option value="<?= View::e($key) ?>" <?= ($webmailConfig['provider'] ?? 'roundcube') === $key ? 'selected' : '' ?> <?= ($provider['status'] ?? '') !== 'supported' ? 'disabled' : '' ?>>
+                                            <?= View::e($provider['label']) ?><?= ($provider['status'] ?? '') !== 'supported' ? ' (futuro)' : '' ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label webmail-lock-label">Hostname webmail</label>
+                                <input id="webmail_host" name="host" class="form-control webmail-lockable" value="<?= View::e($webmailHostValue) ?>" placeholder="<?= View::e($webmailHostPlaceholder) ?>" autocomplete="off" required>
+                                <div class="form-text text-muted">Debe apuntar por DNS a este servidor o al nodo donde publiques Roundcube.</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label webmail-lock-label <?= $webmailMailParamsManaged ? 'webmail-hard-lock-label' : '' ?>">Servidor IMAP</label>
+                                <input id="webmail_imap_host" name="imap_host" class="form-control webmail-lockable <?= $webmailMailParamsManaged ? 'webmail-hard-locked' : '' ?>" value="<?= View::e($webmailImapValue) ?>" placeholder="<?= View::e($webmailImapPlaceholder) ?>" autocomplete="off" <?= $webmailMailParamsManaged ? 'readonly data-hard-locked="1"' : '' ?>>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label webmail-lock-label <?= $webmailMailParamsManaged ? 'webmail-hard-lock-label' : '' ?>">Servidor SMTP</label>
+                                <input id="webmail_smtp_host" name="smtp_host" class="form-control webmail-lockable <?= $webmailMailParamsManaged ? 'webmail-hard-locked' : '' ?>" value="<?= View::e($webmailSmtpValue) ?>" placeholder="<?= View::e($webmailSmtpPlaceholder) ?>" autocomplete="off" <?= $webmailMailParamsManaged ? 'readonly data-hard-locked="1"' : '' ?>>
+                            </div>
+                            <?php if ($webmailMailParamsManaged): ?>
+                            <div class="col-12">
+                                <div class="small text-warning">
+                                    <i class="bi bi-lock-fill me-1"></i>
+                                    IMAP/SMTP estan gestionados por el modo de correo actual para evitar desincronizacion.
+                                    Si necesitas cambiarlos, hazlo desde <a href="/mail?tab=infra&amp;setup=1" class="text-info">Infra → Configurar servidor de mail</a>.
+                                </div>
+                            </div>
+                            <?php endif; ?>
+                            <div class="col-12 d-flex flex-wrap gap-2">
+                                <button id="webmail-save-btn" class="btn btn-outline-info btn-sm" <?= $webmailConfigLockedDefault ? 'disabled' : '' ?>><i class="bi bi-save me-1"></i>Guardar configuracion</button>
+                            </div>
+                        </form>
 
-                <form method="post" action="/mail/webmail/sieve-enable" class="row g-2 align-items-end mt-3" autocomplete="off" onsubmit="return confirm('Activar Sieve/ManageSieve en los nodos de correo?')">
-                    <?= View::csrf() ?>
-                    <div class="col-md-7">
-                        <label class="form-label small">Filtros, reenvios y vacaciones</label>
-                        <input name="admin_password" type="password" class="form-control form-control-sm" autocomplete="new-password" placeholder="Password admin" required>
-                        <div class="form-text text-muted">Instala/activa Dovecot Sieve y ManageSieve para que Roundcube pueda gestionar filtros y autoresponder.</div>
+                        <form method="post" action="/mail/webmail/install" class="row g-2" autocomplete="off" onsubmit="syncWebmailInstallForm(); return confirm('Instalar o reconfigurar Roundcube ahora?')">
+                            <?= View::csrf() ?>
+                            <input id="webmail_install_provider" type="hidden" name="provider" value="<?= View::e($webmailConfig['provider'] ?? 'roundcube') ?>">
+                            <input id="webmail_install_host" type="hidden" name="host" value="<?= View::e($webmailHostValue) ?>">
+                            <input id="webmail_install_imap_host" type="hidden" name="imap_host" value="<?= View::e($webmailImapValue) ?>">
+                            <input id="webmail_install_smtp_host" type="hidden" name="smtp_host" value="<?= View::e($webmailSmtpValue) ?>">
+                            <div class="col-12">
+                                <label class="form-label small">Password admin</label>
+                                <input name="admin_password" type="password" class="form-control form-control-sm" autocomplete="new-password" required>
+                                <div class="form-text text-muted">Instala paquetes, descarga Roundcube y crea la ruta Caddy del hostname webmail.</div>
+                            </div>
+                            <div class="col-12">
+                                <button class="btn btn-success btn-sm" <?= $webmailStatus === 'running' ? 'disabled' : '' ?>>
+                                    <i class="bi bi-download me-1"></i><?= $webmailStatus === 'running' ? 'Instalando...' : 'Instalar / reconfigurar Roundcube' ?>
+                                </button>
+                            </div>
+                        </form>
+
+                        <form method="post" action="/mail/webmail/aliases/store" class="row g-2 mt-3" autocomplete="off">
+                            <?= View::csrf() ?>
+                            <div class="col-12">
+                                <label class="form-label small">Webmail por dominio de cliente</label>
+                                <input name="host" class="form-control form-control-sm" placeholder="webmail.cliente.com" autocomplete="off">
+                                <div class="form-text text-muted">Añade un hostname extra apuntando al mismo Roundcube. El DNS debe apuntar a este servidor.</div>
+                            </div>
+                            <div class="col-12">
+                                <button class="btn btn-outline-light btn-sm" <?= empty($webmailConfig['enabled']) ? 'disabled' : '' ?>>
+                                    <i class="bi bi-plus-lg me-1"></i>Añadir hostname webmail
+                                </button>
+                            </div>
+                        </form>
+
+                        <form method="post" action="/mail/webmail/sieve-enable" class="row g-2 mt-3" autocomplete="off" onsubmit="return confirm('Activar Sieve/ManageSieve en los nodos de correo?')">
+                            <?= View::csrf() ?>
+                            <div class="col-12">
+                                <label class="form-label small">Filtros, reenvios y vacaciones</label>
+                                <input name="admin_password" type="password" class="form-control form-control-sm" autocomplete="new-password" placeholder="Password admin" required>
+                                <div class="form-text text-muted">Instala/activa Dovecot Sieve y ManageSieve para que Roundcube pueda gestionar filtros y autoresponder.</div>
+                            </div>
+                            <div class="col-12">
+                                <button class="btn btn-outline-warning btn-sm">
+                                    <i class="bi bi-funnel me-1"></i>Activar Sieve/ManageSieve
+                                </button>
+                            </div>
+                        </form>
                     </div>
-                    <div class="col-md-5">
-                        <button class="btn btn-outline-warning btn-sm w-100">
-                            <i class="bi bi-funnel me-1"></i>Activar Sieve/ManageSieve
-                        </button>
-                    </div>
-                </form>
+                </div>
                 <?php endif; ?>
             </div>
         </div>
@@ -425,6 +520,16 @@
     $relayPublicIp = \MuseDockPanel\Settings::get('mail_relay_public_ip', '');
     $relayPublicHost = \MuseDockPanel\Settings::get('mail_outbound_hostname', '') ?: \MuseDockPanel\Settings::get('mail_relay_host', '');
     $relayTruthy = static fn($v): bool => in_array((string)$v, ['1', 't', 'true', 'yes', 'on'], true) || $v === true;
+    $relayDomains = $relayDomains ?? [];
+    $relayTotalDomains = count($relayDomains);
+    $relayActiveCount = 0;
+    foreach ($relayDomains as $rd) {
+        if ((string)($rd['status'] ?? 'pending') === 'active') {
+            $relayActiveCount++;
+        }
+    }
+    $relayPendingCount = max(0, $relayTotalDomains - $relayActiveCount);
+    $relayGuideCollapsed = $relayTotalDomains > 0 && $relayPendingCount === 0;
     $relayQueue = $relayQueue ?? [];
     $relayLogPage = $relayLogPage ?? ['entries' => ($relayLogs ?? []), 'total' => count($relayLogs ?? []), 'page' => 1, 'per_page' => 25, 'pages' => 1];
     $relayPerPageOptions = [25, 100, 200, 500, 1000];
@@ -445,9 +550,33 @@
 <div class="card mb-3" style="border-color:rgba(56,189,248,.28);">
     <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
         <span><i class="bi bi-signpost-split me-2"></i>Como activar un dominio en Relay Privado</span>
-        <a href="/mail?tab=deliverability" class="btn btn-outline-info btn-sm"><i class="bi bi-shield-check me-1"></i>Ir a Entregabilidad</a>
+        <div class="d-flex flex-wrap align-items-center gap-2">
+            <?php if (!$isSlave): ?>
+                <form method="post" action="/mail/relay/domains/refresh-all" class="d-inline">
+                    <?= View::csrf() ?>
+                    <input type="hidden" name="tab" value="relay">
+                    <button class="btn btn-outline-light btn-sm" type="submit">
+                        <i class="bi bi-arrow-repeat me-1"></i>Actualizar estados DNS
+                    </button>
+                </form>
+            <?php endif; ?>
+            <a href="/mail?tab=deliverability" class="btn btn-outline-info btn-sm"><i class="bi bi-shield-check me-1"></i>Ir a Entregabilidad</a>
+            <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#relayGuideBody" aria-expanded="<?= $relayGuideCollapsed ? 'false' : 'true' ?>" aria-controls="relayGuideBody">
+                <i class="bi bi-chevron-down me-1"></i>Mostrar/Ocultar
+            </button>
+        </div>
     </div>
-    <div class="card-body">
+    <div id="relayGuideBody" class="card-body collapse<?= $relayGuideCollapsed ? '' : ' show' ?>">
+        <?php if ($relayTotalDomains > 0): ?>
+            <div class="mb-3 small text-muted">
+                Estado relay: <span class="badge bg-success"><?= $relayActiveCount ?> active</span>
+                <?php if ($relayPendingCount > 0): ?>
+                    <span class="badge bg-warning text-dark"><?= $relayPendingCount ?> pending</span>
+                <?php else: ?>
+                    <span class="badge bg-info text-dark">Todo OK, guia plegada automaticamente</span>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
         <div class="row g-3">
             <div class="col-lg-4">
                 <div class="small text-muted">1. Autoriza el dominio remitente</div>
@@ -702,20 +831,20 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
         <span><i class="bi bi-inboxes me-2"></i>Cola de correo</span>
         <?php if (!$isSlave): ?>
         <div class="d-flex flex-wrap gap-2">
-            <form method="post" action="/mail/relay/queue/flush" class="d-inline">
+            <form method="post" action="/mail/relay/queue/flush" class="d-inline" data-relay-queue-form data-relay-queue-kind="flush">
                 <?= View::csrf() ?>
                 <input type="hidden" name="relay_log_page" value="<?= (int)($relayLogPage['page'] ?? 1) ?>">
                 <input type="hidden" name="relay_log_per_page" value="<?= $relayCurrentPerPage ?>">
                 <button class="btn btn-outline-info btn-sm"><i class="bi bi-arrow-repeat me-1"></i>Reintentar cola</button>
             </form>
-            <form method="post" action="/mail/relay/queue/delete" class="d-inline" onsubmit="return confirm('Eliminar todos los mensajes deferred de la cola?')">
+            <form method="post" action="/mail/relay/queue/delete" class="d-inline" data-relay-queue-form data-relay-queue-kind="delete-deferred">
                 <?= View::csrf() ?>
                 <input type="hidden" name="scope" value="deferred">
                 <input type="hidden" name="relay_log_page" value="<?= (int)($relayLogPage['page'] ?? 1) ?>">
                 <input type="hidden" name="relay_log_per_page" value="<?= $relayCurrentPerPage ?>">
                 <button class="btn btn-outline-warning btn-sm"><i class="bi bi-eraser me-1"></i>Borrar deferred</button>
             </form>
-            <form method="post" action="/mail/relay/queue/delete" class="d-inline" onsubmit="return confirm('Eliminar TODA la cola de Postfix? Esta accion no se puede deshacer.')">
+            <form method="post" action="/mail/relay/queue/delete" class="d-inline" data-relay-queue-form data-relay-queue-kind="delete-all">
                 <?= View::csrf() ?>
                 <input type="hidden" name="scope" value="all">
                 <input type="hidden" name="relay_log_page" value="<?= (int)($relayLogPage['page'] ?? 1) ?>">
@@ -759,7 +888,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                             <td class="small queue-detail"><?= View::e($item['reason'] ?: '-') ?></td>
                             <td class="text-end">
                                 <?php if (!$isSlave && !empty($item['queue_id'])): ?>
-                                <form method="post" action="/mail/relay/queue/delete-message" class="d-inline" onsubmit="return confirm('Eliminar este mensaje de la cola?')">
+                                <form method="post" action="/mail/relay/queue/delete-message" class="d-inline" data-relay-queue-form data-relay-queue-kind="delete-message" data-relay-queue-id="<?= View::e((string)$item['queue_id']) ?>">
                                     <?= View::csrf() ?>
                                     <input type="hidden" name="queue_id" value="<?= View::e($item['queue_id']) ?>">
                                     <input type="hidden" name="relay_log_page" value="<?= (int)($relayLogPage['page'] ?? 1) ?>">
@@ -793,7 +922,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                 </select>
             </form>
             <?php if (!$isSlave): ?>
-            <form method="post" action="/mail/relay/log/clear" class="d-inline" data-relay-log-clear-form>
+            <form method="post" action="/mail/relay/log/clear" class="d-inline" data-relay-queue-form data-relay-queue-kind="clear-log">
                 <?= View::csrf() ?>
                 <input type="hidden" name="relay_log_page" value="<?= (int)($relayLogPage['page'] ?? 1) ?>">
                 <input type="hidden" name="relay_log_per_page" value="<?= $relayCurrentPerPage ?>">
@@ -1156,7 +1285,18 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
 <div class="card mt-4 mb-4">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-shield-check me-2"></i>Entregabilidad DNS</span>
-        <span class="text-muted small">SPF, DKIM, DMARC, PTR y blacklists</span>
+        <div class="d-flex align-items-center gap-2">
+            <?php if (($mailMode ?? 'full') === 'relay' && !$isSlave): ?>
+                <form method="post" action="/mail/relay/domains/refresh-all" class="d-inline">
+                    <?= View::csrf() ?>
+                    <input type="hidden" name="tab" value="deliverability">
+                    <button class="btn btn-outline-light btn-sm">
+                        <i class="bi bi-arrow-repeat me-1"></i>Actualizar estado BD relay
+                    </button>
+                </form>
+            <?php endif; ?>
+            <span class="text-muted small">SPF, DKIM, DMARC, PTR y blacklists</span>
+        </div>
     </div>
     <div class="card-body">
         <p class="text-muted small mb-3">
@@ -1204,11 +1344,29 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                                 Host salida: <code><?= View::e($row['mail_hostname'] ?? '-') ?></code> ·
                                 IP: <code><?= View::e($row['ip'] ?? '-') ?></code>
                             </div>
+                            <?php if (($row['mode'] ?? '') === 'relay' && !empty($row['relay_domain_id'])): ?>
+                                <div class="small text-muted mt-1">
+                                    Estado BD relay:
+                                    <span class="badge bg-<?= ($row['relay_db_status'] ?? '') === 'active' ? 'success' : 'secondary' ?>"><?= View::e($row['relay_db_status'] ?: 'pending') ?></span>
+                                    <?php if (!empty($row['relay_last_dns_check_at'])): ?>
+                                        · ultimo check: <?= View::e($row['relay_last_dns_check_at']) ?>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endif; ?>
                         </div>
                         <div class="d-flex align-items-center gap-2">
                             <span class="badge bg-<?= $score >= $scoreTotal ? 'success' : ($score >= 3 ? 'warning text-dark' : 'danger') ?>">
                                 Puntuacion <?= $score ?>/<?= $scoreTotal ?>
                             </span>
+                            <?php if (($row['mode'] ?? '') === 'relay' && !empty($row['relay_domain_id']) && !$isSlave): ?>
+                                <form method="post" action="/mail/relay/domains/<?= (int)$row['relay_domain_id'] ?>/refresh" class="d-inline">
+                                    <?= View::csrf() ?>
+                                    <input type="hidden" name="tab" value="deliverability">
+                                    <button class="btn btn-outline-info btn-sm" type="submit">
+                                        <i class="bi bi-arrow-clockwise me-1"></i>Refrescar BD
+                                    </button>
+                                </form>
+                            <?php endif; ?>
                             <button class="btn btn-outline-light btn-sm" type="button" onclick="copyDnsRecords(this)" data-records="<?= View::e($copyText) ?>">
                                 <i class="bi bi-clipboard me-1"></i>Copiar DNS
                             </button>
@@ -1349,6 +1507,55 @@ function syncWebmailInstallForm() {
     }
 }
 
+function setWebmailConfigLocked(locked) {
+    const editor = document.getElementById('webmail-config-editor');
+    const btn = document.getElementById('btn-webmail-config-lock');
+    const saveBtn = document.getElementById('webmail-save-btn');
+    if (!editor || !btn || !saveBtn) return;
+
+    const isLocked = !!locked;
+    editor.classList.toggle('webmail-config-locked', isLocked);
+
+    editor.querySelectorAll('.webmail-lockable').forEach((el) => {
+        const hardLocked = el.dataset.hardLocked === '1';
+        if (el.tagName === 'SELECT') {
+            if (hardLocked) {
+                el.tabIndex = -1;
+                return;
+            }
+            el.tabIndex = isLocked ? -1 : 0;
+            return;
+        }
+        if (hardLocked) {
+            el.readOnly = true;
+            return;
+        }
+        el.readOnly = isLocked;
+    });
+
+    saveBtn.disabled = isLocked;
+    if (isLocked) {
+        btn.className = 'btn btn-outline-warning btn-sm';
+        btn.innerHTML = '<i class="bi bi-lock-fill me-1"></i>Datos protegidos';
+    } else {
+        btn.className = 'btn btn-outline-success btn-sm';
+        btn.innerHTML = '<i class="bi bi-unlock-fill me-1"></i>Datos desbloqueados';
+    }
+}
+
+function initWebmailConfigLock() {
+    const btn = document.getElementById('btn-webmail-config-lock');
+    if (!btn) return;
+
+    let locked = btn.dataset.lockedDefault === '1';
+    setWebmailConfigLocked(locked);
+
+    btn.addEventListener('click', () => {
+        locked = !locked;
+        setWebmailConfigLocked(locked);
+    });
+}
+
 function copyDnsRecords(btn) {
     const text = btn.getAttribute('data-records') || '';
     navigator.clipboard.writeText(text).then(() => {
@@ -1431,24 +1638,84 @@ function copyDnsRecords(btn) {
     applyTab(initialTab, false);
 })();
 
-(function initRelayLogClearForm() {
-    const form = document.querySelector('[data-relay-log-clear-form]');
-    if (!form) return;
+initWebmailConfigLock();
 
-    form.addEventListener('submit', async function (event) {
-        event.preventDefault();
-        const result = await SwalDark.fire({
+(function initRelayQueueConfirmations() {
+    const forms = Array.from(document.querySelectorAll('form[data-relay-queue-form]'));
+    if (!forms.length) return;
+
+    const kindConfig = {
+        'flush': {
+            icon: 'question',
+            title: 'Reintentar cola de correo',
+            html: '<div class="text-start small">Se ejecutara <code>postqueue -f</code> para reintentar entregas pendientes.</div>',
+            confirmButtonText: 'Si, reintentar',
+            confirmButtonColor: '#0ea5e9'
+        },
+        'delete-deferred': {
+            icon: 'warning',
+            title: 'Borrar mensajes deferred',
+            html: '<div class="text-start small">Se eliminaran todos los mensajes en cola <code>deferred</code>.</div>',
+            confirmButtonText: 'Si, borrar deferred',
+            confirmButtonColor: '#f59e0b'
+        },
+        'delete-all': {
+            icon: 'warning',
+            title: 'Borrar toda la cola',
+            html: '<div class="text-start small">Se eliminara <strong>toda</strong> la cola de Postfix. Esta accion no se puede deshacer.</div>',
+            confirmButtonText: 'Si, borrar toda',
+            confirmButtonColor: '#ef4444'
+        },
+        'delete-message': {
+            icon: 'warning',
+            title: 'Eliminar mensaje de la cola',
+            html: '<div class="text-start small">Se eliminara el mensaje seleccionado de la cola de Postfix.</div>',
+            confirmButtonText: 'Si, eliminar mensaje',
+            confirmButtonColor: '#ef4444'
+        },
+        'clear-log': {
             icon: 'warning',
             title: 'Borrar historico del relay',
             html: '<div class="text-start small">Se vaciara <code>mail.log</code> (y/o <code>maillog</code>) en este nodo. Esta accion no se puede deshacer.</div>',
-            showCancelButton: true,
             confirmButtonText: 'Si, borrar historico',
-            cancelButtonText: 'Cancelar',
-            reverseButtons: true
-        });
-        if (result.isConfirmed) {
-            form.submit();
+            confirmButtonColor: '#ef4444'
         }
+    };
+
+    forms.forEach((form) => {
+        form.addEventListener('submit', async function (event) {
+            event.preventDefault();
+
+            const kind = form.dataset.relayQueueKind || '';
+            const cfg = kindConfig[kind];
+            if (!cfg) {
+                form.submit();
+                return;
+            }
+
+            let html = cfg.html;
+            if (kind === 'delete-message') {
+                const queueId = (form.dataset.relayQueueId || '').trim();
+                if (queueId !== '') {
+                    html = '<div class="text-start small mb-2">Queue ID: <code>' + queueId + '</code></div>' + html;
+                }
+            }
+
+            const result = await SwalDark.fire({
+                icon: cfg.icon,
+                title: cfg.title,
+                html: html,
+                showCancelButton: true,
+                confirmButtonText: cfg.confirmButtonText,
+                confirmButtonColor: cfg.confirmButtonColor,
+                cancelButtonText: 'Cancelar',
+                reverseButtons: true
+            });
+
+            if (result.isConfirmed) {
+                form.submit();
+            }
+        });
     });
 })();
 

@@ -538,6 +538,9 @@ class MailService
                     'spf_record' => '',
                     'dmarc_policy' => 'quarantine',
                     'mail_mode' => 'relay',
+                    'relay_domain_id' => (int)($relayDomain['id'] ?? 0),
+                    'relay_db_status' => (string)($relayDomain['status'] ?? 'pending'),
+                    'relay_last_dns_check_at' => (string)($relayDomain['last_dns_check_at'] ?? ''),
                 ];
             }
         }
@@ -576,6 +579,9 @@ class MailService
                 'recommended' => $recommended,
                 'score' => $score['ok'],
                 'score_total' => $score['total'],
+                'relay_domain_id' => isset($domain['relay_domain_id']) ? (int)$domain['relay_domain_id'] : null,
+                'relay_db_status' => isset($domain['relay_db_status']) ? (string)$domain['relay_db_status'] : '',
+                'relay_last_dns_check_at' => isset($domain['relay_last_dns_check_at']) ? (string)$domain['relay_last_dns_check_at'] : '',
             ];
         }
 
@@ -817,6 +823,59 @@ class MailService
         ], 'id = :id', ['id' => $id]);
 
         return ['ok' => true, 'checks' => $checks, 'status' => $active ? 'active' : 'pending'];
+    }
+
+    public static function refreshAllRelayDomains(): array
+    {
+        $rows = self::getRelayDomains();
+        if (empty($rows)) {
+            return [
+                'ok' => true,
+                'total' => 0,
+                'updated' => 0,
+                'active' => 0,
+                'pending' => 0,
+                'errors' => [],
+            ];
+        }
+
+        $updated = 0;
+        $active = 0;
+        $pending = 0;
+        $errors = [];
+
+        foreach ($rows as $row) {
+            $id = (int)($row['id'] ?? 0);
+            if ($id <= 0) {
+                continue;
+            }
+
+            $result = self::refreshRelayDomain($id);
+            if (!($result['ok'] ?? false)) {
+                $errors[] = [
+                    'id' => $id,
+                    'domain' => (string)($row['domain'] ?? ''),
+                    'error' => (string)($result['error'] ?? 'Error desconocido'),
+                ];
+                continue;
+            }
+
+            $updated++;
+            if (($result['status'] ?? '') === 'active') {
+                $active++;
+            } else {
+                $pending++;
+            }
+        }
+
+        return [
+            'ok' => empty($errors),
+            'total' => count($rows),
+            'updated' => $updated,
+            'active' => $active,
+            'pending' => $pending,
+            'errors' => $errors,
+        ];
     }
 
     public static function deleteRelayDomain(int $id): array

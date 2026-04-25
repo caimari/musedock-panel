@@ -2,6 +2,22 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.108] — 2026-04-25
+
+### New
+- `/mail?tab=infra&setup=1`: el instalador de mail ahora precarga la configuracion actual (modo, destino local/remoto, hostname, relay/WireGuard/SMTP) y muestra un resumen de "modo actual configurado".
+- `/mail?tab=relay` y `/mail?tab=deliverability`: nuevo refresco masivo de dominios relay para sincronizar estado DNS en BD (`active/pending`) desde un solo boton.
+
+### Improved
+- `/mail?tab=webmail`: la configuracion queda plegable cuando ya esta configurada, mostrando resumen actual de proveedor/host/IMAP/SMTP.
+- `/mail?tab=webmail`: edicion protegida por candado con bloqueo por defecto; los parametros IMAP/SMTP gestionados por el modo de correo quedan bloqueados en duro con aviso para evitar romper la configuracion.
+- `/mail?tab=webmail`: los inputs solo se autocompletan con defaults cuando hay backend de mail capaz de proveerlos; si no, quedan vacios (sin placeholders forzados).
+- `/mail?tab=webmail`: reorganizacion visual para dejar cada boton de accion debajo de su bloque funcional (instalacion, hostnames extra, sieve).
+- `/mail?tab=queue`: todas las acciones destructivas y de mantenimiento de cola/historico usan confirmaciones SweetAlert2 en lugar de `confirm()` nativo.
+
+### Fixed
+- `/mail`: al refrescar un dominio relay se conserva la pestaña de origen (`relay` o `deliverability`) y no se fuerza volver siempre a `relay`.
+
 ## [1.0.107] — 2026-04-25
 
 ### New

@@ -1,4 +1,26 @@
-<?php use MuseDockPanel\View; ?>
+<?php
+use MuseDockPanel\View;
+
+$prefill = is_array($mailSetupPrefill ?? null) ? $mailSetupPrefill : [];
+$mailModes = ['satellite', 'relay', 'full', 'external'];
+$selectedMailMode = in_array((string)($prefill['mail_mode'] ?? ''), $mailModes, true)
+    ? (string)$prefill['mail_mode']
+    : 'full';
+$selectedSetupMode = (string)($prefill['setup_mode'] ?? 'local') === 'remote' ? 'remote' : 'local';
+$selectedNodeId = (int)($prefill['node_id'] ?? 0);
+$modeLabels = [
+    'satellite' => 'Solo Envio',
+    'relay' => 'Relay Privado',
+    'full' => 'Correo Completo',
+    'external' => 'SMTP Externo',
+];
+$currentModeLabel = $modeLabels[$selectedMailMode] ?? 'Correo Completo';
+$targetLabel = trim((string)($prefill['target_label'] ?? 'Este servidor (local)'));
+$pf = static function (string $key, string $default = '') use ($prefill): string {
+    $value = $prefill[$key] ?? $default;
+    return is_scalar($value) ? (string)$value : $default;
+};
+?>
 
 <!-- Mail Node Setup — launched from mail index or cluster settings -->
 <style>
@@ -23,6 +45,30 @@
     .mail-setup-panel .small,
     .mail-setup-panel p {
         color: #cbd5e1 !important;
+    }
+    .setup-lock-btn {
+        min-width: 200px;
+    }
+    .setup-lock-btn .bi {
+        pointer-events: none;
+    }
+    #form-mail-setup.setup-form-locked .setup-lockable:not([type="radio"]):not([type="checkbox"]) {
+        background-color: #111827;
+        border-color: #475569;
+        color: #93c5fd;
+    }
+    #form-mail-setup.setup-form-locked select.setup-lockable {
+        pointer-events: none;
+    }
+    #form-mail-setup.setup-form-locked .setup-lock-radio {
+        pointer-events: none;
+        opacity: .82;
+    }
+    #form-mail-setup.setup-form-locked .setup-lock-label::after {
+        content: " \f47a";
+        font-family: "bootstrap-icons";
+        font-size: .85em;
+        color: #f59e0b;
     }
 </style>
 <div class="card mb-4" id="mail-setup-card">
@@ -62,14 +108,14 @@
                     <label class="form-label fw-semibold">Donde instalar el servidor de mail</label>
                     <div class="d-flex gap-2">
                         <div class="form-check form-check-inline flex-fill">
-                            <input class="form-check-input" type="radio" name="setup_mode" id="mode-local" value="local" checked onchange="toggleSetupMode()">
+                            <input class="form-check-input setup-lockable setup-lock-radio" type="radio" name="setup_mode" id="mode-local" value="local" <?= $selectedSetupMode === 'local' ? 'checked' : '' ?> onchange="toggleSetupMode()">
                             <label class="form-check-label" for="mode-local">
                                 <i class="bi bi-pc-display me-1"></i> Este servidor (local)
                                 <small class="d-block text-muted ms-4">Instala mail en la misma maquina donde estas viendo el panel.</small>
                             </label>
                         </div>
                         <div class="form-check form-check-inline flex-fill">
-                            <input class="form-check-input" type="radio" name="setup_mode" id="mode-remote" value="remote" onchange="toggleSetupMode()" <?= empty($clusterNodes) ? 'disabled' : '' ?>>
+                            <input class="form-check-input setup-lockable setup-lock-radio" type="radio" name="setup_mode" id="mode-remote" value="remote" <?= $selectedSetupMode === 'remote' ? 'checked' : '' ?> onchange="toggleSetupMode()" <?= empty($clusterNodes) ? 'disabled' : '' ?>>
                             <label class="form-check-label <?= empty($clusterNodes) ? 'text-muted' : '' ?>" for="mode-remote">
                                 <i class="bi bi-hdd-network me-1"></i> Nodo remoto del cluster
                                 <small class="d-block text-muted ms-4">Instala mail en un slave/nodo dedicado, gestionado desde este master.</small>
@@ -107,9 +153,27 @@
                 </div>
             </div>
 
-            <form id="form-mail-setup" onsubmit="return startMailSetup(event)" autocomplete="off">
+            <div class="mail-setup-panel rounded p-3 mb-3">
+                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+                    <div>
+                        <div class="small text-uppercase text-info fw-semibold">Modo actual configurado</div>
+                        <div class="d-flex align-items-center gap-2 flex-wrap mt-1">
+                            <span class="badge bg-info text-dark"><?= View::e($currentModeLabel) ?></span>
+                            <span class="small text-muted">Destino: <?= View::e($targetLabel !== '' ? $targetLabel : 'Este servidor (local)') ?></span>
+                        </div>
+                    </div>
+                    <button type="button" id="btn-toggle-setup-lock" class="btn btn-outline-warning btn-sm setup-lock-btn">
+                        <i class="bi bi-lock-fill me-1"></i> Datos protegidos
+                    </button>
+                </div>
+                <div class="small text-muted mt-2">
+                    Los datos aparecen precargados y bloqueados por defecto. Pulsa el candado para desbloquear la edicion manual.
+                </div>
+            </div>
+
+            <form id="form-mail-setup" class="setup-form-locked" onsubmit="return startMailSetup(event)" autocomplete="off">
                 <?= View::csrf() ?>
-                <input type="hidden" name="setup_mode" id="hidden-setup-mode" value="local">
+                <input type="hidden" name="setup_mode" id="hidden-setup-mode" value="<?= View::e($selectedSetupMode) ?>">
                 <input type="hidden" name="db_host" value="localhost">
                 <input type="text" name="mail_setup_autofill_user" autocomplete="username" tabindex="-1" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;opacity:0;">
                 <input type="password" name="mail_setup_autofill_password" autocomplete="current-password" tabindex="-1" aria-hidden="true" style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;opacity:0;">
@@ -125,28 +189,28 @@
                         <div class="row g-2">
                             <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100">
-                                    <input class="form-check-input me-2" type="radio" name="mail_mode" value="satellite" onchange="toggleMailMode()">
+                                    <input class="form-check-input me-2 setup-lockable setup-lock-radio" type="radio" name="mail_mode" value="satellite" <?= $selectedMailMode === 'satellite' ? 'checked' : '' ?> onchange="toggleMailMode()">
                                     <strong>Solo Envio</strong>
                                     <small class="d-block mt-1" style="color:#cbd5e1;">Para SaaS local, formularios y notificaciones. Escucha en localhost, firma DKIM y no recibe correo publico.</small>
                                 </label>
                             </div>
                             <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100">
-                                    <input class="form-check-input me-2" type="radio" name="mail_mode" value="relay" onchange="toggleMailMode()">
+                                    <input class="form-check-input me-2 setup-lockable setup-lock-radio" type="radio" name="mail_mode" value="relay" <?= $selectedMailMode === 'relay' ? 'checked' : '' ?> onchange="toggleMailMode()">
                                     <strong>Relay Privado</strong>
                                     <small class="d-block mt-1" style="color:#cbd5e1;">Para que otros servidores envien por WireGuard con usuario SMTP. Incluye lo de Solo Envio y centraliza la salida.</small>
                                 </label>
                             </div>
                             <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100">
-                                    <input class="form-check-input me-2" type="radio" name="mail_mode" value="full" checked onchange="toggleMailMode()">
+                                    <input class="form-check-input me-2 setup-lockable setup-lock-radio" type="radio" name="mail_mode" value="full" <?= $selectedMailMode === 'full' ? 'checked' : '' ?> onchange="toggleMailMode()">
                                     <strong>Correo Completo</strong>
                                     <small class="d-block mt-1" style="color:#cbd5e1;">Para buzones IMAP, recepcion, webmail y antispam. Requiere MX, PTR y puertos 25/587/993 abiertos.</small>
                                 </label>
                             </div>
                             <div class="col-md-3">
                                 <label class="mail-mode-card p-3 rounded d-block h-100">
-                                    <input class="form-check-input me-2" type="radio" name="mail_mode" value="external" onchange="toggleMailMode()">
+                                    <input class="form-check-input me-2 setup-lockable setup-lock-radio" type="radio" name="mail_mode" value="external" <?= $selectedMailMode === 'external' ? 'checked' : '' ?> onchange="toggleMailMode()">
                                     <strong>SMTP Externo</strong>
                                     <small class="d-block mt-1" style="color:#cbd5e1;">Para delegar envio en SES, Mailgun, Brevo u otro proveedor. No instala servidor local.</small>
                                 </label>
@@ -165,41 +229,41 @@
 
                     <!-- Node selector (remote only) -->
                     <div class="col-md-6" id="node-selector-row" style="display: none;">
-                        <label class="form-label">Nodo de mail</label>
-                        <select name="node_id" id="setup-node-id" class="form-select">
+                        <label class="form-label setup-lock-label">Nodo de mail</label>
+                        <select name="node_id" id="setup-node-id" class="form-select setup-lockable">
                             <option value="">Seleccionar nodo...</option>
                             <?php foreach ($clusterNodes as $n): ?>
-                                <option value="<?= $n['id'] ?>"><?= View::e($n['name']) ?> (<?= View::e($n['api_url']) ?>)</option>
+                                <option value="<?= $n['id'] ?>" <?= (int)$n['id'] === $selectedNodeId ? 'selected' : '' ?>><?= View::e($n['name']) ?> (<?= View::e($n['api_url']) ?>)</option>
                             <?php endforeach; ?>
                         </select>
                     </div>
                     <div class="col-md-6 mb-2">
-                        <label class="form-label">Hostname de mail</label>
-                        <input type="text" name="mail_hostname" class="form-control" placeholder="mail.example.com" value="" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true" required>
+                        <label class="form-label setup-lock-label">Hostname de mail</label>
+                        <input type="text" name="mail_hostname" class="form-control setup-lockable" placeholder="mail.example.com" value="<?= View::e($pf('mail_hostname')) ?>" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true" required>
                         <small class="text-muted mode-help mode-full">Nombre publico del servidor. Debe tener A hacia esta IP, MX del dominio apuntando aqui, PTR/rDNS idealmente igual y puertos 25/587/993 abiertos. Ej: mail.example.com.</small>
                         <small class="text-muted mode-help mode-satellite" style="display:none;">Nombre de salida/EHLO del servidor. Debe tener A y PTR/rDNS correctos. Ej: mail.example.com o mailout.example.com.</small>
                         <small class="text-muted mode-help mode-relay" style="display:none;">Nombre publico del relay para reputacion, SPF, PTR y DKIM. Los clientes remotos conectan por la IP WireGuard, no por la IP publica. Ej: relay.example.net.</small>
                     </div>
                     <div class="col-md-6 mb-2 mode-satellite-field mode-relay-field" style="display:none;">
-                        <label class="form-label">Dominio remitente</label>
-                        <input type="text" name="outbound_domain" class="form-control" placeholder="dominio.com" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
+                        <label class="form-label setup-lock-label">Dominio remitente</label>
+                        <input type="text" name="outbound_domain" class="form-control setup-lockable" placeholder="dominio.com" value="<?= View::e($pf('outbound_domain')) ?>" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
                         <small class="text-muted">Dominio que firmara DKIM y tendra SPF/DMARC. Ej: si la app envia desde noreply@example.com, escribe example.com.</small>
                     </div>
                     <div class="col-12 mt-2 mode-relay-field" style="display:none;">
                         <div class="mail-setup-panel row g-3 p-3 rounded">
                             <div class="col-md-4">
-                                <label class="form-label">IP WireGuard del relay</label>
-                                <input type="text" name="wireguard_ip" class="form-control" placeholder="10.10.70.10" autocomplete="off" inputmode="decimal" data-lpignore="true" data-1p-ignore="true">
+                                <label class="form-label setup-lock-label">IP WireGuard del relay</label>
+                                <input type="text" name="wireguard_ip" class="form-control setup-lockable" placeholder="10.10.70.10" value="<?= View::e($pf('wireguard_ip')) ?>" autocomplete="off" inputmode="decimal" data-lpignore="true" data-1p-ignore="true">
                                 <small class="text-muted">Postfix 587 escuchara en esta IP privada. Los servidores remotos usaran esta IP como MAIL_HOST.</small>
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label">Red WireGuard autorizada</label>
-                                <input type="text" name="wireguard_cidr" class="form-control" value="10.10.70.0/24" autocomplete="off" inputmode="decimal" data-lpignore="true" data-1p-ignore="true">
+                                <label class="form-label setup-lock-label">Red WireGuard autorizada</label>
+                                <input type="text" name="wireguard_cidr" class="form-control setup-lockable" value="<?= View::e($pf('wireguard_cidr', '10.10.70.0/24')) ?>" autocomplete="off" inputmode="decimal" data-lpignore="true" data-1p-ignore="true">
                                 <small class="text-muted">Rango privado que podra llegar al relay. Normalmente 10.10.70.0/24.</small>
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label">IP publica del relay</label>
-                                <input type="text" name="relay_public_ip" class="form-control" placeholder="Se detecta automaticamente si lo dejas vacio" autocomplete="off" inputmode="decimal" data-lpignore="true" data-1p-ignore="true">
+                                <label class="form-label setup-lock-label">IP publica del relay</label>
+                                <input type="text" name="relay_public_ip" class="form-control setup-lockable" placeholder="Se detecta automaticamente si lo dejas vacio" value="<?= View::e($pf('relay_public_ip')) ?>" autocomplete="off" inputmode="decimal" data-lpignore="true" data-1p-ignore="true">
                                 <small class="text-muted">Opcional. Si se deja vacia, se detecta. Se usa para SPF, PTR/rDNS y comprobaciones de reputacion.</small>
                             </div>
                         </div>
@@ -210,22 +274,22 @@
                                 <strong class="small">Failover opcional: relay privado → SMTP externo</strong>
                                 <div class="small text-muted">Si rellenas estos campos, Postfix local enviara por el relay WireGuard y cambiara al SMTP externo si el relay no responde. Para SaaS local puro puedes dejarlos vacios.</div>
                             </div>
-                            <div class="col-md-3"><label class="form-label">Relay host/IP</label><input name="relay_host" class="form-control" placeholder="10.10.70.10" autocomplete="off" data-lpignore="true" data-1p-ignore="true"></div>
-                            <div class="col-md-2"><label class="form-label">Puerto relay</label><input name="relay_port" type="number" class="form-control" value="587" autocomplete="off"></div>
-                            <div class="col-md-3"><label class="form-label">Usuario relay</label><input name="relay_user" class="form-control" autocomplete="off" data-lpignore="true" data-1p-ignore="true"></div>
-                            <div class="col-md-4"><label class="form-label">Password relay</label><input name="relay_password" type="password" class="form-control" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true"></div>
-                            <div class="col-md-3"><label class="form-label">Fallback SMTP</label><input name="fallback_smtp_host" class="form-control" placeholder="smtp.proveedor.com" autocomplete="off" data-lpignore="true" data-1p-ignore="true"></div>
-                            <div class="col-md-2"><label class="form-label">Puerto fallback</label><input name="fallback_smtp_port" type="number" class="form-control" value="587" autocomplete="off"></div>
-                            <div class="col-md-3"><label class="form-label">Usuario fallback</label><input name="fallback_smtp_user" class="form-control" autocomplete="off" data-lpignore="true" data-1p-ignore="true"></div>
-                            <div class="col-md-4"><label class="form-label">Password fallback</label><input name="fallback_smtp_password" type="password" class="form-control" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true"></div>
+                            <div class="col-md-3"><label class="form-label setup-lock-label">Relay host/IP</label><input name="relay_host" class="form-control setup-lockable" placeholder="10.10.70.10" value="<?= View::e($pf('relay_host')) ?>" autocomplete="off" data-lpignore="true" data-1p-ignore="true"></div>
+                            <div class="col-md-2"><label class="form-label setup-lock-label">Puerto relay</label><input name="relay_port" type="number" class="form-control setup-lockable" value="<?= View::e($pf('relay_port', '587')) ?>" autocomplete="off"></div>
+                            <div class="col-md-3"><label class="form-label setup-lock-label">Usuario relay</label><input name="relay_user" class="form-control setup-lockable" value="<?= View::e($pf('relay_user')) ?>" autocomplete="off" data-lpignore="true" data-1p-ignore="true"></div>
+                            <div class="col-md-4"><label class="form-label setup-lock-label">Password relay</label><input name="relay_password" type="password" class="form-control setup-lockable" value="<?= View::e($pf('relay_password')) ?>" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true"></div>
+                            <div class="col-md-3"><label class="form-label setup-lock-label">Fallback SMTP</label><input name="fallback_smtp_host" class="form-control setup-lockable" placeholder="smtp.proveedor.com" value="<?= View::e($pf('fallback_smtp_host')) ?>" autocomplete="off" data-lpignore="true" data-1p-ignore="true"></div>
+                            <div class="col-md-2"><label class="form-label setup-lock-label">Puerto fallback</label><input name="fallback_smtp_port" type="number" class="form-control setup-lockable" value="<?= View::e($pf('fallback_smtp_port', '587')) ?>" autocomplete="off"></div>
+                            <div class="col-md-3"><label class="form-label setup-lock-label">Usuario fallback</label><input name="fallback_smtp_user" class="form-control setup-lockable" value="<?= View::e($pf('fallback_smtp_user')) ?>" autocomplete="off" data-lpignore="true" data-1p-ignore="true"></div>
+                            <div class="col-md-4"><label class="form-label setup-lock-label">Password fallback</label><input name="fallback_smtp_password" type="password" class="form-control setup-lockable" value="<?= View::e($pf('fallback_smtp_password')) ?>" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true"></div>
                         </div>
                     </div>
                     <div class="col-md-6 mode-full-field">
-                        <label class="form-label">Certificado SSL del correo</label>
-                        <select name="ssl_mode" class="form-select">
-                            <option value="letsencrypt">Let's Encrypt (automatico)</option>
-                            <option value="selfsigned">Auto-firmado (testing)</option>
-                            <option value="manual">Manual (ya tengo certificados)</option>
+                        <label class="form-label setup-lock-label">Certificado SSL del correo</label>
+                        <select name="ssl_mode" class="form-select setup-lockable">
+                            <option value="letsencrypt" <?= $pf('ssl_mode', 'letsencrypt') === 'letsencrypt' ? 'selected' : '' ?>>Let's Encrypt (automatico)</option>
+                            <option value="selfsigned" <?= $pf('ssl_mode', 'letsencrypt') === 'selfsigned' ? 'selected' : '' ?>>Auto-firmado (testing)</option>
+                            <option value="manual" <?= $pf('ssl_mode', 'letsencrypt') === 'manual' ? 'selected' : '' ?>>Manual (ya tengo certificados)</option>
                         </select>
                         <small class="text-muted">
                             Solo aplica a <strong>Correo Completo</strong>. El certificado se instala en el servidor elegido:
@@ -235,36 +299,36 @@
                     <div class="col-12 mt-3 mode-external-field" style="display:none;">
                         <div class="mail-setup-panel row g-3 p-3 rounded">
                             <div class="col-md-6">
-                                <label class="form-label">Servidor SMTP</label>
-                                <input type="text" name="smtp_host" class="form-control" placeholder="smtp.proveedor.com" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
+                                <label class="form-label setup-lock-label">Servidor SMTP</label>
+                                <input type="text" name="smtp_host" class="form-control setup-lockable" placeholder="smtp.proveedor.com" value="<?= View::e($pf('smtp_host')) ?>" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
                             </div>
                             <div class="col-md-2">
-                                <label class="form-label">Puerto</label>
-                                <input type="number" name="smtp_port" class="form-control" value="587" autocomplete="off">
+                                <label class="form-label setup-lock-label">Puerto</label>
+                                <input type="number" name="smtp_port" class="form-control setup-lockable" value="<?= View::e($pf('smtp_port', '587')) ?>" autocomplete="off">
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label">Cifrado</label>
-                                <select name="smtp_encryption" class="form-select">
-                                    <option value="tls">TLS / STARTTLS</option>
-                                    <option value="ssl">SSL</option>
-                                    <option value="none">Sin cifrado</option>
+                                <label class="form-label setup-lock-label">Cifrado</label>
+                                <select name="smtp_encryption" class="form-select setup-lockable">
+                                    <option value="tls" <?= $pf('smtp_encryption', 'tls') === 'tls' ? 'selected' : '' ?>>TLS / STARTTLS</option>
+                                    <option value="ssl" <?= $pf('smtp_encryption', 'tls') === 'ssl' ? 'selected' : '' ?>>SSL</option>
+                                    <option value="none" <?= $pf('smtp_encryption', 'tls') === 'none' ? 'selected' : '' ?>>Sin cifrado</option>
                                 </select>
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">Usuario SMTP</label>
-                                <input type="text" name="smtp_user" class="form-control" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
+                                <label class="form-label setup-lock-label">Usuario SMTP</label>
+                                <input type="text" name="smtp_user" class="form-control setup-lockable" value="<?= View::e($pf('smtp_user')) ?>" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">Password SMTP</label>
-                                <input type="password" name="smtp_password" class="form-control" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true">
+                                <label class="form-label setup-lock-label">Password SMTP</label>
+                                <input type="password" name="smtp_password" class="form-control setup-lockable" value="<?= View::e($pf('smtp_password')) ?>" autocomplete="new-password" data-lpignore="true" data-1p-ignore="true">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">From address</label>
-                                <input type="email" name="from_address" class="form-control" placeholder="noreply@dominio.com" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
+                                <label class="form-label setup-lock-label">From address</label>
+                                <input type="email" name="from_address" class="form-control setup-lockable" placeholder="noreply@dominio.com" value="<?= View::e($pf('from_address')) ?>" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
                             </div>
                             <div class="col-md-6">
-                                <label class="form-label">From name</label>
-                                <input type="text" name="from_name" class="form-control" placeholder="Nombre visible del remitente" value="" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
+                                <label class="form-label setup-lock-label">From name</label>
+                                <input type="text" name="from_name" class="form-control setup-lockable" placeholder="Nombre visible del remitente" value="<?= View::e($pf('from_name')) ?>" autocomplete="off" data-lpignore="true" data-1p-ignore="true">
                             </div>
                             <div class="col-12">
                                 <small class="text-muted">Estos datos solo se guardan para que el panel y las apps locales puedan enviar por tu proveedor SMTP. El nombre visible es opcional.</small>
@@ -476,14 +540,22 @@ let pollTimer = null;
 let pollNodeId = null;
 let pollTaskId = null;
 let pollStartTime = null;
-let setupMode = 'local';
+let setupMode = document.getElementById('hidden-setup-mode')?.value === 'remote' ? 'remote' : 'local';
+let setupFormLocked = true;
+let lockedSetupMode = setupMode;
+let lockedMailMode = null;
 
 function currentMailMode() {
     return document.querySelector('input[name="mail_mode"]:checked')?.value || 'full';
 }
 
-function toggleMailMode() {
-    const mode = currentMailMode();
+function toggleMailMode(force = false) {
+    let mode = currentMailMode();
+    if (setupFormLocked && !force && lockedMailMode) {
+        mode = lockedMailMode;
+        const lockedRadio = document.querySelector('input[name="mail_mode"][value="' + lockedMailMode + '"]');
+        if (lockedRadio) lockedRadio.checked = true;
+    }
     document.querySelectorAll('.mode-full-field').forEach(el => el.style.display = mode === 'full' ? '' : 'none');
     document.querySelectorAll('.mode-satellite-field').forEach(el => el.style.display = mode === 'satellite' ? '' : 'none');
     document.querySelectorAll('.mode-relay-field').forEach(el => el.style.display = mode === 'relay' ? '' : 'none');
@@ -544,8 +616,13 @@ function updateMailModeAdvice(mode) {
     body.textContent = advice[mode][1];
 }
 
-function toggleSetupMode() {
+function toggleSetupMode(force = false) {
     setupMode = document.getElementById('mode-local').checked ? 'local' : 'remote';
+    if (setupFormLocked && !force) {
+        setupMode = lockedSetupMode || 'local';
+        const keepRadio = document.getElementById(setupMode === 'remote' ? 'mode-remote' : 'mode-local');
+        if (keepRadio) keepRadio.checked = true;
+    }
     document.getElementById('hidden-setup-mode').value = setupMode;
     document.getElementById('local-mode-info').style.display = setupMode === 'local' ? '' : 'none';
     document.getElementById('remote-mode-info').style.display = setupMode === 'remote' ? '' : 'none';
@@ -558,6 +635,49 @@ function toggleSetupMode() {
         nodeSelect.required = false;
         nodeSelect.value = '';
     }
+}
+
+function setSetupFormLocked(locked) {
+    setupFormLocked = !!locked;
+    const form = document.getElementById('form-mail-setup');
+    const lockBtn = document.getElementById('btn-toggle-setup-lock');
+    if (!form || !lockBtn) return;
+
+    form.classList.toggle('setup-form-locked', setupFormLocked);
+    form.querySelectorAll('.setup-lockable').forEach(el => {
+        const isRadio = el.matches('input[type="radio"], input[type="checkbox"]');
+        if (isRadio) return;
+        if (el.tagName === 'SELECT') {
+            el.tabIndex = setupFormLocked ? -1 : 0;
+            return;
+        }
+        el.readOnly = setupFormLocked;
+    });
+
+    if (setupFormLocked) {
+        lockedSetupMode = document.getElementById('mode-local').checked ? 'local' : 'remote';
+        lockedMailMode = currentMailMode();
+        lockBtn.className = 'btn btn-outline-warning btn-sm setup-lock-btn';
+        lockBtn.innerHTML = '<i class="bi bi-lock-fill me-1"></i> Datos protegidos';
+    } else {
+        lockBtn.className = 'btn btn-outline-success btn-sm setup-lock-btn';
+        lockBtn.innerHTML = '<i class="bi bi-unlock-fill me-1"></i> Datos desbloqueados';
+    }
+}
+
+function initSetupLocking() {
+    document.getElementById('btn-toggle-setup-lock')?.addEventListener('click', () => {
+        setSetupFormLocked(!setupFormLocked);
+    });
+
+    document.querySelectorAll('input[name="mail_mode"]').forEach(radio => {
+        radio.addEventListener('change', () => toggleMailMode(false));
+    });
+    document.querySelectorAll('input[name="setup_mode"]').forEach(radio => {
+        radio.addEventListener('change', () => toggleSetupMode(false));
+    });
+
+    setSetupFormLocked(true);
 }
 
 function startMailSetup(e) {
@@ -619,7 +739,9 @@ function fetchJson(url, options) {
     });
 }
 
-toggleMailMode();
+toggleSetupMode(true);
+toggleMailMode(true);
+initSetupLocking();
 
 function showProgressPhase() {
     document.getElementById('setup-form-section').style.display = 'none';

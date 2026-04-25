@@ -410,6 +410,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/mail/test-send', 'MailController@testSend');
 \MuseDockPanel\Router::post('/mail/relay/domains/store', 'MailController@relayDomainStore');
 \MuseDockPanel\Router::post('/mail/relay/domains/{id}/refresh', 'MailController@relayDomainRefresh');
+\MuseDockPanel\Router::post('/mail/relay/domains/refresh-all', 'MailController@relayDomainsRefreshAll');
 \MuseDockPanel\Router::post('/mail/relay/domains/{id}/delete', 'MailController@relayDomainDelete');
 \MuseDockPanel\Router::post('/mail/relay/users/store', 'MailController@relayUserStore');
 \MuseDockPanel\Router::post('/mail/relay/users/{id}/delete', 'MailController@relayUserDelete');

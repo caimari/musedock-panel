@@ -89,6 +89,7 @@ class MailController
         $mailLocalConfigured = Settings::get('mail_local_configured', '') === '1';
         $mailLocalHostname   = Settings::get('mail_local_hostname', '');
         $localMailRepairStatus = $clusterRole !== 'slave' ? $this->getLocalMailRepairStatus() : [];
+        $mailSetupPrefill = $clusterRole !== 'slave' ? $this->buildMailSetupPrefill($clusterNodes) : [];
 
         View::render('mail/index', [
             'layout'              => 'main',
@@ -118,6 +119,7 @@ class MailController
             'webmailProviders'    => $webmailProviders,
             'webmailInstallStatus'=> $webmailInstallStatus,
             'relayNewCredentials' => $relayNewCredentials,
+            'mailSetupPrefill'    => $mailSetupPrefill,
         ]);
     }
 
@@ -226,6 +228,77 @@ class MailController
         }
 
         return false;
+    }
+
+    private function buildMailSetupPrefill(array $clusterNodes): array
+    {
+        $mailMode = MailService::getCurrentMailMode();
+        $setupNodeIdRaw = trim((string)Settings::get('mail_setup_node_id', 'local'));
+        $setupNodeId = ctype_digit($setupNodeIdRaw) ? (int)$setupNodeIdRaw : 0;
+        $setupMode = $setupNodeId > 0 ? 'remote' : 'local';
+
+        $nodeById = [];
+        foreach ($clusterNodes as $node) {
+            $id = (int)($node['id'] ?? 0);
+            if ($id > 0) {
+                $nodeById[$id] = $node;
+            }
+        }
+        if ($setupMode === 'remote' && !isset($nodeById[$setupNodeId])) {
+            $setupMode = 'local';
+            $setupNodeId = 0;
+        }
+
+        $targetLabel = 'Este servidor (local)';
+        if ($setupMode === 'remote' && isset($nodeById[$setupNodeId])) {
+            $targetLabel = (string)($nodeById[$setupNodeId]['name'] ?? ('Nodo #' . $setupNodeId));
+        }
+
+        return [
+            'setup_mode' => $setupMode,
+            'node_id' => $setupNodeId,
+            'target_label' => $targetLabel,
+            'mail_mode' => $mailMode,
+            'mail_hostname' => trim((string)(
+                Settings::get('mail_local_hostname', '')
+                ?: Settings::get('mail_hostname', '')
+                ?: Settings::get('mail_setup_hostname', '')
+            )),
+            'outbound_domain' => trim((string)Settings::get('mail_outbound_domain', '')),
+            'wireguard_ip' => trim((string)Settings::get('mail_relay_wireguard_ip', '')),
+            'wireguard_cidr' => trim((string)Settings::get('mail_relay_wireguard_cidr', '10.10.70.0/24')),
+            'relay_public_ip' => trim((string)Settings::get('mail_relay_public_ip', '')),
+            'ssl_mode' => trim((string)Settings::get('mail_ssl_mode', 'letsencrypt')) ?: 'letsencrypt',
+            'smtp_host' => trim((string)Settings::get('mail_smtp_host', '')),
+            'smtp_port' => trim((string)Settings::get('mail_smtp_port', '587')) ?: '587',
+            'smtp_encryption' => trim((string)Settings::get('mail_smtp_encryption', 'tls')) ?: 'tls',
+            'smtp_user' => trim((string)Settings::get('mail_smtp_user', '')),
+            'smtp_password' => $this->decryptSetting('mail_smtp_password_enc'),
+            'from_address' => trim((string)Settings::get('mail_from_address', '')),
+            'from_name' => trim((string)Settings::get('mail_from_name', '')),
+            'relay_host' => trim((string)Settings::get('mail_relay_host', '')),
+            'relay_port' => trim((string)Settings::get('mail_relay_port', '587')) ?: '587',
+            'relay_user' => trim((string)Settings::get('mail_relay_user', '')),
+            'relay_password' => $this->decryptSetting('mail_relay_password_enc'),
+            'fallback_smtp_host' => trim((string)Settings::get('mail_relay_fallback_host', '')),
+            'fallback_smtp_port' => trim((string)Settings::get('mail_relay_fallback_port', '587')) ?: '587',
+            'fallback_smtp_user' => trim((string)Settings::get('mail_relay_fallback_user', '')),
+            'fallback_smtp_password' => $this->decryptSetting('mail_relay_fallback_password_enc'),
+        ];
+    }
+
+    private function decryptSetting(string $key): string
+    {
+        $enc = trim((string)Settings::get($key, ''));
+        if ($enc === '') {
+            return '';
+        }
+
+        try {
+            return (string)\MuseDockPanel\Services\ReplicationService::decryptPassword($enc);
+        } catch (\Throwable) {
+            return '';
+        }
     }
 
     public function domainShow(array $params): void
@@ -822,7 +895,45 @@ class MailController
 
         $result = MailService::refreshRelayDomain((int)$params['id']);
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false) ? 'DNS del dominio relay actualizado.' : ($result['error'] ?? 'Error verificando DNS.'));
-        Router::redirect('/mail?tab=relay');
+        $tab = (string)($_POST['tab'] ?? 'relay');
+        Router::redirect('/mail?tab=' . (in_array($tab, ['relay', 'deliverability'], true) ? $tab : 'relay'));
+    }
+
+    public function relayDomainsRefreshAll(): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail?tab=relay');
+            return;
+        }
+
+        $result = MailService::refreshAllRelayDomains();
+        if ($result['ok'] ?? false) {
+            Flash::set(
+                'success',
+                sprintf(
+                    'DNS sincronizado en BD: %d dominio(s) actualizado(s), %d active, %d pending.',
+                    (int)($result['updated'] ?? 0),
+                    (int)($result['active'] ?? 0),
+                    (int)($result['pending'] ?? 0)
+                )
+            );
+        } else {
+            $firstError = (string)(($result['errors'][0]['error'] ?? '') ?: 'Error desconocido');
+            Flash::set(
+                'warning',
+                sprintf(
+                    'Sincronizacion parcial: %d actualizados, %d errores. Primer error: %s',
+                    (int)($result['updated'] ?? 0),
+                    count($result['errors'] ?? []),
+                    $firstError
+                )
+            );
+        }
+
+        $tab = (string)($_POST['tab'] ?? 'relay');
+        $anchor = in_array($tab, ['relay', 'deliverability'], true) ? $tab : 'relay';
+        Router::redirect('/mail?tab=' . $anchor);
     }
 
     public function relayDomainDelete(array $params): void
