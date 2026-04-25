@@ -398,9 +398,45 @@
     $relayHost = \MuseDockPanel\Settings::get('mail_relay_wireguard_ip', '') ?: \MuseDockPanel\Settings::get('mail_relay_host', '');
     $relayPort = \MuseDockPanel\Settings::get('mail_relay_port', '587');
     $relayPublicIp = \MuseDockPanel\Settings::get('mail_relay_public_ip', '');
+    $relayPublicHost = \MuseDockPanel\Settings::get('mail_outbound_hostname', '') ?: \MuseDockPanel\Settings::get('mail_relay_host', '');
     $relayTruthy = static fn($v): bool => in_array((string)$v, ['1', 't', 'true', 'yes', 'on'], true) || $v === true;
 ?>
 <div class="mail-tab-pane<?= $activeTab === 'relay' ? '' : ' d-none' ?>" data-mail-tab="relay">
+<div class="card mb-3" style="border-color:rgba(56,189,248,.28);">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span><i class="bi bi-signpost-split me-2"></i>Como activar un dominio en Relay Privado</span>
+        <a href="/mail?tab=deliverability" class="btn btn-outline-info btn-sm"><i class="bi bi-shield-check me-1"></i>Ir a Entregabilidad</a>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-lg-4">
+                <div class="small text-muted">1. Autoriza el dominio remitente</div>
+                <div class="fw-semibold">Ej: <code>example.com</code></div>
+                <div class="small text-muted">El panel genera una clave DKIM propia para ese dominio. No crea buzones.</div>
+            </div>
+            <div class="col-lg-4">
+                <div class="small text-muted">2. Publica los DNS</div>
+                <div class="fw-semibold">SPF, DKIM, DMARC y A/PTR</div>
+                <div class="small text-muted">
+                    Copia los TXT desde <a href="/mail?tab=deliverability" class="text-info">Entregabilidad</a>. El DKIM pendiente suele ser <code>default._domainkey.tudominio.com</code>.
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="small text-muted">3. Crea usuario SMTP y prueba</div>
+                <div class="fw-semibold">Laravel/SaaS por WireGuard</div>
+                <div class="small text-muted">Cuando SPF/DKIM/DMARC esten OK, el estado pasa de <code>pending</code> a <code>active</code>.</div>
+            </div>
+        </div>
+        <div class="mt-3 p-3 rounded" style="background:#0f172a;border:1px solid #334155;">
+            <div class="small text-muted mb-1">DNS base del relay</div>
+            <div class="row g-2 small">
+                <div class="col-md-4">A <code><?= View::e($relayPublicHost ?: 'mail.example.com') ?></code> → <code><?= View::e($relayPublicIp ?: 'IP_PUBLICA') ?></code></div>
+                <div class="col-md-4">PTR/rDNS de <code><?= View::e($relayPublicIp ?: 'IP_PUBLICA') ?></code> → <code><?= View::e($relayPublicHost ?: 'mail.example.com') ?></code></div>
+                <div class="col-md-4">SMTP privado: <code><?= View::e($relayHost ?: 'IP_WIREGUARD') ?>:<?= View::e($relayPort) ?></code> STARTTLS</div>
+            </div>
+        </div>
+    </div>
+</div>
 <div class="row g-3 mb-4">
     <div class="col-lg-6">
         <div class="card h-100" style="border-color:rgba(14,165,233,.28);">
@@ -425,7 +461,8 @@
                 <div class="alert alert-info py-2 mb-3">
                     <div class="fw-semibold mb-1">Flujo correcto en Relay Privado</div>
                     <div class="small">
-                        Aqui no se crean buzones. Primero autoriza el dominio remitente para DKIM/SPF; despues crea un usuario SMTP en la tarjeta de la derecha.
+                        Aqui no se crean buzones. Primero autoriza el dominio remitente para DKIM/SPF; despues ve a
+                        <a href="/mail?tab=deliverability" class="text-info">Entregabilidad</a>, copia los DNS recomendados en tu proveedor DNS y vuelve a refrescar esta fila.
                     </div>
                 </div>
 
@@ -467,7 +504,12 @@
                                     <td><?= $okBadge($relayTruthy($rd['spf_verified'] ?? false)) ?></td>
                                     <td><?= $okBadge($relayTruthy($rd['dkim_verified'] ?? false)) ?></td>
                                     <td><?= $okBadge($relayTruthy($rd['dmarc_verified'] ?? false)) ?></td>
-                                    <td><span class="badge bg-<?= $status === 'active' ? 'success' : 'secondary' ?>"><?= View::e($status) ?></span></td>
+                                    <td>
+                                        <span class="badge bg-<?= $status === 'active' ? 'success' : 'secondary' ?>"><?= View::e($status) ?></span>
+                                        <?php if ($status !== 'active'): ?>
+                                            <div class="small text-muted mt-1">Publica DNS y refresca</div>
+                                        <?php endif; ?>
+                                    </td>
                                     <td class="text-end">
                                         <?php if (!$isSlave): ?>
                                             <form method="post" action="/mail/relay/domains/<?= (int)$rd['id'] ?>/refresh" class="d-inline">

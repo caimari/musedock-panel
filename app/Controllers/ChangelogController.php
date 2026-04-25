@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.99',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=relay`: añade una guia visible de activacion de dominios relay con los pasos autorizar dominio, publicar DNS en Entregabilidad y crear usuario SMTP',
+                            'Relay: explica que `pending` significa DNS incompleto y enlaza directamente a `Entregabilidad` para copiar SPF/DKIM/DMARC/A/PTR',
+                            'Relay: muestra el DNS base esperado del relay (`A`, `PTR/rDNS` y endpoint WireGuard STARTTLS)',
+                        ],
+                        'en' => [
+                            '`/mail?tab=relay`: adds a visible relay domain activation guide covering authorize domain, publish DNS in Deliverability and create SMTP user',
+                            'Relay: explains that `pending` means incomplete DNS and links directly to `Deliverability` to copy SPF/DKIM/DMARC/A/PTR',
+                            'Relay: shows the expected base relay DNS (`A`, `PTR/rDNS` and WireGuard STARTTLS endpoint)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.98',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

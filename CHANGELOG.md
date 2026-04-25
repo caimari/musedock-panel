@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.99] — 2026-04-25
+
+### Improved
+- `/mail?tab=relay`: añade una guia visible de activacion de dominios relay con los pasos autorizar dominio, publicar DNS en Entregabilidad y crear usuario SMTP.
+- Relay: explica que `pending` significa DNS incompleto y enlaza directamente a `Entregabilidad` para copiar SPF/DKIM/DMARC/A/PTR.
+- Relay: muestra el DNS base esperado del relay (`A`, `PTR/rDNS` y endpoint WireGuard STARTTLS).
+
 ## [1.0.98] — 2026-04-25
 
 ### Fixed
