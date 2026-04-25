@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.122] — 2026-04-25
+
+### New
+- `/mail?tab=relay`: edicion de usuarios SMTP del relay desde la tabla, con descripcion, limite/hora, dominios remitentes permitidos y cambio de password.
+- Relay SMTP: opcion de mantener password, generar una nueva o definir una manual; si cambia, se actualiza el usuario SASL real en `sasldb2` y se guarda cifrada para migraciones.
+
+### Improved
+- `/mail?tab=relay`: spinner al crear usuario SMTP y al guardar/borrar usuarios.
+- Edicion y borrado de usuarios SMTP requieren modal de confirmacion y password admin antes de tocar credenciales sensibles.
+
 ## [1.0.121] — 2026-04-25
 
 ### Docs

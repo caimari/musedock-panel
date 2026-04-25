@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.122',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            '`/mail?tab=relay`: edicion de usuarios SMTP del relay desde la tabla, con descripcion, limite/hora, dominios remitentes permitidos y cambio de password',
+                            'Relay SMTP: opcion de mantener password, generar una nueva o definir una manual; si cambia, se actualiza el usuario SASL real en `sasldb2` y se guarda cifrada para migraciones',
+                        ],
+                        'en' => [
+                            '`/mail?tab=relay`: relay SMTP users can now be edited from the table, including description, hourly limit, allowed sender domains, and password changes',
+                            'SMTP Relay: keep password, generate a new one, or set a custom one; password changes update the real SASL user in `sasldb2` and are stored encrypted for migrations',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=relay`: spinner al crear usuario SMTP y al guardar/borrar usuarios',
+                            'Edicion y borrado de usuarios SMTP requieren modal de confirmacion y password admin antes de tocar credenciales sensibles',
+                        ],
+                        'en' => [
+                            '`/mail?tab=relay`: spinner feedback when creating SMTP users and when saving/deleting users',
+                            'Editing and deleting SMTP users requires confirmation modal plus admin password before touching sensitive credentials',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.121',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

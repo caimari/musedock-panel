@@ -414,6 +414,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/mail/deliverability/check', 'MailController@deliverabilityCheck');
 \MuseDockPanel\Router::post('/mail/relay/domains/{id}/delete', 'MailController@relayDomainDelete');
 \MuseDockPanel\Router::post('/mail/relay/users/store', 'MailController@relayUserStore');
+\MuseDockPanel\Router::post('/mail/relay/users/{id}/update', 'MailController@relayUserUpdate');
 \MuseDockPanel\Router::post('/mail/relay/users/{id}/delete', 'MailController@relayUserDelete');
 \MuseDockPanel\Router::post('/mail/relay/queue/flush', 'MailController@relayQueueFlush');
 \MuseDockPanel\Router::post('/mail/relay/queue/delete', 'MailController@relayQueueDelete');

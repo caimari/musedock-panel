@@ -1361,6 +1361,63 @@ class MailService
         }
     }
 
+    public static function updateRelayUser(int $id, string $description, int $limit, string $domains = '', string $passwordMode = 'keep', string $customPassword = ''): array
+    {
+        try {
+            $row = Database::fetchOne("SELECT * FROM mail_relay_users WHERE id = :id", ['id' => $id]);
+            if (!$row) {
+                return ['ok' => false, 'error' => 'Usuario no encontrado'];
+            }
+
+            $passwordMode = strtolower(trim($passwordMode));
+            if (!in_array($passwordMode, ['keep', 'generate', 'custom'], true)) {
+                $passwordMode = 'keep';
+            }
+
+            $newPassword = '';
+            if ($passwordMode === 'generate') {
+                $newPassword = bin2hex(random_bytes(24));
+            } elseif ($passwordMode === 'custom') {
+                $newPassword = trim($customPassword);
+                if (strlen($newPassword) < 12) {
+                    return ['ok' => false, 'error' => 'La nueva password debe tener al menos 12 caracteres.'];
+                }
+            }
+
+            if ($newPassword !== '') {
+                $nodeResult = self::runRelayNodeAction('mail_relay_update_user', [
+                    'username' => (string)$row['username'],
+                    'password' => $newPassword,
+                ]);
+                if (!($nodeResult['ok'] ?? false)) {
+                    return $nodeResult;
+                }
+            }
+
+            $data = [
+                'description' => trim($description),
+                'rate_limit_per_hour' => max(1, $limit),
+                'allowed_from_domains' => trim($domains),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ];
+            if ($newPassword !== '') {
+                $data['password_hash'] = password_hash($newPassword, PASSWORD_DEFAULT);
+                $data['password_encrypted'] = ReplicationService::encryptPassword($newPassword);
+            }
+
+            Database::update('mail_relay_users', $data, 'id = :id', ['id' => $id]);
+
+            return [
+                'ok' => true,
+                'username' => (string)$row['username'],
+                'password_changed' => $newPassword !== '',
+                'password' => $newPassword,
+            ];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => 'Error actualizando usuario relay: ' . $e->getMessage()];
+        }
+    }
+
     public static function getMailMigrations(int $limit = 10): array
     {
         try {
@@ -1961,6 +2018,7 @@ class MailService
             'mail_relay_create_domain' => self::nodeRelayCreateDomain($payload),
             'mail_relay_delete_domain' => self::nodeRelayDeleteDomain($payload),
             'mail_relay_create_user' => self::nodeRelayCreateUser($payload),
+            'mail_relay_update_user' => self::nodeRelayUpdateUser($payload),
             'mail_relay_delete_user' => self::nodeRelayDeleteUser($payload),
             'mail_relay_import_domain' => self::nodeRelayImportDomain($payload),
             'mail_relay_import_user' => self::nodeRelayImportUser($payload),
@@ -2095,6 +2153,11 @@ class MailService
     }
 
     public static function nodeRelayImportUser(array $payload): array
+    {
+        return self::nodeRelayCreateUser($payload);
+    }
+
+    public static function nodeRelayUpdateUser(array $payload): array
     {
         return self::nodeRelayCreateUser($payload);
     }

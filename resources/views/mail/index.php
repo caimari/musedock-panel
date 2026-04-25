@@ -743,7 +743,7 @@
             <div class="card-body">
                 <?php if (!empty($relayNewCredentials)): ?>
                     <div class="alert alert-warning mb-3" style="background:rgba(251,191,36,.12);border-color:rgba(251,191,36,.3);">
-                        <div class="fw-semibold mb-1">Credenciales SMTP creadas. Copia la contrasena ahora.</div>
+                        <div class="fw-semibold mb-1">Credenciales SMTP generadas/actualizadas. Copia la contrasena ahora.</div>
                         <pre class="mb-2 small p-2 rounded" style="background:#020617;color:#e2e8f0;">Host: <?= View::e($relayNewCredentials['host'] ?? $relayHost) . "\n" ?>Puerto: <?= View::e($relayNewCredentials['port'] ?? $relayPort) . "\n" ?>Usuario: <?= View::e($relayNewCredentials['username'] ?? '') . "\n" ?>Password: <?= View::e($relayNewCredentials['password'] ?? '') . "\n" ?>Cifrado: STARTTLS</pre>
                         <button class="btn btn-outline-light btn-sm" type="button" onclick="copyDnsRecords(this)" data-records="<?= View::e("Host: ".($relayNewCredentials['host'] ?? $relayHost)."\nPuerto: ".($relayNewCredentials['port'] ?? $relayPort)."\nUsuario: ".($relayNewCredentials['username'] ?? '')."\nPassword: ".($relayNewCredentials['password'] ?? '')."\nCifrado: STARTTLS") ?>">
                             <i class="bi bi-clipboard me-1"></i>Copiar credenciales
@@ -840,7 +840,7 @@
                     cifrado <code>STARTTLS</code>, usuario SMTP y la password generada al crear el usuario.
                 </div>
                 <?php if (!$isSlave): ?>
-                <form method="post" action="/mail/relay/users/store" class="row g-2 mb-3">
+                <form method="post" action="/mail/relay/users/store" class="row g-2 mb-3" data-relay-user-create-form>
                     <?= View::csrf() ?>
                     <div class="col-md-4">
                         <label class="form-label small text-muted mb-1">Usuario SMTP</label>
@@ -857,7 +857,9 @@
                         <input class="form-control form-control-sm" name="rate_limit_per_hour" type="number" min="1" value="200">
                         <div class="form-text">Maximo de envios por hora para este usuario.</div>
                     </div>
-                    <div class="col-md-2 d-flex align-items-start pt-md-4"><button class="btn btn-info btn-sm w-100">Crear</button></div>
+                    <div class="col-md-2 d-flex align-items-start pt-md-4">
+                        <button class="btn btn-info btn-sm w-100" data-relay-user-create-btn>Crear</button>
+                    </div>
                     <div class="col-12">
                         <label class="form-label small text-muted mb-1">Dominios remitentes permitidos</label>
                         <input class="form-control form-control-sm" name="allowed_from_domains" placeholder="example.com, example.net">
@@ -886,6 +888,7 @@
                             </thead>
                             <tbody>
                                 <?php foreach ($relayUsers as $ru): ?>
+                                <?php $relayUserEditId = 'relayUserEdit' . (int)$ru['id']; ?>
                                 <tr>
                                     <td class="fw-semibold"><?= View::e($ru['username']) ?></td>
                                     <td class="text-muted"><?= View::e($ru['description'] ?: '-') ?></td>
@@ -900,6 +903,9 @@
                                     <td><?= $relayTruthy($ru['enabled'] ?? true) ? '<span class="badge bg-success">Activo</span>' : '<span class="badge bg-secondary">Off</span>' ?></td>
                                     <td class="text-end">
                                         <?php if (!$isSlave): ?>
+                                            <button class="btn btn-outline-info btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#<?= View::e($relayUserEditId) ?>" title="Editar usuario SMTP">
+                                                <i class="bi bi-pencil-square"></i>
+                                            </button>
                                             <form method="post" action="/mail/relay/users/<?= (int)$ru['id'] ?>/delete" class="d-inline" data-relay-user-delete-form data-relay-user="<?= View::e($ru['username']) ?>">
                                                 <?= View::csrf() ?>
                                                 <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
@@ -907,6 +913,50 @@
                                         <?php endif; ?>
                                     </td>
                                 </tr>
+                                <?php if (!$isSlave): ?>
+                                <tr>
+                                    <td colspan="6" class="p-0" style="background:rgba(15,23,42,.55);">
+                                        <div class="collapse" id="<?= View::e($relayUserEditId) ?>">
+                                            <form method="post" action="/mail/relay/users/<?= (int)$ru['id'] ?>/update" class="row g-2 align-items-end p-3" data-relay-user-update-form data-relay-user="<?= View::e($ru['username']) ?>">
+                                                <?= View::csrf() ?>
+                                                <div class="col-md-4">
+                                                    <label class="form-label small text-muted mb-1">Descripcion interna</label>
+                                                    <input class="form-control form-control-sm" name="description" value="<?= View::e($ru['description'] ?? '') ?>" placeholder="Apps del servidor web">
+                                                </div>
+                                                <div class="col-md-2">
+                                                    <label class="form-label small text-muted mb-1">Limite/hora</label>
+                                                    <input class="form-control form-control-sm" name="rate_limit_per_hour" type="number" min="1" value="<?= (int)($ru['rate_limit_per_hour'] ?? 200) ?>">
+                                                </div>
+                                                <div class="col-md-3">
+                                                    <label class="form-label small text-muted mb-1">Password SMTP</label>
+                                                    <select class="form-select form-select-sm" name="password_mode" data-relay-user-password-mode>
+                                                        <option value="keep">Mantener actual</option>
+                                                        <option value="generate">Generar nueva</option>
+                                                        <option value="custom">Definir manual</option>
+                                                    </select>
+                                                </div>
+                                                <div class="col-md-3 d-none" data-relay-user-password-box>
+                                                    <label class="form-label small text-muted mb-1">Nueva password</label>
+                                                    <input class="form-control form-control-sm" name="new_password" type="password" autocomplete="new-password" minlength="12" placeholder="Min. 12 caracteres">
+                                                </div>
+                                                <div class="col-12">
+                                                    <label class="form-label small text-muted mb-1">Dominios remitentes permitidos</label>
+                                                    <input class="form-control form-control-sm" name="allowed_from_domains" value="<?= View::e($ru['allowed_from_domains'] ?? '') ?>" placeholder="example.com, example.net">
+                                                    <div class="form-text">
+                                                        Si cambias la password, las apps que usan este usuario dejaran de enviar hasta actualizar <code>MAIL_PASSWORD</code>.
+                                                        El limite/hora se guarda en la politica del usuario para control operativo del relay.
+                                                    </div>
+                                                </div>
+                                                <div class="col-12 text-end">
+                                                    <button class="btn btn-outline-info btn-sm" data-relay-user-update-btn>
+                                                        <i class="bi bi-save me-1"></i>Guardar cambios
+                                                    </button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </td>
+                                </tr>
+                                <?php endif; ?>
                                 <?php endforeach; ?>
                             </tbody>
                         </table>
@@ -2045,6 +2095,84 @@ initWebmailConfigLock();
             );
             if (!pwd) return;
             setHiddenField(form, 'admin_password', pwd);
+            const button = form.querySelector('button[type="submit"], button:not([type])');
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+            }
+            form.submit();
+        });
+    });
+})();
+
+(function initRelayUserForms() {
+    const createForm = document.querySelector('form[data-relay-user-create-form]');
+    if (createForm) {
+        const button = createForm.querySelector('[data-relay-user-create-btn]');
+        createForm.addEventListener('submit', function () {
+            if (!button) return;
+            button.disabled = true;
+            button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Creando...';
+        });
+    }
+
+    document.querySelectorAll('form[data-relay-user-update-form]').forEach((form) => {
+        const modeSelect = form.querySelector('[data-relay-user-password-mode]');
+        const passwordBox = form.querySelector('[data-relay-user-password-box]');
+        const passwordInput = form.querySelector('input[name="new_password"]');
+        const button = form.querySelector('[data-relay-user-update-btn]');
+
+        const syncPasswordMode = () => {
+            const custom = modeSelect && modeSelect.value === 'custom';
+            if (passwordBox) passwordBox.classList.toggle('d-none', !custom);
+            if (passwordInput) passwordInput.required = custom;
+        };
+        if (modeSelect) {
+            modeSelect.addEventListener('change', syncPasswordMode);
+            syncPasswordMode();
+        }
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (!form.reportValidity()) return;
+
+            const username = (form.dataset.relayUser || '').trim();
+            const passwordMode = modeSelect ? modeSelect.value : 'keep';
+            if (passwordMode === 'custom' && passwordInput && String(passwordInput.value || '').length < 12) {
+                await fireSwal({ icon: 'warning', title: 'Password demasiado corta', text: 'La nueva password SMTP debe tener al menos 12 caracteres.' });
+                passwordInput.focus();
+                return;
+            }
+
+            const passwordNote = passwordMode === 'generate'
+                ? '<p class="mb-0 text-warning">Se generara una nueva password SMTP. Las apps que usen este usuario deberan actualizar <code>MAIL_PASSWORD</code>.</p>'
+                : (passwordMode === 'custom'
+                    ? '<p class="mb-0 text-warning">Se cambiara la password SMTP por la indicada. Las apps que usen este usuario deberan actualizar <code>MAIL_PASSWORD</code>.</p>'
+                    : '<p class="mb-0">La password SMTP se mantiene sin cambios.</p>');
+
+            const confirm = await fireSwal(getSwalOptions({
+                icon: passwordMode === 'keep' ? 'question' : 'warning',
+                title: 'Actualizar usuario SMTP',
+                html: '<div class="text-start small">'
+                    + '<p>Se actualizaran los datos operativos de <code>' + username + '</code>: descripcion, limite/hora y dominios permitidos.</p>'
+                    + passwordNote
+                    + '</div>',
+                confirmButtonText: 'Guardar cambios',
+                confirmButtonColor: passwordMode === 'keep' ? '#0ea5e9' : '#f59e0b'
+            }));
+            if (!confirm.isConfirmed) return;
+
+            const pwd = await requestAdminPassword(
+                'Confirmar cambios SMTP',
+                '<div class="text-start small">Introduce tu password admin para guardar cambios en <code>' + username + '</code>.</div>'
+            );
+            if (!pwd) return;
+            setHiddenField(form, 'admin_password', pwd);
+
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Guardando...';
+            }
             form.submit();
         });
     });

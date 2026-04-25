@@ -1121,6 +1121,55 @@ class MailController
         Router::redirect('/mail?tab=relay');
     }
 
+    public function relayUserUpdate(array $params): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail?tab=relay');
+            return;
+        }
+        if (!$this->verifyAdminPassword((string)($_POST['admin_password'] ?? ''))) {
+            Flash::set('error', 'Password de admin incorrecta.');
+            Router::redirect('/mail?tab=relay');
+            return;
+        }
+
+        try {
+            $result = MailService::updateRelayUser(
+                (int)$params['id'],
+                (string)($_POST['description'] ?? ''),
+                (int)($_POST['rate_limit_per_hour'] ?? 200),
+                (string)($_POST['allowed_from_domains'] ?? ''),
+                (string)($_POST['password_mode'] ?? 'keep'),
+                (string)($_POST['new_password'] ?? '')
+            );
+        } catch (\Throwable $e) {
+            LogService::log('mail.relay_user.update_failed', (string)($params['id'] ?? ''), $e->getMessage());
+            $result = ['ok' => false, 'error' => $e->getMessage()];
+        }
+
+        if ($result['ok'] ?? false) {
+            if (!empty($result['password_changed']) && !empty($result['password'])) {
+                $relayHost = \MuseDockPanel\Settings::get('mail_relay_wireguard_ip', '');
+                if ($relayHost === '') {
+                    $relayHost = \MuseDockPanel\Settings::get('mail_relay_host', '');
+                }
+                $_SESSION['relay_new_credentials'] = [
+                    'username' => $result['username'],
+                    'password' => $result['password'],
+                    'host' => $relayHost,
+                    'port' => \MuseDockPanel\Settings::get('mail_relay_port', '587'),
+                ];
+                Flash::set('success', 'Usuario relay actualizado. Copia la nueva password ahora; no se volvera a mostrar.');
+            } else {
+                Flash::set('success', 'Usuario relay actualizado.');
+            }
+        } else {
+            Flash::set('error', $result['error'] ?? 'No se pudo actualizar el usuario relay.');
+        }
+        Router::redirect('/mail?tab=relay');
+    }
+
     public function relayUserDelete(array $params): void
     {
         if (self::isSlave()) {
