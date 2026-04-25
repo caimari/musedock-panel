@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.105',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'Docs Mail: enlace global en el footer lateral y acceso directo desde Settings para abrir `/docs/mail-modes` sin entrar primero al instalador de Mail',
+                        ],
+                        'en' => [
+                            'Mail Docs: global link in the sidebar footer and direct access from Settings to open `/docs/mail-modes` without going through the Mail installer first',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.104',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

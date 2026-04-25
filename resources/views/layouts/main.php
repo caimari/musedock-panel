@@ -145,6 +145,12 @@
         </a>
     </nav>
     <div class="sidebar-footer">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <a href="/docs/mail-modes" style="text-decoration:none;color:#94a3b8;" title="Documentacion">
+                <i class="bi bi-journal-text"></i> Docs
+            </a>
+            <a href="/changelog" style="text-decoration:none;color:#64748b;" title="Changelog">v<?= View::e($panelVersion) ?></a>
+        </div>
         <a href="/profile" style="text-decoration:none;color:#94a3b8;" title="Mi Perfil"><i class="bi bi-person-circle"></i> <?= View::e($currentUser['username'] ?? 'admin') ?></a>
         <a href="/logout" class="float-end"><i class="bi bi-box-arrow-right"></i></a>
     </div>

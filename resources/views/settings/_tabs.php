@@ -25,4 +25,5 @@
     <a href="/settings/services" class="btn btn-outline-light btn-sm <?= str_contains($pageTitle ?? '', 'Servicio') ? 'active' : '' ?>"><i class="bi bi-hdd-rack me-1"></i>Servicios</a>
     <a href="/settings/portal" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Portal Clientes' ? 'active' : '' ?>" style="<?= ($pageTitle ?? '') === 'Portal Clientes' ? '' : 'border-color:#a855f7;color:#a855f7;' ?>"><i class="bi bi-people me-1"></i>Portal Clientes</a>
     <a href="/settings/federation" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Federation' ? 'active' : '' ?>" style="<?= ($pageTitle ?? '') === 'Federation' ? '' : 'border-color:#10b981;color:#10b981;' ?>"><i class="bi bi-arrow-left-right me-1"></i>Federation</a>
+    <a href="/docs/mail-modes" class="btn btn-outline-light btn-sm <?= str_starts_with($pageTitle ?? '', 'Docs') ? 'active' : '' ?>"><i class="bi bi-journal-text me-1"></i>Docs Mail</a>
 </div>
