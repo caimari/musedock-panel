@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.94] — 2026-04-25
+
+### Fixed
+- `/mail`: el reparador local ya no usa el modal nativo del navegador ni una redireccion muda; ahora ejecuta por AJAX y muestra el resultado real.
+- Reparador mail: errores internos, respuestas no JSON y fallos de systemd/apt se muestran en pantalla con detalle.
+
+### Improved
+- `/mail`: SweetAlert2 muestra confirmacion, spinner y fases de reparacion mientras se corrige OpenDKIM/Postfix.
+
 ## [1.0.93] — 2026-04-24
 
 ### New

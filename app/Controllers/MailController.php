@@ -507,13 +507,23 @@ class MailController
 
     public function repairLocal(): void
     {
+        $ajax = $this->isJsonRequest();
+
         if (self::isSlave()) {
+            if ($ajax) {
+                $this->jsonResponse(['ok' => false, 'error' => 'Este servidor es Slave. Repara el mail desde el nodo donde esta instalado o desde el master.'], 403);
+                return;
+            }
             Flash::set('error', 'Este servidor es Slave. Repara el mail desde el nodo donde esta instalado o desde el master.');
             Router::redirect('/mail?tab=infra');
             return;
         }
 
         if (!View::verifyCsrf()) {
+            if ($ajax) {
+                $this->jsonResponse(['ok' => false, 'error' => 'Token CSRF invalido. Recarga la pagina e intentalo de nuevo.'], 419);
+                return;
+            }
             Flash::set('error', 'Token CSRF invalido.');
             Router::redirect('/mail?tab=infra');
             return;
@@ -521,12 +531,36 @@ class MailController
 
         $adminPassword = (string)($_POST['admin_password'] ?? '');
         if (!$this->verifyAdminPassword($adminPassword)) {
+            if ($ajax) {
+                $this->jsonResponse(['ok' => false, 'error' => 'Password de admin incorrecta.'], 403);
+                return;
+            }
             Flash::set('error', 'Password de admin incorrecta.');
             Router::redirect('/mail?tab=infra');
             return;
         }
 
-        $result = $this->repairLocalMailInstall();
+        try {
+            $result = $this->repairLocalMailInstall();
+        } catch (\Throwable $e) {
+            $result = [
+                'ok' => false,
+                'messages' => ['Excepcion interna: ' . $e->getMessage()],
+            ];
+        }
+
+        if ($ajax) {
+            $this->jsonResponse([
+                'ok' => (bool)($result['ok'] ?? false),
+                'message' => ($result['ok'] ?? false)
+                    ? 'Instalacion local de mail reparada.'
+                    : 'No se pudo reparar mail local.',
+                'messages' => $result['messages'] ?? [],
+                'status' => $this->getLocalMailRepairStatus(),
+            ], ($result['ok'] ?? false) ? 200 : 500);
+            return;
+        }
+
         if ($result['ok']) {
             Flash::set('success', 'Instalacion local de mail reparada: ' . implode('; ', $result['messages']));
         } else {
@@ -691,6 +725,19 @@ class MailController
         }
 
         return false;
+    }
+
+    private function isJsonRequest(): bool
+    {
+        return ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '') === 'XMLHttpRequest'
+            || str_contains((string)($_SERVER['HTTP_ACCEPT'] ?? ''), 'application/json');
+    }
+
+    private function jsonResponse(array $data, int $status = 200): void
+    {
+        http_response_code($status);
+        header('Content-Type: application/json');
+        echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 
     public function relayDomainStore(): void

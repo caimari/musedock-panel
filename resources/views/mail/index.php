@@ -229,7 +229,7 @@
                 </div>
             </div>
             <div class="col-lg-5">
-                <form method="post" action="/mail/repair-local" class="d-flex gap-2" onsubmit="return confirm('Reparar instalacion local de mail y reiniciar OpenDKIM/Postfix?')">
+                <form method="post" action="/mail/repair-local" class="d-flex gap-2" data-mail-repair-form>
                     <?= View::csrf() ?>
                     <input type="password" name="admin_password" class="form-control form-control-sm" placeholder="Password admin" required autocomplete="current-password">
                     <button class="btn btn-warning btn-sm text-dark fw-semibold">
@@ -861,7 +861,7 @@
                             <div class="fw-semibold"><i class="bi bi-tools me-2 text-warning"></i>Hay restos de una instalacion anterior</div>
                             <div class="small text-muted">Antes de reinstalar, prueba el reparador. Si la IP WireGuard anterior no era correcta, cambia modo y vuelve a instalar despues.</div>
                         </div>
-                        <form method="post" action="/mail/repair-local" class="d-flex gap-2" onsubmit="return confirm('Reparar instalacion local de mail y reiniciar OpenDKIM/Postfix?')">
+                        <form method="post" action="/mail/repair-local" class="d-flex gap-2" data-mail-repair-form>
                             <?= View::csrf() ?>
                             <input type="password" name="admin_password" class="form-control form-control-sm" placeholder="Password admin" required autocomplete="current-password">
                             <button class="btn btn-warning btn-sm text-dark fw-semibold"><i class="bi bi-wrench-adjustable me-1"></i>Reparar</button>
@@ -1156,6 +1156,125 @@ function copyDnsRecords(btn) {
     });
 
     applyTab(initialTab, false);
+})();
+
+(function initMailRepairForms() {
+    const forms = Array.from(document.querySelectorAll('[data-mail-repair-form]'));
+    if (!forms.length) return;
+
+    const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    }[ch]));
+
+    const formatMessages = (messages) => {
+        const list = Array.isArray(messages) ? messages : [];
+        if (!list.length) return '<div class="text-muted small">Sin detalle adicional.</div>';
+        return '<pre class="text-start small mb-0 p-2 rounded" style="background:#0f172a;color:#e2e8f0;white-space:pre-wrap;max-height:320px;overflow:auto;">'
+            + escapeHtml(list.join("\n"))
+            + '</pre>';
+    };
+
+    forms.forEach((form) => {
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+
+            const passwordInput = form.querySelector('[name="admin_password"]');
+            if (passwordInput && !passwordInput.value) {
+                await SwalDark.fire({ icon: 'warning', title: 'Password requerido', text: 'Introduce tu password admin para reparar mail.' });
+                passwordInput.focus();
+                return;
+            }
+
+            const confirm = await SwalDark.fire({
+                icon: 'warning',
+                title: 'Reparar instalacion local de mail',
+                html: '<div class="text-start small">'
+                    + '<p>Se preparara OpenDKIM, se corregira el socket local, se reiniciaran <code>opendkim</code> y <code>postfix</code>, y el panel solo marcara mail como instalado si ambos servicios quedan activos.</p>'
+                    + '<p class="mb-0 text-warning">Puede tardar uno o dos minutos si systemd o apt estan lentos.</p>'
+                    + '</div>',
+                showCancelButton: true,
+                confirmButtonText: 'Reparar ahora',
+                cancelButtonText: 'Cancelar',
+                reverseButtons: true,
+            });
+            if (!confirm.isConfirmed) return;
+
+            const button = form.querySelector('button[type="submit"], button:not([type])');
+            const originalHtml = button ? button.innerHTML : '';
+            if (button) {
+                button.disabled = true;
+                button.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Reparando...';
+            }
+
+            SwalDark.fire({
+                title: 'Reparando mail local...',
+                html: '<div class="text-start small">'
+                    + '<div>1. Preparando runtime de OpenDKIM</div>'
+                    + '<div>2. Corrigiendo socket y permisos</div>'
+                    + '<div>3. Reiniciando OpenDKIM/Postfix</div>'
+                    + '<div>4. Verificando servicios</div>'
+                    + '</div>',
+                allowOutsideClick: false,
+                allowEscapeKey: false,
+                showConfirmButton: false,
+                didOpen: () => Swal.showLoading(),
+            });
+
+            try {
+                const response = await fetch(form.action, {
+                    method: 'POST',
+                    body: new FormData(form),
+                    headers: {
+                        'Accept': 'application/json',
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                });
+                const contentType = response.headers.get('content-type') || '';
+                let data;
+                if (contentType.includes('application/json')) {
+                    data = await response.json();
+                } else {
+                    const text = await response.text();
+                    throw new Error('Respuesta no JSON del servidor:\n' + text.slice(0, 1200));
+                }
+
+                if (!response.ok || !data.ok) {
+                    await SwalDark.fire({
+                        icon: 'error',
+                        title: data.message || 'No se pudo reparar',
+                        html: '<div class="text-start small mb-2">' + escapeHtml(data.error || 'El reparador devolvio error.') + '</div>' + formatMessages(data.messages),
+                        width: 760,
+                    });
+                    return;
+                }
+
+                await SwalDark.fire({
+                    icon: 'success',
+                    title: data.message || 'Mail reparado',
+                    html: formatMessages(data.messages),
+                    width: 760,
+                    confirmButtonText: 'Recargar Mail',
+                });
+                window.location.href = '/mail?tab=infra';
+            } catch (err) {
+                await SwalDark.fire({
+                    icon: 'error',
+                    title: 'Error interno o de conexion',
+                    html: '<pre class="text-start small mb-0 p-2 rounded" style="background:#0f172a;color:#fca5a5;white-space:pre-wrap;max-height:320px;overflow:auto;">' + escapeHtml(err.message || err) + '</pre>',
+                    width: 760,
+                });
+            } finally {
+                if (button) {
+                    button.disabled = false;
+                    button.innerHTML = originalHtml;
+                }
+            }
+        });
+    });
 })();
 
 <?php if (!empty($mailNodes) || ($mailLocalConfigured ?? false)): ?>

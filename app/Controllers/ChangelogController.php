@@ -20,6 +20,31 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.94',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`/mail`: el reparador local ya no usa el modal nativo del navegador ni una redireccion muda; ahora ejecuta por AJAX y muestra el resultado real',
+                            'Reparador mail: errores internos, respuestas no JSON y fallos de systemd/apt se muestran en pantalla con detalle',
+                        ],
+                        'en' => [
+                            '`/mail`: local repair no longer uses the browser native modal or a silent redirect; it now runs via AJAX and shows the real result',
+                            'Mail repair: internal errors, non-JSON responses and systemd/apt failures are displayed on screen with detail',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            '`/mail`: SweetAlert2 muestra confirmacion, spinner y fases de reparacion mientras se corrige OpenDKIM/Postfix',
+                        ],
+                        'en' => [
+                            '`/mail`: SweetAlert2 shows confirmation, spinner and repair phases while fixing OpenDKIM/Postfix',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.93',
                 'date' => '2026-04-24',
                 'badge' => 'primary',
