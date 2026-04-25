@@ -1577,6 +1577,40 @@ class MailService
         ];
     }
 
+    public static function getDeliveryLogStats(int $scanLines = 20000): array
+    {
+        $file = is_readable('/var/log/mail.log') ? '/var/log/mail.log' : (is_readable('/var/log/maillog') ? '/var/log/maillog' : '');
+        $stats = [
+            'available' => $file !== '',
+            'sent' => 0,
+            'deferred' => 0,
+            'bounced' => 0,
+            'total' => 0,
+            'last_sent_at' => '',
+        ];
+
+        if ($file === '') {
+            return $stats;
+        }
+
+        $scanLines = max(1000, min(60000, $scanLines));
+        $lines = explode("\n", trim((string)shell_exec('tail -n ' . $scanLines . ' ' . escapeshellarg($file) . ' 2>/dev/null')));
+        foreach (array_reverse($lines) as $line) {
+            if (!str_contains($line, 'postfix/') || !preg_match('/status=(sent|deferred|bounced)/', $line, $match)) {
+                continue;
+            }
+
+            $status = $match[1];
+            $stats[$status]++;
+            $stats['total']++;
+            if ($status === 'sent' && $stats['last_sent_at'] === '') {
+                $stats['last_sent_at'] = substr($line, 0, 15);
+            }
+        }
+
+        return $stats;
+    }
+
     public static function clearRelayLog(): array
     {
         $candidates = ['/var/log/mail.log', '/var/log/maillog'];

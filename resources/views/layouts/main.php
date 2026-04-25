@@ -136,7 +136,7 @@
         <a href="/customers" class="<?= str_contains($pageTitle ?? '', 'Customer') ? 'active' : '' ?>">
             <i class="bi bi-people"></i> Customers
         </a>
-        <a href="/mail" class="<?= str_contains($pageTitle ?? '', 'Mail') ? 'active' : '' ?>">
+        <a href="/mail?tab=general" class="<?= str_contains($pageTitle ?? '', 'Mail') ? 'active' : '' ?>">
             <i class="bi bi-envelope"></i> Mail
         </a>
         <a href="/system-users" class="<?= str_contains($pageTitle ?? '', 'System User') ? 'active' : '' ?>">

@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.116] — 2026-04-25
+
+### Improved
+- Sidebar: el enlace `Mail` apunta siempre a `/mail?tab=general` y `/mail` redirige a esa URL para dejar la pestaña General explicita.
+- `/mail?tab=general`: se elimina el bloque duplicado de General y se consolidan las cards de resumen.
+- `/mail?tab=general`: cards dinamicas por modo de correo:
+  - Relay Privado: emails enviados, dominios relay activos, usuarios SMTP habilitados y cola actual.
+  - Solo Envio: emails enviados, estado DKIM, backend local/remoto y diferidos/rebotes.
+  - Correo Completo: dominios, buzones, aliases y storage mail.
+  - SMTP Externo: proveedor SMTP, usuario SMTP, remitente y DNS remitente.
+- Las metricas de envio se leen de forma acotada desde `mail.log`/`maillog` para reflejar actividad real reciente.
+
 ## [1.0.115] — 2026-04-25
 
 ### New

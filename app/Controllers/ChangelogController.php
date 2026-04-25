@@ -20,6 +20,29 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.116',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'Sidebar: el enlace `Mail` apunta siempre a `/mail?tab=general` y `/mail` redirige a esa URL',
+                            '`/mail?tab=general`: se elimina el bloque duplicado de General y se consolidan las cards de resumen',
+                            '`/mail?tab=general`: cards dinamicas segun modo (`Relay Privado`, `Solo Envio`, `Correo Completo`, `SMTP Externo`)',
+                            'Relay Privado muestra emails enviados, dominios relay activos, usuarios SMTP habilitados y cola actual',
+                            'Las metricas de envio se leen de forma acotada desde `mail.log`/`maillog` para reflejar actividad real reciente',
+                        ],
+                        'en' => [
+                            'Sidebar: `Mail` now always points to `/mail?tab=general`, and `/mail` redirects there',
+                            '`/mail?tab=general`: duplicate General block removed and summary cards consolidated',
+                            '`/mail?tab=general`: dynamic cards based on mail mode (`Private Relay`, `Send Only`, `Full Mail`, `External SMTP`)',
+                            'Private Relay shows sent mail, active relay domains, enabled SMTP users, and current queue',
+                            'Delivery metrics are read from bounded `mail.log`/`maillog` scans to reflect recent real activity',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.115',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

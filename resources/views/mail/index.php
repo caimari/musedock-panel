@@ -148,6 +148,23 @@
         }
         return $url;
     };
+
+    $relayDomains = $relayDomains ?? [];
+    $relayUsers = $relayUsers ?? [];
+    $relayQueue = $relayQueue ?? [];
+    $mailDeliveryStats = $mailDeliveryStats ?? ['sent' => 0, 'deferred' => 0, 'bounced' => 0, 'total' => 0, 'available' => false, 'last_sent_at' => ''];
+    $relayActiveDomains = 0;
+    foreach ($relayDomains as $rd) {
+        if ((string)($rd['status'] ?? 'pending') === 'active') {
+            $relayActiveDomains++;
+        }
+    }
+    $relayEnabledUsers = 0;
+    foreach ($relayUsers as $ru) {
+        if (!empty($ru['enabled'])) {
+            $relayEnabledUsers++;
+        }
+    }
 ?>
 <style>
     .mail-tab-pane .form-text,
@@ -258,6 +275,58 @@
             </div>
         </div>
     </div>
+</div>
+<?php
+    $generalCards = [];
+    if ($mailModeValue === 'relay') {
+        $generalCards = [
+            ['icon' => 'bi-send-check', 'label' => 'Emails enviados', 'value' => (string)(int)($mailDeliveryStats['sent'] ?? 0), 'hint' => 'Eventos recientes en mail.log', 'url' => '/mail?tab=queue'],
+            ['icon' => 'bi-globe-check', 'label' => 'Dominios relay activos', 'value' => $relayActiveDomains . ' / ' . count($relayDomains), 'hint' => 'Dominios autorizados con DNS OK', 'url' => '/mail?tab=relay'],
+            ['icon' => 'bi-person-lock', 'label' => 'Usuarios SMTP', 'value' => $relayEnabledUsers . ' / ' . count($relayUsers), 'hint' => 'Credenciales SASL habilitadas', 'url' => '/mail?tab=relay'],
+            ['icon' => 'bi-inboxes', 'label' => 'Cola actual', 'value' => (string)count($relayQueue), 'hint' => 'Mensajes detectados por postqueue', 'url' => '/mail?tab=queue'],
+        ];
+    } elseif ($mailModeValue === 'satellite') {
+        $generalCards = [
+            ['icon' => 'bi-send-check', 'label' => 'Emails enviados', 'value' => (string)(int)($mailDeliveryStats['sent'] ?? 0), 'hint' => 'Envios recientes firmados por el servidor', 'url' => '/mail?tab=deliverability'],
+            ['icon' => 'bi-shield-check', 'label' => 'DKIM local', 'value' => !empty($smtpConfig['dkim_configured']) ? 'Activo' : 'Revisar', 'hint' => 'Firma de salida local', 'url' => '/mail?tab=deliverability'],
+            ['icon' => 'bi-hdd-network', 'label' => 'Backend', 'value' => ($mailLocalConfigured ?? false) ? 'Local' : ($remoteOnlineCount > 0 ? 'Remoto' : 'Pendiente'), 'hint' => 'Origen real del envio', 'url' => '/mail?tab=infra'],
+            ['icon' => 'bi-exclamation-triangle', 'label' => 'Diferidos/rebotes', 'value' => ((int)($mailDeliveryStats['deferred'] ?? 0)) . ' / ' . ((int)($mailDeliveryStats['bounced'] ?? 0)), 'hint' => 'Deferred / bounced en logs recientes', 'url' => '/mail?tab=deliverability'],
+        ];
+    } elseif ($mailModeValue === 'external') {
+        $generalCards = [
+            ['icon' => 'bi-cloud-arrow-up', 'label' => 'Proveedor SMTP', 'value' => trim((string)($smtpConfig['host'] ?? '')) !== '' ? 'Configurado' : 'Pendiente', 'hint' => trim((string)($smtpConfig['host'] ?? '')) ?: 'Sin host SMTP', 'url' => '/mail?tab=infra&setup=1'],
+            ['icon' => 'bi-person-badge', 'label' => 'Usuario SMTP', 'value' => trim((string)($smtpConfig['username'] ?? '')) !== '' ? 'Configurado' : 'Pendiente', 'hint' => trim((string)($smtpConfig['username'] ?? '')) ?: 'Sin credencial', 'url' => '/mail?tab=infra&setup=1'],
+            ['icon' => 'bi-envelope-at', 'label' => 'Remitente', 'value' => trim((string)($smtpConfig['from_address'] ?? '')) !== '' ? 'Definido' : 'Revisar', 'hint' => trim((string)($smtpConfig['from_address'] ?? '')) ?: 'Sin mail_from_address', 'url' => '/mail?tab=deliverability'],
+            ['icon' => 'bi-shield-check', 'label' => 'DNS remitente', 'value' => 'Validar', 'hint' => 'SPF/DKIM/DMARC dependen del proveedor', 'url' => '/mail?tab=deliverability'],
+        ];
+    } else {
+        $generalCards = [
+            ['icon' => 'bi-globe2', 'label' => 'Dominios de correo', 'value' => (string)(int)($stats['domains'] ?? 0), 'hint' => 'Dominios con buzones IMAP', 'url' => '/mail?tab=domains'],
+            ['icon' => 'bi-envelope-open', 'label' => 'Buzones activos', 'value' => (string)(int)($stats['accounts'] ?? 0), 'hint' => 'Cuentas IMAP/webmail', 'url' => '/mail?tab=domains'],
+            ['icon' => 'bi-signpost-split', 'label' => 'Aliases', 'value' => (string)(int)($stats['aliases'] ?? 0), 'hint' => 'Redirecciones activas', 'url' => '/mail?tab=domains'],
+            ['icon' => 'bi-database', 'label' => 'Storage mail', 'value' => (int)($stats['used_mb'] ?? 0) . ' MB', 'hint' => 'Cuota total: ' . (int)($stats['quota_mb'] ?? 0) . ' MB', 'url' => '/mail?tab=domains'],
+        ];
+    }
+?>
+<div class="row g-3 mb-4">
+    <?php foreach ($generalCards as $card): ?>
+        <div class="col-xl-3 col-md-6">
+            <a href="<?= View::e($card['url']) ?>" class="text-decoration-none">
+                <div class="card h-100" style="border-color:rgba(148,163,184,.22);">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start gap-3">
+                            <div>
+                                <div class="text-muted small"><?= View::e($card['label']) ?></div>
+                                <div class="fs-3 fw-bold text-info"><?= View::e($card['value']) ?></div>
+                                <div class="small text-muted"><?= View::e($card['hint']) ?></div>
+                            </div>
+                            <span class="btn btn-outline-info btn-sm disabled" style="opacity:.9;"><i class="bi <?= View::e($card['icon']) ?>"></i></span>
+                        </div>
+                    </div>
+                </div>
+            </a>
+        </div>
+    <?php endforeach; ?>
 </div>
 <?php if (!$isSlave && !empty($localRepair['needs_repair'])): ?>
 <div class="card mb-4" style="border-color:rgba(251,191,36,.35);">
@@ -1127,44 +1196,6 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
 </div>
 </div>
 <?php endif; ?>
-
-<!-- Stats cards -->
-<div class="mail-tab-pane<?= $activeTab === 'general' ? '' : ' d-none' ?>" data-mail-tab="general">
-<div class="row g-3 mb-4">
-    <div class="col-md-3">
-        <div class="card">
-            <div class="card-body text-center">
-                <div class="text-muted small">Domains</div>
-                <div class="fs-3 fw-bold text-info"><?= $stats['domains'] ?></div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card">
-            <div class="card-body text-center">
-                <div class="text-muted small">Mailboxes</div>
-                <div class="fs-3 fw-bold text-info"><?= $stats['accounts'] ?></div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card">
-            <div class="card-body text-center">
-                <div class="text-muted small">Aliases</div>
-                <div class="fs-3 fw-bold text-info"><?= $stats['aliases'] ?></div>
-            </div>
-        </div>
-    </div>
-    <div class="col-md-3">
-        <div class="card">
-            <div class="card-body text-center">
-                <div class="text-muted small">Storage</div>
-                <div class="fs-3 fw-bold text-info"><?= $stats['used_mb'] ?> <small class="text-muted fs-6">/ <?= $stats['quota_mb'] ?> MB</small></div>
-            </div>
-        </div>
-    </div>
-</div>
-</div>
 
 <!-- Local Mail Server Status -->
 <div class="mail-tab-pane<?= $activeTab === 'infra' ? '' : ' d-none' ?>" data-mail-tab="infra">

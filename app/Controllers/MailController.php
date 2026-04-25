@@ -49,6 +49,11 @@ class MailController
 
     public function index(): void
     {
+        if (!isset($_GET['tab']) && empty($_GET['setup'])) {
+            Router::redirect('/mail?tab=general');
+            return;
+        }
+
         $clusterRole = Settings::get('cluster_role', '');
         if ($clusterRole === '') $clusterRole = \MuseDockPanel\Env::get('PANEL_ROLE', 'standalone');
 
@@ -81,6 +86,7 @@ class MailController
             : ['entries' => [], 'total' => 0, 'page' => 1, 'per_page' => $relayLogPerPage, 'pages' => 1];
         $relayLogs = $relayLogPage['entries'];
         $relayQueue = ($mailMode === 'relay') ? MailService::getMailQueueEntries(200) : [];
+        $mailDeliveryStats = MailService::getDeliveryLogStats();
         $mailMigrations = MailService::getMailMigrations(8);
         $webmailConfig = WebmailService::config();
         $webmailProviders = WebmailService::providers();
@@ -126,6 +132,7 @@ class MailController
             'relayLogs'           => $relayLogs,
             'relayLogPage'        => $relayLogPage,
             'relayQueue'          => $relayQueue,
+            'mailDeliveryStats'   => $mailDeliveryStats,
             'mailMigrations'      => $mailMigrations,
             'webmailConfig'       => $webmailConfig,
             'webmailProviders'    => $webmailProviders,
