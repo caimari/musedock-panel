@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.97',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Relay SMTP: los usuarios SASL ahora se crean con el realm del dominio remitente (`mail_outbound_domain`/`mydomain`) en vez del hostname del relay, evitando `454 Temporary authentication failure`',
+                        ],
+                        'en' => [
+                            'SMTP Relay: SASL users are now created with the sender domain realm (`mail_outbound_domain`/`mydomain`) instead of the relay hostname, preventing `454 Temporary authentication failure`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.96',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.97] — 2026-04-25
+
+### Fixed
+- Relay SMTP: los usuarios SASL ahora se crean con el realm del dominio remitente (`mail_outbound_domain`/`mydomain`) en vez del hostname del relay, evitando `454 Temporary authentication failure`.
+
 ## [1.0.96] — 2026-04-25
 
 ### Fixed

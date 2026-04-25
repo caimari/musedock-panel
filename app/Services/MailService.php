@@ -1291,7 +1291,7 @@ class MailService
         if (!preg_match('/^[a-z0-9][a-z0-9_.-]{2,120}$/', $username) || $password === '') {
             return ['ok' => false, 'error' => 'Usuario/password no validos'];
         }
-        $realm = Settings::get('mail_outbound_hostname', '') ?: Settings::get('mail_relay_host', '') ?: (gethostname() ?: 'relay');
+        $realm = self::relaySaslRealm();
         @mkdir('/etc/postfix/sasl', 0755, true);
         file_put_contents('/etc/postfix/sasl/smtpd.conf', "pwcheck_method: auxprop\nauxprop_plugin: sasldb\nmech_list: PLAIN LOGIN\n");
         $cmd = 'printf %s\\\\n ' . escapeshellarg($password) . ' | saslpasswd2 -p -c -u ' . escapeshellarg($realm) . ' ' . escapeshellarg($username) . ' 2>&1';
@@ -1311,9 +1311,23 @@ class MailService
     {
         $username = strtolower(trim((string)($payload['username'] ?? '')));
         if ($username === '') return ['ok' => false, 'error' => 'Usuario no valido'];
-        $realm = Settings::get('mail_outbound_hostname', '') ?: Settings::get('mail_relay_host', '') ?: (gethostname() ?: 'relay');
+        $realm = self::relaySaslRealm();
         exec('saslpasswd2 -d -u ' . escapeshellarg($realm) . ' ' . escapeshellarg($username) . ' 2>&1', $out, $code);
         return ['ok' => $code === 0, 'error' => $code === 0 ? '' : implode("\n", $out)];
+    }
+
+    private static function relaySaslRealm(): string
+    {
+        $realm = Settings::get('mail_outbound_domain', '') ?: Settings::get('mail_relay_domain', '');
+        if ($realm === '') {
+            $realm = trim((string)shell_exec('postconf -h mydomain 2>/dev/null'));
+        }
+        if ($realm === '') {
+            $host = Settings::get('mail_outbound_hostname', '') ?: Settings::get('mail_relay_host', '') ?: (gethostname() ?: 'relay');
+            $parts = explode('.', $host);
+            $realm = count($parts) >= 2 ? implode('.', array_slice($parts, -2)) : $host;
+        }
+        return strtolower($realm);
     }
 
     private static function checkRelayDomainDns(string $domain, string $publicKey = ''): array
