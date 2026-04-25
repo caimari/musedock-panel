@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.103',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=relay`: los campos para crear usuarios SMTP ahora tienen labels y ayuda clara: usuario, descripcion, limite por hora, dominios remitentes permitidos y relacion con `MAIL_USERNAME`, `MAIL_PASSWORD` y `MAIL_FROM_ADDRESS`',
+                        ],
+                        'en' => [
+                            '`/mail?tab=relay`: SMTP user creation fields now include clear labels and help: username, description, hourly limit, allowed sender domains and how they map to `MAIL_USERNAME`, `MAIL_PASSWORD` and `MAIL_FROM_ADDRESS`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.102',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

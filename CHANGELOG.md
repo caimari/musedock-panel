@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.103] — 2026-04-25
+
+### Improved
+- `/mail?tab=relay`: los campos para crear usuarios SMTP ahora tienen labels y ayuda clara: usuario, descripcion, limite por hora, dominios remitentes permitidos y relacion con `MAIL_USERNAME`, `MAIL_PASSWORD` y `MAIL_FROM_ADDRESS`.
+
 ## [1.0.102] — 2026-04-25
 
 ### Improved

@@ -568,11 +568,30 @@
                 <?php if (!$isSlave): ?>
                 <form method="post" action="/mail/relay/users/store" class="row g-2 mb-3">
                     <?= View::csrf() ?>
-                    <div class="col-md-4"><input class="form-control form-control-sm" name="username" placeholder="web01-relay" required></div>
-                    <div class="col-md-4"><input class="form-control form-control-sm" name="description" placeholder="Apps del servidor web"></div>
-                    <div class="col-md-2"><input class="form-control form-control-sm" name="rate_limit_per_hour" type="number" min="1" value="200"></div>
-                    <div class="col-md-2"><button class="btn btn-info btn-sm w-100">Crear</button></div>
-                    <div class="col-12"><input class="form-control form-control-sm" name="allowed_from_domains" placeholder="Dominios permitidos opcional: example.com, example.net"></div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted mb-1">Usuario SMTP</label>
+                        <input class="form-control form-control-sm" name="username" placeholder="web01-relay" required>
+                        <div class="form-text">Nombre que pondras en <code>MAIL_USERNAME</code>. Usa uno por servidor/app.</div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted mb-1">Descripcion interna</label>
+                        <input class="form-control form-control-sm" name="description" placeholder="Apps del servidor web">
+                        <div class="form-text">Solo sirve para reconocer quien usa esta credencial.</div>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small text-muted mb-1">Limite/hora</label>
+                        <input class="form-control form-control-sm" name="rate_limit_per_hour" type="number" min="1" value="200">
+                        <div class="form-text">Maximo de envios por hora para este usuario.</div>
+                    </div>
+                    <div class="col-md-2 d-flex align-items-start pt-md-4"><button class="btn btn-info btn-sm w-100">Crear</button></div>
+                    <div class="col-12">
+                        <label class="form-label small text-muted mb-1">Dominios remitentes permitidos</label>
+                        <input class="form-control form-control-sm" name="allowed_from_domains" placeholder="example.com, example.net">
+                        <div class="form-text">
+                            Opcional. Si lo rellenas, este usuario solo deberia enviar con <code>MAIL_FROM_ADDRESS</code> de esos dominios.
+                            Primero autoriza esos dominios en la tarjeta izquierda y publica su DNS.
+                        </div>
+                    </div>
                 </form>
                 <?php endif; ?>
 
@@ -621,6 +640,10 @@
                 <?php endif; ?>
                 <div class="mt-3 p-3 rounded" style="background:#0f172a;border:1px solid #334155;">
                     <div class="fw-semibold small mb-2">Ejemplo Laravel</div>
+                    <div class="small text-muted mb-2">
+                        Al crear el usuario, el panel mostrara la password una sola vez. Copia esa password en <code>MAIL_PASSWORD</code>.
+                        <code>MAIL_FROM_ADDRESS</code> debe usar un dominio autorizado y con DNS OK.
+                    </div>
                     <pre class="small mb-0" style="color:#cbd5e1;white-space:pre-wrap;">MAIL_MAILER=smtp
 MAIL_HOST=<?= View::e($relayHost ?: 'IP_WIREGUARD') . "\n" ?>MAIL_PORT=<?= View::e($relayPort) . "\n" ?>MAIL_USERNAME=USUARIO_RELAY
 MAIL_PASSWORD=PASSWORD_GENERADA
