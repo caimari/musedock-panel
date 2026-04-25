@@ -103,6 +103,11 @@
         .swal2-popup.swal-dark-popup { border: 1px solid #334155; border-radius: 16px; }
         .swal2-popup .swal2-title { color: #f1f5f9; }
         .swal2-popup .swal2-html-container { color: #94a3b8; }
+        .swal2-popup.swal-dark-popup .swal2-title { color: #f8fafc !important; }
+        .swal2-popup.swal-dark-popup .swal2-html-container { color: #cbd5e1 !important; }
+        .swal2-popup.swal-dark-popup .swal2-html-container .text-muted { color: #cbd5e1 !important; }
+        .swal2-popup.swal-light-readable .swal2-title { color: #0f172a !important; }
+        .swal2-popup.swal-light-readable .swal2-html-container { color: #334155 !important; }
         .swal2-popup .swal2-cancel { background: #334155 !important; color: #94a3b8 !important; border: 1px solid #475569 !important; }
     </style>
 </head>
@@ -237,6 +242,7 @@ const SwalDark = Swal.mixin({
         popup: 'swal-dark-popup'
     }
 });
+window.SwalDark = SwalDark;
 
 // Confirm action helper
 function confirmAction(form, options, preSubmitFn) {

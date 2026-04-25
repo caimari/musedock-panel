@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.119] — 2026-04-25
+
+### Fixed
+- `/mail?tab=general`: corregido el icono vacio de la card `Dominios relay activos` usando un icono compatible con la version actual de Bootstrap Icons.
+- SweetAlert: `SwalDark` queda expuesto globalmente para que los modales de Mail usen tema oscuro real y textos legibles.
+- Modales: contraste reforzado para titulos y contenido en tema oscuro, con fallback legible si algun modal usa fondo claro.
+
 ## [1.0.118] — 2026-04-25
 
 ### Improved

@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.119',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`/mail?tab=general`: corregido el icono vacio de la card `Dominios relay activos` usando un icono compatible con Bootstrap Icons',
+                            'SweetAlert: `SwalDark` queda expuesto globalmente para que los modales de Mail usen tema oscuro real y textos legibles',
+                            'Modales: contraste reforzado para titulos y contenido en tema oscuro, con fallback legible si algun modal usa fondo claro',
+                        ],
+                        'en' => [
+                            '`/mail?tab=general`: fixed the empty icon on the `Active relay domains` card by using a Bootstrap Icons-compatible icon',
+                            'SweetAlert: `SwalDark` is now exposed globally so Mail modals use the real dark theme with readable text',
+                            'Modals: stronger contrast for titles and content in dark theme, with readable fallback for light-background modals',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.118',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

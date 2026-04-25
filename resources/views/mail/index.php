@@ -281,7 +281,7 @@
     if ($mailModeValue === 'relay') {
         $generalCards = [
             ['icon' => 'bi-send-check', 'label' => 'Emails enviados', 'value' => (string)(int)($mailDeliveryStats['sent'] ?? 0), 'hint' => 'Eventos recientes en mail.log', 'url' => '/mail?tab=queue'],
-            ['icon' => 'bi-globe-check', 'label' => 'Dominios relay activos', 'value' => $relayActiveDomains . ' / ' . count($relayDomains), 'hint' => 'Dominios autorizados con DNS OK', 'url' => '/mail?tab=relay'],
+            ['icon' => 'bi-globe2', 'label' => 'Dominios relay activos', 'value' => $relayActiveDomains . ' / ' . count($relayDomains), 'hint' => 'Dominios autorizados con DNS OK', 'url' => '/mail?tab=relay'],
             ['icon' => 'bi-person-lock', 'label' => 'Usuarios SMTP', 'value' => $relayEnabledUsers . ' / ' . count($relayUsers), 'hint' => 'Credenciales SASL habilitadas', 'url' => '/mail?tab=relay'],
             ['icon' => 'bi-inboxes', 'label' => 'Cola actual', 'value' => (string)count($relayQueue), 'hint' => 'Mensajes detectados por postqueue', 'url' => '/mail?tab=queue'],
         ];
@@ -1711,6 +1711,9 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
 
 <script>
 function getSwal() {
+    if (typeof SwalDark !== 'undefined') {
+        return SwalDark;
+    }
     return window.SwalDark || window.Swal || null;
 }
 
@@ -1726,6 +1729,14 @@ async function fireSwal(options) {
     const swal = getSwal();
     if (!swal || typeof swal.fire !== 'function') {
         throw new Error('SweetAlert no disponible en esta vista.');
+    }
+    if (typeof SwalDark === 'undefined' && !(window.SwalDark && swal === window.SwalDark)) {
+        const currentClass = (options && options.customClass) || {};
+        options = Object.assign({}, options || {}, {
+            customClass: Object.assign({}, currentClass, {
+                popup: [currentClass.popup, 'swal-light-readable'].filter(Boolean).join(' ')
+            })
+        });
     }
     return swal.fire(options);
 }
