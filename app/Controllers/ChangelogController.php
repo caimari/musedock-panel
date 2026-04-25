@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.121',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'docs' => [
+                        'es' => [
+                            'Nueva guia `/docs/mail/hostname` explicando dominio raiz vs `mail.dominio.com` como hostname de correo',
+                            'La guia cubre Solo Envio, Relay Privado, Correo Completo, DNS A/TXT/MX, PTR/rDNS, Cloudflare `Solo DNS`, certificados TLS y pasos de cambio desde Infra',
+                            '`/docs/mail-sections` y `/docs/mail/infra` enlazan la nueva guia para que aparezca en el mapa Mail y en busqueda',
+                        ],
+                        'en' => [
+                            'New `/docs/mail/hostname` guide explaining root domain vs `mail.domain.com` as mail hostname',
+                            'The guide covers Send Only, Private Relay, Full Mail, DNS A/TXT/MX, PTR/rDNS, Cloudflare `DNS only`, TLS certificates, and change steps from Infra',
+                            '`/docs/mail-sections` and `/docs/mail/infra` link the new guide so it appears in the Mail map and search',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.120',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

@@ -143,6 +143,14 @@ class DocsController
                 'keywords' => 'mail entregabilidad spf dkim dmarc ptr rdns blacklist dns check',
                 'view' => 'mail-deliverability',
             ],
+            'hostname' => [
+                'title' => 'Hostname de correo',
+                'summary' => 'Cuando usar dominio raiz o subdominio mail para SMTP/IMAP, PTR, MX, certificados y Cloudflare.',
+                'panel_url' => '/mail?tab=infra&setup=1',
+                'icon' => 'bi-signpost-2',
+                'keywords' => 'mail hostname dominio raiz subdominio mail.example.com example.com ptr rdns mx cloudflare proxy solo dns certificado postfix imap smtp',
+                'view' => 'mail-hostname',
+            ],
         ];
     }
 

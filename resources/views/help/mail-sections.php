@@ -57,6 +57,13 @@ $sections = [
         'icon' => 'bi-clipboard',
         'summary' => 'Checks DNS en tiempo real: SPF, DKIM, DMARC, A hostname, PTR/rDNS y blacklist.',
     ],
+    [
+        'title' => 'Hostname de correo',
+        'url' => '/mail?tab=infra&setup=1',
+        'doc_url' => '/docs/mail/hostname',
+        'icon' => 'bi-signpost-2',
+        'summary' => 'Dominio raiz vs mail.dominio.com para SMTP/IMAP, PTR, MX, TLS y Cloudflare.',
+    ],
 ];
 ?>
 

@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.121] — 2026-04-25
+
+### Docs
+- Nueva guia `/docs/mail/hostname` explicando dominio raiz vs `mail.dominio.com` como hostname de correo.
+- La guia cubre Solo Envio, Relay Privado, Correo Completo, DNS A/TXT/MX, PTR/rDNS, Cloudflare `Solo DNS`, certificados TLS y pasos de cambio desde Infra.
+- `/docs/mail-sections` y `/docs/mail/infra` enlazan la nueva guia para que aparezca en el mapa Mail y en busqueda.
+
 ## [1.0.120] — 2026-04-25
 
 ### Fixed
