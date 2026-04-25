@@ -100,12 +100,21 @@
         .btn-outline-danger, .btn-danger { border-color: #ef4444; }
         .input-group .btn { border-color: #334155; }
         .form-control:disabled, .form-select:disabled { background: #334155; color: #f1f5f9; opacity: 1; -webkit-text-fill-color: #f1f5f9; border-color: #475569; }
-        .swal2-popup.swal-dark-popup { border: 1px solid #334155; border-radius: 16px; }
-        .swal2-popup .swal2-title { color: #f1f5f9; }
-        .swal2-popup .swal2-html-container { color: #94a3b8; }
+        .swal2-popup { border-radius: 16px; }
+        .swal2-popup .swal2-title { color: #0f172a; }
+        .swal2-popup .swal2-html-container { color: #334155; }
+        .swal2-popup .swal2-html-container .text-muted { color: #475569 !important; }
+        .swal2-popup.swal-dark-popup { border: 1px solid #334155; background: #1e293b !important; color: #e2e8f0 !important; }
         .swal2-popup.swal-dark-popup .swal2-title { color: #f8fafc !important; }
         .swal2-popup.swal-dark-popup .swal2-html-container { color: #cbd5e1 !important; }
         .swal2-popup.swal-dark-popup .swal2-html-container .text-muted { color: #cbd5e1 !important; }
+        .swal2-popup.swal-dark-popup .swal2-html-container p,
+        .swal2-popup.swal-dark-popup .swal2-html-container div,
+        .swal2-popup.swal-dark-popup .swal2-html-container li,
+        .swal2-popup.swal-dark-popup .swal2-html-container span { color: inherit; }
+        .swal2-popup.swal-dark-popup .swal2-input,
+        .swal2-popup.swal-dark-popup .swal2-textarea,
+        .swal2-popup.swal-dark-popup .swal2-select { background: #0f172a !important; border-color: #334155 !important; color: #f8fafc !important; }
         .swal2-popup.swal-light-readable .swal2-title { color: #0f172a !important; }
         .swal2-popup.swal-light-readable .swal2-html-container { color: #334155 !important; }
         .swal2-popup .swal2-cancel { background: #334155 !important; color: #94a3b8 !important; border: 1px solid #475569 !important; }
@@ -243,6 +252,40 @@ const SwalDark = Swal.mixin({
     }
 });
 window.SwalDark = SwalDark;
+if (window.Swal && window.Swal.fire) {
+    const musedockSwalBaseFire = window.Swal.fire.bind(window.Swal);
+    const musedockSwalIsDarkBackground = function(background) {
+        const bg = String(background || '').trim().toLowerCase();
+        if (!bg) return true;
+        if (['black', '#000', '#000000', '#020617', '#0b1120', '#0b1220', '#0f172a', '#111827', '#1e1e2e', '#1e293b'].includes(bg)) {
+            return true;
+        }
+        const match = bg.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+        if (!match) return false;
+        let hex = match[1];
+        if (hex.length === 3) {
+            hex = hex.split('').map((ch) => ch + ch).join('');
+        }
+        const r = parseInt(hex.slice(0, 2), 16);
+        const g = parseInt(hex.slice(2, 4), 16);
+        const b = parseInt(hex.slice(4, 6), 16);
+        return ((r * 299 + g * 587 + b * 114) / 1000) < 128;
+    };
+    window.Swal.fire = function(...args) {
+        const first = args[0];
+        if (first && typeof first === 'object' && !Array.isArray(first) && first.background && String(first.background).toLowerCase() !== '#1e293b') {
+            const currentClass = first.customClass || {};
+            const popupClass = musedockSwalIsDarkBackground(first.background) ? 'swal-dark-popup' : 'swal-light-readable';
+            return musedockSwalBaseFire(Object.assign({}, first, {
+                color: first.color || (popupClass === 'swal-dark-popup' ? '#e2e8f0' : '#334155'),
+                customClass: Object.assign({}, currentClass, {
+                    popup: [currentClass.popup, popupClass].filter(Boolean).join(' ')
+                })
+            }));
+        }
+        return SwalDark.fire(...args);
+    };
+}
 
 // Confirm action helper
 function confirmAction(form, options, preSubmitFn) {

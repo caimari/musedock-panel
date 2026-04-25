@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.120',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'SweetAlert global: cualquier llamada directa a `Swal.fire()` usa ahora el tema oscuro del panel por defecto',
+                            'Modales: corregido contraste de texto en todos los modales, incluyendo confirmaciones de eliminar dominio relay, reparacion DKIM, loaders y resultados',
+                            'Modales con fondo claro explicito reciben fallback de texto oscuro para evitar titulos grises/blancos ilegibles',
+                        ],
+                        'en' => [
+                            'Global SweetAlert: direct `Swal.fire()` calls now use the panel dark theme by default',
+                            'Modals: fixed text contrast across all modals, including relay-domain delete confirmations, DKIM repair, loaders, and results',
+                            'Explicit light-background modals now get a dark-text fallback to avoid unreadable gray/white titles',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.119',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

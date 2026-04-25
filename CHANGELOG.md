@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.120] — 2026-04-25
+
+### Fixed
+- SweetAlert global: cualquier llamada directa a `Swal.fire()` usa ahora el tema oscuro del panel por defecto.
+- Modales: corregido contraste de texto en todos los modales, incluyendo confirmaciones de eliminar dominio relay, reparacion DKIM, loaders y resultados.
+- Modales con fondo claro explicito reciben fallback de texto oscuro para evitar titulos grises/blancos ilegibles.
+
 ## [1.0.119] — 2026-04-25
 
 ### Fixed
