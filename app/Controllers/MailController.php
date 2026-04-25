@@ -975,10 +975,13 @@ class MailController
             $updated = (int)($result['updated'] ?? 0);
             $active = (int)($result['active'] ?? 0);
             $pending = (int)($result['pending'] ?? 0);
+            // Trigger one live render pass after refresh so A/PTR/blacklists are shown,
+            // not only the deferred SPF/DKIM/DMARC snapshot from BD.
+            $_SESSION['mail_deliverability_check_once'] = '1';
             if ($result['ok'] ?? false) {
                 Flash::set(
                     $pending > 0 ? 'warning' : 'success',
-                    sprintf('Comprobacion DNS relay completada: %d dominio(s), %d active, %d pending.', $updated, $active, $pending)
+                    sprintf('Comprobacion DNS relay completada: %d dominio(s), %d active, %d pending. Vista DNS actualizada.', $updated, $active, $pending)
                 );
             } else {
                 $firstError = (string)(($result['errors'][0]['error'] ?? '') ?: 'Error desconocido');

@@ -1324,8 +1324,10 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
             <?php foreach ($deliverabilityRows as $row): ?>
                 <?php
                     $checks = $row['checks'] ?? [];
+                    $recommendedRecords = is_array($row['recommended'] ?? null) ? $row['recommended'] : [];
+                    $domainFqdn = strtolower(trim((string)($row['domain'] ?? ''), '.'));
                     $recommendedLines = [];
-                    foreach (($row['recommended'] ?? []) as $rec) {
+                    foreach ($recommendedRecords as $rec) {
                         $name = $rec['name'] ?? '';
                         $value = $rec['value'] ?? '';
                         $type = $rec['type'] ?? '';
@@ -1388,8 +1390,69 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                         </div>
                     </div>
 
-                    <div class="small text-muted mb-1">Registros recomendados</div>
-                    <pre class="mb-0 p-2 rounded small" style="background:#020617;color:#cbd5e1;white-space:pre-wrap;"><?= View::e($copyText) ?></pre>
+                    <div class="small text-muted mb-2">Registros recomendados</div>
+                    <?php if (empty($recommendedRecords)): ?>
+                        <div class="small text-muted">No hay registros recomendados para mostrar.</div>
+                    <?php else: ?>
+                        <div class="table-responsive">
+                            <table class="table table-dark table-sm align-middle mb-0" style="background:#020617;border:1px solid #1e293b;">
+                                <thead>
+                                    <tr>
+                                        <th style="width:120px;">Tipo</th>
+                                        <th style="width:170px;">Nombre (Host)</th>
+                                        <th>Contenido (Value)</th>
+                                        <th style="width:120px;">Prioridad</th>
+                                        <th style="width:130px;">Proxy</th>
+                                        <th style="width:110px;">TTL</th>
+                                        <th style="width:220px;">Donde</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($recommendedRecords as $rec): ?>
+                                        <?php
+                                            $typeLabel = strtoupper((string)($rec['type'] ?? ''));
+                                            $nameRaw = trim((string)($rec['name'] ?? ''));
+                                            $nameNormalized = strtolower(trim($nameRaw, '.'));
+                                            $hostField = $nameRaw;
+                                            if ($typeLabel !== 'PTR') {
+                                                if ($domainFqdn !== '' && $nameNormalized === $domainFqdn) {
+                                                    $hostField = '@';
+                                                } elseif ($domainFqdn !== '' && str_ends_with($nameNormalized, '.' . $domainFqdn)) {
+                                                    $hostField = substr($nameNormalized, 0, -1 * (strlen($domainFqdn) + 1));
+                                                } else {
+                                                    $hostField = $nameRaw;
+                                                }
+                                            }
+                                            $priorityLabel = isset($rec['priority']) ? (string)$rec['priority'] : '-';
+                                            $proxyLabel = $typeLabel === 'PTR' ? 'N/A' : 'Solo DNS';
+                                            $ttlLabel = $typeLabel === 'PTR' ? 'N/A' : 'Auto';
+                                            $whereLabel = $typeLabel === 'PTR'
+                                                ? 'rDNS proveedor IP/VPS'
+                                                : 'Cloudflare DNS > Registros';
+                                        ?>
+                                        <tr>
+                                            <td><code><?= View::e($typeLabel) ?></code></td>
+                                            <td><code><?= View::e($hostField) ?></code></td>
+                                            <td><code class="small"><?= View::e((string)($rec['value'] ?? '')) ?></code></td>
+                                            <td><code><?= View::e($priorityLabel) ?></code></td>
+                                            <td><span class="small text-muted"><?= View::e($proxyLabel) ?></span></td>
+                                            <td><span class="small text-muted"><?= View::e($ttlLabel) ?></span></td>
+                                            <td><span class="small text-muted"><?= View::e($whereLabel) ?></span></td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="small text-muted mt-2">
+                            Nota: en Cloudflare usa exactamente <strong>Tipo</strong>, <strong>Nombre (Host)</strong> y <strong>Contenido</strong> de la tabla.
+                            <strong>PTR</strong> no se crea en Cloudflare DNS: se configura en el proveedor de la IP publica (rDNS).
+                        </div>
+                        <div class="small text-muted mt-2">
+                            Si ya usas otro proveedor SMTP/relay, no borres sus selectores DKIM ni su include SPF.
+                            Mantener varios DKIM es valido (selector distinto). SPF debe ir en un solo registro TXT <code>v=spf1 ...</code> combinando todos los emisores.
+                            DMARC debe ser unico: si ya existe, edita ese registro en lugar de crear otro.
+                        </div>
+                    <?php endif; ?>
                 </div>
             <?php endforeach; ?>
         <?php endif; ?>

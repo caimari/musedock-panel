@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.111] — 2026-04-25
+
+### Improved
+- `/mail?tab=deliverability`: tras pulsar `Comprobar DNS ahora` en modo relay, la siguiente carga muestra tambien checks en caliente de `A hostname`, `PTR/rDNS` y `blacklists` (no solo estado diferido de BD).
+- `/mail?tab=deliverability`: "Registros recomendados" pasa a tabla orientada a Cloudflare con columnas `Tipo`, `Nombre (Host)`, `Contenido (Value)`, `Prioridad`, `Proxy`, `TTL` y `Donde`.
+- `/mail?tab=deliverability`: normalizacion del campo `Host` para zona raiz (`@`) y subdominios relativos, facilitando copia directa en Cloudflare.
+
+### Docs
+- `/docs/mail/deliverability`: anadidas notas operativas para coexistencia con otros proveedores/relays (DKIM por selectores, SPF unico combinado, DMARC unico y manejo de MX/PTR).
+
 ## [1.0.110] — 2026-04-25
 
 ### New
