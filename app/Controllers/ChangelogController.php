@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.156',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Docs/Bugs: nueva guia `Restaurar Caddy/web tras reinstalacion accidental`, con diagnostico, restauracion desde backups, permisos Caddyfile y reconstruccion si no hubiese backup',
+                        ],
+                        'en' => [
+                            'Docs/Bugs: new `Restore Caddy/web after accidental reinstall` guide, covering diagnosis, backup restore, Caddyfile permissions and reconstruction when no backup exists',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.155',
                 'date' => '2026-04-26',
                 'badge' => 'primary',

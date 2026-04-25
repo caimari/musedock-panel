@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.156] — 2026-04-26
+
+### Added
+- Docs/Bugs: nueva guia `Restaurar Caddy/web tras reinstalacion accidental`, con diagnostico, restauracion desde backups, permisos Caddyfile y reconstruccion si no hubiese backup.
+
 ## [1.0.155] — 2026-04-26
 
 ### Fixed

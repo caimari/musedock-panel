@@ -183,6 +183,14 @@ class DocsController
                 'keywords' => 'bug err_ssl_protocol_error ssl protocol error wrong version number tls caddy ip dominio 8444 certificado autofirmado avanzado chrome curl reverse proxy',
                 'view' => 'bug-err-ssl-protocol-error',
             ],
+            'caddy-recovery' => [
+                'title' => 'Restaurar Caddy/web tras reinstalacion accidental',
+                'summary' => 'Como recuperar una web cuando el Caddyfile queda solo con el bloque del panel, restaurar backups y corregir permisos.',
+                'panel_url' => '/settings/caddy',
+                'icon' => 'bi-arrow-counterclockwise',
+                'keywords' => 'bug caddy recovery recuperar restaurar backup caddyfile reinstalacion accidental panel only 8444 web caida permission denied root root chmod 0644 muserelay asterisk mabelle',
+                'view' => 'bug-caddy-recovery',
+            ],
         ];
     }
 
