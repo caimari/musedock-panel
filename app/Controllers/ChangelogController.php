@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.136',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`install.sh`: el paso PHP ya no muere silenciosamente en `add-apt-repository`, `apt-get update`, `apt-get install` o `php-fpm`; muestra las ultimas lineas del log real',
+                            '`install.sh`: nuevo log temporal `/tmp/musedock-panel-install-php.log` para diagnosticar fallos de repositorio PHP/PPA/Sury en servidores virgenes',
+                            '`install.sh`: trap global para errores no controlados, mostrando linea y ultimas lineas de `/tmp/musedock-panel-install.log`',
+                        ],
+                        'en' => [
+                            '`install.sh`: the PHP step no longer dies silently on `add-apt-repository`, `apt-get update`, `apt-get install`, or `php-fpm`; it shows the latest real log lines',
+                            '`install.sh`: new temporary log `/tmp/musedock-panel-install-php.log` to diagnose PHP/PPA/Sury repository failures on fresh servers',
+                            '`install.sh`: global trap for unhandled errors, showing the line and latest `/tmp/musedock-panel-install.log` lines',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.135',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

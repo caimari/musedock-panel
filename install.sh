@@ -14,12 +14,27 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
+INSTALL_LOG="/tmp/musedock-panel-install.log"
+: > "$INSTALL_LOG" 2>/dev/null || true
 
 header() { echo -e "\n${CYAN}${BOLD}=== $1 ===${NC}\n"; }
 ok()     { echo -e "  ${GREEN}✓${NC} $1"; }
 warn()   { echo -e "  ${YELLOW}!${NC} $1"; }
 fail()   { echo -e "  ${RED}✗ $1${NC}"; exit 1; }
 ask()    { read -rp "  $1: " "$2"; }
+
+on_unhandled_error() {
+    local rc=$?
+    local line="${1:-?}"
+    echo ""
+    echo -e "  ${RED}✗ Instalador detenido en linea ${line} (exit ${rc}).${NC}"
+    if [ -s "$INSTALL_LOG" ]; then
+        echo -e "  ${YELLOW}Ultimas lineas de ${INSTALL_LOG}:${NC}"
+        tail -n 40 "$INSTALL_LOG" | sed 's/^/    /'
+    fi
+    echo -e "  ${YELLOW}Reintenta con: bash -x install.sh${NC}"
+}
+trap 'on_unhandled_error $LINENO' ERR
 
 # ============================================================
 # Language selection (before anything else)
@@ -2255,6 +2270,8 @@ ok "$(t pkg_installed)"
 # Step 2: PHP
 # ============================================================
 header "$(t step_php "$PHP_VER")"
+PHP_INSTALL_LOG="/tmp/musedock-panel-install-php.log"
+: > "$PHP_INSTALL_LOG" 2>/dev/null || true
 
 # Add Ondrej PPA for PHP (check multiple possible filenames)
 PHP_REPO_EXISTS=false
@@ -2267,27 +2284,58 @@ done
 
 if [ "$PHP_REPO_EXISTS" = false ]; then
     if [ "$OS_ID" = "ubuntu" ]; then
-        add-apt-repository -y ppa:ondrej/php > /dev/null 2>&1
+        if ! add-apt-repository -y ppa:ondrej/php >> "$PHP_INSTALL_LOG" 2>&1; then
+            tail -n 40 "$PHP_INSTALL_LOG" | sed 's/^/    /'
+            fail "No se pudo añadir el PPA ondrej/php. Revisa red/DNS/Launchpad o instala con PHP 8.3 si PHP ${PHP_VER} no esta disponible."
+        fi
     else
-        curl -sSLo /tmp/debsuryorg-archive-keyring.deb https://packages.sury.org/debsuryorg-archive-keyring.deb 2>/dev/null
-        dpkg -i /tmp/debsuryorg-archive-keyring.deb > /dev/null 2>&1
+        if ! curl -sSLo /tmp/debsuryorg-archive-keyring.deb https://packages.sury.org/debsuryorg-archive-keyring.deb >> "$PHP_INSTALL_LOG" 2>&1; then
+            tail -n 40 "$PHP_INSTALL_LOG" | sed 's/^/    /'
+            fail "No se pudo descargar la keyring de packages.sury.org para PHP."
+        fi
+        if ! dpkg -i /tmp/debsuryorg-archive-keyring.deb >> "$PHP_INSTALL_LOG" 2>&1; then
+            tail -n 40 "$PHP_INSTALL_LOG" | sed 's/^/    /'
+            fail "No se pudo instalar la keyring de packages.sury.org para PHP."
+        fi
         echo "deb [signed-by=/usr/share/keyrings/deb.sury.org-php.gpg] https://packages.sury.org/php/ $(lsb_release -sc) main" > /etc/apt/sources.list.d/php.list
         rm -f /tmp/debsuryorg-archive-keyring.deb
     fi
-    apt-get update -qq
+    if ! apt-get update -qq >> "$PHP_INSTALL_LOG" 2>&1; then
+        tail -n 40 "$PHP_INSTALL_LOG" | sed 's/^/    /'
+        fail "No se pudo actualizar APT despues de añadir el repositorio PHP."
+    fi
     ok "$(t php_repo_added)"
 else
     ok "$(t php_repo_exists)"
 fi
 
-apt-get install -y -qq \
-    php${PHP_VER}-cli php${PHP_VER}-fpm php${PHP_VER}-pgsql php${PHP_VER}-curl \
-    php${PHP_VER}-mbstring php${PHP_VER}-xml php${PHP_VER}-zip php${PHP_VER}-gd \
-    php${PHP_VER}-intl php${PHP_VER}-bcmath php${PHP_VER}-mysql > /dev/null 2>&1
+PHP_PACKAGES=(
+    "php${PHP_VER}-cli"
+    "php${PHP_VER}-fpm"
+    "php${PHP_VER}-pgsql"
+    "php${PHP_VER}-curl"
+    "php${PHP_VER}-mbstring"
+    "php${PHP_VER}-xml"
+    "php${PHP_VER}-zip"
+    "php${PHP_VER}-gd"
+    "php${PHP_VER}-intl"
+    "php${PHP_VER}-bcmath"
+    "php${PHP_VER}-mysql"
+)
+if ! apt-get install -y -qq "${PHP_PACKAGES[@]}" >> "$PHP_INSTALL_LOG" 2>&1; then
+    tail -n 60 "$PHP_INSTALL_LOG" | sed 's/^/    /'
+    fail "No se pudo instalar PHP ${PHP_VER}. Revisa ${PHP_INSTALL_LOG}. Si el repo no ofrece PHP ${PHP_VER}, relanza el instalador y elige PHP 8.3."
+fi
 ok "$(t php_installed "$PHP_VER")"
 
-systemctl enable php${PHP_VER}-fpm > /dev/null 2>&1
-systemctl start php${PHP_VER}-fpm
+if ! systemctl enable php${PHP_VER}-fpm >> "$PHP_INSTALL_LOG" 2>&1; then
+    tail -n 40 "$PHP_INSTALL_LOG" | sed 's/^/    /'
+    fail "No se pudo habilitar php${PHP_VER}-fpm."
+fi
+if ! systemctl start php${PHP_VER}-fpm >> "$PHP_INSTALL_LOG" 2>&1; then
+    tail -n 40 "$PHP_INSTALL_LOG" | sed 's/^/    /'
+    fail "No se pudo arrancar php${PHP_VER}-fpm."
+fi
 ok "$(t php_fpm_started "$PHP_VER")"
 
 # ============================================================

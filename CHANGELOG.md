@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.136] — 2026-04-25
+
+### Fixed
+- `install.sh`: el paso PHP ya no muere silenciosamente en `add-apt-repository`, `apt-get update`, `apt-get install` o `php-fpm`; muestra las ultimas lineas del log real.
+- `install.sh`: nuevo log temporal `/tmp/musedock-panel-install-php.log` para diagnosticar fallos de repositorio PHP/PPA/Sury en servidores virgenes.
+- `install.sh`: trap global para errores no controlados, mostrando linea y ultimas lineas de `/tmp/musedock-panel-install.log`.
+
 ## [1.0.135] — 2026-04-25
 
 ### Improved
