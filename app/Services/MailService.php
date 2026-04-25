@@ -1530,58 +1530,52 @@ class MailService
 
     public static function getRelayLogPage(int $page = 1, int $perPage = 25): array
     {
-        $file = is_readable('/var/log/mail.log') ? '/var/log/mail.log' : (is_readable('/var/log/maillog') ? '/var/log/maillog' : '');
-        if ($file === '') {
-            return ['entries' => [], 'total' => 0, 'page' => 1, 'per_page' => $perPage, 'pages' => 1];
-        }
-
         $page = max(1, $page);
         $perPage = max(5, min(1000, $perPage));
         $scanLines = (int)min(60000, max(2500, ($perPage * 30), ($page * $perPage * 3)));
-        $lines = explode("\n", trim((string)shell_exec('tail -n ' . $scanLines . ' ' . escapeshellarg($file) . ' 2>/dev/null')));
-        $entries = [];
-        foreach (array_reverse($lines) as $line) {
-            if (!str_contains($line, 'postfix/') || !preg_match('/status=(sent|deferred|bounced)/', $line, $sm)) continue;
-            preg_match('/from=<([^>]*)>/', $line, $fm);
-            preg_match('/to=<([^>]*)>/', $line, $tm);
-            preg_match('/relay=([^, ]+)/', $line, $rm);
-            preg_match('/dsn=([^, ]+)/', $line, $dm);
-            $from = $fm[1] ?? '';
-            $domain = str_contains($from, '@') ? substr(strrchr($from, '@'), 1) : '';
-            $detail = '';
-            if (preg_match('/status=(?:sent|deferred|bounced)\s+\((.*)\)\s*$/', $line, $detailMatch)) {
-                $detail = $detailMatch[1];
-            }
-            $entries[] = [
-                'timestamp' => substr($line, 0, 15),
-                'domain' => $domain,
-                'from' => $from,
-                'to' => $tm[1] ?? '',
-                'status' => $sm[1],
-                'relay' => $rm[1] ?? '',
-                'dsn' => $dm[1] ?? '',
-                'detail' => $detail,
-                'line' => $line,
-            ];
-        }
+        self::ingestRelayLogFromFile($scanLines);
 
-        $total = count($entries);
-        $pages = max(1, (int)ceil($total / $perPage));
-        $page = min($page, $pages);
-        return [
-            'entries' => array_slice($entries, ($page - 1) * $perPage, $perPage),
-            'total' => $total,
-            'page' => $page,
-            'per_page' => $perPage,
-            'pages' => $pages,
-        ];
+        try {
+            self::ensureRelayEventsTable();
+            $totalRow = Database::fetchOne("SELECT COUNT(*) AS cnt FROM mail_relay_events");
+            $total = (int)($totalRow['cnt'] ?? 0);
+            $pages = max(1, (int)ceil($total / $perPage));
+            $page = min($page, $pages);
+            $offset = ($page - 1) * $perPage;
+            $rows = Database::fetchAll(
+                "SELECT log_timestamp, domain, sender, recipient, status, relay, dsn, detail, raw_line
+                 FROM mail_relay_events
+                 ORDER BY event_at DESC, id DESC
+                 LIMIT {$perPage} OFFSET {$offset}"
+            );
+
+            return [
+                'entries' => array_map(static fn(array $row): array => [
+                    'timestamp' => (string)($row['log_timestamp'] ?? ''),
+                    'domain' => (string)($row['domain'] ?? ''),
+                    'from' => (string)($row['sender'] ?? ''),
+                    'to' => (string)($row['recipient'] ?? ''),
+                    'status' => (string)($row['status'] ?? ''),
+                    'relay' => (string)($row['relay'] ?? ''),
+                    'dsn' => (string)($row['dsn'] ?? ''),
+                    'detail' => (string)($row['detail'] ?? ''),
+                    'line' => (string)($row['raw_line'] ?? ''),
+                ], $rows),
+                'total' => $total,
+                'page' => $page,
+                'per_page' => $perPage,
+                'pages' => $pages,
+            ];
+        } catch (\Throwable) {
+            return ['entries' => [], 'total' => 0, 'page' => 1, 'per_page' => $perPage, 'pages' => 1];
+        }
     }
 
     public static function getDeliveryLogStats(int $scanLines = 20000): array
     {
-        $file = is_readable('/var/log/mail.log') ? '/var/log/mail.log' : (is_readable('/var/log/maillog') ? '/var/log/maillog' : '');
+        self::ingestRelayLogFromFile($scanLines);
         $stats = [
-            'available' => $file !== '',
+            'available' => true,
             'sent' => 0,
             'deferred' => 0,
             'bounced' => 0,
@@ -1589,23 +1583,21 @@ class MailService
             'last_sent_at' => '',
         ];
 
-        if ($file === '') {
-            return $stats;
-        }
-
-        $scanLines = max(1000, min(60000, $scanLines));
-        $lines = explode("\n", trim((string)shell_exec('tail -n ' . $scanLines . ' ' . escapeshellarg($file) . ' 2>/dev/null')));
-        foreach (array_reverse($lines) as $line) {
-            if (!str_contains($line, 'postfix/') || !preg_match('/status=(sent|deferred|bounced)/', $line, $match)) {
-                continue;
+        try {
+            self::ensureRelayEventsTable();
+            foreach (Database::fetchAll("SELECT status, COUNT(*) AS cnt FROM mail_relay_events GROUP BY status") as $row) {
+                $status = (string)($row['status'] ?? '');
+                if (array_key_exists($status, $stats)) {
+                    $stats[$status] = (int)($row['cnt'] ?? 0);
+                    $stats['total'] += (int)($row['cnt'] ?? 0);
+                }
             }
-
-            $status = $match[1];
-            $stats[$status]++;
-            $stats['total']++;
-            if ($status === 'sent' && $stats['last_sent_at'] === '') {
-                $stats['last_sent_at'] = substr($line, 0, 15);
+            $last = Database::fetchOne("SELECT log_timestamp FROM mail_relay_events WHERE status = 'sent' ORDER BY event_at DESC, id DESC LIMIT 1");
+            if ($last) {
+                $stats['last_sent_at'] = (string)($last['log_timestamp'] ?? '');
             }
+        } catch (\Throwable) {
+            $stats['available'] = false;
         }
 
         return $stats;
@@ -1613,6 +1605,7 @@ class MailService
 
     public static function clearRelayLog(): array
     {
+        $archived = self::ingestRelayLogFromFile(60000);
         $candidates = ['/var/log/mail.log', '/var/log/maillog'];
         $targets = [];
         foreach ($candidates as $candidate) {
@@ -1647,7 +1640,120 @@ class MailService
             return ['ok' => false, 'error' => implode(' | ', $errors)];
         }
 
-        return ['ok' => true, 'files' => $cleared];
+        return ['ok' => true, 'files' => $cleared, 'archived' => $archived];
+    }
+
+    private static function ensureRelayEventsTable(): void
+    {
+        static $ensured = false;
+        if ($ensured) {
+            return;
+        }
+
+        Database::query("CREATE TABLE IF NOT EXISTS mail_relay_events (
+            id BIGSERIAL PRIMARY KEY,
+            line_hash CHAR(64) NOT NULL UNIQUE,
+            event_at TIMESTAMP NOT NULL,
+            log_timestamp VARCHAR(32) NOT NULL DEFAULT '',
+            domain VARCHAR(255) NOT NULL DEFAULT '',
+            sender VARCHAR(320) NOT NULL DEFAULT '',
+            recipient VARCHAR(320) NOT NULL DEFAULT '',
+            status VARCHAR(20) NOT NULL,
+            relay VARCHAR(255) NOT NULL DEFAULT '',
+            dsn VARCHAR(64) NOT NULL DEFAULT '',
+            detail TEXT NOT NULL DEFAULT '',
+            raw_line TEXT NOT NULL,
+            source_file VARCHAR(255) NOT NULL DEFAULT '',
+            created_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )");
+        Database::query("CREATE INDEX IF NOT EXISTS idx_mail_relay_events_event_at ON mail_relay_events(event_at DESC)");
+        Database::query("CREATE INDEX IF NOT EXISTS idx_mail_relay_events_status ON mail_relay_events(status)");
+        Database::query("CREATE INDEX IF NOT EXISTS idx_mail_relay_events_domain ON mail_relay_events(domain)");
+        $ensured = true;
+    }
+
+    private static function ingestRelayLogFromFile(int $scanLines = 20000): int
+    {
+        $file = is_readable('/var/log/mail.log') ? '/var/log/mail.log' : (is_readable('/var/log/maillog') ? '/var/log/maillog' : '');
+        if ($file === '') {
+            return 0;
+        }
+
+        try {
+            self::ensureRelayEventsTable();
+            $scanLines = max(1000, min(60000, $scanLines));
+            $lines = explode("\n", trim((string)shell_exec('tail -n ' . $scanLines . ' ' . escapeshellarg($file) . ' 2>/dev/null')));
+            $pdo = Database::connect();
+            $stmt = $pdo->prepare("
+                INSERT INTO mail_relay_events
+                    (line_hash, event_at, log_timestamp, domain, sender, recipient, status, relay, dsn, detail, raw_line, source_file)
+                VALUES
+                    (:line_hash, :event_at, :log_timestamp, :domain, :sender, :recipient, :status, :relay, :dsn, :detail, :raw_line, :source_file)
+                ON CONFLICT (line_hash) DO NOTHING
+            ");
+
+            $inserted = 0;
+            foreach ($lines as $line) {
+                $event = self::parseRelayLogLine($line, $file);
+                if ($event === null) {
+                    continue;
+                }
+                $stmt->execute($event);
+                $inserted += $stmt->rowCount() > 0 ? 1 : 0;
+            }
+            return $inserted;
+        } catch (\Throwable) {
+            return 0;
+        }
+    }
+
+    private static function parseRelayLogLine(string $line, string $sourceFile): ?array
+    {
+        $line = trim($line);
+        if ($line === '' || !str_contains($line, 'postfix/') || !preg_match('/status=(sent|deferred|bounced)/', $line, $sm)) {
+            return null;
+        }
+
+        preg_match('/from=<([^>]*)>/', $line, $fm);
+        preg_match('/to=<([^>]*)>/', $line, $tm);
+        preg_match('/relay=([^, ]+)/', $line, $rm);
+        preg_match('/dsn=([^, ]+)/', $line, $dm);
+        $from = $fm[1] ?? '';
+        $domain = str_contains($from, '@') ? strtolower(substr(strrchr($from, '@'), 1)) : '';
+        $detail = '';
+        if (preg_match('/status=(?:sent|deferred|bounced)\s+\((.*)\)\s*$/', $line, $detailMatch)) {
+            $detail = $detailMatch[1];
+        }
+
+        $logTimestamp = substr($line, 0, 15);
+        $eventAt = self::parseMailLogTimestamp($logTimestamp);
+
+        return [
+            'line_hash' => hash('sha256', $line),
+            'event_at' => $eventAt,
+            'log_timestamp' => $logTimestamp,
+            'domain' => $domain,
+            'sender' => $from,
+            'recipient' => $tm[1] ?? '',
+            'status' => $sm[1],
+            'relay' => $rm[1] ?? '',
+            'dsn' => $dm[1] ?? '',
+            'detail' => $detail,
+            'raw_line' => $line,
+            'source_file' => $sourceFile,
+        ];
+    }
+
+    private static function parseMailLogTimestamp(string $timestamp): string
+    {
+        $date = \DateTime::createFromFormat('Y M j H:i:s', date('Y') . ' ' . trim($timestamp));
+        if (!$date) {
+            return date('Y-m-d H:i:s');
+        }
+        if ($date->getTimestamp() > time() + 86400) {
+            $date->modify('-1 year');
+        }
+        return $date->format('Y-m-d H:i:s');
     }
 
     public static function getMailQueueEntries(int $limit = 200): array

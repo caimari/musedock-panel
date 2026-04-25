@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.117] — 2026-04-25
+
+### New
+- Relay: nuevo historico persistente en BD (`mail_relay_events`) para eventos Postfix `sent`, `deferred` y `bounced` parseados desde `mail.log`/`maillog`.
+
+### Improved
+- `/mail?tab=queue`: el historico reciente del relay ahora lee desde BD, no directamente desde el archivo de log.
+- `Vaciar mail.log`: antes de truncar `mail.log`/`maillog`, el panel archiva los eventos detectados en BD y conserva el historico.
+- Las metricas de General (`emails enviados`, diferidos y rebotes) usan el historico persistente en BD.
+
+### Fixed
+- Borrar o rotar `mail.log` ya no hace desaparecer el historico del relay mostrado por el panel.
+
 ## [1.0.116] — 2026-04-25
 
 ### Improved

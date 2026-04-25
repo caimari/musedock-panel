@@ -1207,7 +1207,8 @@ class MailController
 
         $result = MailService::clearRelayLog();
         if ($result['ok'] ?? false) {
-            Flash::set('success', 'Historico del relay vaciado.');
+            $archived = (int)($result['archived'] ?? 0);
+            Flash::set('success', 'mail.log/maillog vaciado. Historico persistente en BD conservado' . ($archived > 0 ? " ({$archived} eventos archivados antes de vaciar)." : '.'));
         } else {
             Flash::set('error', $result['error'] ?? 'No se pudo vaciar el historico del relay.');
         }

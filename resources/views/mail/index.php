@@ -1015,7 +1015,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
     <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
         <span><i class="bi bi-activity me-2"></i>Historico reciente del relay</span>
         <div class="d-flex flex-wrap align-items-center gap-2">
-            <span class="text-muted small"><?= (int)($relayLogPage['total'] ?? 0) ?> eventos encontrados en mail.log</span>
+            <span class="text-muted small"><?= (int)($relayLogPage['total'] ?? 0) ?> eventos guardados en BD</span>
             <form method="get" action="/mail" class="d-flex align-items-center gap-2">
                 <input type="hidden" name="tab" value="queue">
                 <input type="hidden" name="relay_log_page" value="1">
@@ -1032,7 +1032,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                 <input type="hidden" name="relay_log_page" value="<?= (int)($relayLogPage['page'] ?? 1) ?>">
                 <input type="hidden" name="relay_log_per_page" value="<?= $relayCurrentPerPage ?>">
                 <button type="submit" class="btn btn-outline-danger btn-sm">
-                    <i class="bi bi-trash3 me-1"></i>Borrar historico
+                    <i class="bi bi-trash3 me-1"></i>Vaciar mail.log
                 </button>
             </form>
             <?php endif; ?>
@@ -1040,7 +1040,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
     </div>
     <div class="card-body p-0">
         <?php if (empty($relayLogs)): ?>
-            <div class="p-3 text-muted small">Sin entradas recientes con estado <code>sent</code>, <code>deferred</code> o <code>bounced</code> en mail.log.</div>
+            <div class="p-3 text-muted small">Sin eventos guardados con estado <code>sent</code>, <code>deferred</code> o <code>bounced</code>. Pulsa Cola/General despues de que Postfix genere actividad para archivar nuevos eventos desde mail.log.</div>
         <?php else: ?>
             <div class="table-responsive">
                 <table class="table table-sm mb-0">
@@ -2102,9 +2102,9 @@ initWebmailConfigLock();
         },
         'clear-log': {
             icon: 'warning',
-            title: 'Borrar historico del relay',
-            html: '<div class="text-start small">Se vaciara <code>mail.log</code> (y/o <code>maillog</code>) en este nodo. Esta accion no se puede deshacer.</div>',
-            confirmButtonText: 'Si, borrar historico',
+            title: 'Vaciar mail.log del relay',
+            html: '<div class="text-start small">Antes de vaciar <code>mail.log</code>/<code>maillog</code>, el panel archivara los eventos detectados en la base de datos. El historico BD se conserva.</div>',
+            confirmButtonText: 'Si, vaciar mail.log',
             confirmButtonColor: '#ef4444',
             requirePassword: true
         }

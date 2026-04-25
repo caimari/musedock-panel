@@ -20,6 +20,41 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.117',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Relay: nuevo historico persistente en BD (`mail_relay_events`) para eventos Postfix `sent`, `deferred` y `bounced` parseados desde `mail.log`/`maillog`',
+                        ],
+                        'en' => [
+                            'Relay: new persistent DB history (`mail_relay_events`) for Postfix `sent`, `deferred`, and `bounced` events parsed from `mail.log`/`maillog`',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=queue`: el historico reciente del relay ahora lee desde BD, no directamente desde el archivo de log',
+                            '`Vaciar mail.log`: antes de truncar `mail.log`/`maillog`, el panel archiva los eventos detectados en BD y conserva el historico',
+                            'Las metricas de General (`emails enviados`, diferidos y rebotes) usan el historico persistente en BD',
+                        ],
+                        'en' => [
+                            '`/mail?tab=queue`: recent relay history now reads from DB, not directly from the log file',
+                            '`Clear mail.log`: before truncating `mail.log`/`maillog`, the panel archives detected events into DB and keeps history',
+                            'General metrics (`sent mail`, deferred, and bounced) now use persistent DB history',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Borrar o rotar `mail.log` ya no hace desaparecer el historico del relay mostrado por el panel',
+                        ],
+                        'en' => [
+                            'Deleting or rotating `mail.log` no longer removes relay history shown by the panel',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.116',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

@@ -314,6 +314,27 @@ CREATE TABLE IF NOT EXISTS mail_aliases (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mail_aliases_unique ON mail_aliases(source, destination);
 
+-- Persistent mail relay delivery events parsed from Postfix logs
+CREATE TABLE IF NOT EXISTS mail_relay_events (
+    id BIGSERIAL PRIMARY KEY,
+    line_hash CHAR(64) NOT NULL UNIQUE,
+    event_at TIMESTAMP NOT NULL,
+    log_timestamp VARCHAR(32) NOT NULL DEFAULT '',
+    domain VARCHAR(255) NOT NULL DEFAULT '',
+    sender VARCHAR(320) NOT NULL DEFAULT '',
+    recipient VARCHAR(320) NOT NULL DEFAULT '',
+    status VARCHAR(20) NOT NULL,
+    relay VARCHAR(255) NOT NULL DEFAULT '',
+    dsn VARCHAR(64) NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '',
+    raw_line TEXT NOT NULL,
+    source_file VARCHAR(255) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_mail_relay_events_event_at ON mail_relay_events(event_at DESC);
+CREATE INDEX IF NOT EXISTS idx_mail_relay_events_status ON mail_relay_events(status);
+CREATE INDEX IF NOT EXISTS idx_mail_relay_events_domain ON mail_relay_events(domain);
+
 -- Monitoring metrics
 CREATE TABLE IF NOT EXISTS monitor_metrics (
     ts TIMESTAMP NOT NULL DEFAULT NOW(),
