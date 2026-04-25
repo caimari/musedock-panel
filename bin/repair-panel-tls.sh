@@ -108,7 +108,7 @@ if [ -n "$(echo "$EXISTING_SITES" | tr -d '[:space:]')" ]; then
     echo "$EXISTING_SITES" >> "$TMP_FILE"
 fi
 
-if ! caddy validate --config "$TMP_FILE" >/tmp/musedock-panel-caddy-validate.log 2>&1; then
+if ! caddy validate --adapter caddyfile --config "$TMP_FILE" >/tmp/musedock-panel-caddy-validate.log 2>&1; then
     cat /tmp/musedock-panel-caddy-validate.log >&2
     rm -f "$TMP_FILE"
     echo "Caddy validation failed; original Caddyfile kept at ${CADDY_FILE}" >&2

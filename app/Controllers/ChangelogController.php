@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.152',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`bin/repair-panel-tls.sh`: valida Caddyfiles temporales con `--adapter caddyfile`, evitando el error `config is not valid JSON`',
+                            '`install.sh`: el modo `Reinstalar` queda protegido si el panel existente parece operativo; exige escribir `REINSTALAR` para evitar reinstalaciones accidentales',
+                            '`install.sh`: corregida URL corrupta del health check en modo `Solo verificar`',
+                        ],
+                        'en' => [
+                            '`bin/repair-panel-tls.sh`: validates temporary Caddyfiles with `--adapter caddyfile`, avoiding the `config is not valid JSON` error',
+                            '`install.sh`: `Reinstall` mode is protected when the existing panel appears operational; it requires typing `REINSTALAR` to avoid accidental reinstalls',
+                            '`install.sh`: fixed a corrupted health-check URL in `Verify only` mode',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.151',
                 'date' => '2026-04-26',
                 'badge' => 'primary',

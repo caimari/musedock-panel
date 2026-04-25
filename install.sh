@@ -195,6 +195,50 @@ preflight_existing_panel_services() {
         warn "Preflight: PostgreSQL panel sigue sin responder; el paso PostgreSQL mostrara diagnostico completo"
     fi
 }
+
+panel_looks_operational() {
+    [ -f "${PANEL_DIR}/.env" ] || return 1
+
+    local env_panel_port env_internal_port internal_code https_code db_host db_port db_name db_user db_pass
+    env_panel_port=$(read_env_value PANEL_PORT)
+    env_panel_port=${env_panel_port:-8444}
+    env_internal_port=$(read_env_value PANEL_INTERNAL_PORT)
+    env_internal_port=${env_internal_port:-$((env_panel_port + 1))}
+
+    systemctl is-active --quiet musedock-panel 2>/dev/null || return 1
+    systemctl is-active --quiet caddy 2>/dev/null || return 1
+
+    if ! ss -tln 2>/dev/null | grep -qE "127\\.0\\.0\\.1:${env_internal_port}\\b"; then
+        return 1
+    fi
+    if ! ss -tln 2>/dev/null | grep -qE "\\*:${env_panel_port}\\b|0\\.0\\.0\\.0:${env_panel_port}\\b|\\[::\\]:${env_panel_port}\\b"; then
+        return 1
+    fi
+
+    internal_code=$(curl -sk -o /dev/null -w "%{http_code}" --connect-timeout 1 --max-time 3 "http://127.0.0.1:${env_internal_port}/" 2>/dev/null || echo "000")
+    internal_code=$(echo "$internal_code" | tr -d '[:space:]')
+    https_code=$(curl -sk -o /dev/null -w "%{http_code}" --connect-timeout 1 --max-time 3 "https://127.0.0.1:${env_panel_port}/" 2>/dev/null || echo "000")
+    https_code=$(echo "$https_code" | tr -d '[:space:]')
+    case "$internal_code:$https_code" in
+        2*:2*|2*:3*|2*:403|3*:2*|3*:3*|3*:403|403:2*|403:3*|403:403) ;;
+        *) return 1 ;;
+    esac
+
+    db_host=$(read_env_value DB_HOST)
+    db_port=$(read_env_value DB_PORT)
+    db_name=$(read_env_value DB_NAME)
+    db_user=$(read_env_value DB_USER)
+    db_pass=$(read_env_value DB_PASS)
+    db_host=${db_host:-127.0.0.1}
+    db_port=${db_port:-5433}
+    db_name=${db_name:-musedock_panel}
+    db_user=${db_user:-musedock_panel}
+    if command -v psql >/dev/null 2>&1; then
+        PGPASSWORD="$db_pass" PGCONNECT_TIMEOUT=3 psql -h "$db_host" -p "$db_port" -U "$db_user" -d "$db_name" -tAc "SELECT 1" >/dev/null 2>&1 || return 1
+    fi
+
+    return 0
+}
 trap 'on_unhandled_error $LINENO' ERR
 trap 'stop_step_timer' EXIT
 
@@ -952,6 +996,19 @@ if [ -f "${PANEL_DIR}/.env" ]; then
 
     case "$EXISTING_CHOICE" in
         1)
+            if panel_looks_operational; then
+                echo ""
+                echo -e "  ${RED}${BOLD}PELIGRO: este panel parece operativo.${NC}"
+                echo -e "  ${YELLOW}Reinstalar puede reescribir servicio systemd, Caddyfile, crons, .env y rutas del panel.${NC}"
+                echo -e "  ${YELLOW}No borra bases de datos ni vhosts, pero no es la opcion correcta para actualizar un servidor sano.${NC}"
+                echo -e "  ${CYAN}Usa la opcion 4 para actualizar o la opcion 5 para reparar.${NC}"
+                echo ""
+                prompt_read "  Para forzar reinstalacion escribe exactamente REINSTALAR: " REINSTALL_CONFIRM
+                if [ "$REINSTALL_CONFIRM" != "REINSTALAR" ]; then
+                    echo -e "  ${GREEN}Cancelado. No se ha tocado la instalacion existente.${NC}"
+                    exit 0
+                fi
+            fi
             REINSTALL=true
             echo ""
             ok "$(t reinstall_mode)"
@@ -1496,8 +1553,8 @@ elif [ "$VERIFY_ONLY" = true ]; then
     sleep 1
     PANEL_HTTP="000"
     for TEST_URL in \
-        "http://127.0.0.1:1000 27 33 1000(PANEL_PORT + 1))/" \
-        "https://127.0.0.1:/" \
+        "http://127.0.0.1:$((PANEL_PORT + 1))/" \
+        "https://127.0.0.1:${PANEL_PORT}/" \
     ; do
         PANEL_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" --connect-timeout 1 --max-time 3 "$TEST_URL" 2>/dev/null || echo "000")
         PANEL_HTTP=$(echo "$PANEL_HTTP" | tr -d '[:space:]')
@@ -3432,7 +3489,7 @@ if [ -f "$CADDY_ROOT_CERT" ]; then
 fi
 
 # Validate and reload Caddy
-if caddy validate --config "$CADDY_FILE" > /dev/null 2>&1; then
+if caddy validate --adapter caddyfile --config "$CADDY_FILE" > /dev/null 2>&1; then
     systemctl restart caddy
     sleep 2
 

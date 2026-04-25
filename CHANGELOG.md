@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.152] — 2026-04-26
+
+### Fixed
+- `bin/repair-panel-tls.sh`: valida Caddyfiles temporales con `--adapter caddyfile`, evitando el error `config is not valid JSON`.
+- `install.sh`: el modo `Reinstalar` queda protegido si el panel existente parece operativo; exige escribir `REINSTALAR` para evitar reinstalaciones accidentales.
+- `install.sh`: corregida URL corrupta del health check en modo `Solo verificar`.
+
 ## [1.0.151] — 2026-04-26
 
 ### Fixed
