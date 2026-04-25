@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.154] — 2026-04-26
+
+### Fixed
+- `bin/repair-panel-tls.sh`: si Caddy valida pero no arranca, restaura automaticamente el Caddyfile anterior y muestra `systemctl/journalctl` para no dejar el panel sin listener.
+- `install.sh`: si el Caddyfile generado valida pero el servicio no reinicia, intenta restaurar el ultimo backup de Caddyfile.
+
 ## [1.0.153] — 2026-04-26
 
 ### Fixed

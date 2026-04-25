@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.154',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`bin/repair-panel-tls.sh`: si Caddy valida pero no arranca, restaura automaticamente el Caddyfile anterior y muestra `systemctl/journalctl` para no dejar el panel sin listener',
+                            '`install.sh`: si el Caddyfile generado valida pero el servicio no reinicia, intenta restaurar el ultimo backup de Caddyfile',
+                        ],
+                        'en' => [
+                            '`bin/repair-panel-tls.sh`: if Caddy validates but fails to start, it automatically restores the previous Caddyfile and shows `systemctl/journalctl` output so the panel is not left without a listener',
+                            '`install.sh`: if the generated Caddyfile validates but the service fails to restart, it tries to restore the latest Caddyfile backup',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.153',
                 'date' => '2026-04-26',
                 'badge' => 'primary',

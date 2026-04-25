@@ -3504,7 +3504,15 @@ fi
 
 # Validate and reload Caddy
 if caddy validate --adapter caddyfile --config "$CADDY_FILE" > /dev/null 2>&1; then
-    systemctl restart caddy
+    if ! systemctl restart caddy; then
+        warn "Caddy no pudo reiniciar con el Caddyfile generado; restaurando backup si existe"
+        LATEST_CADDY_BACKUP=$(ls -1t "${CADDY_FILE}".bak.* 2>/dev/null | head -1 || true)
+        if [ -n "$LATEST_CADDY_BACKUP" ]; then
+            cp "$LATEST_CADDY_BACKUP" "$CADDY_FILE"
+            systemctl restart caddy >/dev/null 2>&1 || true
+            warn "Caddyfile restaurado desde ${LATEST_CADDY_BACKUP}"
+        fi
+    fi
     sleep 2
 
     # Verify HTTPS works

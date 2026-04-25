@@ -118,7 +118,14 @@ fi
 mv "$TMP_FILE" "$CADDY_FILE"
 rm -f /etc/systemd/system/caddy.service.d/override-resume.conf
 systemctl daemon-reload
-systemctl restart caddy
+if ! systemctl restart caddy; then
+    echo "Caddy restart failed after writing repaired Caddyfile. Restoring backup: ${BACKUP_FILE}" >&2
+    cp "$BACKUP_FILE" "$CADDY_FILE"
+    systemctl restart caddy >/dev/null 2>&1 || true
+    systemctl status caddy --no-pager >&2 || true
+    journalctl -u caddy -n 80 --no-pager >&2 || true
+    exit 3
+fi
 sleep 2
 
 HTTPS_CODE="$(curl -sk -o /dev/null -w "%{http_code}" --max-time 5 "https://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000")"
