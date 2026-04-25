@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.138',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`install.sh`: temporizador visible por paso; cada `OK`/warning muestra tiempo transcurrido del paso',
+                            '`install.sh`: pasos largos imprimen un latido cada 30 segundos con tiempo del paso y tiempo total para evitar sensacion de bloqueo durante APT/PHP/PostgreSQL',
+                        ],
+                        'en' => [
+                            '`install.sh`: visible per-step timer; every OK/warning shows elapsed time for the current step',
+                            '`install.sh`: long steps print a heartbeat every 30 seconds with step elapsed time and total time to avoid looking stuck during APT/PHP/PostgreSQL',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.137',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

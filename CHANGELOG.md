@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.138] — 2026-04-25
+
+### Improved
+- `install.sh`: temporizador visible por paso; cada `OK`/warning muestra tiempo transcurrido del paso.
+- `install.sh`: pasos largos imprimen un latido cada 30 segundos con tiempo del paso y tiempo total para evitar sensacion de bloqueo durante APT/PHP/PostgreSQL.
+
 ## [1.0.137] — 2026-04-25
 
 ### Fixed

@@ -16,16 +16,76 @@ BOLD='\033[1m'
 NC='\033[0m'
 INSTALL_LOG="/tmp/musedock-panel-install.log"
 : > "$INSTALL_LOG" 2>/dev/null || true
+INSTALL_START_TS=$(date +%s)
+STEP_START_TS=$INSTALL_START_TS
+STEP_TITLE=""
+STEP_TIMER_PID=""
 
-header() { echo -e "\n${CYAN}${BOLD}=== $1 ===${NC}\n"; }
-ok()     { echo -e "  ${GREEN}✓${NC} $1"; }
-warn()   { echo -e "  ${YELLOW}!${NC} $1"; }
-fail()   { echo -e "  ${RED}✗ $1${NC}"; exit 1; }
+format_duration() {
+    local seconds="${1:-0}"
+    local minutes=$((seconds / 60))
+    local rest=$((seconds % 60))
+    if [ "$minutes" -gt 0 ]; then
+        printf "%dm%02ds" "$minutes" "$rest"
+    else
+        printf "%ds" "$rest"
+    fi
+}
+
+elapsed_step() {
+    local now
+    now=$(date +%s)
+    format_duration $((now - STEP_START_TS))
+}
+
+elapsed_total() {
+    local now
+    now=$(date +%s)
+    format_duration $((now - INSTALL_START_TS))
+}
+
+stop_step_timer() {
+    if [ -n "${STEP_TIMER_PID:-}" ]; then
+        kill "$STEP_TIMER_PID" 2>/dev/null || true
+        wait "$STEP_TIMER_PID" 2>/dev/null || true
+        STEP_TIMER_PID=""
+    fi
+}
+
+start_step_timer() {
+    local title="$1"
+    (
+        while true; do
+            sleep 30 || exit 0
+            now=""
+            elapsed=""
+            total=""
+            now=$(date +%s)
+            elapsed=$(format_duration $((now - STEP_START_TS)))
+            total=$(format_duration $((now - INSTALL_START_TS)))
+            echo -e "  ${CYAN}…${NC} ${title} sigue en curso (${elapsed}; total ${total})"
+        done
+    ) &
+    STEP_TIMER_PID=$!
+}
+
+header() {
+    stop_step_timer
+    STEP_TITLE="$1"
+    STEP_START_TS=$(date +%s)
+    echo -e "\n${CYAN}${BOLD}=== $1 ===${NC}"
+    echo -e "${CYAN}Inicio: $(date '+%Y-%m-%d %H:%M:%S') · total $(elapsed_total)${NC}\n"
+    start_step_timer "$1"
+}
+ok()     { echo -e "  ${GREEN}✓${NC} [$(elapsed_step)] $1"; }
+warn()   { echo -e "  ${YELLOW}!${NC} [$(elapsed_step)] $1"; }
+fail()   { stop_step_timer; echo -e "  ${RED}✗${NC} [$(elapsed_step)] $1"; exit 1; }
 ask()    { read -rp "  $1: " "$2"; }
 
 on_unhandled_error() {
     local rc=$?
     local line="${1:-?}"
+    stop_step_timer
     echo ""
     echo -e "  ${RED}✗ Instalador detenido en linea ${line} (exit ${rc}).${NC}"
     if [ -s "$INSTALL_LOG" ]; then
@@ -35,6 +95,7 @@ on_unhandled_error() {
     echo -e "  ${YELLOW}Reintenta con: bash -x install.sh${NC}"
 }
 trap 'on_unhandled_error $LINENO' ERR
+trap 'stop_step_timer' EXIT
 
 install_ondrej_php_repo_manual() {
     local codename key_url keyring source_file
