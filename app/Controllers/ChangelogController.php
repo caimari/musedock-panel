@@ -20,6 +20,35 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.123',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=queue`: historico relay mas compacto, con detalle truncado para evitar scroll horizontal y boton de ojo para abrir modal con evento completo',
+                            'Historico relay: el parser correlaciona lineas de Postfix por queue id para rellenar `from` y dominio cuando la linea `status=sent/deferred/bounced` solo trae `to`',
+                            'Al reingestar `mail.log`, eventos ya guardados en BD actualizan campos vacios (`from`, dominio, relay, dsn, detalle) si el log permite completarlos',
+                        ],
+                        'en' => [
+                            '`/mail?tab=queue`: more compact relay history, with truncated details to avoid horizontal scroll and an eye button to open the full event modal',
+                            'Relay history: parser correlates Postfix lines by queue id to fill `from` and domain when the `status=sent/deferred/bounced` line only carries `to`',
+                            'When re-ingesting `mail.log`, already stored DB events fill empty fields (`from`, domain, relay, dsn, detail) when the log provides them',
+                        ],
+                    ],
+                    'docs' => [
+                        'es' => [
+                            '`/docs/mail/relay`: nueva seccion Laravel/SaaS con `MAIL_LOCAL_URL`, DSN SMTP interno, `verify_peer=0`, mailer `local` y `failover` local + proveedor backup',
+                            '`/docs/mail/queue`: documentado como se alimenta el historico desde `mail.log`/`maillog`, correlacion por queue id y modal de detalle raw',
+                        ],
+                        'en' => [
+                            '`/docs/mail/relay`: new Laravel/SaaS section with `MAIL_LOCAL_URL`, internal SMTP DSN, `verify_peer=0`, `local` mailer, and local + backup-provider `failover`',
+                            '`/docs/mail/queue`: documented how history is fed from `mail.log`/`maillog`, queue-id correlation, and raw-detail modal',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.122',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

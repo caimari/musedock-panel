@@ -1746,12 +1746,36 @@ class MailService
                     (line_hash, event_at, log_timestamp, domain, sender, recipient, status, relay, dsn, detail, raw_line, source_file)
                 VALUES
                     (:line_hash, :event_at, :log_timestamp, :domain, :sender, :recipient, :status, :relay, :dsn, :detail, :raw_line, :source_file)
-                ON CONFLICT (line_hash) DO NOTHING
+                ON CONFLICT (line_hash) DO UPDATE SET
+                    domain = CASE WHEN mail_relay_events.domain = '' AND EXCLUDED.domain <> '' THEN EXCLUDED.domain ELSE mail_relay_events.domain END,
+                    sender = CASE WHEN mail_relay_events.sender = '' AND EXCLUDED.sender <> '' THEN EXCLUDED.sender ELSE mail_relay_events.sender END,
+                    recipient = CASE WHEN mail_relay_events.recipient = '' AND EXCLUDED.recipient <> '' THEN EXCLUDED.recipient ELSE mail_relay_events.recipient END,
+                    relay = CASE WHEN mail_relay_events.relay = '' AND EXCLUDED.relay <> '' THEN EXCLUDED.relay ELSE mail_relay_events.relay END,
+                    dsn = CASE WHEN mail_relay_events.dsn = '' AND EXCLUDED.dsn <> '' THEN EXCLUDED.dsn ELSE mail_relay_events.dsn END,
+                    detail = CASE WHEN mail_relay_events.detail = '' AND EXCLUDED.detail <> '' THEN EXCLUDED.detail ELSE mail_relay_events.detail END
+                WHERE
+                    (mail_relay_events.domain = '' AND EXCLUDED.domain <> '')
+                    OR (mail_relay_events.sender = '' AND EXCLUDED.sender <> '')
+                    OR (mail_relay_events.recipient = '' AND EXCLUDED.recipient <> '')
+                    OR (mail_relay_events.relay = '' AND EXCLUDED.relay <> '')
+                    OR (mail_relay_events.dsn = '' AND EXCLUDED.dsn <> '')
+                    OR (mail_relay_events.detail = '' AND EXCLUDED.detail <> '')
             ");
 
             $inserted = 0;
+            $queueSenders = [];
             foreach ($lines as $line) {
-                $event = self::parseRelayLogLine($line, $file);
+                if (preg_match('/postfix\/[a-z0-9_-]+\[[0-9]+\]:\s+([A-Z0-9]{5,}):\s+.*from=<([^>]*)>/i', $line, $fromMatch)) {
+                    $queueId = strtoupper((string)$fromMatch[1]);
+                    $sender = trim((string)$fromMatch[2]);
+                    if ($queueId !== '' && $sender !== '') {
+                        $queueSenders[$queueId] = $sender;
+                    }
+                }
+            }
+
+            foreach ($lines as $line) {
+                $event = self::parseRelayLogLine($line, $file, $queueSenders);
                 if ($event === null) {
                     continue;
                 }
@@ -1764,18 +1788,22 @@ class MailService
         }
     }
 
-    private static function parseRelayLogLine(string $line, string $sourceFile): ?array
+    private static function parseRelayLogLine(string $line, string $sourceFile, array $queueSenders = []): ?array
     {
         $line = trim($line);
         if ($line === '' || !str_contains($line, 'postfix/') || !preg_match('/status=(sent|deferred|bounced)/', $line, $sm)) {
             return null;
         }
 
+        preg_match('/postfix\/[a-z0-9_-]+\[[0-9]+\]:\s+([A-Z0-9]{5,}):/i', $line, $qm);
         preg_match('/from=<([^>]*)>/', $line, $fm);
         preg_match('/to=<([^>]*)>/', $line, $tm);
         preg_match('/relay=([^, ]+)/', $line, $rm);
         preg_match('/dsn=([^, ]+)/', $line, $dm);
         $from = $fm[1] ?? '';
+        if ($from === '' && !empty($qm[1])) {
+            $from = (string)($queueSenders[strtoupper((string)$qm[1])] ?? '');
+        }
         $domain = str_contains($from, '@') ? strtolower(substr(strrchr($from, '@'), 1)) : '';
         $detail = '';
         if (preg_match('/status=(?:sent|deferred|bounced)\s+\((.*)\)\s*$/', $line, $detailMatch)) {

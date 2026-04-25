@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.123] — 2026-04-25
+
+### Improved
+- `/mail?tab=queue`: historico relay mas compacto, con detalle truncado para evitar scroll horizontal y boton de ojo para abrir modal con evento completo.
+- Historico relay: el parser correlaciona lineas de Postfix por queue id para rellenar `from` y dominio cuando la linea `status=sent/deferred/bounced` solo trae `to`.
+- Al reingestar `mail.log`, eventos ya guardados en BD actualizan campos vacios (`from`, dominio, relay, dsn, detalle) si el log permite completarlos.
+
+### Docs
+- `/docs/mail/relay`: nueva seccion Laravel/SaaS con `MAIL_LOCAL_URL`, DSN SMTP interno, `verify_peer=0`, mailer `local` y `failover` local + proveedor backup.
+- `/docs/mail/queue`: documentado como se alimenta el historico desde `mail.log`/`maillog`, correlacion por queue id y modal de detalle raw.
+
 ## [1.0.122] — 2026-04-25
 
 ### New

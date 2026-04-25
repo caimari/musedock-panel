@@ -31,4 +31,73 @@
     </div>
 </div>
 
+<div class="card mb-4">
+    <div class="card-header"><i class="bi bi-code-square me-2"></i>Laravel: relay privado local con failover</div>
+    <div class="card-body">
+        <p class="small text-muted mb-3">
+            Patron recomendado para una app Laravel/SaaS: usar el relay privado como primer mailer y un proveedor externo como backup.
+            Asi el envio normal sale por Postfix interno, pero si el relay cae, Laravel puede saltar al proveedor alternativo.
+        </p>
+
+        <div class="row g-3 mb-3">
+            <div class="col-lg-6">
+                <div class="p-3 rounded h-100" style="background:#0f172a;border:1px solid #334155;">
+                    <div class="fw-semibold small mb-2">config/mail.php</div>
+                    <pre class="small mb-0" style="color:#cbd5e1;white-space:pre-wrap;">'mailers' =&gt; [
+    'local' =&gt; [
+        'transport' =&gt; 'smtp',
+        'url' =&gt; env('MAIL_LOCAL_URL'),
+    ],
+
+    'provider_backup' =&gt; [
+        'transport' =&gt; 'smtp',
+        'host' =&gt; env('MAIL_BACKUP_HOST'),
+        'port' =&gt; env('MAIL_BACKUP_PORT', 587),
+        'username' =&gt; env('MAIL_BACKUP_USERNAME'),
+        'password' =&gt; env('MAIL_BACKUP_PASSWORD'),
+        'encryption' =&gt; 'tls',
+    ],
+
+    'failover' =&gt; [
+        'transport' =&gt; 'failover',
+        'mailers' =&gt; ['local', 'provider_backup'],
+    ],
+],</pre>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div class="p-3 rounded h-100" style="background:#0f172a;border:1px solid #334155;">
+                    <div class="fw-semibold small mb-2">.env</div>
+                    <pre class="small mb-0" style="color:#cbd5e1;white-space:pre-wrap;">MAIL_MAILER=failover
+MAIL_LOCAL_URL=smtp://relay-user:RELAY_PASSWORD@10.10.70.2:587?verify_peer=0
+
+MAIL_BACKUP_HOST=smtp-backup.example.net
+MAIL_BACKUP_PORT=587
+MAIL_BACKUP_USERNAME=backup-user
+MAIL_BACKUP_PASSWORD=backup-password</pre>
+                </div>
+            </div>
+        </div>
+
+        <div class="alert alert-info mb-3">
+            <div class="small">
+                <strong>MAIL_MAILER=failover</strong> no significa proveedor externo. Es un orquestador:
+                primero intenta <code>local</code> y solo si falla usa <code>provider_backup</code>.
+                Si pones <code>MAIL_MAILER=local</code>, no hay backup.
+            </div>
+        </div>
+
+        <div class="small text-muted mb-3">
+            <strong>verify_peer=0</strong> desactiva la verificacion del certificado TLS del relay interno. Es util cuando el relay usa un
+            certificado autofirmado en IP privada/WireGuard. No requiere instalar nada extra: Symfony Mailer entiende esa opcion en el DSN.
+            Para un relay publico o expuesto a Internet, lo correcto es usar certificado valido y mantener verificacion TLS.
+        </div>
+
+        <div class="small text-muted mb-0">
+            Para verificar que realmente sale por el relay local, prueba el mailer aislado:
+            <code>Mail::mailer('local')-&gt;raw(...)</code>. Si ese envio funciona, no ha usado el fallback.
+        </div>
+    </div>
+</div>
+
 <div class="card"><div class="card-header"><i class="bi bi-exclamation-triangle me-2"></i>Errores tipicos</div><div class="card-body"><ul class="small text-muted mb-0"><li>DKIM no publicado o selector incorrecto.</li><li>SPF sin IP de salida real.</li><li>Cliente SMTP apuntando a host/puerto equivocado.</li><li>WireGuard sin ruta hacia el relay.</li></ul></div></div>

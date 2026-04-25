@@ -11,3 +11,17 @@
     <div class="col-lg-6"><div class="card h-100"><div class="card-header"><i class="bi bi-shield-check me-2"></i>Seguridad operativa</div><div class="card-body"><ul class="small text-muted mb-0"><li>Usar modales SweetAlert para todas las confirmaciones.</li><li>Acciones destructivas deben pedir password admin.</li><li>No borrar cola sin revisar primero causa del bloqueo.</li></ul></div></div></div>
     <div class="col-lg-6"><div class="card h-100"><div class="card-header"><i class="bi bi-check2-square me-2"></i>Que verificar</div><div class="card-body"><ul class="small text-muted mb-0"><li>Tras reintento, baja el numero de deferred.</li><li>Historico se limpia/actualiza segun accion.</li><li>Selector de registros por pagina (25, 100, 200, 500, 1000) aplicado.</li></ul></div></div></div>
 </div>
+
+<div class="card mt-4">
+    <div class="card-header"><i class="bi bi-activity me-2"></i>Historico reciente del relay</div>
+    <div class="card-body">
+        <p class="small text-muted mb-2">
+            El historico se guarda en BD y se alimenta desde <code>mail.log</code>/<code>maillog</code>. Postfix suele separar datos:
+            una linea contiene <code>from=&lt;...&gt;</code> y otra posterior contiene <code>to=&lt;...&gt;</code>, <code>relay=...</code>,
+            <code>dsn=...</code> y <code>status=sent/deferred/bounced</code>. El panel correlaciona esas lineas por queue id para rellenar remitente y dominio cuando sea posible.
+        </p>
+        <p class="small text-muted mb-0">
+            La tabla muestra un extracto corto para evitar scroll horizontal. El boton de ojo abre el modal con todos los detalles y la linea raw original.
+        </p>
+    </div>
+</div>

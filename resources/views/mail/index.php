@@ -188,6 +188,23 @@
         color: #cbd5e1 !important;
         overflow-wrap: anywhere;
     }
+    .mail-tab-pane .relay-history-table {
+        table-layout: fixed;
+    }
+    .mail-tab-pane .relay-history-table th,
+    .mail-tab-pane .relay-history-table td {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .mail-tab-pane .relay-history-table .relay-detail-preview {
+        display: inline-block;
+        max-width: 100%;
+        vertical-align: bottom;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
     #webmail-config-editor.webmail-config-locked .webmail-lockable:not(select):not([type="hidden"]) {
         background-color: #111827;
         border-color: #475569;
@@ -650,6 +667,27 @@
         unset($query['setup']);
         return '/mail?' . http_build_query($query);
     };
+    $relayShort = static function (string $value, int $limit = 80): string {
+        $value = trim($value);
+        if ($value === '') {
+            return '-';
+        }
+        return mb_strlen($value) > $limit ? mb_substr($value, 0, $limit - 1) . '...' : $value;
+    };
+    $relayLogDetail = static function (array $log): string {
+        $detail = trim((string)($log['detail'] ?? ''));
+        if ($detail !== '') {
+            return $detail;
+        }
+        $parts = [];
+        if (!empty($log['dsn'])) {
+            $parts[] = 'dsn=' . (string)$log['dsn'];
+        }
+        if (!empty($log['relay'])) {
+            $parts[] = 'relay=' . (string)$log['relay'];
+        }
+        return trim(implode(' ', $parts));
+    };
 ?>
 <div class="mail-tab-pane<?= $activeTab === 'relay' ? '' : ' d-none' ?>" data-mail-tab="relay">
 <div class="card mb-3" style="border-color:rgba(56,189,248,.28);">
@@ -1093,22 +1131,46 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
             <div class="p-3 text-muted small">Sin eventos guardados con estado <code>sent</code>, <code>deferred</code> o <code>bounced</code>. Pulsa Cola/General despues de que Postfix genere actividad para archivar nuevos eventos desde mail.log.</div>
         <?php else: ?>
             <div class="table-responsive">
-                <table class="table table-sm mb-0">
-                    <thead><tr><th class="ps-3">Hora</th><th>Dominio</th><th>From</th><th>To</th><th>Estado</th><th>Detalle</th></tr></thead>
+                <table class="table table-sm mb-0 relay-history-table">
+                    <thead>
+                        <tr>
+                            <th class="ps-3" style="width:140px;">Hora</th>
+                            <th style="width:150px;">Dominio</th>
+                            <th style="width:210px;">From</th>
+                            <th style="width:240px;">To</th>
+                            <th style="width:90px;">Estado</th>
+                            <th>Detalle</th>
+                            <th style="width:70px;"></th>
+                        </tr>
+                    </thead>
                     <tbody>
                         <?php foreach ($relayLogs as $log): ?>
+                        <?php $relayDetail = $relayLogDetail($log); ?>
                         <tr>
                             <td class="ps-3 text-muted"><?= View::e($log['timestamp'] ?? '') ?></td>
-                            <td><?= View::e($log['domain'] ?: '-') ?></td>
-                            <td class="text-muted"><?= View::e($log['from'] ?: '-') ?></td>
-                            <td class="text-muted"><?= View::e($log['to'] ?: '-') ?></td>
+                            <td><?= View::e($relayShort((string)($log['domain'] ?: '-'), 36)) ?></td>
+                            <td class="text-muted" title="<?= View::e($log['from'] ?: '-') ?>"><?= View::e($relayShort((string)($log['from'] ?: '-'), 48)) ?></td>
+                            <td class="text-muted" title="<?= View::e($log['to'] ?: '-') ?>"><?= View::e($relayShort((string)($log['to'] ?: '-'), 52)) ?></td>
                             <td><span class="badge bg-<?= ($log['status'] ?? '') === 'sent' ? 'success' : (($log['status'] ?? '') === 'bounced' ? 'danger' : 'warning') ?>"><?= View::e($log['status'] ?? '-') ?></span></td>
                             <td class="small queue-detail" title="<?= View::e($log['line'] ?? '') ?>">
-                                <?php if (!empty($log['detail'])): ?>
-                                    <?= View::e($log['detail']) ?>
-                                <?php else: ?>
-                                    <?= View::e(trim((($log['dsn'] ?? '') ? 'dsn=' . $log['dsn'] : '') . ' ' . (($log['relay'] ?? '') ? 'relay=' . $log['relay'] : '')) ?: '-') ?>
-                                <?php endif; ?>
+                                <span class="relay-detail-preview"><?= View::e($relayShort($relayDetail, 96)) ?></span>
+                            </td>
+                            <td class="text-end pe-3">
+                                <button class="btn btn-outline-info btn-sm"
+                                    type="button"
+                                    data-relay-log-detail
+                                    data-time="<?= View::e($log['timestamp'] ?? '') ?>"
+                                    data-domain="<?= View::e($log['domain'] ?: '-') ?>"
+                                    data-from="<?= View::e($log['from'] ?: '-') ?>"
+                                    data-to="<?= View::e($log['to'] ?: '-') ?>"
+                                    data-status="<?= View::e($log['status'] ?? '-') ?>"
+                                    data-relay="<?= View::e($log['relay'] ?: '-') ?>"
+                                    data-dsn="<?= View::e($log['dsn'] ?: '-') ?>"
+                                    data-detail="<?= View::e($relayDetail ?: '-') ?>"
+                                    data-line="<?= View::e($log['line'] ?? '') ?>"
+                                    title="Ver detalle completo">
+                                    <i class="bi bi-eye"></i>
+                                </button>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -1791,6 +1853,16 @@ async function fireSwal(options) {
     return swal.fire(options);
 }
 
+function escapeHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#039;'
+    }[ch]));
+}
+
 function setHiddenField(form, name, value) {
     if (!form) return;
     let input = form.querySelector('input[name="' + name + '"]');
@@ -2199,6 +2271,41 @@ initWebmailConfigLock();
         if (result.isConfirmed) {
             form.submit();
         }
+    });
+})();
+
+(function initRelayLogDetailButtons() {
+    document.querySelectorAll('[data-relay-log-detail]').forEach((button) => {
+        button.addEventListener('click', async () => {
+            const row = button.dataset || {};
+            const field = (label, value) => '<tr><th class="text-muted pe-3" style="width:120px;">' + label + '</th><td>' + escapeHtml(value || '-') + '</td></tr>';
+            const html = '<div class="text-start small">'
+                + '<table class="table table-sm mb-3">'
+                + '<tbody>'
+                + field('Hora', row.time)
+                + field('Estado', row.status)
+                + field('Dominio', row.domain)
+                + field('From', row.from)
+                + field('To', row.to)
+                + field('Relay', row.relay)
+                + field('DSN', row.dsn)
+                + field('Detalle', row.detail)
+                + '</tbody></table>'
+                + '<div class="fw-semibold mb-1">Linea raw de mail.log</div>'
+                + '<pre class="mb-0 p-2 rounded" style="background:#0f172a;color:#e2e8f0;white-space:pre-wrap;max-height:260px;overflow:auto;">'
+                + escapeHtml(row.line || '')
+                + '</pre>'
+                + '</div>';
+
+            await fireSwal({
+                icon: 'info',
+                title: 'Detalle del evento relay',
+                html: html,
+                width: 820,
+                showCancelButton: false,
+                confirmButtonText: 'Cerrar'
+            });
+        });
     });
 })();
 
