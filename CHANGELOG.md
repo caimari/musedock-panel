@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.142] — 2026-04-25
+
+### Improved
+- `install.sh`: preflight rapido de PostgreSQL `panel` en `5433` con `pg_isready -t 1`, evitando esperas largas si el cluster ya esta operativo.
+- `install.sh`: al reinstalar, si el cluster `panel` esta parado se intenta arrancar y se espera maximo 5s; si no responde, se muestran comandos de diagnostico en vez de bloquearse en `psql`.
+- `install.sh`: las conexiones criticas a PostgreSQL usan `PGCONNECT_TIMEOUT=5` y el arranque global de PostgreSQL queda acotado a 30s.
+
 ## [1.0.141] — 2026-04-25
 
 ### Improved

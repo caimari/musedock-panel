@@ -2465,7 +2465,9 @@ else
 fi
 
 systemctl enable postgresql > /dev/null 2>&1
-systemctl start postgresql
+if ! systemctl is-active --quiet postgresql 2>/dev/null; then
+    timeout 30 systemctl start postgresql || fail "PostgreSQL no arranco en 30s. Revisa: journalctl -u postgresql --no-pager -n 80"
+fi
 ok "$(t pgsql_running)"
 
 # Detect PostgreSQL major version
@@ -2479,20 +2481,60 @@ ok "$(t pgsql_version_found "$PG_VER")"
 # Show current clusters
 header "$(t pgsql_dual_header)"
 
+pg_port_ready() {
+    local PORT="${1:-5433}"
+    if command -v pg_isready >/dev/null 2>&1; then
+        pg_isready -h 127.0.0.1 -p "$PORT" -t 1 >/dev/null 2>&1
+        return $?
+    fi
+    ss -tln 2>/dev/null | grep -qE "127\\.0\\.0\\.1:${PORT}\\b|\\*:${PORT}\\b|0\\.0\\.0\\.0:${PORT}\\b|\\[::\\]:${PORT}\\b"
+}
+
+wait_pg_port_ready() {
+    local PORT="${1:-5433}"
+    local MAX_WAIT="${2:-5}"
+    local i
+    for i in $(seq 1 "$MAX_WAIT"); do
+        if pg_port_ready "$PORT"; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+fail_panel_pg_unavailable() {
+    local PORT="${1:-5433}"
+    warn "PostgreSQL cluster 'panel' no responde en 127.0.0.1:${PORT}"
+    echo "    Diagnostico rapido:"
+    echo "    sudo pg_lsclusters"
+    echo "    sudo systemctl status postgresql@${PG_VER}-panel --no-pager"
+    echo "    sudo tail -n 80 /var/log/postgresql/postgresql-${PG_VER}-panel.log"
+    fail "No se puede continuar hasta que PostgreSQL del panel responda en ${PORT}."
+}
+
 # Function to ensure the panel cluster exists on port 5433
 ensure_panel_cluster() {
     if pg_lsclusters -h 2>/dev/null | awk '{print $2}' | grep -qw "panel"; then
         local PANEL_PORT_ACTUAL
         PANEL_PORT_ACTUAL=$(pg_lsclusters -h 2>/dev/null | awk '$2=="panel" {print $3}')
         ok "$(t pgsql_cluster_exists "panel" "$PANEL_PORT_ACTUAL")"
+        if [ "$PANEL_PORT_ACTUAL" != "5433" ]; then
+            fail "El cluster PostgreSQL 'panel' existe en puerto ${PANEL_PORT_ACTUAL}, pero MuseDock espera 5433. Corrige el cluster antes de reinstalar."
+        fi
+        if pg_port_ready 5433; then
+            return 0
+        fi
         # Ensure it is running
         local PANEL_STATUS
         PANEL_STATUS=$(pg_lsclusters -h 2>/dev/null | awk '$2=="panel" {print $4}')
         if [ "$PANEL_STATUS" != "online" ]; then
             pg_ctlcluster "$PG_VER" panel start 2>/dev/null || true
         fi
+        wait_pg_port_ready 5433 5 || fail_panel_pg_unavailable 5433
     else
         pg_createcluster "$PG_VER" panel --port 5433 --start 2>/dev/null
+        wait_pg_port_ready 5433 5 || fail_panel_pg_unavailable 5433
         ok "$(t pgsql_cluster_created "panel" "5433")"
     fi
 }
@@ -2517,14 +2559,14 @@ update_panel_pg_hba() {
 PG_AUTH_METHOD="peer"
 PG_PASS_ENV=""
 
-if ! runuser -u postgres -- psql -c "SELECT 1;" > /dev/null 2>&1; then
+if ! runuser -u postgres -- env PGCONNECT_TIMEOUT=5 psql -c "SELECT 1;" > /dev/null 2>&1; then
     PG_AUTH_METHOD="password"
     echo ""
     echo -e "  ${YELLOW}${BOLD}$(t pgsql_peer_fail)${NC}"
     echo -e "  ${YELLOW}$(t pgsql_peer_desc)${NC}"
     echo ""
 
-    if PGPASSWORD="" psql -U postgres -h 127.0.0.1 -c "SELECT 1;" > /dev/null 2>&1; then
+    if PGCONNECT_TIMEOUT=5 PGPASSWORD="" psql -U postgres -h 127.0.0.1 -c "SELECT 1;" > /dev/null 2>&1; then
         ok "$(t pgsql_empty_pass)"
         PG_PASS_ENV=""
     else
@@ -2532,7 +2574,7 @@ if ! runuser -u postgres -- psql -c "SELECT 1;" > /dev/null 2>&1; then
         prompt_read_secret "  Password: " PG_SUPERUSER_PASS
         echo ""
 
-        if PGPASSWORD="$PG_SUPERUSER_PASS" psql -U postgres -h 127.0.0.1 -c "SELECT 1;" > /dev/null 2>&1; then
+        if PGCONNECT_TIMEOUT=5 PGPASSWORD="$PG_SUPERUSER_PASS" psql -U postgres -h 127.0.0.1 -c "SELECT 1;" > /dev/null 2>&1; then
             ok "$(t pgsql_pass_verified)"
             PG_PASS_ENV="$PG_SUPERUSER_PASS"
         else
@@ -2546,18 +2588,18 @@ pg_exec() {
     local SQL="$1"
     local PORT="${2:-5433}"
     if [ "$PG_AUTH_METHOD" = "peer" ]; then
-        runuser -u postgres -- psql -p "$PORT" -c "$SQL" 2>/dev/null
+        runuser -u postgres -- env PGCONNECT_TIMEOUT=5 psql -p "$PORT" -c "$SQL" 2>/dev/null
     else
-        PGPASSWORD="$PG_PASS_ENV" psql -U postgres -h 127.0.0.1 -p "$PORT" -c "$SQL" 2>/dev/null
+        PGCONNECT_TIMEOUT=5 PGPASSWORD="$PG_PASS_ENV" psql -U postgres -h 127.0.0.1 -p "$PORT" -c "$SQL" 2>/dev/null
     fi
 }
 
 pg_exec_quiet() {
     local PORT="${1:-5433}"
     if [ "$PG_AUTH_METHOD" = "peer" ]; then
-        runuser -u postgres -- psql -p "$PORT" -lqt 2>/dev/null
+        runuser -u postgres -- env PGCONNECT_TIMEOUT=5 psql -p "$PORT" -lqt 2>/dev/null
     else
-        PGPASSWORD="$PG_PASS_ENV" psql -U postgres -h 127.0.0.1 -p "$PORT" -lqt 2>/dev/null
+        PGCONNECT_TIMEOUT=5 PGPASSWORD="$PG_PASS_ENV" psql -U postgres -h 127.0.0.1 -p "$PORT" -lqt 2>/dev/null
     fi
 }
 
@@ -3140,7 +3182,7 @@ ok "$(t env_created)"
 
 # Run database schema (safe — uses IF NOT EXISTS)
 SCHEMA_INSTALL_LOG="/tmp/musedock-panel-install-schema.log"
-if ! PGPASSWORD="${DB_PASS}" psql -v ON_ERROR_STOP=1 -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > "$SCHEMA_INSTALL_LOG" 2>&1; then
+if ! PGCONNECT_TIMEOUT=5 PGPASSWORD="${DB_PASS}" psql -v ON_ERROR_STOP=1 -U "${DB_USER}" -h 127.0.0.1 -p 5433 -d "${DB_NAME}" -f "${PANEL_DIR}/database/schema.sql" > "$SCHEMA_INSTALL_LOG" 2>&1; then
     tail -n 80 "$SCHEMA_INSTALL_LOG" | sed 's/^/    /'
     fail "No se pudo aplicar database/schema.sql. Revisa PostgreSQL, pg_hba.conf y credenciales en ${PANEL_DIR}/.env."
 fi

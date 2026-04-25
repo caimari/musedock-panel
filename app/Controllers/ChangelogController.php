@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.142',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`install.sh`: preflight rapido de PostgreSQL `panel` en `5433` con `pg_isready -t 1`, evitando esperas largas si el cluster ya esta operativo',
+                            '`install.sh`: al reinstalar, si el cluster `panel` esta parado se intenta arrancar y se espera maximo 5s; si no responde, se muestran comandos de diagnostico en vez de bloquearse en `psql`',
+                            '`install.sh`: las conexiones criticas a PostgreSQL usan `PGCONNECT_TIMEOUT=5` y el arranque global de PostgreSQL queda acotado a 30s',
+                        ],
+                        'en' => [
+                            '`install.sh`: fast PostgreSQL `panel` preflight on `5433` using `pg_isready -t 1`, avoiding long waits when the cluster is already operational',
+                            '`install.sh`: during reinstall, if the `panel` cluster is stopped it tries to start it and waits at most 5s; if it still does not respond, it prints diagnostics instead of blocking in `psql`',
+                            '`install.sh`: critical PostgreSQL connections use `PGCONNECT_TIMEOUT=5` and global PostgreSQL startup is capped at 30s',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.141',
                 'date' => '2026-04-25',
                 'badge' => 'primary',
