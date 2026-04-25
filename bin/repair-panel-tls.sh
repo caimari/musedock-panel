@@ -116,11 +116,15 @@ if ! caddy validate --adapter caddyfile --config "$TMP_FILE" >/tmp/musedock-pane
 fi
 
 mv "$TMP_FILE" "$CADDY_FILE"
+chown root:root "$CADDY_FILE"
+chmod 0644 "$CADDY_FILE"
 rm -f /etc/systemd/system/caddy.service.d/override-resume.conf
 systemctl daemon-reload
 if ! systemctl restart caddy; then
     echo "Caddy restart failed after writing repaired Caddyfile. Restoring backup: ${BACKUP_FILE}" >&2
     cp "$BACKUP_FILE" "$CADDY_FILE"
+    chown root:root "$CADDY_FILE"
+    chmod 0644 "$CADDY_FILE"
     systemctl restart caddy >/dev/null 2>&1 || true
     systemctl status caddy --no-pager >&2 || true
     journalctl -u caddy -n 80 --no-pager >&2 || true

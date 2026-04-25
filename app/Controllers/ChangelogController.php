@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.155',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`bin/repair-panel-tls.sh`: fuerza `/etc/caddy/Caddyfile` a `root:root 0644` tras escribir o restaurar, corrigiendo `open /etc/caddy/Caddyfile: permission denied` cuando Caddy corre como usuario `caddy`',
+                            '`install.sh`: normaliza permisos del Caddyfile generado o restaurado para que `systemd` pueda arrancar Caddy',
+                        ],
+                        'en' => [
+                            '`bin/repair-panel-tls.sh`: forces `/etc/caddy/Caddyfile` to `root:root 0644` after writing or restoring it, fixing `open /etc/caddy/Caddyfile: permission denied` when Caddy runs as user `caddy`',
+                            '`install.sh`: normalizes permissions on generated or restored Caddyfiles so `systemd` can start Caddy',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.154',
                 'date' => '2026-04-26',
                 'badge' => 'primary',

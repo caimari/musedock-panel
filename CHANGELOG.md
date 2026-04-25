@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.155] — 2026-04-26
+
+### Fixed
+- `bin/repair-panel-tls.sh`: fuerza `/etc/caddy/Caddyfile` a `root:root 0644` tras escribir o restaurar, corrigiendo `open /etc/caddy/Caddyfile: permission denied` cuando Caddy corre como usuario `caddy`.
+- `install.sh`: normaliza permisos del Caddyfile generado o restaurado para que `systemd` pueda arrancar Caddy.
+
 ## [1.0.154] — 2026-04-26
 
 ### Fixed

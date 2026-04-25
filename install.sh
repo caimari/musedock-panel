@@ -3487,6 +3487,8 @@ if [ -n "$(echo "$EXISTING_SITES" | tr -d '[:space:]')" ]; then
     echo "" >> "$CADDY_FILE"
     echo "$EXISTING_SITES" >> "$CADDY_FILE"
 fi
+chown root:root "$CADDY_FILE" 2>/dev/null || true
+chmod 0644 "$CADDY_FILE" 2>/dev/null || true
 
 # Remove --resume override (use Caddyfile directly)
 rm -f /etc/systemd/system/caddy.service.d/override-resume.conf
@@ -3509,6 +3511,8 @@ if caddy validate --adapter caddyfile --config "$CADDY_FILE" > /dev/null 2>&1; t
         LATEST_CADDY_BACKUP=$(ls -1t "${CADDY_FILE}".bak.* 2>/dev/null | head -1 || true)
         if [ -n "$LATEST_CADDY_BACKUP" ]; then
             cp "$LATEST_CADDY_BACKUP" "$CADDY_FILE"
+            chown root:root "$CADDY_FILE" 2>/dev/null || true
+            chmod 0644 "$CADDY_FILE" 2>/dev/null || true
             systemctl restart caddy >/dev/null 2>&1 || true
             warn "Caddyfile restaurado desde ${LATEST_CADDY_BACKUP}"
         fi
