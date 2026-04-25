@@ -64,6 +64,7 @@
     ];
     $modeInfo = $modeLabels[$mailMode ?? 'full'] ?? $modeLabels['full'];
     $mailModeValue = (string)($mailMode ?? 'full');
+    $localRepair = $localMailRepairStatus ?? [];
     $remoteNodeCount = 0;
     $remoteOnlineCount = 0;
     foreach (($mailNodes ?? []) as $node) {
@@ -204,6 +205,42 @@
         </div>
     </div>
 </div>
+<?php if (!$isSlave && !empty($localRepair['needs_repair'])): ?>
+<div class="card mb-4" style="border-color:rgba(251,191,36,.35);">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span><i class="bi bi-tools me-2 text-warning"></i>Instalacion local de mail incompleta</span>
+        <span class="badge bg-warning text-dark">Reparacion disponible</span>
+    </div>
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-lg-7">
+                <div class="small text-muted mb-2">
+                    Se detecta una instalacion parcial o servicios locales no activos. El reparador prepara OpenDKIM,
+                    corrige el socket, reinicia OpenDKIM/Postfix y marca el mail local como configurado si queda operativo.
+                </div>
+                <div class="d-flex flex-wrap gap-2 small">
+                    <span class="badge bg-<?= !empty($localRepair['postfix_active']) ? 'success' : 'secondary' ?>">Postfix <?= !empty($localRepair['postfix_active']) ? 'activo' : 'no activo' ?></span>
+                    <span class="badge bg-<?= !empty($localRepair['opendkim_active']) ? 'success' : 'secondary' ?>">OpenDKIM <?= !empty($localRepair['opendkim_active']) ? 'activo' : 'no activo' ?></span>
+                    <?php if (!empty($localRepair['relay_ip'])): ?>
+                        <span class="badge bg-<?= ($localRepair['relay_ip_assigned'] ?? null) === false ? 'danger' : 'info' ?>">
+                            WG <?= View::e($localRepair['relay_ip']) ?><?= ($localRepair['relay_ip_assigned'] ?? null) === false ? ' no asignada' : '' ?>
+                        </span>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <div class="col-lg-5">
+                <form method="post" action="/mail/repair-local" class="d-flex gap-2" onsubmit="return confirm('Reparar instalacion local de mail y reiniciar OpenDKIM/Postfix?')">
+                    <?= View::csrf() ?>
+                    <input type="password" name="admin_password" class="form-control form-control-sm" placeholder="Password admin" required autocomplete="current-password">
+                    <button class="btn btn-warning btn-sm text-dark fw-semibold">
+                        <i class="bi bi-wrench-adjustable me-1"></i>Reparar
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
 </div>
 
 <?php
@@ -816,6 +853,23 @@
 
 <?php if (!$isSlave): ?>
     <?php if ($showSetup ?? false): ?>
+        <?php if (!empty($localRepair['partial']) || !empty($localRepair['needs_repair'])): ?>
+            <div class="card mb-4" style="border-color:rgba(251,191,36,.35);">
+                <div class="card-body">
+                    <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+                        <div>
+                            <div class="fw-semibold"><i class="bi bi-tools me-2 text-warning"></i>Hay restos de una instalacion anterior</div>
+                            <div class="small text-muted">Antes de reinstalar, prueba el reparador. Si la IP WireGuard anterior no era correcta, cambia modo y vuelve a instalar despues.</div>
+                        </div>
+                        <form method="post" action="/mail/repair-local" class="d-flex gap-2" onsubmit="return confirm('Reparar instalacion local de mail y reiniciar OpenDKIM/Postfix?')">
+                            <?= View::csrf() ?>
+                            <input type="password" name="admin_password" class="form-control form-control-sm" placeholder="Password admin" required autocomplete="current-password">
+                            <button class="btn btn-warning btn-sm text-dark fw-semibold"><i class="bi bi-wrench-adjustable me-1"></i>Reparar</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        <?php endif; ?>
         <?php include __DIR__ . '/setup-node.php'; ?>
     <?php elseif (empty($mailNodes) && !($mailLocalConfigured ?? false)): ?>
         <div class="card mb-4" style="border: 1px solid rgba(13, 202, 240, 0.25);">

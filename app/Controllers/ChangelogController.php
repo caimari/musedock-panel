@@ -20,6 +20,39 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.93',
+                'date' => '2026-04-24',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            '`/mail`: reparador de instalacion local incompleta para casos donde Postfix/OpenDKIM quedaron a medias durante el setup',
+                        ],
+                        'en' => [
+                            '`/mail`: local incomplete installation repair flow for cases where Postfix/OpenDKIM were left half configured during setup',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Reparador mail: recrea `/run/opendkim`, tmpfiles, override systemd, socket local y permisos de OpenDKIM, reinicia OpenDKIM/Postfix y marca el mail local como configurado solo si ambos quedan activos',
+                            '`/mail`: detecta restos de instalacion o IP WireGuard no asignada y muestra una accion clara de reparacion en General/Infra',
+                        ],
+                        'en' => [
+                            'Mail repair: recreates `/run/opendkim`, tmpfiles, systemd override, local socket and OpenDKIM permissions, restarts OpenDKIM/Postfix and marks local mail configured only when both are active',
+                            '`/mail`: detects installation remnants or an unassigned WireGuard IP and shows a clear repair action in General/Infra',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Instalador mail: tarjetas y modal sin fondos suaves de colores; ahora usan paneles oscuros sobrios con borde de seleccion',
+                        ],
+                        'en' => [
+                            'Mail installer: mode cards and modal no longer use soft colored backgrounds; they now use sober dark panels with selected-state borders',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.92',
                 'date' => '2026-04-24',
                 'badge' => 'primary',

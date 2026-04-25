@@ -1,6 +1,30 @@
 <?php use MuseDockPanel\View; ?>
 
 <!-- Mail Node Setup — launched from mail index or cluster settings -->
+<style>
+    .mail-mode-card,
+    .mail-setup-panel {
+        background: #0f172a;
+        border: 1px solid #334155;
+        color: #e2e8f0;
+    }
+    .mail-mode-card {
+        cursor: pointer;
+        transition: border-color .15s ease, box-shadow .15s ease;
+    }
+    .mail-mode-card:hover {
+        border-color: #64748b;
+    }
+    .mail-mode-card:has(input:checked) {
+        border-color: #0dcaf0;
+        box-shadow: 0 0 0 1px rgba(13, 202, 240, .35);
+    }
+    .mail-mode-card small,
+    .mail-setup-panel .small,
+    .mail-setup-panel p {
+        color: #cbd5e1 !important;
+    }
+</style>
 <div class="card mb-4" id="mail-setup-card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-gear-wide-connected me-2"></i>Configurar Servidor de Mail</span>
@@ -18,7 +42,7 @@
 
         <!-- Phase 1: Setup form (visible when no setup running) -->
         <div id="setup-form-section">
-            <div class="alert mb-4" style="background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.25);">
+            <div class="mail-setup-panel rounded p-3 mb-4">
                 <div class="d-flex gap-3">
                     <i class="bi bi-lightbulb text-info fs-4"></i>
                     <div>
@@ -60,7 +84,7 @@
 
             <!-- Local mode info -->
             <div id="local-mode-info" class="mb-3">
-                <div class="p-3 rounded" style="background: rgba(34,197,94,0.06); border: 1px solid rgba(34,197,94,0.15);">
+                <div class="mail-setup-panel rounded p-3">
                     <i class="bi bi-pc-display me-1 text-success"></i>
                     <strong class="small">Modo local:</strong>
                     <span class="small text-muted">
@@ -72,7 +96,7 @@
 
             <!-- Remote mode info (hidden by default) -->
             <div id="remote-mode-info" class="mb-3" style="display: none;">
-                <div class="p-3 rounded" style="background: rgba(56,189,248,0.06); border: 1px solid rgba(56,189,248,0.15);">
+                <div class="mail-setup-panel rounded p-3">
                     <i class="bi bi-database me-1 text-info"></i>
                     <strong class="small">Requisito:</strong>
                     <span class="small text-muted">
@@ -100,35 +124,35 @@
                         </div>
                         <div class="row g-2">
                             <div class="col-md-3">
-                                <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(56,189,248,.35);background:rgba(56,189,248,.06);cursor:pointer;">
+                                <label class="mail-mode-card p-3 rounded d-block h-100">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="satellite" onchange="toggleMailMode()">
                                     <strong>Solo Envio</strong>
                                     <small class="d-block mt-1" style="color:#cbd5e1;">Para SaaS local, formularios y notificaciones. Escucha en localhost, firma DKIM y no recibe correo publico.</small>
                                 </label>
                             </div>
                             <div class="col-md-3">
-                                <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(14,165,233,.35);background:rgba(14,165,233,.08);cursor:pointer;">
+                                <label class="mail-mode-card p-3 rounded d-block h-100">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="relay" onchange="toggleMailMode()">
                                     <strong>Relay Privado</strong>
                                     <small class="d-block mt-1" style="color:#cbd5e1;">Para que otros servidores envien por WireGuard con usuario SMTP. Incluye lo de Solo Envio y centraliza la salida.</small>
                                 </label>
                             </div>
                             <div class="col-md-3">
-                                <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(34,197,94,.35);background:rgba(34,197,94,.06);cursor:pointer;">
+                                <label class="mail-mode-card p-3 rounded d-block h-100">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="full" checked onchange="toggleMailMode()">
                                     <strong>Correo Completo</strong>
                                     <small class="d-block mt-1" style="color:#cbd5e1;">Para buzones IMAP, recepcion, webmail y antispam. Requiere MX, PTR y puertos 25/587/993 abiertos.</small>
                                 </label>
                             </div>
                             <div class="col-md-3">
-                                <label class="mail-mode-card p-3 rounded d-block h-100" style="border:1px solid rgba(251,191,36,.35);background:rgba(251,191,36,.06);cursor:pointer;">
+                                <label class="mail-mode-card p-3 rounded d-block h-100">
                                     <input class="form-check-input me-2" type="radio" name="mail_mode" value="external" onchange="toggleMailMode()">
                                     <strong>SMTP Externo</strong>
                                     <small class="d-block mt-1" style="color:#cbd5e1;">Para delegar envio en SES, Mailgun, Brevo u otro proveedor. No instala servidor local.</small>
                                 </label>
                             </div>
                         </div>
-                        <div id="mail-mode-advice" class="mt-3 p-3 rounded" style="border:1px solid rgba(56,189,248,.22);background:rgba(15,23,42,.35);">
+                        <div id="mail-mode-advice" class="mail-setup-panel mt-3 p-3 rounded">
                             <div class="d-flex gap-3">
                                 <i class="bi bi-info-circle text-info"></i>
                                 <div>
@@ -162,7 +186,7 @@
                         <small class="text-muted">Dominio que firmara DKIM y tendra SPF/DMARC. Ej: si la app envia desde noreply@example.com, escribe example.com.</small>
                     </div>
                     <div class="col-12 mt-2 mode-relay-field" style="display:none;">
-                        <div class="row g-3 p-3 rounded" style="border:1px solid rgba(14,165,233,.25);background:rgba(14,165,233,.06);">
+                        <div class="mail-setup-panel row g-3 p-3 rounded">
                             <div class="col-md-4">
                                 <label class="form-label">IP WireGuard del relay</label>
                                 <input type="text" name="wireguard_ip" class="form-control" placeholder="10.10.70.10" autocomplete="off" inputmode="decimal" data-lpignore="true" data-1p-ignore="true">
@@ -181,7 +205,7 @@
                         </div>
                     </div>
                     <div class="col-12 mt-2 mode-satellite-field" style="display:none;">
-                        <div class="row g-3 p-3 rounded" style="border:1px solid rgba(56,189,248,.22);background:rgba(56,189,248,.05);">
+                        <div class="mail-setup-panel row g-3 p-3 rounded">
                             <div class="col-12">
                                 <strong class="small">Failover opcional: relay privado → SMTP externo</strong>
                                 <div class="small text-muted">Si rellenas estos campos, Postfix local enviara por el relay WireGuard y cambiara al SMTP externo si el relay no responde. Para SaaS local puro puedes dejarlos vacios.</div>
@@ -209,7 +233,7 @@
                         </small>
                     </div>
                     <div class="col-12 mt-3 mode-external-field" style="display:none;">
-                        <div class="row g-3 p-3 rounded" style="border:1px solid rgba(148,163,184,.25);background:rgba(15,23,42,.35);">
+                        <div class="mail-setup-panel row g-3 p-3 rounded">
                             <div class="col-md-6">
                                 <label class="form-label">Servidor SMTP</label>
                                 <input type="text" name="smtp_host" class="form-control" placeholder="smtp.proveedor.com" autocomplete="off" autocapitalize="none" spellcheck="false" data-lpignore="true" data-1p-ignore="true">
@@ -329,7 +353,7 @@
             <div class="modal-body">
                 <div class="row g-4">
                     <div class="col-lg-6">
-                        <div class="p-3 rounded h-100" style="background:rgba(15,23,42,.35);border:1px solid #334155;">
+                        <div class="mail-setup-panel p-3 rounded h-100">
                             <h6>1. Donde instalar</h6>
                             <p class="small text-muted mb-2">
                                 <strong>Este servidor</strong> es correcto cuando quieres que el mail viva en la misma maquina que el panel.
@@ -343,7 +367,7 @@
                     </div>
 
                     <div class="col-lg-6">
-                        <div class="p-3 rounded h-100" style="background:rgba(15,23,42,.35);border:1px solid #334155;">
+                        <div class="mail-setup-panel p-3 rounded h-100">
                             <h6>2. Hostname, DNS y certificado</h6>
                             <p class="small text-muted mb-2">
                                 Usa un hostname real, por ejemplo <code>mail.example.com</code>. Debe tener un registro A hacia la IP publica del servidor.
@@ -357,7 +381,7 @@
                     </div>
 
                     <div class="col-lg-6">
-                        <div class="p-3 rounded h-100" style="background:rgba(56,189,248,.06);border:1px solid rgba(56,189,248,.22);">
+                        <div class="mail-setup-panel p-3 rounded h-100">
                             <h6>Solo Envio (Satellite)</h6>
                             <p class="small text-muted mb-2">
                                 Instala Postfix + OpenDKIM para enviar desde esta maquina. No recibe correo, no crea buzones y no abre IMAP.
@@ -371,7 +395,7 @@
                     </div>
 
                     <div class="col-lg-6">
-                        <div class="p-3 rounded h-100" style="background:rgba(14,165,233,.08);border:1px solid rgba(14,165,233,.25);">
+                        <div class="mail-setup-panel p-3 rounded h-100">
                             <h6>Relay Privado (WireGuard)</h6>
                             <p class="small text-muted mb-2">
                                 Es Satellite mas SMTP autenticado por VPN. La app local puede seguir enviando por localhost sin credenciales.
@@ -385,7 +409,7 @@
                     </div>
 
                     <div class="col-lg-6">
-                        <div class="p-3 rounded h-100" style="background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.22);">
+                        <div class="mail-setup-panel p-3 rounded h-100">
                             <h6>Correo Completo</h6>
                             <p class="small text-muted mb-2">
                                 Es para hosting de correo real: buzones IMAP, recepcion de mensajes, webmail, antispam y cuotas.
@@ -398,7 +422,7 @@
                     </div>
 
                     <div class="col-lg-6">
-                        <div class="p-3 rounded h-100" style="background:rgba(251,191,36,.06);border:1px solid rgba(251,191,36,.22);">
+                        <div class="mail-setup-panel p-3 rounded h-100">
                             <h6>SMTP Externo</h6>
                             <p class="small text-muted mb-2">
                                 Guarda credenciales de un proveedor como SES, Mailgun, Brevo u otro. No instala servidor local.
@@ -410,7 +434,7 @@
                     </div>
 
                     <div class="col-lg-6">
-                        <div class="p-3 rounded h-100" style="background:rgba(15,23,42,.35);border:1px solid #334155;">
+                        <div class="mail-setup-panel p-3 rounded h-100">
                             <h6>DKIM externo y DKIM propio</h6>
                             <p class="small text-muted mb-2">
                                 Pueden convivir. DKIM funciona por selector. Por ejemplo:
@@ -424,7 +448,7 @@
                     </div>
 
                     <div class="col-lg-6">
-                        <div class="p-3 rounded h-100" style="background:rgba(15,23,42,.35);border:1px solid #334155;">
+                        <div class="mail-setup-panel p-3 rounded h-100">
                             <h6>SPF durante la migracion</h6>
                             <p class="small text-muted mb-2">
                                 SPF debe autorizar todos los emisores activos. Si ahora usas un proveedor externo y anades tu servidor:

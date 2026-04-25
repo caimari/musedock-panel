@@ -58,6 +58,7 @@ class MailController
 
         $mailLocalConfigured = Settings::get('mail_local_configured', '') === '1';
         $mailLocalHostname   = Settings::get('mail_local_hostname', '');
+        $localMailRepairStatus = $clusterRole !== 'slave' ? $this->getLocalMailRepairStatus() : [];
 
         View::render('mail/index', [
             'layout'              => 'main',
@@ -71,6 +72,7 @@ class MailController
             'clusterNodes'        => $clusterNodes,
             'mailLocalConfigured' => $mailLocalConfigured,
             'mailLocalHostname'   => $mailLocalHostname,
+            'localMailRepairStatus' => $localMailRepairStatus,
             'clusterRole'         => $clusterRole,
             'mailMode'            => $mailMode,
             'smtpConfig'          => $smtpConfig,
@@ -501,6 +503,194 @@ class MailController
 
         echo json_encode(['ok' => true, 'nodes' => $results]);
         exit;
+    }
+
+    public function repairLocal(): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave. Repara el mail desde el nodo donde esta instalado o desde el master.');
+            Router::redirect('/mail?tab=infra');
+            return;
+        }
+
+        if (!View::verifyCsrf()) {
+            Flash::set('error', 'Token CSRF invalido.');
+            Router::redirect('/mail?tab=infra');
+            return;
+        }
+
+        $adminPassword = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPassword($adminPassword)) {
+            Flash::set('error', 'Password de admin incorrecta.');
+            Router::redirect('/mail?tab=infra');
+            return;
+        }
+
+        $result = $this->repairLocalMailInstall();
+        if ($result['ok']) {
+            Flash::set('success', 'Instalacion local de mail reparada: ' . implode('; ', $result['messages']));
+        } else {
+            Flash::set('error', 'No se pudo reparar mail local: ' . implode('; ', $result['messages']));
+        }
+
+        Router::redirect('/mail?tab=infra');
+    }
+
+    private function getLocalMailRepairStatus(): array
+    {
+        $postfixActive = $this->systemctlIsActive('postfix');
+        $opendkimActive = $this->systemctlIsActive('opendkim');
+        $postfixInstalled = trim((string)shell_exec('command -v postfix 2>/dev/null')) !== ''
+            || is_file('/etc/postfix/main.cf');
+        $opendkimInstalled = trim((string)shell_exec('command -v opendkim 2>/dev/null')) !== ''
+            || is_file('/etc/opendkim.conf');
+        $configured = Settings::get('mail_local_configured', '') === '1';
+        $enabled = Settings::get('mail_enabled', '') === '1';
+        $mailMode = MailService::getCurrentMailMode();
+        $relayIp = trim((string)Settings::get('mail_relay_wireguard_ip', ''));
+        $relayIpAssigned = ($mailMode === 'relay' && $relayIp !== '') ? $this->localIpv4IsAssigned($relayIp) : null;
+
+        $partial = !$configured && (
+            ($postfixInstalled && $opendkimInstalled)
+            || $opendkimInstalled
+            || $enabled
+            || trim((string)Settings::get('mail_setup_hostname', '')) !== ''
+            || trim((string)Settings::get('mail_hostname', '')) !== ''
+        );
+
+        $needsRepair = $partial
+            || ($configured && (!$postfixActive || !$opendkimActive))
+            || ($mailMode === 'relay' && $relayIpAssigned === false);
+
+        return [
+            'configured' => $configured,
+            'partial' => $partial,
+            'needs_repair' => $needsRepair,
+            'postfix_installed' => $postfixInstalled,
+            'opendkim_installed' => $opendkimInstalled,
+            'postfix_active' => $postfixActive,
+            'opendkim_active' => $opendkimActive,
+            'relay_ip' => $relayIp,
+            'relay_ip_assigned' => $relayIpAssigned,
+            'hostname' => trim((string)(Settings::get('mail_local_hostname', '') ?: Settings::get('mail_hostname', '') ?: Settings::get('mail_setup_hostname', ''))),
+        ];
+    }
+
+    private function repairLocalMailInstall(): array
+    {
+        $messages = [];
+        $errors = [];
+        $run = function (string $label, string $cmd) use (&$messages, &$errors): bool {
+            $output = [];
+            $code = 0;
+            exec($cmd . ' 2>&1', $output, $code);
+            $text = trim(implode("\n", $output));
+            if ($code === 0) {
+                $messages[] = "{$label}: OK";
+                return true;
+            }
+            $errors[] = "{$label}: " . ($text !== '' ? $text : "exit {$code}");
+            return false;
+        };
+
+        $run('paquetes', 'DEBIAN_FRONTEND=noninteractive apt-get install -y postfix opendkim opendkim-tools sasl2-bin libsasl2-modules ca-certificates openssl');
+
+        @mkdir('/run/opendkim', 0755, true);
+        @chown('/run/opendkim', 'opendkim');
+        @chgrp('/run/opendkim', 'opendkim');
+        @chmod('/run/opendkim', 0755);
+
+        @mkdir('/etc/tmpfiles.d', 0755, true);
+        file_put_contents('/etc/tmpfiles.d/opendkim.conf', "d /run/opendkim 0755 opendkim opendkim -\n");
+
+        @mkdir('/etc/systemd/system/opendkim.service.d', 0755, true);
+        file_put_contents(
+            '/etc/systemd/system/opendkim.service.d/runtime.conf',
+            "[Service]\nRuntimeDirectory=opendkim\nRuntimeDirectoryMode=0755\n"
+        );
+
+        @mkdir('/etc/opendkim/keys', 0700, true);
+        foreach (['/etc/opendkim/key.table', '/etc/opendkim/signing.table'] as $file) {
+            if (!is_file($file)) {
+                @touch($file);
+            }
+        }
+        if (!is_file('/etc/opendkim/trusted.hosts')) {
+            $cidr = trim((string)Settings::get('mail_relay_wireguard_cidr', '10.10.70.0/24'));
+            file_put_contents('/etc/opendkim/trusted.hosts', "127.0.0.1\n::1\nlocalhost\n{$cidr}\n");
+        }
+
+        $conf = is_file('/etc/opendkim.conf') ? (string)file_get_contents('/etc/opendkim.conf') : '';
+        if ($conf === '') {
+            $conf = "Syslog yes\nUMask 007\nMode s\nCanonicalization relaxed/simple\nKeyTable /etc/opendkim/key.table\nSigningTable refile:/etc/opendkim/signing.table\nExternalIgnoreList /etc/opendkim/trusted.hosts\nInternalHosts /etc/opendkim/trusted.hosts\nSocket local:/run/opendkim/opendkim.sock\nOversignHeaders From\nUserID opendkim:opendkim\n";
+        }
+        if (preg_match('/^Socket\s+.*/m', $conf)) {
+            $conf = preg_replace('/^Socket\s+.*/m', 'Socket local:/run/opendkim/opendkim.sock', $conf);
+        } else {
+            $conf .= "\nSocket local:/run/opendkim/opendkim.sock\n";
+        }
+        if (preg_match('/^UserID\s+.*/m', $conf)) {
+            $conf = preg_replace('/^UserID\s+.*/m', 'UserID opendkim:opendkim', $conf);
+        } else {
+            $conf .= "UserID opendkim:opendkim\n";
+        }
+        file_put_contents('/etc/opendkim.conf', $conf);
+        file_put_contents('/etc/default/opendkim', "SOCKET=\"local:/run/opendkim/opendkim.sock\"\n");
+
+        $run('permisos opendkim', 'chown -R opendkim:opendkim /etc/opendkim /run/opendkim');
+        $run('systemd reload', 'systemctl daemon-reload');
+        $run('reset opendkim', 'systemctl reset-failed opendkim || true');
+        $run('restart opendkim', 'systemctl restart opendkim');
+        $run('restart postfix', 'systemctl restart postfix');
+
+        $postfixActive = $this->systemctlIsActive('postfix');
+        $opendkimActive = $this->systemctlIsActive('opendkim');
+        if ($postfixActive && $opendkimActive) {
+            $hostname = trim((string)(Settings::get('mail_local_hostname', '') ?: Settings::get('mail_hostname', '') ?: Settings::get('mail_setup_hostname', '')));
+            if ($hostname === '') {
+                $hostname = trim((string)shell_exec('hostname -f 2>/dev/null')) ?: trim((string)shell_exec('hostname 2>/dev/null'));
+            }
+            Settings::set('mail_local_configured', '1');
+            Settings::set('mail_node_configured', '1');
+            Settings::set('mail_enabled', '1');
+            if ($hostname !== '') {
+                Settings::set('mail_local_hostname', $hostname);
+                Settings::set('mail_hostname', $hostname);
+            }
+            LogService::log('mail.repair_local', 'local', 'Mail local repair completed');
+            return ['ok' => true, 'messages' => array_merge($messages, ['postfix activo', 'opendkim activo'])];
+        }
+
+        if (!$postfixActive) $errors[] = 'postfix no quedo activo';
+        if (!$opendkimActive) $errors[] = 'opendkim no quedo activo';
+        LogService::log('mail.repair_local_failed', 'local', implode('; ', $errors));
+        return ['ok' => false, 'messages' => array_merge($messages, $errors)];
+    }
+
+    private function systemctlIsActive(string $service): bool
+    {
+        if (!preg_match('/^[a-zA-Z0-9_.@-]+$/', $service)) {
+            return false;
+        }
+
+        exec('systemctl is-active --quiet ' . escapeshellarg($service), $out, $code);
+        return $code === 0;
+    }
+
+    private function localIpv4IsAssigned(string $ip): bool
+    {
+        $output = (string)shell_exec('ip -o -4 addr show 2>/dev/null');
+        foreach (explode("\n", $output) as $line) {
+            if (preg_match_all('/\binet\s+(\d{1,3}(?:\.\d{1,3}){3})\//', $line, $matches)) {
+                foreach ($matches[1] as $assignedIp) {
+                    if ($assignedIp === $ip) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     public function relayDomainStore(): void

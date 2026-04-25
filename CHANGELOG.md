@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.93] — 2026-04-24
+
+### New
+- `/mail`: reparador de instalacion local incompleta para casos donde Postfix/OpenDKIM quedaron a medias durante el setup.
+
+### Fixed
+- Reparador mail: recrea `/run/opendkim`, tmpfiles, override systemd, socket local y permisos de OpenDKIM, reinicia OpenDKIM/Postfix y marca el mail local como configurado solo si ambos quedan activos.
+- `/mail`: detecta restos de instalacion o IP WireGuard no asignada y muestra una accion clara de reparacion en General/Infra.
+
+### Improved
+- Instalador mail: tarjetas y modal sin fondos suaves de colores; ahora usan paneles oscuros sobrios con borde de seleccion.
+
 ## [1.0.92] — 2026-04-24
 
 ### Fixed
