@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.106',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            '`/docs`: nueva home de documentacion interna con indice de temas y busqueda simple; los enlaces globales de Docs ahora apuntan a esta home',
+                        ],
+                        'en' => [
+                            '`/docs`: new internal documentation home with topic index and simple search; global Docs links now point to this home',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.105',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

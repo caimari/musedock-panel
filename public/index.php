@@ -639,6 +639,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/changelog', 'ChangelogController@index');
 
 // Docs
+\MuseDockPanel\Router::get('/docs', 'DocsController@index');
 \MuseDockPanel\Router::get('/docs/mail-modes', 'DocsController@mailModes');
 
 // Profile
