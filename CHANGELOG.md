@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.141] — 2026-04-25
+
+### Improved
+- `bin/update.sh`: antes de migrar comprueba si PostgreSQL del panel responde y, en instalaciones locales, intenta arrancar el cluster `panel` si esta parado.
+- `bin/update.sh`: si la BD sigue inaccesible, muestra diagnostico operativo (`pg_lsclusters`, `systemctl`, logs PostgreSQL) y recomienda reinstalar solo cuando la instalacion quedo parcial.
+
 ## [1.0.140] — 2026-04-25
 
 ### Improved

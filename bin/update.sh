@@ -69,6 +69,73 @@ read_panel_version() {
     echo "$ver"
 }
 
+env_value() {
+    local key="$1"
+    grep -E "^${key}=" "${PANEL_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | sed 's/^["'\'']//; s/["'\'']$//'
+}
+
+is_local_db_host() {
+    case "$1" in
+        ""|"127.0.0.1"|"localhost"|"::1") return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+ensure_database_ready() {
+    local db_host db_port db_name db_user cluster_line pg_ver pg_cluster pg_status
+
+    db_host=$(env_value DB_HOST)
+    db_port=$(env_value DB_PORT)
+    db_name=$(env_value DB_NAME)
+    db_user=$(env_value DB_USER)
+
+    db_host=${db_host:-127.0.0.1}
+    db_port=${db_port:-5433}
+    db_name=${db_name:-musedock_panel}
+    db_user=${db_user:-musedock_panel}
+
+    if ! command -v pg_isready >/dev/null 2>&1; then
+        warn "pg_isready not found; skipping PostgreSQL readiness preflight"
+        return 0
+    fi
+
+    if pg_isready -h "$db_host" -p "$db_port" -d "$db_name" -U "$db_user" -t 5 >/dev/null 2>&1; then
+        ok "PostgreSQL panel DB is reachable (${db_host}:${db_port})"
+        return 0
+    fi
+
+    warn "PostgreSQL panel DB is not reachable yet (${db_host}:${db_port})"
+
+    if is_local_db_host "$db_host" && command -v pg_lsclusters >/dev/null 2>&1 && command -v pg_ctlcluster >/dev/null 2>&1; then
+        cluster_line=$(pg_lsclusters --no-header 2>/dev/null | awk -v port="$db_port" '$3 == port {print $1" "$2" "$4; exit}')
+        if [ -n "$cluster_line" ]; then
+            read -r pg_ver pg_cluster pg_status <<< "$cluster_line"
+            if [ "$pg_status" != "online" ]; then
+                warn "Starting PostgreSQL cluster ${pg_ver}/${pg_cluster} on port ${db_port}"
+                pg_ctlcluster "$pg_ver" "$pg_cluster" start >/dev/null 2>&1 || true
+                sleep 2
+            else
+                warn "PostgreSQL cluster ${pg_ver}/${pg_cluster} is online but did not answer readiness check"
+            fi
+        else
+            warn "No local PostgreSQL cluster found on port ${db_port}"
+        fi
+    fi
+
+    if pg_isready -h "$db_host" -p "$db_port" -d "$db_name" -U "$db_user" -t 5 >/dev/null 2>&1; then
+        ok "PostgreSQL panel DB recovered (${db_host}:${db_port})"
+        return 0
+    fi
+
+    echo ""
+    warn "Database is still unavailable. Run these diagnostics on the node:"
+    echo "    sudo pg_lsclusters"
+    echo "    sudo systemctl status 'postgresql@*-panel' --no-pager"
+    echo "    sudo tail -n 80 /var/log/postgresql/postgresql-*-panel.log"
+    echo ""
+    fail "Cannot run migrations until PostgreSQL ${db_host}:${db_port} is reachable. If this was a partial install, run: sudo bash ${PANEL_DIR}/install.sh and choose Reinstalar."
+}
+
 # Get current version
 CURRENT_VERSION=$(read_panel_version)
 
@@ -169,6 +236,8 @@ fi
 # ============================================================
 echo -e "${CYAN}${BOLD}[2/4]${NC} Running database migrations..."
 echo ""
+
+ensure_database_ready
 
 set +e
 MIG_OUT=$($PHP_BIN "${PANEL_DIR}/bin/migrate.php" 2>&1)

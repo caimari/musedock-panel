@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.141',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`bin/update.sh`: antes de migrar comprueba si PostgreSQL del panel responde y, en instalaciones locales, intenta arrancar el cluster `panel` si esta parado',
+                            '`bin/update.sh`: si la BD sigue inaccesible, muestra diagnostico operativo (`pg_lsclusters`, `systemctl`, logs PostgreSQL) y recomienda reinstalar solo cuando la instalacion quedo parcial',
+                        ],
+                        'en' => [
+                            '`bin/update.sh`: before migrations it checks whether the panel PostgreSQL is reachable and, on local installs, tries to start the `panel` cluster if it is stopped',
+                            '`bin/update.sh`: if the DB is still unreachable, it prints operational diagnostics (`pg_lsclusters`, `systemctl`, PostgreSQL logs) and recommends reinstall only when the install was left partial',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.140',
                 'date' => '2026-04-25',
                 'badge' => 'primary',
