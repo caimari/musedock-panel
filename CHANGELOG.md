@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.101] — 2026-04-25
+
+### Fixed
+- Relay Privado: al instalar o reparar el modo relay, limpia `relayhost`, `transport_maps` y mapas SMTP salientes antiguos para evitar que Postfix siga intentando entregar por proveedores previos como `smtp.*`.
+- Reparador mail: en modo relay tambien elimina transportes y credenciales SMTP salientes obsoletas antes de reiniciar Postfix.
+
 ## [1.0.100] — 2026-04-25
 
 ### Improved

@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.101',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Relay Privado: al instalar o reparar el modo relay, limpia `relayhost`, `transport_maps` y mapas SMTP salientes antiguos para evitar que Postfix siga intentando entregar por proveedores previos como `smtp.*`',
+                            'Reparador mail: en modo relay tambien elimina transportes y credenciales SMTP salientes obsoletas antes de reiniciar Postfix',
+                        ],
+                        'en' => [
+                            'Private Relay: when installing or repairing relay mode, clears stale `relayhost`, `transport_maps` and outbound SMTP maps so Postfix no longer keeps delivering through previous providers such as `smtp.*`',
+                            'Mail repair: in relay mode also removes obsolete outbound transports and SMTP credentials before restarting Postfix',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.100',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

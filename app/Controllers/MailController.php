@@ -682,6 +682,14 @@ class MailController
 
         $run('permisos opendkim', 'chown -R opendkim:opendkim /etc/opendkim /run/opendkim');
         $run('postfix en grupo opendkim', 'usermod -aG opendkim postfix || true');
+        if (MailService::getCurrentMailMode() === 'relay') {
+            $run('limpiar relayhost antiguo', "postconf -e 'relayhost ='");
+            $run('limpiar transport antiguo', "postconf -e 'transport_maps ='");
+            $run('limpiar smtp_sasl saliente', "postconf -e 'smtp_sasl_auth_enable = no'");
+            $run('limpiar smtp_sasl_password_maps', "postconf -e 'smtp_sasl_password_maps ='");
+            $run('limpiar smtp_sasl_security_options', "postconf -e 'smtp_sasl_security_options ='");
+            $run('eliminar mapas relay antiguos', 'rm -f /etc/postfix/transport /etc/postfix/transport.db /etc/postfix/sasl_passwords /etc/postfix/sasl_passwords.db /etc/cron.d/musedock-relay-health');
+        }
         $run('systemd reload', 'systemctl daemon-reload');
         $run('reset opendkim', 'systemctl reset-failed opendkim || true');
         $run('restart opendkim', 'systemctl restart opendkim');

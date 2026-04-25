@@ -221,6 +221,24 @@ function configureSatelliteRelayFailover(array $payload, string $logFile, array 
     }
 }
 
+function clearPostfixOutboundRelayConfig(string $logFile, array &$errors): void
+{
+    $settings = [
+        'relayhost' => '',
+        'transport_maps' => '',
+        'smtp_sasl_auth_enable' => 'no',
+        'smtp_sasl_password_maps' => '',
+        'smtp_sasl_security_options' => '',
+    ];
+
+    foreach ($settings as $key => $value) {
+        run('postconf -e ' . escapeshellarg("{$key} = {$value}"), $logFile, $errors, "postconf:clear_{$key}");
+    }
+
+    run('rm -f /etc/postfix/transport /etc/postfix/transport.db /etc/postfix/sasl_passwords /etc/postfix/sasl_passwords.db', $logFile, $errors, 'clear-stale-outbound-relay-maps');
+    run('rm -f /etc/cron.d/musedock-relay-health', $logFile, $errors, 'clear-stale-relay-health-cron');
+}
+
 function detectPublicIpv4(): string
 {
     $ctx = stream_context_create(['http' => ['timeout' => 3]]);
@@ -361,6 +379,11 @@ if ($mailMode === 'relay') {
         'myhostname' => $hostname,
         'mydomain' => $domain,
         'myorigin' => '$mydomain',
+        'relayhost' => '',
+        'transport_maps' => '',
+        'smtp_sasl_auth_enable' => 'no',
+        'smtp_sasl_password_maps' => '',
+        'smtp_sasl_security_options' => '',
         'inet_interfaces' => "127.0.0.1, {$wireguardIp}",
         'inet_protocols' => 'ipv4',
         'mydestination' => '',
@@ -393,6 +416,7 @@ if ($mailMode === 'relay') {
     foreach ($relayPostconf as $key => $val) {
         run('postconf -e ' . escapeshellarg("{$key} = {$val}"), $logFile, $errors, "postconf:{$key}");
     }
+    clearPostfixOutboundRelayConfig($logFile, $errors);
     @mkdir('/etc/postfix/sasl', 0755, true);
     file_put_contents('/etc/postfix/sasl/smtpd.conf', "pwcheck_method: auxprop\nauxprop_plugin: sasldb\nmech_list: PLAIN LOGIN\n");
     file_put_contents('/etc/postfix/header_checks', "/^Received:.*127\\.0\\.0\\.1/    IGNORE\n/^X-Originating-IP:/          IGNORE\n/^X-Mailer:/                  IGNORE\n");
