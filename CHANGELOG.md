@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.102] — 2026-04-25
+
+### Improved
+- `/mail?tab=relay`: añade instrucciones visibles para editar/cambiar despues el relay, incluyendo hostname, IP WireGuard, dominio remitente, DNS y refresco de SPF/DKIM/DMARC.
+
 ## [1.0.101] — 2026-04-25
 
 ### Fixed

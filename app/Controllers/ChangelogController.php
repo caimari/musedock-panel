@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.102',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=relay`: añade instrucciones visibles para editar/cambiar despues el relay, incluyendo hostname, IP WireGuard, dominio remitente, DNS y refresco de SPF/DKIM/DMARC',
+                        ],
+                        'en' => [
+                            '`/mail?tab=relay`: adds visible instructions for editing/changing the relay later, including hostname, WireGuard IP, sender domain, DNS and SPF/DKIM/DMARC refresh',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.101',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

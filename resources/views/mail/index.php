@@ -435,6 +435,28 @@
                 <div class="col-md-4">SMTP privado: <code><?= View::e($relayHost ?: 'IP_WIREGUARD') ?>:<?= View::e($relayPort) ?></code> STARTTLS</div>
             </div>
         </div>
+        <div class="mt-3 p-3 rounded" style="background:#0b1220;border:1px solid #334155;">
+            <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+                <div>
+                    <div class="fw-semibold mb-1"><i class="bi bi-pencil-square me-1 text-info"></i>Como cambiarlo despues</div>
+                    <div class="small text-muted">
+                        Si cambias el hostname del relay, la IP WireGuard, el dominio remitente o el modo de correo, vuelve a
+                        <a href="/mail?tab=infra&amp;setup=1" class="text-info">Infra → Configurar servidor de mail</a>.
+                        El instalador reescribe Postfix/OpenDKIM y limpia configuraciones antiguas de relay externo.
+                    </div>
+                    <div class="small text-muted mt-2">
+                        Despues de cambiar hostname o dominio, revisa
+                        <a href="/mail?tab=deliverability" class="text-info">Entregabilidad</a>, actualiza los TXT/A/PTR en tu DNS
+                        y pulsa <i class="bi bi-arrow-clockwise"></i> en cada dominio para refrescar SPF/DKIM/DMARC.
+                    </div>
+                </div>
+                <?php if (!$isSlave): ?>
+                    <a href="/mail?tab=infra&amp;setup=1" class="btn btn-outline-info btn-sm">
+                        <i class="bi bi-sliders me-1"></i>Editar relay
+                    </a>
+                <?php endif; ?>
+            </div>
+        </div>
     </div>
 </div>
 <div class="row g-3 mb-4">
