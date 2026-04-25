@@ -20,6 +20,27 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.128',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'docs' => [
+                        'es' => [
+                            'Nueva guia especial `/docs/install-recovery` con primera instalacion desde GitHub, carpeta correcta (`/opt/musedock-panel`), comandos de instalacion y primer acceso web',
+                            'Documentadas las opciones principales de `install.sh`: puerto, PHP, PostgreSQL interno, MySQL opcional, firewall, IP/CIDR permitido y Fail2Ban',
+                            'Documentado como actualizar desde shell con `bin/update.sh --auto`',
+                            'Documentada recuperacion PostgreSQL/.env: diferencia entre superusuario `postgres`, usuario DB `musedock_panel`, `DB_PASS` y admin web del panel',
+                        ],
+                        'en' => [
+                            'New special guide `/docs/install-recovery` covering first install from GitHub, correct directory (`/opt/musedock-panel`), install commands, and first web access',
+                            'Documented the main `install.sh` options: port, PHP, internal PostgreSQL, optional MySQL, firewall, allowed IP/CIDR, and Fail2Ban',
+                            'Documented shell update with `bin/update.sh --auto`',
+                            'Documented PostgreSQL/.env recovery: difference between `postgres` superuser, `musedock_panel` DB user, `DB_PASS`, and panel web admin',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.127',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

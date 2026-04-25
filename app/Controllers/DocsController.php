@@ -283,6 +283,14 @@ class DocsController
                 'icon' => 'bi-database',
                 'keywords' => 'postgresql master slave replication espejo streaming wal hot standby pg_hba postgresql.conf root ip privada wireguard panel 5433 no replica',
             ],
+            [
+                'title' => 'Instalacion y recuperacion',
+                'description' => 'Primera instalacion desde GitHub, opciones del instalador, actualizacion por shell y recuperacion de PostgreSQL/.env.',
+                'url' => '/docs/install-recovery',
+                'category' => 'Guia especial',
+                'icon' => 'bi-tools',
+                'keywords' => 'instalacion instalar github git clone update actualizar shell recuperacion rotura postgres postgresql runuser env db_pass db_user musedock_panel setup admin firewall fail2ban',
+            ],
         ]);
     }
 
@@ -336,6 +344,10 @@ class DocsController
 
         if ($url === '/docs/mail-modes') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'mail-modes.php');
+        }
+
+        if ($url === '/docs/install-recovery') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'install-recovery.php');
         }
 
         if ($url === '/docs/mail-sections') {
@@ -1080,6 +1092,14 @@ class DocsController
         View::render('help/postgresql-mirror-master-slave', [
             'layout' => 'main',
             'pageTitle' => 'Docs - PostgreSQL Mirror Master/Slave',
+        ]);
+    }
+
+    public function installRecovery(): void
+    {
+        View::render('help/install-recovery', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Instalacion y Recuperacion',
         ]);
     }
 }

@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.128] — 2026-04-25
+
+### Docs
+- Nueva guia especial `/docs/install-recovery` con primera instalacion desde GitHub, carpeta correcta (`/opt/musedock-panel`), comandos de instalacion y primer acceso web.
+- Documentadas las opciones principales de `install.sh`: puerto, PHP, PostgreSQL interno, MySQL opcional, firewall, IP/CIDR permitido y Fail2Ban.
+- Documentado como actualizar desde shell con `bin/update.sh --auto`.
+- Documentada recuperacion PostgreSQL/.env: diferencia entre superusuario `postgres`, usuario DB `musedock_panel`, `DB_PASS` y admin web del panel.
+
 ## [1.0.127] — 2026-04-25
 
 ### Fixed

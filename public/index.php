@@ -654,6 +654,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/docs/cluster-basics', 'DocsController@clusterBasics');
 \MuseDockPanel\Router::get('/docs/mail-modes', 'DocsController@mailModes');
 \MuseDockPanel\Router::get('/docs/postgresql-mirror-master-slave', 'DocsController@postgresqlMirrorMasterSlave');
+\MuseDockPanel\Router::get('/docs/install-recovery', 'DocsController@installRecovery');
 
 // Profile
 \MuseDockPanel\Router::get('/profile', 'ProfileController@index');
