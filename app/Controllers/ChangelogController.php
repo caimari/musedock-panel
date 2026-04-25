@@ -20,6 +20,31 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.124',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`/settings/updates`: el boton `Actualizar` ya no oculta errores del backend; si no puede arrancar el updater muestra el mensaje real en modal y en la salida de progreso',
+                            '`/settings/updates`: si la peticion se corta por reinicio del panel, la UI sigue haciendo polling y recarga automaticamente cuando el panel vuelve',
+                        ],
+                        'en' => [
+                            '`/settings/updates`: the `Update` button no longer hides backend errors; if the updater cannot start, the real message is shown in a modal and in the progress output',
+                            '`/settings/updates`: if the request is interrupted by the panel restart, the UI keeps polling and reloads automatically when the panel is back',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            '`/settings/updates`: spinners y bloqueo visual en `Comprobar ahora` y `Actualizar` para evitar dobles clicks y dejar claro que la pagina esta trabajando',
+                        ],
+                        'en' => [
+                            '`/settings/updates`: spinners and disabled states on `Check now` and `Update` to prevent double clicks and make page activity explicit',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.123',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

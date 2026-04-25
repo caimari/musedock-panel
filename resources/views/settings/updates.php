@@ -58,9 +58,9 @@
     <div class="card-body">
         <div class="d-flex gap-3 flex-wrap">
             <!-- Check for updates -->
-            <form method="POST" action="/settings/updates/check">
+            <form method="POST" action="/settings/updates/check" id="updateCheckForm">
                 <?= View::csrf() ?>
-                <button type="submit" class="btn btn-outline-light">
+                <button type="submit" class="btn btn-outline-light" id="updateCheckBtn">
                     <i class="bi bi-arrow-clockwise me-1"></i>Comprobar ahora
                 </button>
             </form>
@@ -69,7 +69,7 @@
             <?php if ($updateInfo['has_update']): ?>
                 <form method="POST" action="/settings/updates/run" id="updateForm" onsubmit="return confirmUpdate(event)">
                     <?= View::csrf() ?>
-                    <button type="submit" class="btn btn-success">
+                    <button type="submit" class="btn btn-success" id="updateRunBtn">
                         <i class="bi bi-cloud-arrow-down me-1"></i>Actualizar a v<?= View::e($updateInfo['remote']) ?>
                     </button>
                 </form>
@@ -187,6 +187,53 @@ function panelReadyFetch() {
     });
 }
 
+function setButtonLoading(button, label, loadingClass) {
+    if (!button) return;
+    button.dataset.originalHtml = button.dataset.originalHtml || button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>' + label;
+    if (loadingClass) button.classList.add(loadingClass);
+}
+
+function resetButtonLoading(button) {
+    if (!button || !button.dataset.originalHtml) return;
+    button.disabled = false;
+    button.innerHTML = button.dataset.originalHtml;
+}
+
+function showUpdateProgress(message) {
+    var container = document.querySelector('.card-body .d-flex.gap-3');
+    if (container) {
+        container.closest('.card').innerHTML =
+            '<div class="card-header" style="background:rgba(251,191,36,0.1);border-bottom-color:#fbbf24;">' +
+            '<i class="bi bi-hourglass-split me-2 text-warning"></i>' +
+            '<span class="text-warning">Actualizacion en progreso...</span></div>' +
+            '<div class="card-body">' +
+            '<div class="progress mb-3"><div class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width:100%"></div></div>' +
+            '<pre class="bg-dark text-light p-3 rounded mb-0" style="max-height:300px;overflow-y:auto;font-size:0.85rem" id="updateOutput">' + escapeHtml(message || 'Iniciando actualizacion...') + '</pre></div>';
+    }
+}
+
+function showUpdateStartError(message) {
+    var out = document.getElementById('updateOutput');
+    if (out) {
+        out.textContent = 'No se pudo iniciar la actualizacion.\n\n' + (message || 'Error desconocido');
+        out.scrollTop = out.scrollHeight;
+    }
+    SwalDark.fire({
+        icon: 'error',
+        title: 'No se pudo iniciar la actualizacion',
+        html: '<div class="text-start"><p>El backend devolvio un error antes de lanzar el updater.</p><pre class="bg-dark text-light p-3 rounded small mb-0" style="white-space:pre-wrap;max-height:220px;overflow:auto;">' + escapeHtml(message || 'Error desconocido') + '</pre></div>',
+        confirmButtonText: 'Entendido'
+    });
+}
+
+function escapeHtml(value) {
+    return String(value || '').replace(/[&<>"']/g, function(ch) {
+        return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[ch];
+    });
+}
+
 function confirmUpdate(e) {
     e.preventDefault();
     SwalDark.fire({
@@ -202,8 +249,12 @@ function confirmUpdate(e) {
         cancelButtonText: 'Cancelar'
     }).then(function(result) {
         if (result.isConfirmed) {
-            // Launch update via AJAX and start polling immediately
-            var fd = new FormData(document.getElementById('updateForm'));
+            var form = document.getElementById('updateForm');
+            var btn = document.getElementById('updateRunBtn');
+            var fd = new FormData(form);
+            setButtonLoading(btn, 'Iniciando update...');
+            showUpdateProgress('Solicitando arranque del updater...');
+
             fetch('/settings/updates/run', {
                 method: 'POST',
                 body: fd,
@@ -213,25 +264,37 @@ function confirmUpdate(e) {
                     'X-Requested-With': 'XMLHttpRequest'
                 }
             })
-                .catch(function() {}); // Ignore — panel may restart before response
-            startUpdatePolling();
+                .then(function(response) {
+                    return response.text().then(function(text) {
+                        var data = null;
+                        try { data = text ? JSON.parse(text) : null; } catch (e) {}
+                        if (!response.ok) {
+                            throw new Error((data && data.message) ? data.message : ('HTTP ' + response.status + (text ? '\n' + text : '')));
+                        }
+                        if (data && data.ok === false) {
+                            throw new Error(data.message || 'El updater no pudo arrancar.');
+                        }
+                        startUpdatePolling();
+                    });
+                })
+                .catch(function(error) {
+                    // If the panel restarts exactly while the request is open, fetch can fail.
+                    // In that case keep polling. If the backend returned a JSON error, show it.
+                    var message = error && error.message ? error.message : '';
+                    if (message && !message.match(/Failed to fetch|NetworkError|Load failed/i)) {
+                        resetButtonLoading(btn);
+                        showUpdateStartError(message);
+                        return;
+                    }
+                    startUpdatePolling('Respuesta interrumpida; comprobando estado del panel...');
+                });
         }
     });
     return false;
 }
 
-function startUpdatePolling() {
-    // Show progress UI inline
-    var container = document.querySelector('.card-body .d-flex.gap-3');
-    if (container) {
-        container.closest('.card').innerHTML =
-            '<div class="card-header" style="background:rgba(251,191,36,0.1);border-bottom-color:#fbbf24;">' +
-            '<i class="bi bi-hourglass-split me-2 text-warning"></i>' +
-            '<span class="text-warning">Actualizacion en progreso...</span></div>' +
-            '<div class="card-body">' +
-            '<div class="progress mb-3"><div class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width:100%"></div></div>' +
-            '<pre class="bg-dark text-light p-3 rounded mb-0" style="max-height:300px;overflow-y:auto;font-size:0.85rem" id="updateOutput">Iniciando actualizacion...</pre></div>';
-    }
+function startUpdatePolling(initialMessage) {
+    showUpdateProgress(initialMessage || 'Updater arrancado. Esperando salida...');
 
     var polls = 0, catchCount = 0, sawRestart = false;
     var maxPolls = 180;
@@ -284,6 +347,16 @@ function startUpdatePolling() {
             });
     }, 2000);
 }
+
+document.addEventListener('DOMContentLoaded', function() {
+    var checkForm = document.getElementById('updateCheckForm');
+    var checkBtn = document.getElementById('updateCheckBtn');
+    if (checkForm && checkBtn) {
+        checkForm.addEventListener('submit', function() {
+            setButtonLoading(checkBtn, 'Comprobando...');
+        });
+    }
+});
 
 <?php if ($updateStatus['in_progress']): ?>
 // Poll for update progress

@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.124] — 2026-04-25
+
+### Fixed
+- `/settings/updates`: el boton `Actualizar` ya no oculta errores del backend; si no puede arrancar el updater muestra el mensaje real en modal y en la salida de progreso.
+- `/settings/updates`: si la peticion se corta por reinicio del panel, la UI sigue haciendo polling y recarga automaticamente cuando el panel vuelve.
+
+### Improved
+- `/settings/updates`: spinners y bloqueo visual en `Comprobar ahora` y `Actualizar` para evitar dobles clicks y dejar claro que la pagina esta trabajando.
+
 ## [1.0.123] — 2026-04-25
 
 ### Improved
