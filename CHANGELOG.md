@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.95] — 2026-04-25
+
+### Fixed
+- OpenDKIM relay/satellite: corrige el timeout causado por `/run/opendkim` creado como `root:root` mientras OpenDKIM intenta crear el socket como usuario `opendkim`.
+- Reparador mail: el override systemd ahora ejecuta OpenDKIM como servicio `simple` bajo `opendkim:opendkim`, con `RuntimeDirectory` propio y `ExecStart` en foreground.
+- Reparador mail: elimina `UserID` de `/etc/opendkim.conf` en modo reparacion y anade `postfix` al grupo `opendkim` para poder usar el socket Unix.
+
 ## [1.0.94] — 2026-04-25
 
 ### Fixed

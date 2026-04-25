@@ -628,6 +628,7 @@ class MailController
         };
 
         $run('paquetes', 'DEBIAN_FRONTEND=noninteractive apt-get install -y postfix opendkim opendkim-tools sasl2-bin libsasl2-modules ca-certificates openssl');
+        $run('stop opendkim', 'systemctl stop opendkim || true');
 
         @mkdir('/run/opendkim', 0755, true);
         @chown('/run/opendkim', 'opendkim');
@@ -640,7 +641,7 @@ class MailController
         @mkdir('/etc/systemd/system/opendkim.service.d', 0755, true);
         file_put_contents(
             '/etc/systemd/system/opendkim.service.d/runtime.conf',
-            "[Service]\nRuntimeDirectory=opendkim\nRuntimeDirectoryMode=0755\n"
+            "[Service]\nType=simple\nUser=opendkim\nGroup=opendkim\nRuntimeDirectory=opendkim\nRuntimeDirectoryMode=0755\nPIDFile=\nExecStart=\nExecStart=/usr/sbin/opendkim -f -x /etc/opendkim.conf\n"
         );
 
         @mkdir('/etc/opendkim/keys', 0700, true);
@@ -656,22 +657,19 @@ class MailController
 
         $conf = is_file('/etc/opendkim.conf') ? (string)file_get_contents('/etc/opendkim.conf') : '';
         if ($conf === '') {
-            $conf = "Syslog yes\nUMask 007\nMode s\nCanonicalization relaxed/simple\nKeyTable /etc/opendkim/key.table\nSigningTable refile:/etc/opendkim/signing.table\nExternalIgnoreList /etc/opendkim/trusted.hosts\nInternalHosts /etc/opendkim/trusted.hosts\nSocket local:/run/opendkim/opendkim.sock\nOversignHeaders From\nUserID opendkim:opendkim\n";
+            $conf = "Syslog yes\nUMask 007\nMode s\nCanonicalization relaxed/simple\nKeyTable /etc/opendkim/key.table\nSigningTable refile:/etc/opendkim/signing.table\nExternalIgnoreList /etc/opendkim/trusted.hosts\nInternalHosts /etc/opendkim/trusted.hosts\nSocket local:/run/opendkim/opendkim.sock\nOversignHeaders From\n";
         }
         if (preg_match('/^Socket\s+.*/m', $conf)) {
             $conf = preg_replace('/^Socket\s+.*/m', 'Socket local:/run/opendkim/opendkim.sock', $conf);
         } else {
             $conf .= "\nSocket local:/run/opendkim/opendkim.sock\n";
         }
-        if (preg_match('/^UserID\s+.*/m', $conf)) {
-            $conf = preg_replace('/^UserID\s+.*/m', 'UserID opendkim:opendkim', $conf);
-        } else {
-            $conf .= "UserID opendkim:opendkim\n";
-        }
+        $conf = preg_replace('/^UserID\s+.*\n?/m', '', $conf);
         file_put_contents('/etc/opendkim.conf', $conf);
         file_put_contents('/etc/default/opendkim', "SOCKET=\"local:/run/opendkim/opendkim.sock\"\n");
 
         $run('permisos opendkim', 'chown -R opendkim:opendkim /etc/opendkim /run/opendkim');
+        $run('postfix en grupo opendkim', 'usermod -aG opendkim postfix || true');
         $run('systemd reload', 'systemctl daemon-reload');
         $run('reset opendkim', 'systemctl reset-failed opendkim || true');
         $run('restart opendkim', 'systemctl restart opendkim');

@@ -127,8 +127,10 @@ function prepareOpenDkimRuntime(string $socketDir, string $logFile, array &$erro
     }
 
     @mkdir($socketDir, 0755, true);
+    run('systemctl stop opendkim 2>&1 || true', $logFile, $errors, 'opendkim-stop-before-runtime');
     run('chown opendkim:opendkim ' . escapeshellarg($socketDir), $logFile, $errors, 'opendkim-runtime-chown');
     run('chmod 0755 ' . escapeshellarg($socketDir), $logFile, $errors, 'opendkim-runtime-chmod');
+    run('usermod -aG opendkim postfix 2>&1 || true', $logFile, $errors, 'postfix-opendkim-group');
 
     if ($socketDir === '/run/opendkim') {
         @mkdir('/etc/tmpfiles.d', 0755, true);
@@ -138,7 +140,7 @@ function prepareOpenDkimRuntime(string $socketDir, string $logFile, array &$erro
         @mkdir('/etc/systemd/system/opendkim.service.d', 0755, true);
         file_put_contents(
             '/etc/systemd/system/opendkim.service.d/runtime.conf',
-            "[Service]\nRuntimeDirectory=opendkim\nRuntimeDirectoryMode=0755\n"
+            "[Service]\nType=simple\nUser=opendkim\nGroup=opendkim\nRuntimeDirectory=opendkim\nRuntimeDirectoryMode=0755\nPIDFile=\nExecStart=\nExecStart=/usr/sbin/opendkim -f -x /etc/opendkim.conf\n"
         );
         logLine($logFile, 'WRITE', '/etc/systemd/system/opendkim.service.d/runtime.conf');
         run('systemctl daemon-reload 2>&1', $logFile, $errors, 'systemd-daemon-reload-opendkim');
@@ -410,7 +412,7 @@ if ($mailMode === 'relay') {
     writeProgress($progressFile, $relaySteps[$step], $step, $totalSteps, 'running', $errors);
     @mkdir('/etc/opendkim/keys', 0700, true);
     prepareOpenDkimRuntime('/run/opendkim', $logFile, $errors);
-    $dkimConf = "Syslog yes\nUMask 007\nMode s\nCanonicalization relaxed/simple\nKeyTable /etc/opendkim/key.table\nSigningTable refile:/etc/opendkim/signing.table\nExternalIgnoreList /etc/opendkim/trusted.hosts\nInternalHosts /etc/opendkim/trusted.hosts\nSocket local:/run/opendkim/opendkim.sock\nOversignHeaders From\nUserID opendkim:opendkim\n";
+    $dkimConf = "Syslog yes\nUMask 007\nMode s\nCanonicalization relaxed/simple\nKeyTable /etc/opendkim/key.table\nSigningTable refile:/etc/opendkim/signing.table\nExternalIgnoreList /etc/opendkim/trusted.hosts\nInternalHosts /etc/opendkim/trusted.hosts\nSocket local:/run/opendkim/opendkim.sock\nOversignHeaders From\n";
     file_put_contents('/etc/opendkim.conf', $dkimConf);
     foreach (['/etc/opendkim/key.table', '/etc/opendkim/signing.table'] as $file) {
         if (!is_file($file)) touch($file);
@@ -521,7 +523,7 @@ if ($mailMode === 'satellite') {
         run("opendkim-genkey -D " . escapeshellarg($dkimDir) . " -d " . escapeshellarg($dkimDomain) . " -s default", $logFile, $errors, 'dkim-genkey');
     }
     run('chown -R opendkim:opendkim /etc/opendkim', $logFile, $errors, 'dkim-chown');
-    $dkimConf = "Syslog yes\nUMask 007\nMode s\nCanonicalization relaxed/simple\nDomain {$dkimDomain}\nSelector default\nKeyFile {$dkimDir}/default.private\nSocket local:/run/opendkim/opendkim.sock\nOversignHeaders From\nUserID opendkim:opendkim\n";
+    $dkimConf = "Syslog yes\nUMask 007\nMode s\nCanonicalization relaxed/simple\nDomain {$dkimDomain}\nSelector default\nKeyFile {$dkimDir}/default.private\nSocket local:/run/opendkim/opendkim.sock\nOversignHeaders From\n";
     file_put_contents('/etc/opendkim.conf', $dkimConf);
     logLine($logFile, 'WRITE', '/etc/opendkim.conf (satellite)');
 
