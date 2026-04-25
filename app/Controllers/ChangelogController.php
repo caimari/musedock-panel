@@ -20,6 +20,31 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.114',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=deliverability` > `Test de envio`: se anaden cabeceras `List-ID` y `List-Unsubscribe` para mejorar validacion externa tipo Mail-Tester',
+                            '`/mail?tab=deliverability`: texto de ayuda aclarando que Mail-Tester llama "autenticado" a SPF/DKIM/DMARC; SMTP AUTH requiere usuario/password y no sustituye DKIM',
+                        ],
+                        'en' => [
+                            '`/mail?tab=deliverability` > `Send test`: added `List-ID` and `List-Unsubscribe` headers to improve external Mail-Tester-style validation',
+                            '`/mail?tab=deliverability`: help text now clarifies that Mail-Tester means SPF/DKIM/DMARC by "authenticated"; SMTP AUTH requires username/password and does not replace DKIM',
+                        ],
+                    ],
+                    'notes' => [
+                        'es' => [
+                            'SMTP autenticado valida la conexion, pero la firma DKIM depende de OpenDKIM/Postfix y de los milters/configuracion del dominio remitente',
+                        ],
+                        'en' => [
+                            'Authenticated SMTP validates the connection, but DKIM signing depends on OpenDKIM/Postfix and the sender domain milter/configuration',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.113',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

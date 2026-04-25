@@ -1559,8 +1559,8 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
             <div class="col-12">
                 <div class="form-text text-muted mb-0">
                     Envia un correo de prueba y muestra si Postfix/SMTP lo entrega, lo deja en cola o lo rechaza.
-                    El test sale en formato <strong>texto + HTML</strong> y fuerza Return-Path con el remitente elegido para SPF/DMARC.
-                    En <strong>Auto</strong>, modo externo usa SMTP autenticado y modos locales usan Postfix local.
+                    El test sale en formato <strong>texto + HTML</strong>, incluye <code>List-Unsubscribe</code> y fuerza Return-Path con el remitente elegido para SPF/DMARC.
+                    En <strong>Auto</strong>, modo externo usa SMTP autenticado y modos locales usan Postfix local. Mail-Tester llama "autenticado" a SPF/DKIM/DMARC; SMTP AUTH requiere usuario/password y no sustituye la firma DKIM.
                 </div>
             </div>
         </form>

@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.114] — 2026-04-25
+
+### Improved
+- `Test de envio`: añade cabeceras `List-ID` y `List-Unsubscribe` para que herramientas como Mail-Tester no penalicen el mensaje por faltar baja de lista en pruebas tipo campana.
+- `/mail?tab=deliverability`: texto de ayuda aclarado; Mail-Tester llama "autenticado" a SPF/DKIM/DMARC, mientras que SMTP AUTH requiere usuario/password y no sustituye la firma DKIM.
+
+### Notes
+- SMTP autenticado valida credenciales de conexion, pero la firma DKIM depende de OpenDKIM/Postfix (`smtpd_milters`/`non_smtpd_milters`) y de que el dominio remitente tenga clave/selector correcto.
+
 ## [1.0.113] — 2026-04-25
 
 ### Improved

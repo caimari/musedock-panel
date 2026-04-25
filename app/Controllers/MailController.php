@@ -1418,6 +1418,8 @@ class MailController
             Router::redirect('/mail?tab=deliverability');
             return;
         }
+        $fromDomain = strtolower((string)substr(strrchr($from, '@') ?: '', 1));
+        $unsubscribeMailbox = $fromDomain !== '' ? 'unsubscribe@' . $fromDomain : $from;
 
         $marker = 'MuseDock-Test-' . date('YmdHis') . '-' . bin2hex(random_bytes(3));
         $subject = "Test de envio MuseDock {$marker}";
@@ -1436,6 +1438,8 @@ class MailController
             'Reply-To: ' . $from,
             'Auto-Submitted: auto-generated',
             'X-MuseDock-Test: ' . $marker,
+            'List-ID: MuseDock Panel Test <musedock-test.' . ($fromDomain !== '' ? $fromDomain : 'local') . '>',
+            'List-Unsubscribe: <mailto:' . $unsubscribeMailbox . '?subject=unsubscribe>',
             'MIME-Version: 1.0',
             'Content-Type: multipart/alternative; boundary="' . $multipart['boundary'] . '"',
         ];
