@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.140] — 2026-04-25
+
+### Improved
+- `install.sh`: la cabecera del instalador usa la version real del panel desde `config/panel.php` en vez de `v0.1.0`.
+- `install.sh`: el temporizador de pasos se pausa mientras espera respuestas interactivas, evitando latidos falsos durante prompts.
+- `install.sh`: los checks de rutas de Caddy usan timeout corto para no bloquear varios minutos si la API admin local esta lenta o no responde.
+
 ## [1.0.139] — 2026-04-25
 
 ### Fixed

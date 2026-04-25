@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.140',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`install.sh`: la cabecera del instalador usa la version real del panel desde `config/panel.php` en vez de `v0.1.0`',
+                            '`install.sh`: el temporizador de pasos se pausa mientras espera respuestas interactivas, evitando latidos falsos durante prompts',
+                            '`install.sh`: los checks de rutas de Caddy usan timeout corto para no bloquear varios minutos si la API admin local esta lenta o no responde',
+                        ],
+                        'en' => [
+                            '`install.sh`: installer banner now uses the real panel version from `config/panel.php` instead of `v0.1.0`',
+                            '`install.sh`: step timer pauses while waiting for interactive answers, avoiding false heartbeat messages during prompts',
+                            '`install.sh`: Caddy route checks use short timeouts to avoid blocking for minutes if the local admin API is slow or unavailable',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.139',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

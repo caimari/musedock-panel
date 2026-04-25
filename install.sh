@@ -77,10 +77,42 @@ header() {
     echo -e "${CYAN}Inicio: $(date '+%Y-%m-%d %H:%M:%S') · total $(elapsed_total)${NC}\n"
     start_step_timer "$1"
 }
+prompt_read() {
+    local prompt="$1"
+    local var_name="$2"
+    local resume_timer=false
+    if [ -n "${STEP_TIMER_PID:-}" ]; then
+        resume_timer=true
+        stop_step_timer
+    fi
+    read -rp "$prompt" "$var_name"
+    local rc=$?
+    if [ "$resume_timer" = true ] && [ -n "${STEP_TITLE:-}" ]; then
+        start_step_timer "$STEP_TITLE"
+    fi
+    return "$rc"
+}
+
+prompt_read_secret() {
+    local prompt="$1"
+    local var_name="$2"
+    local resume_timer=false
+    if [ -n "${STEP_TIMER_PID:-}" ]; then
+        resume_timer=true
+        stop_step_timer
+    fi
+    read -rsp "$prompt" "$var_name"
+    local rc=$?
+    if [ "$resume_timer" = true ] && [ -n "${STEP_TITLE:-}" ]; then
+        start_step_timer "$STEP_TITLE"
+    fi
+    return "$rc"
+}
+
 ok()     { echo -e "  ${GREEN}✓${NC} [$(elapsed_step)] $1"; }
 warn()   { echo -e "  ${YELLOW}!${NC} [$(elapsed_step)] $1"; }
 fail()   { stop_step_timer; echo -e "  ${RED}✗${NC} [$(elapsed_step)] $1"; exit 1; }
-ask()    { read -rp "  $1: " "$2"; }
+ask()    { prompt_read "  $1: " "$2"; }
 
 on_unhandled_error() {
     local rc=$?
@@ -134,7 +166,7 @@ echo ""
 echo "    1) English"
 echo "    2) Español"
 echo ""
-read -rp "  Choose / Elige [1/2] (default: 2): " LANG_CHOICE
+prompt_read "  Choose / Elige [1/2] (default: 2): " LANG_CHOICE
 LANG_CHOICE=${LANG_CHOICE:-2}
 case "$LANG_CHOICE" in
     1) LANG_CODE="en" ;;
@@ -821,7 +853,9 @@ echo ""
 echo -e "${CYAN}${BOLD}"
 echo "  ╔══════════════════════════════════════════╗"
 echo "  ║         MuseDock Panel Installer         ║"
-echo "  ║            v0.1.0 — $(date +%Y)                ║"
+INSTALLER_VERSION=$(sed -n "s/.*'version'[[:space:]]*=>[[:space:]]*'\([^']*\)'.*/\1/p" "${PANEL_DIR}/config/panel.php" | head -1)
+INSTALLER_VERSION=${INSTALLER_VERSION:-unknown}
+printf "  ║            v%-10s — %-4s        ║\n" "$INSTALLER_VERSION" "$(date +%Y)"
 echo "  ╚══════════════════════════════════════════╝"
 echo -e "${NC}"
 echo -e "  OS:          ${BOLD}${OS_ID} ${OS_VERSION}${NC}"
@@ -844,7 +878,7 @@ if [ -f "${PANEL_DIR}/.env" ]; then
     echo "    4) $(t existing_opt_update)"
     echo "    5) $(t existing_opt_repair)"
     echo ""
-    read -rp "  $(t existing_choose)" EXISTING_CHOICE
+    prompt_read "  $(t existing_choose)" EXISTING_CHOICE
     EXISTING_CHOICE=${EXISTING_CHOICE:-4}
 
     case "$EXISTING_CHOICE" in
@@ -1776,7 +1810,7 @@ if command -v caddy &> /dev/null && systemctl is-active --quiet caddy 2>/dev/nul
         echo -e "  ${GREEN}${BOLD}$(t caddy_already_running)${NC}"
         echo -e "  ${GREEN}  $(t caddy_already_desc)${NC}"
         # Count active routes
-        CADDY_EARLY_ROUTES=$(curl -s http://127.0.0.1:2019/config/apps/http/servers/srv0/routes 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+        CADDY_EARLY_ROUTES=$(curl -s --max-time 3 http://127.0.0.1:2019/config/apps/http/servers/srv0/routes 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
         if [ "$CADDY_EARLY_ROUTES" -gt 0 ] 2>/dev/null; then
             echo -e "  ${GREEN}  $(t caddy_has_routes "$CADDY_EARLY_ROUTES")${NC}"
         fi
@@ -1800,7 +1834,7 @@ if [ -d /usr/local/psa ] || command -v psa &> /dev/null || [ -f /etc/init.d/psa 
     echo "    1) $(t plesk_opt_abort)"
     echo "    2) $(t plesk_opt_continue)"
     echo ""
-    read -rp "  Choose [1/2] (default: 1): " PLESK_CHOICE
+    prompt_read "  Choose [1/2] (default: 1): " PLESK_CHOICE
     PLESK_CHOICE=${PLESK_CHOICE:-1}
 
     if [ "$PLESK_CHOICE" = "1" ]; then
@@ -1858,7 +1892,7 @@ if command -v nginx &> /dev/null; then
         echo "    2) $(t opt_keep_running nginx)"
         echo "    3) $(t opt_abort)"
         echo ""
-        read -rp "  Choose [1/2/3] (default: 1): " NGINX_CHOICE
+        prompt_read "  Choose [1/2/3] (default: 1): " NGINX_CHOICE
         NGINX_CHOICE=${NGINX_CHOICE:-1}
 
         case "$NGINX_CHOICE" in
@@ -1888,7 +1922,7 @@ if command -v nginx &> /dev/null; then
     elif [ "$NGINX_ON_HTTP" = true ] && [ "$NGINX_IS_PLESK" = true ]; then
         warn "$(t plesk_managed_warn Nginx)"
         warn "$(t plesk_resolve_manual)"
-        read -rp "  $(t continue_anyway)" NGINX_PLESK_CONTINUE
+        prompt_read "  $(t continue_anyway)" NGINX_PLESK_CONTINUE
         if [[ ! "$NGINX_PLESK_CONTINUE" =~ ^[YySs]$ ]]; then
             echo "  $(t installation_aborted)"
             exit 0
@@ -1944,7 +1978,7 @@ if command -v apache2 &> /dev/null || command -v httpd &> /dev/null; then
         echo "    2) $(t opt_keep_running Apache)"
         echo "    3) $(t opt_abort)"
         echo ""
-        read -rp "  Choose [1/2/3] (default: 1): " APACHE_CHOICE
+        prompt_read "  Choose [1/2/3] (default: 1): " APACHE_CHOICE
         APACHE_CHOICE=${APACHE_CHOICE:-1}
 
         case "$APACHE_CHOICE" in
@@ -1975,7 +2009,7 @@ if command -v apache2 &> /dev/null || command -v httpd &> /dev/null; then
     elif [ "$APACHE_ON_HTTP" = true ] && [ "$APACHE_IS_PLESK" = true ]; then
         warn "$(t plesk_managed_warn Apache)"
         warn "$(t plesk_resolve_manual)"
-        read -rp "  $(t continue_anyway)" APACHE_PLESK_CONTINUE
+        prompt_read "  $(t continue_anyway)" APACHE_PLESK_CONTINUE
         if [[ ! "$APACHE_PLESK_CONTINUE" =~ ^[YySs]$ ]]; then
             echo "  $(t installation_aborted)"
             exit 0
@@ -2086,7 +2120,7 @@ migrate_nginx_sites() {
     fi
 
     echo ""
-    read -rp "  $(t migrate_ask "$SITES_FOUND" Nginx)" MIGRATE_CONFIRM
+    prompt_read "  $(t migrate_ask "$SITES_FOUND" Nginx)" MIGRATE_CONFIRM
     MIGRATE_CONFIRM=${MIGRATE_CONFIRM:-s}
 
     if [[ "$MIGRATE_CONFIRM" =~ ^[YySs]$ ]] || [ -z "$MIGRATE_CONFIRM" ]; then
@@ -2188,7 +2222,7 @@ migrate_apache_sites() {
     fi
 
     echo ""
-    read -rp "  $(t migrate_ask "$NEW_APACHE_FOUND" Apache)" MIGRATE_CONFIRM
+    prompt_read "  $(t migrate_ask "$NEW_APACHE_FOUND" Apache)" MIGRATE_CONFIRM
     MIGRATE_CONFIRM=${MIGRATE_CONFIRM:-s}
 
     if [[ "$MIGRATE_CONFIRM" =~ ^[YySs]$ ]] || [ -z "$MIGRATE_CONFIRM" ]; then
@@ -2244,7 +2278,7 @@ echo "  - $(t summary_dir "$PANEL_DIR")"
 echo -e "  - ${CYAN}$(t summary_admin)${NC}"
 echo ""
 
-read -rp "  $(t proceed_install)" CONFIRM
+prompt_read "  $(t proceed_install)" CONFIRM
 CONFIRM=${CONFIRM:-Y}
 if [[ ! "$CONFIRM" =~ ^[YySs]$ ]]; then
     echo "  $(t install_cancelled)"
@@ -2495,7 +2529,7 @@ if ! runuser -u postgres -- psql -c "SELECT 1;" > /dev/null 2>&1; then
         PG_PASS_ENV=""
     else
         echo -e "  ${BOLD}$(t pgsql_enter_pass)${NC}"
-        read -rsp "  Password: " PG_SUPERUSER_PASS
+        prompt_read_secret "  Password: " PG_SUPERUSER_PASS
         echo ""
 
         if PGPASSWORD="$PG_SUPERUSER_PASS" psql -U postgres -h 127.0.0.1 -c "SELECT 1;" > /dev/null 2>&1; then
@@ -2629,7 +2663,7 @@ if command -v caddy &> /dev/null; then
     CADDY_HAS_AUTOSAVE=false
 
     if [ "$CADDY_WAS_RUNNING" = true ]; then
-        CADDY_ROUTES=$(curl -s http://127.0.0.1:2019/config/apps/http/servers/srv0/routes 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
+        CADDY_ROUTES=$(curl -s --max-time 3 http://127.0.0.1:2019/config/apps/http/servers/srv0/routes 2>/dev/null | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
     fi
 
     # Check if Caddyfile has domain blocks (not just global options)
@@ -2677,7 +2711,7 @@ if command -v caddy &> /dev/null; then
         echo "    1) $(t caddy_opt_integrate)"
         echo "    2) $(t caddy_opt_reconfigure)"
         echo ""
-        read -rp "  $(t caddy_choose)" CADDY_CHOICE
+        prompt_read "  $(t caddy_choose)" CADDY_CHOICE
         CADDY_CHOICE=${CADDY_CHOICE:-1}
 
         if [ "$CADDY_CHOICE" = "1" ]; then
@@ -2857,15 +2891,15 @@ json.dump(unique, open('$MIGRATE_SITES_FILE', 'w'))
         MIGRATE_SKIPPED=0
 
         # Ensure srv0 server exists with a routes array
-        SRV0_CHECK=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:2019/config/apps/http/servers/srv0 2>/dev/null)
+        SRV0_CHECK=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:2019/config/apps/http/servers/srv0 2>/dev/null)
         if [ "$SRV0_CHECK" != "200" ]; then
-            curl -s -X POST http://127.0.0.1:2019/config/apps/http/servers/srv0 \
+            curl -s --max-time 3 -X POST http://127.0.0.1:2019/config/apps/http/servers/srv0 \
                 -H "Content-Type: application/json" \
                 -d '{"listen":[":443",":80"],"routes":[]}' > /dev/null 2>&1
         fi
 
         # Fetch existing routes to detect duplicates
-        EXISTING_ROUTES_JSON=$(curl -s http://127.0.0.1:2019/config/apps/http/servers/srv0/routes 2>/dev/null || echo "[]")
+        EXISTING_ROUTES_JSON=$(curl -s --max-time 3 http://127.0.0.1:2019/config/apps/http/servers/srv0/routes 2>/dev/null || echo "[]")
 
         python3 -c "
 import json, sys
@@ -2897,7 +2931,7 @@ print('no')
             if [ "$ALREADY_EXISTS" = "yes" ]; then
                 # Route exists — delete it first so we replace with clean config (fixes duplicates from bad installs)
                 # Find and delete by @id or by matching domain
-                curl -s -X DELETE "http://127.0.0.1:2019/id/${ROUTE_ID}" > /dev/null 2>&1
+                curl -s --max-time 3 -X DELETE "http://127.0.0.1:2019/id/${ROUTE_ID}" > /dev/null 2>&1
                 # Also try to delete any route that matches this domain but has a different @id
                 python3 -c "
 import json, sys, urllib.request
@@ -2944,7 +2978,7 @@ route = {
 print(json.dumps(route))
 ")
 
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 -X POST \
                 "http://127.0.0.1:2019/config/apps/http/servers/srv0/routes" \
                 -H "Content-Type: application/json" \
                 -d "$ROUTE_JSON" 2>/dev/null)
@@ -3018,13 +3052,13 @@ else
         echo "    1) $(t mysql_opt_enter)"
         echo "    2) $(t mysql_opt_skip)"
         echo ""
-        read -rp "  $(t mysql_choose)" MYSQL_PASS_CHOICE
+        prompt_read "  $(t mysql_choose)" MYSQL_PASS_CHOICE
         MYSQL_PASS_CHOICE=${MYSQL_PASS_CHOICE:-1}
 
         if [ "$MYSQL_PASS_CHOICE" = "1" ]; then
             MAX_ATTEMPTS=3
             for attempt in $(seq 1 $MAX_ATTEMPTS); do
-                read -rsp "  $(t mysql_attempt "$attempt" "$MAX_ATTEMPTS")" MYSQL_INPUT_PASS
+                prompt_read_secret "  $(t mysql_attempt "$attempt" "$MAX_ATTEMPTS")" MYSQL_INPUT_PASS
                 echo ""
                 if mysql -u root -p"${MYSQL_INPUT_PASS}" -e "SELECT 1;" > /dev/null 2>&1; then
                     MYSQL_ROOT_PASS="$MYSQL_INPUT_PASS"
@@ -3334,7 +3368,7 @@ header "Configurando Fail2Ban (proteccion contra fuerza bruta)..."
 F2B_CONFIGURE=false
 if command -v fail2ban-client >/dev/null 2>&1; then
     ok "Fail2Ban detectado"
-    read -rp "  Fail2Ban ya esta instalado. Instalar/sincronizar jails MuseDock? [S/n] " F2B_CONFIRM
+    prompt_read "  Fail2Ban ya esta instalado. Instalar/sincronizar jails MuseDock? [S/n] " F2B_CONFIRM
     F2B_CONFIRM=${F2B_CONFIRM:-s}
     if [[ "$F2B_CONFIRM" =~ ^[YySs]$ ]]; then
         F2B_CONFIGURE=true
@@ -3343,7 +3377,7 @@ if command -v fail2ban-client >/dev/null 2>&1; then
     fi
 else
     warn "Fail2Ban no instalado."
-    read -rp "  Instalar Fail2Ban y configurar jails MuseDock ahora? [S/n] " F2B_CONFIRM
+    prompt_read "  Instalar Fail2Ban y configurar jails MuseDock ahora? [S/n] " F2B_CONFIRM
     F2B_CONFIRM=${F2B_CONFIRM:-s}
     if [[ "$F2B_CONFIRM" =~ ^[YySs]$ ]]; then
         apt-get install -y -qq fail2ban > /dev/null 2>&1 || true
@@ -3610,7 +3644,7 @@ esac
 ok "$(t fw_setup_selected "$FW_MODE_LABEL")"
 
 echo ""
-read -rp "  $(t fw_setup_ask)" FW_SETUP_CONFIRM
+prompt_read "  $(t fw_setup_ask)" FW_SETUP_CONFIRM
 FW_SETUP_CONFIRM=${FW_SETUP_CONFIRM:-s}
 
 if [[ "$FW_SETUP_CONFIRM" =~ ^[YySs]$ ]] || [ -z "$FW_SETUP_CONFIRM" ]; then
@@ -3618,7 +3652,7 @@ if [[ "$FW_SETUP_CONFIRM" =~ ^[YySs]$ ]] || [ -z "$FW_SETUP_CONFIRM" ]; then
     FW_ALLOWED_IPS=()
     while true; do
         echo ""
-        read -rp "  $(t fw_setup_ip_prompt): " FW_IP
+        prompt_read "  $(t fw_setup_ip_prompt): " FW_IP
         FW_IP=$(echo "$FW_IP" | tr -d ' ')
 
         # Validate IP or CIDR
@@ -3630,7 +3664,7 @@ if [[ "$FW_SETUP_CONFIRM" =~ ^[YySs]$ ]] || [ -z "$FW_SETUP_CONFIRM" ]; then
         fi
 
         echo ""
-        read -rp "  $(t fw_setup_ip_another)" FW_MORE
+        prompt_read "  $(t fw_setup_ip_another)" FW_MORE
         if [[ ! "$FW_MORE" =~ ^[YySs]$ ]]; then
             break
         fi
