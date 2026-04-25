@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.100] — 2026-04-25
+
+### Improved
+- `/mail?tab=relay`: los ultimos envios ahora muestran el detalle real de Postfix (`dsn`, `relay` y motivo entre parentesis) para entender por que un envio queda `deferred` o `bounced`.
+
 ## [1.0.99] — 2026-04-25
 
 ### Improved

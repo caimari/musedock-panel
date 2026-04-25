@@ -617,7 +617,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                     <div class="p-3 text-muted small">Sin entradas recientes con estado <code>sent</code>, <code>deferred</code> o <code>bounced</code> en mail.log.</div>
                 <?php else: ?>
                     <table class="table table-sm mb-0">
-                        <thead><tr><th class="ps-3">Hora</th><th>Dominio</th><th>From</th><th>To</th><th>Estado</th></tr></thead>
+                        <thead><tr><th class="ps-3">Hora</th><th>Dominio</th><th>From</th><th>To</th><th>Estado</th><th>Detalle</th></tr></thead>
                         <tbody>
                             <?php foreach ($relayLogs as $log): ?>
                             <tr>
@@ -626,6 +626,13 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                                 <td class="text-muted"><?= View::e($log['from'] ?: '-') ?></td>
                                 <td class="text-muted"><?= View::e($log['to'] ?: '-') ?></td>
                                 <td><span class="badge bg-<?= ($log['status'] ?? '') === 'sent' ? 'success' : (($log['status'] ?? '') === 'bounced' ? 'danger' : 'warning') ?>"><?= View::e($log['status'] ?? '-') ?></span></td>
+                                <td class="small text-muted" title="<?= View::e($log['line'] ?? '') ?>">
+                                    <?php if (!empty($log['detail'])): ?>
+                                        <?= View::e($log['detail']) ?>
+                                    <?php else: ?>
+                                        <?= View::e(trim((($log['dsn'] ?? '') ? 'dsn=' . $log['dsn'] : '') . ' ' . (($log['relay'] ?? '') ? 'relay=' . $log['relay'] : '')) ?: '-') ?>
+                                    <?php endif; ?>
+                                </td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>

@@ -1035,14 +1035,23 @@ class MailService
             if (!str_contains($line, 'postfix/') || !preg_match('/status=(sent|deferred|bounced)/', $line, $sm)) continue;
             preg_match('/from=<([^>]*)>/', $line, $fm);
             preg_match('/to=<([^>]*)>/', $line, $tm);
+            preg_match('/relay=([^, ]+)/', $line, $rm);
+            preg_match('/dsn=([^, ]+)/', $line, $dm);
             $from = $fm[1] ?? '';
             $domain = str_contains($from, '@') ? substr(strrchr($from, '@'), 1) : '';
+            $detail = '';
+            if (preg_match('/status=(?:sent|deferred|bounced)\s+\((.*)\)\s*$/', $line, $detailMatch)) {
+                $detail = $detailMatch[1];
+            }
             $entries[] = [
                 'timestamp' => substr($line, 0, 15),
                 'domain' => $domain,
                 'from' => $from,
                 'to' => $tm[1] ?? '',
                 'status' => $sm[1],
+                'relay' => $rm[1] ?? '',
+                'dsn' => $dm[1] ?? '',
+                'detail' => $detail,
                 'line' => $line,
             ];
             if (count($entries) >= $limit) break;

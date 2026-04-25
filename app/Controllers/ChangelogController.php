@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.100',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=relay`: los ultimos envios ahora muestran el detalle real de Postfix (`dsn`, `relay` y motivo entre parentesis) para entender por que un envio queda `deferred` o `bounced`',
+                        ],
+                        'en' => [
+                            '`/mail?tab=relay`: recent relay deliveries now show the real Postfix detail (`dsn`, `relay` and parenthesized reason) to explain why a message is `deferred` or `bounced`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.99',
                 'date' => '2026-04-25',
                 'badge' => 'primary',
