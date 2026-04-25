@@ -51,6 +51,115 @@ class ChangelogController
                 ],
             ],
             [
+                'version' => '1.0.112',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=deliverability`: bloque de test externo de reputacion con enlace a Mail-Tester y notas de validacion (SPF/DKIM/DMARC/rDNS)',
+                            '`/mail?tab=deliverability`: test de envio con selector de remitente (`Recomendado`, `mail_from_address`, `Email admin`) y `Return-Path` forzado para SPF/DMARC',
+                            '`/mail?tab=deliverability`: aviso contextual cuando `non_smtpd_milters` no incluye OpenDKIM',
+                            '`/mail` (General): nueva card de mantenimiento `Normalizar DKIM` visible incluso en estado estable',
+                            'Reparador local de mail: normaliza `smtpd_milters` y `non_smtpd_milters` asegurando OpenDKIM sin eliminar otros milters',
+                        ],
+                        'en' => [
+                            '`/mail?tab=deliverability`: external reputation test block with Mail-Tester link and SPF/DKIM/DMARC/rDNS validation notes',
+                            '`/mail?tab=deliverability`: send-test form now includes sender source selector (`Recommended`, `mail_from_address`, `Admin email`) and forced `Return-Path` for realistic SPF/DMARC tests',
+                            '`/mail?tab=deliverability`: contextual warning when `non_smtpd_milters` does not include OpenDKIM',
+                            '`/mail` (General): new always-visible `Normalize DKIM` maintenance card, even when system is stable',
+                            'Local mail repair now normalizes both `smtpd_milters` and `non_smtpd_milters`, ensuring OpenDKIM without removing other existing milters',
+                        ],
+                    ],
+                    'security' => [
+                        'es' => [
+                            '`/mail/repair-local`: bloqueo defensivo cuando no existe huella local de mail (`repair_available=false`)',
+                            'Modal de reparacion con texto explicito: no sobrescribe dominios, cuentas, buzones, aliases, cola ni DNS',
+                        ],
+                        'en' => [
+                            '`/mail/repair-local`: defensive block when no local mail footprint exists (`repair_available=false`)',
+                            'Repair modal now explicitly states it does not overwrite domains, accounts, mailboxes, aliases, queue, or DNS',
+                        ],
+                    ],
+                    'docs' => [
+                        'es' => [
+                            '`/docs/mail/deliverability`: guia ampliada con arquitectura hibrida multi-proveedor y tabla tipo Cloudflare',
+                            '`/docs/mail/deliverability`: recomendaciones operativas para `dmarc@`, `postgresql@`, `root@`',
+                            '`/docs/mail/relay` y `/docs/mail/webmail`: secciones ampliadas de comportamiento y autenticacion',
+                        ],
+                        'en' => [
+                            '`/docs/mail/deliverability`: expanded guide with hybrid multi-provider architecture and Cloudflare-like table',
+                            '`/docs/mail/deliverability`: operational mailbox suggestions for `dmarc@`, `postgresql@`, `root@`',
+                            '`/docs/mail/relay` and `/docs/mail/webmail`: expanded behavior and authentication sections',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.111',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`/mail?tab=deliverability`: tras `Comprobar DNS ahora`, la vista muestra checks en caliente de `A hostname`, `PTR/rDNS` y `blacklists`',
+                            '`/mail?tab=deliverability`: tabla de `Registros recomendados` adaptada a campos reales de Cloudflare (`Tipo`, `Nombre`, `Contenido`, `Prioridad`, `Proxy`, `TTL`, `Donde`)',
+                            '`/mail?tab=deliverability`: normalizacion de `Host` para raiz (`@`) y subdominios',
+                        ],
+                        'en' => [
+                            '`/mail?tab=deliverability`: after `Check DNS now`, view now includes live checks for `A hostname`, `PTR/rDNS`, and `blacklists`',
+                            '`/mail?tab=deliverability`: `Recommended records` table adapted to real Cloudflare fields (`Type`, `Host`, `Value`, `Priority`, `Proxy`, `TTL`, `Where`)',
+                            '`/mail?tab=deliverability`: host normalization for root (`@`) and subdomains',
+                        ],
+                    ],
+                    'docs' => [
+                        'es' => [
+                            '`/docs/mail/deliverability`: notas para coexistencia con otros proveedores SMTP/relay (SPF combinado, DKIM por selector y DMARC unico)',
+                        ],
+                        'en' => [
+                            '`/docs/mail/deliverability`: coexistence notes for additional SMTP/relay providers (combined SPF, selector-based DKIM, single DMARC)',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.110',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            'Docs Mail: nueva guia padre `/docs/mail-sections` y guias hijas `/docs/mail/{slug}` (`general`, `domains`, `webmail`, `relay`, `queue`, `migration`, `infra`, `deliverability`)',
+                        ],
+                        'en' => [
+                            'Mail Docs: new parent guide `/docs/mail-sections` and child guides under `/docs/mail/{slug}` (`general`, `domains`, `webmail`, `relay`, `queue`, `migration`, `infra`, `deliverability`)',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            '`/docs`: la home incorpora Mail como guia padre y la busqueda indexa tambien metadatos/contenido de guias hijas',
+                            '`/mail?tab=deliverability`: checks DNS pasan a modo on-demand (no se ejecutan automaticamente al entrar en `/mail`)',
+                            'En modo relay, `Comprobar DNS ahora` sincroniza DNS y estado BD (`active/pending`) en una sola accion',
+                            'Sin check on-demand, la vista usa estado diferido guardado en BD (`spf_verified`, `dkim_verified`, `dmarc_verified`)',
+                        ],
+                        'en' => [
+                            '`/docs`: home now includes Mail parent guide and search indexes child-guide metadata/content',
+                            '`/mail?tab=deliverability`: DNS checks are now on-demand only (no automatic check on `/mail` load)',
+                            'In relay mode, `Check DNS now` syncs DNS and DB status (`active/pending`) in one action',
+                            'Without on-demand check, view uses deferred DB status (`spf_verified`, `dkim_verified`, `dmarc_verified`)',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            '`/docs`: corregido icono roto en la card padre de Mail',
+                        ],
+                        'en' => [
+                            '`/docs`: fixed broken icon on Mail parent card',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.109',
                 'date' => '2026-04-25',
                 'badge' => 'primary',
