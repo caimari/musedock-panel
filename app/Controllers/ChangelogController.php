@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.146',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`install.sh`: al elegir `Reinstalar`, ejecuta un preflight inmediato de servicios existentes; si PostgreSQL `panel` en `5433` no responde, intenta arrancar/reiniciar el cluster antes de iniciar pasos pesados',
+                            '`install.sh`: el paso PostgreSQL reinicia el cluster `panel` cuando figura `online` pero no acepta conexiones, y acota `pg_ctlcluster`/`pg_createcluster` con timeout para evitar bloqueos largos',
+                        ],
+                        'en' => [
+                            '`install.sh`: when `Reinstall` is selected, it runs an immediate existing-services preflight; if PostgreSQL `panel` on `5433` is not reachable, it tries to start/restart the cluster before heavy steps begin',
+                            '`install.sh`: the PostgreSQL step restarts the `panel` cluster when it is marked `online` but does not accept connections, and caps `pg_ctlcluster`/`pg_createcluster` with timeouts to avoid long hangs',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.145',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

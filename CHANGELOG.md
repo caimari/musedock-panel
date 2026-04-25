@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.146] — 2026-04-25
+
+### Improved
+- `install.sh`: al elegir `Reinstalar`, ejecuta un preflight inmediato de servicios existentes; si PostgreSQL `panel` en `5433` no responde, intenta arrancar/reiniciar el cluster antes de iniciar pasos pesados.
+- `install.sh`: el paso PostgreSQL reinicia el cluster `panel` cuando figura `online` pero no acepta conexiones, y acota `pg_ctlcluster`/`pg_createcluster` con timeout para evitar bloqueos largos.
+
 ## [1.0.145] — 2026-04-25
 
 ### Fixed

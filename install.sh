@@ -126,6 +126,76 @@ on_unhandled_error() {
     fi
     echo -e "  ${YELLOW}Reintenta con: bash -x install.sh${NC}"
 }
+
+read_env_value() {
+    local key="$1"
+    grep -E "^${key}=" "${PANEL_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
+}
+
+quick_pg_port_ready() {
+    local port="${1:-5433}"
+    if command -v pg_isready >/dev/null 2>&1; then
+        pg_isready -h 127.0.0.1 -p "$port" -t 1 >/dev/null 2>&1
+        return $?
+    fi
+    ss -tln 2>/dev/null | grep -qE "127\\.0\\.0\\.1:${port}\\b|\\*:${port}\\b|0\\.0\\.0\\.0:${port}\\b|\\[::\\]:${port}\\b"
+}
+
+wait_quick_pg_port_ready() {
+    local port="${1:-5433}"
+    local max_wait="${2:-5}"
+    local i
+    for i in $(seq 1 "$max_wait"); do
+        if quick_pg_port_ready "$port"; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+preflight_existing_panel_services() {
+    [ -f "${PANEL_DIR}/.env" ] || return 0
+    command -v pg_lsclusters >/dev/null 2>&1 || return 0
+    command -v pg_ctlcluster >/dev/null 2>&1 || return 0
+
+    local env_db_port pg_line pg_ver pg_cluster pg_port pg_status
+    env_db_port=$(read_env_value DB_PORT)
+    env_db_port=${env_db_port:-5433}
+
+    if [ "$env_db_port" != "5433" ]; then
+        return 0
+    fi
+
+    pg_line=$(pg_lsclusters -h 2>/dev/null | awk '$2=="panel" {print $1" "$2" "$3" "$4; exit}')
+    if [ -z "$pg_line" ]; then
+        return 0
+    fi
+
+    read -r pg_ver pg_cluster pg_port pg_status <<< "$pg_line"
+    if [ "$pg_port" != "5433" ]; then
+        warn "Preflight: cluster PostgreSQL 'panel' existe en puerto ${pg_port}, pero .env usa 5433"
+        return 0
+    fi
+
+    if quick_pg_port_ready 5433; then
+        ok "Preflight: PostgreSQL panel responde en 5433"
+        return 0
+    fi
+
+    warn "Preflight: PostgreSQL panel no responde en 5433; intentando recuperar cluster ${pg_ver}/panel"
+    if [ "$pg_status" = "online" ]; then
+        timeout 20 pg_ctlcluster "$pg_ver" panel restart >/dev/null 2>&1 || true
+    else
+        timeout 20 pg_ctlcluster "$pg_ver" panel start >/dev/null 2>&1 || true
+    fi
+
+    if wait_quick_pg_port_ready 5433 5; then
+        ok "Preflight: PostgreSQL panel recuperado en 5433"
+    else
+        warn "Preflight: PostgreSQL panel sigue sin responder; el paso PostgreSQL mostrara diagnostico completo"
+    fi
+}
 trap 'on_unhandled_error $LINENO' ERR
 trap 'stop_step_timer' EXIT
 
@@ -886,6 +956,7 @@ if [ -f "${PANEL_DIR}/.env" ]; then
             REINSTALL=true
             echo ""
             ok "$(t reinstall_mode)"
+            preflight_existing_panel_services
             ;;
         2)
             VERIFY_ONLY=true
@@ -2528,12 +2599,16 @@ ensure_panel_cluster() {
         # Ensure it is running
         local PANEL_STATUS
         PANEL_STATUS=$(pg_lsclusters -h 2>/dev/null | awk '$2=="panel" {print $4}')
-        if [ "$PANEL_STATUS" != "online" ]; then
-            pg_ctlcluster "$PG_VER" panel start 2>/dev/null || true
+        if [ "$PANEL_STATUS" = "online" ]; then
+            warn "PostgreSQL panel figura online pero no responde; reiniciando cluster ${PG_VER}/panel"
+            timeout 20 pg_ctlcluster "$PG_VER" panel restart 2>/dev/null || true
+        else
+            warn "PostgreSQL panel esta ${PANEL_STATUS:-unknown}; arrancando cluster ${PG_VER}/panel"
+            timeout 20 pg_ctlcluster "$PG_VER" panel start 2>/dev/null || true
         fi
         wait_pg_port_ready 5433 5 || fail_panel_pg_unavailable 5433
     else
-        pg_createcluster "$PG_VER" panel --port 5433 --start 2>/dev/null
+        timeout 60 pg_createcluster "$PG_VER" panel --port 5433 --start 2>/dev/null
         wait_pg_port_ready 5433 5 || fail_panel_pg_unavailable 5433
         ok "$(t pgsql_cluster_created "panel" "5433")"
     fi
