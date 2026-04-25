@@ -546,7 +546,7 @@ t() {
                 caddy_choose) text="Elige [1/2] (por defecto: 1): " ;;
                 caddy_proxy_ok) text="Caddy HTTPS reverse proxy → https://0.0.0.0:$1 → 127.0.0.1:$2" ;;
                 caddy_tls_internal) text="TLS interno (certificado autofirmado para acceso por IP)" ;;
-                caddy_proxy_fail) text="Fallo al crear ruta Caddy API (HTTP $1) — usando acceso PHP directo" ;;
+                caddy_proxy_fail) text="Caddy/TLS no responde aun (HTTP $1); el panel queda disponible internamente en 127.0.0.1" ;;
                 caddy_proxy_fallback) text="Panel accesible en http://IP:$1 (sin HTTPS)" ;;
                 caddy_api_unavailable) text="API Caddy no disponible — panel en http://0.0.0.0:$1 (sin HTTPS)" ;;
                 mysql_choose) text="Elige [1/2] (por defecto: 1): " ;;
@@ -815,7 +815,7 @@ t() {
                 caddy_choose) text="Choose [1/2] (default: 1): " ;;
                 caddy_proxy_ok) text="Caddy HTTPS reverse proxy → https://0.0.0.0:$1 → 127.0.0.1:$2" ;;
                 caddy_tls_internal) text="TLS internal (self-signed certificate for IP access)" ;;
-                caddy_proxy_fail) text="Caddy API route creation failed (HTTP $1) — falling back to direct PHP access" ;;
+                caddy_proxy_fail) text="Caddy/TLS is not responding yet (HTTP $1); the panel remains available internally on 127.0.0.1" ;;
                 caddy_proxy_fallback) text="Panel accessible via http://IP:$1 (no HTTPS)" ;;
                 caddy_api_unavailable) text="Caddy API not available — panel running on http://0.0.0.0:$1 (no HTTPS)" ;;
                 mysql_choose) text="Choose [1/2] (default: 1): " ;;
@@ -1496,15 +1496,15 @@ elif [ "$VERIFY_ONLY" = true ]; then
     sleep 1
     PANEL_HTTP="000"
     for TEST_URL in \
-        "https://127.0.0.1:${PANEL_PORT}/" \
-        "http://127.0.0.1:$((PANEL_PORT + 1))/" \
+        "http://127.0.0.1:1000 27 33 1000(PANEL_PORT + 1))/" \
+        "https://127.0.0.1:/" \
     ; do
-        PANEL_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 3 "$TEST_URL" 2>/dev/null || echo "000")
+        PANEL_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" --connect-timeout 1 --max-time 3 "$TEST_URL" 2>/dev/null || echo "000")
         PANEL_HTTP=$(echo "$PANEL_HTTP" | tr -d '[:space:]')
         [ -n "$PANEL_HTTP" ] && [ "$PANEL_HTTP" != "000" ] && break
         PANEL_HTTP="000"
     done
-    PANEL_PUBLIC_PLAIN_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000")
+    PANEL_PUBLIC_PLAIN_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 1 --max-time 3 "http://127.0.0.1:/" 2>/dev/null || echo "000")
     PANEL_PUBLIC_PLAIN_HTTP=$(echo "$PANEL_PUBLIC_PLAIN_HTTP" | tr -d '[:space:]')
     if [ "$PANEL_PUBLIC_PLAIN_HTTP" = "200" ] || [ "$PANEL_PUBLIC_PLAIN_HTTP" = "302" ] || [ "$PANEL_PUBLIC_PLAIN_HTTP" = "301" ]; then
         echo -e "  ${RED}✗ El puerto publico ${PANEL_PORT} responde por HTTP plano. Esto causa ERR_SSL_PROTOCOL_ERROR en https://IP:${PANEL_PORT}.${NC}"
@@ -3611,15 +3611,15 @@ sleep 2
 # Valid layout: HTTPS on public PANEL_PORT via Caddy, HTTP only on internal PANEL_PORT+1.
 PANEL_HTTP="000"
 for TEST_URL in \
-    "https://127.0.0.1:${PANEL_PORT}/" \
     "http://127.0.0.1:$((PANEL_PORT + 1))/" \
+    "https://127.0.0.1:${PANEL_PORT}/" \
 ; do
-    PANEL_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" --max-time 3 "$TEST_URL" 2>/dev/null)
+    PANEL_HTTP=$(curl -sk -o /dev/null -w "%{http_code}" --connect-timeout 1 --max-time 3 "$TEST_URL" 2>/dev/null || echo "000")
     PANEL_HTTP=$(echo "$PANEL_HTTP" | tr -d '[:space:]')
     [ -n "$PANEL_HTTP" ] && [ "$PANEL_HTTP" != "000" ] && break
     PANEL_HTTP="000"
 done
-PANEL_PUBLIC_PLAIN_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 "http://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000")
+PANEL_PUBLIC_PLAIN_HTTP=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 1 --max-time 3 "http://127.0.0.1:${PANEL_PORT}/" 2>/dev/null || echo "000")
 PANEL_PUBLIC_PLAIN_HTTP=$(echo "$PANEL_PUBLIC_PLAIN_HTTP" | tr -d '[:space:]')
 if [ "$PANEL_PUBLIC_PLAIN_HTTP" = "200" ] || [ "$PANEL_PUBLIC_PLAIN_HTTP" = "302" ] || [ "$PANEL_PUBLIC_PLAIN_HTTP" = "301" ]; then
     echo -e "  ${RED}✗ El puerto publico ${PANEL_PORT} responde por HTTP plano. Esto causa ERR_SSL_PROTOCOL_ERROR en https://IP:${PANEL_PORT}.${NC}"

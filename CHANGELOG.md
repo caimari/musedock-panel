@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.150] — 2026-04-26
+
+### Fixed
+- `install.sh`: el health check ya no aborta por `curl` timeout cuando Caddy/HTTPS `8444` no responde; valida primero el panel interno `127.0.0.1:PANEL_INTERNAL_PORT`.
+- `install.sh`: textos de Caddy actualizados para no decir que cae a PHP directo en `8444`; el panel queda interno y requiere reparar Caddy/TLS para acceso publico.
+
 ## [1.0.149] — 2026-04-26
 
 ### Fixed

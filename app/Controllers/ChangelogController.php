@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.150',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`install.sh`: el health check ya no aborta por `curl` timeout cuando Caddy/HTTPS `8444` no responde; valida primero el panel interno `127.0.0.1:PANEL_INTERNAL_PORT`',
+                            '`install.sh`: textos de Caddy actualizados para no decir que cae a PHP directo en `8444`; el panel queda interno y requiere reparar Caddy/TLS para acceso publico',
+                        ],
+                        'en' => [
+                            '`install.sh`: health check no longer aborts on `curl` timeout when Caddy/HTTPS `8444` does not respond; it validates the internal panel first on `127.0.0.1:PANEL_INTERNAL_PORT`',
+                            '`install.sh`: Caddy messages updated so they no longer say it falls back to direct PHP on `8444`; the panel stays internal and public access requires Caddy/TLS repair',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.149',
                 'date' => '2026-04-26',
                 'badge' => 'primary',
