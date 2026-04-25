@@ -2918,6 +2918,7 @@ if command -v caddy &> /dev/null; then
         echo ""
         prompt_read "  $(t caddy_choose)" CADDY_CHOICE
         CADDY_CHOICE=${CADDY_CHOICE:-1}
+        [ "$CADDY_CHOICE" = "2" ] || CADDY_CHOICE="1"
 
         if [ "$CADDY_CHOICE" = "1" ]; then
             ok "$(t caddy_integrated)"
@@ -2966,6 +2967,19 @@ SVCEOF
                 ok "$(t caddy_resume_exists)"
             fi
         else
+            echo ""
+            echo -e "  ${RED}${BOLD}PELIGRO: vas a sobrescribir la configuracion de Caddy.${NC}"
+            echo -e "  ${YELLOW}Se han detectado dominios/rutas/autosave existentes. Si solo quieres instalar o actualizar el panel, usa Integrar.${NC}"
+            echo -e "  ${YELLOW}Reconfigurar puede dejar sitios en 80/443 fuera de servicio hasta restaurar el backup.${NC}"
+            echo ""
+            prompt_read "  Para forzar reconfiguracion de Caddy escribe exactamente RECONFIGURAR CADDY: " CADDY_RECONFIG_CONFIRM
+            if [ "$CADDY_RECONFIG_CONFIRM" != "RECONFIGURAR CADDY" ]; then
+                ok "$(t caddy_integrated)"
+                CADDY_CHOICE="1"
+            fi
+        fi
+
+        if [ "$CADDY_CHOICE" != "1" ]; then
             # Reconfigure Caddy — backup EVERYTHING first
             warn "$(t caddy_reconfiguring)"
             BACKUP_TS=$(date +%Y%m%d%H%M%S)
@@ -3696,11 +3710,14 @@ else
 fi
 
 # 3. PostgreSQL connection?
-if PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h 127.0.0.1 -p "${DB_PORT:-5433}" -d "${DB_NAME}" -c "SELECT 1;" > /dev/null 2>&1; then
+HEALTH_DB_HOST="${PANEL_DB_HOST:-$(grep -E '^DB_HOST=' "${PANEL_DIR}/.env" 2>/dev/null | tail -1 | cut -d= -f2- | tr -d '"'\''')}"
+HEALTH_DB_HOST="${HEALTH_DB_HOST:-127.0.0.1}"
+if PGCONNECT_TIMEOUT=5 PGPASSWORD="${DB_PASS}" psql -U "${DB_USER}" -h "${HEALTH_DB_HOST}" -p "${DB_PORT:-5433}" -d "${DB_NAME}" -c "SELECT 1;" > /dev/null 2>&1; then
     ok "$(t health_pgsql_ok "$DB_NAME" "$DB_USER")"
 else
     echo -e "  ${RED}✗ $(t health_pgsql_fail "$DB_NAME" "$DB_USER")${NC}"
     echo -e "    ${YELLOW}$(t health_pgsql_fix)${NC}"
+    echo -e "    ${YELLOW}  DB_HOST=${HEALTH_DB_HOST} DB_PORT=${DB_PORT:-5433}${NC}"
     echo -e "    ${YELLOW}  systemctl status postgresql${NC}"
     HEALTH_ERRORS=$((HEALTH_ERRORS + 1))
 fi

@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.153] — 2026-04-26
+
+### Fixed
+- `install.sh`: `Reconfigurar Caddy` tambien exige confirmacion exacta `RECONFIGURAR CADDY` cuando detecta dominios/rutas existentes, evitando sobrescrituras accidentales de sitios.
+- `install.sh`: el health check PostgreSQL usa el `DB_HOST` real del panel, incluido `/var/run/postgresql`, en vez de forzar siempre `127.0.0.1`.
+
 ## [1.0.152] — 2026-04-26
 
 ### Fixed

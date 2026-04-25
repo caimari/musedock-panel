@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.153',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`install.sh`: `Reconfigurar Caddy` tambien exige confirmacion exacta `RECONFIGURAR CADDY` cuando detecta dominios/rutas existentes, evitando sobrescrituras accidentales de sitios',
+                            '`install.sh`: el health check PostgreSQL usa el `DB_HOST` real del panel, incluido `/var/run/postgresql`, en vez de forzar siempre `127.0.0.1`',
+                        ],
+                        'en' => [
+                            '`install.sh`: `Reconfigure Caddy` also requires exact `RECONFIGURAR CADDY` confirmation when existing domains/routes are detected, preventing accidental site overwrites',
+                            '`install.sh`: PostgreSQL health check uses the panel real `DB_HOST`, including `/var/run/postgresql`, instead of always forcing `127.0.0.1`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.152',
                 'date' => '2026-04-26',
                 'badge' => 'primary',
