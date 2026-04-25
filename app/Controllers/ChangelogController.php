@@ -20,6 +20,29 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.104',
+                'date' => '2026-04-25',
+                'badge' => 'primary',
+                'changes' => [
+                    'new' => [
+                        'es' => [
+                            '`/mail?tab=queue`: nueva pestaña Cola para Relay Privado con cola real de Postfix, historico paginado y acciones para reintentar, borrar `deferred`, borrar toda la cola o borrar un mensaje concreto por Queue ID',
+                        ],
+                        'en' => [
+                            '`/mail?tab=queue`: new Queue tab for Private Relay with the real Postfix queue, paginated history and actions to retry, delete `deferred`, delete the whole queue or delete one message by Queue ID',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'UI dark: los textos de ayuda de formularios (`form-text`) y bloques de Mail quedan forzados a colores claros para evitar texto negro sobre tarjetas oscuras',
+                        ],
+                        'en' => [
+                            'Dark UI: form help text (`form-text`) and Mail blocks are forced to light colors to avoid black text on dark cards',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.103',
                 'date' => '2026-04-25',
                 'badge' => 'primary',

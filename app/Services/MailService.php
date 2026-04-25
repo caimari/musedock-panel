@@ -1024,12 +1024,22 @@ class MailService
         return ['ok' => true];
     }
 
-    public static function getRelayLogEntries(int $limit = 30): array
+    public static function getRelayLogEntries(int $limit = 30, int $offset = 0): array
+    {
+        $page = self::getRelayLogPage(max(1, intdiv(max(0, $offset), max(1, $limit)) + 1), $limit);
+        return $page['entries'];
+    }
+
+    public static function getRelayLogPage(int $page = 1, int $perPage = 25): array
     {
         $file = is_readable('/var/log/mail.log') ? '/var/log/mail.log' : (is_readable('/var/log/maillog') ? '/var/log/maillog' : '');
-        if ($file === '') return [];
+        if ($file === '') {
+            return ['entries' => [], 'total' => 0, 'page' => 1, 'per_page' => $perPage, 'pages' => 1];
+        }
 
-        $lines = explode("\n", trim((string)shell_exec('tail -n 400 ' . escapeshellarg($file) . ' 2>/dev/null')));
+        $page = max(1, $page);
+        $perPage = max(5, min(100, $perPage));
+        $lines = explode("\n", trim((string)shell_exec('tail -n 2500 ' . escapeshellarg($file) . ' 2>/dev/null')));
         $entries = [];
         foreach (array_reverse($lines) as $line) {
             if (!str_contains($line, 'postfix/') || !preg_match('/status=(sent|deferred|bounced)/', $line, $sm)) continue;
@@ -1054,9 +1064,98 @@ class MailService
                 'detail' => $detail,
                 'line' => $line,
             ];
-            if (count($entries) >= $limit) break;
         }
+
+        $total = count($entries);
+        $pages = max(1, (int)ceil($total / $perPage));
+        $page = min($page, $pages);
+        return [
+            'entries' => array_slice($entries, ($page - 1) * $perPage, $perPage),
+            'total' => $total,
+            'page' => $page,
+            'per_page' => $perPage,
+            'pages' => $pages,
+        ];
+    }
+
+    public static function getMailQueueEntries(int $limit = 200): array
+    {
+        $limit = max(1, min(500, $limit));
+        $out = [];
+        $code = 0;
+        exec('postqueue -j 2>/dev/null', $out, $code);
+        if ($code !== 0 || empty($out)) {
+            return [];
+        }
+
+        $entries = [];
+        foreach ($out as $line) {
+            $row = json_decode($line, true);
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $recipients = [];
+            foreach (($row['recipients'] ?? []) as $recipient) {
+                if (is_array($recipient)) {
+                    $recipients[] = (string)($recipient['address'] ?? $recipient['recipient'] ?? '');
+                } else {
+                    $recipients[] = (string)$recipient;
+                }
+            }
+            $recipients = array_values(array_filter($recipients, static fn($v) => $v !== ''));
+            $arrival = (int)($row['arrival_time'] ?? 0);
+
+            $entries[] = [
+                'queue_id' => (string)($row['queue_id'] ?? ''),
+                'queue_name' => (string)($row['queue_name'] ?? ''),
+                'arrival_time' => $arrival > 0 ? date('M d H:i:s', $arrival) : '-',
+                'size' => (int)($row['message_size'] ?? 0),
+                'sender' => (string)($row['sender'] ?? ''),
+                'recipients' => $recipients,
+                'reason' => (string)($row['reason'] ?? ''),
+            ];
+
+            if (count($entries) >= $limit) {
+                break;
+            }
+        }
+
         return $entries;
+    }
+
+    public static function flushMailQueue(): array
+    {
+        return self::runPostfixQueueCommand('postqueue -f 2>&1');
+    }
+
+    public static function deleteMailQueue(string $scope): array
+    {
+        $target = $scope === 'deferred' ? 'ALL deferred' : 'ALL';
+        return self::runPostfixQueueCommand('postsuper -d ' . $target . ' 2>&1');
+    }
+
+    public static function deleteMailQueueMessage(string $queueId): array
+    {
+        $queueId = strtoupper(trim($queueId));
+        if (!preg_match('/^[A-F0-9]{5,32}[*!]?$/', $queueId)) {
+            return ['ok' => false, 'error' => 'Queue ID no valido'];
+        }
+
+        return self::runPostfixQueueCommand('postsuper -d ' . escapeshellarg(rtrim($queueId, '*!')) . ' 2>&1');
+    }
+
+    private static function runPostfixQueueCommand(string $cmd): array
+    {
+        $out = [];
+        $code = 0;
+        exec($cmd, $out, $code);
+        $output = trim(implode("\n", $out));
+        return [
+            'ok' => $code === 0,
+            'output' => $output,
+            'error' => $code === 0 ? null : ($output !== '' ? $output : "exit {$code}"),
+        ];
     }
 
     private static function normalizeMailMigrationMode(string $mode): string

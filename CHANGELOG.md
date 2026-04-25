@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.104] — 2026-04-25
+
+### New
+- `/mail?tab=queue`: nueva pestaña Cola para Relay Privado con cola real de Postfix, historico paginado y acciones para reintentar, borrar `deferred`, borrar toda la cola o borrar un mensaje concreto por Queue ID.
+
+### Fixed
+- UI dark: los textos de ayuda de formularios (`form-text`) y bloques de Mail quedan forzados a colores claros para evitar texto negro sobre tarjetas oscuras.
+
 ## [1.0.103] — 2026-04-25
 
 ### Improved

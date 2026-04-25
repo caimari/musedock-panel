@@ -62,6 +62,7 @@
         .btn-outline-light { border-color: #334155; color: #94a3b8; }
         .btn-outline-light:hover { background: rgba(56,189,248,0.1); border-color: #38bdf8; color: #38bdf8; }
         .form-label { color: #94a3b8; font-size: 0.85rem; font-weight: 500; }
+        .form-text { color: #94a3b8 !important; }
         label { color: #e2e8f0; }
         .card-header { color: #e2e8f0; }
         .card-body { color: #e2e8f0; }

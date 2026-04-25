@@ -123,6 +123,7 @@
     $tabCandidates = ['general', 'webmail', 'deliverability', 'domains', 'infra'];
     if (($mailMode ?? 'full') === 'relay') {
         $tabCandidates[] = 'relay';
+        $tabCandidates[] = 'queue';
     }
     if (!$isSlave) {
         $tabCandidates[] = 'migration';
@@ -148,6 +149,29 @@
         return $url;
     };
 ?>
+<style>
+    .mail-tab-pane .form-text,
+    .mail-tab-pane .text-muted,
+    .mail-tab-pane small {
+        color: #94a3b8 !important;
+    }
+    .mail-tab-pane .alert-info,
+    .mail-tab-pane .alert-info div,
+    .mail-tab-pane .alert-info span {
+        color: #dbeafe !important;
+    }
+    .mail-tab-pane .alert-info a {
+        color: #67e8f9 !important;
+    }
+    .mail-tab-pane .form-label,
+    .mail-tab-pane label {
+        color: #cbd5e1 !important;
+    }
+    .mail-tab-pane .queue-detail {
+        color: #cbd5e1 !important;
+        overflow-wrap: anywhere;
+    }
+</style>
 <div class="card mb-4" style="border-color: rgba(148,163,184,.22);">
     <div class="card-body py-2">
         <div class="nav nav-pills gap-2 flex-wrap" role="tablist" aria-label="Navegacion Mail">
@@ -156,6 +180,7 @@
             <a class="btn btn-sm <?= $activeTab === 'webmail' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('webmail')) ?>" data-mail-tab-link="webmail">Webmail</a>
             <?php if (($mailMode ?? 'full') === 'relay'): ?>
                 <a class="btn btn-sm <?= $activeTab === 'relay' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('relay')) ?>" data-mail-tab-link="relay">Relay</a>
+                <a class="btn btn-sm <?= $activeTab === 'queue' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('queue')) ?>" data-mail-tab-link="queue">Cola</a>
             <?php endif; ?>
             <?php if (!$isSlave): ?>
                 <a class="btn btn-sm <?= $activeTab === 'migration' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('migration')) ?>" data-mail-tab-link="migration">Migracion</a>
@@ -400,6 +425,15 @@
     $relayPublicIp = \MuseDockPanel\Settings::get('mail_relay_public_ip', '');
     $relayPublicHost = \MuseDockPanel\Settings::get('mail_outbound_hostname', '') ?: \MuseDockPanel\Settings::get('mail_relay_host', '');
     $relayTruthy = static fn($v): bool => in_array((string)$v, ['1', 't', 'true', 'yes', 'on'], true) || $v === true;
+    $relayQueue = $relayQueue ?? [];
+    $relayLogPage = $relayLogPage ?? ['entries' => ($relayLogs ?? []), 'total' => count($relayLogs ?? []), 'page' => 1, 'per_page' => 12, 'pages' => 1];
+    $relayLogUrl = static function (int $page): string {
+        $query = $_GET;
+        $query['tab'] = 'queue';
+        $query['relay_log_page'] = max(1, $page);
+        unset($query['setup']);
+        return '/mail?' . http_build_query($query);
+    };
 ?>
 <div class="mail-tab-pane<?= $activeTab === 'relay' ? '' : ' d-none' ?>" data-mail-tab="relay">
 <div class="card mb-3" style="border-color:rgba(56,189,248,.28);">
@@ -653,39 +687,125 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
             </div>
         </div>
     </div>
+</div>
+</div>
 
-    <div class="col-12">
-        <div class="card" style="border-color:rgba(14,165,233,.18);">
-            <div class="card-header"><i class="bi bi-activity me-2"></i>Ultimos envios del relay</div>
-            <div class="card-body p-0">
-                <?php if (empty($relayLogs)): ?>
-                    <div class="p-3 text-muted small">Sin entradas recientes con estado <code>sent</code>, <code>deferred</code> o <code>bounced</code> en mail.log.</div>
-                <?php else: ?>
-                    <table class="table table-sm mb-0">
-                        <thead><tr><th class="ps-3">Hora</th><th>Dominio</th><th>From</th><th>To</th><th>Estado</th><th>Detalle</th></tr></thead>
-                        <tbody>
-                            <?php foreach ($relayLogs as $log): ?>
-                            <tr>
-                                <td class="ps-3 text-muted"><?= View::e($log['timestamp'] ?? '') ?></td>
-                                <td><?= View::e($log['domain'] ?: '-') ?></td>
-                                <td class="text-muted"><?= View::e($log['from'] ?: '-') ?></td>
-                                <td class="text-muted"><?= View::e($log['to'] ?: '-') ?></td>
-                                <td><span class="badge bg-<?= ($log['status'] ?? '') === 'sent' ? 'success' : (($log['status'] ?? '') === 'bounced' ? 'danger' : 'warning') ?>"><?= View::e($log['status'] ?? '-') ?></span></td>
-                                <td class="small text-muted" title="<?= View::e($log['line'] ?? '') ?>">
-                                    <?php if (!empty($log['detail'])): ?>
-                                        <?= View::e($log['detail']) ?>
-                                    <?php else: ?>
-                                        <?= View::e(trim((($log['dsn'] ?? '') ? 'dsn=' . $log['dsn'] : '') . ' ' . (($log['relay'] ?? '') ? 'relay=' . $log['relay'] : '')) ?: '-') ?>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                <?php endif; ?>
+<div class="mail-tab-pane<?= $activeTab === 'queue' ? '' : ' d-none' ?>" data-mail-tab="queue">
+<div class="card mb-4" style="border-color:rgba(14,165,233,.28);">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span><i class="bi bi-inboxes me-2"></i>Cola de correo</span>
+        <?php if (!$isSlave): ?>
+        <div class="d-flex flex-wrap gap-2">
+            <form method="post" action="/mail/relay/queue/flush" class="d-inline">
+                <?= View::csrf() ?>
+                <button class="btn btn-outline-info btn-sm"><i class="bi bi-arrow-repeat me-1"></i>Reintentar cola</button>
+            </form>
+            <form method="post" action="/mail/relay/queue/delete" class="d-inline" onsubmit="return confirm('Eliminar todos los mensajes deferred de la cola?')">
+                <?= View::csrf() ?>
+                <input type="hidden" name="scope" value="deferred">
+                <button class="btn btn-outline-warning btn-sm"><i class="bi bi-eraser me-1"></i>Borrar deferred</button>
+            </form>
+            <form method="post" action="/mail/relay/queue/delete" class="d-inline" onsubmit="return confirm('Eliminar TODA la cola de Postfix? Esta accion no se puede deshacer.')">
+                <?= View::csrf() ?>
+                <input type="hidden" name="scope" value="all">
+                <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash3 me-1"></i>Borrar toda</button>
+            </form>
+        </div>
+        <?php endif; ?>
+    </div>
+    <div class="card-body">
+        <div class="small text-muted mb-3">
+            Esto es la cola real de Postfix. Los mensajes rebotados ya no estan en cola; aparecen abajo como historico. Si Gmail responde
+            <code>sender is unauthenticated</code>, no es cola rota: faltan SPF/DKIM validos para el dominio remitente.
+        </div>
+        <?php if (empty($relayQueue)): ?>
+            <div class="p-3 rounded text-muted small" style="background:#0f172a;border:1px solid #334155;">La cola actual esta vacia.</div>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead>
+                        <tr>
+                            <th class="ps-3">Queue ID</th>
+                            <th>Cola</th>
+                            <th>Hora</th>
+                            <th>Tamano</th>
+                            <th>From</th>
+                            <th>To</th>
+                            <th>Motivo</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($relayQueue as $item): ?>
+                        <tr>
+                            <td class="ps-3"><code><?= View::e($item['queue_id'] ?: '-') ?></code></td>
+                            <td><span class="badge bg-secondary"><?= View::e($item['queue_name'] ?: '-') ?></span></td>
+                            <td class="text-muted"><?= View::e($item['arrival_time'] ?? '-') ?></td>
+                            <td><?= number_format(((int)($item['size'] ?? 0)) / 1024, 1) ?> KB</td>
+                            <td class="text-muted"><?= View::e($item['sender'] ?: '-') ?></td>
+                            <td class="text-muted"><?= View::e(implode(', ', array_slice($item['recipients'] ?? [], 0, 3)) ?: '-') ?></td>
+                            <td class="small queue-detail"><?= View::e($item['reason'] ?: '-') ?></td>
+                            <td class="text-end">
+                                <?php if (!$isSlave && !empty($item['queue_id'])): ?>
+                                <form method="post" action="/mail/relay/queue/delete-message" class="d-inline" onsubmit="return confirm('Eliminar este mensaje de la cola?')">
+                                    <?= View::csrf() ?>
+                                    <input type="hidden" name="queue_id" value="<?= View::e($item['queue_id']) ?>">
+                                    <button class="btn btn-outline-danger btn-sm" title="Eliminar este mensaje"><i class="bi bi-trash"></i></button>
+                                </form>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+</div>
+
+<div class="card" style="border-color:rgba(14,165,233,.18);">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span><i class="bi bi-activity me-2"></i>Historico reciente del relay</span>
+        <span class="text-muted small"><?= (int)($relayLogPage['total'] ?? 0) ?> eventos encontrados en mail.log</span>
+    </div>
+    <div class="card-body p-0">
+        <?php if (empty($relayLogs)): ?>
+            <div class="p-3 text-muted small">Sin entradas recientes con estado <code>sent</code>, <code>deferred</code> o <code>bounced</code> en mail.log.</div>
+        <?php else: ?>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead><tr><th class="ps-3">Hora</th><th>Dominio</th><th>From</th><th>To</th><th>Estado</th><th>Detalle</th></tr></thead>
+                    <tbody>
+                        <?php foreach ($relayLogs as $log): ?>
+                        <tr>
+                            <td class="ps-3 text-muted"><?= View::e($log['timestamp'] ?? '') ?></td>
+                            <td><?= View::e($log['domain'] ?: '-') ?></td>
+                            <td class="text-muted"><?= View::e($log['from'] ?: '-') ?></td>
+                            <td class="text-muted"><?= View::e($log['to'] ?: '-') ?></td>
+                            <td><span class="badge bg-<?= ($log['status'] ?? '') === 'sent' ? 'success' : (($log['status'] ?? '') === 'bounced' ? 'danger' : 'warning') ?>"><?= View::e($log['status'] ?? '-') ?></span></td>
+                            <td class="small queue-detail" title="<?= View::e($log['line'] ?? '') ?>">
+                                <?php if (!empty($log['detail'])): ?>
+                                    <?= View::e($log['detail']) ?>
+                                <?php else: ?>
+                                    <?= View::e(trim((($log['dsn'] ?? '') ? 'dsn=' . $log['dsn'] : '') . ' ' . (($log['relay'] ?? '') ? 'relay=' . $log['relay'] : '')) ?: '-') ?>
+                                <?php endif; ?>
+                            </td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php endif; ?>
+    </div>
+    <?php if (($relayLogPage['pages'] ?? 1) > 1): ?>
+        <div class="card-footer d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <span class="text-muted small">Pagina <?= (int)$relayLogPage['page'] ?> de <?= (int)$relayLogPage['pages'] ?></span>
+            <div class="btn-group btn-group-sm">
+                <a class="btn btn-outline-light <?= (int)$relayLogPage['page'] <= 1 ? 'disabled' : '' ?>" href="<?= View::e($relayLogUrl((int)$relayLogPage['page'] - 1)) ?>">Anterior</a>
+                <a class="btn btn-outline-light <?= (int)$relayLogPage['page'] >= (int)$relayLogPage['pages'] ? 'disabled' : '' ?>" href="<?= View::e($relayLogUrl((int)$relayLogPage['page'] + 1)) ?>">Siguiente</a>
             </div>
         </div>
-    </div>
+    <?php endif; ?>
 </div>
 </div>
 <?php endif; ?>
