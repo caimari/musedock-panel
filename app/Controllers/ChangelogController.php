@@ -20,6 +20,27 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.164',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'README modernizado y alineado con el estado real del panel (monitoring, firewall, fail2ban, seguridad/MFA, cluster, docs internas)',
+                            'README: nueva seccion de actualizacion shell con bloques copy/paste para nodo unico y para varios nodos (master/slaves)',
+                            'README: anadida verificacion post-update y referencia clara a `Settings > Updates` para update desde web',
+                            'README: limpieza de contenido antiguo para evitar desalineacion con funcionalidades actuales',
+                        ],
+                        'en' => [
+                            'README modernized and aligned with the panel current scope (monitoring, firewall, fail2ban, security/MFA, cluster, internal docs)',
+                            'README: new shell update section with copy/paste blocks for single-node and multi-node (master/slaves) updates',
+                            'README: added post-update verification and clear reference to `Settings > Updates` for web-based updates',
+                            'README: legacy content cleanup to avoid mismatch with current features',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.163',
                 'date' => '2026-04-26',
                 'badge' => 'primary',

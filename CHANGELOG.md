@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.164] — 2026-04-26
+
+### Improved
+- README modernizado y alineado con el estado real del panel (monitoring, firewall, fail2ban, seguridad/MFA, cluster, docs internas).
+- README: nueva seccion de actualizacion shell con bloques copy/paste para nodo unico y para varios nodos (master/slaves).
+- README: anadida verificacion post-update y referencia clara a `Settings > Updates` para update desde web.
+- README: limpieza de contenido antiguo para evitar desalineacion con funcionalidades actuales.
+
 ## [1.0.163] — 2026-04-26
 
 ### Added
