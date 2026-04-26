@@ -379,6 +379,14 @@ class DocsController
                 'icon' => 'bi-shield-check',
                 'keywords' => 'backups defecto backup panel base datos caddy caddyfile last-known-good retencion 48 horas 15 dias install-backup snapshot restore restaurar vhosts correo bases clientes',
             ],
+            [
+                'title' => 'Perfil de usuario: MFA (Authenticator/TOTP)',
+                'description' => 'Como activar MFA paso a paso, apps compatibles (movil/PC), buenas practicas y recuperacion si se pierde el dispositivo.',
+                'url' => '/docs/profile-mfa',
+                'category' => 'Guia especial',
+                'icon' => 'bi-phone-vibrate',
+                'keywords' => 'profile perfil mfa authenticator totp qr secret otpauth 2fa recovery recuperar perdida movil backup root sql panel_admins security_mfa_required',
+            ],
         ]);
     }
 
@@ -1319,6 +1327,14 @@ class DocsController
         View::render('help/sync-archivos-lsyncd', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Sync de archivos (lsyncd)',
+        ]);
+    }
+
+    public function profileMfa(): void
+    {
+        View::render('help/profile-mfa', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Perfil MFA',
         ]);
     }
 }

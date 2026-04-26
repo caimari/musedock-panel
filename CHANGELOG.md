@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.163] — 2026-04-26
+
+### Added
+- Docs: nueva guia especial `/docs/profile-mfa` con configuración MFA paso a paso (móvil/PC), uso diario, recuperación y procedimiento de emergencia por base de datos.
+- Profile: nuevo botón `Guia` en la tarjeta `Autenticacion MFA (TOTP)` con acceso directo a `/docs/profile-mfa`.
+
+### Improved
+- Login: campo de contraseña con botón ojo para mostrar/ocultar password en `/login`.
+
+### Fixed
+- Monitor collector (`FIREWALL_CHANGED`): ya no dispara alerta externa cuando el único cambio en firewall corresponde a bans dinámicos por IP de Fail2Ban.
+
 ## [1.0.158] — 2026-04-26
 
 ### Added

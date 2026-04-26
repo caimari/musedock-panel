@@ -20,6 +20,39 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.163',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Docs: nueva guia especial `/docs/profile-mfa` con configuracion MFA paso a paso (móvil/PC), uso diario, recuperacion y procedimiento de emergencia por base de datos',
+                            'Profile: nuevo boton `Guia` en la tarjeta `Autenticacion MFA (TOTP)` con acceso directo a `/docs/profile-mfa`',
+                        ],
+                        'en' => [
+                            'Docs: new special guide `/docs/profile-mfa` covering step-by-step MFA setup (mobile/desktop), daily usage, recovery, and emergency DB unlock procedure',
+                            'Profile: new `Guide` button in the `MFA Authentication (TOTP)` card with direct access to `/docs/profile-mfa`',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Login: campo de contraseña con boton ojo para mostrar/ocultar password en `/login`',
+                        ],
+                        'en' => [
+                            'Login: password field now includes an eye button to show/hide password on `/login`',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Monitor collector (`FIREWALL_CHANGED`): ya no dispara alerta externa cuando el unico cambio en firewall corresponde a bans dinamicos por IP de Fail2Ban',
+                        ],
+                        'en' => [
+                            'Monitor collector (`FIREWALL_CHANGED`): no longer emits external alerts when the only firewall change is dynamic per-IP Fail2Ban ban/unban activity',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.162',
                 'date' => '2026-04-26',
                 'badge' => 'primary',

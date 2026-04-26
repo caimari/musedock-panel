@@ -119,11 +119,16 @@
         <div class="card mt-4">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-phone me-2"></i>Autenticacion MFA (TOTP)</span>
-                <?php if ($mfaEnabled): ?>
-                    <span class="badge bg-success">Activa</span>
-                <?php else: ?>
-                    <span class="badge bg-secondary">Inactiva</span>
-                <?php endif; ?>
+                <div class="d-flex align-items-center gap-2">
+                    <a href="/docs/profile-mfa" class="btn btn-outline-info btn-sm">
+                        <i class="bi bi-journal-text me-1"></i>Guia
+                    </a>
+                    <?php if ($mfaEnabled): ?>
+                        <span class="badge bg-success">Activa</span>
+                    <?php else: ?>
+                        <span class="badge bg-secondary">Inactiva</span>
+                    <?php endif; ?>
+                </div>
             </div>
             <div class="card-body">
                 <div class="small text-muted mb-3">

@@ -774,6 +774,33 @@ function normalizeFirewallDump(string $raw): string
     return trim(implode("\n", $out));
 }
 
+function stripFail2BanDynamicRules(string $raw): string
+{
+    $raw = trim($raw);
+    if ($raw === '') {
+        return '';
+    }
+
+    $lines = preg_split('/\r?\n/', $raw) ?: [];
+    $out = [];
+    foreach ($lines as $line) {
+        $line = rtrim((string)$line);
+        if ($line === '') {
+            continue;
+        }
+
+        // Dynamic per-IP bans added/removed by fail2ban inside f2b-* chains.
+        // Keep static chain scaffolding (RETURN/jumps), ignore only source-specific entries.
+        if (preg_match('/^-A\s+f2b-[A-Za-z0-9_.:-]+\s+-s\s+\S+\s+-j\s+\S+/i', $line)) {
+            continue;
+        }
+
+        $out[] = $line;
+    }
+
+    return trim(implode("\n", $out));
+}
+
 function detectFirewallSnapshot(): array
 {
     $type = \MuseDockPanel\Services\FirewallService::detectType();
@@ -930,6 +957,21 @@ function checkFirewallIntegrityWatch(string $host): void
             if ($currV6Raw === false) $currV6Raw = '';
             $v4Diff = buildDiffSnippet($prevV4Raw, $currV4Raw, 40);
             $v6Diff = buildDiffSnippet($prevV6Raw, $currV6Raw, 40);
+            $prevV4NoF2b = stripFail2BanDynamicRules($prevV4Raw);
+            $currV4NoF2b = stripFail2BanDynamicRules($currV4Raw);
+            $prevV6NoF2b = stripFail2BanDynamicRules($prevV6Raw);
+            $currV6NoF2b = stripFail2BanDynamicRules($currV6Raw);
+            $onlyFail2BanDynamic =
+                ($prevV4NoF2b === $currV4NoF2b) &&
+                ($prevV6NoF2b === $currV6NoF2b);
+
+            if ($onlyFail2BanDynamic) {
+                logMsg('Firewall watch: cambio detectado solo en bans dinamicos de Fail2Ban, alerta externa omitida.');
+                $state['snapshot'] = $snapshot;
+                $state['last_checked_at'] = $now;
+                @file_put_contents($stateFile, json_encode($state, JSON_UNESCAPED_SLASHES), LOCK_EX);
+                return;
+            }
 
             $message = "Cambio externo detectado en firewall ({$snapshot['type']})";
             $details =

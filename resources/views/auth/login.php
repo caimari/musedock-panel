@@ -18,6 +18,10 @@
         .form-control { background: #0f172a; border: 1px solid #334155; color: #f1f5f9 !important; padding: 0.75rem 1rem; }
         .form-control:focus { background: #0f172a; border-color: #38bdf8; color: #f1f5f9 !important; box-shadow: 0 0 0 2px rgba(56,189,248,0.2); }
         .form-control::placeholder { color: #64748b; }
+        .input-group .form-control { border-right: 0; }
+        .password-toggle { background: #0f172a; border: 1px solid #334155; border-left: 0; color: #94a3b8; }
+        .password-toggle:hover { background: #111d33; color: #cbd5e1; }
+        .password-toggle:focus { box-shadow: none; color: #e2e8f0; }
         .form-label { color: #94a3b8; font-size: 0.85rem; font-weight: 500; }
         .btn-login { background: #0ea5e9; border: none; padding: 0.75rem; font-weight: 600; width: 100%; }
         .btn-login:hover { background: #0284c7; }
@@ -53,7 +57,19 @@
             </div>
             <div class="mb-3">
                 <label class="form-label">Contraseña</label>
-                <input type="password" name="password" class="form-control" placeholder="Password" required>
+                <div class="input-group">
+                    <input id="password" type="password" name="password" class="form-control" placeholder="Password" required>
+                    <button
+                        type="button"
+                        class="btn password-toggle"
+                        id="passwordToggle"
+                        data-target="password"
+                        aria-label="Mostrar u ocultar contraseña"
+                        aria-pressed="false"
+                    >
+                        <i class="bi bi-eye"></i>
+                    </button>
+                </div>
             </div>
             <button type="submit" class="btn btn-login btn-primary">
                 <i class="bi bi-box-arrow-in-right me-1"></i> Acceder
@@ -62,5 +78,24 @@
 
         <div class="version">v<?= View::e($panelVersion ?? '0.1.0') ?></div>
     </div>
+    <script>
+        (function () {
+            const toggle = document.getElementById('passwordToggle');
+            if (!toggle) return;
+
+            const targetId = toggle.getAttribute('data-target');
+            const input = document.getElementById(targetId);
+            const icon = toggle.querySelector('i');
+            if (!input || !icon) return;
+
+            toggle.addEventListener('click', function () {
+                const show = input.type === 'password';
+                input.type = show ? 'text' : 'password';
+                icon.classList.toggle('bi-eye', !show);
+                icon.classList.toggle('bi-eye-slash', show);
+                toggle.setAttribute('aria-pressed', show ? 'true' : 'false');
+            });
+        })();
+    </script>
 </body>
 </html>

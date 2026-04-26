@@ -679,6 +679,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/docs/security-operations', 'DocsController@securityOperations');
 \MuseDockPanel\Router::get('/docs/firewall-operations', 'DocsController@firewallOperations');
 \MuseDockPanel\Router::get('/docs/sync-archivos-lsyncd', 'DocsController@syncArchivosLsyncd');
+\MuseDockPanel\Router::get('/docs/profile-mfa', 'DocsController@profileMfa');
 
 // Profile
 \MuseDockPanel\Router::get('/profile', 'ProfileController@index');
