@@ -292,30 +292,32 @@
                                 <thead>
                                     <tr>
                                         <th>Direccion IP</th>
-                                        <th class="text-end" style="width:200px;">Acciones</th>
+                                        <th class="text-end" style="width:260px; white-space:nowrap;">Acciones</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <?php foreach ($jail['banned_ips'] as $ip): ?>
                                         <tr>
                                             <td><code><?= View::e($ip) ?></code></td>
-                                            <td class="text-end">
-                                                <form method="POST" action="/settings/fail2ban/unban" class="d-inline" onsubmit="return confirmUnban(this, '<?= View::e($ip) ?>', '<?= View::e($jail['name']) ?>')">
-                                                    <?= View::csrf() ?>
-                                                    <input type="hidden" name="jail" value="<?= View::e($jail['name']) ?>">
-                                                    <input type="hidden" name="ip" value="<?= View::e($ip) ?>">
-                                                    <button type="submit" class="btn btn-outline-warning btn-sm">
-                                                        <i class="bi bi-unlock me-1"></i>Desbanear
-                                                    </button>
-                                                </form>
-                                                <form method="POST" action="/settings/fail2ban/whitelist" class="d-inline ms-1">
-                                                    <?= View::csrf() ?>
-                                                    <input type="hidden" name="action" value="add">
-                                                    <input type="hidden" name="ip" value="<?= View::e($ip) ?>">
-                                                    <button type="submit" class="btn btn-outline-success btn-sm" title="Desbanear y anadir a whitelist" onclick="return confirmWhitelistAddFromBan(this.form, '<?= View::e($ip) ?>')">
-                                                        <i class="bi bi-shield-plus me-1"></i>Whitelist
-                                                    </button>
-                                                </form>
+                                            <td class="text-end align-middle">
+                                                <div class="d-inline-flex flex-nowrap align-items-center gap-1">
+                                                    <form method="POST" action="/settings/fail2ban/unban" class="d-inline-block mb-0" onsubmit="return confirmUnban(this, '<?= View::e($ip) ?>', '<?= View::e($jail['name']) ?>')">
+                                                        <?= View::csrf() ?>
+                                                        <input type="hidden" name="jail" value="<?= View::e($jail['name']) ?>">
+                                                        <input type="hidden" name="ip" value="<?= View::e($ip) ?>">
+                                                        <button type="submit" class="btn btn-outline-warning btn-sm text-nowrap">
+                                                            <i class="bi bi-unlock me-1"></i>Desbanear
+                                                        </button>
+                                                    </form>
+                                                    <form method="POST" action="/settings/fail2ban/whitelist" class="d-inline-block mb-0">
+                                                        <?= View::csrf() ?>
+                                                        <input type="hidden" name="action" value="add">
+                                                        <input type="hidden" name="ip" value="<?= View::e($ip) ?>">
+                                                        <button type="submit" class="btn btn-outline-success btn-sm text-nowrap" title="Desbanear y anadir a whitelist" onclick="return confirmWhitelistAddFromBan(this.form, '<?= View::e($ip) ?>')">
+                                                            <i class="bi bi-shield-plus me-1"></i>Whitelist
+                                                        </button>
+                                                    </form>
+                                                </div>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
