@@ -45,6 +45,10 @@ class FirewallController
                 FirewallService::auditManualIptablesRules($manualIptables)
             );
         }
+        $securityWarnings = array_merge(
+            $securityWarnings,
+            FirewallService::auditIpv6Coverage($networkInterfaces)
+        );
 
         View::render('settings/firewall', [
             'layout'            => 'main',
@@ -342,6 +346,60 @@ class FirewallController
             Flash::set('error', 'Error al guardar reglas: ' . ($result['output'] ?? 'desconocido'));
         }
 
+        header('Location: /settings/firewall');
+        exit;
+    }
+
+    public function toggleIpv6Interface(): void
+    {
+        View::verifyCsrf();
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'cambiar estado de IPv6 en la interfaz')) {
+            exit;
+        }
+
+        $iface = trim((string)($_POST['interface'] ?? ''));
+        $mode = strtolower(trim((string)($_POST['mode'] ?? '')));
+        if ($iface === '' || !in_array($mode, ['enable', 'disable'], true)) {
+            Flash::set('error', 'Solicitud invalida para cambio de IPv6.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $result = FirewallService::setIpv6InterfaceEnabled($iface, $mode === 'enable');
+        if (!($result['ok'] ?? false)) {
+            Flash::set('error', 'No se pudo cambiar IPv6: ' . (string)($result['error'] ?? 'error desconocido'));
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        LogService::log(
+            'firewall.ipv6.toggle',
+            $iface,
+            $mode === 'enable' ? 'IPv6 activada en interfaz' : 'IPv6 desactivada en interfaz'
+        );
+        Flash::set('success', (string)($result['message'] ?? 'Estado de IPv6 actualizado.'));
+        header('Location: /settings/firewall');
+        exit;
+    }
+
+    public function fixIpv6Lockdown(): void
+    {
+        View::verifyCsrf();
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'aplicar bloqueo IPv6 por defecto')) {
+            exit;
+        }
+
+        $result = FirewallService::applyIpv6DefaultLockdown();
+        if (!($result['ok'] ?? false)) {
+            Flash::set('error', 'No se pudo aplicar el fix IPv6: ' . (string)($result['error'] ?? 'error desconocido'));
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        LogService::log('firewall.ipv6.fix', 'lockdown', 'Fix IPv6 aplicado: bloqueo por defecto');
+        Flash::set('success', (string)($result['message'] ?? 'Fix IPv6 aplicado.'));
         header('Location: /settings/firewall');
         exit;
     }

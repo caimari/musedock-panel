@@ -86,6 +86,21 @@ fail2ban-client status</pre>
     </div>
 </div>
 
+<div class="card mb-4" style="border-color:rgba(245,158,11,.35);">
+    <div class="card-header"><i class="bi bi-hdd-network me-2 text-warning"></i>Gestion IPv6 por interfaz</div>
+    <div class="card-body">
+        <ul class="small text-muted mb-3">
+            <li>En <code>/settings/firewall</code> puedes activar o desactivar <strong>solo IPv6</strong> por interfaz desde la tabla de red.</li>
+            <li>IPv4 no se modifica en esa acción.</li>
+            <li>La operación pide password admin y persiste en <code>/etc/sysctl.d/99-musedock-ipv6.conf</code>.</li>
+        </ul>
+        <div class="small text-muted mb-0">
+            Si IPv6 está activa y no hay protección IPv6 efectiva, la auditoría muestra alerta con fix directo:
+            <strong>Bloquear IPv6 por defecto</strong> (políticas INPUT/FORWARD en DROP con baseline seguro).
+        </div>
+    </div>
+</div>
+
 <div class="card">
     <div class="card-header"><i class="bi bi-check2-square me-2"></i>Checklist de cierre</div>
     <div class="card-body">

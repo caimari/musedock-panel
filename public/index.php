@@ -619,6 +619,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/firewall/disable', 'FirewallController@disableFirewall');
 \MuseDockPanel\Router::post('/settings/firewall/emergency', 'FirewallController@emergencyAllow');
 \MuseDockPanel\Router::post('/settings/firewall/save', 'FirewallController@saveRules');
+\MuseDockPanel\Router::post('/settings/firewall/toggle-ipv6-interface', 'FirewallController@toggleIpv6Interface');
+\MuseDockPanel\Router::post('/settings/firewall/fix-ipv6-lockdown', 'FirewallController@fixIpv6Lockdown');
 \MuseDockPanel\Router::post('/settings/firewall/presets/save', 'FirewallController@savePreset');
 \MuseDockPanel\Router::post('/settings/firewall/presets/delete', 'FirewallController@deletePreset');
 \MuseDockPanel\Router::post('/settings/firewall/presets/apply', 'FirewallController@applyPreset');

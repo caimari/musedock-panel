@@ -8,6 +8,7 @@ class FirewallService
     private static ?string $cachedType = null;
     private const IPTABLES_DISABLED_FLAG = __DIR__ . '/../../storage/firewall/iptables.disabled.flag';
     private const IPTABLES_BACKUP_FILE = __DIR__ . '/../../storage/firewall/iptables.before-disable.v4';
+    private const IPV6_SYSCTL_PERSIST_FILE = '/etc/sysctl.d/99-musedock-ipv6.conf';
     private const RULE_PRESETS_KEY = 'firewall_rule_presets';
     private const FULL_SNAPSHOTS_KEY = 'firewall_full_snapshots';
     private const MAX_FULL_SNAPSHOTS = 20;
@@ -509,25 +510,298 @@ class FirewallService
         if ($output === '') return [];
 
         $interfaces = [];
+        $seenByIface = [];
         foreach (explode("\n", $output) as $line) {
             // Format: 1: lo    inet 127.0.0.1/8 ...
             if (preg_match('/^\d+:\s+(\S+)\s+(inet6?)\s+(\S+)/', $line, $m)) {
-                $iface = $m[1];
+                $iface = self::normalizeInterfaceName($m[1]);
+                if ($iface === '') continue;
                 $family = $m[2];
                 $addr = $m[3]; // includes CIDR like 10.10.70.1/24
 
                 // Skip link-local IPv6
                 if ($family === 'inet6' && str_starts_with($addr, 'fe80:')) continue;
 
+                $familyLabel = $family === 'inet' ? 'IPv4' : 'IPv6';
+                if (!isset($seenByIface[$iface])) {
+                    $seenByIface[$iface] = ['IPv4' => false, 'IPv6' => false];
+                }
+                $seenByIface[$iface][$familyLabel] = true;
+
+                $ipv6Enabled = self::getIpv6InterfaceState($iface);
+
                 $interfaces[] = [
                     'interface' => $iface,
-                    'family'    => $family === 'inet' ? 'IPv4' : 'IPv6',
+                    'family'    => $familyLabel,
                     'address'   => $addr,
+                    'synthetic' => false,
+                    'ipv6_enabled' => $ipv6Enabled,
+                    'ipv6_toggle_allowed' => self::isIpv6ToggleAllowed($iface),
                 ];
             }
         }
 
+        // If an interface has IPv4 but no visible IPv6 line, add a synthetic IPv6 row
+        // so the operator can still enable/disable IPv6 from the panel.
+        foreach ($seenByIface as $iface => $families) {
+            if (!empty($families['IPv6'])) continue;
+            $ipv6Enabled = self::getIpv6InterfaceState($iface);
+            if ($ipv6Enabled === null) continue;
+
+            $interfaces[] = [
+                'interface' => $iface,
+                'family'    => 'IPv6',
+                'address'   => $ipv6Enabled ? 'sin direccion IPv6 global' : 'IPv6 desactivada',
+                'synthetic' => true,
+                'ipv6_enabled' => $ipv6Enabled,
+                'ipv6_toggle_allowed' => self::isIpv6ToggleAllowed($iface),
+            ];
+        }
+
+        usort($interfaces, static function (array $a, array $b): int {
+            $ifaceCmp = strcmp((string)($a['interface'] ?? ''), (string)($b['interface'] ?? ''));
+            if ($ifaceCmp !== 0) return $ifaceCmp;
+            $order = ['IPv4' => 1, 'IPv6' => 2];
+            $fa = (string)($a['family'] ?? '');
+            $fb = (string)($b['family'] ?? '');
+            return ($order[$fa] ?? 99) <=> ($order[$fb] ?? 99);
+        });
+
         return $interfaces;
+    }
+
+    private static function normalizeInterfaceName(string $iface): string
+    {
+        $iface = trim($iface);
+        if ($iface === '') return '';
+        $iface = explode('@', $iface)[0];
+        return trim($iface);
+    }
+
+    private static function ipv6DisablePath(string $iface): string
+    {
+        return '/proc/sys/net/ipv6/conf/' . $iface . '/disable_ipv6';
+    }
+
+    public static function getIpv6InterfaceState(string $iface): ?bool
+    {
+        $iface = self::normalizeInterfaceName($iface);
+        if ($iface === '' || !preg_match('/^[A-Za-z0-9_.:-]+$/', $iface)) {
+            return null;
+        }
+
+        $path = self::ipv6DisablePath($iface);
+        if (!is_file($path)) {
+            return null;
+        }
+
+        $raw = @file_get_contents($path);
+        if ($raw === false) {
+            return null;
+        }
+
+        // 0 => IPv6 enabled, 1 => IPv6 disabled
+        return trim($raw) === '0';
+    }
+
+    public static function isIpv6ToggleAllowed(string $iface): bool
+    {
+        $iface = self::normalizeInterfaceName($iface);
+        if ($iface === '' || $iface === 'lo') {
+            return false;
+        }
+
+        $state = self::getIpv6InterfaceState($iface);
+        return $state !== null;
+    }
+
+    public static function setIpv6InterfaceEnabled(string $iface, bool $enabled): array
+    {
+        $iface = self::normalizeInterfaceName($iface);
+        if ($iface === '' || !preg_match('/^[A-Za-z0-9_.:-]+$/', $iface)) {
+            return ['ok' => false, 'error' => 'Interfaz no valida'];
+        }
+        if (!self::isIpv6ToggleAllowed($iface)) {
+            return ['ok' => false, 'error' => 'No se permite cambiar IPv6 en esta interfaz'];
+        }
+
+        $value = $enabled ? '0' : '1';
+        $key = 'net.ipv6.conf.' . $iface . '.disable_ipv6';
+        $cmd = 'sysctl -w ' . escapeshellarg($key . '=' . $value) . ' 2>&1';
+        $output = trim((string)shell_exec($cmd));
+        $ok = $output === '' || stripos($output, 'error') === false;
+        if (!$ok) {
+            return ['ok' => false, 'error' => $output ?: 'No se pudo aplicar sysctl para IPv6'];
+        }
+
+        $persist = self::persistIpv6InterfaceSetting($iface, $value);
+        if (!($persist['ok'] ?? false)) {
+            return ['ok' => false, 'error' => (string)($persist['error'] ?? 'No se pudo persistir ajuste IPv6')];
+        }
+
+        return [
+            'ok' => true,
+            'message' => $enabled
+                ? "IPv6 activada en interfaz {$iface}"
+                : "IPv6 desactivada en interfaz {$iface}",
+            'output' => $output,
+        ];
+    }
+
+    private static function persistIpv6InterfaceSetting(string $iface, string $value): array
+    {
+        $key = 'net.ipv6.conf.' . $iface . '.disable_ipv6';
+        $map = [];
+
+        $path = self::IPV6_SYSCTL_PERSIST_FILE;
+        if (is_file($path)) {
+            $lines = explode("\n", (string)@file_get_contents($path));
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line === '' || str_starts_with($line, '#')) continue;
+                if (!str_contains($line, '=')) continue;
+                [$k, $v] = array_map('trim', explode('=', $line, 2));
+                if ($k !== '') $map[$k] = $v;
+            }
+        }
+
+        $map[$key] = $value;
+        ksort($map);
+
+        $content = "# MuseDock Panel - IPv6 interface state\n";
+        $content .= "# Managed automatically from Settings > Firewall\n";
+        foreach ($map as $k => $v) {
+            $content .= $k . ' = ' . $v . "\n";
+        }
+
+        $ok = @file_put_contents($path, $content);
+        if ($ok === false) {
+            return ['ok' => false, 'error' => 'No se pudo escribir ' . $path];
+        }
+
+        return ['ok' => true];
+    }
+
+    public static function getIpv6FirewallStatus(): array
+    {
+        $bin = trim((string)shell_exec('which ip6tables 2>/dev/null'));
+        if ($bin === '') {
+            return [
+                'available' => false,
+                'input_policy' => 'unknown',
+                'has_input_rules' => false,
+            ];
+        }
+
+        $rulesOutput = trim((string)shell_exec('ip6tables -S INPUT 2>/dev/null'));
+        $inputPolicy = 'unknown';
+        if (preg_match('/^-P INPUT (\S+)/m', $rulesOutput, $m)) {
+            $inputPolicy = strtoupper((string)$m[1]);
+        }
+
+        $hasInputRules = preg_match('/^-A INPUT\b/m', $rulesOutput) === 1;
+
+        return [
+            'available' => true,
+            'input_policy' => $inputPolicy,
+            'has_input_rules' => $hasInputRules,
+            'raw' => $rulesOutput,
+        ];
+    }
+
+    public static function applyIpv6DefaultLockdown(): array
+    {
+        $status = self::getIpv6FirewallStatus();
+        if (empty($status['available'])) {
+            return ['ok' => false, 'error' => 'ip6tables no esta disponible en este servidor'];
+        }
+
+        $errors = [];
+        $outputs = [];
+        $run = static function (string $cmd) use (&$errors, &$outputs): void {
+            $out = trim((string)shell_exec($cmd . ' 2>&1'));
+            if ($out !== '') $outputs[] = $out;
+            if ($out !== '' && stripos($out, 'error') !== false) {
+                $errors[] = $out;
+            }
+        };
+
+        $run('ip6tables -P INPUT DROP');
+        $run('ip6tables -P FORWARD DROP');
+        $run('ip6tables -P OUTPUT ACCEPT');
+
+        // Baseline safe allows.
+        exec('ip6tables -C INPUT -i lo -j ACCEPT >/dev/null 2>&1', $x1, $rc1);
+        if ($rc1 !== 0) $run('ip6tables -I INPUT 1 -i lo -j ACCEPT');
+
+        exec('ip6tables -C INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT >/dev/null 2>&1', $x2, $rc2);
+        if ($rc2 !== 0) $run('ip6tables -I INPUT 2 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT');
+
+        exec('ip6tables -C INPUT -p ipv6-icmp -j ACCEPT >/dev/null 2>&1', $x3, $rc3);
+        if ($rc3 !== 0) $run('ip6tables -I INPUT 3 -p ipv6-icmp -j ACCEPT');
+
+        if (!empty($errors)) {
+            return ['ok' => false, 'error' => implode(' | ', $errors), 'output' => implode("\n", $outputs)];
+        }
+
+        @mkdir('/etc/iptables', 0755, true);
+        $saveOut = trim((string)shell_exec('ip6tables-save > /etc/iptables/rules.v6 2>&1'));
+        if ($saveOut !== '' && stripos($saveOut, 'error') !== false) {
+            return ['ok' => false, 'error' => $saveOut];
+        }
+
+        // Best effort to persist both v4/v6 through distro service.
+        shell_exec('netfilter-persistent save 2>/dev/null');
+
+        return ['ok' => true, 'message' => 'Bloqueo IPv6 por defecto aplicado y persistido'];
+    }
+
+    public static function auditIpv6Coverage(array $networkInterfaces): array
+    {
+        $activeIpv6 = [];
+        foreach ($networkInterfaces as $iface) {
+            if (!is_array($iface)) continue;
+            if ((string)($iface['family'] ?? '') !== 'IPv6') continue;
+
+            $name = (string)($iface['interface'] ?? '');
+            if ($name === '' || $name === 'lo') continue;
+
+            $enabled = $iface['ipv6_enabled'] ?? null;
+            if ($enabled === false) continue;
+
+            $addr = trim((string)($iface['address'] ?? ''));
+            if ($addr === '' || !str_contains($addr, ':')) continue; // skip synthetic placeholders
+            $activeIpv6[] = $name . ' (' . $addr . ')';
+        }
+
+        if (empty($activeIpv6)) {
+            return [];
+        }
+
+        $status = self::getIpv6FirewallStatus();
+        if (empty($status['available'])) {
+            return [[
+                'severity' => 'warning',
+                'icon'     => 'bi-hdd-network',
+                'title'    => 'IPv6 activa sin firewall IPv6 disponible',
+                'message'  => 'Hay IPv6 activa en: ' . implode(', ', $activeIpv6) . '. No se detecta ip6tables para aplicar filtros IPv6.',
+            ]];
+        }
+
+        $policy = strtoupper((string)($status['input_policy'] ?? 'UNKNOWN'));
+        $hasRules = (bool)($status['has_input_rules'] ?? false);
+
+        if ($policy === 'ACCEPT' || !$hasRules) {
+            return [[
+                'severity' => 'danger',
+                'icon'     => 'bi-exclamation-octagon-fill',
+                'title'    => 'IPv6 expuesta sin proteccion efectiva',
+                'message'  => 'IPv6 activa en: ' . implode(', ', $activeIpv6) . '. La politica INPUT de ip6tables es ' . $policy . ' o no hay reglas INPUT IPv6. Aplica el fix para bloquear por defecto.',
+                'fix'      => 'ipv6_lockdown',
+            ]];
+        }
+
+        return [];
     }
 
     public static function emergencyAllowIp(string $ip): array

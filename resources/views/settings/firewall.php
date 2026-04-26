@@ -66,6 +66,14 @@
                                     <i class="bi bi-wrench me-1"></i>Corregir
                                 </button>
                             </form>
+                        <?php elseif (!empty($warn['fix']) && $warn['fix'] === 'ipv6_lockdown'): ?>
+                            <form method="POST" action="/settings/firewall/fix-ipv6-lockdown" class="ms-3" onsubmit="return confirmIpv6LockdownFix(this)">
+                                <?= View::csrf() ?>
+                                <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+                                <button type="submit" class="btn btn-outline-danger btn-sm text-nowrap">
+                                    <i class="bi bi-shield-lock me-1"></i>Bloquear IPv6 por defecto
+                                </button>
+                            </form>
                         <?php endif; ?>
                     </div>
                 <?php endforeach; ?>
@@ -128,12 +136,13 @@
             <?php if (!empty($networkInterfaces)): ?>
                 <h6 class="mb-2"><i class="bi bi-hdd-network me-1"></i>Interfaces de red del servidor</h6>
                 <div class="table-responsive mb-3">
-                    <table class="table table-sm mb-0" style="max-width:500px;">
+                    <table class="table table-sm mb-0" style="max-width:760px;">
                         <thead>
                             <tr class="text-muted">
                                 <th>Interfaz</th>
                                 <th>Tipo</th>
                                 <th>Direccion</th>
+                                <th class="text-end" style="width:230px;">IPv6</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -150,7 +159,43 @@
                                         <?php endif; ?>
                                     </td>
                                     <td><span class="badge bg-secondary"><?= View::e($iface['family']) ?></span></td>
-                                    <td><code><?= View::e($iface['address']) ?></code></td>
+                                    <td>
+                                        <?php if (!empty($iface['synthetic']) && str_contains((string)$iface['address'], 'desactivada')): ?>
+                                            <span class="text-muted"><?= View::e($iface['address']) ?></span>
+                                        <?php elseif (!empty($iface['synthetic']) && str_contains((string)$iface['address'], 'sin direccion')): ?>
+                                            <span class="text-muted"><?= View::e($iface['address']) ?></span>
+                                        <?php else: ?>
+                                            <code><?= View::e($iface['address']) ?></code>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="text-end">
+                                        <?php
+                                            $isIpv6 = ($iface['family'] ?? '') === 'IPv6';
+                                            $canToggleIpv6 = $isIpv6 && !empty($iface['ipv6_toggle_allowed']);
+                                            $ipv6Enabled = (bool)($iface['ipv6_enabled'] ?? false);
+                                        ?>
+                                        <?php if ($canToggleIpv6): ?>
+                                            <form method="POST" action="/settings/firewall/toggle-ipv6-interface" class="d-inline" onsubmit="return confirmToggleIpv6Interface(this, '<?= View::e($iface['interface']) ?>', '<?= $ipv6Enabled ? 'disable' : 'enable' ?>')">
+                                                <?= View::csrf() ?>
+                                                <input type="hidden" name="interface" value="<?= View::e($iface['interface']) ?>">
+                                                <input type="hidden" name="mode" value="<?= $ipv6Enabled ? 'disable' : 'enable' ?>">
+                                                <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+                                                <?php if ($ipv6Enabled): ?>
+                                                    <button type="submit" class="btn btn-outline-warning btn-sm text-nowrap">
+                                                        <i class="bi bi-toggle-off me-1"></i>Desactivar IPv6
+                                                    </button>
+                                                <?php else: ?>
+                                                    <button type="submit" class="btn btn-outline-success btn-sm text-nowrap">
+                                                        <i class="bi bi-toggle-on me-1"></i>Activar IPv6
+                                                    </button>
+                                                <?php endif; ?>
+                                            </form>
+                                        <?php elseif ($isIpv6): ?>
+                                            <span class="badge bg-secondary">No gestionable</span>
+                                        <?php else: ?>
+                                            <span class="text-muted small">Solo IPv6</span>
+                                        <?php endif; ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -1196,6 +1241,34 @@ function confirmFixDelete(form, ruleNum) {
         confirmText: 'Si, corregir',
         confirmColor: '#dc3545',
         fallbackConfirm: 'Eliminar la regla #' + ruleNum + ' para corregir el problema?'
+    });
+}
+
+function confirmIpv6LockdownFix(form) {
+    return confirmWithAdminPassword(form, {
+        title: 'Aplicar bloqueo IPv6 por defecto',
+        html:
+            'Se aplicara una politica segura para IPv6:<br>' +
+            '<code>INPUT DROP</code>, <code>FORWARD DROP</code>, <code>OUTPUT ACCEPT</code>.<br>' +
+            '<small class="text-muted">Se mantendra loopback, trafico establecido e ICMPv6.</small>',
+        icon: 'warning',
+        confirmText: 'Aplicar fix IPv6',
+        confirmColor: '#dc3545',
+        fallbackConfirm: 'Aplicar bloqueo IPv6 por defecto?'
+    });
+}
+
+function confirmToggleIpv6Interface(form, iface, mode) {
+    var enable = mode === 'enable';
+    return confirmWithAdminPassword(form, {
+        title: (enable ? 'Activar' : 'Desactivar') + ' IPv6 en ' + fwEsc(iface),
+        html: enable
+            ? 'Se activara IPv6 en la interfaz <strong>' + fwEsc(iface) + '</strong>.<br><small class="text-muted">Este cambio se guardara en sysctl para persistencia tras reinicio.</small>'
+            : 'Se desactivara IPv6 en la interfaz <strong>' + fwEsc(iface) + '</strong>.<br><small class="text-muted">Solo afecta IPv6; IPv4 no se toca.</small>',
+        icon: 'warning',
+        confirmText: enable ? 'Activar IPv6' : 'Desactivar IPv6',
+        confirmColor: enable ? '#198754' : '#f59e0b',
+        fallbackConfirm: (enable ? 'Activar' : 'Desactivar') + ' IPv6 en ' + iface + '?'
     });
 }
 

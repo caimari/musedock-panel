@@ -20,6 +20,35 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.161',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Firewall > Interfaces de red: nueva acción por fila para activar/desactivar IPv6 por interfaz desde el panel (solo IPv6, IPv4 nunca se modifica), con confirmación y password admin',
+                            'Firewall > Auditoría de seguridad: nueva detección de exposición IPv6 cuando hay IPv6 activa y no hay protección efectiva en ip6tables (sin reglas INPUT o política INPUT=ACCEPT)',
+                            'Firewall > Auditoría de seguridad: nuevo fix directo `Bloquear IPv6 por defecto` para aplicar baseline seguro IPv6 (INPUT/FORWARD DROP, OUTPUT ACCEPT + reglas base)',
+                        ],
+                        'en' => [
+                            'Firewall > Network interfaces: new per-row action to enable/disable IPv6 per interface from the panel (IPv6 only, IPv4 is never modified), with admin-password confirmation',
+                            'Firewall > Security audit: new IPv6 exposure detection when IPv6 is active and ip6tables protection is not effective (no INPUT rules or INPUT policy=ACCEPT)',
+                            'Firewall > Security audit: new direct fix `Block IPv6 by default` to apply a safe IPv6 baseline (INPUT/FORWARD DROP, OUTPUT ACCEPT + base rules)',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Firewall > Interfaces: cuando una interfaz no muestra dirección IPv6 global, se añade fila IPv6 sintética para seguir pudiendo gestionar su estado desde UI',
+                            'Docs: ampliada `/docs/firewall-operations` con sección específica de gestión IPv6 por interfaz y criterio de auditoría/fix IPv6',
+                        ],
+                        'en' => [
+                            'Firewall > Interfaces: when an interface has no visible global IPv6 address, a synthetic IPv6 row is added so its state can still be managed from UI',
+                            'Docs: expanded `/docs/firewall-operations` with a dedicated IPv6-per-interface management section and IPv6 audit/fix criteria',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.160',
                 'date' => '2026-04-26',
                 'badge' => 'primary',
