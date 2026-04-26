@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.160',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Firewall > Auditoría de seguridad: los avisos de puertos sensibles abiertos (ej. SSH 22 a 0.0.0.0/0) ahora incluyen acción directa `Corregir` para borrar la regla afectada',
+                            'Firewall > Auditoría de seguridad: los avisos muestran `Regla #N` en el título para evitar confusión cuando aparecen múltiples entradas similares (IPv4/IPv6 o reglas duplicadas)',
+                            'Fail2Ban > IPs baneadas actualmente: botones `Desbanear` y `Whitelist` alineados horizontalmente en la columna de acciones (sin salto vertical)',
+                        ],
+                        'en' => [
+                            'Firewall > Security audit: sensitive-port warnings (e.g. SSH 22 exposed to 0.0.0.0/0) now include a direct `Fix` action to delete the affected rule',
+                            'Firewall > Security audit: warnings now show `Rule #N` in the title to avoid confusion when multiple similar entries appear (IPv4/IPv6 or duplicate rules)',
+                            'Fail2Ban > Currently banned IPs: `Unban` and `Whitelist` buttons are now horizontally aligned in the actions column (no vertical stacking)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.159',
                 'date' => '2026-04-26',
                 'badge' => 'primary',
