@@ -671,12 +671,17 @@ class FirewallService
                 $port = strtolower(trim(explode('/', $rule['to'] ?? '')[0]));
                 if (isset($sensitivePorts[$port])) {
                     $sp = $sensitivePorts[$port];
+                    $ruleNum = (int)($rule['num'] ?? 0);
                     $warnings[] = [
                         'severity' => $port === '22' || $port === 'ssh' ? 'danger' : 'warning',
                         'icon'     => 'bi-unlock-fill',
-                        'title'    => "Puerto {$sp['name']} ({$port}) abierto a todo internet",
+                        'title'    => $ruleNum > 0
+                            ? "Regla #{$ruleNum}: Puerto {$sp['name']} ({$port}) abierto a todo internet"
+                            : "Puerto {$sp['name']} ({$port}) abierto a todo internet",
                         'message'  => "{$sp['risk']}. Se recomienda restringir a IPs de confianza.",
-                        'rule_num' => $rule['num'],
+                        'rule_num' => $ruleNum,
+                        'fix'      => 'delete',
+                        'delete_backend' => 'ufw',
                     ];
                 }
             }
@@ -687,12 +692,17 @@ class FirewallService
                 $port = $rule['port'] ?? '';
                 if (isset($sensitivePorts[$port])) {
                     $sp = $sensitivePorts[$port];
+                    $ruleNum = (int)($rule['num'] ?? 0);
                     $warnings[] = [
                         'severity' => $port === '22' ? 'danger' : 'warning',
                         'icon'     => 'bi-unlock-fill',
-                        'title'    => "Puerto {$sp['name']} ({$port}) abierto a todo internet",
+                        'title'    => $ruleNum > 0
+                            ? "Regla #{$ruleNum}: Puerto {$sp['name']} ({$port}) abierto a todo internet"
+                            : "Puerto {$sp['name']} ({$port}) abierto a todo internet",
                         'message'  => "{$sp['risk']}. Se recomienda restringir a IPs de confianza.",
-                        'rule_num' => $rule['num'],
+                        'rule_num' => $ruleNum,
+                        'fix'      => 'delete',
+                        'delete_backend' => 'iptables',
                     ];
                 }
             }
