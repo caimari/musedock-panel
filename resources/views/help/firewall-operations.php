@@ -3,7 +3,7 @@
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
     <div>
         <h4 class="mb-1">Firewall: operaciones completas</h4>
-        <div class="text-muted small">Snapshots completos, export/import JSON y verificacion real del estado aplicado.</div>
+        <div class="text-muted small">Snapshots completos, export/import JSON, lockdown temporal y verificacion real del estado aplicado.</div>
     </div>
     <div class="d-flex gap-2">
         <a href="/docs" class="btn btn-outline-light btn-sm">
@@ -43,6 +43,7 @@
             <li>Entrar a <a href="/settings/firewall" class="text-info">Settings &rarr; Firewall</a>.</li>
             <li>Guardar un <strong>snapshot completo</strong> antes de tocar reglas.</li>
             <li>Aplicar cambios por bloques pequenos y verificar acceso SSH/panel.</li>
+            <li>Si hay ataque activo, activar <strong>lockdown temporal</strong> (10-15 min) para cortar trafico en caliente.</li>
             <li>Si todo queda correcto, exportar JSON para replicar en otros nodos.</li>
             <li>En el nodo destino, importar en modo <code>append</code> o <code>replace</code> segun el caso.</li>
         </ol>
@@ -97,6 +98,37 @@ fail2ban-client status</pre>
         <div class="small text-muted mb-0">
             Si IPv6 está activa y no hay protección IPv6 efectiva, la auditoría muestra alerta con fix directo:
             <strong>Bloquear IPv6 por defecto</strong> (políticas INPUT/FORWARD en DROP con baseline seguro).
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4" style="border-color:rgba(239,68,68,.35);">
+    <div class="card-header"><i class="bi bi-shield-lock me-2 text-danger"></i>Lockdown temporal de emergencia</div>
+    <div class="card-body">
+        <ul class="small text-muted mb-3">
+            <li>Disponible en <code>/settings/firewall</code> con duracion configurable (1-120 min).</li>
+            <li>Mantiene loopback, conexiones establecidas y tu IP admin; bloquea el resto temporalmente.</li>
+            <li>La desactivacion puede ser manual o automatica al expirar (monitor collector).</li>
+            <li>Todas las acciones de activacion/desactivacion piden password admin.</li>
+        </ul>
+        <div class="small text-muted mb-0">
+            Recomendado para incidentes puntuales mientras revisas reglas o mitigas un pico de ataque.
+        </div>
+    </div>
+</div>
+
+<div class="card mb-4" style="border-color:rgba(14,165,233,.35);">
+    <div class="card-header"><i class="bi bi-bell me-2 text-info"></i>Vigilancia de seguridad (collector)</div>
+    <div class="card-body">
+        <ul class="small text-muted mb-3">
+            <li>En <code>/settings/notifications</code> puedes activar <strong>Vigilancia de cambios externos</strong>.</li>
+            <li>Cuando el estado real del firewall cambia fuera del panel (shell/manual), se crea alerta <code>FIREWALL_CHANGED</code>.</li>
+            <li>Si hay email configurado en <code>/settings/notifications</code>, se envia aviso con anti-spam (cooldown).</li>
+            <li>Tambien puedes activar avisos de hardening degradado (<code>SECURITY_HARDENING</code>), drift de config (<code>CONFIG_DRIFT</code>) y exposicion publica inesperada (<code>PORT_EXPOSURE</code>).</li>
+            <li>El collector sigue avisando reinicio/parada del host (<code>SERVER_REBOOT</code>, <code>MONITOR_GAP</code>).</li>
+        </ul>
+        <div class="small text-muted mb-0">
+            Para evitar ruido, los avisos aplican deduplicacion por huella y cooldown. Los cambios realizados desde el propio panel no se notifican como externos.
         </div>
     </div>
 </div>

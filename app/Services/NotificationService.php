@@ -25,6 +25,59 @@ class NotificationService
         }
     }
 
+    /**
+     * True when email notifications are configured from Settings > Notifications.
+     * This checks channel config only (not monitor channel toggles).
+     */
+    public static function isEmailConfigured(): bool
+    {
+        $to = self::getRecipientEmail();
+        if ($to === '') {
+            return false;
+        }
+
+        $method = Settings::get('notify_email_method', 'smtp');
+        if ($method === 'php') {
+            return true;
+        }
+
+        return Settings::get('notify_smtp_host', '') !== '';
+    }
+
+    /**
+     * Event-driven email with anti-spam cooldown.
+     * Returns true only when an email was actually sent.
+     */
+    public static function sendEventEmail(
+        string $eventKey,
+        string $subject,
+        string $body,
+        int $cooldownSeconds = 1800
+    ): bool {
+        $eventKey = strtolower(trim($eventKey));
+        if ($eventKey === '') {
+            $eventKey = 'generic';
+        }
+        $eventKey = preg_replace('/[^a-z0-9_.-]+/', '_', $eventKey) ?: 'generic';
+
+        if (!self::isEmailConfigured()) {
+            return false;
+        }
+
+        $cooldownSeconds = max(60, min(86400, $cooldownSeconds));
+        $settingKey = 'notify_event_email_last_' . $eventKey;
+        $now = time();
+        $last = (int)Settings::get($settingKey, '0');
+
+        if ($last > 0 && ($now - $last) < $cooldownSeconds) {
+            return false;
+        }
+
+        // Mark timestamp before send to avoid bursts on concurrent runs.
+        Settings::set($settingKey, (string)$now);
+        return self::sendEmail($subject, $body);
+    }
+
     // ─── Email ──────────────────────────────────────────────
 
     public static function sendEmail(string $subject, string $body): bool

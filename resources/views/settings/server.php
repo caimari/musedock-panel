@@ -179,6 +179,23 @@
                         <small class="text-muted d-block mt-1">Fallback emergencia: <?= View::e($fallbackUrl) ?>.</small>
                     </div>
 
+                    <div class="mb-3">
+                        <div class="rounded p-3" style="border:1px solid rgba(56,189,248,0.32); background:rgba(2,132,199,0.08);">
+                            <div class="fw-semibold mb-1"><i class="bi bi-bell me-1"></i>Avisos de reinicio y paradas</div>
+                            <div class="small text-muted mb-2">
+                                Estos avisos se gestionan desde <a href="/settings/notifications" class="text-info">Settings → Notifications</a>.
+                            </div>
+                            <div class="small text-muted">
+                                Estado actual reinicio:
+                                <?php if (!empty($rebootNotifyEnabled)): ?>
+                                    <span class="badge bg-success">activado</span>
+                                <?php else: ?>
+                                    <span class="badge bg-secondary">desactivado</span>
+                                <?php endif; ?>
+                            </div>
+                        </div>
+                    </div>
+
                     <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Guardar</button>
                 </form>
             </div>
@@ -205,4 +222,5 @@
     modeSel.addEventListener('change', refresh);
     refresh();
 })();
+
 </script>

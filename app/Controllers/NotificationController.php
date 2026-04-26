@@ -74,6 +74,19 @@ class NotificationController
         }
         Settings::set('notify_telegram_chat_id', trim($_POST['notify_telegram_chat_id'] ?? ''));
 
+        // Event notifications (system integrity / lifecycle)
+        Settings::set('firewall_change_watch_enabled', isset($_POST['firewall_change_watch_enabled']) ? '1' : '0');
+        Settings::set('server_reboot_notify_enabled', isset($_POST['server_reboot_notify_enabled']) ? '1' : '0');
+        Settings::set('notify_event_collector_gap_enabled', isset($_POST['notify_event_collector_gap_enabled']) ? '1' : '0');
+        Settings::set('notify_event_hardening_enabled', isset($_POST['notify_event_hardening_enabled']) ? '1' : '0');
+        Settings::set('notify_event_config_drift_enabled', isset($_POST['notify_event_config_drift_enabled']) ? '1' : '0');
+        Settings::set('notify_event_public_exposure_enabled', isset($_POST['notify_event_public_exposure_enabled']) ? '1' : '0');
+        Settings::set('notify_login_anomaly_enabled', isset($_POST['notify_login_anomaly_enabled']) ? '1' : '0');
+
+        $gapSeconds = (int)($_POST['notify_event_collector_gap_seconds'] ?? 300);
+        $gapSeconds = max(120, min(86400, $gapSeconds));
+        Settings::set('notify_event_collector_gap_seconds', (string)$gapSeconds);
+
         // Also update old cluster_* keys for backwards compatibility
         Settings::set('cluster_smtp_host', trim($_POST['notify_smtp_host'] ?? ''));
         Settings::set('cluster_smtp_port', (string)(int)($_POST['notify_smtp_port'] ?? 587));

@@ -6,7 +6,7 @@ $sections = [
         'url' => '/settings/server',
         'doc_url' => '/docs/settings/server',
         'icon' => 'bi-server',
-        'summary' => 'Identidad del nodo, hostname y ajustes generales del servidor.',
+        'summary' => 'Identidad del nodo, hostname, TLS del panel y ajustes globales del host.',
     ],
     [
         'title' => 'PHP',
@@ -27,7 +27,7 @@ $sections = [
         'url' => '/settings/security',
         'doc_url' => '/docs/settings/security',
         'icon' => 'bi-lock',
-        'summary' => 'Politicas de hardening y controles de acceso del panel.',
+        'summary' => 'Hardening del host, puertos esperados, MFA admin y controles de acceso.',
     ],
     [
         'title' => 'Fail2Ban',
@@ -69,7 +69,7 @@ $sections = [
         'url' => '/settings/firewall',
         'doc_url' => '/docs/settings/firewall',
         'icon' => 'bi-shield-fill',
-        'summary' => 'Reglas de red, puertos abiertos y controles de trafico.',
+        'summary' => 'Reglas de red, auditoria, snapshots, import/export y lockdown temporal.',
     ],
     [
         'title' => 'WireGuard',
@@ -83,7 +83,7 @@ $sections = [
         'url' => '/settings/notifications',
         'doc_url' => '/docs/settings/notifications',
         'icon' => 'bi-bell',
-        'summary' => 'Canales y eventos para alertas operativas del panel.',
+        'summary' => 'Canales de alerta y eventos de seguridad (firewall, reboot, hardening, drift, exposicion, login anomalo).',
     ],
     [
         'title' => 'Cluster',
@@ -172,6 +172,18 @@ $sections = [
             Esta guia resume para que sirve cada pantalla de <code>Settings</code>. Es un baseline operativo para el equipo.
             El titulo de cada tarjeta abre su documentacion (si ya existe) y el boton abre la pantalla funcional del panel.
         </p>
+    </div>
+</div>
+
+<div class="card mb-4" style="border-color:rgba(56,189,248,.35);">
+    <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div class="small text-muted">
+            Para el mapa completo de seguridad (hardening, drift, exposicion, lockdown y MFA), revisa la guia especial:
+            <code>/docs/security-operations</code>.
+        </div>
+        <a href="/docs/security-operations" class="btn btn-outline-info btn-sm">
+            <i class="bi bi-shield-lock me-1"></i> Abrir guia de seguridad
+        </a>
     </div>
 </div>
 

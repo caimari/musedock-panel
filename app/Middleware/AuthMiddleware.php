@@ -8,7 +8,7 @@ use MuseDockPanel\View;
 
 class AuthMiddleware
 {
-    private static array $publicPaths = ['/login', '/login/submit', '/portal'];
+    private static array $publicPaths = ['/login', '/login/submit', '/login/mfa', '/login/mfa/verify', '/portal'];
     private static array $apiPrefixes = ['/api/'];
 
     public static function handle(): bool

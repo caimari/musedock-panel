@@ -242,6 +242,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // Auth
 \MuseDockPanel\Router::get('/login', 'AuthController@loginForm');
 \MuseDockPanel\Router::post('/login/submit', 'AuthController@login');
+\MuseDockPanel\Router::get('/login/mfa', 'AuthController@mfaForm');
+\MuseDockPanel\Router::post('/login/mfa/verify', 'AuthController@mfaVerify');
 \MuseDockPanel\Router::get('/logout', 'AuthController@logout');
 
 // Dashboard
@@ -445,6 +447,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/php/opcache-save', 'SettingsController@phpOpcacheSave');
 \MuseDockPanel\Router::get('/settings/security', 'SettingsController@security');
 \MuseDockPanel\Router::post('/settings/security/save', 'SettingsController@securitySave');
+\MuseDockPanel\Router::post('/settings/security/hardening-fix', 'SettingsController@securityHardeningFix');
 \MuseDockPanel\Router::post('/settings/security/pg-ssl-enable', 'SettingsController@pgSslEnable');
 \MuseDockPanel\Router::post('/settings/security/pg-ssl-disable', 'SettingsController@pgSslDisable');
 \MuseDockPanel\Router::get('/settings/ssl', 'SettingsController@ssl');
@@ -621,6 +624,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/firewall/save', 'FirewallController@saveRules');
 \MuseDockPanel\Router::post('/settings/firewall/toggle-ipv6-interface', 'FirewallController@toggleIpv6Interface');
 \MuseDockPanel\Router::post('/settings/firewall/fix-ipv6-lockdown', 'FirewallController@fixIpv6Lockdown');
+\MuseDockPanel\Router::post('/settings/firewall/lockdown-temporary', 'FirewallController@startTemporaryLockdown');
+\MuseDockPanel\Router::post('/settings/firewall/lockdown-stop', 'FirewallController@stopTemporaryLockdown');
+\MuseDockPanel\Router::post('/settings/firewall/toggle-change-watch', 'FirewallController@toggleChangeWatch');
 \MuseDockPanel\Router::post('/settings/firewall/presets/save', 'FirewallController@savePreset');
 \MuseDockPanel\Router::post('/settings/firewall/presets/delete', 'FirewallController@deletePreset');
 \MuseDockPanel\Router::post('/settings/firewall/presets/apply', 'FirewallController@applyPreset');
@@ -670,6 +676,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/docs/postgresql-mirror-master-slave', 'DocsController@postgresqlMirrorMasterSlave');
 \MuseDockPanel\Router::get('/docs/install-recovery', 'DocsController@installRecovery');
 \MuseDockPanel\Router::get('/docs/default-backups', 'DocsController@defaultBackups');
+\MuseDockPanel\Router::get('/docs/security-operations', 'DocsController@securityOperations');
 \MuseDockPanel\Router::get('/docs/firewall-operations', 'DocsController@firewallOperations');
 \MuseDockPanel\Router::get('/docs/sync-archivos-lsyncd', 'DocsController@syncArchivosLsyncd');
 
@@ -678,6 +685,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/profile/username', 'ProfileController@updateUsername');
 \MuseDockPanel\Router::post('/profile/email', 'ProfileController@updateEmail');
 \MuseDockPanel\Router::post('/profile/password', 'ProfileController@updatePassword');
+\MuseDockPanel\Router::post('/profile/mfa/start', 'ProfileController@mfaStart');
+\MuseDockPanel\Router::post('/profile/mfa/enable', 'ProfileController@mfaEnable');
+\MuseDockPanel\Router::post('/profile/mfa/disable', 'ProfileController@mfaDisable');
 
 // System Users
 \MuseDockPanel\Router::get('/system-users', 'SystemUserController@index');

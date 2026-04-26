@@ -292,17 +292,16 @@ echo -e "${CYAN}${BOLD}[3/4]${NC} Clearing cache..."
 rm -rf "${PANEL_DIR}/storage/cache/"* 2>/dev/null || true
 ok "Cache cleared"
 
-# Install monitor cron if missing (added in monitoring feature)
-if [ ! -f /etc/cron.d/musedock-monitor ]; then
-    cat > /etc/cron.d/musedock-monitor << CRONEOF
+# Enforce monitor cron (network/cpu/ram + event watch: firewall/reboot/gaps)
+cat > /etc/cron.d/musedock-monitor << CRONEOF
 # MuseDock Panel — Network/system monitoring collector (every 30s)
+# Includes event watchers: firewall external changes, server reboot, monitor gaps
 * * * * * root /usr/bin/php ${PANEL_DIR}/bin/monitor-collector.php
 * * * * * root sleep 30 && /usr/bin/php ${PANEL_DIR}/bin/monitor-collector.php
 CRONEOF
-    chmod 644 /etc/cron.d/musedock-monitor
-    systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
-    ok "Monitor cron installed"
-fi
+chmod 644 /etc/cron.d/musedock-monitor
+systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
+ok "Monitor cron ensured"
 
 # Install/update bandwidth collector cron
 cat > /etc/cron.d/musedock-bandwidth << CRONEOF
@@ -620,6 +619,28 @@ fi
 # ============================================================
 # Step 5: Clear update flags in panel DB
 # ============================================================
+# Warm-up monitor collector once after update so security/event watchers
+# (firewall drift/reboot/gap/hardening/exposure) initialize immediately
+# without waiting for next cron tick.
+echo -e "${CYAN}${BOLD}[Warm-up]${NC} Running monitor collector warm-up..."
+if [ -f "${PANEL_DIR}/bin/monitor-collector.php" ]; then
+    set +e
+    COLLECTOR_OUT=$($PHP_BIN "${PANEL_DIR}/bin/monitor-collector.php" 2>&1)
+    COLLECTOR_RC=$?
+    set -e
+    if [ $COLLECTOR_RC -eq 0 ]; then
+        ok "Monitor collector warm-up completed"
+    else
+        warn "Monitor collector warm-up failed (non-critical)"
+        echo "$COLLECTOR_OUT" | sed 's/^/    /'
+    fi
+else
+    warn "monitor-collector.php not found; skipping warm-up"
+fi
+
+# ============================================================
+# Step 6: Clear update flags in panel DB
+# ============================================================
 $PHP_BIN -r "
 define('PANEL_ROOT', '${PANEL_DIR}');
 spl_autoload_register(function (\$c) {
@@ -636,7 +657,7 @@ MuseDockPanel\Settings::set('update_last_check', (string)time());
 " 2>/dev/null && ok "Update flags cleared" || warn "Could not clear update flags (non-critical)"
 
 # ============================================================
-# Step 6: Update Portal if installed
+# Step 7: Update Portal if installed
 # ============================================================
 PORTAL_DIR="/opt/musedock-portal"
 if [ -d "$PORTAL_DIR" ] && [ -f "${PORTAL_DIR}/bin/update.sh" ]; then

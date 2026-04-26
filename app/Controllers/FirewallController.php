@@ -6,6 +6,7 @@ use MuseDockPanel\Flash;
 use MuseDockPanel\Settings;
 use MuseDockPanel\Database;
 use MuseDockPanel\Services\FirewallService;
+use MuseDockPanel\Services\NotificationService;
 use MuseDockPanel\Services\LogService;
 
 class FirewallController
@@ -36,6 +37,10 @@ class FirewallController
         $manualIptables = FirewallService::getManualIptablesRules();
         $rulePresets = FirewallService::getRulePresets();
         $fullSnapshots = FirewallService::getFullSnapshots();
+        $changeWatchEnabled = Settings::get('firewall_change_watch_enabled', '0') === '1';
+        $emailConfigured = NotificationService::isEmailConfigured();
+        $monitorEnabled = Settings::get('monitor_enabled', '1') === '1';
+        $lockdownState = FirewallService::getTemporaryLockdownState();
 
         // Security audit
         $securityWarnings = FirewallService::auditRules($rules, $policy);
@@ -65,6 +70,10 @@ class FirewallController
             'manualIptables'    => $manualIptables,
             'rulePresets'       => $rulePresets,
             'fullSnapshots'     => $fullSnapshots,
+            'changeWatchEnabled'=> $changeWatchEnabled,
+            'emailConfigured'   => $emailConfigured,
+            'monitorEnabled'    => $monitorEnabled,
+            'lockdownState'     => $lockdownState,
         ]);
     }
 
@@ -774,6 +783,84 @@ class FirewallController
             'replication' => $replSuggestions,
             'hosting'     => $hostSuggestions,
         ]);
+        exit;
+    }
+
+    public function toggleChangeWatch(): void
+    {
+        View::verifyCsrf();
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'cambiar vigilancia de integridad del firewall')) {
+            exit;
+        }
+
+        $enable = ((string)($_POST['enable'] ?? '')) === '1';
+        Settings::set('firewall_change_watch_enabled', $enable ? '1' : '0');
+
+        LogService::log(
+            $enable ? 'firewall.change_watch.enable' : 'firewall.change_watch.disable',
+            'integrity',
+            $enable
+                ? 'Vigilancia de cambios externos de firewall activada'
+                : 'Vigilancia de cambios externos de firewall desactivada'
+        );
+
+        if ($enable) {
+            Flash::set('success', 'Vigilancia de cambios de firewall activada. Se notificaran cambios externos con anti-spam.');
+        } else {
+            Flash::set('success', 'Vigilancia de cambios de firewall desactivada.');
+        }
+
+        header('Location: /settings/firewall');
+        exit;
+    }
+
+    public function startTemporaryLockdown(): void
+    {
+        View::verifyCsrf();
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'activar lockdown temporal')) {
+            exit;
+        }
+
+        $minutes = (int)($_POST['minutes'] ?? 15);
+        $minutes = max(1, min(120, $minutes));
+        $adminIp = FirewallService::getAdminIp();
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $panelPort = (int)($config['port'] ?? 8444);
+
+        $result = FirewallService::startTemporaryLockdown($adminIp, $minutes, $panelPort);
+        if (!($result['ok'] ?? false)) {
+            Flash::set('error', 'No se pudo activar lockdown: ' . (string)($result['error'] ?? 'error desconocido'));
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $untilTs = (int)($result['until_ts'] ?? 0);
+        LogService::log('firewall.lockdown.start', $adminIp, "Lockdown temporal {$minutes} min");
+        Flash::set('success', 'Lockdown temporal activo hasta ' . gmdate('Y-m-d H:i:s', $untilTs) . ' UTC.');
+        header('Location: /settings/firewall');
+        exit;
+    }
+
+    public function stopTemporaryLockdown(): void
+    {
+        View::verifyCsrf();
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'desactivar lockdown temporal')) {
+            exit;
+        }
+
+        $result = FirewallService::stopTemporaryLockdown();
+        if (!($result['ok'] ?? false)) {
+            Flash::set('error', 'No se pudo desactivar lockdown: ' . (string)($result['error'] ?? 'error desconocido'));
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        LogService::log('firewall.lockdown.stop', 'manual', 'Lockdown temporal desactivado');
+        Flash::set('success', 'Lockdown temporal desactivado.');
+        header('Location: /settings/firewall');
         exit;
     }
 

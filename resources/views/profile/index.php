@@ -1,4 +1,13 @@
 <?php use MuseDockPanel\View; ?>
+<?php
+    $mfaEnabledRaw = $admin['mfa_enabled'] ?? false;
+    $mfaEnabled = $mfaEnabledRaw === true || $mfaEnabledRaw === 1 || $mfaEnabledRaw === '1' || $mfaEnabledRaw === 't';
+    $mfaSetupSecret = (string)($mfaSetupSecret ?? '');
+    $mfaOtpAuthUri = (string)($mfaOtpAuthUri ?? '');
+    $mfaRequiredGlobal = !empty($mfaRequiredGlobal);
+    $mfaActiveAdmins = (int)($mfaActiveAdmins ?? 0);
+    $mfaEnrolledAdmins = (int)($mfaEnrolledAdmins ?? 0);
+?>
 
 <div class="row g-4">
     <!-- Profile Info Card -->
@@ -105,6 +114,94 @@
                 </form>
             </div>
         </div>
+
+        <!-- MFA -->
+        <div class="card mt-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-phone me-2"></i>Autenticacion MFA (TOTP)</span>
+                <?php if ($mfaEnabled): ?>
+                    <span class="badge bg-success">Activa</span>
+                <?php else: ?>
+                    <span class="badge bg-secondary">Inactiva</span>
+                <?php endif; ?>
+            </div>
+            <div class="card-body">
+                <div class="small text-muted mb-3">
+                    Estado global: <?= $mfaRequiredGlobal ? '<span class="badge bg-warning text-dark">MFA obligatorio</span>' : '<span class="badge bg-secondary">opcional</span>' ?>
+                    <span class="ms-2">Admins enrolados: <strong><?= $mfaEnrolledAdmins ?></strong>/<?= $mfaActiveAdmins ?></span>
+                </div>
+
+                <form method="POST" action="/profile/mfa/start" class="mb-3">
+                    <?= View::csrf() ?>
+                    <button type="submit" class="btn btn-outline-info btn-sm">
+                        <i class="bi bi-key me-1"></i><?= $mfaSetupSecret !== '' ? 'Generar/rotar secret' : 'Generar secret MFA' ?>
+                    </button>
+                </form>
+
+                <?php if ($mfaSetupSecret !== ''): ?>
+                    <div class="rounded p-3 mb-3" style="border:1px solid rgba(56,189,248,0.35);background:rgba(56,189,248,0.08);">
+                        <div class="fw-semibold mb-2">1) Anade esta cuenta en tu app Authenticator</div>
+                        <div class="small text-muted mb-2">Puedes copiar el secret o la URI <code>otpauth://</code> y anadirlo manualmente.</div>
+
+                        <label class="form-label small mb-1">Secret</label>
+                        <div class="input-group input-group-sm mb-2">
+                            <input type="text" class="form-control" id="mfaSecretValue" value="<?= View::e($mfaSetupSecret) ?>" readonly>
+                            <button type="button" class="btn btn-outline-light" onclick="copyNow('mfaSecretValue')"><i class="bi bi-clipboard"></i></button>
+                        </div>
+
+                        <label class="form-label small mb-1">URI otpauth</label>
+                        <div class="input-group input-group-sm">
+                            <input type="text" class="form-control" id="mfaUriValue" value="<?= View::e($mfaOtpAuthUri) ?>" readonly>
+                            <button type="button" class="btn btn-outline-light" onclick="copyNow('mfaUriValue')"><i class="bi bi-clipboard"></i></button>
+                        </div>
+                    </div>
+
+                    <form method="POST" action="/profile/mfa/enable" class="mb-3">
+                        <?= View::csrf() ?>
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-5">
+                                <label class="form-label">Contrasena actual</label>
+                                <input type="password" name="current_password" class="form-control" required autocomplete="current-password">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Codigo MFA (6 digitos)</label>
+                                <input type="text" name="mfa_code" class="form-control" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6">
+                            </div>
+                            <div class="col-md-3">
+                                <button type="submit" class="btn btn-success w-100"><i class="bi bi-check2-circle me-1"></i>Activar MFA</button>
+                            </div>
+                        </div>
+                    </form>
+                <?php endif; ?>
+
+                <?php if ($mfaEnabled): ?>
+                    <div class="rounded p-3" style="border:1px solid rgba(239,68,68,0.35);background:rgba(239,68,68,0.08);">
+                        <div class="fw-semibold mb-2 text-danger">Desactivar MFA</div>
+                        <form method="POST" action="/profile/mfa/disable">
+                            <?= View::csrf() ?>
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-5">
+                                    <label class="form-label">Contrasena actual</label>
+                                    <input type="password" name="current_password_disable" class="form-control" required autocomplete="current-password">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Codigo MFA actual</label>
+                                    <input type="text" name="mfa_code_disable" class="form-control" required inputmode="numeric" pattern="[0-9]{6}" maxlength="6">
+                                </div>
+                                <div class="col-md-3">
+                                    <button type="submit" class="btn btn-outline-danger w-100" <?= $mfaRequiredGlobal ? 'disabled title="MFA obligatorio global activo"' : '' ?>>
+                                        <i class="bi bi-x-circle me-1"></i>Desactivar
+                                    </button>
+                                </div>
+                            </div>
+                            <?php if ($mfaRequiredGlobal): ?>
+                                <div class="small text-warning mt-2">No se puede desactivar mientras MFA obligatorio global este activo.</div>
+                            <?php endif; ?>
+                        </form>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -133,4 +230,12 @@ document.getElementById('passwordForm').addEventListener('submit', function(e) {
         }
     }
 });
+
+function copyNow(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.select();
+    el.setSelectionRange(0, 99999);
+    navigator.clipboard.writeText(el.value || '');
+}
 </script>

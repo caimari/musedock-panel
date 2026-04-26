@@ -4,8 +4,10 @@ namespace MuseDockPanel\Controllers;
 use MuseDockPanel\Database;
 use MuseDockPanel\Flash;
 use MuseDockPanel\Router;
+use MuseDockPanel\Settings;
 use MuseDockPanel\View;
 use MuseDockPanel\Services\LogService;
+use MuseDockPanel\Services\SecurityService;
 
 class SettingsController
 {
@@ -622,6 +624,7 @@ class SettingsController
     public function server(): void
     {
         $settings = \MuseDockPanel\Settings::getAll();
+        $rebootNotifyEnabled = \MuseDockPanel\Settings::get('server_reboot_notify_enabled', '0') === '1';
 
         // Detect server info
         $hostname = trim(shell_exec('hostname') ?? '');
@@ -661,6 +664,7 @@ class SettingsController
             'ntpSynced' => $ntpSynced,
             'ntpActive' => $ntpActive,
             'ntpServer' => $ntpServer,
+            'rebootNotifyEnabled' => $rebootNotifyEnabled,
         ]);
     }
 
@@ -1026,24 +1030,42 @@ class SettingsController
 
     public function security(): void
     {
-        $envFile = dirname(__DIR__, 2) . '/.env';
         $allowedIps = \MuseDockPanel\Env::get('ALLOWED_IPS', '');
 
         // Active sessions
         $sessionPath = dirname(__DIR__, 2) . '/storage/sessions';
         $sessionCount = count(glob("{$sessionPath}/sess_*"));
 
+        $hardening = SecurityService::getHardeningAudit();
+        $expectedPortsRaw = Settings::get('security_expected_public_tcp_ports', '22,80,443,8444');
+        $mfaRequired = Settings::get('security_mfa_required', '0') === '1';
+        $mfaStats = Database::fetchOne(
+            "SELECT COUNT(*) AS total,
+                    SUM(CASE WHEN mfa_enabled = true AND mfa_secret IS NOT NULL AND mfa_secret != '' THEN 1 ELSE 0 END) AS enrolled
+             FROM panel_admins
+             WHERE is_active = true"
+        );
+
         View::render('settings/security', [
             'layout' => 'main',
             'pageTitle' => 'Seguridad',
             'allowedIps' => $allowedIps,
             'sessionCount' => $sessionCount,
+            'hardening' => $hardening,
+            'expectedPublicPorts' => $expectedPortsRaw,
+            'mfaRequired' => $mfaRequired,
+            'mfaActiveAdmins' => (int)($mfaStats['total'] ?? 0),
+            'mfaEnrolledAdmins' => (int)($mfaStats['enrolled'] ?? 0),
         ]);
     }
 
     public function securitySave(): void
     {
+        View::verifyCsrf();
+
         $allowedIps = trim($_POST['allowed_ips'] ?? '');
+        $expectedPortsRaw = trim((string)($_POST['security_expected_public_tcp_ports'] ?? '22,80,443,8444'));
+        $mfaRequired = isset($_POST['security_mfa_required']);
 
         // Validate IPs format
         if (!empty($allowedIps)) {
@@ -1055,6 +1077,29 @@ class SettingsController
                     Router::redirect('/settings/security');
                     return;
                 }
+            }
+        }
+
+        $ports = SecurityService::parseExpectedPublicPorts($expectedPortsRaw);
+        if (empty($ports)) {
+            Flash::set('error', 'Debes indicar al menos un puerto publico esperado.');
+            Router::redirect('/settings/security');
+            return;
+        }
+
+        if ($mfaRequired) {
+            $mfaStats = Database::fetchOne(
+                "SELECT COUNT(*) AS total,
+                        SUM(CASE WHEN mfa_enabled = true AND mfa_secret IS NOT NULL AND mfa_secret != '' THEN 1 ELSE 0 END) AS enrolled
+                 FROM panel_admins
+                 WHERE is_active = true"
+            );
+            $total = (int)($mfaStats['total'] ?? 0);
+            $enrolled = (int)($mfaStats['enrolled'] ?? 0);
+            if ($total > 0 && $enrolled < $total) {
+                Flash::set('error', "No puedes activar MFA obligatorio: solo {$enrolled}/{$total} admins tienen MFA activa.");
+                Router::redirect('/settings/security');
+                return;
             }
         }
 
@@ -1070,9 +1115,68 @@ class SettingsController
             file_put_contents($envFile, $envContent);
         }
 
-        LogService::log('settings.security', 'allowed_ips', "Updated ALLOWED_IPS: {$allowedIps}");
+        Settings::set('security_expected_public_tcp_ports', implode(',', $ports));
+        Settings::set('security_mfa_required', $mfaRequired ? '1' : '0');
+
+        LogService::log(
+            'settings.security',
+            'baseline',
+            "Updated ALLOWED_IPS={$allowedIps}; expected_ports=" . implode(',', $ports) . '; mfa_required=' . ($mfaRequired ? '1' : '0')
+        );
         Flash::set('success', 'Configuracion de seguridad guardada.');
         Router::redirect('/settings/security');
+    }
+
+    public function securityHardeningFix(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyCurrentAdminPassword($password)) {
+            Flash::set('error', 'Contrasena de administrador incorrecta.');
+            Router::redirect('/settings/security');
+            return;
+        }
+
+        $result = SecurityService::applyRecommendedHardening();
+        $ok = (bool)($result['ok'] ?? false);
+        $steps = is_array($result['steps'] ?? null) ? $result['steps'] : [];
+        $summary = [];
+        foreach ($steps as $s) {
+            $summary[] = (string)($s['name'] ?? 'paso') . ':' . (!empty($s['ok']) ? 'ok' : 'fail');
+        }
+
+        LogService::log('settings.security.hardening.fix', 'host', implode(', ', $summary));
+        if ($ok) {
+            Flash::set('success', 'Hardening aplicado correctamente.');
+        } else {
+            Flash::set('warning', 'Hardening aplicado con incidencias. Revisa el estado en la auditoria.');
+        }
+
+        Router::redirect('/settings/security');
+    }
+
+    private function verifyCurrentAdminPassword(string $password): bool
+    {
+        $password = trim($password);
+        if ($password === '') {
+            return false;
+        }
+
+        $adminId = (int)($_SESSION['panel_user']['id'] ?? 0);
+        if ($adminId < 1) {
+            return false;
+        }
+
+        $admin = Database::fetchOne(
+            "SELECT password_hash FROM panel_admins WHERE id = :id",
+            ['id' => $adminId]
+        );
+        if (!$admin) {
+            return false;
+        }
+
+        return password_verify($password, (string)($admin['password_hash'] ?? ''));
     }
 
     /**

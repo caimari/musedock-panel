@@ -1,4 +1,10 @@
 <?php use MuseDockPanel\View; ?>
+<?php
+    $lockdownState = is_array($lockdownState ?? null) ? $lockdownState : [];
+    $lockdownActive = !empty($lockdownState['active']);
+    $lockdownUntilTs = (int)($lockdownState['until_ts'] ?? 0);
+    $lockdownAdminIp = (string)($lockdownState['admin_ip'] ?? '');
+?>
 
 <?php include __DIR__ . '/_tabs.php'; ?>
 
@@ -130,6 +136,40 @@
                         <span class="badge bg-info ms-1">Tu conexion</span>
                     </td>
                 </tr>
+                <tr>
+                    <td class="text-muted">Vigilancia de cambios externos</td>
+                    <td>
+                        <?php if (!empty($changeWatchEnabled)): ?>
+                            <span class="badge bg-success">Activa</span>
+                        <?php else: ?>
+                            <span class="badge bg-secondary">Inactiva</span>
+                        <?php endif; ?>
+                        <small class="text-muted ms-2">Se configura en <a href="/settings/notifications" class="text-info">Settings → Notifications</a>.</small>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="text-muted">Canal email (Notificaciones)</td>
+                    <td>
+                        <?php if (!empty($emailConfigured)): ?>
+                            <span class="badge bg-success">Configurado</span>
+                            <small class="text-muted ms-2">Se usa para avisos de cambios externos y reinicios.</small>
+                        <?php else: ?>
+                            <span class="badge bg-warning text-dark">No configurado</span>
+                            <small class="text-muted ms-2">Configuralo en <a href="/settings/notifications" class="text-info">Settings → Notifications</a>.</small>
+                        <?php endif; ?>
+                    </td>
+                </tr>
+                <tr>
+                    <td class="text-muted">Collector monitor</td>
+                    <td>
+                        <?php if (!empty($monitorEnabled)): ?>
+                            <span class="badge bg-success">Activo</span>
+                        <?php else: ?>
+                            <span class="badge bg-danger">Inactivo</span>
+                            <small class="text-muted ms-2">Activalo en <a href="/monitor" class="text-info">Monitoring → Alert Settings</a> para que la vigilancia procese eventos.</small>
+                        <?php endif; ?>
+                    </td>
+                </tr>
             </table>
 
             <!-- Network Interfaces -->
@@ -234,7 +274,61 @@
                         <i class="bi bi-lightning-fill me-1"></i>Permitir todo desde mi IP (<?= View::e($adminIp) ?>)
                     </button>
                 </form>
+
+                <a href="/settings/notifications" class="btn btn-outline-info btn-sm">
+                    <i class="bi bi-bell me-1"></i>Configurar eventos en Notificaciones
+                </a>
             </div>
+        </div>
+    </div>
+
+    <!-- Card: Lockdown temporal -->
+    <div class="card mb-3 border-warning">
+        <div class="card-header d-flex align-items-center justify-content-between" style="background:rgba(245,158,11,0.12);">
+            <span><i class="bi bi-shield-lock me-1 text-warning"></i> Lockdown temporal de emergencia</span>
+            <?php if ($lockdownActive): ?>
+                <span class="badge bg-danger">Activo</span>
+            <?php else: ?>
+                <span class="badge bg-secondary">Inactivo</span>
+            <?php endif; ?>
+        </div>
+        <div class="card-body">
+            <p class="small text-muted mb-3">
+                Corta trafico entrante de forma temporal y automatica. Mantiene loopback, conexiones establecidas y tu IP de admin.
+            </p>
+
+            <?php if ($lockdownActive): ?>
+                <div class="alert py-2 px-3 mb-3" style="background:rgba(220,53,69,0.12);border:1px solid rgba(220,53,69,0.3);color:#fca5a5;">
+                    <div class="small">
+                        <strong>Activo hasta:</strong>
+                        <code><?= View::e(gmdate('Y-m-d H:i:s', $lockdownUntilTs)) ?> UTC</code>
+                        <?php if ($lockdownAdminIp !== ''): ?>
+                            <span class="ms-2"><strong>IP admin:</strong> <code><?= View::e($lockdownAdminIp) ?></code></span>
+                        <?php endif; ?>
+                    </div>
+                </div>
+                <form method="POST" action="/settings/firewall/lockdown-stop" class="d-inline" onsubmit="return confirmStopTemporaryLockdown(this)">
+                    <?= View::csrf() ?>
+                    <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+                    <button type="submit" class="btn btn-outline-danger btn-sm">
+                        <i class="bi bi-unlock me-1"></i>Desactivar lockdown ahora
+                    </button>
+                </form>
+            <?php else: ?>
+                <form method="POST" action="/settings/firewall/lockdown-temporary" class="row g-2 align-items-end" onsubmit="return confirmStartTemporaryLockdown(this)">
+                    <?= View::csrf() ?>
+                    <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+                    <div class="col-sm-4 col-md-3">
+                        <label class="form-label mb-1">Duracion (min)</label>
+                        <input type="number" name="minutes" class="form-control form-control-sm" min="1" max="120" value="15" required>
+                    </div>
+                    <div class="col-sm-8 col-md-9">
+                        <button type="submit" class="btn btn-outline-warning btn-sm">
+                            <i class="bi bi-shield-fill-exclamation me-1"></i>Activar lockdown temporal
+                        </button>
+                    </div>
+                </form>
+            <?php endif; ?>
         </div>
     </div>
 
@@ -1269,6 +1363,40 @@ function confirmToggleIpv6Interface(form, iface, mode) {
         confirmText: enable ? 'Activar IPv6' : 'Desactivar IPv6',
         confirmColor: enable ? '#198754' : '#f59e0b',
         fallbackConfirm: (enable ? 'Activar' : 'Desactivar') + ' IPv6 en ' + iface + '?'
+    });
+}
+
+function confirmStartTemporaryLockdown(form) {
+    var minutesEl = form.querySelector('input[name="minutes"]');
+    var minutes = parseInt(minutesEl ? minutesEl.value : '15', 10);
+    if (!Number.isFinite(minutes)) {
+        minutes = 15;
+    }
+    minutes = Math.max(1, Math.min(120, minutes));
+    if (minutesEl) {
+        minutesEl.value = String(minutes);
+    }
+
+    return confirmWithAdminPassword(form, {
+        title: 'Activar lockdown temporal',
+        html:
+            'Se activara bloqueo temporal durante <strong>' + minutes + ' minuto(s)</strong>.<br>' +
+            '<small class="text-muted">Se conserva tu IP actual y conexiones establecidas. El collector lo desactiva automaticamente al expirar.</small>',
+        icon: 'warning',
+        confirmText: 'Activar lockdown',
+        confirmColor: '#f59e0b',
+        fallbackConfirm: 'Activar lockdown temporal ' + minutes + ' min?'
+    });
+}
+
+function confirmStopTemporaryLockdown(form) {
+    return confirmWithAdminPassword(form, {
+        title: 'Desactivar lockdown temporal',
+        html: 'Se retirara el modo lockdown y se restaurara el flujo normal de reglas.',
+        icon: 'warning',
+        confirmText: 'Desactivar lockdown',
+        confirmColor: '#dc3545',
+        fallbackConfirm: 'Desactivar lockdown temporal ahora?'
     });
 }
 

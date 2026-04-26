@@ -9,6 +9,15 @@
     $hasTelegram = !empty($settings['notify_telegram_token']) && !empty($settings['notify_telegram_chat_id']);
     $hasSmtp = !empty($settings['notify_smtp_host']);
     $manualTo = $settings['notify_email_to'] ?? '';
+    $firewallWatchEnabled = ($settings['firewall_change_watch_enabled'] ?? '0') === '1';
+    $serverRebootNotifyEnabled = ($settings['server_reboot_notify_enabled'] ?? '0') === '1';
+    $collectorGapNotifyEnabled = ($settings['notify_event_collector_gap_enabled'] ?? '1') === '1';
+    $hardeningNotifyEnabled = ($settings['notify_event_hardening_enabled'] ?? '1') === '1';
+    $configDriftNotifyEnabled = ($settings['notify_event_config_drift_enabled'] ?? '1') === '1';
+    $publicExposureNotifyEnabled = ($settings['notify_event_public_exposure_enabled'] ?? '1') === '1';
+    $loginAnomalyNotifyEnabled = ($settings['notify_login_anomaly_enabled'] ?? '1') === '1';
+    $collectorGapSeconds = (int)($settings['notify_event_collector_gap_seconds'] ?? 300);
+    if ($collectorGapSeconds < 120) $collectorGapSeconds = 300;
 ?>
 
 <form method="post" action="/settings/notifications/save" id="notifForm">
@@ -162,7 +171,98 @@
         </div>
     </div>
 
-    <!-- Card 3: Resumen -->
+    <!-- Card 3: Eventos del sistema -->
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-shield-check me-2"></i>Eventos del sistema (sin spam)</div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                Estas opciones controlan avisos de seguridad/operativa detectados por el monitor collector.
+                Se aplica deduplicacion y cooldown para evitar ruido.
+            </p>
+
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="evFirewallChange" name="firewall_change_watch_enabled" value="1" <?= $firewallWatchEnabled ? 'checked' : '' ?>>
+                <label class="form-check-label" for="evFirewallChange">
+                    Avisar cambios externos de firewall (shell/manual)
+                </label>
+            </div>
+            <div class="small text-muted mb-3">
+                Si cambia el firewall fuera del panel, crea alerta <code>FIREWALL_CHANGED</code> y envia email.
+            </div>
+
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="evServerReboot" name="server_reboot_notify_enabled" value="1" <?= $serverRebootNotifyEnabled ? 'checked' : '' ?>>
+                <label class="form-check-label" for="evServerReboot">
+                    Avisar reinicio del servidor
+                </label>
+            </div>
+            <div class="small text-muted mb-3">
+                Detecta cambio de <code>boot_id</code>, crea alerta <code>SERVER_REBOOT</code> y envia email.
+            </div>
+
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="evCollectorGap" name="notify_event_collector_gap_enabled" value="1" <?= $collectorGapNotifyEnabled ? 'checked' : '' ?>>
+                <label class="form-check-label" for="evCollectorGap">
+                    Avisar paradas (gap del monitor/host)
+                </label>
+            </div>
+            <div class="row g-2 align-items-center mb-2">
+                <div class="col-md-4">
+                    <label class="form-label small text-muted mb-1" for="collectorGapSeconds">Umbral de parada (segundos)</label>
+                    <input type="number" min="120" max="86400" step="30" class="form-control form-control-sm" id="collectorGapSeconds" name="notify_event_collector_gap_seconds" value="<?= (int)$collectorGapSeconds ?>">
+                </div>
+                <div class="col-md-8">
+                    <div class="small text-muted mt-4 mt-md-0">
+                        Si el collector deja de ejecutar por encima del umbral, crea alerta <code>MONITOR_GAP</code> y envia email.
+                    </div>
+                </div>
+            </div>
+
+            <hr class="border-secondary my-3">
+
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="evHardening" name="notify_event_hardening_enabled" value="1" <?= $hardeningNotifyEnabled ? 'checked' : '' ?>>
+                <label class="form-check-label" for="evHardening">
+                    Avisar hardening degradado del host
+                </label>
+            </div>
+            <div class="small text-muted mb-3">
+                Genera alerta <code>SECURITY_HARDENING</code> cuando la auditoria detecta baseline roto (sshd/fail2ban/sysctl/permisos).
+            </div>
+
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="evConfigDrift" name="notify_event_config_drift_enabled" value="1" <?= $configDriftNotifyEnabled ? 'checked' : '' ?>>
+                <label class="form-check-label" for="evConfigDrift">
+                    Avisar drift en ficheros criticos
+                </label>
+            </div>
+            <div class="small text-muted mb-3">
+                Genera alerta <code>CONFIG_DRIFT</code> con diff resumido cuando cambian <code>/etc/ssh/sshd_config</code> o config de Fail2Ban fuera del flujo normal.
+            </div>
+
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="evPublicExposure" name="notify_event_public_exposure_enabled" value="1" <?= $publicExposureNotifyEnabled ? 'checked' : '' ?>>
+                <label class="form-check-label" for="evPublicExposure">
+                    Avisar exposicion publica inesperada
+                </label>
+            </div>
+            <div class="small text-muted mb-3">
+                Genera alerta <code>PORT_EXPOSURE</code> si detecta puertos TCP publicos escuchando fuera de la politica esperada definida en Settings &rarr; Security.
+            </div>
+
+            <div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="evLoginAnomaly" name="notify_login_anomaly_enabled" value="1" <?= $loginAnomalyNotifyEnabled ? 'checked' : '' ?>>
+                <label class="form-check-label" for="evLoginAnomaly">
+                    Avisar login admin anomalo
+                </label>
+            </div>
+            <div class="small text-muted">
+                Genera alerta <code>LOGIN_ANOMALY</code> en login exitoso desde IP/ASN/pais nuevo y envia email con cooldown.
+            </div>
+        </div>
+    </div>
+
+    <!-- Card 4: Resumen -->
     <div class="card mb-3">
         <div class="card-header"><i class="bi bi-info-circle me-2"></i>Resumen de canales</div>
         <div class="card-body">

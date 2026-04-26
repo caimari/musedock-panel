@@ -87,11 +87,31 @@
             <div class="mt-3">
                 <small class="text-muted">
                     <i class="bi bi-info-circle me-1"></i>
-                    La actualizacion descargara el codigo nuevo, ejecutara migraciones de base de datos, instalara crons necesarios y reiniciara el servicio del panel.
+                    La actualizacion descargara el codigo nuevo, ejecutara migraciones de base de datos, instalara crons necesarios, reiniciara el servicio del panel
+                    y lanzara un warm-up del monitor collector para inicializar las vigilancias de seguridad/eventos al instante.
                     La pagina se recargara automaticamente.
                 </small>
             </div>
         <?php endif; ?>
+    </div>
+</div>
+
+<!-- Bash note -->
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-terminal me-2"></i>Nota: update manual desde Bash
+    </div>
+    <div class="card-body">
+        <p class="text-muted mb-2">
+            Si prefieres ejecutar el update por consola, usa estos comandos en el servidor:
+        </p>
+        <pre class="bg-dark text-light p-3 rounded mb-2"><code>cd /opt/musedock-panel
+git pull --ff-only origin main
+bash /opt/musedock-panel/bin/update.sh --auto</code></pre>
+        <small class="text-muted d-block">
+            Si <code>git pull</code> muestra <code>Already up to date.</code>, es normal.
+            Aun asi ejecuta <code>update.sh --auto</code> para aplicar tareas de mantenimiento del panel.
+        </small>
     </div>
 </div>
 
@@ -157,7 +177,7 @@
             <tr><td class="text-muted">Rama</td><td><code>main</code></td></tr>
             <tr><td class="text-muted">Directorio</td><td><code>/opt/musedock-panel</code></td></tr>
             <tr><td class="text-muted">Intervalo de check</td><td>Cada 6 horas (automatico al visitar esta pagina)</td></tr>
-            <tr><td class="text-muted">Proceso de update</td><td>git pull → migraciones → crons → reinicio servicio</td></tr>
+            <tr><td class="text-muted">Proceso de update</td><td>git pull → migraciones → crons → reinicio servicio → warm-up collector</td></tr>
         </table>
     </div>
 </div>

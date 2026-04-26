@@ -20,6 +20,59 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.162',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Security: nueva auditoria de hardening del host con fix 1 clic (sshd, fail2ban, sysctl y permisos `/root/.ssh`) en `/settings/security`',
+                            'Security: nueva politica de puertos TCP publicos esperados en `/settings/security` para detectar exposicion inesperada',
+                            'Auth/Profile: soporte MFA TOTP para admins (setup, activar, desactivar, login MFA) y opcion de MFA obligatoria global',
+                            'Auth/Security: registro de eventos de login admin con deteccion de anomalia por IP/ASN/pais y alerta `LOGIN_ANOMALY`',
+                            'Monitor collector: nuevos eventos `SECURITY_HARDENING`, `CONFIG_DRIFT` y `PORT_EXPOSURE` con anti-spam y envio email por cooldown',
+                            'Firewall: nuevo lockdown temporal de emergencia en `/settings/firewall` con password admin, auto-expiracion y alertas de expiracion/error',
+                            'Docs: nueva guia especial de seguridad operativa en `/docs/security-operations` + actualizacion de guias Firewall/Settings',
+                        ],
+                        'en' => [
+                            'Security: new host hardening audit with one-click fix (sshd, fail2ban, sysctl and `/root/.ssh` permissions) in `/settings/security`',
+                            'Security: new expected public TCP ports policy in `/settings/security` to detect unexpected exposure',
+                            'Auth/Profile: TOTP MFA support for admins (setup, enable, disable, MFA login) and global required-MFA option',
+                            'Auth/Security: admin login event tracking with anomaly detection by IP/ASN/country and `LOGIN_ANOMALY` alert',
+                            'Monitor collector: new `SECURITY_HARDENING`, `CONFIG_DRIFT` and `PORT_EXPOSURE` events with anti-spam and cooldown-based email',
+                            'Firewall: new emergency temporary lockdown in `/settings/firewall` with admin-password confirmation, auto-expiry and expiry/error alerts',
+                            'Docs: new special security operations guide at `/docs/security-operations` + updated Firewall/Settings docs',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Updater (`bin/update.sh`): ahora ejecuta un warm-up de `monitor-collector.php` tras actualizar para inicializar watchers sin esperar al cron',
+                            'Updates UI: documenta que el update web/shell incluye warm-up del collector',
+                            'Notifications: nuevos switches de eventos de seguridad en `/settings/notifications` para hardening/drift/exposure/login anomaly',
+                            'Firewall watcher: ahora adjunta diff resumido de cambios reales en reglas para facilitar diagnostico',
+                        ],
+                        'en' => [
+                            'Updater (`bin/update.sh`): now runs a `monitor-collector.php` warm-up after update so watchers initialize immediately (no cron wait)',
+                            'Updates UI: now documents that web/shell update includes collector warm-up',
+                            'Notifications: new security-event switches in `/settings/notifications` for hardening/drift/exposure/login anomaly',
+                            'Firewall watcher: now includes a concise diff of real rule changes for easier diagnostics',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Firewall watch (`FIREWALL_CHANGED`): eliminado ruido por falsos positivos debidos a timestamps y contadores de `iptables-save`/`ip6tables-save`',
+                            'Firewall fingerprint: hash normalizado (ignora `Generated/Completed` y counters de cadenas) para alertar solo ante cambios de reglas/politicas reales',
+                            'Security settings: añadido `verifyCsrf()` en guardado de seguridad y aplicacion de hardening para consistencia de seguridad en POSTs',
+                        ],
+                        'en' => [
+                            'Firewall watch (`FIREWALL_CHANGED`): removed noisy false positives caused by `iptables-save`/`ip6tables-save` timestamps and counters',
+                            'Firewall fingerprint: normalized hashing (ignores `Generated/Completed` metadata and chain counters) to alert only on real rule/policy changes',
+                            'Security settings: added `verifyCsrf()` on security save and hardening apply actions for consistent POST protection',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.161',
                 'date' => '2026-04-26',
                 'badge' => 'primary',

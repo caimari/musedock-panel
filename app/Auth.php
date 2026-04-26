@@ -5,21 +5,35 @@ use MuseDockPanel\Security\ClientIp;
 
 class Auth
 {
-    public static function attempt(string $username, string $password): bool
+    public static function findActiveUser(string $username): ?array
     {
-        $user = Database::fetchOne(
+        $username = trim($username);
+        if ($username === '') {
+            return null;
+        }
+
+        return Database::fetchOne(
             "SELECT * FROM panel_admins WHERE username = :username AND is_active = true",
             ['username' => $username]
         );
+    }
 
+    public static function verifyCredentials(string $username, string $password): ?array
+    {
+        $user = self::findActiveUser($username);
         if (!$user) {
-            return false;
+            return null;
         }
 
         if (!password_verify($password, $user['password_hash'])) {
-            return false;
+            return null;
         }
 
+        return $user;
+    }
+
+    public static function loginUser(array $user): void
+    {
         // Update last login
         Database::update('panel_admins', [
             'last_login_at' => date('Y-m-d H:i:s'),
@@ -34,7 +48,16 @@ class Auth
             'username' => $user['username'],
             'role' => $user['role'],
         ];
+    }
 
+    public static function attempt(string $username, string $password): bool
+    {
+        $user = self::verifyCredentials($username, $password);
+        if (!$user) {
+            return false;
+        }
+
+        self::loginUser($user);
         return true;
     }
 

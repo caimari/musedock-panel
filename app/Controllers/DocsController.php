@@ -324,6 +324,14 @@ class DocsController
     {
         return $this->dedupeTopics([
             [
+                'title' => 'Seguridad operativa: hardening, drift, exposicion, lockdown y MFA',
+                'description' => 'Guia integral de seguridad del panel: que dispara FIREWALL_CHANGED, como validar cambios reales y donde gestionar cada control.',
+                'url' => '/docs/security-operations',
+                'category' => 'Guia especial',
+                'icon' => 'bi-shield-lock',
+                'keywords' => 'security hardening drift firewall changed fingerprint hash lockdown mfa login anomaly fail2ban exposicion puertos collector',
+            ],
+            [
                 'title' => 'Firewall completo: snapshots, export/import y verificacion',
                 'description' => 'Guia operativa del firewall del panel con snapshots completos, backup JSON e importacion segura por nodos.',
                 'url' => '/docs/firewall-operations',
@@ -510,21 +518,24 @@ class DocsController
             'server' => [
                 'title' => 'Servidor',
                 'panel_url' => '/settings/server',
-                'summary' => 'Identidad del nodo, hostname y parametros generales del servidor.',
-                'what_is' => 'Centraliza ajustes base del nodo donde corre el panel: identificacion, contexto de entorno y parametros globales.',
+                'summary' => 'Identidad del nodo, hostname, TLS del panel y parametros globales del host.',
+                'what_is' => 'Centraliza ajustes base del nodo donde corre el panel: identidad, timezone, URL/TLS del panel y estado operativo general.',
                 'quick_steps' => [
-                    'Revisar identidad del servidor y hostname efectivo.',
-                    'Ajustar parametros globales que afecten al resto de modulos.',
-                    'Guardar y verificar que no hay alertas nuevas en System Health.',
+                    'Verificar hostname, timezone y URL de acceso real del panel.',
+                    'Ajustar TLS del panel (self-signed/http01/dns01) segun tu modelo de red.',
+                    'Guardar cambios y comprobar acceso HTTPS por dominio e IP fallback.',
+                    'Gestionar avisos de reinicio/paradas desde Settings > Notifications.',
                 ],
                 'checklist' => [
                     'Hostname correcto y coherente con DNS/reverse.',
+                    'URL del panel accesible por ruta principal y fallback.',
                     'Cambios aplicados sin errores en logs.',
-                    'No hay impacto en servicios dependientes.',
+                    'Sin impacto en servicios dependientes (Caddy/PHP/cron).',
                 ],
                 'pitfalls' => [
                     'Cambiar identidad sin revisar DNS puede romper validaciones externas.',
-                    'Aplicar cambios en horas pico puede afectar procesos en curso.',
+                    'Usar HTTP-01 con firewall cerrado impide emision/renovacion de certificados.',
+                    'Pensar que los avisos de reinicio se gestionan aqui (ahora van en Notificaciones).',
                 ],
             ],
             'php' => [
@@ -570,20 +581,24 @@ class DocsController
             'security' => [
                 'title' => 'Seguridad',
                 'panel_url' => '/settings/security',
-                'summary' => 'Hardening y controles de acceso del panel.',
-                'what_is' => 'Agrupa controles de seguridad del entorno del panel y del acceso administrativo.',
+                'summary' => 'Hardening del host, MFA admin y controles de acceso del panel.',
+                'what_is' => 'Agrupa baseline de hardening del host, politica MFA de administradores y restricciones de acceso del panel.',
                 'quick_steps' => [
-                    'Revisar politicas activas y endurecimiento recomendado.',
-                    'Aplicar cambios de forma incremental.',
-                    'Validar login, sesiones y endpoints criticos.',
+                    'Revisar auditoria de hardening (sshd/fail2ban/sysctl/permisos SSH) y su score.',
+                    'Aplicar fix 1 clic cuando haya controles fuera de baseline.',
+                    'Definir puertos publicos esperados para alerta de exposicion.',
+                    'Activar MFA obligatoria solo cuando todos los admins esten enrolados.',
                 ],
                 'checklist' => [
-                    'Acceso admin protegido.',
+                    'Acceso admin protegido con MFA cuando corresponda.',
+                    'Hardening base del host en estado OK.',
+                    'Puertos esperados definidos para deteccion de deriva operativa.',
                     'Sin bloqueos accidentales de operacion legitima.',
                     'Eventos sensibles auditables en logs.',
                 ],
                 'pitfalls' => [
-                    'Reglas demasiado restrictivas pueden bloquear automatizaciones internas.',
+                    'Activar MFA global sin enrolar a todos los admins bloquea operaciones.',
+                    'Aplicar hardening sin validar acceso SSH por clave puede cortar acceso remoto.',
                     'Cambiar varias politicas a la vez dificulta aislar incidencias.',
                 ],
             ],
@@ -728,40 +743,51 @@ class DocsController
             'firewall' => [
                 'title' => 'Firewall',
                 'panel_url' => '/settings/firewall',
-                'summary' => 'Reglas de red y exposicion de puertos.',
-                'what_is' => 'Controla la superficie expuesta del servidor y la politica de trafico entrante/saliente.',
+                'summary' => 'Reglas de red, auditoria, snapshots, import/export y lockdown temporal.',
+                'what_is' => 'Controla la superficie expuesta del servidor, permite correcciones rapidas y mantiene backups operativos del estado real del firewall.',
                 'quick_steps' => [
-                    'Revisar reglas activas y puertos publicados.',
-                    'Aplicar cambios minimos y validar acceso admin.',
-                    'Guardar configuracion final y dejar regla de emergencia definida.',
+                    'Guardar snapshot completo antes de tocar reglas.',
+                    'Aplicar cambios minimos y validar acceso SSH/panel tras cada bloque.',
+                    'Revisar la Auditoria de Seguridad y ejecutar fix directo cuando aplique.',
+                    'Usar lockdown temporal de emergencia para cortar ataque activo y dejar auto-expiracion.',
+                    'Exportar JSON al cerrar cambios para poder clonar estado en otros nodos.',
                 ],
                 'checklist' => [
                     'Puertos criticos abiertos solo donde toca.',
+                    'Sin reglas globales tipo ACCEPT all sin condicion.',
                     'Panel y SSH accesibles tras cambios.',
                     'Servicios internos no expuestos innecesariamente.',
+                    'IPv6 protegida (reglas o bloqueo por defecto) si esta activa.',
                 ],
                 'pitfalls' => [
                     'Cerrar SSH/panel sin regla de rescate puede dejar servidor inaccesible.',
-                    'Reglas duplicadas o desordenadas dificultan auditoria.',
+                    'Importar en modo replace sin snapshot previo complica recuperacion.',
+                    'Olvidar IPv6 deja una via abierta aunque IPv4 este bien cerrada.',
                 ],
                 'advanced_steps' => [
-                    'Tomar baseline de reglas actuales y acceso admin (IP de origen y puertos en uso).',
-                    'Crear primero regla de seguridad para no perder acceso a SSH y panel.',
-                    'Aplicar cambios en bloques pequenos: entrada, salida y servicios expuestos por capas.',
-                    'Validar conectividad desde fuera y desde dentro del nodo tras cada bloque.',
-                    'Guardar configuracion final y dejar un procedimiento de emergencia documentado.',
+                    'Tomar baseline: reglas actuales, politica por defecto y puertos escuchando realmente.',
+                    'Crear/confirmar camino de rescate para SSH y panel antes de cambios destructivos.',
+                    'Aplicar cambios por capas (entrada, servicios, endurecimiento) con verificacion en cada paso.',
+                    'Si hay incidente, activar lockdown temporal 10-15 min y resolver antes de su expiracion.',
+                    'Guardar snapshot completo al inicio y otro al final para rollback rapido.',
+                    'Mantener vigilancia de cambios externos en Settings > Notifications para detectar cambios por shell/manual.',
+                    'Si gestionas multiples nodos, exportar JSON e importar en append primero; replace solo tras validacion.',
                 ],
                 'verify_commands' => [
-                    'sudo ufw status verbose',
-                    'sudo iptables -S',
-                    'sudo ss -tulpen',
+                    'iptables -L -n --line-numbers',
+                    'iptables -S | grep "^-P"',
+                    'iptables -S | grep -E "ACCEPT.*0.0.0.0/0.*0.0.0.0/0"',
+                    'iptables -L INPUT -n | grep dpt:22',
+                    'ip6tables -S',
+                    'ss -tuln',
+                    'fail2ban-client status',
                     'curl -kI https://127.0.0.1:8444',
                 ],
                 'rollback_steps' => [
-                    'Restaurar la ultima politica conocida que mantenia SSH y panel accesibles.',
-                    'Reabrir temporalmente puertos de gestion (SSH/panel) desde IP administrativa.',
-                    'Revertir el ultimo bloque de reglas aplicado y volver a validar acceso remoto.',
-                    'Documentar regla conflictiva antes de reintentar el cambio.',
+                    'Aplicar el ultimo snapshot completo valido desde la seccion de snapshots.',
+                    'Usar el boton de emergencia para abrir acceso de gestion desde tu IP si quedaste bloqueado.',
+                    'Reabrir temporalmente puertos de gestion y volver a baseline seguro.',
+                    'Exportar estado recuperado y documentar la regla o import conflictivo antes de reintentar.',
                 ],
             ],
             'wireguard' => [
@@ -806,21 +832,47 @@ class DocsController
             'notifications' => [
                 'title' => 'Notificaciones',
                 'panel_url' => '/settings/notifications',
-                'summary' => 'Canales y eventos de alertado operativo.',
-                'what_is' => 'Define como y a donde se notifican alertas del panel (email/telegram/etc).',
+                'summary' => 'Canales de envio y eventos de seguridad/operacion con anti-spam.',
+                'what_is' => 'Define como y a donde se notifican alertas del panel (SMTP/PHP mail/Telegram) y activa eventos de seguridad: firewall externo, reboot, gap, hardening, config drift, exposicion y login anomalo.',
                 'quick_steps' => [
-                    'Configurar credenciales del canal elegido.',
-                    'Seleccionar eventos relevantes por criticidad.',
-                    'Ejecutar prueba de envio y validar recepcion.',
+                    'Configurar canal de envio (SMTP o PHP mail) y destinatario efectivo.',
+                    'Configurar Telegram si quieres segundo canal de respaldo.',
+                    'Activar eventos de sistema: FIREWALL_CHANGED, SERVER_REBOOT y MONITOR_GAP.',
+                    'Activar eventos de seguridad: SECURITY_HARDENING, CONFIG_DRIFT, PORT_EXPOSURE y LOGIN_ANOMALY.',
+                    'Ejecutar pruebas de envio y validar recepcion real.',
                 ],
                 'checklist' => [
-                    'Canal de emergencia funcionando.',
-                    'Sin ruido excesivo de alertas no accionables.',
-                    'Destinatarios actualizados.',
+                    'Al menos un canal de envio operativo y probado.',
+                    'Destinatarios actualizados (email/telegram).',
+                    'Eventos del sistema activados segun politica del nodo.',
+                    'Eventos de seguridad activados con cooldown apropiado (sin ruido excesivo).',
+                    'Umbral de MONITOR_GAP acorde al cron real (sin ruido innecesario).',
                 ],
                 'pitfalls' => [
-                    'Sin prueba real, la configuracion puede quedar rota sin detectarlo.',
-                    'Alertas excesivas generan fatiga operativa.',
+                    'Dejar eventos activos sin canal configurado genera falsa sensacion de cobertura.',
+                    'Umbral de gap demasiado bajo dispara alertas ruidosas.',
+                    'Monitor collector inactivo impide detectar eventos de firewall/reboot/gap.',
+                ],
+                'advanced_steps' => [
+                    'Si usas PHP mail(), valida que exista sendmail/postfix; si no, usa SMTP.',
+                    'Definir destinatario explicito para separar alertas tecnicas del email de perfil.',
+                    'Usar Telegram como canal secundario para incidentes de correo.',
+                    'Verificar que el cron de monitor collector esta activo en el nodo.',
+                    'Tras guardar cambios, forzar una ejecucion del collector para inicializar estados de vigilancia.',
+                ],
+                'verify_commands' => [
+                    'cd /opt/musedock-panel && php bin/monitor-collector.php',
+                    'ls -l /opt/musedock-panel/storage/cache/*watch-state.json',
+                    'ls -l /opt/musedock-panel/storage/cache/security-hardening-watch-state.json /opt/musedock-panel/storage/cache/config-drift-watch-state.json /opt/musedock-panel/storage/cache/public-exposure-watch-state.json',
+                    'tail -n 60 /opt/musedock-panel/storage/logs/monitor-collector.log',
+                    'cat /etc/cron.d/musedock-monitor',
+                    'systemctl status cron --no-pager',
+                ],
+                'rollback_steps' => [
+                    'Desactivar temporalmente el evento ruidoso mientras ajustas umbral/canal.',
+                    'Volver a la ultima configuracion SMTP/Telegram conocida que enviaba correctamente.',
+                    'Reactivar eventos de forma gradual y validar cada canal con prueba real.',
+                    'Si el collector falla, reparar cron/ejecucion antes de volver a activar avisos.',
                 ],
             ],
             'proxy-routes' => [
@@ -913,7 +965,7 @@ class DocsController
                 'quick_steps' => [
                     'Revisar version actual vs disponible.',
                     'Tomar backup/snapshot antes de actualizar.',
-                    'Actualizar y validar rutas criticas del panel.',
+                    'Actualizar desde web o shell y validar rutas criticas del panel.',
                 ],
                 'checklist' => [
                     'Version esperada aplicada.',
@@ -932,6 +984,8 @@ class DocsController
                     'Confirmar crons requeridos y health checks en verde al finalizar.',
                 ],
                 'verify_commands' => [
+                    'cd /opt/musedock-panel && git pull --ff-only origin main',
+                    'bash /opt/musedock-panel/bin/update.sh --auto',
                     'cd /opt/musedock-panel && git rev-parse --short HEAD',
                     'sudo systemctl status caddy --no-pager',
                     'sudo systemctl status php8.2-fpm --no-pager',
@@ -1249,6 +1303,14 @@ class DocsController
         View::render('help/firewall-operations', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Firewall Operations',
+        ]);
+    }
+
+    public function securityOperations(): void
+    {
+        View::render('help/security-operations', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Seguridad operativa',
         ]);
     }
 

@@ -12,6 +12,8 @@ class FirewallService
     private const RULE_PRESETS_KEY = 'firewall_rule_presets';
     private const FULL_SNAPSHOTS_KEY = 'firewall_full_snapshots';
     private const MAX_FULL_SNAPSHOTS = 20;
+    private const LOCKDOWN_CHAIN_V4 = 'MUSEDOCK_LOCKDOWN';
+    private const LOCKDOWN_CHAIN_V6 = 'MUSEDOCK_LOCKDOWN6';
 
     // ─── Detection ────────────────────────────────────────────
 
@@ -41,6 +43,11 @@ class FirewallService
             self::$cachedType = self::detectType();
         }
         return self::$cachedType;
+    }
+
+    public static function resetTypeCache(): void
+    {
+        self::$cachedType = null;
     }
 
     public static function isActive(): bool
@@ -822,6 +829,187 @@ class FirewallService
         }
 
         return ['ok' => false, 'output' => 'No se detecto firewall'];
+    }
+
+    public static function getTemporaryLockdownState(): array
+    {
+        $untilTs = (int)Settings::get('firewall_lockdown_until_ts', '0');
+        $adminIp = trim(Settings::get('firewall_lockdown_admin_ip', ''));
+        return [
+            'active' => $untilTs > time(),
+            'until_ts' => $untilTs,
+            'admin_ip' => $adminIp,
+        ];
+    }
+
+    public static function startTemporaryLockdown(string $adminIp, int $minutes = 15, int $panelPort = 8444): array
+    {
+        $adminIp = trim($adminIp);
+        if (!filter_var($adminIp, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'error' => 'IP admin invalida para lockdown'];
+        }
+
+        $minutes = max(1, min(120, $minutes));
+        $panelPort = max(1, min(65535, $panelPort));
+
+        $steps = [];
+        $errors = [];
+
+        $isV4 = filter_var($adminIp, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false;
+        $isV6 = filter_var($adminIp, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== false;
+
+        $v4Bin = trim((string)shell_exec('which iptables 2>/dev/null'));
+        if ($v4Bin !== '') {
+            $apply = self::applyLockdownChain('iptables', self::LOCKDOWN_CHAIN_V4, $isV4 ? $adminIp : '');
+            $steps[] = ['name' => 'iptables lockdown', 'ok' => $apply['ok'], 'output' => $apply['output']];
+            if (!$apply['ok']) {
+                $errors[] = $apply['output'];
+            }
+        }
+
+        $v6Bin = trim((string)shell_exec('which ip6tables 2>/dev/null'));
+        if ($v6Bin !== '') {
+            $apply6 = self::applyLockdownChain('ip6tables', self::LOCKDOWN_CHAIN_V6, $isV6 ? $adminIp : '');
+            $steps[] = ['name' => 'ip6tables lockdown', 'ok' => $apply6['ok'], 'output' => $apply6['output']];
+            if (!$apply6['ok']) {
+                $errors[] = $apply6['output'];
+            }
+        }
+
+        if ($v4Bin === '' && $v6Bin === '') {
+            return ['ok' => false, 'error' => 'No hay iptables/ip6tables disponibles para lockdown'];
+        }
+
+        if (!empty($errors)) {
+            return ['ok' => false, 'error' => implode(' | ', $errors), 'steps' => $steps];
+        }
+
+        $untilTs = time() + ($minutes * 60);
+        Settings::set('firewall_lockdown_until_ts', (string)$untilTs);
+        Settings::set('firewall_lockdown_admin_ip', $adminIp);
+        Settings::set('firewall_lockdown_minutes', (string)$minutes);
+
+        // Persist best effort
+        self::iptablesSave();
+        @shell_exec('ip6tables-save > /etc/iptables/rules.v6 2>/dev/null');
+        @shell_exec('netfilter-persistent save 2>/dev/null');
+
+        return [
+            'ok' => true,
+            'until_ts' => $untilTs,
+            'steps' => $steps,
+            'message' => "Lockdown temporal activado durante {$minutes} min",
+        ];
+    }
+
+    public static function stopTemporaryLockdown(): array
+    {
+        $steps = [];
+        $errors = [];
+
+        $v4Bin = trim((string)shell_exec('which iptables 2>/dev/null'));
+        if ($v4Bin !== '') {
+            $stop = self::removeLockdownChain('iptables', self::LOCKDOWN_CHAIN_V4);
+            $steps[] = ['name' => 'iptables unlock', 'ok' => $stop['ok'], 'output' => $stop['output']];
+            if (!$stop['ok']) {
+                $errors[] = $stop['output'];
+            }
+        }
+
+        $v6Bin = trim((string)shell_exec('which ip6tables 2>/dev/null'));
+        if ($v6Bin !== '') {
+            $stop6 = self::removeLockdownChain('ip6tables', self::LOCKDOWN_CHAIN_V6);
+            $steps[] = ['name' => 'ip6tables unlock', 'ok' => $stop6['ok'], 'output' => $stop6['output']];
+            if (!$stop6['ok']) {
+                $errors[] = $stop6['output'];
+            }
+        }
+
+        Settings::set('firewall_lockdown_until_ts', '0');
+        Settings::set('firewall_lockdown_admin_ip', '');
+        Settings::set('firewall_lockdown_minutes', '0');
+
+        // Persist best effort
+        self::iptablesSave();
+        @shell_exec('ip6tables-save > /etc/iptables/rules.v6 2>/dev/null');
+        @shell_exec('netfilter-persistent save 2>/dev/null');
+
+        if (!empty($errors)) {
+            return ['ok' => false, 'error' => implode(' | ', $errors), 'steps' => $steps];
+        }
+
+        return ['ok' => true, 'steps' => $steps, 'message' => 'Lockdown temporal desactivado'];
+    }
+
+    private static function applyLockdownChain(string $tool, string $chain, string $allowedIp): array
+    {
+        $outputs = [];
+        $run = static function (string $cmd) use (&$outputs): array {
+            $out = trim((string)shell_exec($cmd . ' 2>&1'));
+            if ($out !== '') {
+                $outputs[] = $out;
+            }
+            $ok = $out === '' || stripos($out, 'error') === false;
+            return ['ok' => $ok, 'out' => $out];
+        };
+
+        $run($tool . ' -N ' . escapeshellarg($chain) . ' >/dev/null 2>&1 || true');
+        $resFlush = $run($tool . ' -F ' . escapeshellarg($chain));
+        if (!$resFlush['ok']) {
+            return ['ok' => false, 'output' => implode(' | ', $outputs)];
+        }
+
+        exec($tool . ' -C INPUT -j ' . escapeshellarg($chain) . ' >/dev/null 2>&1', $x1, $rc1);
+        if ($rc1 !== 0) {
+            $resInsert = $run($tool . ' -I INPUT 1 -j ' . escapeshellarg($chain));
+            if (!$resInsert['ok']) {
+                return ['ok' => false, 'output' => implode(' | ', $outputs)];
+            }
+        }
+
+        $run($tool . ' -A ' . escapeshellarg($chain) . ' -i lo -j RETURN');
+        $run($tool . ' -A ' . escapeshellarg($chain) . ' -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN');
+        if ($allowedIp !== '') {
+            $run($tool . ' -A ' . escapeshellarg($chain) . ' -s ' . escapeshellarg($allowedIp) . ' -j RETURN');
+        }
+        $resDrop = $run($tool . ' -A ' . escapeshellarg($chain) . ' -j DROP');
+
+        return ['ok' => $resDrop['ok'], 'output' => implode(' | ', $outputs)];
+    }
+
+    private static function removeLockdownChain(string $tool, string $chain): array
+    {
+        $outputs = [];
+
+        for ($i = 0; $i < 10; $i++) {
+            exec($tool . ' -C INPUT -j ' . escapeshellarg($chain) . ' >/dev/null 2>&1', $x, $rc);
+            if ($rc !== 0) {
+                break;
+            }
+            $out = trim((string)shell_exec($tool . ' -D INPUT -j ' . escapeshellarg($chain) . ' 2>&1'));
+            if ($out !== '') {
+                $outputs[] = $out;
+            }
+        }
+
+        $flushOut = trim((string)shell_exec($tool . ' -F ' . escapeshellarg($chain) . ' 2>&1'));
+        if ($flushOut !== '' && stripos($flushOut, 'No chain/target/match') === false) {
+            $outputs[] = $flushOut;
+        }
+
+        $delOut = trim((string)shell_exec($tool . ' -X ' . escapeshellarg($chain) . ' 2>&1'));
+        if ($delOut !== '' && stripos($delOut, 'No chain/target/match') === false) {
+            $outputs[] = $delOut;
+        }
+
+        $errorText = implode(' | ', array_filter($outputs, static function (string $line): bool {
+            return stripos($line, 'error') !== false;
+        }));
+
+        return [
+            'ok' => $errorText === '',
+            'output' => implode(' | ', $outputs),
+        ];
     }
 
     // ─── Security Audit ────────────────────────────────────
