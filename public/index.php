@@ -538,6 +538,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/lsyncd-start', 'ClusterController@lsyncdStart');
 \MuseDockPanel\Router::post('/settings/cluster/lsyncd-stop', 'ClusterController@lsyncdStop');
 \MuseDockPanel\Router::post('/settings/cluster/lsyncd-reload', 'ClusterController@lsyncdReload');
+\MuseDockPanel\Router::post('/settings/cluster/lsyncd-autofix', 'ClusterController@lsyncdAutofix');
+\MuseDockPanel\Router::post('/settings/cluster/lsyncd-retry', 'ClusterController@lsyncdRetry');
 \MuseDockPanel\Router::get('/settings/cluster/lsyncd-status', 'ClusterController@lsyncdStatus');
 \MuseDockPanel\Router::post('/settings/cluster/node-standby', 'ClusterController@toggleNodeStandby');
 \MuseDockPanel\Router::get('/settings/cluster/browse-vhosts', 'ClusterController@browseVhosts');
@@ -617,6 +619,14 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/firewall/disable', 'FirewallController@disableFirewall');
 \MuseDockPanel\Router::post('/settings/firewall/emergency', 'FirewallController@emergencyAllow');
 \MuseDockPanel\Router::post('/settings/firewall/save', 'FirewallController@saveRules');
+\MuseDockPanel\Router::post('/settings/firewall/presets/save', 'FirewallController@savePreset');
+\MuseDockPanel\Router::post('/settings/firewall/presets/delete', 'FirewallController@deletePreset');
+\MuseDockPanel\Router::post('/settings/firewall/presets/apply', 'FirewallController@applyPreset');
+\MuseDockPanel\Router::post('/settings/firewall/snapshots/save', 'FirewallController@saveFullSnapshot');
+\MuseDockPanel\Router::post('/settings/firewall/snapshots/delete', 'FirewallController@deleteFullSnapshot');
+\MuseDockPanel\Router::post('/settings/firewall/snapshots/apply', 'FirewallController@applyFullSnapshot');
+\MuseDockPanel\Router::post('/settings/firewall/export', 'FirewallController@exportConfig');
+\MuseDockPanel\Router::post('/settings/firewall/import', 'FirewallController@importConfig');
 \MuseDockPanel\Router::get('/settings/firewall/suggest', 'FirewallController@suggestRules');
 
 // Backups
@@ -658,6 +668,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/docs/postgresql-mirror-master-slave', 'DocsController@postgresqlMirrorMasterSlave');
 \MuseDockPanel\Router::get('/docs/install-recovery', 'DocsController@installRecovery');
 \MuseDockPanel\Router::get('/docs/default-backups', 'DocsController@defaultBackups');
+\MuseDockPanel\Router::get('/docs/firewall-operations', 'DocsController@firewallOperations');
+\MuseDockPanel\Router::get('/docs/sync-archivos-lsyncd', 'DocsController@syncArchivosLsyncd');
 
 // Profile
 \MuseDockPanel\Router::get('/profile', 'ProfileController@index');

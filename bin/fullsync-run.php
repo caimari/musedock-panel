@@ -66,7 +66,12 @@ try {
     $sshAvailable = false;
     $sshKeyPath = $fsConfig['ssh_key_path'] ?? '/root/.ssh/id_ed25519';
     if (file_exists($sshKeyPath)) {
-        $sshTest = FileSyncService::testSshConnection($host, $fsConfig['ssh_port'] ?? 22, $sshKeyPath);
+        $sshTest = FileSyncService::testSshConnection(
+            $host,
+            $fsConfig['ssh_port'] ?? 22,
+            $sshKeyPath,
+            $fsConfig['ssh_user'] ?? 'root'
+        );
         $sshAvailable = $sshTest['ok'] ?? false;
     }
 

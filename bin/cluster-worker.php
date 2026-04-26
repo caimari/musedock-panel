@@ -52,6 +52,38 @@ function logMsg(string $msg): void
     $logLines[] = $line;
 }
 
+function pushMonitorAlert(string $type, string $message, float $value = 0.0, ?string $details = null, int $cooldownSeconds = 900): void
+{
+    try {
+        $host = gethostname() ?: 'localhost';
+        $cooldownSeconds = max(60, min(86400, $cooldownSeconds));
+        $recent = \MuseDockPanel\Database::fetchOne(
+            "SELECT id FROM monitor_alerts
+             WHERE host = :host
+               AND type = :type
+               AND ts > NOW() - (CAST(:cooldown_seconds AS integer) * INTERVAL '1 second')",
+            [
+                'host' => $host,
+                'type' => $type,
+                'cooldown_seconds' => $cooldownSeconds,
+            ]
+        );
+        if ($recent) {
+            return;
+        }
+
+        \MuseDockPanel\Database::insert('monitor_alerts', [
+            'host' => $host,
+            'type' => $type,
+            'message' => $message,
+            'value' => $value,
+            'details' => $details,
+        ]);
+    } catch (\Throwable $e) {
+        logMsg("  Monitor alert insert error ({$type}): " . $e->getMessage());
+    }
+}
+
 try {
     // Verify database connectivity
     \MuseDockPanel\Database::connect();
@@ -61,6 +93,7 @@ try {
 }
 
 use MuseDockPanel\Services\ClusterService;
+use MuseDockPanel\Services\FileSyncService;
 use MuseDockPanel\Services\LogService;
 use MuseDockPanel\Settings;
 
@@ -343,6 +376,148 @@ try {
     Settings::set('cluster_tls_alert_state', json_encode($tlsAlertState));
 } catch (\Throwable $e) {
     logMsg("ERROR checking TLS expiry: " . $e->getMessage());
+}
+
+// ─── Step 2d: lsyncd health (sync congestion / SSH refused) ─────────────
+logMsg("Checking lsyncd health...");
+try {
+    $fsCfg = FileSyncService::getConfig();
+    $lsyncdMode = (string)($fsCfg['sync_mode'] ?? 'periodic');
+    $lsyncdEnabled = (bool)($fsCfg['enabled'] ?? false);
+
+    if ($lsyncdEnabled && $lsyncdMode === 'lsyncd') {
+        $ls = FileSyncService::getLsyncdStatus();
+        $now = time();
+        $stateRaw = Settings::get('cluster_lsyncd_alert_state', '{}');
+        $state = json_decode($stateRaw, true);
+        if (!is_array($state)) $state = [];
+
+        $isCritical = (($ls['health'] ?? 'ok') === 'critical');
+        $hasConnRefused = !empty($ls['connection_refused_recent']);
+        $hasIssue = $isCritical || $hasConnRefused;
+
+        if ($hasIssue) {
+            $badNodes = [];
+            foreach (($ls['ssh_unreachable'] ?? []) as $n) {
+                $badNodes[] = (string)($n['node_name'] ?? ($n['host'] ?? 'nodo'));
+            }
+            $badNodesTxt = !empty($badNodes) ? implode(', ', $badNodes) : 'sin identificar';
+            $rssMb = (int)($ls['rss_mb'] ?? 0);
+            $activeEvents = (int)($ls['active_events'] ?? 0);
+            $logMb = (int)($ls['log_size_mb'] ?? 0);
+            $recentErrors = trim((string)($ls['recent_errors'] ?? ''));
+            $severity = $isCritical ? 'CRITICA' : 'WARNING';
+
+            $lastAlert = (int)($state['last_alert'] ?? 0);
+            $repeatEvery = $isCritical ? 900 : 1800; // 15m / 30m
+            if ($lastAlert === 0 || ($now - $lastAlert) >= $repeatEvery) {
+                $subject = "[MuseDock Cluster] ALERTA SYNC {$severity}: lsyncd congestionado";
+                $body = "Se detectó un problema en sincronización de archivos (lsyncd).\n\n"
+                    . "Modo: lsyncd\n"
+                    . "Health: " . strtoupper((string)($ls['health'] ?? 'unknown')) . "\n"
+                    . "SSH no accesible en: {$badNodesTxt}\n"
+                    . "RSS lsyncd: {$rssMb} MB\n"
+                    . "Eventos activos en cola: {$activeEvents}\n"
+                    . "Tamaño log lsyncd: {$logMb} MB\n"
+                    . "Errores recientes:\n" . ($recentErrors !== '' ? $recentErrors : '(sin detalle)') . "\n\n"
+                    . "Acción recomendada: Cluster > Archivos > botón 'Autocorregir (contener)'.\n"
+                    . "Fecha: " . date('Y-m-d H:i:s');
+
+                \MuseDockPanel\Services\NotificationService::send($subject, $body);
+                LogService::log('cluster.lsyncd', 'alert', "lsyncd issue: rss={$rssMb}MB queue={$activeEvents} bad_nodes={$badNodesTxt}");
+                logMsg("  lsyncd alert sent ({$severity}): rss={$rssMb}MB, queue={$activeEvents}, bad_nodes={$badNodesTxt}");
+                pushMonitorAlert(
+                    'LSYNCD_SYNC_DEGRADED',
+                    "lsyncd degradado: SSH no accesible hacia {$badNodesTxt}. Ir a /settings/cluster#archivos",
+                    (float)$rssMb,
+                    "Health: " . strtoupper((string)($ls['health'] ?? 'unknown'))
+                    . "\nSSH no accesible: {$badNodesTxt}"
+                    . "\nRSS: {$rssMb} MB"
+                    . "\nCola activa: {$activeEvents}"
+                    . "\nLog lsyncd: {$logMb} MB"
+                    . "\n\nAcción recomendada: Cluster > Archivos > Autocorregir (contener).",
+                    $repeatEvery
+                );
+
+                $state['active'] = 1;
+                $state['last_alert'] = $now;
+                $state['last_health'] = (string)($ls['health'] ?? 'unknown');
+                $state['last_summary'] = "rss={$rssMb}MB queue={$activeEvents} nodes={$badNodesTxt}";
+            } else {
+                $remaining = $repeatEvery - ($now - $lastAlert);
+                logMsg("  lsyncd issue throttled, next alert in {$remaining}s.");
+
+                // Keep /monitor visibility even during throttling windows.
+                // This avoids "silent" degraded states after deploy/restart.
+                $host = gethostname() ?: 'localhost';
+                $recentMonitor = \MuseDockPanel\Database::fetchOne(
+                    "SELECT id FROM monitor_alerts
+                     WHERE host = :host
+                       AND type = 'LSYNCD_SYNC_DEGRADED'
+                       AND ts > NOW() - INTERVAL '2 hours'
+                     LIMIT 1",
+                    ['host' => $host]
+                );
+                if (!$recentMonitor) {
+                    pushMonitorAlert(
+                        'LSYNCD_SYNC_DEGRADED',
+                        "lsyncd degradado: SSH no accesible hacia {$badNodesTxt}. Ir a /settings/cluster#archivos",
+                        (float)$rssMb,
+                        "Health: " . strtoupper((string)($ls['health'] ?? 'unknown'))
+                        . "\nSSH no accesible: {$badNodesTxt}"
+                        . "\nRSS: {$rssMb} MB"
+                        . "\nCola activa: {$activeEvents}"
+                        . "\nLog lsyncd: {$logMb} MB"
+                        . "\n\nAcción recomendada: Cluster > Archivos > Autocorregir (contener).",
+                        300
+                    );
+                    logMsg("  lsyncd monitor alert inserted during throttling window.");
+                }
+            }
+
+            // Optional auto-heal (disabled by default to avoid unexpected mode switches)
+            $autoHeal = Settings::get('filesync_lsyncd_auto_heal', '0') === '1';
+            if ($autoHeal) {
+                $lastAutoHeal = (int)($state['last_autoheal'] ?? 0);
+                if ($lastAutoHeal === 0 || ($now - $lastAutoHeal) >= 1800) {
+                    $heal = FileSyncService::autoHealLsyncd();
+                    $state['last_autoheal'] = $now;
+                    $actions = implode(' | ', (array)($heal['actions'] ?? []));
+                    LogService::log('cluster.lsyncd', 'autofix-auto', $actions !== '' ? $actions : 'autoheal executed');
+                    logMsg("  lsyncd auto-heal executed: " . ($actions !== '' ? $actions : 'ok'));
+                    \MuseDockPanel\Services\NotificationService::send(
+                        '[MuseDock Cluster] lsyncd auto-heal ejecutado',
+                        "Se ejecutó auto-heal en lsyncd.\nAcciones: " . ($actions !== '' ? $actions : 'N/A') . "\nFecha: " . date('Y-m-d H:i:s')
+                    );
+                }
+            }
+        } else {
+            if (!empty($state['active'])) {
+                \MuseDockPanel\Services\NotificationService::send(
+                    '[MuseDock Cluster] lsyncd recuperado',
+                    "El estado de lsyncd volvió a normal.\nFecha: " . date('Y-m-d H:i:s')
+                );
+                LogService::log('cluster.lsyncd', 'recovered', 'lsyncd back to normal');
+                logMsg("  lsyncd recovered notification sent.");
+                pushMonitorAlert(
+                    'LSYNCD_SYNC_RECOVERED',
+                    'lsyncd recuperado: sincronización en estado normal. Ver /settings/cluster#archivos',
+                    0.0,
+                    "Estado de lsyncd normalizado.\nFecha: " . date('Y-m-d H:i:s'),
+                    3600
+                );
+            } else {
+                logMsg("  lsyncd health OK.");
+            }
+            $state = [];
+        }
+
+        Settings::set('cluster_lsyncd_alert_state', json_encode($state));
+    } else {
+        logMsg("  lsyncd health check skipped (filesync disabled or mode={$lsyncdMode}).");
+    }
+} catch (\Throwable $e) {
+    logMsg("ERROR checking lsyncd health: " . $e->getMessage());
 }
 
 // ─── Step 3: Check for unreachable nodes (escalating alerts) ──

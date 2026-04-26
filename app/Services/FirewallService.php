@@ -8,6 +8,9 @@ class FirewallService
     private static ?string $cachedType = null;
     private const IPTABLES_DISABLED_FLAG = __DIR__ . '/../../storage/firewall/iptables.disabled.flag';
     private const IPTABLES_BACKUP_FILE = __DIR__ . '/../../storage/firewall/iptables.before-disable.v4';
+    private const RULE_PRESETS_KEY = 'firewall_rule_presets';
+    private const FULL_SNAPSHOTS_KEY = 'firewall_full_snapshots';
+    private const MAX_FULL_SNAPSHOTS = 20;
 
     // ─── Detection ────────────────────────────────────────────
 
@@ -698,6 +701,65 @@ class FirewallService
         return $warnings;
     }
 
+    /**
+     * Audit manual iptables rules that exist outside UFW management.
+     * These rules execute before UFW and can silently bypass it.
+     */
+    public static function auditManualIptablesRules(array $manualRules): array
+    {
+        $warnings = [];
+        $sensitivePorts = [
+            '22'   => ['name' => 'SSH', 'risk' => 'Permite ataques de fuerza bruta desde cualquier IP del mundo'],
+            '8444' => ['name' => 'Panel Admin', 'risk' => 'Expone el panel de administracion a internet'],
+            '8446' => ['name' => 'Portal Clientes', 'risk' => 'Expone el portal de clientes a internet sin restriccion'],
+            '3306' => ['name' => 'MySQL', 'risk' => 'Expone la base de datos MySQL a internet'],
+            '5432' => ['name' => 'PostgreSQL', 'risk' => 'Expone la base de datos PostgreSQL a internet'],
+            '5433' => ['name' => 'PostgreSQL (alt)', 'risk' => 'Expone la base de datos PostgreSQL a internet'],
+            '6379' => ['name' => 'Redis', 'risk' => 'Expone Redis sin autenticacion a internet'],
+        ];
+
+        foreach ($manualRules as $rule) {
+            $target = strtoupper((string)($rule['target'] ?? ''));
+            $sourceRaw = (string)($rule['source_raw'] ?? '');
+            $protocol = strtolower((string)($rule['protocol'] ?? ''));
+            $port = (string)($rule['port'] ?? '');
+            $ruleNum = (int)($rule['num'] ?? 0);
+            if ($ruleNum <= 0 || $target !== 'ACCEPT') {
+                continue;
+            }
+
+            // Full allow rule from any IP: bypasses UFW effectively.
+            if ($sourceRaw === '0.0.0.0/0' && ($protocol === 'all' || $protocol === '') && ($port === 'all' || $port === '')) {
+                $warnings[] = [
+                    'severity'       => 'danger',
+                    'icon'           => 'bi-exclamation-octagon-fill',
+                    'title'          => "Regla iptables manual #{$ruleNum}: Acceso total desde cualquier IP",
+                    'message'        => "La regla manual #{$ruleNum} permite TODO el trafico desde 0.0.0.0/0. Aunque UFW este activo, esta regla se evalua antes y deja el servidor abierto.",
+                    'rule_num'       => $ruleNum,
+                    'fix'            => 'delete',
+                    'delete_backend' => 'iptables',
+                ];
+                continue;
+            }
+
+            // Sensitive explicit ports open from anywhere.
+            if ($sourceRaw === '0.0.0.0/0' && isset($sensitivePorts[$port])) {
+                $sp = $sensitivePorts[$port];
+                $warnings[] = [
+                    'severity'       => $port === '22' ? 'danger' : 'warning',
+                    'icon'           => 'bi-unlock-fill',
+                    'title'          => "Regla iptables manual #{$ruleNum}: Puerto {$sp['name']} ({$port}) abierto a todo internet",
+                    'message'        => "{$sp['risk']}. Al ser regla manual de iptables, UFW no la controla.",
+                    'rule_num'       => $ruleNum,
+                    'fix'            => 'delete',
+                    'delete_backend' => 'iptables',
+                ];
+            }
+        }
+
+        return $warnings;
+    }
+
     public static function suggestRulesForReplication(string $slaveIp): array
     {
         $suggestions = [];
@@ -751,6 +813,488 @@ class FirewallService
                 'comment'  => 'MuseDock Panel',
             ],
         ];
+    }
+
+    /**
+     * Firewall presets (single rule per preset) stored in panel_settings as JSON.
+     */
+    public static function getRulePresets(): array
+    {
+        $raw = json_decode(Settings::get(self::RULE_PRESETS_KEY, '[]'), true);
+        if (!is_array($raw)) return [];
+
+        $presets = [];
+        foreach ($raw as $item) {
+            if (!is_array($item)) continue;
+
+            $id   = trim((string)($item['id'] ?? ''));
+            $name = trim((string)($item['name'] ?? ''));
+            if ($id === '' || $name === '') continue;
+
+            $action = strtolower(trim((string)($item['action'] ?? 'allow')));
+            $action = in_array($action, ['allow', 'deny'], true) ? $action : 'allow';
+
+            $protocol = strtolower(trim((string)($item['protocol'] ?? 'tcp')));
+            if (!in_array($protocol, ['tcp', 'udp', 'both', 'all'], true)) {
+                $protocol = 'tcp';
+            }
+
+            $from = trim((string)($item['from'] ?? '0.0.0.0/0'));
+            if ($from === '') $from = '0.0.0.0/0';
+
+            $port = trim((string)($item['port'] ?? ''));
+            if ($protocol === 'all') $port = '';
+
+            $presets[] = [
+                'id'         => $id,
+                'name'       => $name,
+                'action'     => $action,
+                'from'       => $from,
+                'port'       => $port,
+                'protocol'   => $protocol,
+                'comment'    => trim((string)($item['comment'] ?? '')),
+                'created_at' => (string)($item['created_at'] ?? ''),
+                'updated_at' => (string)($item['updated_at'] ?? ''),
+            ];
+        }
+
+        usort($presets, static function (array $a, array $b): int {
+            return strcasecmp($a['name'], $b['name']);
+        });
+
+        return $presets;
+    }
+
+    public static function findRulePreset(string $id): ?array
+    {
+        $id = trim($id);
+        if ($id === '') return null;
+        foreach (self::getRulePresets() as $preset) {
+            if (($preset['id'] ?? '') === $id) {
+                return $preset;
+            }
+        }
+        return null;
+    }
+
+    public static function saveRulePreset(array $data): array
+    {
+        $presets = self::getRulePresets();
+        $id = trim((string)($data['id'] ?? ''));
+        if ($id === '') {
+            try {
+                $id = 'fwpreset_' . bin2hex(random_bytes(6));
+            } catch (\Throwable) {
+                $id = 'fwpreset_' . str_replace('.', '', uniqid('', true));
+            }
+        }
+
+        $record = [
+            'id'         => $id,
+            'name'       => trim((string)($data['name'] ?? 'Preset sin nombre')),
+            'action'     => strtolower(trim((string)($data['action'] ?? 'allow'))) === 'deny' ? 'deny' : 'allow',
+            'from'       => trim((string)($data['from'] ?? '0.0.0.0/0')) ?: '0.0.0.0/0',
+            'port'       => trim((string)($data['port'] ?? '')),
+            'protocol'   => strtolower(trim((string)($data['protocol'] ?? 'tcp'))),
+            'comment'    => trim((string)($data['comment'] ?? '')),
+            'created_at' => gmdate('c'),
+            'updated_at' => gmdate('c'),
+        ];
+
+        if (!in_array($record['protocol'], ['tcp', 'udp', 'both', 'all'], true)) {
+            $record['protocol'] = 'tcp';
+        }
+        if ($record['protocol'] === 'all') {
+            $record['port'] = '';
+        }
+
+        $updated = false;
+        foreach ($presets as $i => $preset) {
+            if (($preset['id'] ?? '') !== $id) continue;
+            $record['created_at'] = (string)($preset['created_at'] ?? gmdate('c'));
+            $presets[$i] = $record;
+            $updated = true;
+            break;
+        }
+
+        if (!$updated) {
+            $presets[] = $record;
+        }
+
+        self::storeRulePresets($presets);
+        return $record;
+    }
+
+    public static function deleteRulePreset(string $id): bool
+    {
+        $id = trim($id);
+        if ($id === '') return false;
+
+        $presets = self::getRulePresets();
+        $before = count($presets);
+        $presets = array_values(array_filter($presets, static function (array $preset) use ($id): bool {
+            return ($preset['id'] ?? '') !== $id;
+        }));
+
+        if (count($presets) === $before) return false;
+
+        self::storeRulePresets($presets);
+        return true;
+    }
+
+    private static function storeRulePresets(array $presets): void
+    {
+        Settings::set(
+            self::RULE_PRESETS_KEY,
+            json_encode(array_values($presets), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+        );
+    }
+
+    /**
+     * Full snapshots store/restore the effective firewall state via iptables-save.
+     */
+    public static function getFullSnapshots(): array
+    {
+        $raw = json_decode(Settings::get(self::FULL_SNAPSHOTS_KEY, '[]'), true);
+        if (!is_array($raw)) return [];
+
+        $items = [];
+        foreach ($raw as $item) {
+            if (!is_array($item)) continue;
+            $id = trim((string)($item['id'] ?? ''));
+            $name = trim((string)($item['name'] ?? ''));
+            $rulesV4 = (string)($item['rules_v4'] ?? '');
+            if ($id === '' || $name === '' || $rulesV4 === '') continue;
+
+            $items[] = [
+                'id'          => $id,
+                'name'        => $name,
+                'note'        => trim((string)($item['note'] ?? '')),
+                'source_type' => trim((string)($item['source_type'] ?? 'unknown')),
+                'hash'        => trim((string)($item['hash'] ?? sha1($rulesV4))),
+                'created_at'  => trim((string)($item['created_at'] ?? '')),
+                'rules_v4'    => $rulesV4,
+            ];
+        }
+
+        usort($items, static function (array $a, array $b): int {
+            return strcmp((string)$b['created_at'], (string)$a['created_at']);
+        });
+
+        return $items;
+    }
+
+    public static function createFullSnapshot(string $name, string $note = ''): array
+    {
+        $name = trim($name);
+        if ($name === '') {
+            return ['ok' => false, 'error' => 'Nombre de snapshot requerido'];
+        }
+
+        $rulesV4 = trim((string)shell_exec('iptables-save 2>/dev/null'));
+        if ($rulesV4 === '') {
+            return ['ok' => false, 'error' => 'No se pudo capturar el estado real con iptables-save'];
+        }
+
+        try {
+            $id = 'fwsnap_' . bin2hex(random_bytes(6));
+        } catch (\Throwable) {
+            $id = 'fwsnap_' . str_replace('.', '', uniqid('', true));
+        }
+
+        $snapshot = [
+            'id'          => $id,
+            'name'        => $name,
+            'note'        => trim($note),
+            'source_type' => self::getType(),
+            'hash'        => sha1($rulesV4),
+            'created_at'  => gmdate('c'),
+            'rules_v4'    => $rulesV4,
+        ];
+
+        $all = self::getFullSnapshots();
+        array_unshift($all, $snapshot);
+        if (count($all) > self::MAX_FULL_SNAPSHOTS) {
+            $all = array_slice($all, 0, self::MAX_FULL_SNAPSHOTS);
+        }
+        self::storeFullSnapshots($all);
+
+        return ['ok' => true, 'snapshot' => $snapshot];
+    }
+
+    public static function findFullSnapshot(string $id): ?array
+    {
+        $id = trim($id);
+        if ($id === '') return null;
+        foreach (self::getFullSnapshots() as $item) {
+            if (($item['id'] ?? '') === $id) return $item;
+        }
+        return null;
+    }
+
+    public static function deleteFullSnapshot(string $id): bool
+    {
+        $id = trim($id);
+        if ($id === '') return false;
+
+        $all = self::getFullSnapshots();
+        $before = count($all);
+        $all = array_values(array_filter($all, static function (array $item) use ($id): bool {
+            return ($item['id'] ?? '') !== $id;
+        }));
+        if (count($all) === $before) return false;
+
+        self::storeFullSnapshots($all);
+        return true;
+    }
+
+    public static function applyFullSnapshot(string $id): array
+    {
+        $snapshot = self::findFullSnapshot($id);
+        if (!$snapshot) {
+            return ['ok' => false, 'error' => 'Snapshot no encontrado'];
+        }
+
+        $rulesV4 = (string)($snapshot['rules_v4'] ?? '');
+        if (trim($rulesV4) === '') {
+            return ['ok' => false, 'error' => 'Snapshot invalido: contenido vacio'];
+        }
+
+        $tmp = tempnam(sys_get_temp_dir(), 'fwsnap_');
+        if ($tmp === false) {
+            return ['ok' => false, 'error' => 'No se pudo crear archivo temporal'];
+        }
+
+        file_put_contents($tmp, $rulesV4);
+        $output = trim((string)shell_exec('iptables-restore < ' . escapeshellarg($tmp) . ' 2>&1'));
+        @unlink($tmp);
+
+        $ok = $output === '' || stripos($output, 'error') === false;
+        if (!$ok) {
+            return ['ok' => false, 'error' => $output ?: 'Error al restaurar snapshot completo'];
+        }
+
+        // Persist best effort for reboot.
+        self::iptablesSave();
+
+        return ['ok' => true, 'output' => 'Snapshot completo aplicado correctamente'];
+    }
+
+    private static function storeFullSnapshots(array $snapshots): void
+    {
+        Settings::set(
+            self::FULL_SNAPSHOTS_KEY,
+            json_encode(array_values($snapshots), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+        );
+    }
+
+    /**
+     * Export current firewall configuration in a portable JSON payload.
+     */
+    public static function exportConfiguration(): array
+    {
+        $type = self::getType();
+        if ($type === 'none') {
+            return ['ok' => false, 'error' => 'No se detecto firewall activo para exportar'];
+        }
+
+        $rules = $type === 'ufw' ? self::ufwGetRules() : self::iptablesGetRules();
+        $policy = $type === 'ufw' ? self::ufwGetDefault() : self::iptablesGetPolicy();
+
+        $normalizedRules = [];
+        if ($type === 'ufw') {
+            foreach ($rules as $rule) {
+                $direction = strtoupper((string)($rule['direction'] ?? 'IN'));
+                if ($direction !== 'IN') continue;
+
+                $actionRaw = strtoupper((string)($rule['action'] ?? 'ALLOW'));
+                $action = str_contains($actionRaw, 'ALLOW') ? 'allow' : 'deny';
+
+                $from = trim((string)($rule['from'] ?? 'Anywhere'));
+                if ($from === '' || stripos($from, 'Anywhere') !== false) {
+                    $from = '0.0.0.0/0';
+                }
+
+                $to = trim((string)($rule['to'] ?? ''));
+                $port = '';
+                $protocol = 'all';
+                if (preg_match('/^(\d+)(?:\/(tcp|udp))?/i', $to, $m)) {
+                    $port = (string)$m[1];
+                    $protocol = strtolower((string)($m[2] ?? 'both'));
+                }
+
+                $normalizedRules[] = [
+                    'action'   => $action,
+                    'from'     => $from,
+                    'port'     => $port,
+                    'protocol' => $protocol,
+                    'comment'  => trim((string)($rule['comment'] ?? '')),
+                ];
+            }
+        } else {
+            foreach ($rules as $rule) {
+                $target = strtoupper((string)($rule['target'] ?? ''));
+                if (!in_array($target, ['ACCEPT', 'DROP', 'REJECT'], true)) continue;
+
+                $action = $target === 'ACCEPT' ? 'allow' : 'deny';
+                $from = trim((string)($rule['source'] ?? '0.0.0.0/0'));
+                if ($from === '') $from = '0.0.0.0/0';
+
+                $protocol = strtolower((string)($rule['protocol'] ?? 'all'));
+                if (!in_array($protocol, ['tcp', 'udp', 'all', 'both'], true)) {
+                    $protocol = 'all';
+                }
+
+                $normalizedRules[] = [
+                    'action'   => $action,
+                    'from'     => $from,
+                    'port'     => trim((string)($rule['port'] ?? '')),
+                    'protocol' => $protocol,
+                    'comment'  => '',
+                ];
+            }
+        }
+
+        $incomingPolicy = 'unknown';
+        $policyUpper = strtoupper($policy);
+        if (str_contains($policyUpper, 'DROP') || str_contains($policyUpper, 'DENY')) {
+            $incomingPolicy = 'deny';
+        } elseif (str_contains($policyUpper, 'ACCEPT') || str_contains($policyUpper, 'ALLOW')) {
+            $incomingPolicy = 'allow';
+        }
+
+        $payload = [
+            'format'            => 'musedock-firewall-export-v1',
+            'generated_at'      => gmdate('c'),
+            'source_type'       => $type,
+            'source_policy'     => $policy,
+            'normalized'        => [
+                'incoming_policy' => $incomingPolicy,
+                'rules'           => $normalizedRules,
+            ],
+            'raw'               => [
+                'iptables_save' => $type === 'iptables' ? (string)shell_exec('iptables-save 2>/dev/null') : '',
+            ],
+        ];
+
+        return ['ok' => true, 'data' => $payload];
+    }
+
+    /**
+     * Import a portable firewall configuration payload.
+     *
+     * Replace mode:
+     * - iptables: removes simple ACCEPT/DROP/REJECT rules, keeps loopback/state/jump rules.
+     * - ufw: deletes current numbered rules.
+     */
+    public static function importConfiguration(array $payload, bool $replaceExisting): array
+    {
+        $type = self::getType();
+        if ($type === 'none') {
+            return ['ok' => false, 'error' => 'No se detecto firewall activo para importar'];
+        }
+
+        $format = (string)($payload['format'] ?? '');
+        if ($format !== 'musedock-firewall-export-v1') {
+            return ['ok' => false, 'error' => 'Formato de archivo no soportado'];
+        }
+
+        $normalized = $payload['normalized'] ?? null;
+        if (!is_array($normalized)) {
+            return ['ok' => false, 'error' => 'Archivo invalido: falta bloque normalized'];
+        }
+
+        $rules = $normalized['rules'] ?? [];
+        if (!is_array($rules)) {
+            return ['ok' => false, 'error' => 'Archivo invalido: reglas malformed'];
+        }
+
+        // Fast path: exact restore on iptables when replacing and raw payload exists.
+        $rawIptables = trim((string)($payload['raw']['iptables_save'] ?? ''));
+        if ($replaceExisting && $type === 'iptables' && $rawIptables !== '' && (string)($payload['source_type'] ?? '') === 'iptables') {
+            $tmp = tempnam(sys_get_temp_dir(), 'fwimp_');
+            if ($tmp === false) {
+                return ['ok' => false, 'error' => 'No se pudo crear archivo temporal para import'];
+            }
+            file_put_contents($tmp, $rawIptables);
+            $output = trim((string)shell_exec('iptables-restore < ' . escapeshellarg($tmp) . ' 2>&1'));
+            @unlink($tmp);
+            $ok = $output === '' || stripos($output, 'error') === false;
+            if (!$ok) {
+                return ['ok' => false, 'error' => $output ?: 'Error al aplicar iptables-restore'];
+            }
+            self::iptablesSave();
+            return ['ok' => true, 'message' => 'Import completo aplicado con iptables-restore'];
+        }
+
+        // Optional cleanup before importing normalized rules.
+        if ($replaceExisting) {
+            if ($type === 'ufw') {
+                $existing = self::ufwGetRules();
+                foreach (array_reverse($existing) as $rule) {
+                    $num = (int)($rule['num'] ?? 0);
+                    if ($num > 0) self::ufwDeleteRule($num);
+                }
+            } else {
+                $existing = self::iptablesGetRules();
+                foreach (array_reverse($existing) as $rule) {
+                    $target = strtoupper((string)($rule['target'] ?? ''));
+                    if (!in_array($target, ['ACCEPT', 'DROP', 'REJECT'], true)) continue;
+                    $state = strtoupper((string)($rule['state'] ?? ''));
+                    if (str_contains($state, 'RELATED') || str_contains($state, 'ESTABLISHED')) continue;
+                    if ((string)($rule['in'] ?? '') === 'lo') continue;
+                    $num = (int)($rule['num'] ?? 0);
+                    if ($num > 0) self::iptablesDeleteRule($num);
+                }
+            }
+        }
+
+        // Apply incoming policy when possible.
+        $incomingPolicy = strtolower((string)($normalized['incoming_policy'] ?? 'unknown'));
+        if ($incomingPolicy === 'allow' || $incomingPolicy === 'deny') {
+            if ($type === 'ufw') {
+                shell_exec('ufw default ' . escapeshellarg($incomingPolicy) . ' incoming 2>&1');
+            } else {
+                shell_exec('iptables -P INPUT ' . ($incomingPolicy === 'allow' ? 'ACCEPT' : 'DROP') . ' 2>&1');
+            }
+        }
+
+        $applied = 0;
+        foreach ($rules as $item) {
+            if (!is_array($item)) continue;
+            $action = strtolower(trim((string)($item['action'] ?? 'allow')));
+            if (!in_array($action, ['allow', 'deny'], true)) continue;
+
+            $from = trim((string)($item['from'] ?? '0.0.0.0/0'));
+            if ($from === '') $from = '0.0.0.0/0';
+
+            $port = trim((string)($item['port'] ?? ''));
+            $protocol = strtolower(trim((string)($item['protocol'] ?? 'all')));
+            if (!in_array($protocol, ['tcp', 'udp', 'both', 'all'], true)) $protocol = 'all';
+            $comment = trim((string)($item['comment'] ?? ''));
+
+            if ($type === 'ufw') {
+                $r = self::ufwAddRule($action, $from, $port, $protocol, $comment);
+                if ($r['ok']) $applied++;
+                continue;
+            }
+
+            if ($protocol === 'both') {
+                $r1 = self::iptablesAddRule($action, $from, (int)$port, 'tcp');
+                $r2 = self::iptablesAddRule($action, $from, (int)$port, 'udp');
+                if ($r1['ok']) $applied++;
+                if ($r2['ok']) $applied++;
+            } else {
+                $r = self::iptablesAddRule($action, $from, (int)$port, $protocol);
+                if ($r['ok']) $applied++;
+            }
+        }
+
+        if ($type === 'iptables') {
+            self::iptablesSave();
+        }
+
+        return ['ok' => true, 'message' => 'Import completado. Reglas aplicadas: ' . $applied];
     }
 
     public static function isPortOpen(int $port, string $fromIp = ''): bool

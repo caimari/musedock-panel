@@ -324,6 +324,22 @@ class DocsController
     {
         return $this->dedupeTopics([
             [
+                'title' => 'Firewall completo: snapshots, export/import y verificacion',
+                'description' => 'Guia operativa del firewall del panel con snapshots completos, backup JSON e importacion segura por nodos.',
+                'url' => '/docs/firewall-operations',
+                'category' => 'Guia especial',
+                'icon' => 'bi-shield-fill-check',
+                'keywords' => 'firewall snapshots export import json restore iptables ufw reglas presets backup recovery',
+            ],
+            [
+                'title' => 'Sync de archivos (lsyncd)',
+                'description' => 'Diagnostico rapido de Sync degradado, cola lsyncd, SSH entre nodos y autocorreccion desde Cluster > Archivos.',
+                'url' => '/docs/sync-archivos-lsyncd',
+                'category' => 'Guia especial',
+                'icon' => 'bi-files',
+                'keywords' => 'filesync lsyncd sync degradado cluster archivos ssh queue rsync autocorregir',
+            ],
+            [
                 'title' => 'Modos de correo',
                 'description' => 'Como elegir entre Satellite, Relay Privado, Correo Completo y SMTP Externo.',
                 'url' => '/docs/mail-modes',
@@ -1225,6 +1241,22 @@ class DocsController
         View::render('help/default-backups', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Backups por defecto',
+        ]);
+    }
+
+    public function firewallOperations(): void
+    {
+        View::render('help/firewall-operations', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Firewall Operations',
+        ]);
+    }
+
+    public function syncArchivosLsyncd(): void
+    {
+        View::render('help/sync-archivos-lsyncd', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Sync de archivos (lsyncd)',
         ]);
     }
 }

@@ -32,6 +32,7 @@ class FileSyncService
             'exclude_patterns' => Settings::get('filesync_exclude', '.cache,*.log,*.tmp,node_modules'),
             'rsync_default_excludes' => Settings::get('filesync_rsync_default_excludes', implode("\n", self::FALLBACK_RSYNC_DEFAULT_EXCLUDES)),
             'lsyncd_default_excludes' => Settings::get('filesync_lsyncd_default_excludes', implode("\n", self::FALLBACK_LSYNCD_DEFAULT_EXCLUDES)),
+            'lsyncd_auto_heal' => Settings::get('filesync_lsyncd_auto_heal', '0') === '1',
             'sync_ssl_certs'   => Settings::get('filesync_ssl_certs', '0') === '1',
             'ssl_cert_path'    => Settings::get('filesync_ssl_cert_path', ''),
             'rewrite_db_host'  => Settings::get('filesync_rewrite_dbhost', '1') === '1',
@@ -49,6 +50,7 @@ class FileSyncService
             'filesync_ssh_port', 'filesync_ssh_key_path', 'filesync_ssh_user',
             'filesync_interval', 'filesync_bwlimit', 'filesync_exclude',
             'filesync_rsync_default_excludes', 'filesync_lsyncd_default_excludes',
+            'filesync_lsyncd_auto_heal',
             'filesync_ssl_certs', 'filesync_ssl_cert_path', 'filesync_rewrite_dbhost',
             'filesync_db_dumps', 'filesync_db_dump_mysql', 'filesync_db_dump_pgsql',
             'filesync_db_dump_path',
@@ -165,16 +167,21 @@ class FileSyncService
     /**
      * Test SSH connection to a remote host.
      */
-    public static function testSshConnection(string $host, int $port = 22, string $keyPath = ''): array
+    public static function testSshConnection(string $host, int $port = 22, string $keyPath = '', string $user = ''): array
     {
         if ($keyPath === '') {
             $keyPath = Settings::get('filesync_ssh_key_path', '/root/.ssh/id_ed25519');
         }
+        if ($user === '') {
+            $user = Settings::get('filesync_ssh_user', 'root');
+        }
+        $user = preg_replace('/[^a-zA-Z0-9_.-]/', '', (string)$user) ?: 'root';
 
         $cmd = sprintf(
-            'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes -p %d -i %s root@%s "echo OK" 2>&1',
+            'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o BatchMode=yes -o PasswordAuthentication=no -o PreferredAuthentications=publickey -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0 -p %d -i %s %s@%s "echo OK" 2>&1',
             $port,
             escapeshellarg($keyPath),
+            escapeshellarg($user),
             escapeshellarg($host)
         );
 
@@ -247,7 +254,7 @@ class FileSyncService
 
         // SSH options
         $sshCmd = sprintf(
-            'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p %d -i %s',
+            'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -o BatchMode=yes -o PasswordAuthentication=no -o PreferredAuthentications=publickey -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0 -p %d -i %s',
             $port,
             escapeshellarg($keyPath)
         );
@@ -1494,22 +1501,163 @@ class FileSyncService
     public static function getLsyncdStatus(): array
     {
         if (!self::isLsyncdInstalled()) {
-            return ['installed' => false, 'running' => false, 'enabled' => false];
+            return [
+                'installed' => false,
+                'running' => false,
+                'enabled' => false,
+                'health' => 'unknown',
+                'issues' => [],
+            ];
         }
+
+        $config = self::getConfig();
+        $sshPort = (int)($config['ssh_port'] ?? 22);
+        $sshUser = (string)($config['ssh_user'] ?? 'root');
+        $syncMode = (string)($config['sync_mode'] ?? 'periodic');
+
         $active = trim((string)shell_exec('systemctl is-active lsyncd 2>/dev/null')) === 'active';
         $enabled = trim((string)shell_exec('systemctl is-enabled lsyncd 2>/dev/null')) === 'enabled';
         $pid = $active ? trim((string)shell_exec('pgrep -x lsyncd 2>/dev/null')) : '';
+        $rssMb = self::readProcessRssMb((int)$pid);
+
+        $logPath = '/var/log/lsyncd/lsyncd.log';
+        $statusPath = '/var/log/lsyncd/lsyncd.status';
         $logTail = '';
-        if (file_exists('/var/log/lsyncd/lsyncd.log')) {
-            $logTail = trim((string)shell_exec('tail -30 /var/log/lsyncd/lsyncd.log 2>/dev/null'));
+        if (file_exists($logPath)) {
+            $logTail = trim((string)shell_exec('tail -30 ' . escapeshellarg($logPath) . ' 2>/dev/null'));
         }
+
+        $recentErrors = '';
+        if (file_exists($logPath)) {
+            $recentErrors = trim((string)shell_exec(
+                "tail -250 " . escapeshellarg($logPath) . " 2>/dev/null | " .
+                "grep -E 'Connection refused|rsync error|Permission denied|No route to host|connection unexpectedly closed|Host key verification failed|timed out' | tail -8"
+            ));
+        }
+        $connectionRefusedRecent = stripos($recentErrors, 'Connection refused') !== false;
+
+        $activeEvents = 0;
+        if (file_exists($statusPath)) {
+            $activeEvents = (int)trim((string)shell_exec("grep -c '^active ' " . escapeshellarg($statusPath) . " 2>/dev/null"));
+        }
+
+        $logSizeMb = file_exists($logPath) ? (int)round(filesize($logPath) / 1048576) : 0;
+        $statusSizeMb = file_exists($statusPath) ? (int)round(filesize($statusPath) / 1048576) : 0;
+
+        $sshChecks = [];
+        $sshUnreachable = [];
+        $apiDown = [];
+        $nodes = ClusterService::getWebNodes();
+        foreach ($nodes as $node) {
+            if (!empty($node['standby'])) continue;
+            $host = self::extractHostFromUrl((string)($node['api_url'] ?? ''));
+            if ($host === '') continue;
+
+            $apiUrl = trim((string)($node['api_url'] ?? ''));
+            $apiPort = (int)(parse_url($apiUrl, PHP_URL_PORT) ?: 443);
+            $sshOk = self::canConnectTcp($host, $sshPort, 1.5);
+            $apiOk = self::canConnectTcp($host, $apiPort, 1.5);
+            $entry = [
+                'node_id' => (int)($node['id'] ?? 0),
+                'node_name' => (string)($node['name'] ?? ('node-' . $host)),
+                'host' => $host,
+                'ssh_port' => $sshPort,
+                'ssh_ok' => $sshOk,
+                'api_port' => $apiPort,
+                'api_ok' => $apiOk,
+            ];
+            $sshChecks[] = $entry;
+            if (!$sshOk) $sshUnreachable[] = $entry;
+            if (!$apiOk) $apiDown[] = $entry;
+        }
+
+        $health = 'ok';
+        $issues = [];
+        if (!$active) {
+            $health = 'warning';
+            $issues[] = 'lsyncd está detenido';
+        }
+        if (!empty($sshUnreachable)) {
+            $health = 'warning';
+            $issues[] = 'Hay nodos sin SSH accesible (Connection refused/timeouts)';
+        }
+        if ($connectionRefusedRecent) {
+            $health = 'warning';
+            $issues[] = 'Se detectaron errores recientes "Connection refused" en lsyncd';
+        }
+        if ($logSizeMb >= 1024) {
+            $health = 'warning';
+            $issues[] = 'El log de lsyncd es muy grande';
+        }
+        if ($rssMb >= 1024 || $activeEvents >= 5000) {
+            $health = 'critical';
+            $issues[] = 'Cola/RAM de lsyncd en nivel crítico';
+        }
+        if ($syncMode !== 'lsyncd') {
+            $issues[] = 'El modo actual de sync no es lsyncd (está en ' . $syncMode . ')';
+        }
+
         return [
             'installed' => true,
             'running'   => $active,
             'enabled'   => $enabled,
             'pid'       => $pid,
             'log_tail'  => $logTail,
+            'health'    => $health,
+            'issues'    => $issues,
+            'sync_mode' => $syncMode,
+            'ssh_user'  => $sshUser,
+            'ssh_port'  => $sshPort,
+            'rss_mb'    => $rssMb,
+            'active_events' => $activeEvents,
+            'log_size_mb' => $logSizeMb,
+            'status_size_mb' => $statusSizeMb,
+            'recent_errors' => $recentErrors,
+            'connection_refused_recent' => $connectionRefusedRecent,
+            'ssh_checks' => $sshChecks,
+            'ssh_unreachable' => $sshUnreachable,
+            'api_down' => $apiDown,
         ];
+    }
+
+    private static function readProcessRssMb(int $pid): int
+    {
+        if ($pid < 1) return 0;
+        $statusPath = "/proc/{$pid}/status";
+        if (!is_file($statusPath)) return 0;
+        $content = @file_get_contents($statusPath);
+        if (!$content) return 0;
+        if (!preg_match('/^VmRSS:\s+(\d+)\s+kB$/m', $content, $m)) return 0;
+        return (int)round(((int)$m[1]) / 1024);
+    }
+
+    private static function canConnectTcp(string $host, int $port, float $timeout = 1.5): bool
+    {
+        if ($host === '' || $port < 1 || $port > 65535) return false;
+        $errno = 0;
+        $errstr = '';
+        $fp = @fsockopen($host, $port, $errno, $errstr, $timeout);
+        if (!is_resource($fp)) return false;
+        fclose($fp);
+        return true;
+    }
+
+    /**
+     * Requires N consecutive successful TCP connects to avoid flapping false-positives.
+     */
+    private static function canConnectTcpStable(string $host, int $port, int $checks = 3, int $sleepMs = 300): bool
+    {
+        $checks = max(1, $checks);
+        $sleepMs = max(0, $sleepMs);
+        for ($i = 0; $i < $checks; $i++) {
+            if (!self::canConnectTcp($host, $port, 1.2)) {
+                return false;
+            }
+            if ($i < ($checks - 1) && $sleepMs > 0) {
+                usleep($sleepMs * 1000);
+            }
+        }
+        return true;
     }
 
     /**
@@ -1601,11 +1749,13 @@ class FileSyncService
                 $lua .= "    },\n";
             }
 
+            $sshRsh = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o BatchMode=yes -o PasswordAuthentication=no -o PreferredAuthentications=publickey -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0 -p {$port} -i {$keyPath}";
+
             $lua .= "    rsync = {\n";
             $lua .= "        binary   = \"/opt/musedock-panel/bin/rsync-nice\",\n";
             $lua .= "        archive  = true,\n";
             $lua .= "        compress = true,\n";
-            $lua .= "        rsh      = \"ssh -o StrictHostKeyChecking=no -p {$port} -i {$keyPath}\",\n";
+            $lua .= "        rsh      = \"" . addcslashes($sshRsh, '"') . "\",\n";
             if ($bwLimit > 0) {
                 $lua .= "        bwlimit  = {$bwLimit},\n";
             }
@@ -1616,7 +1766,7 @@ class FileSyncService
         @mkdir('/etc/lsyncd', 0755, true);
         @mkdir('/var/log/lsyncd', 0755, true);
         $confPath = '/etc/lsyncd/lsyncd.conf.lua';
-        $written = file_put_contents($confPath, $lua);
+        $written = @file_put_contents($confPath, $lua);
 
         if ($written === false) {
             return ['ok' => false, 'error' => 'No se pudo escribir ' . $confPath];
@@ -1673,5 +1823,194 @@ class FileSyncService
         $status = self::getLsyncdStatus();
 
         return ['ok' => $status['running'], 'output' => $output, 'status' => $status];
+    }
+
+    /**
+     * Emergency auto-heal for lsyncd congestion due to SSH failures.
+     * If SSH is down but panel API is reachable, switch to periodic HTTPS sync
+     * and stop lsyncd to prevent RAM/queue runaway.
+     */
+    public static function autoHealLsyncd(): array
+    {
+        $before = self::getLsyncdStatus();
+        $actions = [];
+
+        if (empty($before['installed'])) {
+            return ['ok' => false, 'error' => 'lsyncd no está instalado', 'before' => $before, 'actions' => $actions];
+        }
+
+        $sshUnreachable = $before['ssh_unreachable'] ?? [];
+        $apiDown = $before['api_down'] ?? [];
+        $recentErrors = strtolower((string)($before['recent_errors'] ?? ''));
+        $hasAuthIssue = $recentErrors !== '' && (
+            str_contains($recentErrors, 'permission denied')
+            || str_contains($recentErrors, 'too many authentication failures')
+            || str_contains($recentErrors, 'host key verification failed')
+            || str_contains($recentErrors, 'no route to host')
+        );
+        $hasSshIssue = !empty($sshUnreachable) || $hasAuthIssue;
+        $allApiUp = empty($apiDown);
+
+        if ($hasSshIssue && $allApiUp) {
+            // Safe fallback: stop real-time SSH sync and move to periodic HTTPS.
+            self::saveConfig([
+                'filesync_sync_mode' => 'periodic',
+                'filesync_method' => 'https',
+            ]);
+            $actions[] = 'Configuración cambiada a periodic + HTTPS';
+
+            $stop = self::stopLsyncd();
+            if ($stop['ok']) {
+                $actions[] = 'lsyncd detenido para evitar crecimiento de cola/RAM';
+            } else {
+                $actions[] = 'No se pudo detener lsyncd automáticamente';
+            }
+
+            Settings::set('filesync_lsyncd_last_autofix', date('Y-m-d H:i:s'));
+            Settings::set('filesync_lsyncd_last_autofix_reason', 'ssh_unreachable_fallback_https');
+        } else {
+            // If SSH is OK (or API is also down), do a lighter recovery attempt.
+            $reload = self::reloadLsyncd();
+            $actions[] = $reload['ok']
+                ? 'lsyncd recargado/reiniciado'
+                : 'Intento de recarga de lsyncd falló';
+
+            Settings::set('filesync_lsyncd_last_autofix', date('Y-m-d H:i:s'));
+            Settings::set('filesync_lsyncd_last_autofix_reason', $hasSshIssue ? 'ssh_unreachable_api_down' : 'reload_only');
+        }
+
+        $after = self::getLsyncdStatus();
+        return ['ok' => true, 'before' => $before, 'after' => $after, 'actions' => $actions];
+    }
+
+    /**
+     * Retry real-time SSH sync safely after a degraded state.
+     * Only switches back to lsyncd+ssh if SSH to all active nodes is reachable.
+     */
+    public static function retryLsyncdSsh(): array
+    {
+        $configBefore = self::getConfig();
+        $before = self::getLsyncdStatus();
+        $actions = [];
+
+        if (empty($before['installed'])) {
+            return ['ok' => false, 'error' => 'lsyncd no está instalado', 'before' => $before];
+        }
+
+        $config = self::getConfig();
+        $sshPort = (int)($config['ssh_port'] ?? 22);
+        $sshKeyPath = (string)($config['ssh_key_path'] ?? '/root/.ssh/id_ed25519');
+        $sshUser = (string)($config['ssh_user'] ?? 'root');
+
+        $unstableNodes = [];
+        $authFailedNodes = [];
+        $nodes = ClusterService::getWebNodes();
+        foreach ($nodes as $node) {
+            if (!empty($node['standby'])) continue;
+            $host = self::extractHostFromUrl((string)($node['api_url'] ?? ''));
+            if ($host === '') continue;
+            $nodeName = (string)($node['name'] ?? $host);
+
+            if (!self::canConnectTcpStable($host, $sshPort, 3, 350)) {
+                $unstableNodes[] = $nodeName;
+                continue;
+            }
+
+            $sshCheck = self::testSshConnection($host, $sshPort, $sshKeyPath, $sshUser);
+            if (!($sshCheck['ok'] ?? false)) {
+                $authFailedNodes[] = $nodeName;
+            }
+        }
+
+        if (!empty($unstableNodes) || !empty($authFailedNodes)) {
+            $parts = [];
+            if (!empty($unstableNodes)) {
+                $parts[] = 'SSH inestable/no accesible: ' . implode(', ', array_unique($unstableNodes));
+            }
+            if (!empty($authFailedNodes)) {
+                $parts[] = 'Autenticación por clave fallida: ' . implode(', ', array_unique($authFailedNodes));
+            }
+            return [
+                'ok' => false,
+                'error' => implode(' | ', $parts),
+                'before' => $before,
+                'status' => $before,
+            ];
+        }
+
+        $sshUnreachable = $before['ssh_unreachable'] ?? [];
+        if (!empty($sshUnreachable)) {
+            $names = array_values(array_unique(array_map(
+                static fn($n) => (string)($n['node_name'] ?? ($n['host'] ?? 'nodo')),
+                $sshUnreachable
+            )));
+            return [
+                'ok' => false,
+                'error' => 'SSH aún no accesible: ' . implode(', ', $names),
+                'before' => $before,
+                'status' => $before,
+            ];
+        }
+
+        self::saveConfig([
+            'filesync_sync_mode' => 'lsyncd',
+            'filesync_method' => 'ssh',
+        ]);
+        $actions[] = 'Configuración cambiada a lsyncd + SSH';
+
+        $start = self::startLsyncd();
+        $after = $start['status'] ?? self::getLsyncdStatus();
+
+        if (!($start['ok'] ?? false) || empty($after['running'])) {
+            self::saveConfig([
+                'filesync_sync_mode' => (string)($configBefore['sync_mode'] ?? 'periodic'),
+                'filesync_method' => (string)($configBefore['method'] ?? 'https'),
+            ]);
+            return [
+                'ok' => false,
+                'error' => (string)($start['error'] ?? 'No se pudo iniciar lsyncd'),
+                'before' => $before,
+                'after' => $after,
+                'output' => (string)($start['output'] ?? ''),
+                'rolled_back' => true,
+                'actions' => $actions,
+            ];
+        }
+
+        $actions[] = 'lsyncd iniciado correctamente';
+
+        $details = "Reintento manual exitoso desde monitor/cluster.\n"
+            . "Acciones: " . implode(' · ', $actions);
+        self::pushMonitorAlert(
+            'LSYNCD_SYNC_RECOVERED',
+            'lsyncd recuperado: sync en tiempo real por SSH restablecido. Ir a /settings/cluster#archivos',
+            null,
+            $details
+        );
+
+        return [
+            'ok' => true,
+            'before' => $before,
+            'after' => $after,
+            'actions' => $actions,
+            'output' => (string)($start['output'] ?? ''),
+        ];
+    }
+
+    private static function pushMonitorAlert(string $type, string $message, ?float $value = null, string $details = ''): void
+    {
+        try {
+            Database::insert('monitor_alerts', [
+                'ts' => date('Y-m-d H:i:s'),
+                'host' => (gethostname() ?: 'localhost'),
+                'type' => $type,
+                'message' => $message,
+                'value' => $value,
+                'acknowledged' => false,
+                'details' => $details,
+            ]);
+        } catch (\Throwable $e) {
+            // Best-effort notification path; do not fail main operation.
+        }
     }
 }

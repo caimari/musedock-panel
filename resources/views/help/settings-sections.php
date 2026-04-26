@@ -93,6 +93,13 @@ $sections = [
         'summary' => 'Topologia, rol del nodo y coordinacion Master/Slave.',
     ],
     [
+        'title' => 'Cluster Archivos (Sync lsyncd)',
+        'url' => '/settings/cluster#archivos',
+        'doc_url' => '/docs/sync-archivos-lsyncd',
+        'icon' => 'bi-files',
+        'summary' => 'Sync de archivos, lsyncd, SSH inter-nodo y diagnostico de Sync degradado.',
+    ],
+    [
         'title' => 'Proxy Routes',
         'url' => '/settings/proxy-routes',
         'doc_url' => '/docs/settings/proxy-routes',

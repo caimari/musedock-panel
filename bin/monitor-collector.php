@@ -391,6 +391,19 @@ $alertRamThreshold = (float) Settings::get('monitor_alert_ram', '90');
 $alertNetMbps = (float) Settings::get('monitor_alert_net_mbps', '800');
 $alertDiskThreshold = (float) Settings::get('monitor_alert_disk', '90');
 $alertNetBps = $alertNetMbps * 1000000 / 8; // Convert Mbps to bytes/sec
+$alertNoiseLevel = strtolower((string) Settings::get('monitor_alert_noise_level', 'normal'));
+
+function resolveAlertCooldownSeconds(string $noiseLevel): int
+{
+    return match ($noiseLevel) {
+        'high' => 120, // more sensitive, more alerts
+        'low' => 900,  // less sensitive, less noise
+        default => 300,
+    };
+}
+
+$alertCooldownSeconds = resolveAlertCooldownSeconds($alertNoiseLevel);
+logMsg("Alert anti-spam: {$alertNoiseLevel} ({$alertCooldownSeconds}s por tipo)");
 
 /**
  * Get top processes by resource usage for alert context
@@ -650,10 +663,16 @@ function formatDiskSize(float $bytes): string
 
 function checkAlert(string $host, string $type, string $message, float $value): void
 {
-    // Anti-spam: max 1 alert per type per 5 minutes
+    global $alertCooldownSeconds;
+    $cooldownSeconds = max(60, min(3600, (int)$alertCooldownSeconds));
+
+    // Anti-spam: max 1 alert per type per configured cooldown
     $recent = Database::fetchOne(
-        "SELECT id FROM monitor_alerts WHERE host = :host AND type = :type AND ts > NOW() - INTERVAL '5 minutes'",
-        ['host' => $host, 'type' => $type]
+        "SELECT id FROM monitor_alerts
+         WHERE host = :host
+           AND type = :type
+           AND ts > NOW() - (CAST(:cooldown_seconds AS integer) * INTERVAL '1 second')",
+        ['host' => $host, 'type' => $type, 'cooldown_seconds' => $cooldownSeconds]
     );
     if ($recent) return;
 
@@ -726,18 +745,28 @@ if ($alertDiskThreshold > 0 && !empty($diskData)) {
     }
 }
 
-// ─── Update disk usage for all hosting accounts (every 10 min, not every 30s) ─
+// ─── Update disk usage for all hosting accounts (configurable cadence) ─
 // du is expensive even with throttling — no need to run it every collector cycle
 $duLockFile = '/tmp/musedock-du-lastrun';
 $duLastRun = file_exists($duLockFile) ? (int)file_get_contents($duLockFile) : 0;
-$duInterval = 600; // 10 minutes
+$duInterval = (int) Settings::get('monitor_disk_scan_interval_seconds', '1200'); // default: 20 minutes
+$duInterval = max(300, min(86400, $duInterval)); // clamp: 5 min .. 24 h
+$duRunMs = (int) Settings::get('monitor_du_run_ms', '10');
+$duPauseMs = (int) Settings::get('monitor_du_pause_ms', '30'); // default duty cycle: 25%
+$duRunMs = max(1, min(1000, $duRunMs));
+$duPauseMs = max(1, min(5000, $duPauseMs));
 
 if ((time() - $duLastRun) >= $duInterval) {
     try {
         $accounts = Database::fetchAll("SELECT id, home_dir FROM hosting_accounts WHERE status = 'active'");
         $homeDirs = array_filter(array_column($accounts, 'home_dir'), fn($d) => is_dir($d));
         if (!empty($homeDirs)) {
-            $cmd = '/opt/musedock-panel/bin/du-throttled -sm ' . implode(' ', array_map('escapeshellarg', $homeDirs)) . ' 2>/dev/null';
+            $cmd = sprintf(
+                'DU_THROTTLE_RUN_MS=%d DU_THROTTLE_PAUSE_MS=%d /opt/musedock-panel/bin/du-throttled -sm %s 2>/dev/null',
+                $duRunMs,
+                $duPauseMs,
+                implode(' ', array_map('escapeshellarg', $homeDirs))
+            );
             $output = shell_exec($cmd) ?: '';
             $diskMap = [];
             foreach (explode("\n", trim($output)) as $line) {

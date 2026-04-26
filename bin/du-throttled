@@ -1,18 +1,51 @@
 #!/bin/bash
-# du-throttled — Runs du with CPU throttling (50% of one core)
+# du-throttled — runs du with CPU/IO throttling.
 # Usage: du-throttled [du arguments...]
-# Executes du in background and alternates SIGSTOP/SIGCONT every 10ms
-# to limit CPU usage to ~50% of a single core.
+#
+# Tunables via env vars:
+#   DU_THROTTLE_RUN_MS   (default: 10)
+#   DU_THROTTLE_PAUSE_MS (default: 10)
+#   DU_THROTTLE_NICE     (default: 19)
+#   DU_THROTTLE_IONICE_CLASS (default: 3)
+#
+# Default behavior is ~50% of one core (10ms run / 10ms pause).
 
-nice -n 19 ionice -c3 du "$@" &
+set -u
+
+RUN_MS="${DU_THROTTLE_RUN_MS:-10}"
+PAUSE_MS="${DU_THROTTLE_PAUSE_MS:-10}"
+NICE_LEVEL="${DU_THROTTLE_NICE:-19}"
+IONICE_CLASS="${DU_THROTTLE_IONICE_CLASS:-3}"
+
+is_int() {
+    [[ "$1" =~ ^[0-9]+$ ]]
+}
+
+ms_to_seconds() {
+    awk -v ms="$1" 'BEGIN { printf "%.3f", ms / 1000 }'
+}
+
+if ! is_int "$RUN_MS"; then RUN_MS=10; fi
+if ! is_int "$PAUSE_MS"; then PAUSE_MS=10; fi
+if ! is_int "$NICE_LEVEL"; then NICE_LEVEL=19; fi
+if ! is_int "$IONICE_CLASS"; then IONICE_CLASS=3; fi
+
+if [ "$RUN_MS" -lt 1 ]; then RUN_MS=1; fi
+if [ "$RUN_MS" -gt 1000 ]; then RUN_MS=1000; fi
+if [ "$PAUSE_MS" -lt 1 ]; then PAUSE_MS=1; fi
+if [ "$PAUSE_MS" -gt 5000 ]; then PAUSE_MS=5000; fi
+
+RUN_SLEEP="$(ms_to_seconds "$RUN_MS")"
+PAUSE_SLEEP="$(ms_to_seconds "$PAUSE_MS")"
+
+nice -n "$NICE_LEVEL" ionice -c"$IONICE_CLASS" du "$@" &
 DU_PID=$!
 
-# Throttle loop: 10ms run, 10ms pause ≈ 50% CPU
-while kill -0 $DU_PID 2>/dev/null; do
-    kill -STOP $DU_PID 2>/dev/null
-    sleep 0.01
-    kill -CONT $DU_PID 2>/dev/null
-    sleep 0.01
+while kill -0 "$DU_PID" 2>/dev/null; do
+    kill -CONT "$DU_PID" 2>/dev/null
+    sleep "$RUN_SLEEP"
+    kill -STOP "$DU_PID" 2>/dev/null
+    sleep "$PAUSE_SLEEP"
 done
 
-wait $DU_PID 2>/dev/null
+wait "$DU_PID" 2>/dev/null

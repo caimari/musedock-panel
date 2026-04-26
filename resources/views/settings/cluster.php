@@ -890,9 +890,9 @@
                     </div>
                 </div>
 
-                <!-- lsyncd panel (visible when mode=lsyncd) -->
+                <!-- lsyncd panel (always visible to inspect service state) -->
                 <?php $lsyncdStatus = \MuseDockPanel\Services\FileSyncService::getLsyncdStatus(); ?>
-                <div id="lsyncdPanel" style="<?= $syncMode !== 'lsyncd' ? 'display:none' : '' ?>">
+                <div id="lsyncdPanel">
                     <div class="card mb-3" style="background:rgba(13,110,253,0.05);border-color:rgba(13,110,253,0.15);">
                         <div class="card-body py-3">
                             <h6 class="mb-2"><i class="bi bi-lightning-charge me-1"></i>lsyncd — Sincronización en tiempo real</h6>
@@ -918,6 +918,41 @@
                                 <span id="lsyncdActionStatus" class="small"></span>
                             </div>
 
+                            <?php if (($lsyncdStatus['installed'] ?? false) && (($lsyncdStatus['health'] ?? 'ok') !== 'ok' && ($lsyncdStatus['health'] ?? '') !== 'unknown')): ?>
+                            <?php
+                                $lsyncdHealth = (string)($lsyncdStatus['health'] ?? 'warning');
+                                $isCritical = $lsyncdHealth === 'critical';
+                                $healthClass = $isCritical ? 'alert-danger' : 'alert-warning';
+                            ?>
+                            <div class="alert <?= $healthClass ?> py-2 px-3 mb-2 small" style="background:<?= $isCritical ? 'rgba(220,53,69,0.14)' : 'rgba(255,193,7,0.12)' ?>;border-color:<?= $isCritical ? 'rgba(220,53,69,0.4)' : 'rgba(255,193,7,0.35)' ?>;">
+                                <div class="fw-semibold mb-1">
+                                    <i class="bi <?= $isCritical ? 'bi-exclamation-octagon' : 'bi-exclamation-triangle' ?> me-1"></i>
+                                    lsyncd en estado <?= strtoupper(View::e($lsyncdHealth)) ?>
+                                </div>
+                                <?php if (!empty($lsyncdStatus['issues']) && is_array($lsyncdStatus['issues'])): ?>
+                                    <ul class="mb-1 ps-3">
+                                        <?php foreach ($lsyncdStatus['issues'] as $issue): ?>
+                                            <li><?= View::e((string)$issue) ?></li>
+                                        <?php endforeach; ?>
+                                    </ul>
+                                <?php endif; ?>
+                                <div class="text-muted">
+                                    RSS: <strong><?= (int)($lsyncdStatus['rss_mb'] ?? 0) ?> MB</strong> ·
+                                    Cola activa: <strong><?= number_format((int)($lsyncdStatus['active_events'] ?? 0), 0, ',', '.') ?></strong> ·
+                                    Log: <strong><?= number_format((int)($lsyncdStatus['log_size_mb'] ?? 0), 0, ',', '.') ?> MB</strong>
+                                </div>
+                                <?php if (!empty($lsyncdStatus['ssh_unreachable']) && is_array($lsyncdStatus['ssh_unreachable'])): ?>
+                                    <div class="mt-1">
+                                        SSH no accesible en:
+                                        <?php
+                                            $names = array_map(static fn($n) => (string)($n['node_name'] ?? ($n['host'] ?? 'nodo')), $lsyncdStatus['ssh_unreachable']);
+                                            echo View::e(implode(', ', $names));
+                                        ?>
+                                    </div>
+                                <?php endif; ?>
+                            </div>
+                            <?php endif; ?>
+
                             <div class="d-flex flex-wrap gap-2">
                                 <?php if (!$lsyncdStatus['installed']): ?>
                                     <button type="button" class="btn btn-outline-primary btn-sm" onclick="lsyncdAction('install')">
@@ -933,13 +968,26 @@
                                         </button>
                                     <?php else: ?>
                                         <button type="button" class="btn btn-outline-success btn-sm" onclick="lsyncdAction('start')">
-                                            <i class="bi bi-play-circle me-1"></i>Iniciar
+                                        <i class="bi bi-play-circle me-1"></i>Iniciar
                                         </button>
                                     <?php endif; ?>
+                                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="lsyncdAction('autofix')">
+                                        <i class="bi bi-shield-exclamation me-1"></i>Autocorregir (contener)
+                                    </button>
+                                    <button type="button" class="btn btn-outline-success btn-sm" onclick="lsyncdAction('retry')">
+                                        <i class="bi bi-arrow-up-right-circle me-1"></i>Reintentar SSH sync
+                                    </button>
                                     <button type="button" class="btn btn-outline-secondary btn-sm" onclick="lsyncdAction('status')">
                                         <i class="bi bi-info-circle me-1"></i>Ver estado
                                     </button>
                                 <?php endif; ?>
+                            </div>
+                            <div class="form-check form-switch mt-2 mb-1">
+                                <input class="form-check-input" type="checkbox" name="filesync_lsyncd_auto_heal" id="filesyncLsyncdAutoHeal"
+                                       <?= !empty($fsConfig['lsyncd_auto_heal']) ? 'checked' : '' ?>>
+                                <label class="form-check-label small" for="filesyncLsyncdAutoHeal">
+                                    Auto-heal (contención automática): si SSH cae y API está online, cambia a sync periódico por HTTPS y detiene lsyncd.
+                                </label>
                             </div>
 
                             <?php if ($lsyncdStatus['installed'] && $lsyncdStatus['log_tail']): ?>
@@ -3755,15 +3803,15 @@ function toggleSyncMode() {
     var descEl = document.getElementById('syncModeDesc');
 
     if (mode === 'lsyncd') {
-        lsyncdPanel.style.display = '';
+        if (lsyncdPanel) lsyncdPanel.style.display = '';
         methodSelector.style.display = 'none';
         intervalDesc.textContent = 'Solo para SSL, dumps de BD y disk usage';
         descEl.innerHTML = '<i class="bi bi-lightning-charge text-info me-1"></i>Los archivos se sincronizan en tiempo real. El intervalo solo aplica a SSL, dumps y disk usage.';
     } else {
-        lsyncdPanel.style.display = 'none';
+        if (lsyncdPanel) lsyncdPanel.style.display = '';
         methodSelector.style.display = '';
         intervalDesc.textContent = 'Cada cuántos minutos sincronizar';
-        descEl.innerHTML = 'rsync periódico cada X minutos. Archivos, SSL, dumps y disk usage se sincronizan en el mismo ciclo.';
+        descEl.innerHTML = 'rsync periódico cada X minutos. Archivos, SSL, dumps y disk usage se sincronizan en el mismo ciclo. El estado de lsyncd se muestra abajo para diagnóstico.';
     }
 }
 
@@ -3781,6 +3829,9 @@ function lsyncdAction(action) {
                 html += ' | <strong>Activo:</strong> ' + (data.running ? 'Si' : 'No');
                 if (data.pid) html += ' (PID ' + data.pid + ')';
                 html += ' | <strong>Habilitado:</strong> ' + (data.enabled ? 'Si' : 'No');
+                if (data.health) html += ' | <strong>Health:</strong> ' + String(data.health).toUpperCase();
+                if (typeof data.rss_mb !== 'undefined') html += ' | <strong>RSS:</strong> ' + data.rss_mb + ' MB';
+                if (typeof data.active_events !== 'undefined') html += ' | <strong>Cola:</strong> ' + Number(data.active_events).toLocaleString('es-ES');
             }
             statusEl.innerHTML = '<span class="text-info">' + html + '</span>';
             if (data.log_tail) {
@@ -3796,7 +3847,14 @@ function lsyncdAction(action) {
         return;
     }
 
-    var labels = { install: 'Instalando lsyncd...', start: 'Iniciando lsyncd...', stop: 'Deteniendo lsyncd...', reload: 'Recargando config...' };
+    var labels = {
+        install: 'Instalando lsyncd...',
+        start: 'Iniciando lsyncd...',
+        stop: 'Deteniendo lsyncd...',
+        reload: 'Recargando config...',
+        autofix: 'Aplicando autocorrección...',
+        retry: 'Reintentando sync SSH...'
+    };
     statusEl.innerHTML = '<span class="text-warning"><i class="bi bi-hourglass-split me-1"></i>' + (labels[action] || 'Procesando...') + '</span>';
 
     var formData = new FormData();
@@ -3806,7 +3864,11 @@ function lsyncdAction(action) {
     .then(function(r) { return r.json(); })
     .then(function(data) {
         if (data.ok) {
-            statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>OK</span>';
+            if (action === 'autofix' && Array.isArray(data.actions) && data.actions.length > 0) {
+                statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>' + data.actions.join(' · ') + '</span>';
+            } else {
+                statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>OK</span>';
+            }
             setTimeout(function() { location.reload(); }, 1500);
         } else {
             statusEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>' + (data.error || 'Error') + '</span>';

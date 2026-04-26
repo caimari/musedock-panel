@@ -20,6 +20,67 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.159',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Monitor: nuevo banner superior de `Sync degradado` con enlace directo a `/settings/cluster#archivos` y botón de acción rápida `Reintentar SSH sync` sin recargar página',
+                            'Monitor: nuevo ajuste de sensibilidad de alertas (`Alta/Normal/Baja`) en Alert Settings; el anti-spam por tipo pasa a cooldown configurable (2m / 5m / 15m)',
+                            'Cluster > Archivos: nuevas acciones `Autocorregir (contener)` y `Reintentar sync SSH`, con endpoints dedicados (`/settings/cluster/lsyncd-autofix` y `/settings/cluster/lsyncd-retry`)',
+                            'Firewall: nuevo módulo de `Snapshots completos` (guardar/aplicar/eliminar) basado en estado real (`iptables-save`/`iptables-restore`)',
+                            'Firewall: `Exportar/Importar configuración` en JSON para mover reglas entre nodos (append o replace) y facilitar despliegues en slaves',
+                            'Firewall: `Presets de reglas` (guardar/aplicar/eliminar) para reutilizar reglas frecuentes desde el panel',
+                            'Docs: nuevas guías visibles en `/docs`: `/docs/firewall-operations` y `/docs/sync-archivos-lsyncd`',
+                        ],
+                        'en' => [
+                            'Monitor: new top `Sync degraded` banner with direct link to `/settings/cluster#archivos` and a quick `Retry SSH sync` action button without page reload',
+                            'Monitor: new alert sensitivity setting (`High/Normal/Low`) in Alert Settings; per-type anti-spam now uses configurable cooldown (2m / 5m / 15m)',
+                            'Cluster > Files: new `Auto-fix (contain)` and `Retry SSH sync` actions, with dedicated endpoints (`/settings/cluster/lsyncd-autofix` and `/settings/cluster/lsyncd-retry`)',
+                            'Firewall: new `Full snapshots` module (save/apply/delete) based on real state (`iptables-save`/`iptables-restore`)',
+                            'Firewall: JSON `Export/Import configuration` to move rules across nodes (append or replace) and simplify slave deployments',
+                            'Firewall: `Rule presets` (save/apply/delete) to reuse common rules directly from the panel',
+                            'Docs: new guides now visible in `/docs`: `/docs/firewall-operations` and `/docs/sync-archivos-lsyncd`',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Monitor: contador y campana de alertas no reconocidas se actualizan en vivo mediante polling, sin necesidad de recargar',
+                            'Cluster/lsyncd: health check ampliado con métricas de `RSS`, tamaño de cola/eventos, tamaño de logs y validación de conectividad SSH/API por nodo',
+                            'File Sync/SSH: pruebas y sincronización endurecidas para clave pública (BatchMode, sin password prompts, IdentitiesOnly, UserKnownHostsFile controlado)',
+                            'Monitor collector + `du-throttled`: límites de CPU/IO parametrizables (`run/pause ms`) y escaneo de disco configurable para reducir ruido y picos sostenidos',
+                            'Firewall audit: ahora detecta también reglas manuales de iptables fuera de UFW (incluyendo `ACCEPT` global y puertos sensibles abiertos)',
+                            'UI global: estandarización de modales con SweetAlert y conversión automática de `confirm()` legacy para evitar modales JS inconsistentes',
+                            'UI global: bloques `<pre><code>` con botón de copia automático en toda la app',
+                        ],
+                        'en' => [
+                            'Monitor: unacknowledged alert counter and bell now update live via polling, without reload',
+                            'Cluster/lsyncd: expanded health checks with `RSS`, queue/event size, log size and per-node SSH/API reachability validation',
+                            'File Sync/SSH: hardened tests and sync path for public-key auth (BatchMode, no password prompts, IdentitiesOnly, controlled UserKnownHostsFile)',
+                            'Monitor collector + `du-throttled`: configurable CPU/IO throttling (`run/pause ms`) and configurable disk scan cadence to reduce noise and sustained spikes',
+                            'Firewall audit: now also detects manual iptables rules outside UFW (including global `ACCEPT` and exposed sensitive ports)',
+                            'Global UI: standardized SweetAlert modals and automatic upgrade of legacy `confirm()` flows to avoid inconsistent JS modals',
+                            'Global UI: automatic copy button for `<pre><code>` blocks across the app',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Fail2Ban WordPress: filtro actualizado para excluir tráfico legítimo de Jetpack en `xmlrpc.php` y reducir falsos positivos',
+                            'Fail2Ban WordPress: ajuste de dureza de jail (`maxretry` 10→8, `bantime` 3600→7200) para abuso sostenido en `wp-login/xmlrpc`',
+                            'Fail2Ban UI: al eliminar IP de whitelist vuelve a mostrar confirmación modal consistente',
+                            'Docs/Settings map: renombrado para retirar `FileMon` en títulos visibles, quedando `Sync de archivos (lsyncd)`',
+                        ],
+                        'en' => [
+                            'Fail2Ban WordPress: filter updated to ignore legitimate Jetpack traffic on `xmlrpc.php`, reducing false positives',
+                            'Fail2Ban WordPress: stricter jail tuning (`maxretry` 10→8, `bantime` 3600→7200) for sustained `wp-login/xmlrpc` abuse',
+                            'Fail2Ban UI: whitelist IP removal now consistently shows a confirmation modal again',
+                            'Docs/Settings map: renamed visible titles to remove `FileMon`, keeping `Sync de archivos (lsyncd)`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.158',
                 'date' => '2026-04-26',
                 'badge' => 'primary',

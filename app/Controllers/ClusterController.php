@@ -872,6 +872,7 @@ class ClusterController
             'filesync_exclude'         => trim($_POST['filesync_exclude'] ?? '.cache,*.log,*.tmp,node_modules'),
             'filesync_rsync_default_excludes' => trim($_POST['filesync_rsync_default_excludes'] ?? ''),
             'filesync_lsyncd_default_excludes' => trim($_POST['filesync_lsyncd_default_excludes'] ?? ''),
+            'filesync_lsyncd_auto_heal' => isset($_POST['filesync_lsyncd_auto_heal']) ? '1' : '0',
             'filesync_ssl_certs'       => isset($_POST['filesync_ssl_certs']) ? '1' : '0',
             'filesync_ssl_cert_path'   => trim($_POST['filesync_ssl_cert_path'] ?? ''),
             'filesync_rewrite_dbhost'  => isset($_POST['filesync_rewrite_dbhost']) ? '1' : '0',
@@ -952,7 +953,7 @@ class ClusterController
 
         $host = FileSyncService::extractHostFromUrl($node['api_url']);
         $config = FileSyncService::getConfig();
-        $result = FileSyncService::testSshConnection($host, $config['ssh_port'], $config['ssh_key_path']);
+        $result = FileSyncService::testSshConnection($host, $config['ssh_port'], $config['ssh_key_path'], $config['ssh_user'] ?? 'root');
         echo json_encode($result);
         exit;
     }
@@ -1232,6 +1233,38 @@ class ClusterController
         header('Content-Type: application/json');
         $result = FileSyncService::reloadLsyncd();
         LogService::log('cluster.lsyncd', 'reload', $result['ok'] ? 'lsyncd recargado' : 'Error recargando lsyncd');
+        echo json_encode($result);
+        exit;
+    }
+
+    /** POST /settings/cluster/lsyncd-autofix (JSON) */
+    public function lsyncdAutofix(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $result = FileSyncService::autoHealLsyncd();
+        LogService::log(
+            'cluster.lsyncd',
+            'autofix',
+            ($result['ok'] ?? false) ? 'Autocorrección ejecutada' : ('Autocorrección falló: ' . ($result['error'] ?? 'error desconocido'))
+        );
+        echo json_encode($result);
+        exit;
+    }
+
+    /** POST /settings/cluster/lsyncd-retry (JSON) */
+    public function lsyncdRetry(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $result = FileSyncService::retryLsyncdSsh();
+        LogService::log(
+            'cluster.lsyncd',
+            'retry',
+            ($result['ok'] ?? false)
+                ? 'Reintento SSH de lsyncd aplicado'
+                : ('Reintento SSH falló: ' . ($result['error'] ?? 'error desconocido'))
+        );
         echo json_encode($result);
         exit;
     }

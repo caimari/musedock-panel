@@ -58,6 +58,10 @@
                             <form method="POST" action="/settings/firewall/delete-rule" class="ms-3" onsubmit="return confirmFixDelete(this, <?= (int)$warn['rule_num'] ?>)">
                                 <?= View::csrf() ?>
                                 <input type="hidden" name="rule_number" value="<?= (int)$warn['rule_num'] ?>">
+                                <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+                                <?php if (!empty($warn['delete_backend'])): ?>
+                                    <input type="hidden" name="backend" value="<?= View::e($warn['delete_backend']) ?>">
+                                <?php endif; ?>
                                 <button type="submit" class="btn btn-outline-danger btn-sm text-nowrap">
                                     <i class="bi bi-wrench me-1"></i>Corregir
                                 </button>
@@ -194,8 +198,9 @@
         <div class="card-header d-flex align-items-center justify-content-between">
             <span><i class="bi bi-list-ul me-1"></i> Reglas Actuales</span>
             <?php if ($type === 'iptables'): ?>
-                <form method="POST" action="/settings/firewall/save" class="d-inline">
+                <form method="POST" action="/settings/firewall/save" class="d-inline" onsubmit="return confirmSaveRules(this)">
                     <?= View::csrf() ?>
+                    <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
                     <button type="submit" class="btn btn-outline-success btn-sm">
                         <i class="bi bi-save me-1"></i>Guardar Reglas
                     </button>
@@ -283,6 +288,7 @@
                                         <form method="POST" action="/settings/firewall/delete-rule" class="d-inline" onsubmit="return confirmDelete(this, <?= (int)$rule['num'] ?>)">
                                             <?= View::csrf() ?>
                                             <input type="hidden" name="rule_number" value="<?= (int)$rule['num'] ?>">
+                                            <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
                                             <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar regla">
                                                 <i class="bi bi-trash"></i>
                                             </button>
@@ -342,9 +348,10 @@
     <div class="modal fade" id="editRuleModal" tabindex="-1">
         <div class="modal-dialog">
             <div class="modal-content bg-dark text-light">
-                <form method="POST" action="/settings/firewall/edit-rule" id="editRuleForm">
+                <form method="POST" action="/settings/firewall/edit-rule" id="editRuleForm" onsubmit="return confirmEditRule(this)">
                     <?= View::csrf() ?>
                     <input type="hidden" name="rule_number" id="editRuleNumber">
+                    <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
                     <div class="modal-header border-secondary">
                         <h5 class="modal-title"><i class="bi bi-pencil-square me-2"></i>Editar Regla #<span id="editRuleNumLabel"></span></h5>
                         <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
@@ -433,6 +440,7 @@
                             <th>Origen</th>
                             <th>Puerto</th>
                             <th>Detalles</th>
+                            <th class="text-end" style="width:100px;">Acciones</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -452,6 +460,17 @@
                             <td><code class="small"><?= View::e($mr['source']) ?></code></td>
                             <td><code><?= View::e($mr['port']) ?></code></td>
                             <td><small class="text-muted"><?= View::e($mr['extra'] ?: '-') ?></small></td>
+                            <td class="text-end text-nowrap">
+                                <form method="POST" action="/settings/firewall/delete-rule" class="d-inline" onsubmit="return confirmDelete(this, <?= (int)$mr['num'] ?>)">
+                                    <?= View::csrf() ?>
+                                    <input type="hidden" name="rule_number" value="<?= (int)$mr['num'] ?>">
+                                    <input type="hidden" name="backend" value="iptables">
+                                    <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+                                    <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar regla manual de iptables">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            </td>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -516,7 +535,253 @@
         </div>
     </div>
 
-    <!-- Card 4: Sugerencias -->
+    <!-- Card 4: Snapshot completo -->
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-hdd-stack me-1"></i> Snapshot completo del firewall</div>
+        <div class="card-body">
+            <p class="small text-muted mb-3">
+                Guarda y restaura la configuracion completa efectiva del firewall (estado real actual) en un solo paso.
+            </p>
+
+            <form method="POST" action="/settings/firewall/snapshots/save" id="fullSnapshotForm" class="mb-4" onsubmit="return confirmSaveFullSnapshot(this)">
+                <?= View::csrf() ?>
+                <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+                <div class="row g-3">
+                    <div class="col-md-5">
+                        <label class="form-label">Nombre del snapshot</label>
+                        <input type="text" name="snapshot_name" class="form-control" placeholder="Ej: Produccion estable 2026-04-26" maxlength="100" required>
+                    </div>
+                    <div class="col-md-7">
+                        <label class="form-label">Nota (opcional)</label>
+                        <input type="text" name="snapshot_note" class="form-control" placeholder="Ej: Antes de cambios de puertos SSH y panel">
+                    </div>
+                </div>
+                <div class="mt-3">
+                    <button type="submit" class="btn btn-outline-success btn-sm">
+                        <i class="bi bi-camera me-1"></i>Guardar snapshot completo
+                    </button>
+                </div>
+            </form>
+
+            <?php if (empty($fullSnapshots ?? [])): ?>
+                <p class="text-muted small mb-0"><i class="bi bi-info-circle me-1"></i>No hay snapshots completos guardados.</p>
+            <?php else: ?>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead>
+                            <tr class="text-muted">
+                                <th>Snapshot</th>
+                                <th>Origen</th>
+                                <th>Fecha</th>
+                                <th class="text-end">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach (($fullSnapshots ?? []) as $snap): ?>
+                                <tr>
+                                    <td>
+                                        <strong><?= View::e($snap['name']) ?></strong>
+                                        <?php if (!empty($snap['note'])): ?>
+                                            <div class="small text-muted"><?= View::e($snap['note']) ?></div>
+                                        <?php endif; ?>
+                                        <div class="small text-muted">hash: <code><?= View::e(substr((string)($snap['hash'] ?? ''), 0, 12)) ?></code></div>
+                                    </td>
+                                    <td><span class="badge bg-secondary"><?= View::e(strtoupper((string)($snap['source_type'] ?? 'unknown'))) ?></span></td>
+                                    <td class="small text-muted"><code><?= View::e((string)($snap['created_at'] ?? '')) ?></code></td>
+                                    <td class="text-end text-nowrap">
+                                        <form method="POST" action="/settings/firewall/snapshots/apply" class="d-inline" onsubmit="return confirmApplyFullSnapshot(this, <?= htmlspecialchars(json_encode((string)$snap['name']), ENT_QUOTES, 'UTF-8') ?>)">
+                                            <?= View::csrf() ?>
+                                            <input type="hidden" name="snapshot_id" value="<?= View::e($snap['id']) ?>">
+                                            <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+                                            <button type="submit" class="btn btn-outline-warning btn-sm" title="Restaurar snapshot completo">
+                                                <i class="bi bi-arrow-counterclockwise"></i>
+                                            </button>
+                                        </form>
+                                        <form method="POST" action="/settings/firewall/snapshots/delete" class="d-inline" onsubmit="return confirmDeleteFullSnapshot(this, <?= htmlspecialchars(json_encode((string)$snap['name']), ENT_QUOTES, 'UTF-8') ?>)">
+                                            <?= View::csrf() ?>
+                                            <input type="hidden" name="snapshot_id" value="<?= View::e($snap['id']) ?>">
+                                            <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+                                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar snapshot">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- Card 5: Exportar / Importar -->
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-arrow-left-right me-1"></i> Exportar / Importar configuracion</div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-lg-6">
+                    <h6 class="mb-2"><i class="bi bi-box-arrow-down me-1"></i>Exportar</h6>
+                    <p class="small text-muted mb-2">Descarga JSON con reglas normalizadas y bloque raw (iptables) para despliegue en otros nodos.</p>
+                    <form method="POST" action="/settings/firewall/export" onsubmit="return confirmExportConfig(this)">
+                        <?= View::csrf() ?>
+                        <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+                        <button type="submit" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-download me-1"></i>Exportar JSON
+                        </button>
+                    </form>
+                </div>
+                <div class="col-lg-6">
+                    <h6 class="mb-2"><i class="bi bi-box-arrow-in-up me-1"></i>Importar</h6>
+                    <p class="small text-muted mb-2">Carga JSON exportado. Puedes anadir reglas o reemplazar configuracion existente.</p>
+                    <form method="POST" action="/settings/firewall/import" enctype="multipart/form-data" onsubmit="return confirmImportConfig(this)">
+                        <?= View::csrf() ?>
+                        <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+                        <div class="input-group input-group-sm mb-2">
+                            <input type="file" class="form-control" name="config_file" accept=".json,application/json" required>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" id="replaceExistingImport" name="replace_existing">
+                            <label class="form-check-label small text-muted" for="replaceExistingImport">
+                                Reemplazar configuracion actual (modo destructivo)
+                            </label>
+                        </div>
+                        <button type="submit" class="btn btn-outline-warning btn-sm">
+                            <i class="bi bi-upload me-1"></i>Importar JSON
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card 6: Presets -->
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-bookmark-star me-1"></i> Presets de Reglas</div>
+        <div class="card-body">
+            <p class="small text-muted mb-3">
+                Crea presets para reutilizar reglas frecuentes y aplicarlas con un clic.
+            </p>
+
+            <form method="POST" action="/settings/firewall/presets/save" id="presetRuleForm" class="mb-4" onsubmit="return confirmSavePreset(this)">
+                <?= View::csrf() ?>
+                <input type="hidden" name="preset_id" id="presetId">
+                <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Nombre del preset</label>
+                        <input type="text" name="preset_name" id="presetName" class="form-control" placeholder="Ej: SSH Oficina" maxlength="80" required>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Accion</label>
+                        <select name="action" id="presetAction" class="form-select">
+                            <option value="allow">Permitir</option>
+                            <option value="deny">Denegar</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">IP Origen</label>
+                        <input type="text" name="from" id="presetFrom" class="form-control" placeholder="Ej: 192.168.1.0/24">
+                        <div class="form-check mt-1">
+                            <input class="form-check-input" type="checkbox" id="presetAnyIp" name="any_ip" onchange="togglePresetAnyIp(this)">
+                            <label class="form-check-label small text-muted" for="presetAnyIp">Cualquiera</label>
+                        </div>
+                    </div>
+                    <div class="col-md-1">
+                        <label class="form-label">Puerto</label>
+                        <input type="number" name="port" id="presetPort" class="form-control" min="1" max="65535" placeholder="80">
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Protocolo</label>
+                        <select name="protocol" id="presetProtocol" class="form-select" onchange="togglePresetPortField()">
+                            <option value="tcp">TCP</option>
+                            <option value="udp">UDP</option>
+                            <?php if ($type === 'ufw'): ?>
+                                <option value="both">Ambos</option>
+                            <?php endif; ?>
+                            <option value="all">Todos</option>
+                        </select>
+                    </div>
+                    <?php if ($type === 'ufw'): ?>
+                        <div class="col-md-12">
+                            <label class="form-label">Comentario (opcional)</label>
+                            <input type="text" name="comment" id="presetComment" class="form-control" placeholder="Ej: SSH desde oficina">
+                        </div>
+                    <?php endif; ?>
+                </div>
+
+                <div class="mt-3 d-flex gap-2 flex-wrap">
+                    <button type="submit" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-save me-1"></i>Guardar preset
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="resetPresetForm()">
+                        <i class="bi bi-eraser me-1"></i>Limpiar
+                    </button>
+                </div>
+            </form>
+
+            <?php if (empty($rulePresets ?? [])): ?>
+                <p class="text-muted small mb-0"><i class="bi bi-info-circle me-1"></i>No hay presets guardados todavia.</p>
+            <?php else: ?>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead>
+                            <tr class="text-muted">
+                                <th>Preset</th>
+                                <th>Regla</th>
+                                <th class="text-end">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach (($rulePresets ?? []) as $preset): ?>
+                                <tr>
+                                    <td>
+                                        <strong><?= View::e($preset['name']) ?></strong>
+                                        <div class="small text-muted">ID: <code><?= View::e($preset['id']) ?></code></div>
+                                    </td>
+                                    <td class="small">
+                                        <span class="badge <?= ($preset['action'] ?? '') === 'deny' ? 'bg-danger' : 'bg-success' ?> me-1"><?= strtoupper(View::e($preset['action'] ?? 'allow')) ?></span>
+                                        <code><?= View::e($preset['protocol'] ?? 'tcp') ?></code>
+                                        <?php if (!empty($preset['port'])): ?>
+                                            <code>dpt:<?= View::e($preset['port']) ?></code>
+                                        <?php else: ?>
+                                            <span class="text-muted">all ports</span>
+                                        <?php endif; ?>
+                                        <span class="text-muted ms-1">from</span> <code><?= View::e($preset['from'] ?? '0.0.0.0/0') ?></code>
+                                    </td>
+                                    <td class="text-end text-nowrap">
+                                        <form method="POST" action="/settings/firewall/presets/apply" class="d-inline" onsubmit="return confirmApplyPreset(this, <?= htmlspecialchars(json_encode((string)$preset['name']), ENT_QUOTES, 'UTF-8') ?>)">
+                                            <?= View::csrf() ?>
+                                            <input type="hidden" name="preset_id" value="<?= View::e($preset['id']) ?>">
+                                            <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+                                            <button type="submit" class="btn btn-outline-success btn-sm" title="Aplicar preset">
+                                                <i class="bi bi-lightning-charge"></i>
+                                            </button>
+                                        </form>
+                                        <button type="button" class="btn btn-outline-primary btn-sm" title="Editar preset"
+                                            onclick='editPreset(<?= htmlspecialchars(json_encode($preset), ENT_QUOTES, 'UTF-8') ?>)'>
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <form method="POST" action="/settings/firewall/presets/delete" class="d-inline" onsubmit="return confirmDeletePreset(this, <?= htmlspecialchars(json_encode((string)$preset['name']), ENT_QUOTES, 'UTF-8') ?>)">
+                                            <?= View::csrf() ?>
+                                            <input type="hidden" name="preset_id" value="<?= View::e($preset['id']) ?>">
+                                            <input type="hidden" name="admin_password" class="fw-admin-password-field" value="">
+                                            <button type="submit" class="btn btn-outline-danger btn-sm" title="Eliminar preset">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
+        </div>
+    </div>
+
+    <!-- Card 7: Sugerencias -->
     <div class="card mb-3">
         <div class="card-header" role="button" data-bs-toggle="collapse" data-bs-target="#suggestionsCollapse" aria-expanded="false">
             <i class="bi bi-lightbulb me-1"></i> Sugerencias
@@ -589,6 +854,65 @@
                         <a href="/settings/replication" class="text-info">Ajustes &gt; Replicacion</a> para ver sugerencias.
                     </p>
                 <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- Card 8: Comandos utiles -->
+    <div class="card mb-3">
+        <div class="card-header">
+            <i class="bi bi-terminal me-1"></i> Comandos utiles para verificar firewall (shell)
+        </div>
+        <div class="card-body">
+            <p class="small text-muted mb-3">
+                Ejecuta estos comandos en consola para comparar el estado real del servidor con lo que muestra el panel.
+            </p>
+
+            <div class="mb-3">
+                <div class="fw-semibold mb-1">1) Ver firewall real (lo que manda)</div>
+                <pre class="mb-1 p-2 rounded" style="background:rgba(15,23,42,0.6);"><code>iptables -L -n --line-numbers</code></pre>
+                <small class="text-muted">Compara con la tabla del panel: las reglas clave deben coincidir.</small>
+            </div>
+
+            <div class="mb-3">
+                <div class="fw-semibold mb-1 text-danger">2) Detectar error critico: regla que abre todo</div>
+                <pre class="mb-1 p-2 rounded" style="background:rgba(15,23,42,0.6);"><code>iptables -S | grep -E "ACCEPT.*0.0.0.0/0.*0.0.0.0/0"</code></pre>
+                <small class="text-muted">Si ves una regla global tipo <code>-A INPUT -j ACCEPT</code>, el firewall esta abierto.</small>
+            </div>
+
+            <div class="mb-3">
+                <div class="fw-semibold mb-1">3) Detectar duplicados</div>
+                <pre class="mb-1 p-2 rounded" style="background:rgba(15,23,42,0.6);"><code>iptables -S | sort | uniq -d</code></pre>
+                <small class="text-muted">Si devuelve lineas, hay reglas duplicadas.</small>
+            </div>
+
+            <div class="mb-3">
+                <div class="fw-semibold mb-1">4) Comprobar politicas</div>
+                <pre class="mb-1 p-2 rounded" style="background:rgba(15,23,42,0.6);"><code>iptables -S | grep "^-P"</code></pre>
+                <small class="text-muted">Esperado tipico: <code>-P INPUT DROP</code>, <code>-P FORWARD DROP</code>, <code>-P OUTPUT ACCEPT</code>.</small>
+            </div>
+
+            <div class="mb-3">
+                <div class="fw-semibold mb-1">5) Comprobar SSH solo a rango autorizado</div>
+                <pre class="mb-1 p-2 rounded" style="background:rgba(15,23,42,0.6);"><code>iptables -L INPUT -n | grep dpt:22</code></pre>
+                <small class="text-muted">Revisa rapidamente desde que origenes esta permitido SSH.</small>
+            </div>
+
+            <div class="mb-3">
+                <div class="fw-semibold mb-1">6) Ver puertos escuchando realmente</div>
+                <pre class="mb-1 p-2 rounded" style="background:rgba(15,23,42,0.6);"><code>ss -tuln</code></pre>
+                <small class="text-muted">Muestra servicios escuchando (esto no es firewall).</small>
+            </div>
+
+            <div class="mb-3">
+                <div class="fw-semibold mb-1">7) Test real de acceso</div>
+                <pre class="mb-1 p-2 rounded" style="background:rgba(15,23,42,0.6);"><code>nc -zv 127.0.0.1 22</code></pre>
+                <small class="text-muted">Prueba tambien desde otra IP: tu IP permitida debe entrar; otra no permitida debe fallar.</small>
+            </div>
+
+            <div>
+                <div class="fw-semibold mb-1">8) Estado de Fail2Ban</div>
+                <pre class="mb-1 p-2 rounded" style="background:rgba(15,23,42,0.6);"><code>fail2ban-client status</code></pre>
             </div>
         </div>
     </div>
@@ -747,53 +1071,260 @@ function toggleEditPortField() {
     }
 }
 
+function togglePresetAnyIp(cb) {
+    var fromEl = document.getElementById('presetFrom');
+    if (!fromEl) return;
+    if (cb.checked) {
+        fromEl.value = '';
+        fromEl.disabled = true;
+        fromEl.placeholder = 'Cualquiera (0.0.0.0/0)';
+    } else {
+        fromEl.disabled = false;
+        fromEl.placeholder = 'Ej: 192.168.1.0/24';
+    }
+}
+
+function togglePresetPortField() {
+    var protoEl = document.getElementById('presetProtocol');
+    var portEl = document.getElementById('presetPort');
+    if (!protoEl || !portEl) return;
+    if (protoEl.value === 'all') {
+        portEl.value = '';
+        portEl.disabled = true;
+        portEl.placeholder = 'No aplica';
+    } else {
+        portEl.disabled = false;
+        portEl.placeholder = '80';
+    }
+}
+
+function resetPresetForm() {
+    var form = document.getElementById('presetRuleForm');
+    if (!form) return;
+    form.reset();
+    var presetId = document.getElementById('presetId');
+    if (presetId) presetId.value = '';
+    togglePresetAnyIp(document.getElementById('presetAnyIp'));
+    togglePresetPortField();
+}
+
+function editPreset(preset) {
+    if (!preset || typeof preset !== 'object') return;
+    var form = document.getElementById('presetRuleForm');
+    if (!form) return;
+
+    document.getElementById('presetId').value = preset.id || '';
+    document.getElementById('presetName').value = preset.name || '';
+    document.getElementById('presetAction').value = preset.action || 'allow';
+    document.getElementById('presetProtocol').value = preset.protocol || 'tcp';
+    document.getElementById('presetPort').value = preset.port || '';
+
+    var any = (preset.from || '') === '0.0.0.0/0' || (preset.from || '') === '';
+    var anyIp = document.getElementById('presetAnyIp');
+    var fromEl = document.getElementById('presetFrom');
+    if (anyIp) anyIp.checked = any;
+    if (fromEl) fromEl.value = any ? '' : (preset.from || '');
+    togglePresetAnyIp(anyIp);
+
+    var commentEl = document.getElementById('presetComment');
+    if (commentEl) commentEl.value = preset.comment || '';
+    togglePresetPortField();
+    form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 // ─── SwalDark Confirmations ─────────────────────────────
-function confirmFixDelete(form, ruleNum) {
+function setAdminPassword(form, password) {
+    var fields = form.querySelectorAll('.fw-admin-password-field');
+    fields.forEach(function(field) { field.value = password || ''; });
+}
+
+function confirmWithAdminPassword(form, opts) {
+    opts = opts || {};
     if (typeof Swal !== 'undefined') {
         Swal.fire({
-            title: 'Corregir problema de seguridad',
-            html: 'Se eliminara la regla <strong>#' + ruleNum + '</strong> que representa un riesgo de seguridad.<br><small class="text-muted">Las reglas se renumeraran automaticamente.</small>',
-            icon: 'warning',
+            title: opts.title || 'Confirmar accion',
+            html:
+                (opts.html || '') +
+                '<div class="mt-3 text-start">' +
+                '<label for="swal-fw-admin-password" class="form-label small mb-1">Contrasena admin</label>' +
+                '<input type="password" id="swal-fw-admin-password" class="swal2-input m-0" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;" placeholder="Tu contrasena de administrador" autocomplete="current-password">' +
+                '</div>',
+            icon: opts.icon || 'warning',
             showCancelButton: true,
-            confirmButtonText: 'Si, corregir',
+            confirmButtonText: opts.confirmText || 'Confirmar',
             cancelButtonText: 'Cancelar',
-            background: '#1e1e2e',
-            color: '#cdd6f4',
-            confirmButtonColor: '#dc3545',
-            cancelButtonColor: '#585b70',
-        }).then(function(result) {
-            if (result.isConfirmed) {
-                form.onsubmit = null;
-                form.submit();
+            confirmButtonColor: opts.confirmColor || '#dc3545',
+            preConfirm: function() {
+                var pwd = document.getElementById('swal-fw-admin-password').value;
+                if (!pwd) {
+                    Swal.showValidationMessage('Debes ingresar tu contrasena de administrador');
+                    return false;
+                }
+                return pwd;
             }
+        }).then(function(result) {
+            if (!result.isConfirmed) return;
+            setAdminPassword(form, result.value || '');
+            form.onsubmit = null;
+            form.submit();
         });
         return false;
     }
-    return confirm('¿Eliminar la regla #' + ruleNum + ' para corregir el problema de seguridad?');
+
+    var ok = confirm(opts.fallbackConfirm || 'Confirmar accion?');
+    if (!ok) return false;
+    var pwd = prompt('Contrasena de administrador:');
+    if (!pwd) return false;
+    setAdminPassword(form, pwd);
+    return true;
+}
+
+function fwEsc(text) {
+    return String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function confirmFixDelete(form, ruleNum) {
+    return confirmWithAdminPassword(form, {
+        title: 'Corregir problema de seguridad',
+        html: 'Se eliminara la regla <strong>#' + ruleNum + '</strong> que representa un riesgo de seguridad.<br><small class="text-muted">Las reglas se renumeraran automaticamente.</small>',
+        icon: 'warning',
+        confirmText: 'Si, corregir',
+        confirmColor: '#dc3545',
+        fallbackConfirm: 'Eliminar la regla #' + ruleNum + ' para corregir el problema?'
+    });
 }
 
 function confirmDelete(form, ruleNum) {
-    if (typeof Swal !== 'undefined') {
-        Swal.fire({
-            title: 'Eliminar regla #' + ruleNum,
-            html: '¿Seguro que quieres eliminar la regla <strong>#' + ruleNum + '</strong>?<br><small class="text-muted">Esta accion no se puede deshacer.</small>',
-            icon: 'warning',
-            showCancelButton: true,
-            confirmButtonText: 'Si, eliminar',
-            cancelButtonText: 'Cancelar',
-            background: '#1e1e2e',
-            color: '#cdd6f4',
-            confirmButtonColor: '#dc3545',
-            cancelButtonColor: '#585b70',
-        }).then(function(result) {
-            if (result.isConfirmed) {
-                form.onsubmit = null;
-                form.submit();
-            }
-        });
-        return false;
-    }
-    return confirm('¿Eliminar la regla #' + ruleNum + '?');
+    return confirmWithAdminPassword(form, {
+        title: 'Eliminar regla #' + ruleNum,
+        html: 'Seguro que quieres eliminar la regla <strong>#' + ruleNum + '</strong>?<br><small class="text-muted">Esta accion no se puede deshacer.</small>',
+        icon: 'warning',
+        confirmText: 'Si, eliminar',
+        confirmColor: '#dc3545',
+        fallbackConfirm: 'Eliminar la regla #' + ruleNum + '?'
+    });
+}
+
+function confirmEditRule(form) {
+    return confirmWithAdminPassword(form, {
+        title: 'Guardar edicion de regla',
+        html: 'Se aplicaran los cambios en la regla de firewall.',
+        icon: 'warning',
+        confirmText: 'Guardar cambios',
+        confirmColor: '#0ea5e9',
+        fallbackConfirm: 'Guardar cambios de la regla?'
+    });
+}
+
+function confirmSaveRules(form) {
+    return confirmWithAdminPassword(form, {
+        title: 'Guardar reglas persistentes',
+        html: 'Se guardara la configuracion actual de iptables en disco.',
+        icon: 'question',
+        confirmText: 'Guardar reglas',
+        confirmColor: '#198754',
+        fallbackConfirm: 'Guardar reglas de iptables?'
+    });
+}
+
+function confirmSavePreset(form) {
+    return confirmWithAdminPassword(form, {
+        title: 'Guardar preset',
+        html: 'Se creara o actualizara el preset de firewall.',
+        icon: 'question',
+        confirmText: 'Guardar preset',
+        confirmColor: '#0ea5e9',
+        fallbackConfirm: 'Guardar preset?'
+    });
+}
+
+function confirmSaveFullSnapshot(form) {
+    return confirmWithAdminPassword(form, {
+        title: 'Guardar snapshot completo',
+        html: 'Se guardara una copia completa del estado real actual del firewall.',
+        icon: 'question',
+        confirmText: 'Guardar snapshot',
+        confirmColor: '#198754',
+        fallbackConfirm: 'Guardar snapshot completo del firewall?'
+    });
+}
+
+function confirmExportConfig(form) {
+    return confirmWithAdminPassword(form, {
+        title: 'Exportar configuracion',
+        html: 'Se descargara un archivo JSON con la configuracion actual del firewall.',
+        icon: 'question',
+        confirmText: 'Exportar',
+        confirmColor: '#0ea5e9',
+        fallbackConfirm: 'Exportar configuracion firewall?'
+    });
+}
+
+function confirmImportConfig(form) {
+    var replaceCheck = form.querySelector('[name="replace_existing"]');
+    var replace = !!(replaceCheck && replaceCheck.checked);
+    var html = replace
+        ? 'Se importara el archivo en modo <strong>reemplazar</strong>.<br><small class="text-muted">Esto puede sobrescribir la configuracion actual.</small>'
+        : 'Se importara el archivo en modo <strong>anadir</strong> (append).';
+    return confirmWithAdminPassword(form, {
+        title: 'Importar configuracion',
+        html: html,
+        icon: 'warning',
+        confirmText: 'Importar',
+        confirmColor: '#f59e0b',
+        fallbackConfirm: 'Importar configuracion firewall?'
+    });
+}
+
+function confirmDeletePreset(form, presetName) {
+    return confirmWithAdminPassword(form, {
+        title: 'Eliminar preset',
+        html: 'Seguro que quieres eliminar el preset <strong>' + fwEsc(presetName || '') + '</strong>?',
+        icon: 'warning',
+        confirmText: 'Eliminar preset',
+        confirmColor: '#dc3545',
+        fallbackConfirm: 'Eliminar preset?'
+    });
+}
+
+function confirmApplyPreset(form, presetName) {
+    return confirmWithAdminPassword(form, {
+        title: 'Aplicar preset',
+        html: 'Se aplicara el preset <strong>' + fwEsc(presetName || '') + '</strong> al firewall actual.',
+        icon: 'warning',
+        confirmText: 'Aplicar preset',
+        confirmColor: '#198754',
+        fallbackConfirm: 'Aplicar preset?'
+    });
+}
+
+function confirmApplyFullSnapshot(form, snapshotName) {
+    return confirmWithAdminPassword(form, {
+        title: 'Restaurar snapshot completo',
+        html:
+            'Se restaurara el snapshot <strong>' + fwEsc(snapshotName || '') + '</strong> sobre la configuracion actual.<br>' +
+            '<small class="text-muted">Esto reemplaza el estado efectivo de reglas cargado ahora.</small>',
+        icon: 'warning',
+        confirmText: 'Restaurar snapshot',
+        confirmColor: '#f59e0b',
+        fallbackConfirm: 'Restaurar snapshot completo?'
+    });
+}
+
+function confirmDeleteFullSnapshot(form, snapshotName) {
+    return confirmWithAdminPassword(form, {
+        title: 'Eliminar snapshot completo',
+        html: 'Seguro que quieres eliminar el snapshot <strong>' + fwEsc(snapshotName || '') + '</strong>?',
+        icon: 'warning',
+        confirmText: 'Eliminar snapshot',
+        confirmColor: '#dc3545',
+        fallbackConfirm: 'Eliminar snapshot completo?'
+    });
 }
 
 function confirmEnable(form) {
@@ -909,4 +1440,6 @@ function confirmEmergency(form) {
     }
     return confirm('¿Permitir todo el trafico desde tu IP actual?');
 }
+
+togglePresetPortField();
 </script>

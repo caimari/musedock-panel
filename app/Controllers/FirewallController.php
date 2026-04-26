@@ -32,11 +32,19 @@ class FirewallController
         $replSuggestions  = FirewallService::suggestRulesForReplication($slaveIp);
         $hostSuggestions  = FirewallService::suggestRulesForHosting();
 
-        // Security audit
-        $securityWarnings = FirewallService::auditRules($rules, $policy);
-
         // Manual iptables rules outside UFW
         $manualIptables = FirewallService::getManualIptablesRules();
+        $rulePresets = FirewallService::getRulePresets();
+        $fullSnapshots = FirewallService::getFullSnapshots();
+
+        // Security audit
+        $securityWarnings = FirewallService::auditRules($rules, $policy);
+        if (!empty($manualIptables)) {
+            $securityWarnings = array_merge(
+                $securityWarnings,
+                FirewallService::auditManualIptablesRules($manualIptables)
+            );
+        }
 
         View::render('settings/firewall', [
             'layout'            => 'main',
@@ -51,6 +59,8 @@ class FirewallController
             'hostSuggestions'   => $hostSuggestions,
             'securityWarnings'  => $securityWarnings,
             'manualIptables'    => $manualIptables,
+            'rulePresets'       => $rulePresets,
+            'fullSnapshots'     => $fullSnapshots,
         ]);
     }
 
@@ -121,9 +131,14 @@ class FirewallController
     public function deleteRule(): void
     {
         View::verifyCsrf();
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'eliminar reglas de firewall')) {
+            exit;
+        }
 
-        $type   = FirewallService::getType();
-        $number = (int)($_POST['rule_number'] ?? 0);
+        $type    = FirewallService::getType();
+        $number  = (int)($_POST['rule_number'] ?? 0);
+        $backend = strtolower(trim((string)($_POST['backend'] ?? '')));
 
         if ($number < 1) {
             Flash::set('error', 'Numero de regla no valido.');
@@ -131,10 +146,19 @@ class FirewallController
             exit;
         }
 
-        if ($type === 'ufw') {
+        $logBackend = $type;
+        if ($backend === 'iptables') {
+            $result = FirewallService::iptablesDeleteRule($number);
+            $logBackend = 'iptables';
+        } elseif ($backend === 'ufw') {
             $result = FirewallService::ufwDeleteRule($number);
+            $logBackend = 'ufw';
+        } elseif ($type === 'ufw') {
+            $result = FirewallService::ufwDeleteRule($number);
+            $logBackend = 'ufw';
         } elseif ($type === 'iptables') {
             $result = FirewallService::iptablesDeleteRule($number);
+            $logBackend = 'iptables';
         } else {
             Flash::set('error', 'No se detecto un firewall activo.');
             header('Location: /settings/firewall');
@@ -142,7 +166,7 @@ class FirewallController
         }
 
         if ($result['ok']) {
-            LogService::log('firewall.delete_rule', (string)$number, "Regla #{$number} eliminada");
+            LogService::log('firewall.delete_rule', (string)$number, "Regla #{$number} eliminada ({$logBackend})");
             Flash::set('success', 'Regla eliminada correctamente.');
         } else {
             Flash::set('error', 'Error al eliminar regla: ' . ($result['output'] ?? 'desconocido'));
@@ -155,6 +179,10 @@ class FirewallController
     public function editRule(): void
     {
         View::verifyCsrf();
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'editar reglas de firewall')) {
+            exit;
+        }
 
         $type     = FirewallService::getType();
         $number   = (int)($_POST['rule_number'] ?? 0);
@@ -300,6 +328,10 @@ class FirewallController
     public function saveRules(): void
     {
         View::verifyCsrf();
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'guardar reglas de firewall')) {
+            exit;
+        }
 
         $result = FirewallService::iptablesSave();
 
@@ -310,6 +342,364 @@ class FirewallController
             Flash::set('error', 'Error al guardar reglas: ' . ($result['output'] ?? 'desconocido'));
         }
 
+        header('Location: /settings/firewall');
+        exit;
+    }
+
+    public function savePreset(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'guardar presets de firewall')) {
+            exit;
+        }
+
+        $presetId = trim((string)($_POST['preset_id'] ?? ''));
+        $name     = trim((string)($_POST['preset_name'] ?? ''));
+        $action   = strtolower(trim((string)($_POST['action'] ?? 'allow')));
+        $from     = trim((string)($_POST['from'] ?? ''));
+        $port     = trim((string)($_POST['port'] ?? ''));
+        $protocol = strtolower(trim((string)($_POST['protocol'] ?? 'tcp')));
+        $comment  = trim((string)($_POST['comment'] ?? ''));
+        $anyIp    = isset($_POST['any_ip']);
+
+        if ($name === '') {
+            Flash::set('error', 'Debes indicar un nombre para el preset.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+        if (strlen($name) > 80) {
+            Flash::set('error', 'Nombre de preset demasiado largo (max 80 caracteres).');
+            header('Location: /settings/firewall');
+            exit;
+        }
+        if (!in_array($action, ['allow', 'deny'], true)) {
+            Flash::set('error', 'Accion de preset no valida.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+        if ($anyIp || $from === '') {
+            $from = '0.0.0.0/0';
+        } elseif (!filter_var($from, FILTER_VALIDATE_IP) && !preg_match('#^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/\d{1,2}$#', $from)) {
+            Flash::set('error', 'IP/CIDR del preset no valida.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+        if (!in_array($protocol, ['tcp', 'udp', 'both', 'all'], true)) {
+            Flash::set('error', 'Protocolo del preset no valido.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $portNum = (int)$port;
+        if ($protocol !== 'all' && ($port === '' || $portNum < 1 || $portNum > 65535)) {
+            Flash::set('error', 'Puerto del preset fuera de rango (1-65535).');
+            header('Location: /settings/firewall');
+            exit;
+        }
+        if ($protocol === 'all') {
+            $port = '';
+        }
+
+        $saved = FirewallService::saveRulePreset([
+            'id'       => $presetId,
+            'name'     => $name,
+            'action'   => $action,
+            'from'     => $from,
+            'port'     => $port,
+            'protocol' => $protocol,
+            'comment'  => $comment,
+        ]);
+
+        LogService::log('firewall.preset.save', (string)$saved['id'], 'Preset guardado: ' . $saved['name']);
+        Flash::set('success', 'Preset de firewall guardado.');
+        header('Location: /settings/firewall');
+        exit;
+    }
+
+    public function deletePreset(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'eliminar presets de firewall')) {
+            exit;
+        }
+
+        $presetId = trim((string)($_POST['preset_id'] ?? ''));
+        if ($presetId === '') {
+            Flash::set('error', 'Preset no valido.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $preset = FirewallService::findRulePreset($presetId);
+        $deleted = FirewallService::deleteRulePreset($presetId);
+        if (!$deleted) {
+            Flash::set('error', 'No se pudo eliminar el preset (no existe o ya fue eliminado).');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        LogService::log('firewall.preset.delete', $presetId, 'Preset eliminado: ' . (string)($preset['name'] ?? $presetId));
+        Flash::set('success', 'Preset eliminado correctamente.');
+        header('Location: /settings/firewall');
+        exit;
+    }
+
+    public function applyPreset(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'aplicar presets de firewall')) {
+            exit;
+        }
+
+        $presetId = trim((string)($_POST['preset_id'] ?? ''));
+        $preset = FirewallService::findRulePreset($presetId);
+        if (!$preset) {
+            Flash::set('error', 'Preset no encontrado.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $type = FirewallService::getType();
+        if ($type === 'none') {
+            Flash::set('error', 'No se detecto un firewall activo.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $action = strtolower((string)($preset['action'] ?? 'allow'));
+        $source = (string)($preset['from'] ?? '0.0.0.0/0');
+        $port   = (string)($preset['port'] ?? '');
+        $proto  = strtolower((string)($preset['protocol'] ?? 'tcp'));
+        $comment = (string)($preset['comment'] ?? '');
+
+        if (!in_array($action, ['allow', 'deny'], true) || !in_array($proto, ['tcp', 'udp', 'both', 'all'], true)) {
+            Flash::set('error', 'El preset contiene una configuracion invalida.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+        if ($proto !== 'all' && (int)$port < 1) {
+            Flash::set('error', 'El preset no tiene un puerto valido para el protocolo seleccionado.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        if ($type === 'ufw') {
+            $result = FirewallService::ufwAddRule($action, $source, $port, $proto, $comment);
+            if (!$result['ok']) {
+                Flash::set('error', 'Error al aplicar preset: ' . ($result['output'] ?? 'desconocido'));
+                header('Location: /settings/firewall');
+                exit;
+            }
+        } else {
+            // iptables no soporta "both" en una sola regla: aplicamos tcp + udp.
+            if ($proto === 'both') {
+                $tcp = FirewallService::iptablesAddRule($action, $source, (int)$port, 'tcp');
+                $udp = FirewallService::iptablesAddRule($action, $source, (int)$port, 'udp');
+                if (!$tcp['ok'] || !$udp['ok']) {
+                    Flash::set('error', 'Error al aplicar preset en iptables (tcp/udp).');
+                    header('Location: /settings/firewall');
+                    exit;
+                }
+            } else {
+                $result = FirewallService::iptablesAddRule($action, $source, (int)$port, $proto);
+                if (!$result['ok']) {
+                    Flash::set('error', 'Error al aplicar preset: ' . ($result['output'] ?? 'desconocido'));
+                    header('Location: /settings/firewall');
+                    exit;
+                }
+            }
+        }
+
+        LogService::log('firewall.preset.apply', $presetId, 'Preset aplicado: ' . (string)$preset['name']);
+        Flash::set('success', 'Preset aplicado: ' . (string)$preset['name']);
+        header('Location: /settings/firewall');
+        exit;
+    }
+
+    public function saveFullSnapshot(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'guardar snapshots completos de firewall')) {
+            exit;
+        }
+
+        $name = trim((string)($_POST['snapshot_name'] ?? ''));
+        $note = trim((string)($_POST['snapshot_note'] ?? ''));
+        if ($name === '') {
+            Flash::set('error', 'Debes indicar un nombre para el snapshot completo.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+        if (strlen($name) > 100) {
+            Flash::set('error', 'Nombre de snapshot demasiado largo (max 100 caracteres).');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $result = FirewallService::createFullSnapshot($name, $note);
+        if (!($result['ok'] ?? false)) {
+            Flash::set('error', 'No se pudo guardar snapshot: ' . (string)($result['error'] ?? 'desconocido'));
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $snapshot = (array)($result['snapshot'] ?? []);
+        LogService::log('firewall.snapshot.save', (string)($snapshot['id'] ?? ''), 'Snapshot completo guardado: ' . (string)($snapshot['name'] ?? $name));
+        Flash::set('success', 'Snapshot completo guardado.');
+        header('Location: /settings/firewall');
+        exit;
+    }
+
+    public function applyFullSnapshot(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'restaurar snapshots completos de firewall')) {
+            exit;
+        }
+
+        $id = trim((string)($_POST['snapshot_id'] ?? ''));
+        if ($id === '') {
+            Flash::set('error', 'Snapshot no valido.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $snapshot = FirewallService::findFullSnapshot($id);
+        if (!$snapshot) {
+            Flash::set('error', 'Snapshot no encontrado.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $result = FirewallService::applyFullSnapshot($id);
+        if (!($result['ok'] ?? false)) {
+            Flash::set('error', 'Error al restaurar snapshot: ' . (string)($result['error'] ?? 'desconocido'));
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        LogService::log('firewall.snapshot.apply', $id, 'Snapshot completo restaurado: ' . (string)($snapshot['name'] ?? $id));
+        Flash::set('success', 'Snapshot restaurado: ' . (string)($snapshot['name'] ?? $id));
+        header('Location: /settings/firewall');
+        exit;
+    }
+
+    public function deleteFullSnapshot(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'eliminar snapshots completos de firewall')) {
+            exit;
+        }
+
+        $id = trim((string)($_POST['snapshot_id'] ?? ''));
+        if ($id === '') {
+            Flash::set('error', 'Snapshot no valido.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $snapshot = FirewallService::findFullSnapshot($id);
+        $ok = FirewallService::deleteFullSnapshot($id);
+        if (!$ok) {
+            Flash::set('error', 'No se pudo eliminar el snapshot (no existe o ya fue eliminado).');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        LogService::log('firewall.snapshot.delete', $id, 'Snapshot completo eliminado: ' . (string)($snapshot['name'] ?? $id));
+        Flash::set('success', 'Snapshot eliminado.');
+        header('Location: /settings/firewall');
+        exit;
+    }
+
+    public function exportConfig(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'exportar configuracion de firewall')) {
+            exit;
+        }
+
+        $result = FirewallService::exportConfiguration();
+        if (!($result['ok'] ?? false)) {
+            Flash::set('error', 'No se pudo exportar: ' . (string)($result['error'] ?? 'desconocido'));
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $data = (array)($result['data'] ?? []);
+        $filename = 'musedock-firewall-export-' . gmdate('Ymd-His') . '.json';
+
+        LogService::log('firewall.export', 'download', 'Export de configuracion firewall');
+        header('Content-Type: application/json; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        exit;
+    }
+
+    public function importConfig(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'importar configuracion de firewall')) {
+            exit;
+        }
+
+        if (!isset($_FILES['config_file']) || !is_array($_FILES['config_file'])) {
+            Flash::set('error', 'Debes seleccionar un archivo JSON para importar.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $file = $_FILES['config_file'];
+        $tmpPath = (string)($file['tmp_name'] ?? '');
+        $error = (int)($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($error !== UPLOAD_ERR_OK || $tmpPath === '' || !is_uploaded_file($tmpPath)) {
+            Flash::set('error', 'Error de subida de archivo.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $size = (int)($file['size'] ?? 0);
+        if ($size < 2 || $size > 2 * 1024 * 1024) {
+            Flash::set('error', 'Archivo invalido: maximo 2MB.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $raw = (string)file_get_contents($tmpPath);
+        $payload = json_decode($raw, true);
+        if (!is_array($payload)) {
+            Flash::set('error', 'JSON invalido en archivo de import.');
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        $replace = isset($_POST['replace_existing']);
+        $result = FirewallService::importConfiguration($payload, $replace);
+        if (!($result['ok'] ?? false)) {
+            Flash::set('error', 'No se pudo importar: ' . (string)($result['error'] ?? 'desconocido'));
+            header('Location: /settings/firewall');
+            exit;
+        }
+
+        LogService::log('firewall.import', $replace ? 'replace' : 'append', 'Import de configuracion firewall');
+        Flash::set('success', (string)($result['message'] ?? 'Configuracion importada correctamente.'));
         header('Location: /settings/firewall');
         exit;
     }

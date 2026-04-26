@@ -260,6 +260,45 @@ class MonitorService
     }
 
     /**
+     * Get lsyncd degradation state for monitor top banner/card.
+     * Active when latest sync alert is LSYNCD_SYNC_DEGRADED.
+     */
+    public static function getSyncDegradedStatus(?string $host = null): array
+    {
+        $host = self::resolveHost($host);
+        $row = Database::fetchOne(
+            "SELECT id, extract(epoch FROM ts AT TIME ZONE 'UTC') AS ts,
+                    type, message, acknowledged
+             FROM monitor_alerts
+             WHERE host = :host
+               AND type IN ('LSYNCD_SYNC_DEGRADED', 'LSYNCD_SYNC_RECOVERED')
+             ORDER BY ts DESC
+             LIMIT 1",
+            ['host' => $host]
+        );
+
+        if (!$row) {
+            return [
+                'active' => false,
+                'type' => null,
+                'message' => '',
+                'ts' => null,
+                'acknowledged' => false,
+                'link' => '/settings/cluster#archivos',
+            ];
+        }
+
+        return [
+            'active' => ($row['type'] ?? '') === 'LSYNCD_SYNC_DEGRADED',
+            'type' => (string)($row['type'] ?? ''),
+            'message' => (string)($row['message'] ?? ''),
+            'ts' => isset($row['ts']) ? (float)$row['ts'] : null,
+            'acknowledged' => (bool)($row['acknowledged'] ?? false),
+            'link' => '/settings/cluster#archivos',
+        ];
+    }
+
+    /**
      * Detect available NVIDIA GPUs via nvidia-smi.
      * Returns array of ['index' => 0, 'name' => 'RTX 4090', 'memory_total' => 24576] or empty.
      */

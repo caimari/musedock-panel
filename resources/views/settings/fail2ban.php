@@ -22,14 +22,27 @@
     </div>
     <script>
     function confirmInstallF2b() {
-        var S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+        var S = typeof Swal !== 'undefined' ? Swal : (typeof SwalDark !== 'undefined' ? SwalDark : null);
+        if (!S) {
+            if (confirm('Se instalara fail2ban y se configuraran los jails de proteccion. Continuar?')) {
+                var btnFallback = document.getElementById('btn-install-f2b');
+                btnFallback.disabled = true;
+                btnFallback.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Instalando Fail2Ban...';
+                document.getElementById('form-install-f2b').submit();
+            }
+            return;
+        }
         S.fire({
             title: 'Instalar Fail2Ban',
             html: '<p>Se instalara <code>fail2ban</code> y se configuraran los jails de proteccion.</p><p class="text-muted small">Esto puede tardar 1-2 minutos.</p>',
             icon: 'question',
             showCancelButton: true,
             confirmButtonText: '<i class="bi bi-download me-1"></i>Instalar',
-            cancelButtonText: 'Cancelar'
+            cancelButtonText: 'Cancelar',
+            background: '#ffffff',
+            color: '#111827',
+            confirmButtonColor: '#2563eb',
+            cancelButtonColor: '#6b7280',
         }).then(function(r) {
             if (!r.isConfirmed) return;
             var btn = document.getElementById('btn-install-f2b');
@@ -132,7 +145,7 @@
                                                     <?= View::csrf() ?>
                                                     <input type="hidden" name="action" value="remove">
                                                     <input type="hidden" name="ip" value="<?= View::e($wip) ?>">
-                                                    <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-1" title="Eliminar" onclick="return confirm('Eliminar <?= View::e($wip) ?> de la whitelist?')">
+                                                    <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-1" title="Eliminar" onclick="return confirmWhitelistRemove(this.form, '<?= View::e($wip) ?>')">
                                                         <i class="bi bi-x-lg"></i>
                                                     </button>
                                                 </form>
@@ -182,7 +195,16 @@
         </div>
         <script>
         function confirmSetupJails() {
-            var S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
+            var S = typeof Swal !== 'undefined' ? Swal : (typeof SwalDark !== 'undefined' ? SwalDark : null);
+            if (!S) {
+                if (confirm('Se configuraran jails de proteccion para panel, portal y WordPress. Continuar?')) {
+                    var btnFallback = document.getElementById('btn-setup-jails');
+                    btnFallback.disabled = true;
+                    btnFallback.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Configurando jails...';
+                    document.getElementById('form-setup-jails').submit();
+                }
+                return;
+            }
             S.fire({
                 title: 'Configurar Jails de proteccion?',
                 html: '<div class="text-start"><p>Se crearan los siguientes jails:</p>' +
@@ -196,6 +218,10 @@
                 showCancelButton: true,
                 confirmButtonText: '<i class="bi bi-shield-plus me-1"></i>Configurar',
                 cancelButtonText: 'Cancelar',
+                background: '#ffffff',
+                color: '#111827',
+                confirmButtonColor: '#2563eb',
+                cancelButtonColor: '#6b7280',
             }).then(function(r) {
                 if (!r.isConfirmed) return;
                 var btn = document.getElementById('btn-setup-jails');
@@ -286,7 +312,7 @@
                                                     <?= View::csrf() ?>
                                                     <input type="hidden" name="action" value="add">
                                                     <input type="hidden" name="ip" value="<?= View::e($ip) ?>">
-                                                    <button type="submit" class="btn btn-outline-success btn-sm" title="Desbanear y anadir a whitelist" onclick="return confirm('Anadir <?= View::e($ip) ?> a la whitelist?')">
+                                                    <button type="submit" class="btn btn-outline-success btn-sm" title="Desbanear y anadir a whitelist" onclick="return confirmWhitelistAddFromBan(this.form, '<?= View::e($ip) ?>')">
                                                         <i class="bi bi-shield-plus me-1"></i>Whitelist
                                                     </button>
                                                 </form>
@@ -305,143 +331,202 @@
     <?php endif; ?>
 
     <script>
+    function getFail2banSwal() {
+        if (typeof Swal !== 'undefined') return Swal;
+        if (typeof SwalDark !== 'undefined') return SwalDark;
+        return null;
+    }
+
+    function fireFail2banSwal(options) {
+        const S = getFail2banSwal();
+        if (!S) {
+            if (options && options.showCancelButton) {
+                const msg = options.text || 'Confirmar accion?';
+                return Promise.resolve({ isConfirmed: confirm(msg) });
+            }
+            return Promise.resolve({ isConfirmed: true });
+        }
+        const userDidOpen = options && typeof options.didOpen === 'function' ? options.didOpen : null;
+        const defaults = {
+            background: '#1e293b',
+            color: '#f8fafc',
+            confirmButtonColor: '#2563eb',
+            cancelButtonColor: '#6b7280',
+            didOpen: function(popup) {
+                const title = popup.querySelector('.swal2-title');
+                const html = popup.querySelector('.swal2-html-container');
+                if (title) {
+                    title.style.setProperty('color', '#f8fafc', 'important');
+                }
+                if (html) {
+                    html.style.setProperty('color', '#f8fafc', 'important');
+                    html.style.setProperty('opacity', '1', 'important');
+                }
+                popup.querySelectorAll('.text-muted, small').forEach(function(el) {
+                    el.style.setProperty('color', '#e5e7eb', 'important');
+                });
+                if (userDidOpen) userDidOpen(popup);
+            },
+        };
+        return S.fire(Object.assign({}, defaults, options || {}, { didOpen: defaults.didOpen }));
+    }
+
+    function escHtml(s) {
+        const d = document.createElement('div');
+        d.textContent = String(s || '');
+        return d.innerHTML;
+    }
+
     function confirmBan(form) {
         var ip = form.querySelector('[name="ip"]').value;
         var jail = form.querySelector('[name="jail"]').value;
-        if (typeof Swal !== 'undefined') {
-            Swal.fire({
-                title: 'Banear IP',
-                html: '¿Seguro que quieres banear <strong>' + ip + '</strong> en el jail <strong>' + jail + '</strong>?<br><small class="text-muted">La IP sera bloqueada inmediatamente.</small>',
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonText: 'Si, banear',
-                cancelButtonText: 'Cancelar',
-                background: '#1e1e2e',
-                color: '#cdd6f4',
-                confirmButtonColor: '#f38ba8',
-                cancelButtonColor: '#585b70',
-            }).then(function(result) {
-                if (result.isConfirmed) {
-                    form.onsubmit = null;
-                    form.submit();
-                }
-            });
-            return false;
-        }
-        return confirm('¿Banear ' + ip + ' en jail ' + jail + '?');
+        fireFail2banSwal({
+            title: 'Banear IP',
+            html: 'Seguro que quieres banear <strong>' + escHtml(ip) + '</strong> en el jail <strong>' + escHtml(jail) + '</strong>?<br><small style="color:#6b7280;">La IP se bloqueara inmediatamente.</small>',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Si, banear',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#dc2626',
+        }).then(function(result) {
+            if (result.isConfirmed) {
+                form.onsubmit = null;
+                form.submit();
+            }
+        });
+        return false;
     }
 
     function confirmUnban(form, ip, jail) {
-        if (typeof Swal !== 'undefined') {
-            Swal.fire({
-                title: 'Desbanear IP',
-                html: '¿Seguro que quieres desbanear <strong>' + ip + '</strong> del jail <strong>' + jail + '</strong>?',
-                icon: 'warning',
-                showCancelButton: true,
-                confirmButtonText: 'Si, desbanear',
-                cancelButtonText: 'Cancelar',
-                background: '#1e1e2e',
-                color: '#cdd6f4',
-                confirmButtonColor: '#f9e2af',
-                cancelButtonColor: '#585b70',
-            }).then(function(result) {
-                if (result.isConfirmed) {
-                    form.onsubmit = null;
-                    form.submit();
-                }
-            });
-            return false;
-        }
-        return confirm('¿Desbanear ' + ip + ' del jail ' + jail + '?');
+        fireFail2banSwal({
+            title: 'Desbanear IP',
+            html: 'Seguro que quieres desbanear <strong>' + escHtml(ip) + '</strong> del jail <strong>' + escHtml(jail) + '</strong>?',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Si, desbanear',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#16a34a',
+        }).then(function(result) {
+            if (result.isConfirmed) {
+                form.onsubmit = null;
+                form.submit();
+            }
+        });
+        return false;
+    }
+
+    function confirmWhitelistRemove(form, ip) {
+        fireFail2banSwal({
+            title: 'Eliminar de whitelist',
+            html: 'Seguro que quieres eliminar <strong>' + escHtml(ip) + '</strong> de la whitelist?',
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Eliminar',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#dc2626',
+        }).then(function(result) {
+            if (result.isConfirmed) form.submit();
+        });
+        return false;
+    }
+
+    function confirmWhitelistAddFromBan(form, ip) {
+        fireFail2banSwal({
+            title: 'Anadir a whitelist',
+            html: 'Anadir <strong>' + escHtml(ip) + '</strong> a la whitelist?<br><small style="color:#6b7280;">No se volvera a banear en ningun jail.</small>',
+            icon: 'question',
+            showCancelButton: true,
+            confirmButtonText: 'Anadir',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#0ea5e9',
+        }).then(function(result) {
+            if (result.isConfirmed) form.submit();
+        });
+        return false;
     }
 
     function showBannedIps(jailName, jailLabel, ips) {
-        const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
         if (!ips || ips.length === 0) {
-            S.fire({ title: jailLabel, text: 'No hay IPs baneadas actualmente', icon: 'info' });
+            fireFail2banSwal({ title: jailLabel, text: 'No hay IPs baneadas actualmente', icon: 'info' });
             return;
         }
 
-        const csrf = document.querySelector('input[name=_csrf_token]')?.value || '';
-        let html = '<div class="text-start"><table class="table table-sm table-dark mb-0">';
+        let html = '<div class="text-start"><table class="table table-sm table-striped table-bordered mb-0">';
         html += '<thead><tr><th>IP</th><th class="text-end">Acciones</th></tr></thead><tbody>';
         ips.forEach(function(ip) {
-            html += '<tr><td><code>' + ip + '</code></td>';
+            html += '<tr><td><code>' + escHtml(ip) + '</code></td>';
             html += '<td class="text-end">';
-            html += '<button class="btn btn-outline-success btn-sm py-0 px-2 me-1" onclick="quickUnban(\'' + jailName + '\', \'' + ip + '\')" title="Desbanear"><i class="bi bi-unlock"></i></button>';
-            html += '<button class="btn btn-outline-info btn-sm py-0 px-2" onclick="quickWhitelist(\'' + ip + '\')" title="Añadir a whitelist"><i class="bi bi-shield-check"></i></button>';
+            html += '<button class="btn btn-outline-success btn-sm py-0 px-2 me-1" onclick="quickUnban(' + JSON.stringify(jailName) + ', ' + JSON.stringify(ip) + ')" title="Desbanear"><i class="bi bi-unlock"></i></button>';
+            html += '<button class="btn btn-outline-info btn-sm py-0 px-2" onclick="quickWhitelist(' + JSON.stringify(ip) + ')" title="Anadir a whitelist"><i class="bi bi-shield-check"></i></button>';
             html += '</td></tr>';
         });
         html += '</tbody></table></div>';
 
-        S.fire({
-            title: '<i class="bi bi-shield-exclamation me-2"></i>' + jailLabel,
+        fireFail2banSwal({
+            title: '<i class="bi bi-shield-exclamation me-2"></i>' + escHtml(jailLabel),
             html: html,
             showConfirmButton: false,
             showCloseButton: true,
-            width: 500,
+            width: 560,
         });
     }
 
     function quickUnban(jail, ip) {
-        const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
-        S.fire({
+        fireFail2banSwal({
             title: 'Desbanear IP?',
-            html: '<p>Desbanear <code>' + ip + '</code> del jail <strong>' + jail + '</strong>?</p>',
+            html: '<p>Desbanear <code>' + escHtml(ip) + '</code> del jail <strong>' + escHtml(jail) + '</strong>?</p>',
             icon: 'question',
             showCancelButton: true,
             confirmButtonText: 'Desbanear',
-            confirmButtonColor: '#22c55e',
             cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#16a34a',
         }).then(function(result) {
             if (!result.isConfirmed) return;
             const form = document.createElement('form');
             form.method = 'POST';
             form.action = '/settings/fail2ban/unban';
             const csrf = document.querySelector('input[name=_csrf_token]').value;
-            form.innerHTML = '<input type="hidden" name="_csrf_token" value="' + csrf + '">'
-                + '<input type="hidden" name="jail" value="' + jail + '">'
-                + '<input type="hidden" name="ip" value="' + ip + '">';
+            form.innerHTML = '<input type="hidden" name="_csrf_token" value="' + escHtml(csrf) + '">'
+                + '<input type="hidden" name="jail" value="' + escHtml(jail) + '">'
+                + '<input type="hidden" name="ip" value="' + escHtml(ip) + '">';
             document.body.appendChild(form);
             form.submit();
         });
     }
 
     function quickWhitelist(ip) {
-        const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
-        S.fire({
-            title: 'Añadir a whitelist?',
-            html: '<p>La IP <code>' + ip + '</code> nunca sera baneada en ningun jail.</p>',
+        fireFail2banSwal({
+            title: 'Anadir a whitelist?',
+            html: '<p>La IP <code>' + escHtml(ip) + '</code> no se volvera a banear en ningun jail.</p>',
             icon: 'question',
             showCancelButton: true,
-            confirmButtonText: 'Añadir',
-            confirmButtonColor: '#38bdf8',
+            confirmButtonText: 'Anadir',
             cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#0ea5e9',
         }).then(function(result) {
             if (!result.isConfirmed) return;
             const form = document.createElement('form');
             form.method = 'POST';
             form.action = '/settings/fail2ban/whitelist';
             const csrf = document.querySelector('input[name=_csrf_token]').value;
-            form.innerHTML = '<input type="hidden" name="_csrf_token" value="' + csrf + '">'
+            form.innerHTML = '<input type="hidden" name="_csrf_token" value="' + escHtml(csrf) + '">'
                 + '<input type="hidden" name="action" value="add">'
-                + '<input type="hidden" name="ip" value="' + ip + '">';
+                + '<input type="hidden" name="ip" value="' + escHtml(ip) + '">';
             document.body.appendChild(form);
             form.submit();
         });
     }
 
     function confirmToggleJail(jailName, jailLabel) {
-        const S = typeof SwalDark !== 'undefined' ? SwalDark : Swal;
-        S.fire({
-            title: 'Desactivar ' + jailLabel + '?',
-            html: '<p>La proteccion <strong>' + jailLabel + '</strong> se desactivara.</p>' +
-                  '<p class="text-warning small"><i class="bi bi-exclamation-triangle me-1"></i>Los sitios quedaran sin proteccion contra fuerza bruta hasta que se reactive.</p>',
+        fireFail2banSwal({
+            title: 'Desactivar ' + escHtml(jailLabel) + '?',
+            html: '<p>La proteccion <strong>' + escHtml(jailLabel) + '</strong> se desactivara.</p>' +
+                  '<p style="color:#92400e;font-size:0.85rem;"><i class="bi bi-exclamation-triangle me-1"></i>Los sitios quedaran sin proteccion contra fuerza bruta hasta que se reactive.</p>',
             icon: 'warning',
             showCancelButton: true,
             confirmButtonText: '<i class="bi bi-power me-1"></i>Desactivar',
-            confirmButtonColor: '#dc3545',
             cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#dc2626',
         }).then(function(result) {
             if (!result.isConfirmed) return;
             const csrf = document.querySelector('input[name=_csrf_token]').value;
@@ -451,9 +536,9 @@
             })
             .then(r => r.json())
             .then(data => {
-                S.fire({
+                fireFail2banSwal({
                     title: data.ok ? 'Desactivado' : 'Error',
-                    text: data.ok ? jailLabel + ' desactivado temporalmente. Recarga para ver el estado.' : data.error,
+                    text: data.ok ? jailLabel + ' desactivado temporalmente. Recarga para ver el estado.' : (data.error || 'Error desconocido'),
                     icon: data.ok ? 'success' : 'error',
                     timer: 2000,
                 }).then(() => { if (data.ok) location.reload(); });

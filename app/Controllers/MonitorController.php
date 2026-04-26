@@ -18,6 +18,7 @@ class MonitorController
         $status = MonitorService::getCurrentStatus($host);
         $healthScore = MonitorService::getHealthScore($host);
         $alertCount = MonitorService::getUnacknowledgedCount($host);
+        $syncDegraded = MonitorService::getSyncDegradedStatus($host);
 
         $gpus = MonitorService::detectGpus($host);
         $panelTz = Settings::get('panel_timezone', 'UTC');
@@ -33,6 +34,7 @@ class MonitorController
             'disk'             => Settings::get('monitor_alert_disk', '90'),
             'gpu_temp'         => Settings::get('monitor_alert_gpu_temp', '85'),
             'gpu_util'         => Settings::get('monitor_alert_gpu_util', '95'),
+            'noise_level'      => Settings::get('monitor_alert_noise_level', 'normal'),
             'notify_email'     => Settings::get('monitor_notify_email', '0'),
             'notify_telegram'  => Settings::get('monitor_notify_telegram', '0'),
         ];
@@ -45,6 +47,7 @@ class MonitorController
             'status'        => $status,
             'healthScore'   => $healthScore,
             'alertCount'    => $alertCount,
+            'syncDegraded'  => $syncDegraded,
             'host'          => $host,
             'gpus'          => $gpus,
             'disks'         => $disks,
@@ -90,12 +93,14 @@ class MonitorController
         $status = MonitorService::getCurrentStatus($host);
         $healthScore = MonitorService::getHealthScore($host);
         $alertCount = MonitorService::getUnacknowledgedCount($host);
+        $syncDegraded = MonitorService::getSyncDegradedStatus($host);
 
         echo json_encode([
             'ok'          => true,
             'status'      => $status,
             'healthScore' => $healthScore,
             'alertCount'  => $alertCount,
+            'syncDegraded' => $syncDegraded,
         ]);
         exit;
     }
@@ -472,6 +477,10 @@ class MonitorController
     public function saveSettings(): void
     {
         View::verifyCsrf();
+        $noiseLevel = strtolower((string)($_POST['alert_noise_level'] ?? 'normal'));
+        if (!in_array($noiseLevel, ['high', 'normal', 'low'], true)) {
+            $noiseLevel = 'normal';
+        }
 
         $fields = [
             'monitor_enabled'          => isset($_POST['monitor_enabled']) ? '1' : '0',
@@ -481,6 +490,7 @@ class MonitorController
             'monitor_alert_disk'       => $_POST['alert_disk'] ?? '90',
             'monitor_alert_gpu_temp'   => $_POST['alert_gpu_temp'] ?? '85',
             'monitor_alert_gpu_util'   => $_POST['alert_gpu_util'] ?? '95',
+            'monitor_alert_noise_level'=> $noiseLevel,
             'monitor_notify_email'     => isset($_POST['notify_email']) ? '1' : '0',
             'monitor_notify_telegram'  => isset($_POST['notify_telegram']) ? '1' : '0',
         ];

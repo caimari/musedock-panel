@@ -1,5 +1,40 @@
 <?php use MuseDockPanel\View; use MuseDockPanel\Services\MonitorService; ?>
 
+<?php
+    $syncDegraded = $syncDegraded ?? ['active' => false, 'message' => '', 'ts' => null, 'link' => '/settings/cluster#archivos'];
+    $syncIsActive = !empty($syncDegraded['active']);
+?>
+
+<div
+    id="syncDegradedBanner"
+    class="alert alert-danger d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-2 mb-3 <?= $syncIsActive ? '' : 'd-none' ?>"
+    style="background:rgba(220,53,69,0.14);border-color:rgba(220,53,69,0.45);"
+>
+    <div class="d-flex align-items-start gap-2">
+        <i class="bi bi-exclamation-triangle-fill text-danger fs-5 mt-1"></i>
+        <div>
+            <div class="fw-semibold">Sync degradado</div>
+            <div class="small text-light" id="syncDegradedMessage"><?= View::e($syncDegraded['message'] ?? 'Se detectó degradación en la sincronización de archivos.') ?></div>
+            <div class="small text-muted" id="syncDegradedTime">
+                <?php if (!empty($syncDegraded['ts'])): ?>
+                    Detectado: <?= View::e(gmdate('Y-m-d H:i:s', (int)$syncDegraded['ts'])) ?> UTC
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+    <div>
+        <div class="d-flex flex-column flex-sm-row gap-2 align-items-sm-center">
+            <button id="syncDegradedRetryButton" type="button" class="btn btn-sm btn-warning" onclick="retrySyncFromBanner()">
+                <i class="bi bi-arrow-up-right-circle me-1"></i>Reintentar SSH sync
+            </button>
+            <a id="syncDegradedLink" href="<?= View::e($syncDegraded['link'] ?? '/settings/cluster#archivos') ?>" class="btn btn-sm btn-outline-light">
+                <i class="bi bi-tools me-1"></i>Ir a Cluster
+            </a>
+        </div>
+        <div id="syncDegradedActionStatus" class="small mt-1 text-muted"></div>
+    </div>
+</div>
+
 <!-- Health Score + Alert Badge -->
 <div class="row g-3 mb-4">
     <div class="col-md-6 d-flex">
@@ -28,11 +63,11 @@
     <div class="col-md-6 d-flex">
         <div class="stat-card w-100 d-flex align-items-center gap-3">
             <div>
-                <div class="stat-value"><?= $alertCount ?></div>
+                <div class="stat-value" id="monitorAlertCountValue"><?= $alertCount ?></div>
                 <div class="stat-label">Unacknowledged Alerts</div>
             </div>
             <div class="ms-auto">
-                <i class="bi bi-bell<?= $alertCount > 0 ? '-fill text-warning' : '' ?> stat-icon" style="font-size:2.5rem"></i>
+                <i id="monitorAlertBellIcon" class="bi bi-bell<?= $alertCount > 0 ? '-fill text-warning' : '' ?> stat-icon" style="font-size:2.5rem"></i>
             </div>
         </div>
     </div>
@@ -382,6 +417,17 @@
                 </div>
                 <div class="row g-3 mb-3">
                     <div class="col-md-4">
+                        <label class="form-label">Sensibilidad de alertas</label>
+                        <select class="form-select form-select-sm" name="alert_noise_level">
+                            <option value="high" <?= ($alertSettings['noise_level'] ?? 'normal') === 'high' ? 'selected' : '' ?>>Alta (menos espera, más alertas)</option>
+                            <option value="normal" <?= ($alertSettings['noise_level'] ?? 'normal') === 'normal' ? 'selected' : '' ?>>Normal (equilibrado)</option>
+                            <option value="low" <?= ($alertSettings['noise_level'] ?? 'normal') === 'low' ? 'selected' : '' ?>>Baja (menos ruido)</option>
+                        </select>
+                        <small class="text-muted">Ajusta el anti-spam por tipo: Alta = 2 min, Normal = 5 min, Baja = 15 min.</small>
+                    </div>
+                </div>
+                <div class="row g-3 mb-3">
+                    <div class="col-md-4">
                         <label class="form-label">CPU threshold (%)</label>
                         <input type="number" class="form-control form-control-sm" name="alert_cpu" value="<?= View::e($alertSettings['cpu'] ?? '90') ?>" min="0" max="100">
                         <small class="text-muted">0 = disabled. Media de todos los cores. Ej: 4 cores al 90% = alerta</small>
@@ -431,6 +477,7 @@
 (function() {
     const HOST = '<?= View::e($host) ?>';
     const CSRF = '<?= $_SESSION['_csrf_token'] ?? '' ?>';
+    const INITIAL_SYNC_DEGRADED = <?= json_encode($syncDegraded ?? ['active' => false], JSON_UNESCAPED_UNICODE) ?>;
 
     let currentIface = '<?= View::e($interfaces[0] ?? 'eth0') ?>';
     let currentRange = '1h';
@@ -1300,6 +1347,91 @@
         }
     }
 
+    function setMonitorAlertState(unacknowledgedCount) {
+        const count = Math.max(0, Number(unacknowledgedCount) || 0);
+        const countEl = document.getElementById('monitorAlertCountValue');
+        const iconEl = document.getElementById('monitorAlertBellIcon');
+        const badgeEl = document.getElementById('alertBadge');
+
+        if (countEl) {
+            countEl.textContent = count.toLocaleString('es-ES');
+        }
+        if (iconEl) {
+            if (count > 0) {
+                iconEl.classList.remove('bi-bell');
+                iconEl.classList.add('bi-bell-fill', 'text-warning');
+            } else {
+                iconEl.classList.remove('bi-bell-fill', 'text-warning');
+                iconEl.classList.add('bi-bell');
+            }
+        }
+        if (badgeEl) {
+            badgeEl.textContent = String(count);
+            badgeEl.style.display = count > 0 ? 'inline' : 'none';
+        }
+    }
+
+    function setSyncDegradedBanner(sync) {
+        const banner = document.getElementById('syncDegradedBanner');
+        const msgEl = document.getElementById('syncDegradedMessage');
+        const timeEl = document.getElementById('syncDegradedTime');
+        const linkEl = document.getElementById('syncDegradedLink');
+        const actionStatusEl = document.getElementById('syncDegradedActionStatus');
+        if (!banner) return;
+
+        const isActive = !!(sync && sync.active);
+        if (!isActive) {
+            banner.classList.add('d-none');
+            if (actionStatusEl) actionStatusEl.textContent = '';
+            return;
+        }
+
+        if (msgEl) {
+            msgEl.textContent = String(sync.message || 'Se detectó degradación en la sincronización de archivos.');
+        }
+        if (timeEl) {
+            if (sync.ts) {
+                timeEl.textContent = 'Detectado: ' + fmtTzFull(parseUTC(sync.ts)) + ' (' + PANEL_TZ + ')';
+            } else {
+                timeEl.textContent = '';
+            }
+        }
+        if (linkEl) {
+            linkEl.setAttribute('href', String(sync.link || '/settings/cluster#archivos'));
+        }
+        banner.classList.remove('d-none');
+    }
+
+    window.retrySyncFromBanner = async function() {
+        const btn = document.getElementById('syncDegradedRetryButton');
+        const statusEl = document.getElementById('syncDegradedActionStatus');
+        if (btn) btn.disabled = true;
+        if (statusEl) statusEl.innerHTML = '<span class="text-warning"><i class="bi bi-hourglass-split me-1"></i>Reintentando activar lsyncd + SSH...</span>';
+
+        try {
+            const form = new FormData();
+            form.append('_csrf_token', CSRF);
+            const resp = await fetch('/settings/cluster/lsyncd-retry', { method: 'POST', body: form });
+            const data = await resp.json();
+
+            if (data && data.ok) {
+                if (statusEl) statusEl.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>Sync SSH restablecido.</span>';
+                setSyncDegradedBanner({ active: false });
+                setTimeout(() => {
+                    updateCards();
+                    loadAlerts(1);
+                }, 400);
+            } else {
+                const err = (data && data.error) ? data.error : 'No se pudo reactivar.';
+                if (statusEl) statusEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>' + esc(err) + '</span>';
+            }
+        } catch (e) {
+            if (statusEl) statusEl.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>Error de conexión.</span>';
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    };
+
     // ─── Update stat cards ───────────────────────────────────
     async function updateCards() {
         try {
@@ -1314,6 +1446,13 @@
 
             const [rt, stJson] = await Promise.all([rtPromise, stPromise]);
             const s = (stJson && stJson.ok) ? (stJson.status || {}) : null;
+
+            if (stJson && stJson.ok && typeof stJson.alertCount !== 'undefined') {
+                setMonitorAlertState(stJson.alertCount);
+            }
+            if (stJson && stJson.ok && stJson.syncDegraded) {
+                setSyncDegradedBanner(stJson.syncDegraded);
+            }
 
             if (rt && rt.ok) {
                 // CPU
@@ -1411,25 +1550,22 @@
             if (!json.ok) return;
 
             const tbody = document.getElementById('alertsBody');
-            const badge = document.getElementById('alertBadge');
             const alerts = json.alerts || [];
             const pagination = json.pagination || { total: alerts.length, page: 1, pages: 1, per_page: alertsPerPage };
             alertsPage = Number(pagination.page || 1);
             alertsPages = Number(pagination.pages || 1);
             renderAlertsPagination(pagination);
 
+            const unack = Number(json.unacknowledged ?? alerts.filter(a => !a.acknowledged).length);
+            setMonitorAlertState(unack);
+
             const clearBtn = document.getElementById('btnClearAlerts');
             if ((pagination.total || 0) === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No alerts</td></tr>';
-                badge.style.display = 'none';
                 if (clearBtn) clearBtn.style.display = 'none';
                 return;
             }
             if (clearBtn) clearBtn.style.display = 'inline-block';
-
-            const unack = Number(json.unacknowledged ?? alerts.filter(a => !a.acknowledged).length);
-            badge.textContent = unack;
-            badge.style.display = unack > 0 ? 'inline' : 'none';
 
             // Store alerts globally for modal access
             window._monitorAlerts = {};
@@ -1443,6 +1579,11 @@
                 const ackBtn = a.acknowledged
                     ? ''
                     : `<button class="btn btn-outline-success btn-sm" onclick="event.stopPropagation();ackAlert(${a.id})"><i class="bi bi-check-lg"></i></button>`;
+                const hasLsyncdFix = a.type === 'LSYNCD_SYNC_DEGRADED' || a.type === 'LSYNCD_SYNC_RECOVERED';
+                const fixBtn = hasLsyncdFix
+                    ? `<a class="btn btn-outline-info btn-sm" href="/settings/cluster#archivos" onclick="event.stopPropagation();" title="Abrir Cluster > Archivos"><i class="bi bi-tools"></i></a>`
+                    : '';
+                const actionButtons = [ackBtn, fixBtn].filter(Boolean).join(' ');
                 const detailsIcon = a.details ? ' <i class="bi bi-search text-muted" style="font-size:0.7rem" title="View process details"></i>' : '';
 
                 return `<tr style="cursor:pointer" onclick="showAlertDetails(${a.id})">
@@ -1451,7 +1592,7 @@
                     <td><small>${esc(a.message)}</small></td>
                     <td><small class="text-muted">${a.value !== null ? Number(a.value).toFixed(1) : '-'}</small></td>
                     <td>${statusBadge}</td>
-                    <td>${ackBtn}</td>
+                    <td>${actionButtons || ''}</td>
                 </tr>`;
             }).join('');
         } catch (e) {
@@ -1487,6 +1628,7 @@
             form.append('host', HOST);
             form.append('_csrf_token', CSRF);
             await fetch('/monitor/api/alerts/clear', { method: 'POST', body: form });
+            setMonitorAlertState(0);
             loadAlerts(1);
         } catch (e) {
             console.error('Error clearing alerts:', e);
@@ -1582,6 +1724,7 @@
 
     // ─── Init ────────────────────────────────────────────────
     initCharts();
+    setSyncDegradedBanner(INITIAL_SYNC_DEGRADED);
     const perPageSelect = document.getElementById('alertsPerPageSelect');
     if (perPageSelect) {
         const selected = Number(perPageSelect.value);

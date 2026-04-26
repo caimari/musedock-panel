@@ -101,13 +101,13 @@
         .input-group .btn { border-color: #334155; }
         .form-control:disabled, .form-select:disabled { background: #334155; color: #f1f5f9; opacity: 1; -webkit-text-fill-color: #f1f5f9; border-color: #475569; }
         .swal2-popup { border-radius: 16px; }
-        .swal2-popup .swal2-title { color: #0f172a; }
-        .swal2-popup .swal2-html-container { color: #334155; }
-        .swal2-popup .swal2-html-container .text-muted { color: #475569 !important; }
-        .swal2-popup.swal-dark-popup { border: 1px solid #334155; background: #1e293b !important; color: #e2e8f0 !important; }
+        .swal2-popup .swal2-title { color: #f8fafc; }
+        .swal2-popup .swal2-html-container { color: #f8fafc; }
+        .swal2-popup .swal2-html-container .text-muted { color: #e5e7eb !important; }
+        .swal2-popup.swal-dark-popup { border: 1px solid #334155; background: #1e293b !important; color: #f8fafc !important; }
         .swal2-popup.swal-dark-popup .swal2-title { color: #f8fafc !important; }
-        .swal2-popup.swal-dark-popup .swal2-html-container { color: #cbd5e1 !important; }
-        .swal2-popup.swal-dark-popup .swal2-html-container .text-muted { color: #cbd5e1 !important; }
+        .swal2-popup.swal-dark-popup .swal2-html-container { color: #f8fafc !important; }
+        .swal2-popup.swal-dark-popup .swal2-html-container .text-muted { color: #e5e7eb !important; }
         .swal2-popup.swal-dark-popup .swal2-html-container p,
         .swal2-popup.swal-dark-popup .swal2-html-container div,
         .swal2-popup.swal-dark-popup .swal2-html-container li,
@@ -115,9 +115,26 @@
         .swal2-popup.swal-dark-popup .swal2-input,
         .swal2-popup.swal-dark-popup .swal2-textarea,
         .swal2-popup.swal-dark-popup .swal2-select { background: #0f172a !important; border-color: #334155 !important; color: #f8fafc !important; }
-        .swal2-popup.swal-light-readable .swal2-title { color: #0f172a !important; }
-        .swal2-popup.swal-light-readable .swal2-html-container { color: #334155 !important; }
         .swal2-popup .swal2-cancel { background: #334155 !important; color: #94a3b8 !important; border: 1px solid #475569 !important; }
+        pre.musedock-copy-block { position: relative; padding-top: 2.2rem; }
+        pre.musedock-copy-block .musedock-copy-btn {
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            border: 1px solid #475569;
+            background: #0f172a;
+            color: #f8fafc;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            line-height: 1;
+            padding: 0.35rem 0.55rem;
+            cursor: pointer;
+        }
+        pre.musedock-copy-block .musedock-copy-btn:hover {
+            border-color: #38bdf8;
+            color: #38bdf8;
+            background: #111827;
+        }
     </style>
 </head>
 <body>
@@ -241,89 +258,116 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
 <script>
-// SweetAlert2 dark theme defaults
-const SwalDark = Swal.mixin({
+const musedockSwalDefaults = {
     background: '#1e293b',
-    color: '#e2e8f0',
+    color: '#f8fafc',
     confirmButtonColor: '#0ea5e9',
     cancelButtonColor: '#475569',
-    customClass: {
-        popup: 'swal-dark-popup'
+    customClass: { popup: 'swal-dark-popup' }
+};
+
+function musedockNormalizeSwalArgs(args) {
+    const first = args[0];
+    if (first && typeof first === 'object' && !Array.isArray(first)) {
+        return Object.assign({}, first);
     }
-});
-window.SwalDark = SwalDark;
-if (window.Swal && window.Swal.fire) {
+    if (typeof first === 'string') {
+        return {
+            title: first,
+            text: args.length > 1 ? args[1] : undefined,
+            icon: args.length > 2 ? args[2] : undefined
+        };
+    }
+    return {};
+}
+
+function musedockApplySwalDefaults(payload) {
+    const source = payload && typeof payload === 'object' ? payload : {};
+    const userDidOpen = typeof source.didOpen === 'function' ? source.didOpen : null;
+    const customClass = source.customClass && typeof source.customClass === 'object' ? source.customClass : {};
+    const themed = Object.assign({}, musedockSwalDefaults, source);
+    themed.background = musedockSwalDefaults.background;
+    themed.color = musedockSwalDefaults.color;
+
+    return Object.assign({}, themed, {
+        customClass: Object.assign({}, musedockSwalDefaults.customClass, customClass, {
+            popup: [musedockSwalDefaults.customClass.popup, customClass.popup]
+                .filter(Boolean)
+                .filter((value, index, all) => all.indexOf(value) === index)
+                .join(' ')
+        }),
+        didOpen: function(popup) {
+            const title = popup.querySelector('.swal2-title');
+            const html = popup.querySelector('.swal2-html-container');
+            if (title) title.style.setProperty('color', '#f8fafc', 'important');
+            if (html) {
+                html.style.setProperty('color', '#f8fafc', 'important');
+                html.style.setProperty('opacity', '1', 'important');
+            }
+            popup.querySelectorAll('.text-muted, small').forEach(function(el) {
+                el.style.setProperty('color', '#e5e7eb', 'important');
+            });
+            popup.querySelectorAll('code').forEach(function(el) {
+                el.style.setProperty('color', '#93c5fd', 'important');
+            });
+            if (userDidOpen) userDidOpen(popup);
+        }
+    });
+}
+
+if (window.Swal && typeof window.Swal.mixin === 'function') {
+    window.SwalDark = window.Swal.mixin(musedockSwalDefaults);
+}
+
+if (window.Swal && typeof window.Swal.fire === 'function') {
     const musedockSwalBaseFire = window.Swal.fire.bind(window.Swal);
-    const musedockSwalDarkDefaults = {
-        background: '#1e293b',
-        color: '#e2e8f0',
-        confirmButtonColor: '#0ea5e9',
-        cancelButtonColor: '#475569',
-        customClass: {
-            popup: 'swal-dark-popup'
-        }
-    };
-    const musedockSwalIsDarkBackground = function(background) {
-        const bg = String(background || '').trim().toLowerCase();
-        if (!bg) return true;
-        if (['black', '#000', '#000000', '#020617', '#0b1120', '#0b1220', '#0f172a', '#111827', '#1e1e2e', '#1e293b'].includes(bg)) {
-            return true;
-        }
-        const match = bg.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
-        if (!match) return false;
-        let hex = match[1];
-        if (hex.length === 3) {
-            hex = hex.split('').map((ch) => ch + ch).join('');
-        }
-        const r = parseInt(hex.slice(0, 2), 16);
-        const g = parseInt(hex.slice(2, 4), 16);
-        const b = parseInt(hex.slice(4, 6), 16);
-        return ((r * 299 + g * 587 + b * 114) / 1000) < 128;
-    };
-    const musedockSwalNormalizeArgs = function(args) {
-        const first = args[0];
-        if (first && typeof first === 'object' && !Array.isArray(first)) {
-            const hasCustomBackground = first.background && String(first.background).toLowerCase() !== '#1e293b';
-            const currentClass = first.customClass || {};
-            const popupClass = hasCustomBackground
-                ? (musedockSwalIsDarkBackground(first.background) ? 'swal-dark-popup' : 'swal-light-readable')
-                : 'swal-dark-popup';
-
-            return [Object.assign({}, musedockSwalDarkDefaults, first, {
-                color: first.color || (popupClass === 'swal-dark-popup' ? '#e2e8f0' : '#334155'),
-                customClass: Object.assign({}, musedockSwalDarkDefaults.customClass, currentClass, {
-                    popup: [currentClass.popup || musedockSwalDarkDefaults.customClass.popup, popupClass]
-                        .filter(Boolean)
-                        .filter((value, index, all) => all.indexOf(value) === index)
-                        .join(' ')
-                })
-            })];
-        }
-
-        if (typeof first === 'string') {
-            const title = first;
-            const text = args.length > 1 ? args[1] : undefined;
-            const icon = args.length > 2 ? args[2] : undefined;
-            return [Object.assign({}, musedockSwalDarkDefaults, {title, text, icon})];
-        }
-
-        return [musedockSwalDarkDefaults];
-    };
     window.Swal.fire = function(...args) {
-        return musedockSwalBaseFire(...musedockSwalNormalizeArgs(args));
+        return musedockSwalBaseFire(musedockApplySwalDefaults(musedockNormalizeSwalArgs(args)));
     };
 }
 
+if (window.SwalDark && typeof window.SwalDark.fire === 'function') {
+    const musedockSwalDarkBaseFire = window.SwalDark.fire.bind(window.SwalDark);
+    window.SwalDark.fire = function(...args) {
+        return musedockSwalDarkBaseFire(musedockApplySwalDefaults(musedockNormalizeSwalArgs(args)));
+    };
+}
+
+window.MuseModal = {
+    fire: function(options) {
+        if (window.Swal && typeof window.Swal.fire === 'function') return window.Swal.fire(options || {});
+        return Promise.resolve({ isConfirmed: true });
+    },
+    confirm: function(options) {
+        const opts = Object.assign({
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Confirmar',
+            cancelButtonText: 'Cancelar'
+        }, options || {});
+        return this.fire(opts);
+    },
+    toast: function(options) {
+        const opts = Object.assign({
+            toast: true,
+            position: 'top-end',
+            showConfirmButton: false,
+            timer: 2200,
+            timerProgressBar: true
+        }, options || {});
+        return this.fire(opts);
+    }
+};
+
 // Confirm action helper
 function confirmAction(form, options, preSubmitFn) {
-    SwalDark.fire({
+    window.MuseModal.confirm({
         title: options.title || 'Are you sure?',
         text: options.text || '',
         icon: options.icon || 'warning',
         html: options.html || undefined,
-        showCancelButton: true,
         confirmButtonText: options.confirmText || 'Confirm',
-        cancelButtonText: 'Cancel',
+        cancelButtonText: options.cancelText || 'Cancel',
     }).then(function(result) {
         if (result.isConfirmed) {
             if (typeof preSubmitFn === 'function') preSubmitFn();
@@ -339,6 +383,131 @@ document.querySelectorAll('.flash-alert').forEach(function(el) {
         alert.close();
     }, 4000);
 });
+
+function musedockParseLegacyConfirmText(handler) {
+    const match = String(handler || '').trim().match(/^return\s+confirm\(([\s\S]+)\)\s*;?\s*$/i);
+    if (!match) return null;
+    const arg = match[1].trim();
+    if ((arg.startsWith("'") && arg.endsWith("'")) || (arg.startsWith('"') && arg.endsWith('"'))) {
+        const quote = arg[0];
+        const unwrapped = arg.slice(1, -1);
+        return unwrapped
+            .replace(/\\\\/g, '\\')
+            .replace(quote === "'" ? /\\'/g : /\\"/g, quote);
+    }
+    return arg;
+}
+
+function musedockUpgradeLegacyConfirmForms(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    scope.querySelectorAll('form[onsubmit]').forEach(function(form) {
+        if (form.dataset.musedockConfirmUpgraded === '1') return;
+        const handler = form.getAttribute('onsubmit') || '';
+        const msg = musedockParseLegacyConfirmText(handler);
+        if (!msg) return;
+
+        form.dataset.musedockConfirmUpgraded = '1';
+        form.removeAttribute('onsubmit');
+        form.addEventListener('submit', function(e) {
+            if (form.dataset.musedockSubmitting === '1') {
+                form.dataset.musedockSubmitting = '0';
+                return;
+            }
+            e.preventDefault();
+            window.MuseModal.confirm({
+                title: 'Confirmar accion',
+                text: msg,
+                icon: 'warning',
+                confirmButtonText: 'Continuar',
+                cancelButtonText: 'Cancelar'
+            }).then(function(result) {
+                if (!result.isConfirmed) return;
+                form.dataset.musedockSubmitting = '1';
+                form.submit();
+            });
+        });
+    });
+}
+
+async function musedockCopyText(text) {
+    const value = String(text || '');
+    if (!value) return false;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(value);
+            return true;
+        }
+    } catch (_) {}
+
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = value;
+        ta.setAttribute('readonly', 'readonly');
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return !!ok;
+    } catch (_) {
+        return false;
+    }
+}
+
+function musedockGetPreCopyText(pre) {
+    const code = pre.querySelector('code');
+    if (code) return code.innerText || code.textContent || '';
+    const clone = pre.cloneNode(true);
+    clone.querySelectorAll('.musedock-copy-btn').forEach(function(btn) { btn.remove(); });
+    return clone.innerText || clone.textContent || '';
+}
+
+function musedockEnhanceCopyBlock(pre) {
+    if (!pre || pre.dataset.copyEnhanced === '1') return;
+    if (pre.classList.contains('no-copy') || pre.dataset.noCopy === 'true') return;
+    if (!musedockGetPreCopyText(pre).trim()) return;
+
+    pre.dataset.copyEnhanced = '1';
+    pre.classList.add('musedock-copy-block');
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'musedock-copy-btn';
+    btn.textContent = 'Copiar';
+    btn.addEventListener('click', async function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const original = btn.textContent;
+        const ok = await musedockCopyText(musedockGetPreCopyText(pre));
+        btn.textContent = ok ? 'Copiado' : 'Error';
+        setTimeout(function() {
+            btn.textContent = original;
+        }, 1400);
+    });
+    pre.appendChild(btn);
+}
+
+function musedockInitCopyButtons(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    scope.querySelectorAll('pre').forEach(musedockEnhanceCopyBlock);
+}
+
+musedockUpgradeLegacyConfirmForms(document);
+musedockInitCopyButtons(document);
+
+const musedockUiObserver = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+        mutation.addedNodes.forEach(function(node) {
+            if (!node || node.nodeType !== 1) return;
+            if (node.matches && node.matches('pre')) musedockEnhanceCopyBlock(node);
+            musedockInitCopyButtons(node);
+            musedockUpgradeLegacyConfirmForms(node);
+        });
+    });
+});
+musedockUiObserver.observe(document.body, { childList: true, subtree: true });
 
 // Live system clock in header (server-synced, no page reload required)
 (function () {
