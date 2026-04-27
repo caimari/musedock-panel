@@ -1100,6 +1100,7 @@ class SettingsController
         $panelAcmeFirewallStatus = FirewallService::publicTcpPortStatus([80, 443]);
         $panelDnsProviders = SystemService::installedDnsProviders();
         $panelDnsProviderCatalog = SystemService::dnsProviderCatalog();
+        $caddyDnsProviderInstallStatus = $this->readCaddyDnsProviderInstallStatus();
 
         View::render('settings/server', [
             'layout' => 'main',
@@ -1120,6 +1121,7 @@ class SettingsController
             'panelAcmeFirewallStatus' => $panelAcmeFirewallStatus,
             'panelDnsProviders' => $panelDnsProviders,
             'panelDnsProviderCatalog' => $panelDnsProviderCatalog,
+            'caddyDnsProviderInstallStatus' => $caddyDnsProviderInstallStatus,
         ]);
     }
 
@@ -1341,6 +1343,63 @@ class SettingsController
         $opened = empty($missingAcmePorts) ? 'ninguno; ya estaban abiertos' : implode(', ', $missingAcmePorts);
         Flash::set('success', "Asistencia ACME ejecutada para {$panelHostname}. Puertos temporales: {$opened}. Caddy intentara emitir el certificado publico.");
         Router::redirect('/settings/server');
+    }
+
+    public function serverInstallDnsProvider(): void
+    {
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyCurrentAdminPassword($password)) {
+            Flash::set('error', 'Contrasena de administrador incorrecta para instalar modulo DNS de Caddy.');
+            Router::redirect('/settings/server');
+            return;
+        }
+
+        $provider = strtolower(trim((string)($_POST['dns_provider'] ?? '')));
+        if ($provider === '' || !preg_match('/^[a-z0-9][a-z0-9_.-]{1,63}$/', $provider)) {
+            Flash::set('error', 'Proveedor DNS invalido.');
+            Router::redirect('/settings/server');
+            return;
+        }
+
+        if (SystemService::isDnsProviderInstalled($provider)) {
+            Flash::set('success', "dns.providers.{$provider} ya esta instalado.");
+            Router::redirect('/settings/server');
+            return;
+        }
+
+        $statusFile = PANEL_ROOT . '/storage/caddy-dns-provider-install.json';
+        @file_put_contents($statusFile, json_encode([
+            'status' => 'running',
+            'provider' => $provider,
+            'started_at' => gmdate('c'),
+            'message' => "Compilando Caddy con dns.providers.{$provider}",
+        ], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
+
+        $logFile = PANEL_ROOT . '/storage/logs/caddy-dns-provider-install.log';
+        @mkdir(dirname($logFile), 0770, true);
+        $cmd = sprintf(
+            'nohup php %s %s >> %s 2>&1 &',
+            escapeshellarg(PANEL_ROOT . '/cli/install-caddy-dns-provider.php'),
+            escapeshellarg($provider),
+            escapeshellarg($logFile)
+        );
+        shell_exec($cmd);
+
+        Flash::set('success', "Instalacion de dns.providers.{$provider} iniciada en segundo plano. Caddy se recompilara con backup y rollback automatico si falla; recarga esta pagina en unos minutos para ver el resultado.");
+        LogService::log('settings.server.dns_provider.install_started', $provider, "Instalacion de dns.providers.{$provider} iniciada");
+
+        Router::redirect('/settings/server');
+    }
+
+    private function readCaddyDnsProviderInstallStatus(): array
+    {
+        $file = PANEL_ROOT . '/storage/caddy-dns-provider-install.json';
+        if (!is_file($file)) {
+            return [];
+        }
+
+        $decoded = json_decode((string)@file_get_contents($file), true);
+        return is_array($decoded) ? $decoded : [];
     }
 
     private function normalizePanelHostname(string $value): string

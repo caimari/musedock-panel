@@ -74,7 +74,9 @@
                             }
                             $panelHostnameConfigured = trim((string)($settings['panel_hostname'] ?? '')) !== '';
                             $panelDnsProviders = array_values(array_filter(array_map('strval', $panelDnsProviders ?? [])));
+                            $installedDnsProviderSet = array_fill_keys($panelDnsProviders, true);
                             $panelDnsProviderCatalog = is_array($panelDnsProviderCatalog ?? null) ? $panelDnsProviderCatalog : [];
+                            $installableDnsProviders = array_values(array_filter(array_keys($panelDnsProviderCatalog), static fn($name) => !isset($installedDnsProviderSet[$name])));
                             $selectedDnsProvider = strtolower(trim((string)($settings['panel_dns_provider'] ?? '')));
                             if ($selectedDnsProvider !== '' && !in_array($selectedDnsProvider, $panelDnsProviders, true)) {
                                 array_unshift($panelDnsProviders, $selectedDnsProvider);
@@ -111,8 +113,7 @@
                                 <option value="">Selecciona proveedor instalado...</option>
                                 <?php foreach ($panelDnsProviders as $dnsProviderName): ?>
                                     <?php
-                                        $isInstalledDnsProvider = in_array($dnsProviderName, $panelDnsProviders, true)
-                                            && !($selectedDnsProvider === $dnsProviderName && !\MuseDockPanel\Services\SystemService::isDnsProviderInstalled($dnsProviderName));
+                                        $isInstalledDnsProvider = isset($installedDnsProviderSet[$dnsProviderName]);
                                         $dnsProviderLabel = (string)($panelDnsProviderCatalog[$dnsProviderName]['label'] ?? ucfirst(str_replace(['_', '-'], ' ', $dnsProviderName)));
                                         $dnsProviderSuffix = $isInstalledDnsProvider ? '' : ' (no instalado)';
                                     ?>
@@ -136,6 +137,51 @@
                         <small class="text-muted">
                             JSON exacto que espera el modulo DNS de Caddy. No incluyas <code>name</code>; MuseDock lo rellena con el proveedor seleccionado. Cloudflare puede heredar <code>CLOUDFLARE_API_TOKEN</code> si dejas este campo vacio.
                         </small>
+                    </div>
+
+                    <div class="mb-3" id="dns_provider_install_wrap" style="<?= $panelTlsMode === 'dns01' ? '' : 'display:none;' ?>">
+                        <div class="rounded p-3" style="border:1px solid rgba(56,189,248,0.28); background:rgba(14,165,233,0.08);">
+                            <div class="fw-semibold mb-2"><i class="bi bi-box-arrow-down me-1"></i>Instalar modulo DNS en Caddy</div>
+                            <div class="small text-muted mb-2">
+                                Caddy no carga proveedores DNS en caliente: MuseDock recompila el binario con <code>xcaddy</code>, guarda backup, reinicia Caddy y hace rollback si no queda activo.
+                            </div>
+                            <?php $dnsInstallStatus = is_array($caddyDnsProviderInstallStatus ?? null) ? $caddyDnsProviderInstallStatus : []; ?>
+                            <?php if (!empty($dnsInstallStatus)): ?>
+                                <?php
+                                    $dnsInstallState = (string)($dnsInstallStatus['status'] ?? '');
+                                    $dnsInstallClass = $dnsInstallState === 'ok' ? 'success' : ($dnsInstallState === 'running' ? 'info' : 'danger');
+                                ?>
+                                <div class="alert alert-<?= View::e($dnsInstallClass) ?> py-2 small mb-3">
+                                    <strong><?= View::e((string)($dnsInstallStatus['provider'] ?? 'provider')) ?>:</strong>
+                                    <?= View::e((string)($dnsInstallStatus['message'] ?? '')) ?>
+                                    <?php if (!empty($dnsInstallStatus['backup'])): ?>
+                                        <span class="d-block text-muted mt-1">Backup: <code><?= View::e((string)$dnsInstallStatus['backup']) ?></code></span>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endif; ?>
+                            <?php if (!empty($installableDnsProviders)): ?>
+                                <div class="row g-2 align-items-end">
+                                    <div class="col-md-7">
+                                        <label class="form-label small">Proveedor a instalar</label>
+                                        <select name="dns_provider" id="caddy_dns_provider_install" class="form-select form-select-sm">
+                                            <?php foreach ($installableDnsProviders as $dnsProviderName): ?>
+                                                <?php $dnsProviderLabel = (string)($panelDnsProviderCatalog[$dnsProviderName]['label'] ?? ucfirst(str_replace(['_', '-'], ' ', $dnsProviderName))); ?>
+                                                <option value="<?= View::e($dnsProviderName) ?>">
+                                                    <?= View::e($dnsProviderLabel) ?> — dns.providers.<?= View::e($dnsProviderName) ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-5">
+                                        <button type="button" class="btn btn-sm btn-outline-info w-100" id="install-caddy-dns-provider-btn">
+                                            <i class="bi bi-tools me-1"></i>Instalar proveedor
+                                        </button>
+                                    </div>
+                                </div>
+                            <?php else: ?>
+                                <div class="small text-success">Todos los proveedores DNS del catalogo MuseDock ya estan instalados en este Caddy.</div>
+                            <?php endif; ?>
+                        </div>
                     </div>
 
                     <div class="mb-3">
@@ -271,6 +317,7 @@
     const acmeWrap = document.getElementById('acme_email_wrap');
     const providerWrap = document.getElementById('dns_provider_wrap');
     const providerCfgWrap = document.getElementById('dns_provider_cfg_wrap');
+    const providerInstallWrap = document.getElementById('dns_provider_install_wrap');
     const providerSel = document.getElementById('panel_dns_provider');
     const providerCfg = document.getElementById('panel_dns_provider_config');
 
@@ -288,6 +335,7 @@
         const dnsVisible = mode === 'dns01';
         providerWrap.style.display = dnsVisible ? '' : 'none';
         providerCfgWrap.style.display = dnsVisible ? '' : 'none';
+        if (providerInstallWrap) providerInstallWrap.style.display = dnsVisible ? '' : 'none';
         refreshProviderExample();
     };
     modeSel.addEventListener('change', refresh);
@@ -302,6 +350,8 @@
     const assistField = document.getElementById('panel_acme_firewall_assist');
     const passwordField = document.getElementById('panel_acme_admin_password');
     const assistButtons = form.querySelectorAll('.panel-acme-assist-btn');
+    const installDnsProviderBtn = document.getElementById('install-caddy-dns-provider-btn');
+    const installDnsProviderSelect = document.getElementById('caddy_dns_provider_install');
     const missingAcmePorts = <?= json_encode(array_values($panelAcmeMissingPorts ?? []), JSON_UNESCAPED_SLASHES) ?>;
     const firewallCard = document.getElementById('panel-acme-firewall-card');
 
@@ -379,6 +429,22 @@
             });
         });
     });
+
+    if (installDnsProviderBtn && installDnsProviderSelect) {
+        installDnsProviderBtn.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            const selected = installDnsProviderSelect.value || '';
+            if (!selected) return;
+            const message = 'MuseDock va a lanzar en segundo plano la compilacion de Caddy con dns.providers.' + selected + '. Se hara backup del binario actual, se reemplazara Caddy, se reiniciara el servicio y se hara rollback automatico si no queda activo. Durante unos segundos el panel puede pausar conexiones.';
+            askAdminPassword(message, 'Iniciar instalacion', (pwd) => {
+                passwordField.value = pwd;
+                installDnsProviderBtn.disabled = true;
+                installDnsProviderBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Iniciando...';
+                form.action = '/settings/server/dns-provider/install';
+                form.submit();
+            });
+        });
+    }
 
     form.addEventListener('submit', (ev) => {
         const mode = document.getElementById('panel_tls_mode')?.value || 'self_signed';

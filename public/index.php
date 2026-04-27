@@ -447,6 +447,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/server', 'SettingsController@server');
 \MuseDockPanel\Router::post('/settings/server/save', 'SettingsController@serverSave');
 \MuseDockPanel\Router::post('/settings/server/acme-assist', 'SettingsController@serverAcmeAssist');
+\MuseDockPanel\Router::post('/settings/server/dns-provider/install', 'SettingsController@serverInstallDnsProvider');
 \MuseDockPanel\Router::get('/settings/php', 'SettingsController@php');
 \MuseDockPanel\Router::post('/settings/php/ini-save', 'SettingsController@phpIniSave');
 \MuseDockPanel\Router::post('/settings/php/opcache-save', 'SettingsController@phpOpcacheSave');

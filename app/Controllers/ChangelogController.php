@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.180',
+                'date' => '2026-04-27',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '`Settings > Server`: instalador de modulos DNS para Caddy; compila con `xcaddy`, preserva modulos no estandar existentes, guarda backup, reinicia Caddy y hace rollback si el servicio no queda activo',
+                            '`Settings > Server`: el flujo DNS-01 del panel puede instalar soporte para proveedores del catalogo MuseDock como Cloudflare, DigitalOcean, Route53, Hetzner, OVH, Vultr, Linode, Porkbun, Namecheap, Gandi, PowerDNS y RFC2136',
+                        ],
+                        'en' => [
+                            '`Settings > Server`: DNS module installer for Caddy; builds with `xcaddy`, preserves existing non-standard modules, saves a backup, restarts Caddy and rolls back if the service does not stay active',
+                            '`Settings > Server`: panel DNS-01 can install support for MuseDock catalog providers such as Cloudflare, DigitalOcean, Route53, Hetzner, OVH, Vultr, Linode, Porkbun, Namecheap, Gandi, PowerDNS and RFC2136',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.179',
                 'date' => '2026-04-27',
                 'badge' => 'primary',

@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.180] — 2026-04-27
+
+### Added
+- `Settings > Server`: instalador de modulos DNS para Caddy. Compila con `xcaddy`, preserva modulos no estandar existentes, guarda backup del binario, reinicia Caddy y hace rollback si el servicio no queda activo.
+- `Settings > Server`: el flujo DNS-01 del panel puede instalar soporte para proveedores del catalogo MuseDock como Cloudflare, DigitalOcean, Route53, Hetzner, OVH, Vultr, Linode, Porkbun, Namecheap, Gandi, PowerDNS y RFC2136.
+
 ## [1.0.179] — 2026-04-27
 
 ### Improved

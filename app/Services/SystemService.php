@@ -567,52 +567,261 @@ CONF;
             'cloudflare' => [
                 'label' => 'Cloudflare',
                 'example' => '{"api_token":"..."}',
+                'module' => 'github.com/caddy-dns/cloudflare',
             ],
             'digitalocean' => [
                 'label' => 'DigitalOcean',
                 'example' => '{"token":"..."}',
+                'module' => 'github.com/caddy-dns/digitalocean',
             ],
             'route53' => [
                 'label' => 'Amazon Route53',
                 'example' => '{"access_key_id":"...","secret_access_key":"...","region":"us-east-1"}',
+                'module' => 'github.com/caddy-dns/route53',
             ],
             'hetzner' => [
                 'label' => 'Hetzner DNS',
                 'example' => '{"api_token":"..."}',
+                'module' => 'github.com/caddy-dns/hetzner',
             ],
             'ovh' => [
                 'label' => 'OVH',
                 'example' => '{"endpoint":"ovh-eu","application_key":"...","application_secret":"...","consumer_key":"..."}',
+                'module' => 'github.com/caddy-dns/ovh',
             ],
             'vultr' => [
                 'label' => 'Vultr',
                 'example' => '{"api_token":"..."}',
+                'module' => 'github.com/caddy-dns/vultr',
             ],
             'linode' => [
                 'label' => 'Linode',
                 'example' => '{"token":"..."}',
+                'module' => 'github.com/caddy-dns/linode',
             ],
             'porkbun' => [
                 'label' => 'Porkbun',
                 'example' => '{"api_key":"...","secret_api_key":"..."}',
+                'module' => 'github.com/caddy-dns/porkbun',
             ],
             'namecheap' => [
                 'label' => 'Namecheap',
                 'example' => '{"api_user":"...","api_key":"..."}',
+                'module' => 'github.com/caddy-dns/namecheap',
             ],
             'gandi' => [
                 'label' => 'Gandi',
                 'example' => '{"api_token":"..."}',
+                'module' => 'github.com/caddy-dns/gandi',
             ],
             'powerdns' => [
                 'label' => 'PowerDNS',
                 'example' => '{"server_url":"https://dns.example.com","api_token":"..."}',
+                'module' => 'github.com/caddy-dns/powerdns',
             ],
             'rfc2136' => [
                 'label' => 'RFC2136 / BIND',
                 'example' => '{"key_name":"...","key_alg":"hmac-sha256","key":"...","server":"127.0.0.1:53"}',
+                'module' => 'github.com/caddy-dns/rfc2136',
             ],
         ];
+    }
+
+    public static function installCaddyDnsProvider(string $provider): array
+    {
+        $provider = strtolower(trim($provider));
+        if ($provider === '' || !preg_match('/^[a-z0-9][a-z0-9_.-]{1,63}$/', $provider)) {
+            return ['ok' => false, 'error' => 'Proveedor DNS invalido'];
+        }
+        if (self::caddyHasDnsProvider($provider)) {
+            return ['ok' => true, 'installed' => false, 'message' => "dns.providers.{$provider} ya esta instalado"];
+        }
+
+        $catalog = self::dnsProviderCatalog();
+        $modulePackage = (string)($catalog[$provider]['module'] ?? '');
+        if ($modulePackage === '') {
+            return ['ok' => false, 'error' => "Proveedor {$provider} no esta en el catalogo instalable de MuseDock"];
+        }
+
+        $caddyPath = trim((string)shell_exec('command -v caddy 2>/dev/null'));
+        if ($caddyPath === '' || !is_file($caddyPath)) {
+            return ['ok' => false, 'error' => 'No se encontro el binario caddy'];
+        }
+        $caddyPath = realpath($caddyPath) ?: $caddyPath;
+
+        $prep = self::ensureXcaddyToolchain();
+        if (!($prep['ok'] ?? false)) {
+            return ['ok' => false, 'error' => (string)($prep['error'] ?? 'No se pudo preparar xcaddy'), 'output' => (string)($prep['output'] ?? '')];
+        }
+        $xcaddy = (string)$prep['xcaddy'];
+        $envPrefix = 'PATH=/usr/local/go/bin:/root/go/bin:/usr/local/bin:/usr/bin:/bin ';
+
+        $versionRaw = trim((string)shell_exec(escapeshellarg($caddyPath) . ' version 2>/dev/null'));
+        $caddyVersion = '';
+        if (preg_match('/\bv?(\d+\.\d+\.\d+)\b/', $versionRaw, $m)) {
+            $caddyVersion = 'v' . $m[1];
+        }
+        if ($caddyVersion === '') {
+            return ['ok' => false, 'error' => "No se pudo detectar la version actual de Caddy ({$versionRaw})"];
+        }
+
+        $modulePackages = self::currentCaddyNonStandardPackages($caddyPath);
+        $modulePackages[$modulePackage] = true;
+
+        $backupDir = '/var/backups/musedock/caddy';
+        @mkdir($backupDir, 0750, true);
+        $stamp = gmdate('Ymd-His');
+        $backupPath = "{$backupDir}/caddy-{$stamp}";
+        if (!@copy($caddyPath, $backupPath)) {
+            return ['ok' => false, 'error' => "No se pudo crear backup de {$caddyPath} en {$backupPath}"];
+        }
+        @chmod($backupPath, 0755);
+
+        $buildPath = "/tmp/musedock-caddy-{$provider}-{$stamp}";
+        @unlink($buildPath);
+        $cmd = $envPrefix . escapeshellarg($xcaddy)
+            . ' build ' . escapeshellarg($caddyVersion)
+            . ' --output ' . escapeshellarg($buildPath);
+        foreach (array_keys($modulePackages) as $pkg) {
+            $cmd .= ' --with ' . escapeshellarg($pkg);
+        }
+        $buildOut = trim((string)shell_exec($cmd . ' 2>&1'));
+        if (!is_file($buildPath) || !is_executable($buildPath)) {
+            return [
+                'ok' => false,
+                'error' => 'xcaddy no genero un binario ejecutable',
+                'output' => self::trimCommandOutput($buildOut),
+                'backup' => $backupPath,
+            ];
+        }
+
+        $builtModules = trim((string)shell_exec(escapeshellarg($buildPath) . ' list-modules --packages --skip-standard 2>/dev/null'));
+        if (!str_contains($builtModules, "dns.providers.{$provider} ")) {
+            @unlink($buildPath);
+            return [
+                'ok' => false,
+                'error' => "El binario compilado no contiene dns.providers.{$provider}",
+                'output' => self::trimCommandOutput($builtModules . "\n" . $buildOut),
+                'backup' => $backupPath,
+            ];
+        }
+
+        $validateOut = trim((string)shell_exec(escapeshellarg($buildPath) . ' validate --config /etc/caddy/Caddyfile 2>&1'));
+        if (stripos($validateOut, 'valid') === false && stripos($validateOut, 'adapted config') === false) {
+            // Validation output varies by Caddy version; do not block on empty output,
+            // but block on explicit errors.
+            if (stripos($validateOut, 'error') !== false || stripos($validateOut, 'invalid') !== false) {
+                @unlink($buildPath);
+                return [
+                    'ok' => false,
+                    'error' => 'El nuevo Caddy no valida /etc/caddy/Caddyfile',
+                    'output' => self::trimCommandOutput($validateOut),
+                    'backup' => $backupPath,
+                ];
+            }
+        }
+
+        $installOut = trim((string)shell_exec(sprintf(
+            'install -m 0755 %s %s 2>&1',
+            escapeshellarg($buildPath),
+            escapeshellarg($caddyPath)
+        )));
+        @unlink($buildPath);
+        if ($installOut !== '' && stripos($installOut, 'error') !== false) {
+            return ['ok' => false, 'error' => 'No se pudo reemplazar el binario de Caddy', 'output' => self::trimCommandOutput($installOut), 'backup' => $backupPath];
+        }
+
+        $restartOut = trim((string)shell_exec('systemctl restart caddy 2>&1'));
+        sleep(2);
+        $active = trim((string)shell_exec('systemctl is-active caddy 2>/dev/null')) === 'active';
+        $providerNow = self::binaryHasDnsProvider($caddyPath, $provider);
+        if (!$active || !$providerNow) {
+            @copy($backupPath, $caddyPath);
+            @chmod($caddyPath, 0755);
+            $rollbackOut = trim((string)shell_exec('systemctl restart caddy 2>&1'));
+            return [
+                'ok' => false,
+                'rolled_back' => true,
+                'error' => $active ? "Caddy arranco pero no reporta dns.providers.{$provider}" : 'Caddy no arranco con el nuevo binario',
+                'output' => self::trimCommandOutput($restartOut . "\nRollback:\n" . $rollbackOut),
+                'backup' => $backupPath,
+            ];
+        }
+
+        self::$installedDnsProviders = null;
+        self::$dnsProviderAvailability = [];
+        self::$hasCloudflareDnsProvider = null;
+
+        return [
+            'ok' => true,
+            'installed' => true,
+            'provider' => $provider,
+            'module' => $modulePackage,
+            'version' => $caddyVersion,
+            'backup' => $backupPath,
+            'message' => "dns.providers.{$provider} instalado y Caddy reiniciado correctamente",
+            'output' => self::trimCommandOutput($buildOut),
+        ];
+    }
+
+    private static function ensureXcaddyToolchain(): array
+    {
+        $envPrefix = 'PATH=/usr/local/go/bin:/root/go/bin:/usr/local/bin:/usr/bin:/bin ';
+        $go = trim((string)shell_exec($envPrefix . 'command -v go 2>/dev/null'));
+        $out = '';
+        if ($go === '') {
+            $out .= (string)shell_exec('DEBIAN_FRONTEND=noninteractive apt-get update -qq 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq golang-go 2>&1');
+            $go = trim((string)shell_exec($envPrefix . 'command -v go 2>/dev/null'));
+            if ($go === '') {
+                return ['ok' => false, 'error' => 'No se pudo instalar/encontrar Go', 'output' => self::trimCommandOutput($out)];
+            }
+        }
+
+        $xcaddy = trim((string)shell_exec($envPrefix . 'command -v xcaddy 2>/dev/null'));
+        if ($xcaddy === '') {
+            $out .= (string)shell_exec($envPrefix . 'go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest 2>&1');
+            $xcaddy = trim((string)shell_exec($envPrefix . 'command -v xcaddy 2>/dev/null'));
+            if ($xcaddy === '' && is_file('/root/go/bin/xcaddy')) {
+                $xcaddy = '/root/go/bin/xcaddy';
+            }
+            if ($xcaddy === '') {
+                return ['ok' => false, 'error' => 'No se pudo instalar/encontrar xcaddy', 'output' => self::trimCommandOutput($out)];
+            }
+        }
+
+        return ['ok' => true, 'go' => $go, 'xcaddy' => $xcaddy, 'output' => self::trimCommandOutput($out)];
+    }
+
+    private static function currentCaddyNonStandardPackages(string $caddyPath): array
+    {
+        $out = trim((string)shell_exec(escapeshellarg($caddyPath) . ' list-modules --packages --skip-standard 2>/dev/null'));
+        $packages = [];
+        foreach (preg_split('/\R+/', $out) ?: [] as $line) {
+            $line = trim((string)$line);
+            if ($line === '' || str_contains($line, 'Non-standard modules') || str_contains($line, 'Unknown modules')) {
+                continue;
+            }
+            $parts = preg_split('/\s+/', $line) ?: [];
+            if (count($parts) >= 2 && str_contains($parts[1], '/')) {
+                $packages[$parts[1]] = true;
+            }
+        }
+        return $packages;
+    }
+
+    private static function binaryHasDnsProvider(string $caddyPath, string $provider): bool
+    {
+        $out = trim((string)shell_exec(escapeshellarg($caddyPath) . ' list-modules 2>/dev/null | grep -E "^dns\\.providers\\.' . preg_quote($provider, '/') . '$"'));
+        return $out === "dns.providers.{$provider}";
+    }
+
+    private static function trimCommandOutput(string $output, int $max = 4000): string
+    {
+        $output = trim($output);
+        if (strlen($output) <= $max) {
+            return $output;
+        }
+        return substr($output, -$max);
     }
 
     private static function caddyHasDnsProvider(string $provider): bool
