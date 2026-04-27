@@ -20,6 +20,27 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.168',
+                'date' => '2026-04-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Los hostnames publicos del panel ya no quedan con policy `internal/self_signed`; se fuerza Let’s Encrypt HTTP-01/TLS-ALPN-01 para evitar bloqueos HSTS como `ERR_CERT_AUTHORITY_INVALID`',
+                            '`repair-caddy-routes.php` corrige policies antiguas `internal` para dominios publicos del panel aunque la BD arrastre `panel_tls_mode=self_signed` desde el instalador',
+                            'Si la ruta del dominio ya existe, el reparador vuelve a calentar TLS para disparar la obtencion/seleccion del certificado publico',
+                            '`Settings > Server` muestra Let’s Encrypt como modo recomendado cuando hay dominio del panel configurado y sugiere email ACME desde admin/notificaciones',
+                        ],
+                        'en' => [
+                            'Public panel hostnames no longer remain on `internal/self_signed` policy; Let’s Encrypt HTTP-01/TLS-ALPN-01 is forced to avoid HSTS blocks like `ERR_CERT_AUTHORITY_INVALID`',
+                            '`repair-caddy-routes.php` fixes old `internal` policies for public panel domains even when DB still carries installer-era `panel_tls_mode=self_signed`',
+                            'When the domain route already exists, repair warms TLS again to trigger public certificate obtain/selection',
+                            '`Settings > Server` shows Let’s Encrypt as the recommended mode when a panel domain is configured and suggests ACME email from admin/notifications',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.167',
                 'date' => '2026-04-27',
                 'badge' => 'primary',

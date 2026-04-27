@@ -70,6 +70,7 @@
                             if (!in_array($panelTlsMode, ['self_signed', 'http01', 'dns01'], true)) {
                                 $panelTlsMode = 'self_signed';
                             }
+                            $panelHostnameConfigured = trim((string)($settings['panel_hostname'] ?? '')) !== '';
                         ?>
                         <label class="form-label">TLS del panel (puerto <?= (int)$panelPort ?>)</label>
                         <select class="form-select" name="panel_tls_mode" id="panel_tls_mode">
@@ -78,8 +79,11 @@
                             <option value="dns01" <?= $panelTlsMode === 'dns01' ? 'selected' : '' ?>>Let's Encrypt DNS-01 (+ fallback interno, proveedor DNS con API)</option>
                         </select>
                         <small class="text-muted">
-                            Recomendado: <strong>self-signed</strong> si el panel esta cerrado por firewall. Usa DNS-01 si quieres certificado publico sin abrir puertos.
+                            Recomendado: <strong>Let's Encrypt</strong> para dominios publicos. Usa <strong>self-signed</strong> solo para acceso por IP o hostname privado.
                         </small>
+                        <?php if ($panelHostnameConfigured && $panelTlsMode === 'http01'): ?>
+                            <div class="small text-warning mt-1">Con dominio configurado, el panel evitara certificados internos para prevenir bloqueos HSTS del navegador.</div>
+                        <?php endif; ?>
                     </div>
 
                     <div class="mb-3" id="acme_email_wrap" style="<?= in_array($panelTlsMode, ['http01', 'dns01'], true) ? '' : 'display:none;' ?>">

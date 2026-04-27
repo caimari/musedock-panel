@@ -980,6 +980,7 @@ CONF;
                 continue;
             }
             if (self::panelDomainRouteMatches($existingRoute, $hostname, $panelPublicPort, $internalPort)) {
+                self::warmupPanelDomainTls($hostname, $panelPublicPort);
                 $warning = self::buildPanelDomainDnsWarning($hostname);
                 if (!empty($panelTlsResult['warning'])) {
                     $warning = trim($warning . ' ' . (string)$panelTlsResult['warning']);
@@ -1101,6 +1102,7 @@ CONF;
                 if ($warning !== '') {
                     $result['warning'] = $warning;
                 }
+                self::warmupPanelDomainTls($hostname, $panelPublicPort);
                 return $result;
             }
             break;
@@ -1340,7 +1342,14 @@ CONF;
 
         $email = trim((string)\MuseDockPanel\Settings::get('panel_acme_email', 'admin@musedock.com'));
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $email = 'admin@musedock.com';
+            $email = self::resolvePanelAcmeEmail('');
+        }
+
+        $modeWarning = '';
+        if ($mode === 'self_signed' && self::panelHostnameNeedsPublicTls($hostname)) {
+            $mode = 'http01';
+            $email = self::resolvePanelAcmeEmail($email);
+            $modeWarning = 'Dominio publico detectado: se fuerza Let\'s Encrypt HTTP-01/TLS-ALPN-01 para evitar certificado interno bloqueado por HSTS.';
         }
 
         $provider = strtolower(trim((string)\MuseDockPanel\Settings::get('panel_dns_provider', '')));
@@ -1358,6 +1367,9 @@ CONF;
         $policy = self::buildPanelTlsPolicy($hostname, $mode, $email, $provider, $providerConfig, $warning);
         if (!($policy['ok'] ?? false)) {
             return ['ok' => false, 'error' => (string)($policy['error'] ?? 'No se pudo construir la politica TLS del panel')];
+        }
+        if ($modeWarning !== '') {
+            $warning = trim($modeWarning . ' ' . $warning);
         }
         $panelPolicy = $policy['policy'];
 
@@ -1496,6 +1508,42 @@ CONF;
                 ],
             ],
         ];
+    }
+
+    private static function panelHostnameNeedsPublicTls(string $hostname): bool
+    {
+        $host = strtolower(trim($hostname));
+        if ($host === '' || $host === 'localhost' || filter_var($host, FILTER_VALIDATE_IP)) {
+            return false;
+        }
+        foreach (['.local', '.localhost', '.lan', '.internal', '.test'] as $suffix) {
+            if (str_ends_with($host, $suffix)) {
+                return false;
+            }
+        }
+        return str_contains($host, '.');
+    }
+
+    private static function resolvePanelAcmeEmail(string $candidate): string
+    {
+        $candidates = [
+            $candidate,
+            (string)\MuseDockPanel\Settings::get('panel_acme_email', ''),
+            (string)\MuseDockPanel\Settings::get('notify_smtp_from', ''),
+            (string)\MuseDockPanel\Settings::get('notify_email_to', ''),
+            (string)\MuseDockPanel\Settings::get('mail_from_address', ''),
+            \MuseDockPanel\Services\NotificationService::getAdminEmail(),
+            'admin@musedock.com',
+        ];
+
+        foreach ($candidates as $email) {
+            $email = trim((string)$email);
+            if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return $email;
+            }
+        }
+
+        return 'admin@musedock.com';
     }
 
     private static function removePanelTlsPolicy(string $caddyApi, string $hostname): bool

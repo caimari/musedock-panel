@@ -7,6 +7,7 @@ use MuseDockPanel\Router;
 use MuseDockPanel\Settings;
 use MuseDockPanel\View;
 use MuseDockPanel\Services\LogService;
+use MuseDockPanel\Services\NotificationService;
 use MuseDockPanel\Services\SecurityService;
 
 class SettingsController
@@ -1061,6 +1062,15 @@ class SettingsController
     public function server(): void
     {
         $settings = \MuseDockPanel\Settings::getAll();
+        $panelHostnameForTls = $this->normalizePanelHostname((string)($settings['panel_hostname'] ?? ''));
+        if ($panelHostnameForTls !== ''
+            && $this->panelHostnameNeedsPublicTls($panelHostnameForTls)
+            && (($settings['panel_tls_mode'] ?? 'self_signed') === 'self_signed')) {
+            $settings['panel_tls_mode'] = 'http01';
+            if (empty($settings['panel_acme_email'])) {
+                $settings['panel_acme_email'] = $this->resolvePanelAcmeEmail('');
+            }
+        }
         $rebootNotifyEnabled = \MuseDockPanel\Settings::get('server_reboot_notify_enabled', '0') === '1';
 
         // Detect server info
@@ -1117,6 +1127,7 @@ class SettingsController
         $panelDnsProvider = strtolower(trim((string)($_POST['panel_dns_provider'] ?? '')));
         $panelDnsProviderConfigRaw = trim((string)($_POST['panel_dns_provider_config'] ?? ''));
         $panelAcmeEmail = trim((string)($_POST['panel_acme_email'] ?? \MuseDockPanel\Settings::get('panel_acme_email', '')));
+        $serverWarnings = [];
 
         if ($panelHostnameRaw !== '' && $panelHostname === '') {
             Flash::set('error', 'Dominio del panel invalido. Usa solo hostname (ej: panel.ejemplo.com), sin http:// ni /ruta.');
@@ -1124,7 +1135,14 @@ class SettingsController
             return;
         }
 
+        if ($panelHostname !== '' && $panelTlsMode === 'self_signed' && $this->panelHostnameNeedsPublicTls($panelHostname)) {
+            $panelTlsMode = 'http01';
+            $panelAcmeEmail = $this->resolvePanelAcmeEmail($panelAcmeEmail);
+            $serverWarnings[] = 'Dominio publico detectado: se cambio TLS del panel a Let\'s Encrypt HTTP-01/TLS-ALPN-01. Self-signed queda reservado para acceso por IP o hostnames privados.';
+        }
+
         if (in_array($panelTlsMode, ['http01', 'dns01'], true)) {
+            $panelAcmeEmail = $this->resolvePanelAcmeEmail($panelAcmeEmail);
             if ($panelAcmeEmail === '') {
                 Flash::set('error', 'Email ACME requerido para modos HTTP-01/DNS-01.');
                 Router::redirect('/settings/server');
@@ -1198,10 +1216,10 @@ class SettingsController
             if ($result['ok'] ?? false) {
                 $routeApplied = !empty($result['applied']);
                 if (!empty($result['warning'])) {
-                    Flash::set('warning', (string)$result['warning']);
+                    $serverWarnings[] = (string)$result['warning'];
                 }
             } else {
-                Flash::set('warning', 'Configuracion guardada, pero no se pudo activar HTTPS automatico en Caddy: ' . (string)($result['error'] ?? 'error desconocido'));
+                $serverWarnings[] = 'Configuracion guardada, pero no se pudo activar HTTPS automatico en Caddy: ' . (string)($result['error'] ?? 'error desconocido');
             }
         } else {
             \MuseDockPanel\Services\SystemService::removePanelDomainRoute($previousPanelHostname);
@@ -1213,6 +1231,9 @@ class SettingsController
             Flash::set('success', "Configuracion guardada. Acceso recomendado: https://{$panelHostname}:{$panelPort}/");
         } else {
             Flash::set('success', 'Configuracion del servidor guardada.');
+        }
+        if (!empty($serverWarnings)) {
+            Flash::set('warning', implode(' ', array_values(array_unique($serverWarnings))));
         }
         Router::redirect('/settings/server');
     }
@@ -1245,6 +1266,42 @@ class SettingsController
     {
         $mode = strtolower(trim($value));
         return in_array($mode, ['self_signed', 'http01', 'dns01'], true) ? $mode : 'self_signed';
+    }
+
+    private function panelHostnameNeedsPublicTls(string $hostname): bool
+    {
+        $host = strtolower(trim($hostname));
+        if ($host === '' || $host === 'localhost' || filter_var($host, FILTER_VALIDATE_IP)) {
+            return false;
+        }
+        foreach (['.local', '.localhost', '.lan', '.internal', '.test'] as $suffix) {
+            if (str_ends_with($host, $suffix)) {
+                return false;
+            }
+        }
+        return str_contains($host, '.');
+    }
+
+    private function resolvePanelAcmeEmail(string $candidate): string
+    {
+        $candidates = [
+            $candidate,
+            (string)\MuseDockPanel\Settings::get('panel_acme_email', ''),
+            (string)\MuseDockPanel\Settings::get('notify_smtp_from', ''),
+            (string)\MuseDockPanel\Settings::get('notify_email_to', ''),
+            (string)\MuseDockPanel\Settings::get('mail_from_address', ''),
+            NotificationService::getAdminEmail(),
+            'admin@musedock.com',
+        ];
+
+        foreach ($candidates as $email) {
+            $email = trim((string)$email);
+            if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                return $email;
+            }
+        }
+
+        return '';
     }
 
     // ================================================================

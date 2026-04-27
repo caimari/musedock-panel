@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.168] — 2026-04-27
+
+### Fixed
+- Panel domain TLS: los hostnames publicos del panel ya no quedan con policy `internal/self_signed`; se fuerza Let’s Encrypt HTTP-01/TLS-ALPN-01 para evitar bloqueos HSTS como `ERR_CERT_AUTHORITY_INVALID`.
+- `repair-caddy-routes.php` corrige policies antiguas `internal` para dominios publicos del panel aunque la BD arrastre `panel_tls_mode=self_signed` desde el instalador.
+- Al detectar una ruta del dominio ya existente, el reparador vuelve a calentar TLS para disparar la obtencion/seleccion del certificado publico.
+- `Settings > Server` muestra Let’s Encrypt como modo recomendado cuando hay dominio del panel configurado y rellena un email ACME razonable si existe email de admin/notificaciones.
+
 ## [1.0.167] — 2026-04-27
 
 ### Fixed
