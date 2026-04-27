@@ -963,7 +963,10 @@ CONF;
         }
         $routes = $routesResult['routes'] ?? [];
 
-        $conflict = self::findHostRouteConflict($routes, $hostname, self::PANEL_DOMAIN_ROUTE_ID);
+        $conflict = self::findHostRouteConflict($routes, $hostname, [
+            self::PANEL_DOMAIN_ROUTE_ID,
+            self::PANEL_DOMAIN_HTTPS_ROUTE_ID,
+        ]);
         if ($conflict !== null) {
             return ['ok' => false, 'error' => "El dominio {$hostname} ya esta en uso por la ruta Caddy '{$conflict}'."];
         }
@@ -1747,8 +1750,11 @@ CONF;
         }
         $routes = $routesResult['routes'] ?? [];
 
-        $conflict = self::findHostRouteConflict($routes, $hostname, self::PANEL_DOMAIN_HTTPS_ROUTE_ID);
-        if ($conflict !== null && $conflict !== self::PANEL_DOMAIN_ROUTE_ID) {
+        $conflict = self::findHostRouteConflict($routes, $hostname, [
+            self::PANEL_DOMAIN_ROUTE_ID,
+            self::PANEL_DOMAIN_HTTPS_ROUTE_ID,
+        ]);
+        if ($conflict !== null) {
             return [
                 'ok' => true,
                 'skipped' => true,
@@ -2288,11 +2294,15 @@ CONF;
         return false;
     }
 
-    private static function findHostRouteConflict(array $routes, string $hostname, string $excludeRouteId): ?string
+    private static function findHostRouteConflict(array $routes, string $hostname, string|array $excludeRouteId): ?string
     {
+        $excludeRouteIds = is_array($excludeRouteId)
+            ? array_fill_keys(array_map('strval', $excludeRouteId), true)
+            : [(string)$excludeRouteId => true];
+
         foreach ($routes as $route) {
             $rid = (string)($route['@id'] ?? '');
-            if ($rid === $excludeRouteId) {
+            if (isset($excludeRouteIds[$rid])) {
                 continue;
             }
 

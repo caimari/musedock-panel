@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.172',
+                'date' => '2026-04-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`panel-domain-route` (`:8444`) y `panel-domain-https-route` (`:443`) ya no se detectan entre si como conflicto para el mismo hostname',
+                        ],
+                        'en' => [
+                            '`panel-domain-route` (`:8444`) and `panel-domain-https-route` (`:443`) no longer detect each other as a conflict for the same hostname',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.171',
                 'date' => '2026-04-27',
                 'badge' => 'primary',

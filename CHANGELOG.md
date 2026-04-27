@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.172] — 2026-04-27
+
+### Fixed
+- Panel domain routes: `panel-domain-route` (`:8444`) y `panel-domain-https-route` (`:443`) ya no se detectan entre si como conflicto para el mismo hostname.
+
 ## [1.0.171] — 2026-04-27
 
 ### Fixed
