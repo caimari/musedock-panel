@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.174',
+                'date' => '2026-04-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Las policies ACME de dominios publicos del panel ya no incluyen fallback `internal`; el certificado interno queda limitado a acceso por IP/localhost',
+                            'Evita que Chrome/HSTS reciba `ERR_CERT_AUTHORITY_INVALID` cuando ACME aun no ha emitido un certificado publico para el hostname',
+                        ],
+                        'en' => [
+                            'ACME policies for public panel domains no longer include `internal` fallback; internal certificates are limited to IP/localhost access',
+                            'Prevents Chrome/HSTS from receiving `ERR_CERT_AUTHORITY_INVALID` while ACME has not yet issued a public certificate for the hostname',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.173',
                 'date' => '2026-04-27',
                 'badge' => 'primary',

@@ -1453,20 +1453,21 @@ CONF;
         }
 
         if ($mode === 'http01') {
+            $issuers = [[
+                'module' => 'acme',
+                'email' => $email,
+            ]];
+            if (!self::panelHostnameNeedsPublicTls($hostname)) {
+                $issuers[] = [
+                    'module' => 'internal',
+                ];
+            }
+
             return [
                 'ok' => true,
                 'policy' => [
                     'subjects' => [$hostname],
-                    'issuers' => [
-                        [
-                            'module' => 'acme',
-                            'email' => $email,
-                        ],
-                        [
-                            // Fallback to keep admin panel reachable when ACME is blocked/failing.
-                            'module' => 'internal',
-                        ],
-                    ],
+                    'issuers' => $issuers,
                 ],
             ];
         }
@@ -1502,26 +1503,27 @@ CONF;
             return ['ok' => false, 'error' => "Caddy no tiene cargado dns.providers.{$provider}"];
         }
 
+        $issuers = [[
+            'module' => 'acme',
+            'email' => $email,
+            'challenges' => [
+                'dns' => [
+                    'provider' => array_merge(['name' => $provider], $providerConfig),
+                    'resolvers' => ['1.1.1.1:53', '8.8.8.8:53'],
+                ],
+            ],
+        ]];
+        if (!self::panelHostnameNeedsPublicTls($hostname)) {
+            $issuers[] = [
+                'module' => 'internal',
+            ];
+        }
+
         return [
             'ok' => true,
             'policy' => [
                 'subjects' => [$hostname],
-                'issuers' => [
-                    [
-                        'module' => 'acme',
-                        'email' => $email,
-                        'challenges' => [
-                            'dns' => [
-                                'provider' => array_merge(['name' => $provider], $providerConfig),
-                                'resolvers' => ['1.1.1.1:53', '8.8.8.8:53'],
-                            ],
-                        ],
-                    ],
-                    [
-                        // Fallback if DNS challenge cannot complete.
-                        'module' => 'internal',
-                    ],
-                ],
+                'issuers' => $issuers,
             ],
         ];
     }

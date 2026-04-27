@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.174] — 2026-04-27
+
+### Fixed
+- Panel public TLS: las policies ACME de dominios publicos del panel ya no incluyen fallback `internal`. El certificado interno queda limitado a acceso por IP/localhost para evitar que Chrome/HSTS reciba `ERR_CERT_AUTHORITY_INVALID` cuando ACME todavia no ha emitido.
+
 ## [1.0.173] — 2026-04-27
 
 ### Improved
