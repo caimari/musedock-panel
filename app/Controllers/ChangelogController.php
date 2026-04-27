@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.167',
+                'date' => '2026-04-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`repair-caddy-routes.php` y el worker reponen `panel-fallback-route` en el servidor Caddy que realmente escucha `PANEL_PORT`, incluido `srv1` generado desde Caddyfile',
+                            'El acceso directo por IP a `https://IP:8444/` vuelve a quedar disponible para slaves sin subdominio configurado, con TLS interno/autofirmado',
+                            'La ruta fallback queda limitada a IPs detectadas y `localhost`, sin abrir un catch-all para cualquier hostname en `:8444`',
+                        ],
+                        'en' => [
+                            '`repair-caddy-routes.php` and the worker now restore `panel-fallback-route` in the Caddy server that actually owns `PANEL_PORT`, including Caddyfile-generated `srv1`',
+                            'Direct IP access to `https://IP:8444/` remains available for slaves without a configured subdomain, using internal/self-signed TLS',
+                            'The fallback route is limited to detected IPs and `localhost`, avoiding an unnecessary catch-all for any hostname on `:8444`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.166',
                 'date' => '2026-04-27',
                 'badge' => 'primary',

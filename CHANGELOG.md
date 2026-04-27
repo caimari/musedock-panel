@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.167] — 2026-04-27
+
+### Fixed
+- Panel IP fallback: `repair-caddy-routes.php` y el worker ahora reponen `panel-fallback-route` en el servidor Caddy que realmente escucha `PANEL_PORT`, incluido `srv1` generado desde Caddyfile.
+- El acceso directo por IP a `https://IP:8444/` queda preservado para slaves sin subdominio configurado, usando TLS interno/autofirmado y proxy al panel interno.
+- La ruta fallback queda limitada a IPs locales/detectadas y `localhost`, evitando convertir `:8444` en un catch-all innecesario para cualquier hostname.
+
 ## [1.0.166] — 2026-04-27
 
 ### Fixed

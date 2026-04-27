@@ -466,6 +466,7 @@ CONF;
 
         // Always keep local loopback available for local diagnostics/recovery.
         $subjects['127.0.0.1'] = true;
+        $subjects['localhost'] = true;
 
         $subjects = array_keys($subjects);
         if (empty($subjects)) {
@@ -1846,8 +1847,10 @@ CONF;
 
         if ($enforcePanelPort) {
             $panelServerName = self::getPanelAdminServerName();
-            if (($panelRouteServer === 'srv0' || $panelRouteServer === $panelServerName)
-                && !self::ensurePanelFallbackRoute($caddyApi, $panelRouteServer)) {
+            $canApplyFallbackRoute = $panelRouteServer === 'srv0'
+                || $panelRouteServer === $panelServerName
+                || self::serverProxiesToPanelInternalPort($caddyApi, $panelRouteServer);
+            if ($canApplyFallbackRoute && !self::ensurePanelFallbackRoute($caddyApi, $panelRouteServer)) {
                 return false;
             }
         }
@@ -1864,6 +1867,7 @@ CONF;
         $panelPort = self::getPanelPublicPort();
         $internalPort = self::getPanelInternalPort();
         $expectedExpr = '{http.request.port} == ' . $panelPort;
+        $expectedHosts = self::panelIpFallbackHosts();
 
         $routesUrl = "{$caddyApi}/config/apps/http/servers/{$serverName}/routes";
         $ch = curl_init($routesUrl);
@@ -1886,11 +1890,7 @@ CONF;
             if ((string)($route['@id'] ?? '') !== self::PANEL_FALLBACK_ROUTE_ID) {
                 continue;
             }
-            $match = $route['match'][0] ?? [];
-            $expr = trim((string)($match['expression'] ?? ''));
-            $upstreamDial = (string)($route['handle'][0]['upstreams'][0]['dial'] ?? '');
-            $expectedDial = "127.0.0.1:{$internalPort}";
-            if ($expr === $expectedExpr && $upstreamDial === $expectedDial) {
+            if (self::panelFallbackRouteMatches($route, $expectedHosts, $expectedExpr, $internalPort)) {
                 return true;
             }
             break;
@@ -1899,28 +1899,15 @@ CONF;
         $fallbackRoute = [
             '@id' => self::PANEL_FALLBACK_ROUTE_ID,
             'match' => [[
+                'host' => $expectedHosts,
                 'expression' => $expectedExpr,
             ]],
             'handle' => self::panelReverseProxyHandle($internalPort),
             'terminal' => true,
         ];
 
-        $ch = curl_init("{$caddyApi}/id/" . self::PANEL_FALLBACK_ROUTE_ID);
-        curl_setopt_array($ch, [
-            CURLOPT_CUSTOMREQUEST => 'PUT',
-            CURLOPT_POSTFIELDS => json_encode($fallbackRoute),
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 8,
-        ]);
-        curl_exec($ch);
-        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($httpCode >= 200 && $httpCode < 300) {
-            return true;
-        }
-
+        // Route IDs are global in Caddy. Delete a stale fallback from any server
+        // before POSTing into the actual PANEL_PORT owner (srv1 on Caddyfile installs).
         self::deleteRouteById($caddyApi, self::PANEL_FALLBACK_ROUTE_ID);
         $ch = curl_init($routesUrl);
         curl_setopt_array($ch, [
@@ -1935,6 +1922,70 @@ CONF;
         curl_close($ch);
 
         return $postCode >= 200 && $postCode < 300;
+    }
+
+    private static function panelIpFallbackHosts(): array
+    {
+        $hosts = [];
+        $add = static function (string $host) use (&$hosts): void {
+            $host = strtolower(trim($host));
+            if ($host === '') {
+                return;
+            }
+            if ($host === 'localhost' || filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+                $hosts[$host] = true;
+            }
+        };
+
+        $add((string)\MuseDockPanel\Settings::get('server_ip', ''));
+
+        $rawIps = trim((string)shell_exec('hostname -I 2>/dev/null'));
+        if ($rawIps !== '') {
+            foreach (preg_split('/\s+/', $rawIps) ?: [] as $ip) {
+                $add((string)$ip);
+            }
+        }
+
+        $add('127.0.0.1');
+        $add('localhost');
+
+        $list = array_keys($hosts);
+        sort($list, SORT_NATURAL);
+        return $list;
+    }
+
+    private static function panelFallbackRouteMatches(array $route, array $expectedHosts, string $expectedExpr, int $internalPort): bool
+    {
+        if ((string)($route['@id'] ?? '') !== self::PANEL_FALLBACK_ROUTE_ID) {
+            return false;
+        }
+
+        $match = $route['match'][0] ?? [];
+        if (!is_array($match)) {
+            return false;
+        }
+
+        $expr = trim((string)($match['expression'] ?? ''));
+        if ($expr !== $expectedExpr) {
+            return false;
+        }
+
+        $hosts = $match['host'] ?? [];
+        if (!is_array($hosts)) {
+            return false;
+        }
+        $normalizedHosts = array_fill_keys(array_map(
+            static fn($host) => strtolower(trim((string)$host)),
+            $hosts
+        ), true);
+        foreach ($expectedHosts as $host) {
+            if (!isset($normalizedHosts[strtolower((string)$host)])) {
+                return false;
+            }
+        }
+
+        $expectedDial = "127.0.0.1:{$internalPort}";
+        return self::routesContainReverseProxyDial([$route], $expectedDial);
     }
 
     /**
