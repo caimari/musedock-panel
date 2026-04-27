@@ -45,7 +45,7 @@
         <div class="card">
             <div class="card-header"><i class="bi bi-gear me-1"></i> Configuracion del Panel</div>
             <div class="card-body">
-                <form method="POST" action="/settings/server/save">
+                <form method="POST" action="/settings/server/save" id="server-settings-form">
                     <?= View::csrf() ?>
 
                     <div class="mb-3">
@@ -200,7 +200,9 @@
                         </div>
                     </div>
 
-                    <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Guardar</button>
+                    <button type="submit" class="btn btn-primary" id="server-save-btn">
+                        <i class="bi bi-check-lg me-1"></i><span class="server-save-label">Guardar</span>
+                    </button>
                 </form>
             </div>
         </div>
@@ -225,6 +227,17 @@
     };
     modeSel.addEventListener('change', refresh);
     refresh();
+})();
+
+(() => {
+    const form = document.getElementById('server-settings-form');
+    const btn = document.getElementById('server-save-btn');
+    if (!form || !btn) return;
+
+    form.addEventListener('submit', () => {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Guardando y aplicando TLS...';
+    });
 })();
 
 </script>

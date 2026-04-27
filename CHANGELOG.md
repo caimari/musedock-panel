@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.173] — 2026-04-27
+
+### Improved
+- `Settings > Server`: el boton Guardar muestra spinner y queda deshabilitado mientras se guardan ajustes y se aplica Caddy/TLS.
+
 ## [1.0.172] — 2026-04-27
 
 ### Fixed

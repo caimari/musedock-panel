@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.173',
+                'date' => '2026-04-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`Settings > Server`: el boton Guardar muestra spinner y queda deshabilitado mientras se guardan ajustes y se aplica Caddy/TLS',
+                        ],
+                        'en' => [
+                            '`Settings > Server`: the Save button now shows a spinner and stays disabled while settings are saved and Caddy/TLS is applied',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.172',
                 'date' => '2026-04-27',
                 'badge' => 'primary',
