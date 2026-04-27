@@ -187,6 +187,18 @@ $sections = [
     </div>
 </div>
 
+<div class="card mb-4" style="border-color:rgba(34,197,94,.35);">
+    <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-3">
+        <div class="small text-muted">
+            Para configurar el panel con dominio/subdominio, certificados publicos, DNS-01, proxy naranja y puertos 80/443 cerrados:
+            <code>/docs/panel-tls-dns01</code>.
+        </div>
+        <a href="/docs/panel-tls-dns01" class="btn btn-outline-success btn-sm">
+            <i class="bi bi-shield-lock me-1"></i> Guia TLS del panel
+        </a>
+    </div>
+</div>
+
 <div class="row g-3">
     <?php foreach ($sections as $section): ?>
         <div class="col-lg-6 col-xl-4">

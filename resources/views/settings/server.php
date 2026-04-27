@@ -190,6 +190,11 @@
                             <div class="small text-muted mb-1"><strong>A) Self-signed:</strong> no depende de Internet ni ACME. Ideal para panel privado con firewall estricto.</div>
                             <div class="small text-muted mb-1"><strong>B) HTTP-01/TLS-ALPN-01:</strong> requiere puertos 80/443 alcanzables desde Internet durante emision/renovacion.</div>
                             <div class="small text-muted"><strong>C) DNS-01:</strong> no requiere abrir 80/443 para certificar, pero exige proveedor DNS con API y modulo Caddy instalado.</div>
+                            <div class="small mt-2">
+                                <a href="/docs/panel-tls-dns01" class="text-info text-decoration-none">
+                                    <i class="bi bi-journal-text me-1"></i>Ver guia completa de TLS del panel, DNS-01, proxy y firewall
+                                </a>
+                            </div>
                         </div>
                     </div>
 

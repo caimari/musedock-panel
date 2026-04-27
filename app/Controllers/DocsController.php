@@ -324,6 +324,14 @@ class DocsController
     {
         return $this->dedupeTopics([
             [
+                'title' => 'TLS del panel: DNS-01, proxy naranja y puertos cerrados',
+                'description' => 'Como publicar el panel en un dominio/subdominio con certificado publico usando HTTP-01 o DNS-01, incluso con 80/443 cerrados o proxy DNS.',
+                'url' => '/docs/panel-tls-dns01',
+                'category' => 'Guia especial',
+                'icon' => 'bi-shield-lock-fill',
+                'keywords' => 'panel tls dns-01 http-01 tls-alpn lets encrypt certificado dominio subdominio proxy naranja cloudflare caddy dns providers xcaddy firewall 80 443 cerrado acme',
+            ],
+            [
                 'title' => 'Seguridad operativa: hardening, drift, exposicion, lockdown y MFA',
                 'description' => 'Guia integral de seguridad del panel: que dispara FIREWALL_CHANGED, como validar cambios reales y donde gestionar cada control.',
                 'url' => '/docs/security-operations',
@@ -531,6 +539,7 @@ class DocsController
                 'quick_steps' => [
                     'Verificar hostname, timezone y URL de acceso real del panel.',
                     'Ajustar TLS del panel (self-signed/http01/dns01) segun tu modelo de red.',
+                    'Si usas DNS-01, revisar la guia especial /docs/panel-tls-dns01 antes de guardar.',
                     'Guardar cambios y comprobar acceso HTTPS por dominio e IP fallback.',
                     'Gestionar avisos de reinicio/paradas desde Settings > Notifications.',
                 ],
@@ -543,6 +552,7 @@ class DocsController
                 'pitfalls' => [
                     'Cambiar identidad sin revisar DNS puede romper validaciones externas.',
                     'Usar HTTP-01 con firewall cerrado impide emision/renovacion de certificados.',
+                    'Elegir DNS-01 sin instalar el modulo Caddy del proveedor impide crear la policy ACME.',
                     'Pensar que los avisos de reinicio se gestionan aqui (ahora van en Notificaciones).',
                 ],
             ],
@@ -1322,6 +1332,14 @@ class DocsController
         View::render('help/firewall-operations', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Firewall Operations',
+        ]);
+    }
+
+    public function panelTlsDns01(): void
+    {
+        View::render('help/panel-tls-dns01', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - TLS del panel y DNS-01',
         ]);
     }
 

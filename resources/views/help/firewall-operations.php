@@ -74,6 +74,24 @@ fail2ban-client status</pre>
 </div>
 
 <div class="card mb-4" style="border-color:rgba(34,197,94,.35);">
+    <div class="card-header"><i class="bi bi-shield-lock me-2 text-success"></i>Certificados del panel con firewall estricto</div>
+    <div class="card-body">
+        <p class="small text-muted mb-2">
+            Si el panel usa un dominio publico como <code>panel.midominio.com</code>, hay dos modelos seguros:
+            abrir temporalmente <code>80/443</code> para HTTP-01/TLS-ALPN-01 o usar DNS-01 para no abrir esos puertos.
+        </p>
+        <ul class="small text-muted mb-3">
+            <li>La asistencia ACME del panel crea reglas temporales marcadas como <code>MuseDock ACME temporary</code> y las elimina sola al expirar.</li>
+            <li>Las reglas permanentes que el administrador cree manualmente no se eliminan por esa limpieza temporal.</li>
+            <li>DNS-01 evita depender de puertos publicos, pero exige proveedor DNS con API y modulo <code>dns.providers.*</code> en Caddy.</li>
+        </ul>
+        <a href="/docs/panel-tls-dns01" class="btn btn-outline-success btn-sm">
+            <i class="bi bi-journal-text me-1"></i> Ver guia TLS/DNS-01 del panel
+        </a>
+    </div>
+</div>
+
+<div class="card mb-4" style="border-color:rgba(34,197,94,.35);">
     <div class="card-header"><i class="bi bi-arrow-left-right me-2 text-success"></i>Exportar/Importar entre nodos</div>
     <div class="card-body">
         <ul class="small text-muted mb-3">

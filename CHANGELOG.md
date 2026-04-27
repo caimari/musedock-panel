@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.181] — 2026-04-27
+
+### Added
+- Documentacion: nueva guia especial `TLS del panel: DNS-01, proxy naranja y puertos cerrados`, visible desde `/docs`, con ejemplos genericos para dominio/subdominio, certificados del panel, ACME HTTP-01/TLS-ALPN-01, DNS-01, proxy CDN y proveedores DNS.
+- `Settings > Server` y documentacion de Firewall enlazan la guia para explicar que ocurre cuando 80/443 estan cerrados, cuando se usa asistencia ACME temporal y cuando conviene DNS-01.
+
 ## [1.0.180] — 2026-04-27
 
 ### Added

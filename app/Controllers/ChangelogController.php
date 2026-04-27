@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.181',
+                'date' => '2026-04-27',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Documentacion: nueva guia especial `TLS del panel: DNS-01, proxy naranja y puertos cerrados`, visible desde `/docs`, con ejemplos genericos para dominio/subdominio, certificados del panel, ACME HTTP-01/TLS-ALPN-01, DNS-01, proxy CDN y proveedores DNS',
+                            '`Settings > Server` y documentacion de Firewall enlazan la guia para explicar que ocurre cuando 80/443 estan cerrados, cuando se usa asistencia ACME temporal y cuando conviene DNS-01',
+                        ],
+                        'en' => [
+                            'Documentation: new special guide `Panel TLS: DNS-01, orange proxy and closed ports`, visible from `/docs`, with generic examples for domains/subdomains, panel certificates, ACME HTTP-01/TLS-ALPN-01, DNS-01, CDN proxy and DNS providers',
+                            '`Settings > Server` and Firewall documentation now link to the guide to explain what happens when 80/443 are closed, when temporary ACME assist is used and when DNS-01 is preferable',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.180',
                 'date' => '2026-04-27',
                 'badge' => 'success',
