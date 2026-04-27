@@ -438,8 +438,12 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/crons/save', 'SettingsController@cronSave');
 \MuseDockPanel\Router::post('/settings/crons/update', 'SettingsController@cronUpdate');
 \MuseDockPanel\Router::post('/settings/crons/delete', 'SettingsController@cronDelete');
+\MuseDockPanel\Router::post('/settings/crons/export', 'SettingsController@cronExport');
+\MuseDockPanel\Router::post('/settings/crons/import', 'SettingsController@cronImport');
 \MuseDockPanel\Router::get('/settings/caddy', 'SettingsController@caddy');
 \MuseDockPanel\Router::post('/settings/caddy/delete-route', 'SettingsController@caddyDeleteRoute');
+\MuseDockPanel\Router::post('/settings/caddy/export', 'SettingsController@caddyExport');
+\MuseDockPanel\Router::post('/settings/caddy/import', 'SettingsController@caddyImport');
 \MuseDockPanel\Router::get('/settings/server', 'SettingsController@server');
 \MuseDockPanel\Router::post('/settings/server/save', 'SettingsController@serverSave');
 \MuseDockPanel\Router::get('/settings/php', 'SettingsController@php');
@@ -458,6 +462,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/fail2ban/toggle-jail', 'SettingsController@fail2banToggleJail');
 \MuseDockPanel\Router::post('/settings/fail2ban/install', 'SettingsController@fail2banInstall');
 \MuseDockPanel\Router::post('/settings/fail2ban/setup-jails', 'SettingsController@fail2banSetupJails');
+\MuseDockPanel\Router::post('/settings/fail2ban/export', 'SettingsController@fail2banExport');
+\MuseDockPanel\Router::post('/settings/fail2ban/import', 'SettingsController@fail2banImport');
 \MuseDockPanel\Router::get('/settings/logs', 'SettingsController@logs');
 \MuseDockPanel\Router::post('/settings/logs/clear', 'SettingsController@logClear');
 

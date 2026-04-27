@@ -458,6 +458,123 @@ class SettingsController
         Router::redirect('/settings/crons');
     }
 
+    public function cronExport(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'exportar configuracion de cron', '/settings/crons')) {
+            return;
+        }
+
+        $payload = [
+            'type' => 'musedock-cron-config',
+            'schema' => 1,
+            'exported_at' => gmdate('c'),
+            'panel_version' => defined('PANEL_VERSION') ? PANEL_VERSION : 'unknown',
+            'host' => gethostname() ?: '',
+            'managed_users' => $this->listManagedCronUsers(),
+            'crons_by_user' => $this->getCronMapByUser(),
+        ];
+
+        LogService::log('cron.export', 'download', 'Export de configuracion cron');
+        $this->streamJsonDownload($payload, 'musedock-cron-export');
+    }
+
+    public function cronImport(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'importar configuracion de cron', '/settings/crons')) {
+            return;
+        }
+
+        $payload = $this->readUploadedJsonFile('config_file', 2 * 1024 * 1024, '/settings/crons');
+        if ($payload === null) {
+            return;
+        }
+
+        $type = trim((string)($payload['type'] ?? ''));
+        if ($type !== '' && !in_array($type, ['musedock-cron-config', 'musedock-crons-config'], true)) {
+            Flash::set('error', 'Archivo JSON no compatible con configuracion de Cron.');
+            Router::redirect('/settings/crons');
+            return;
+        }
+
+        $incomingMap = $this->extractCronMapFromPayload($payload);
+        if (empty($incomingMap)) {
+            Flash::set('error', 'No se encontraron tareas de cron validas en el archivo.');
+            Router::redirect('/settings/crons');
+            return;
+        }
+
+        $replace = isset($_POST['replace_existing']);
+        $currentMap = $this->getCronMapByUser();
+        $managedUsers = $this->listManagedCronUsers();
+        $targetUsers = $replace ? $managedUsers : array_keys($incomingMap);
+
+        $updatedUsers = [];
+        $clearedUsers = [];
+        $errors = [];
+
+        foreach ($targetUsers as $user) {
+            if (!$this->linuxUserExists($user)) {
+                if (isset($incomingMap[$user])) {
+                    $errors[] = "Usuario inexistente: {$user}";
+                }
+                continue;
+            }
+
+            if ($replace) {
+                $newLines = $incomingMap[$user] ?? [];
+            } else {
+                if (!isset($incomingMap[$user])) {
+                    continue;
+                }
+                $currentLines = $currentMap[$user] ?? [];
+                $newLines = array_values(array_unique(array_merge($currentLines, $incomingMap[$user])));
+            }
+
+            $error = '';
+            if (!$this->writeCrontabForUser($user, $newLines, $error)) {
+                $errors[] = "{$user}: {$error}";
+                continue;
+            }
+
+            if (empty($newLines)) {
+                $clearedUsers[] = $user;
+            } else {
+                $updatedUsers[] = $user;
+            }
+        }
+
+        if (!empty($errors)) {
+            $msg = 'Importacion cron completada con errores: ' . implode(' | ', array_slice($errors, 0, 3));
+            if (count($errors) > 3) {
+                $msg .= ' ...';
+            }
+            Flash::set('warning', $msg);
+        } else {
+            $msg = $replace
+                ? 'Importacion cron aplicada en modo replace.'
+                : 'Importacion cron aplicada en modo append.';
+            $msg .= ' Usuarios actualizados: ' . count($updatedUsers);
+            if (!empty($clearedUsers)) {
+                $msg .= ', limpiados: ' . count($clearedUsers);
+            }
+            Flash::set('success', $msg . '.');
+        }
+
+        LogService::log(
+            'cron.import',
+            $replace ? 'replace' : 'append',
+            'Import cron: updated=' . count($updatedUsers) . ', cleared=' . count($clearedUsers) . ', errors=' . count($errors)
+        );
+
+        Router::redirect('/settings/crons');
+    }
+
     private function getAllCrons(): array
     {
         $result = [];
@@ -490,6 +607,159 @@ class SettingsController
         }
 
         return $result;
+    }
+
+    private function listManagedCronUsers(): array
+    {
+        $db = \MuseDockPanel\Database::fetchAll("SELECT DISTINCT username FROM hosting_accounts ORDER BY username");
+        $users = array_values(array_filter(array_map('strval', array_column($db, 'username'))));
+        array_unshift($users, 'root');
+
+        return array_values(array_unique($users));
+    }
+
+    private function getCronMapByUser(): array
+    {
+        $map = [];
+        foreach ($this->listManagedCronUsers() as $user) {
+            if (!$this->linuxUserExists($user)) {
+                continue;
+            }
+
+            $crontab = trim((string)shell_exec(sprintf('crontab -u %s -l 2>/dev/null', escapeshellarg($user))));
+            if ($crontab === '') {
+                continue;
+            }
+
+            $lines = preg_split('/\r?\n/', $crontab) ?: [];
+            $lines = array_values(array_filter(array_map(static function (string $line): string {
+                return trim($line);
+            }, $lines), static fn(string $line): bool => $line !== ''));
+
+            if (!empty($lines)) {
+                $map[$user] = $lines;
+            }
+        }
+
+        return $map;
+    }
+
+    private function extractCronMapFromPayload(array $payload): array
+    {
+        $result = [];
+
+        if (isset($payload['crons_by_user']) && is_array($payload['crons_by_user'])) {
+            foreach ($payload['crons_by_user'] as $user => $lines) {
+                $user = trim((string)$user);
+                if ($user === '' || !preg_match('/^[a-z_][a-z0-9_-]*[$]?$/i', $user)) {
+                    continue;
+                }
+                if (!is_array($lines)) {
+                    continue;
+                }
+                $normalized = [];
+                foreach ($lines as $line) {
+                    $line = trim((string)$line);
+                    if ($line !== '') {
+                        $normalized[] = $line;
+                    }
+                }
+                if (!empty($normalized)) {
+                    $result[$user] = array_values(array_unique($normalized));
+                }
+            }
+
+            return $result;
+        }
+
+        if (isset($payload['crons']) && is_array($payload['crons'])) {
+            foreach ($payload['crons'] as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                $user = trim((string)($item['user'] ?? ''));
+                $schedule = trim((string)($item['schedule'] ?? ''));
+                $command = trim((string)($item['command'] ?? ''));
+                if ($user === '' || $schedule === '' || $command === '') {
+                    continue;
+                }
+                if (!preg_match('/^[a-z_][a-z0-9_-]*[$]?$/i', $user)) {
+                    continue;
+                }
+                $line = $schedule . ' ' . $command;
+                $result[$user] ??= [];
+                $result[$user][] = $line;
+            }
+        }
+
+        foreach ($result as $user => $lines) {
+            $result[$user] = array_values(array_unique(array_filter(array_map('trim', $lines), static fn(string $line): bool => $line !== '')));
+            if (empty($result[$user])) {
+                unset($result[$user]);
+            }
+        }
+
+        return $result;
+    }
+
+    private function linuxUserExists(string $user): bool
+    {
+        $user = trim($user);
+        if ($user === '') {
+            return false;
+        }
+
+        $uid = trim((string)shell_exec("id -u " . escapeshellarg($user) . " 2>/dev/null"));
+        return $uid !== '';
+    }
+
+    private function writeCrontabForUser(string $user, array $lines, string &$error = ''): bool
+    {
+        $user = trim($user);
+        if ($user === '') {
+            $error = 'usuario vacio';
+            return false;
+        }
+
+        $normalized = [];
+        foreach ($lines as $line) {
+            $line = trim((string)$line);
+            if ($line !== '') {
+                $normalized[] = $line;
+            }
+        }
+        $normalized = array_values(array_unique($normalized));
+
+        if (empty($normalized)) {
+            $cmd = sprintf('crontab -u %s -r 2>&1', escapeshellarg($user));
+            exec($cmd, $out, $rc);
+            if ($rc !== 0) {
+                $joined = trim(implode("\n", $out));
+                if ($joined !== '' && !str_contains(strtolower($joined), 'no crontab for')) {
+                    $error = $joined;
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        $tmpFile = tempnam('/tmp', 'cron_import_');
+        if ($tmpFile === false) {
+            $error = 'no se pudo crear archivo temporal';
+            return false;
+        }
+
+        file_put_contents($tmpFile, implode("\n", $normalized) . "\n");
+        $cmd = sprintf('crontab -u %s %s 2>&1', escapeshellarg($user), escapeshellarg($tmpFile));
+        exec($cmd, $out, $rc);
+        @unlink($tmpFile);
+
+        if ($rc !== 0) {
+            $error = trim(implode("\n", $out)) ?: 'error desconocido';
+            return false;
+        }
+
+        return true;
     }
 
     // ================================================================
@@ -615,6 +885,173 @@ class SettingsController
         }
 
         Router::redirect('/settings/caddy');
+    }
+
+    public function caddyExport(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'exportar configuracion de caddy', '/settings/caddy')) {
+            return;
+        }
+
+        $fetched = $this->fetchCaddyConfig();
+        if (!($fetched['ok'] ?? false)) {
+            $msg = (string)($fetched['error'] ?? 'No se pudo leer la configuracion actual de Caddy.');
+            Flash::set('error', $msg);
+            Router::redirect('/settings/caddy');
+            return;
+        }
+
+        $fullConfig = is_array($fetched['config'] ?? null) ? $fetched['config'] : [];
+        $routes = $fullConfig['apps']['http']['servers']['srv0']['routes'] ?? [];
+        $tlsPolicies = $fullConfig['apps']['tls']['automation']['policies'] ?? [];
+
+        $payload = [
+            'type' => 'musedock-caddy-config',
+            'schema' => 1,
+            'exported_at' => gmdate('c'),
+            'panel_version' => defined('PANEL_VERSION') ? PANEL_VERSION : 'unknown',
+            'host' => gethostname() ?: '',
+            'meta' => [
+                'route_count' => is_array($routes) ? count($routes) : 0,
+                'tls_policy_count' => is_array($tlsPolicies) ? count($tlsPolicies) : 0,
+            ],
+            'caddy_config' => $fullConfig,
+        ];
+
+        LogService::log('caddy.export', 'download', 'Export de configuracion Caddy');
+        $this->streamJsonDownload($payload, 'musedock-caddy-export');
+    }
+
+    public function caddyImport(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'importar configuracion de caddy', '/settings/caddy')) {
+            return;
+        }
+
+        $payload = $this->readUploadedJsonFile('config_file', 4 * 1024 * 1024, '/settings/caddy');
+        if ($payload === null) {
+            return;
+        }
+
+        $type = trim((string)($payload['type'] ?? ''));
+        if ($type !== '' && !in_array($type, ['musedock-caddy-config', 'musedock-caddy-export'], true)) {
+            Flash::set('error', 'Archivo JSON no compatible con configuracion de Caddy.');
+            Router::redirect('/settings/caddy');
+            return;
+        }
+
+        if (!isset($_POST['replace_existing'])) {
+            Flash::set('error', 'Debes confirmar la sobrescritura completa de configuracion para importar Caddy.');
+            Router::redirect('/settings/caddy');
+            return;
+        }
+
+        $configData = $payload['caddy_config'] ?? ($payload['config'] ?? null);
+        if (!is_array($configData)) {
+            Flash::set('error', 'El JSON no incluye `caddy_config` valido.');
+            Router::redirect('/settings/caddy');
+            return;
+        }
+
+        $applied = $this->loadCaddyConfig($configData);
+        if (!($applied['ok'] ?? false)) {
+            $msg = (string)($applied['error'] ?? 'Error desconocido al aplicar configuracion de Caddy.');
+            Flash::set('error', $msg);
+            Router::redirect('/settings/caddy');
+            return;
+        }
+
+        LogService::log('caddy.import', 'replace', 'Import de configuracion Caddy aplicado');
+        Flash::set('success', 'Configuracion de Caddy importada correctamente.');
+        Router::redirect('/settings/caddy');
+    }
+
+    private function fetchCaddyConfig(): array
+    {
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = (string)($config['caddy']['api_url'] ?? 'http://localhost:2019');
+
+        $ch = curl_init("{$caddyApi}/config/");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 6,
+        ]);
+        $raw = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = (string)curl_error($ch);
+        curl_close($ch);
+
+        if ($raw === false || $httpCode < 200 || $httpCode >= 400) {
+            return [
+                'ok' => false,
+                'error' => $error !== '' ? "Caddy API no accesible: {$error}" : "Caddy API respondio HTTP {$httpCode}",
+                'http_code' => $httpCode,
+                'config' => [],
+            ];
+        }
+
+        $decoded = json_decode((string)$raw, true);
+        if (!is_array($decoded)) {
+            return [
+                'ok' => false,
+                'error' => 'Respuesta JSON invalida de Caddy API.',
+                'http_code' => $httpCode,
+                'config' => [],
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'error' => '',
+            'http_code' => $httpCode,
+            'config' => $decoded,
+        ];
+    }
+
+    private function loadCaddyConfig(array $configPayload): array
+    {
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $caddyApi = (string)($config['caddy']['api_url'] ?? 'http://localhost:2019');
+
+        $json = json_encode($configPayload, JSON_UNESCAPED_SLASHES);
+        if ($json === false) {
+            return ['ok' => false, 'error' => 'No se pudo serializar la configuracion JSON.'];
+        }
+
+        $ch = curl_init("{$caddyApi}/load");
+        curl_setopt_array($ch, [
+            CURLOPT_CUSTOMREQUEST => 'POST',
+            CURLOPT_POSTFIELDS => $json,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 10,
+        ]);
+        $raw = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $error = (string)curl_error($ch);
+        curl_close($ch);
+
+        if ($raw === false || $httpCode < 200 || $httpCode >= 300) {
+            $detail = trim((string)$raw);
+            if ($detail !== '' && strlen($detail) > 280) {
+                $detail = substr($detail, 0, 280) . '...';
+            }
+            return [
+                'ok' => false,
+                'error' => $error !== ''
+                    ? "Error Caddy API: {$error}"
+                    : "Caddy API devolvio HTTP {$httpCode}" . ($detail !== '' ? " ({$detail})" : ''),
+                'http_code' => $httpCode,
+            ];
+        }
+
+        return ['ok' => true, 'error' => '', 'http_code' => $httpCode];
     }
 
     // ================================================================
@@ -1179,6 +1616,161 @@ class SettingsController
         return password_verify($password, (string)($admin['password_hash'] ?? ''));
     }
 
+    private function verifyAdminPasswordOrRedirect(string $password, string $actionLabel, string $redirectPath): bool
+    {
+        if ($this->verifyCurrentAdminPassword($password)) {
+            return true;
+        }
+
+        Flash::set('error', 'Contrasena de administrador incorrecta para ' . $actionLabel . '.');
+        Router::redirect($redirectPath);
+        return false;
+    }
+
+    private function streamJsonDownload(array $data, string $prefix): void
+    {
+        $filename = $prefix . '-' . gmdate('Ymd-His') . '.json';
+        header('Content-Type: application/json; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Cache-Control: no-store, no-cache, must-revalidate');
+        echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        exit;
+    }
+
+    private function readUploadedJsonFile(string $field, int $maxSizeBytes, string $redirectPath): ?array
+    {
+        if (!isset($_FILES[$field]) || !is_array($_FILES[$field])) {
+            Flash::set('error', 'Debes seleccionar un archivo JSON para importar.');
+            Router::redirect($redirectPath);
+            return null;
+        }
+
+        $file = $_FILES[$field];
+        $tmpPath = (string)($file['tmp_name'] ?? '');
+        $error = (int)($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($error !== UPLOAD_ERR_OK || $tmpPath === '' || !is_uploaded_file($tmpPath)) {
+            Flash::set('error', 'Error de subida de archivo.');
+            Router::redirect($redirectPath);
+            return null;
+        }
+
+        $size = (int)($file['size'] ?? 0);
+        if ($size < 2 || $size > $maxSizeBytes) {
+            $maxMb = max(1, (int)floor($maxSizeBytes / (1024 * 1024)));
+            Flash::set('error', "Archivo invalido: maximo {$maxMb}MB.");
+            Router::redirect($redirectPath);
+            return null;
+        }
+
+        $raw = (string)file_get_contents($tmpPath);
+        $payload = json_decode($raw, true);
+        if (!is_array($payload)) {
+            Flash::set('error', 'JSON invalido en archivo de importacion.');
+            Router::redirect($redirectPath);
+            return null;
+        }
+
+        return $payload;
+    }
+
+    private function readFail2BanWhitelist(): array
+    {
+        $whitelist = [];
+        $jailLocal = '/etc/fail2ban/jail.local';
+        if (file_exists($jailLocal)) {
+            $content = (string)file_get_contents($jailLocal);
+            if (preg_match('/^ignoreip\s*=\s*(.+)$/m', $content, $m)) {
+                $whitelist = array_values(array_filter(array_map('trim', preg_split('/[\s,]+/', (string)$m[1]) ?: [])));
+            }
+        }
+
+        return $this->normalizeFail2BanWhitelist($whitelist);
+    }
+
+    private function normalizeFail2BanWhitelist(array $entries): array
+    {
+        $normalized = [];
+        foreach ($entries as $entry) {
+            $entry = trim((string)$entry);
+            if ($entry === '') {
+                continue;
+            }
+            if ($this->isValidIpOrCidr($entry)) {
+                $normalized[] = $entry;
+            }
+        }
+
+        $normalized = array_values(array_unique($normalized));
+        foreach (['127.0.0.1/8', '::1'] as $defaultEntry) {
+            if (!in_array($defaultEntry, $normalized, true)) {
+                array_unshift($normalized, $defaultEntry);
+            }
+        }
+
+        return array_values(array_unique($normalized));
+    }
+
+    private function isValidIpOrCidr(string $value): bool
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return false;
+        }
+        if (filter_var($value, FILTER_VALIDATE_IP)) {
+            return true;
+        }
+        if (!str_contains($value, '/')) {
+            return false;
+        }
+
+        [$ip, $mask] = explode('/', $value, 2);
+        if (!filter_var($ip, FILTER_VALIDATE_IP) || !is_numeric($mask)) {
+            return false;
+        }
+
+        $maskInt = (int)$mask;
+        $max = filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? 128 : 32;
+        return $maskInt >= 0 && $maskInt <= $max;
+    }
+
+    private function writeFail2BanWhitelist(array $entries, string &$error = ''): bool
+    {
+        $normalized = $this->normalizeFail2BanWhitelist($entries);
+        $content = "[DEFAULT]\nignoreip = " . implode(' ', $normalized) . "\n";
+        return $this->writeTextFile('/etc/fail2ban/jail.local', $content, $error);
+    }
+
+    private function writeTextFile(string $path, string $content, string &$error = ''): bool
+    {
+        $dir = dirname($path);
+        if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+            $error = 'no se pudo crear directorio: ' . $dir;
+            return false;
+        }
+
+        $written = @file_put_contents($path, $content);
+        if ($written === false) {
+            $error = 'no se pudo escribir ' . $path;
+            return false;
+        }
+
+        return true;
+    }
+
+    private function isSafeFail2BanFilterName(string $filename): bool
+    {
+        if (!preg_match('/^[a-z0-9._-]+$/i', $filename)) {
+            return false;
+        }
+        if (!str_ends_with(strtolower($filename), '.conf')) {
+            return false;
+        }
+        if (!str_starts_with(strtolower($filename), 'musedock')) {
+            return false;
+        }
+        return !str_contains($filename, '..') && !str_contains($filename, '/');
+    }
+
     /**
      * POST /settings/security/pg-ssl-enable — Enable SSL on PostgreSQL
      */
@@ -1699,6 +2291,180 @@ class SettingsController
 
         // Reload fail2ban to apply
         shell_exec('fail2ban-client reload 2>&1');
+
+        Router::redirect('/settings/fail2ban');
+    }
+
+    public function fail2banExport(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'exportar configuracion de fail2ban', '/settings/fail2ban')) {
+            return;
+        }
+
+        if (empty(trim((string)shell_exec('command -v fail2ban-client 2>/dev/null')))) {
+            Flash::set('error', 'Fail2Ban no esta instalado en este servidor.');
+            Router::redirect('/settings/fail2ban');
+            return;
+        }
+
+        $statusOutput = trim((string)shell_exec('fail2ban-client status 2>/dev/null'));
+        $activeJails = [];
+        if (preg_match('/Jail list:\s*(.+)$/mi', $statusOutput, $m)) {
+            $activeJails = array_values(array_filter(array_map('trim', explode(',', (string)$m[1]))));
+        }
+
+        $filters = [];
+        foreach (glob('/etc/fail2ban/filter.d/musedock*.conf') ?: [] as $filterPath) {
+            if (is_file($filterPath) && is_readable($filterPath)) {
+                $filters[basename($filterPath)] = (string)file_get_contents($filterPath);
+            }
+        }
+
+        $payload = [
+            'type' => 'musedock-fail2ban-config',
+            'schema' => 1,
+            'exported_at' => gmdate('c'),
+            'panel_version' => defined('PANEL_VERSION') ? PANEL_VERSION : 'unknown',
+            'host' => gethostname() ?: '',
+            'whitelist' => $this->readFail2BanWhitelist(),
+            'jail_local' => file_exists('/etc/fail2ban/jail.local') ? (string)file_get_contents('/etc/fail2ban/jail.local') : '',
+            'jail_d_musedock' => file_exists('/etc/fail2ban/jail.d/musedock.conf') ? (string)file_get_contents('/etc/fail2ban/jail.d/musedock.conf') : '',
+            'filters' => $filters,
+            'active_jails' => $activeJails,
+        ];
+
+        LogService::log('fail2ban.export', 'download', 'Export de configuracion Fail2Ban');
+        $this->streamJsonDownload($payload, 'musedock-fail2ban-export');
+    }
+
+    public function fail2banImport(): void
+    {
+        View::verifyCsrf();
+
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPasswordOrRedirect($password, 'importar configuracion de fail2ban', '/settings/fail2ban')) {
+            return;
+        }
+
+        if (empty(trim((string)shell_exec('command -v fail2ban-client 2>/dev/null')))) {
+            Flash::set('error', 'Fail2Ban no esta instalado en este servidor.');
+            Router::redirect('/settings/fail2ban');
+            return;
+        }
+
+        $payload = $this->readUploadedJsonFile('config_file', 2 * 1024 * 1024, '/settings/fail2ban');
+        if ($payload === null) {
+            return;
+        }
+
+        $type = trim((string)($payload['type'] ?? ''));
+        if ($type !== '' && !in_array($type, ['musedock-fail2ban-config', 'musedock-fail2ban-export'], true)) {
+            Flash::set('error', 'Archivo JSON no compatible con configuracion de Fail2Ban.');
+            Router::redirect('/settings/fail2ban');
+            return;
+        }
+
+        $replace = isset($_POST['replace_existing']);
+        $errors = [];
+        $written = [];
+
+        $incomingWhitelist = is_array($payload['whitelist'] ?? null) ? $payload['whitelist'] : [];
+        $normalizedWhitelist = $this->normalizeFail2BanWhitelist($incomingWhitelist);
+
+        $jailLocalPath = '/etc/fail2ban/jail.local';
+        $jailMusedockPath = '/etc/fail2ban/jail.d/musedock.conf';
+        $jailLocalFromPayload = is_string($payload['jail_local'] ?? null) ? (string)$payload['jail_local'] : '';
+        $jailMusedockFromPayload = is_string($payload['jail_d_musedock'] ?? null) ? (string)$payload['jail_d_musedock'] : '';
+
+        if ($replace) {
+            if ($jailLocalFromPayload !== '') {
+                $fileError = '';
+                if (!$this->writeTextFile($jailLocalPath, $jailLocalFromPayload, $fileError)) {
+                    $errors[] = "jail.local: {$fileError}";
+                } else {
+                    $written[] = 'jail.local';
+                }
+            } else {
+                $fileError = '';
+                if (!$this->writeFail2BanWhitelist($normalizedWhitelist, $fileError)) {
+                    $errors[] = "whitelist: {$fileError}";
+                } else {
+                    $written[] = 'whitelist';
+                }
+            }
+
+            if ($jailMusedockFromPayload !== '') {
+                $fileError = '';
+                if (!$this->writeTextFile($jailMusedockPath, $jailMusedockFromPayload, $fileError)) {
+                    $errors[] = "musedock.conf: {$fileError}";
+                } else {
+                    $written[] = 'musedock.conf';
+                }
+            }
+        } else {
+            $merged = array_values(array_unique(array_merge($this->readFail2BanWhitelist(), $normalizedWhitelist)));
+            $fileError = '';
+            if (!$this->writeFail2BanWhitelist($merged, $fileError)) {
+                $errors[] = "whitelist: {$fileError}";
+            } else {
+                $written[] = 'whitelist';
+            }
+
+            if ($jailMusedockFromPayload !== '' && !file_exists($jailMusedockPath)) {
+                $fileError = '';
+                if (!$this->writeTextFile($jailMusedockPath, $jailMusedockFromPayload, $fileError)) {
+                    $errors[] = "musedock.conf: {$fileError}";
+                } else {
+                    $written[] = 'musedock.conf';
+                }
+            }
+        }
+
+        $filtersPayload = is_array($payload['filters'] ?? null) ? $payload['filters'] : [];
+        foreach ($filtersPayload as $filename => $content) {
+            $filename = trim((string)$filename);
+            if (!$this->isSafeFail2BanFilterName($filename)) {
+                continue;
+            }
+            if (!is_string($content)) {
+                continue;
+            }
+
+            $dest = '/etc/fail2ban/filter.d/' . $filename;
+            if (!$replace && file_exists($dest)) {
+                continue;
+            }
+            $fileError = '';
+            if (!$this->writeTextFile($dest, $content, $fileError)) {
+                $errors[] = "{$filename}: {$fileError}";
+                continue;
+            }
+            $written[] = $filename;
+        }
+
+        $reloadOut = trim((string)shell_exec('fail2ban-client reload 2>&1'));
+        if (str_contains(strtoupper($reloadOut), 'ERROR') || str_contains(strtoupper($reloadOut), 'NOK')) {
+            $errors[] = 'reload fail2ban: ' . $reloadOut;
+        }
+
+        LogService::log(
+            'fail2ban.import',
+            $replace ? 'replace' : 'append',
+            'Import fail2ban: written=' . implode(',', array_values(array_unique($written))) . '; errors=' . count($errors)
+        );
+
+        if (!empty($errors)) {
+            $msg = 'Importacion Fail2Ban completada con incidencias: ' . implode(' | ', array_slice($errors, 0, 3));
+            if (count($errors) > 3) {
+                $msg .= ' ...';
+            }
+            Flash::set('warning', $msg);
+        } else {
+            Flash::set('success', 'Configuracion de Fail2Ban importada correctamente.');
+        }
 
         Router::redirect('/settings/fail2ban');
     }

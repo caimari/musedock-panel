@@ -2,6 +2,25 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.165] — 2026-04-26
+
+### Added
+- `Settings > Cron`: nuevo bloque `Exportar / Importar configuracion (JSON)` con autenticacion por password admin.
+- `Settings > Caddy`: nuevo bloque `Exportar / Importar configuracion (JSON)` para backup/restauracion completa desde API.
+- `Settings > Fail2Ban`: nuevo bloque `Exportar / Importar configuracion (JSON)` para whitelist + configuracion musedock.
+- Nuevos endpoints:
+  - `POST /settings/crons/export`
+  - `POST /settings/crons/import`
+  - `POST /settings/caddy/export`
+  - `POST /settings/caddy/import`
+  - `POST /settings/fail2ban/export`
+  - `POST /settings/fail2ban/import`
+
+### Improved
+- Imports protegidos con confirmacion y password admin en UI (SweetAlert) para evitar cambios accidentales.
+- `/docs/settings/{fail2ban|cron|caddy}` actualizado con recomendaciones operativas de export/import y rollback.
+- README actualizado para reflejar export/import JSON en Fail2Ban, Cron y Caddy.
+
 ## [1.0.164] — 2026-04-26
 
 ### Improved

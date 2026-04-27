@@ -20,6 +20,39 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.165',
+                'date' => '2026-04-26',
+                'badge' => 'primary',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '`Settings > Cron`: nuevo bloque `Exportar / Importar configuracion (JSON)` con confirmacion y password admin',
+                            '`Settings > Caddy`: nuevo bloque `Exportar / Importar configuracion (JSON)` para backup/restauracion completa desde API',
+                            '`Settings > Fail2Ban`: nuevo bloque `Exportar / Importar configuracion (JSON)` para whitelist + configuracion musedock',
+                            'Nuevos endpoints: `POST /settings/crons/export|import`, `POST /settings/caddy/export|import`, `POST /settings/fail2ban/export|import`',
+                        ],
+                        'en' => [
+                            '`Settings > Cron`: new `Export / Import configuration (JSON)` block with admin-password confirmation',
+                            '`Settings > Caddy`: new `Export / Import configuration (JSON)` block for full API backup/restore',
+                            '`Settings > Fail2Ban`: new `Export / Import configuration (JSON)` block for whitelist + musedock config',
+                            'New endpoints: `POST /settings/crons/export|import`, `POST /settings/caddy/export|import`, `POST /settings/fail2ban/export|import`',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Imports protegidos con modal SweetAlert + password admin para reducir cambios accidentales',
+                            '`/docs/settings/{fail2ban|cron|caddy}` actualizado con procedimiento operativo de export/import y rollback',
+                            'README actualizado para reflejar export/import JSON en Fail2Ban, Cron y Caddy',
+                        ],
+                        'en' => [
+                            'Imports are now protected by SweetAlert confirmation + admin password to reduce accidental changes',
+                            '`/docs/settings/{fail2ban|cron|caddy}` updated with export/import and rollback operational guidance',
+                            'README updated to reflect JSON export/import support in Fail2Ban, Cron, and Caddy',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.164',
                 'date' => '2026-04-26',
                 'badge' => 'primary',

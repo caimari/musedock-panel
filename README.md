@@ -11,7 +11,8 @@ El panel ha evolucionado de forma importante y ya incluye:
 - Provisioning de hosting (usuarios Linux, vhosts, PHP-FPM, rutas Caddy)
 - Monitor con health score, alertas, anti-spam configurable y analisis de ruido
 - Firewall avanzado (auditoria, fixes, snapshots completos, export/import JSON, presets)
-- Fail2Ban gestionable desde panel (jails, bans, whitelist, acciones rapidas)
+- Fail2Ban gestionable desde panel (jails, bans, whitelist, acciones rapidas, export/import JSON)
+- Cron y Caddy con export/import JSON para mover configuraciones entre nodos
 - Seguridad avanzada (MFA TOTP, hardening audit, drift, exposicion de puertos, login anomaly)
 - Operacion cluster (sync de archivos lsyncd, watchdog de degradacion, acciones de recuperacion)
 - Actualizaciones web/shell con warm-up del monitor collector

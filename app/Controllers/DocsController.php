@@ -617,17 +617,21 @@ class DocsController
                 'what_is' => 'Orquesta jails y umbrales para mitigar fuerza bruta y trafico hostil.',
                 'quick_steps' => [
                     'Verificar jails activos y servicios protegidos.',
+                    'Exportar configuracion JSON antes de cambios grandes.',
                     'Ajustar bantime/findtime/maxretry segun perfil de trafico.',
                     'Comprobar bans recientes y falsos positivos.',
+                    'Importar JSON en append para migraciones; usar replace solo con validacion previa.',
                 ],
                 'checklist' => [
                     'Jails criticos habilitados.',
                     'Sin falso positivo masivo.',
                     'Integracion correcta con firewall.',
+                    'Whitelist y archivos musedock exportados para rollback.',
                 ],
                 'pitfalls' => [
                     'Umbrales bajos pueden banear usuarios legitimos.',
                     'No excluir IPs operativas puede cortar mantenimiento.',
+                    'Importar en replace sin backup puede sobrescribir ajustes locales necesarios.',
                 ],
             ],
             'cron' => [
@@ -638,16 +642,20 @@ class DocsController
                 'quick_steps' => [
                     'Comprobar que cron del sistema esta activo.',
                     'Verificar entradas requeridas del panel.',
+                    'Exportar JSON de cron antes de reordenar frecuencias o limpiar tareas.',
                     'Reparar jobs faltantes y revisar logs de ejecucion.',
+                    'Importar en append primero; replace solo cuando quieras clonar estado exacto.',
                 ],
                 'checklist' => [
                     'Crons requeridos presentes.',
                     'Sin errores repetitivos por permisos o rutas.',
                     'Frecuencias coherentes con carga del servidor.',
+                    'Copia JSON disponible para rollback rapido.',
                 ],
                 'pitfalls' => [
                     'Desactivar un cron critico rompe tareas silenciosamente.',
                     'Ejecuciones superpuestas pueden saturar CPU/IO.',
+                    'Replace en import elimina tareas no incluidas en el archivo.',
                 ],
             ],
             'caddy' => [
@@ -657,6 +665,7 @@ class DocsController
                 'what_is' => 'Gestiona estado operativo y configuracion efectiva de Caddy para rutas web, TLS y proxy.',
                 'quick_steps' => [
                     'Comprobar servicio y estado de configuracion.',
+                    'Exportar JSON completo antes de cambios de rutas/TLS.',
                     'Aplicar cambios y validar reload correcto.',
                     'Probar dominios representativos tras ajustes.',
                 ],
@@ -664,10 +673,12 @@ class DocsController
                     'Caddy activo y estable.',
                     'Sin errores de parseo en config.',
                     'Rutas y certificados funcionando.',
+                    'Ultimo export JSON disponible para recovery inmediato.',
                 ],
                 'pitfalls' => [
                     'Cambios no validados pueden dejar sitios inaccesibles.',
                     'No revisar logs de Caddy oculta errores de routing.',
+                    'Importar config completa sin validar origen puede romper todas las rutas.',
                 ],
                 'advanced_steps' => [
                     'Exportar o guardar una copia de la configuracion actual antes de tocar rutas sensibles.',

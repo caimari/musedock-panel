@@ -91,6 +91,48 @@
     </div>
 </div>
 
+<!-- Export / Import -->
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-arrow-left-right me-2"></i>Exportar / Importar configuracion (JSON)</div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-lg-5">
+                <form method="POST" action="/settings/crons/export" onsubmit="return confirmCronExportConfig(this)">
+                    <?= \MuseDockPanel\View::csrf() ?>
+                    <input type="hidden" name="admin_password" class="cfg-admin-password-field" value="">
+                    <div class="small text-muted mb-2">Descarga todas las tareas cron gestionadas por el panel.</div>
+                    <button type="submit" class="btn btn-outline-info btn-sm">
+                        <i class="bi bi-download me-1"></i>Exportar JSON
+                    </button>
+                </form>
+            </div>
+            <div class="col-lg-7">
+                <form method="POST" action="/settings/crons/import" enctype="multipart/form-data" onsubmit="return confirmCronImportConfig(this)">
+                    <?= \MuseDockPanel\View::csrf() ?>
+                    <input type="hidden" name="admin_password" class="cfg-admin-password-field" value="">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-8">
+                            <label class="form-label small text-muted">Archivo JSON</label>
+                            <input type="file" name="config_file" class="form-control form-control-sm" accept=".json,application/json" required>
+                        </div>
+                        <div class="col-md-4 d-grid">
+                            <button type="submit" class="btn btn-primary btn-sm">
+                                <i class="bi bi-upload me-1"></i>Importar
+                            </button>
+                        </div>
+                    </div>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" name="replace_existing" id="cronReplaceExisting">
+                        <label class="form-check-label small text-muted" for="cronReplaceExisting">
+                            Reemplazar configuracion actual (si no, hace append)
+                        </label>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Add cron -->
 <div class="card">
     <div class="card-header"><i class="bi bi-plus-circle me-2"></i>Anadir Cron Job</div>
@@ -205,5 +247,83 @@ function cronDeleteConfirm(e, form, user, command) {
         if (result.isConfirmed) form.submit();
     });
     return false;
+}
+
+function setCronConfigAdminPassword(form, password) {
+    form.querySelectorAll('.cfg-admin-password-field').forEach(function(field) {
+        field.value = password;
+    });
+}
+
+function confirmCronConfigAction(form, options) {
+    var S = typeof Swal !== 'undefined' ? Swal : (typeof SwalDark !== 'undefined' ? SwalDark : null);
+    if (!S) {
+        var ok = confirm(options.fallbackText || 'Confirmar accion?');
+        if (!ok) return false;
+        var pwd = prompt('Contrasena de administrador:');
+        if (!pwd) return false;
+        setCronConfigAdminPassword(form, pwd);
+        return true;
+    }
+
+    S.fire({
+        title: options.title || 'Confirmar accion',
+        html: (options.html || '') + '<div class="mt-3 text-start"><label class="form-label fw-semibold mb-1" style="color:#111827;">Contrasena de administrador</label><input id="cronAdminPassword" type="password" class="form-control" autocomplete="current-password"></div>',
+        icon: options.icon || 'warning',
+        showCancelButton: true,
+        confirmButtonText: options.confirmText || 'Continuar',
+        cancelButtonText: 'Cancelar',
+        confirmButtonColor: '#2563eb',
+        cancelButtonColor: '#6b7280',
+        background: '#ffffff',
+        color: '#111827',
+        focusConfirm: false,
+        preConfirm: function() {
+            var input = document.getElementById('cronAdminPassword');
+            var password = input ? String(input.value || '').trim() : '';
+            if (!password) {
+                S.showValidationMessage('La contrasena es obligatoria.');
+                return false;
+            }
+            return password;
+        },
+        didOpen: function(popup) {
+            popup.querySelectorAll('.text-muted, small').forEach(function(el) {
+                el.style.setProperty('color', '#4b5563', 'important');
+                el.style.setProperty('opacity', '1', 'important');
+            });
+        }
+    }).then(function(result) {
+        if (!result.isConfirmed || !result.value) return;
+        setCronConfigAdminPassword(form, result.value);
+        form.submit();
+    });
+
+    return false;
+}
+
+function confirmCronExportConfig(form) {
+    return confirmCronConfigAction(form, {
+        title: 'Exportar configuracion de Cron',
+        html: '<div class="text-start"><small class="text-muted">Se descargara un JSON con las tareas cron gestionadas por el panel.</small></div>',
+        icon: 'info',
+        confirmText: 'Exportar',
+        fallbackText: 'Se exportara la configuracion cron actual.'
+    });
+}
+
+function confirmCronImportConfig(form) {
+    var fileInput = form.querySelector('input[name=config_file]');
+    if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+        return false;
+    }
+    var replace = !!form.querySelector('input[name=replace_existing]:checked');
+    return confirmCronConfigAction(form, {
+        title: 'Importar configuracion de Cron',
+        html: '<div class="text-start"><small class="text-muted">Modo: <strong>' + (replace ? 'replace' : 'append') + '</strong>. Esta accion aplica cambios inmediatamente en crontab.</small></div>',
+        icon: 'warning',
+        confirmText: 'Importar',
+        fallbackText: 'Se importara configuracion cron.'
+    });
 }
 </script>

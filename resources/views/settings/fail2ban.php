@@ -89,6 +89,47 @@
         </div>
     </div>
 
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-arrow-left-right me-1"></i> Exportar / Importar configuracion (JSON)</div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-lg-5">
+                    <form method="POST" action="/settings/fail2ban/export" onsubmit="return confirmFail2BanExportConfig(this)">
+                        <?= View::csrf() ?>
+                        <input type="hidden" name="admin_password" class="f2b-admin-password-field" value="">
+                        <div class="small text-muted mb-2">Descarga whitelist + configuracion musedock de Fail2Ban.</div>
+                        <button type="submit" class="btn btn-outline-info btn-sm">
+                            <i class="bi bi-download me-1"></i>Exportar JSON
+                        </button>
+                    </form>
+                </div>
+                <div class="col-lg-7">
+                    <form method="POST" action="/settings/fail2ban/import" enctype="multipart/form-data" onsubmit="return confirmFail2BanImportConfig(this)">
+                        <?= View::csrf() ?>
+                        <input type="hidden" name="admin_password" class="f2b-admin-password-field" value="">
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-8">
+                                <label class="form-label small text-muted">Archivo JSON</label>
+                                <input type="file" name="config_file" class="form-control form-control-sm" accept=".json,application/json" required>
+                            </div>
+                            <div class="col-md-4 d-grid">
+                                <button type="submit" class="btn btn-primary btn-sm">
+                                    <i class="bi bi-upload me-1"></i>Importar
+                                </button>
+                            </div>
+                        </div>
+                        <div class="form-check mt-2">
+                            <input class="form-check-input" type="checkbox" name="replace_existing" id="f2bReplaceExisting">
+                            <label class="form-check-label small text-muted" for="f2bReplaceExisting">
+                                Reemplazar configuracion (si no, aplica merge/append seguro)
+                            </label>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="row g-3 mb-3">
         <!-- Banear IP manualmente -->
         <div class="col-md-6">
@@ -377,6 +418,84 @@
         const d = document.createElement('div');
         d.textContent = String(s || '');
         return d.innerHTML;
+    }
+
+    function setFail2BanConfigPassword(form, password) {
+        form.querySelectorAll('.f2b-admin-password-field').forEach(function(field) {
+            field.value = password;
+        });
+    }
+
+    function confirmFail2BanConfigAction(form, options) {
+        const S = getFail2banSwal();
+        if (!S) {
+            const ok = confirm(options.fallbackText || 'Confirmar accion?');
+            if (!ok) return false;
+            const pwd = prompt('Contrasena de administrador:');
+            if (!pwd) return false;
+            setFail2BanConfigPassword(form, pwd);
+            return true;
+        }
+
+        S.fire({
+            title: options.title || 'Confirmar accion',
+            html: (options.html || '') + '<div class="mt-3 text-start"><label class="form-label fw-semibold mb-1" style="color:#111827;">Contrasena de administrador</label><input id="f2bAdminPassword" type="password" class="form-control" autocomplete="current-password"></div>',
+            icon: options.icon || 'warning',
+            showCancelButton: true,
+            confirmButtonText: options.confirmText || 'Continuar',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#2563eb',
+            cancelButtonColor: '#6b7280',
+            background: '#ffffff',
+            color: '#111827',
+            focusConfirm: false,
+            preConfirm: function() {
+                const input = document.getElementById('f2bAdminPassword');
+                const password = input ? String(input.value || '').trim() : '';
+                if (!password) {
+                    S.showValidationMessage('La contrasena es obligatoria.');
+                    return false;
+                }
+                return password;
+            },
+            didOpen: function(popup) {
+                popup.querySelectorAll('.text-muted, small').forEach(function(el) {
+                    el.style.setProperty('color', '#4b5563', 'important');
+                    el.style.setProperty('opacity', '1', 'important');
+                });
+            }
+        }).then(function(result) {
+            if (!result.isConfirmed || !result.value) return;
+            setFail2BanConfigPassword(form, result.value);
+            form.submit();
+        });
+
+        return false;
+    }
+
+    function confirmFail2BanExportConfig(form) {
+        return confirmFail2BanConfigAction(form, {
+            title: 'Exportar configuracion de Fail2Ban',
+            html: '<div class="text-start"><small class="text-muted">Se descargara whitelist y configuracion musedock en JSON.</small></div>',
+            icon: 'info',
+            confirmText: 'Exportar',
+            fallbackText: 'Se exportara la configuracion de Fail2Ban.'
+        });
+    }
+
+    function confirmFail2BanImportConfig(form) {
+        const fileInput = form.querySelector('input[name=config_file]');
+        if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+            return false;
+        }
+        const replace = !!form.querySelector('input[name=replace_existing]:checked');
+        return confirmFail2BanConfigAction(form, {
+            title: 'Importar configuracion de Fail2Ban',
+            html: '<div class="text-start"><small class="text-muted">Modo: <strong>' + (replace ? 'replace' : 'append') + '</strong>. Se recargara Fail2Ban al terminar.</small></div>',
+            icon: 'warning',
+            confirmText: 'Importar',
+            fallbackText: 'Se importara la configuracion de Fail2Ban.'
+        });
     }
 
     function confirmBan(form) {
