@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.175',
+                'date' => '2026-04-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`Settings > Server`: al guardar un dominio publico con Let\'s Encrypt HTTP-01/TLS-ALPN-01, el panel detecta si el firewall no tiene 80/443 abiertos a Internet',
+                            'Nueva asistencia ACME: modal con password admin para abrir temporalmente 80/443 durante 30 minutos y retirar solo esas reglas despues',
+                        ],
+                        'en' => [
+                            '`Settings > Server`: when saving a public panel domain with Let\'s Encrypt HTTP-01/TLS-ALPN-01, the panel detects whether firewall ports 80/443 are publicly open',
+                            'New ACME assist flow: admin-password modal to temporarily open 80/443 for 30 minutes and remove only those rules afterwards',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.174',
                 'date' => '2026-04-27',
                 'badge' => 'primary',

@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.175] — 2026-04-27
+
+### Improved
+- `Settings > Server`: al guardar un dominio publico con Let's Encrypt HTTP-01/TLS-ALPN-01, el panel detecta si el firewall no tiene 80/443 abiertos a Internet y puede abrirlos temporalmente durante 30 minutos con confirmacion y password admin.
+
 ## [1.0.174] — 2026-04-27
 
 ### Fixed

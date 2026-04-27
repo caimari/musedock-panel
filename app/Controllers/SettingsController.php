@@ -6,6 +6,7 @@ use MuseDockPanel\Flash;
 use MuseDockPanel\Router;
 use MuseDockPanel\Settings;
 use MuseDockPanel\View;
+use MuseDockPanel\Services\FirewallService;
 use MuseDockPanel\Services\LogService;
 use MuseDockPanel\Services\NotificationService;
 use MuseDockPanel\Services\SecurityService;
@@ -1095,6 +1096,7 @@ class SettingsController
 
         // Panel access info
         $panelPort = \MuseDockPanel\Env::get('PANEL_PORT', '8444');
+        $panelAcmeFirewallStatus = FirewallService::publicTcpPortStatus([80, 443]);
 
         View::render('settings/server', [
             'layout' => 'main',
@@ -1112,6 +1114,7 @@ class SettingsController
             'ntpActive' => $ntpActive,
             'ntpServer' => $ntpServer,
             'rebootNotifyEnabled' => $rebootNotifyEnabled,
+            'panelAcmeFirewallStatus' => $panelAcmeFirewallStatus,
         ]);
     }
 
@@ -1127,6 +1130,8 @@ class SettingsController
         $panelDnsProvider = strtolower(trim((string)($_POST['panel_dns_provider'] ?? '')));
         $panelDnsProviderConfigRaw = trim((string)($_POST['panel_dns_provider_config'] ?? ''));
         $panelAcmeEmail = trim((string)($_POST['panel_acme_email'] ?? \MuseDockPanel\Settings::get('panel_acme_email', '')));
+        $panelAcmeFirewallAssist = (string)($_POST['panel_acme_firewall_assist'] ?? '') === '1';
+        $adminPassword = (string)($_POST['admin_password'] ?? '');
         $serverWarnings = [];
 
         if ($panelHostnameRaw !== '' && $panelHostname === '') {
@@ -1205,6 +1210,29 @@ class SettingsController
         );
         $panelAcmeEmailToStore = in_array($panelTlsMode, ['http01', 'dns01'], true) ? $panelAcmeEmail : '';
         \MuseDockPanel\Settings::set('panel_acme_email', $panelAcmeEmailToStore);
+
+        if ($panelHostname !== '' && $panelTlsMode === 'http01' && $this->panelHostnameNeedsPublicTls($panelHostname)) {
+            $firewallStatus = FirewallService::publicTcpPortStatus([80, 443]);
+            $missingAcmePorts = array_values(array_filter(array_map('intval', $firewallStatus['missing'] ?? [])));
+            if (!empty($missingAcmePorts)) {
+                if ($panelAcmeFirewallAssist) {
+                    if (!$this->verifyCurrentAdminPassword($adminPassword)) {
+                        Flash::set('error', 'Contrasena de administrador incorrecta para abrir temporalmente puertos ACME.');
+                        Router::redirect('/settings/server');
+                        return;
+                    }
+                    $openResult = FirewallService::openTemporaryAcmePorts($missingAcmePorts, 30);
+                    if ($openResult['ok'] ?? false) {
+                        $opened = implode(', ', array_map('strval', $openResult['opened'] ?? []));
+                        $serverWarnings[] = "Asistencia ACME: puertos {$opened} abiertos temporalmente durante 30 minutos para emitir certificado. Si usas HTTP-01, manten 80/443 publicos para renovaciones o cambia a DNS-01.";
+                    } else {
+                        $serverWarnings[] = 'No se pudieron abrir temporalmente puertos ACME: ' . (string)($openResult['output'] ?? 'error desconocido');
+                    }
+                } else {
+                    $serverWarnings[] = 'Firewall: los puertos publicos ' . implode(', ', $missingAcmePorts) . ' no estan abiertos a Internet. Let\'s Encrypt HTTP-01/TLS-ALPN-01 puede fallar con timeout.';
+                }
+            }
+        }
 
         // Detect and store server IP
         $serverIp = trim(shell_exec("hostname -I | awk '{print \$1}'") ?? '');

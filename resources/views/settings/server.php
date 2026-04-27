@@ -47,6 +47,8 @@
             <div class="card-body">
                 <form method="POST" action="/settings/server/save" id="server-settings-form">
                     <?= View::csrf() ?>
+                    <input type="hidden" name="panel_acme_firewall_assist" id="panel_acme_firewall_assist" value="0">
+                    <input type="hidden" name="admin_password" id="panel_acme_admin_password" value="">
 
                     <div class="mb-3">
                         <label class="form-label">Zona horaria del servidor</label>
@@ -114,6 +116,26 @@
                             <div class="small text-muted"><strong>C) DNS-01:</strong> no requiere abrir 80/443 para certificar, pero exige proveedor DNS con API y modulo Caddy instalado.</div>
                         </div>
                     </div>
+
+                    <?php
+                        $panelAcmeFirewallStatus = is_array($panelAcmeFirewallStatus ?? null) ? $panelAcmeFirewallStatus : [];
+                        $panelAcmeMissingPorts = array_values(array_filter(array_map('intval', $panelAcmeFirewallStatus['missing'] ?? [])));
+                        $panelAcmeFirewallType = (string)($panelAcmeFirewallStatus['type'] ?? 'none');
+                    ?>
+                    <?php if (!empty($panelAcmeMissingPorts)): ?>
+                        <div class="mb-3">
+                            <div class="rounded p-3" style="border:1px solid rgba(251,191,36,0.35); background:rgba(234,179,8,0.08);">
+                                <div class="fw-semibold mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Firewall y Let's Encrypt</div>
+                                <div class="small text-muted mb-1">
+                                    Firewall detectado: <strong><?= View::e($panelAcmeFirewallType) ?></strong>. No hay apertura publica para:
+                                    <strong><?= View::e(implode(', ', $panelAcmeMissingPorts)) ?></strong>.
+                                </div>
+                                <div class="small text-muted">
+                                    Si guardas con HTTP-01/TLS-ALPN-01, el panel puede pedir password y abrir esos puertos temporalmente para emitir el certificado.
+                                </div>
+                            </div>
+                        </div>
+                    <?php endif; ?>
 
                     <div class="mb-3">
                         <div class="rounded p-3" style="border:1px solid rgba(251,191,36,0.35); background:rgba(234,179,8,0.08);">
@@ -233,10 +255,70 @@
     const form = document.getElementById('server-settings-form');
     const btn = document.getElementById('server-save-btn');
     if (!form || !btn) return;
+    const assistField = document.getElementById('panel_acme_firewall_assist');
+    const passwordField = document.getElementById('panel_acme_admin_password');
+    const missingAcmePorts = <?= json_encode(array_values($panelAcmeMissingPorts ?? []), JSON_UNESCAPED_SLASHES) ?>;
 
-    form.addEventListener('submit', () => {
+    const hostnameNeedsPublicTls = (value) => {
+        const host = String(value || '').trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0].replace(/:\d+$/, '').replace(/\.$/, '');
+        return host.includes('.') && !host.endsWith('.local') && !host.endsWith('.localhost') && !host.endsWith('.lan') && !host.endsWith('.internal') && !host.endsWith('.test');
+    };
+
+    const setSaving = () => {
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Guardando y aplicando TLS...';
+    };
+
+    form.addEventListener('submit', (ev) => {
+        const mode = document.getElementById('panel_tls_mode')?.value || 'self_signed';
+        const hostname = form.querySelector('[name="panel_hostname"]')?.value || '';
+        const alreadyAssisted = assistField && assistField.value === '1';
+
+        if (mode === 'http01' && missingAcmePorts.length > 0 && hostnameNeedsPublicTls(hostname) && !alreadyAssisted) {
+            ev.preventDefault();
+            const message = 'Para emitir Let\\'s Encrypt con HTTP-01/TLS-ALPN-01, los puertos ' + missingAcmePorts.join(', ') + ' deben aceptar conexiones publicas. El panel puede abrirlos temporalmente durante 30 minutos y luego quitara solo esas reglas.';
+
+            if (window.Swal) {
+                Swal.fire({
+                    icon: 'warning',
+                    title: 'Abrir puertos ACME temporalmente',
+                    html: '<div class="text-start small">' + message + '</div>' +
+                        '<label for="swal-panel-acme-password" class="form-label small mt-3 mb-1">Contrasena admin</label>' +
+                        '<input type="password" id="swal-panel-acme-password" class="swal2-input m-0" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;" placeholder="Tu contrasena de administrador" autocomplete="current-password">',
+                    showCancelButton: true,
+                    confirmButtonText: 'Abrir y guardar',
+                    cancelButtonText: 'Cancelar',
+                    focusConfirm: false,
+                    preConfirm: () => {
+                        const pwd = document.getElementById('swal-panel-acme-password')?.value || '';
+                        if (!pwd) {
+                            Swal.showValidationMessage('Introduce la contrasena de administrador');
+                            return false;
+                        }
+                        return pwd;
+                    }
+                }).then((result) => {
+                    if (!result.isConfirmed) return;
+                    assistField.value = '1';
+                    passwordField.value = result.value || '';
+                    setSaving();
+                    form.submit();
+                });
+                return;
+            }
+
+            const ok = window.confirm(message + '\n\nAceptar para introducir la contrasena y continuar.');
+            if (!ok) return;
+            const pwd = window.prompt('Contrasena admin');
+            if (!pwd) return;
+            assistField.value = '1';
+            passwordField.value = pwd;
+            setSaving();
+            form.submit();
+            return;
+        }
+
+        setSaving();
     });
 })();
 

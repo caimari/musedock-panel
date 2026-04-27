@@ -377,6 +377,130 @@ class FirewallService
         return ['ok' => $ok, 'output' => $output ?: 'Regla agregada', 'cmd' => $cmd];
     }
 
+    public static function publicTcpPortStatus(array $ports): array
+    {
+        $ports = array_values(array_unique(array_filter(array_map('intval', $ports), static fn($p) => $p > 0 && $p <= 65535)));
+        $type = self::getType();
+        $status = [];
+
+        foreach ($ports as $port) {
+            $status[$port] = false;
+        }
+
+        if ($type === 'iptables') {
+            $rules = (string)shell_exec('iptables -S INPUT 2>/dev/null');
+            foreach (explode("\n", $rules) as $line) {
+                $line = trim($line);
+                if ($line === '' || !str_starts_with($line, '-A INPUT ') || !str_contains($line, '-j ACCEPT')) {
+                    continue;
+                }
+                if (preg_match('/(?:^|\s)-s\s+(?!0\.0\.0\.0\/0)(\S+)/', $line)) {
+                    continue;
+                }
+                foreach ($ports as $port) {
+                    if (preg_match('/(?:^|\s)-p\s+tcp(?:\s|$)/', $line)
+                        && preg_match('/(?:^|\s)--dport\s+' . preg_quote((string)$port, '/') . '(?:\s|$)/', $line)) {
+                        $status[$port] = true;
+                    }
+                }
+            }
+        } elseif ($type === 'ufw') {
+            foreach (self::ufwGetRules() as $rule) {
+                if (strtoupper((string)($rule['action'] ?? '')) !== 'ALLOW') {
+                    continue;
+                }
+                $from = strtolower(trim((string)($rule['from'] ?? '')));
+                if (!in_array($from, ['', 'anywhere', 'anywhere (v6)', '0.0.0.0/0'], true)) {
+                    continue;
+                }
+                $to = strtolower((string)($rule['to'] ?? ''));
+                foreach ($ports as $port) {
+                    if (preg_match('/(?:^|[^0-9])' . preg_quote((string)$port, '/') . '(?:\/tcp)?(?:[^0-9]|$)/', $to)) {
+                        $status[$port] = true;
+                    }
+                }
+            }
+        }
+
+        return [
+            'type' => $type,
+            'ports' => $status,
+            'missing' => array_values(array_filter($ports, static fn($port) => empty($status[$port]))),
+        ];
+    }
+
+    public static function openTemporaryAcmePorts(array $ports, int $minutes = 30): array
+    {
+        $ports = array_values(array_unique(array_filter(array_map('intval', $ports), static fn($p) => in_array($p, [80, 443], true))));
+        if (empty($ports)) {
+            return ['ok' => true, 'opened' => [], 'output' => 'No hay puertos ACME pendientes'];
+        }
+
+        $minutes = max(5, min(120, $minutes));
+        $type = self::getType();
+        $opened = [];
+        $errors = [];
+
+        if ($type === 'iptables') {
+            foreach ($ports as $port) {
+                $cmd = sprintf(
+                    'iptables -I INPUT 1 -p tcp --dport %d -m comment --comment %s -j ACCEPT 2>&1',
+                    $port,
+                    escapeshellarg('MuseDock ACME temporary')
+                );
+                $out = trim((string)shell_exec($cmd));
+                if ($out !== '' && stripos($out, 'error') !== false) {
+                    $errors[] = "iptables {$port}: {$out}";
+                    continue;
+                }
+                $opened[] = $port;
+            }
+
+            if (!empty($opened)) {
+                $sleep = $minutes * 60;
+                $deleteCommands = [];
+                foreach ($opened as $port) {
+                    $deleteCommands[] = sprintf(
+                        'iptables -D INPUT -p tcp --dport %d -m comment --comment %s -j ACCEPT >/dev/null 2>&1 || true',
+                        $port,
+                        escapeshellarg('MuseDock ACME temporary')
+                    );
+                }
+                $script = 'sleep ' . (int)$sleep . '; ' . implode('; ', $deleteCommands);
+                shell_exec('nohup sh -c ' . escapeshellarg($script) . ' >/dev/null 2>&1 &');
+            }
+        } elseif ($type === 'ufw') {
+            foreach ($ports as $port) {
+                $result = self::ufwAddRule('allow', 'any', (string)$port, 'tcp', 'MuseDock ACME temporary');
+                if (!($result['ok'] ?? false)) {
+                    $errors[] = "ufw {$port}: " . (string)($result['output'] ?? 'error desconocido');
+                    continue;
+                }
+                $opened[] = $port;
+            }
+
+            if (!empty($opened)) {
+                $sleep = $minutes * 60;
+                $deleteCommands = [];
+                foreach ($opened as $port) {
+                    $deleteCommands[] = sprintf('ufw --force delete allow %d/tcp >/dev/null 2>&1 || true', $port);
+                }
+                $script = 'sleep ' . (int)$sleep . '; ' . implode('; ', $deleteCommands);
+                shell_exec('nohup sh -c ' . escapeshellarg($script) . ' >/dev/null 2>&1 &');
+            }
+        } else {
+            return ['ok' => false, 'opened' => [], 'output' => 'No se detecto firewall compatible para asistencia ACME'];
+        }
+
+        return [
+            'ok' => empty($errors),
+            'opened' => $opened,
+            'output' => empty($errors)
+                ? 'Puertos ACME abiertos temporalmente durante ' . $minutes . ' minutos'
+                : implode(' | ', $errors),
+        ];
+    }
+
     public static function iptablesDeleteRule(int $number): array
     {
         $cmd = sprintf('iptables -D INPUT %d 2>&1', $number);
