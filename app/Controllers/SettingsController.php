@@ -1196,7 +1196,7 @@ class SettingsController
         if ($panelHostname !== '') {
             $result = \MuseDockPanel\Services\SystemService::configurePanelDomainRoute($panelHostname);
             if ($result['ok'] ?? false) {
-                $routeApplied = true;
+                $routeApplied = !empty($result['applied']);
                 if (!empty($result['warning'])) {
                     Flash::set('warning', (string)$result['warning']);
                 }

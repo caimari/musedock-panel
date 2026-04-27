@@ -130,6 +130,26 @@ run_caddy_config_snapshot() {
     fi
 }
 
+install_caddy_runtime_repair_override() {
+    if ! command -v systemctl >/dev/null 2>&1 || ! systemctl list-unit-files caddy.service >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ ! -f "${PANEL_DIR}/cli/repair-caddy-routes.php" ]; then
+        return 0
+    fi
+
+    mkdir -p /etc/systemd/system/caddy.service.d
+    cat > /etc/systemd/system/caddy.service.d/zz-musedock-panel-repair.conf << OVERRIDEEOF
+[Service]
+ExecStartPost=/bin/sleep 5
+ExecStartPost=/usr/bin/php ${PANEL_DIR}/cli/repair-caddy-routes.php
+ExecReload=/bin/sleep 5
+ExecReload=/usr/bin/php ${PANEL_DIR}/cli/repair-caddy-routes.php
+OVERRIDEEOF
+    chmod 644 /etc/systemd/system/caddy.service.d/zz-musedock-panel-repair.conf
+    systemctl daemon-reload 2>/dev/null || true
+}
+
 ok()     { echo -e "  ${GREEN}✓${NC} [$(elapsed_step)] $1"; }
 warn()   { echo -e "  ${YELLOW}!${NC} [$(elapsed_step)] $1"; }
 fail()   { stop_step_timer; echo -e "  ${RED}✗${NC} [$(elapsed_step)] $1"; exit 1; }
@@ -3110,6 +3130,7 @@ if [ "$CADDY_API_OK" = "200" ]; then
 else
     warn "$(t caddy_api_wait "$CADDY_API_OK")"
 fi
+install_caddy_runtime_repair_override
 
 # ============================================================
 # Apply deferred nginx/apache → Caddy site migrations

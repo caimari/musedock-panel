@@ -107,6 +107,27 @@ CRONEOF
         warn "Caddy config backup snapshot failed; see storage/logs/caddy-backup.log"
 }
 
+install_caddy_runtime_repair_override() {
+    if ! command -v systemctl >/dev/null 2>&1 || ! systemctl list-unit-files caddy.service >/dev/null 2>&1; then
+        return 0
+    fi
+    if [ ! -f "${PANEL_DIR}/cli/repair-caddy-routes.php" ]; then
+        return 0
+    fi
+
+    mkdir -p /etc/systemd/system/caddy.service.d
+    cat > /etc/systemd/system/caddy.service.d/zz-musedock-panel-repair.conf << OVERRIDEEOF
+[Service]
+ExecStartPost=/bin/sleep 5
+ExecStartPost=${PHP_BIN} ${PANEL_DIR}/cli/repair-caddy-routes.php
+ExecReload=/bin/sleep 5
+ExecReload=${PHP_BIN} ${PANEL_DIR}/cli/repair-caddy-routes.php
+OVERRIDEEOF
+    chmod 644 /etc/systemd/system/caddy.service.d/zz-musedock-panel-repair.conf
+    systemctl daemon-reload 2>/dev/null || true
+    ok "Caddy runtime repair hook installed/updated"
+}
+
 ensure_database_ready() {
     local db_host db_port db_name db_user cluster_line pg_ver pg_cluster pg_status
 
@@ -425,6 +446,7 @@ CRONEOF
 fi
 
 install_caddy_backup_cron
+install_caddy_runtime_repair_override
 
 # Install audit log purge cron if missing
 if [ ! -f /etc/cron.d/musedock-audit-purge ]; then
@@ -570,7 +592,6 @@ CADDYEOF
     fi
 
     if caddy validate --config "$caddy_file" >/dev/null 2>&1; then
-        rm -f /etc/systemd/system/caddy.service.d/override-resume.conf 2>/dev/null || true
         systemctl daemon-reload 2>/dev/null || true
         systemctl restart caddy 2>/dev/null || true
         ok "Panel TLS Caddy block repaired for https://${server_ip}:${panel_port}"

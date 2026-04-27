@@ -835,11 +835,13 @@ try {
     $caddyfile = @file_get_contents('/etc/caddy/Caddyfile') ?: '';
     $staticPanelTls = preg_match('/(^|\n)\s*(https?:\/\/[^\s{]+:' . preg_quote((string)$panelPort, '/') . '|:' . preg_quote((string)$panelPort, '/') . ')\b/', $caddyfile)
         && preg_match('/\btls\s+internal\b/', $caddyfile);
-    $panelManaged = !$staticPanelTls && \MuseDockPanel\Services\SystemService::panelRuntimeManagedByPanel($caddyApi);
-    if (!$panelManaged) {
+    $panelManaged = \MuseDockPanel\Services\SystemService::panelRuntimeManagedByPanel($caddyApi);
+    if ($staticPanelTls || !$panelManaged) {
         $owner = $staticPanelTls ? 'Caddyfile static TLS' : (\MuseDockPanel\Services\SystemService::panelPortOwner($caddyApi) ?? 'unknown');
-        logMsg("INFO: PANEL_PORT gestionado por {$owner}; se omite auto-repair Caddy runtime en este nodo.");
-    } elseif (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi, true)) {
+        logMsg("INFO: PANEL_PORT gestionado por {$owner}; se intentara reponer ruta runtime del dominio del panel si el listener apunta al panel interno.");
+    }
+
+    if (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi, true)) {
         logMsg("WARNING: Caddy srv0/listeners not ready — skipping TLS policy check.");
     } else {
         $panelRouteResult = \MuseDockPanel\Services\SystemService::ensurePanelDomainRouteFromSettings();

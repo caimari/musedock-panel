@@ -20,6 +20,27 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.166',
+                'date' => '2026-04-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`Settings > Server`: el dominio del panel ahora crea `panel-domain-route` en el servidor Caddy que escucha `PANEL_PORT` aunque sea `srv1` generado desde Caddyfile, siempre que proxyee al panel interno',
+                            'La UI solo muestra `Acceso recomendado` cuando la ruta Caddy se ha aplicado realmente',
+                            '`repair-caddy-routes.php` y `cluster-worker.php` reponen la ruta del dominio del panel tras reload/reinicio de Caddy sin tocar rutas manuales existentes',
+                            '`install.sh` y `bin/update.sh` instalan un hook systemd para ejecutar el reparador tras `caddy start/reload`',
+                        ],
+                        'en' => [
+                            '`Settings > Server`: panel domain now creates `panel-domain-route` in the Caddy server that owns `PANEL_PORT`, even when it is Caddyfile-generated `srv1`, as long as it proxies to the internal panel',
+                            'The UI now shows `Recommended access` only when the Caddy route was actually applied',
+                            '`repair-caddy-routes.php` and `cluster-worker.php` restore the panel domain route after Caddy reload/restart without touching existing manual routes',
+                            '`install.sh` and `bin/update.sh` install a systemd hook to run the repair script after `caddy start/reload`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.165',
                 'date' => '2026-04-26',
                 'badge' => 'primary',

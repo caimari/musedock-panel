@@ -930,16 +930,32 @@ CONF;
         if ($panelRouteServer === null) {
             return ['ok' => false, 'error' => 'No se pudo preparar servidor Caddy para el panel'];
         }
-        // If PANEL_PORT is served by an external Caddyfile server (e.g. srv1),
-        // do not mutate routes on srv0/srv_panel_admin.
-        if ($panelRouteServer !== 'srv0' && $panelRouteServer !== $panelServerName) {
+        // If PANEL_PORT is served by an unrelated Caddyfile server, avoid
+        // mutating it. Caddyfile-adapted panel blocks can appear as srv1/srv2,
+        // so allow them when they already proxy to the panel internal port.
+        $panelRouteServerIsExternal = $panelRouteServer !== 'srv0' && $panelRouteServer !== $panelServerName;
+        $panelRouteServerTargetsPanel = !$panelRouteServerIsExternal
+            || self::serverProxiesToPanelInternalPort($caddyApi, $panelRouteServer);
+
+        if (!$panelRouteServerTargetsPanel) {
+            $panelTlsResult = self::ensurePanelTlsPolicyFromSettings($caddyApi, $hostname);
+            if (!($panelTlsResult['ok'] ?? false)) {
+                return ['ok' => false, 'error' => (string)($panelTlsResult['error'] ?? 'No se pudo aplicar la politica TLS del panel')];
+            }
+            $warning = "El puerto {$panelPublicPort} ya esta servido por {$panelRouteServer}; se omite ruta dedicada gestionada por panel.";
+            if (!empty($panelTlsResult['warning'])) {
+                $warning = trim($warning . ' ' . (string)$panelTlsResult['warning']);
+            }
             return [
                 'ok' => true,
-                'warning' => "El puerto {$panelPublicPort} ya esta servido por {$panelRouteServer}; se omite ruta dedicada gestionada por panel."
+                'applied' => false,
+                'skipped' => true,
+                'reason' => "panel-port-owned-by-{$panelRouteServer}",
+                'warning' => $warning,
             ];
         }
 
-        $routesResult = self::fetchCaddyRoutes($caddyApi, false);
+        $routesResult = self::fetchCaddyRoutes($caddyApi, false, $panelRouteServer);
         if (!($routesResult['ok'] ?? false)) {
             return ['ok' => false, 'error' => (string)($routesResult['error'] ?? 'No se pudo leer la config de Caddy')];
         }
@@ -957,18 +973,28 @@ CONF;
             return ['ok' => false, 'error' => (string)($panelTlsResult['error'] ?? 'No se pudo aplicar la politica TLS del panel')];
         }
 
+        $route = self::buildPanelDomainRoute($hostname, $panelPublicPort, $internalPort);
+        foreach ($routes as $existingRoute) {
+            if ((string)($existingRoute['@id'] ?? '') !== self::PANEL_DOMAIN_ROUTE_ID) {
+                continue;
+            }
+            if (self::panelDomainRouteMatches($existingRoute, $hostname, $panelPublicPort, $internalPort)) {
+                $warning = self::buildPanelDomainDnsWarning($hostname);
+                if (!empty($panelTlsResult['warning'])) {
+                    $warning = trim($warning . ' ' . (string)$panelTlsResult['warning']);
+                }
+                return [
+                    'ok' => true,
+                    'applied' => true,
+                    'idempotent' => true,
+                    'server' => $panelRouteServer,
+                    'warning' => $warning,
+                ];
+            }
+            self::deleteRouteById($caddyApi, self::PANEL_DOMAIN_ROUTE_ID);
+            break;
+        }
         self::deleteRouteById($caddyApi, self::PANEL_DOMAIN_ROUTE_ID);
-
-        $route = [
-            '@id' => self::PANEL_DOMAIN_ROUTE_ID,
-            // Panel hostname must only be served on PANEL_PORT (e.g. 8444).
-            'match' => [[
-                'host' => [$hostname],
-                'expression' => '{http.request.port} == ' . $panelPublicPort,
-            ]],
-            'handle' => self::panelReverseProxyHandle($internalPort),
-            'terminal' => true,
-        ];
 
         $ch = curl_init("{$caddyApi}/config/apps/http/servers/{$panelRouteServer}/routes");
         curl_setopt_array($ch, [
@@ -993,7 +1019,12 @@ CONF;
         if (!empty($panelTlsResult['warning'])) {
             $warning = trim($warning . ' ' . (string)$panelTlsResult['warning']);
         }
-        return ['ok' => true, 'warning' => $warning];
+        return [
+            'ok' => true,
+            'applied' => true,
+            'server' => $panelRouteServer,
+            'warning' => $warning,
+        ];
     }
 
     /**
@@ -1004,7 +1035,7 @@ CONF;
     {
         $hostname = self::normalizeStoredHostname((string)\MuseDockPanel\Settings::get('panel_hostname', ''));
         if ($hostname === '') {
-            return ['ok' => true, 'skipped' => true, 'reason' => 'panel_hostname_empty'];
+            return ['ok' => true, 'applied' => false, 'skipped' => true, 'reason' => 'panel_hostname_empty'];
         }
 
         $config = require PANEL_ROOT . '/config/panel.php';
@@ -1015,12 +1046,25 @@ CONF;
         if ($panelRouteServer === null) {
             return ['ok' => false, 'error' => 'No se pudo preparar servidor Caddy para el panel'];
         }
-        if ($panelRouteServer !== 'srv0' && $panelRouteServer !== $panelServerName) {
-            return [
+        $panelRouteServerIsExternal = $panelRouteServer !== 'srv0' && $panelRouteServer !== $panelServerName;
+        $panelRouteServerTargetsPanel = !$panelRouteServerIsExternal
+            || self::serverProxiesToPanelInternalPort($caddyApi, $panelRouteServer);
+
+        if (!$panelRouteServerTargetsPanel) {
+            $panelTlsResult = self::ensurePanelTlsPolicyFromSettings($caddyApi, $hostname);
+            if (!($panelTlsResult['ok'] ?? false)) {
+                return ['ok' => false, 'error' => (string)($panelTlsResult['error'] ?? 'No se pudo aplicar la politica TLS del panel')];
+            }
+            $result = [
                 'ok' => true,
+                'applied' => false,
                 'skipped' => true,
                 'reason' => "panel-port-owned-by-{$panelRouteServer}",
             ];
+            if (!empty($panelTlsResult['warning'])) {
+                $result['warning'] = (string)$panelTlsResult['warning'];
+            }
+            return $result;
         }
 
         $panelTlsResult = self::ensurePanelTlsPolicyFromSettings($caddyApi, $hostname);
@@ -1042,9 +1086,21 @@ CONF;
             $hosts = $match['host'] ?? [];
             $expr = (string)($match['expression'] ?? '');
             $expectedExpr = '{http.request.port} == ' . $panelPublicPort;
-            if (in_array($hostname, $hosts, true) && trim($expr) === $expectedExpr) {
+            if (in_array($hostname, $hosts, true)
+                && trim($expr) === $expectedExpr
+                && self::panelDomainRouteMatches($route, $hostname, $panelPublicPort, self::getPanelInternalPort())
+            ) {
                 $warning = (string)($panelTlsResult['warning'] ?? '');
-                return $warning !== '' ? ['ok' => true, 'warning' => $warning] : ['ok' => true];
+                $result = [
+                    'ok' => true,
+                    'applied' => true,
+                    'idempotent' => true,
+                    'server' => $panelRouteServer,
+                ];
+                if ($warning !== '') {
+                    $result['warning'] = $warning;
+                }
+                return $result;
             }
             break;
         }
@@ -1508,6 +1564,56 @@ CONF;
         ]];
     }
 
+    private static function buildPanelDomainRoute(string $hostname, int $panelPublicPort, int $internalPort): array
+    {
+        return [
+            '@id' => self::PANEL_DOMAIN_ROUTE_ID,
+            // Panel hostname must only be served on PANEL_PORT (e.g. 8444).
+            'match' => [[
+                'host' => [$hostname],
+                'expression' => '{http.request.port} == ' . $panelPublicPort,
+            ]],
+            'handle' => self::panelReverseProxyHandle($internalPort),
+            'terminal' => true,
+        ];
+    }
+
+    private static function panelDomainRouteMatches(array $route, string $hostname, int $panelPublicPort, int $internalPort): bool
+    {
+        if ((string)($route['@id'] ?? '') !== self::PANEL_DOMAIN_ROUTE_ID) {
+            return false;
+        }
+
+        $match = $route['match'][0] ?? [];
+        if (!is_array($match)) {
+            return false;
+        }
+
+        $hosts = $match['host'] ?? [];
+        if (!is_array($hosts) || !in_array($hostname, $hosts, true)) {
+            return false;
+        }
+
+        $expectedExpr = '{http.request.port} == ' . $panelPublicPort;
+        if (trim((string)($match['expression'] ?? '')) !== $expectedExpr) {
+            return false;
+        }
+
+        $expectedDial = "127.0.0.1:{$internalPort}";
+        foreach (($route['handle'] ?? []) as $handler) {
+            if (!is_array($handler) || ($handler['handler'] ?? '') !== 'reverse_proxy') {
+                continue;
+            }
+            foreach (($handler['upstreams'] ?? []) as $upstream) {
+                if (($upstream['dial'] ?? '') === $expectedDial) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     /**
      * Ensure Caddy has srv0 and required listeners.
      * By default only enforces :443 on srv0 (hosting path).
@@ -1876,13 +1982,17 @@ CONF;
         return null;
     }
 
-    private static function fetchCaddyRoutes(string $caddyApi, bool $enforcePanelPort = false): array
+    private static function fetchCaddyRoutes(string $caddyApi, bool $enforcePanelPort = false, string $serverName = 'srv0'): array
     {
         if (!self::ensureCaddyHttpServerReady($caddyApi, $enforcePanelPort)) {
             return ['ok' => false, 'error' => 'No se pudo preparar srv0/listeners en Caddy'];
         }
 
-        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        if ($serverName === '' || !preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $serverName)) {
+            $serverName = 'srv0';
+        }
+
+        $ch = curl_init("{$caddyApi}/config/apps/http/servers/{$serverName}/routes");
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_TIMEOUT => 8,
@@ -1900,6 +2010,54 @@ CONF;
             $routes = [];
         }
         return ['ok' => true, 'routes' => $routes];
+    }
+
+    private static function serverProxiesToPanelInternalPort(string $caddyApi, string $serverName): bool
+    {
+        if ($serverName === '' || !preg_match('/^[a-zA-Z0-9_-]{1,64}$/', $serverName)) {
+            return false;
+        }
+
+        $expectedDial = '127.0.0.1:' . self::getPanelInternalPort();
+        $raw = @file_get_contents("{$caddyApi}/config/apps/http/servers/{$serverName}/routes");
+        $routes = json_decode((string)$raw, true);
+        if (!is_array($routes)) {
+            return false;
+        }
+
+        return self::routesContainReverseProxyDial($routes, $expectedDial);
+    }
+
+    private static function routesContainReverseProxyDial(array $routes, string $expectedDial): bool
+    {
+        foreach ($routes as $route) {
+            if (!is_array($route)) {
+                continue;
+            }
+
+            foreach (($route['handle'] ?? []) as $handler) {
+                if (!is_array($handler)) {
+                    continue;
+                }
+
+                if (($handler['handler'] ?? '') === 'reverse_proxy') {
+                    foreach (($handler['upstreams'] ?? []) as $upstream) {
+                        if (($upstream['dial'] ?? '') === $expectedDial) {
+                            return true;
+                        }
+                    }
+                }
+
+                if (($handler['handler'] ?? '') === 'subroute') {
+                    $nestedRoutes = $handler['routes'] ?? [];
+                    if (is_array($nestedRoutes) && self::routesContainReverseProxyDial($nestedRoutes, $expectedDial)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     private static function findHostRouteConflict(array $routes, string $hostname, string $excludeRouteId): ?string

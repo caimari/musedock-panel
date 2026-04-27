@@ -46,10 +46,7 @@ $caddyfile = @file_get_contents('/etc/caddy/Caddyfile') ?: '';
 $staticPanelTls = preg_match('/(^|\n)\s*(https?:\/\/[^\s{]+:' . preg_quote((string)$panelPort, '/') . '|:' . preg_quote((string)$panelPort, '/') . ')\b/', $caddyfile)
     && preg_match('/\btls\s+internal\b/', $caddyfile);
 if ($staticPanelTls) {
-    echo "[repair-caddy] INFO: PANEL_PORT {$panelPort} esta gestionado por Caddyfile con tls internal; se omite mutacion runtime del panel.\n";
-    $repairWebmailRoute();
-    echo "[repair-caddy] DONE\n";
-    exit(0);
+    echo "[repair-caddy] INFO: PANEL_PORT {$panelPort} esta declarado en Caddyfile con tls internal; se intentara reponer ruta runtime del dominio del panel si procede.\n";
 }
 
 if (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi, true)) {
@@ -72,10 +69,7 @@ echo "[repair-caddy] OK: srv0/listeners activos.\n";
 $panelOwner = \MuseDockPanel\Services\SystemService::panelPortOwner($caddyApi);
 $panelManaged = \MuseDockPanel\Services\SystemService::panelRuntimeManagedByPanel($caddyApi);
 if (!$panelManaged) {
-    echo "[repair-caddy] INFO: PANEL_PORT gestionado por {$panelOwner}; se omite auto-repair de TLS/rutas del panel en runtime API.\n";
-    $repairWebmailRoute();
-    echo "[repair-caddy] DONE\n";
-    exit(0);
+    echo "[repair-caddy] INFO: PANEL_PORT gestionado por {$panelOwner}; se intentara reponer ruta runtime del dominio del panel en ese servidor si apunta al panel interno.\n";
 }
 
 try {
@@ -113,13 +107,17 @@ if (!empty($result['skipped'])) {
         echo "[repair-caddy] INFO: panel_hostname vacio, no se aplica ruta dedicada.\n";
     } elseif (str_starts_with($reason, 'panel-port-owned-by-')) {
         $owner = substr($reason, strlen('panel-port-owned-by-'));
-        echo "[repair-caddy] INFO: PANEL_PORT ya lo gestiona {$owner}; se omite ruta dedicada en srv0.\n";
+        echo "[repair-caddy] INFO: PANEL_PORT ya lo gestiona {$owner}; no se pudo aplicar ruta dedicada del panel en runtime.\n";
     } else {
         echo "[repair-caddy] INFO: ruta dedicada del panel omitida ({$reason}).\n";
     }
 } elseif ($result['ok'] ?? false) {
     $panelHostname = trim((string)\MuseDockPanel\Settings::get('panel_hostname', ''));
-    echo "[repair-caddy] OK: ruta del panel aplicada para {$panelHostname}.\n";
+    if (!empty($result['idempotent'])) {
+        echo "[repair-caddy] OK: ruta del panel ya estaba aplicada para {$panelHostname}.\n";
+    } else {
+        echo "[repair-caddy] OK: ruta del panel aplicada para {$panelHostname}.\n";
+    }
     if (!empty($result['warning'])) {
         fwrite(STDERR, "[repair-caddy] WARNING route: " . $result['warning'] . "\n");
     }

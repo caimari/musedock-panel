@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.166] — 2026-04-27
+
+### Fixed
+- Panel domain TLS: `Settings > Server` ahora puede crear la ruta `panel-domain-route` en el servidor Caddy que realmente escucha `PANEL_PORT` aunque sea `srv1` generado desde Caddyfile, siempre que proxyee al panel interno.
+- La UI ya no muestra `Acceso recomendado` si Caddy omitio la ruta; solo lo muestra cuando la ruta queda aplicada de verdad.
+- `repair-caddy-routes.php` y `cluster-worker.php` reponen la ruta del dominio del panel tras reload/reinicio de Caddy sin tocar rutas manuales existentes.
+- `install.sh` y `bin/update.sh` instalan un hook systemd para ejecutar el reparador tras `caddy start/reload`, preservando configuraciones runtime/autosave.
+
 ## [1.0.165] — 2026-04-26
 
 ### Added
