@@ -200,6 +200,10 @@ class UpdateService
             'output'      => $output,
             'elapsed'     => $startedAt > 0 ? time() - $startedAt : 0,
             'completed'   => $completed,
+            'last_status' => Settings::get('update_last_status', ''),
+            'last_error' => Settings::get('update_last_error', ''),
+            'last_run_id' => Settings::get('update_last_run_id', ''),
+            'last_finished_at' => Settings::get('update_last_finished_at', ''),
         ];
     }
 

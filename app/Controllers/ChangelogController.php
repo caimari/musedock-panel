@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.177',
+                'date' => '2026-04-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'Updater: cada ejecucion queda auditada en `storage/logs/update-audit.log`, `panel_log` y `panel_settings`; si falla, se envia notificacion de evento con run id, version y paso del fallo',
+                            '`Settings > Updates`: muestra el ultimo estado auditado del updater, incluyendo error y run id cuando existan',
+                        ],
+                        'en' => [
+                            'Updater: every run is audited in `storage/logs/update-audit.log`, `panel_log` and `panel_settings`; failures send an event notification with run id, version and failed step',
+                            '`Settings > Updates`: shows the last audited updater status, including error and run id when available',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.176',
                 'date' => '2026-04-27',
                 'badge' => 'primary',

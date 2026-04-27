@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.177] — 2026-04-27
+
+### Improved
+- Updater: cada ejecucion queda auditada en `storage/logs/update-audit.log`, `panel_log` y `panel_settings`; si falla, se envia notificacion de evento con run id, version y paso del fallo.
+- `Settings > Updates`: muestra el ultimo estado auditado del updater, incluyendo error y run id cuando existan.
+
 ## [1.0.176] — 2026-04-27
 
 ### Improved

@@ -131,6 +131,23 @@ bash /opt/musedock-panel/bin/update.sh --auto</code></pre>
 </div>
 <?php endif; ?>
 
+<?php if (!$updateStatus['in_progress'] && !empty($updateStatus['last_status'])): ?>
+<div class="alert py-2 px-3 small <?= $updateStatus['last_status'] === 'failed' ? 'alert-danger' : 'alert-info' ?>">
+    <i class="bi bi-activity me-1"></i>
+    Ultimo estado updater:
+    <strong><?= View::e($updateStatus['last_status']) ?></strong>
+    <?php if (!empty($updateStatus['last_finished_at'])): ?>
+        <span class="text-muted ms-2"><?= View::e($updateStatus['last_finished_at']) ?></span>
+    <?php endif; ?>
+    <?php if (!empty($updateStatus['last_run_id'])): ?>
+        <span class="text-muted ms-2">run <?= View::e($updateStatus['last_run_id']) ?></span>
+    <?php endif; ?>
+    <?php if (!empty($updateStatus['last_error'])): ?>
+        <div class="mt-1"><code><?= View::e($updateStatus['last_error']) ?></code></div>
+    <?php endif; ?>
+</div>
+<?php endif; ?>
+
 <!-- Last update output (if available and not in progress) -->
 <?php if (!$updateStatus['in_progress'] && !empty($updateStatus['output'])): ?>
 <div class="card mb-4">

@@ -56,6 +56,119 @@ if [ ! -x "$PHP_BIN" ]; then
     PHP_BIN="/usr/bin/php"
 fi
 
+mkdir -p "${PANEL_DIR}/storage/logs" 2>/dev/null || true
+UPDATE_RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+UPDATE_AUDIT_LOG="${PANEL_DIR}/storage/logs/update-audit.log"
+UPDATE_START_TS="$(date +%s)"
+UPDATE_FINALIZED=0
+UPDATE_STARTED_VERSION=""
+UPDATE_TARGET_VERSION=""
+UPDATE_LAST_STEP="startup"
+
+# Keep a durable update audit log for manual runs too. Web updates still write
+# their live output to storage/logs/update.log via UpdateService.
+exec > >(tee -a "$UPDATE_AUDIT_LOG") 2>&1
+
+panel_update_php() {
+    local status="$1"
+    local details="$2"
+    local error="$3"
+    local finished_at
+    finished_at="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+    "$PHP_BIN" -r '
+define("PANEL_ROOT", $argv[1]);
+spl_autoload_register(function ($c) {
+    $p = "MuseDockPanel\\";
+    if (strncmp($p, $c, strlen($p)) !== 0) return;
+    $f = PANEL_ROOT . "/app/" . str_replace("\\", "/", substr($c, strlen($p))) . ".php";
+    if (file_exists($f)) require $f;
+});
+if (file_exists(PANEL_ROOT . "/.env")) MuseDockPanel\Env::load(PANEL_ROOT . "/.env");
+$runId = $argv[2];
+$status = $argv[3];
+$from = $argv[4];
+$to = $argv[5];
+$details = $argv[6];
+$error = $argv[7];
+$finishedAt = $argv[8];
+$host = trim((string)@shell_exec("hostname 2>/dev/null")) ?: "unknown";
+try {
+    MuseDockPanel\Settings::set("update_last_run_id", $runId);
+    MuseDockPanel\Settings::set("update_last_status", $status);
+    MuseDockPanel\Settings::set("update_last_finished_at", $finishedAt);
+    MuseDockPanel\Settings::set("update_last_from_version", $from);
+    MuseDockPanel\Settings::set("update_last_to_version", $to);
+    MuseDockPanel\Settings::set("update_last_error", $error);
+    MuseDockPanel\Settings::set("update_in_progress", "0");
+    $action = $status === "success" ? "panel.update.success" : "panel.update.failed";
+    MuseDockPanel\Database::insert("panel_log", [
+        "admin_id" => null,
+        "action" => $action,
+        "target" => "update",
+        "details" => trim("run_id={$runId}; {$details}" . ($error !== "" ? "; error={$error}" : "")),
+        "ip_address" => "127.0.0.1",
+    ]);
+    if ($status !== "success") {
+        $subject = "[MuseDock] Update FAILED on {$host}";
+        $body = "Host: {$host}\nRun ID: {$runId}\nFrom: {$from}\nTarget/current: {$to}\nFinished: {$finishedAt}\n\nDetails:\n{$details}\n\nError:\n{$error}\n\nLog: " . PANEL_ROOT . "/storage/logs/update-audit.log";
+        MuseDockPanel\Services\NotificationService::sendEventEmail("panel_update_failed_" . preg_replace("/[^a-z0-9_.-]+/i", "_", $host), $subject, $body, 300);
+    }
+} catch (Throwable $e) {
+    fwrite(STDERR, "[update-audit] could not persist update status: " . $e->getMessage() . "\n");
+}
+' "$PANEL_DIR" "$UPDATE_RUN_ID" "$status" "${UPDATE_STARTED_VERSION:-unknown}" "${UPDATE_TARGET_VERSION:-unknown}" "$details" "$error" "$finished_at" >/dev/null 2>&1 || true
+}
+
+panel_update_started_php() {
+    local started_at
+    started_at="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+    "$PHP_BIN" -r '
+define("PANEL_ROOT", $argv[1]);
+spl_autoload_register(function ($c) {
+    $p = "MuseDockPanel\\";
+    if (strncmp($p, $c, strlen($p)) !== 0) return;
+    $f = PANEL_ROOT . "/app/" . str_replace("\\", "/", substr($c, strlen($p))) . ".php";
+    if (file_exists($f)) require $f;
+});
+if (file_exists(PANEL_ROOT . "/.env")) MuseDockPanel\Env::load(PANEL_ROOT . "/.env");
+try {
+    MuseDockPanel\Settings::set("update_last_run_id", $argv[2]);
+    MuseDockPanel\Settings::set("update_last_status", "running");
+    MuseDockPanel\Settings::set("update_last_started_at", $argv[4]);
+    MuseDockPanel\Settings::set("update_in_progress", "1");
+    MuseDockPanel\Database::insert("panel_log", [
+        "admin_id" => null,
+        "action" => "panel.update.running",
+        "target" => "update",
+        "details" => "run_id={$argv[2]}; from={$argv[3]}",
+        "ip_address" => "127.0.0.1",
+    ]);
+} catch (Throwable $e) {
+    fwrite(STDERR, "[update-audit] could not persist update start: " . $e->getMessage() . "\n");
+}
+' "$PANEL_DIR" "$UPDATE_RUN_ID" "${UPDATE_STARTED_VERSION:-unknown}" "$started_at" >/dev/null 2>&1 || true
+}
+
+update_finalize() {
+    local rc=$?
+    if [ "$UPDATE_FINALIZED" = "1" ]; then
+        exit "$rc"
+    fi
+    UPDATE_FINALIZED=1
+
+    local elapsed
+    elapsed=$(( $(date +%s) - UPDATE_START_TS ))
+    if [ "$rc" -eq 0 ]; then
+        panel_update_php "success" "Update completed; step=${UPDATE_LAST_STEP}; elapsed=${elapsed}s" ""
+    else
+        panel_update_php "failed" "Update failed; step=${UPDATE_LAST_STEP}; elapsed=${elapsed}s" "Exit code ${rc}"
+    fi
+    exit "$rc"
+}
+trap update_finalize EXIT
+
 read_panel_version() {
     local ver=""
     # Preferred source (current architecture)
@@ -193,6 +306,9 @@ ensure_database_ready() {
 
 # Get current version
 CURRENT_VERSION=$(read_panel_version)
+UPDATE_STARTED_VERSION="${CURRENT_VERSION:-unknown}"
+UPDATE_TARGET_VERSION="${CURRENT_VERSION:-unknown}"
+panel_update_started_php
 
 echo ""
 echo -e "${CYAN}${BOLD}"
@@ -207,6 +323,7 @@ echo ""
 # ============================================================
 # Step 1: Pull latest code
 # ============================================================
+UPDATE_LAST_STEP="pull"
 echo -e "${CYAN}${BOLD}[1/4]${NC} Pulling latest code from GitHub..."
 echo ""
 
@@ -273,6 +390,7 @@ if [ "$SELF_HASH_BEFORE" != "$SELF_HASH_AFTER" ] && [ -z "${MUSEDOCK_RELAUNCH:-}
     warn "update.sh changed — relaunching with new version..."
     echo ""
     export MUSEDOCK_RELAUNCH=1
+    UPDATE_FINALIZED=1
     exec bash "$SELF_SCRIPT" ${1:+"$1"}
 fi
 
@@ -280,6 +398,7 @@ echo ""
 
 # Read new version
 NEW_VERSION=$(read_panel_version)
+UPDATE_TARGET_VERSION="${NEW_VERSION:-$CURRENT_VERSION}"
 
 if [ -n "$NEW_VERSION" ] && [ "$NEW_VERSION" != "$CURRENT_VERSION" ]; then
     echo -e "  ${GREEN}${BOLD}Version: ${CURRENT_VERSION} → ${NEW_VERSION}${NC}"
@@ -289,6 +408,7 @@ fi
 # ============================================================
 # Step 2: Database migrations
 # ============================================================
+UPDATE_LAST_STEP="migrations"
 echo -e "${CYAN}${BOLD}[2/4]${NC} Running database migrations..."
 echo ""
 
@@ -308,6 +428,7 @@ echo ""
 # ============================================================
 # Step 3: Clear cache
 # ============================================================
+UPDATE_LAST_STEP="maintenance"
 echo -e "${CYAN}${BOLD}[3/4]${NC} Clearing cache..."
 
 rm -rf "${PANEL_DIR}/storage/cache/"* 2>/dev/null || true
@@ -605,6 +726,7 @@ CADDYEOF
 # ============================================================
 # Step 4: Restart service
 # ============================================================
+UPDATE_LAST_STEP="restart"
 echo -e "${CYAN}${BOLD}[4/4]${NC} Restarting panel service..."
 
 if systemctl is-active --quiet musedock-panel 2>/dev/null; then
@@ -646,6 +768,7 @@ fi
 # (firewall drift/reboot/gap/hardening/exposure) initialize immediately
 # without waiting for next cron tick.
 echo -e "${CYAN}${BOLD}[Warm-up]${NC} Running monitor collector warm-up..."
+UPDATE_LAST_STEP="monitor-warmup"
 if [ -f "${PANEL_DIR}/bin/monitor-collector.php" ]; then
     set +e
     COLLECTOR_OUT=$($PHP_BIN "${PANEL_DIR}/bin/monitor-collector.php" 2>&1)
@@ -664,6 +787,7 @@ fi
 # ============================================================
 # Step 6: Clear update flags in panel DB
 # ============================================================
+UPDATE_LAST_STEP="clear-flags"
 $PHP_BIN -r "
 define('PANEL_ROOT', '${PANEL_DIR}');
 spl_autoload_register(function (\$c) {
@@ -685,6 +809,7 @@ MuseDockPanel\Settings::set('update_last_check', (string)time());
 PORTAL_DIR="/opt/musedock-portal"
 if [ -d "$PORTAL_DIR" ] && [ -f "${PORTAL_DIR}/bin/update.sh" ]; then
     echo ""
+    UPDATE_LAST_STEP="portal-update"
     echo -e "${CYAN}${BOLD}[Portal]${NC} Updating MuseDock Portal..."
     bash "${PORTAL_DIR}/bin/update.sh"
 elif [ -d "$PORTAL_DIR" ]; then
