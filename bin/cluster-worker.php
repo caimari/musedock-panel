@@ -52,6 +52,28 @@ function logMsg(string $msg): void
     $logLines[] = $line;
 }
 
+function panelAccessUrl(string $path = '/'): string
+{
+    $panelPort = (int)\MuseDockPanel\Env::get('PANEL_PORT', 8444);
+    if ($panelPort <= 0) {
+        $panelPort = 8444;
+    }
+
+    $host = trim((string)\MuseDockPanel\Settings::get('panel_hostname', ''));
+    if ($host === '') {
+        $host = trim((string)\MuseDockPanel\Settings::get('server_ip', ''));
+    }
+    if ($host === '') {
+        $host = trim((string)shell_exec("hostname -I 2>/dev/null | awk '{print \$1}'"));
+    }
+    if ($host === '') {
+        $host = '127.0.0.1';
+    }
+
+    $path = '/' . ltrim($path, '/');
+    return "https://{$host}:{$panelPort}{$path}";
+}
+
 function pushMonitorAlert(string $type, string $message, float $value = 0.0, ?string $details = null, int $cooldownSeconds = 900): void
 {
     try {
@@ -589,7 +611,7 @@ try {
                     . "Alerta #{$state['alert_count']}+1\n"
                     . "Proxima alerta en: {$nextMinutes} min\n\n"
                     . "Silenciar alertas desde el dashboard:\n"
-                    . "https://" . (\MuseDockPanel\Env::get('PANEL_DOMAIN', gethostname())) . ":8444/\n\n"
+                    . panelAccessUrl('/') . "\n\n"
                     . "Fecha: " . date('Y-m-d H:i:s');
 
                 ClusterService::sendAlert(
@@ -730,7 +752,7 @@ if ($clusterRole === 'slave') {
                           . "Servidor slave: " . gethostname() . "\n"
                           . "Fecha: " . date('Y-m-d H:i:s') . "\n\n"
                           . "Puede promover este servidor a Master desde:\n"
-                          . "https://" . (\MuseDockPanel\Env::get('PANEL_DOMAIN', gethostname())) . ":8444/settings/cluster";
+                          . panelAccessUrl('/settings/cluster');
 
                     if ($notifyEmail || $notifyTelegram) {
                         if ($notifyEmail && $notifyTelegram) {

@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.171',
+                'date' => '2026-04-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Las alertas de cluster ya no usan `PANEL_DOMAIN` ni el hostname de la maquina como dominio supuesto del panel',
+                            'Las URLs del panel usan `panel_hostname` solo si fue configurado en `Settings > Server`; si no, caen a `server_ip`/IP detectada',
+                        ],
+                        'en' => [
+                            'Cluster alerts no longer use `PANEL_DOMAIN` or the machine hostname as an assumed panel domain',
+                            'Panel URLs use `panel_hostname` only when configured in `Settings > Server`; otherwise they fall back to `server_ip`/detected IP',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.170',
                 'date' => '2026-04-27',
                 'badge' => 'primary',

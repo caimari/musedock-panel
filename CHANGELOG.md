@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.171] — 2026-04-27
+
+### Fixed
+- Cluster alerts: las URLs del panel ya no usan `PANEL_DOMAIN` ni el hostname de la maquina como dominio supuesto. Ahora usan `panel_hostname` solo si fue configurado en `Settings > Server`; si no, caen a `server_ip`/IP detectada.
+
 ## [1.0.170] — 2026-04-27
 
 ### Fixed
