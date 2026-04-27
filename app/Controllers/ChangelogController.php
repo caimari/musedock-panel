@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.169',
+                'date' => '2026-04-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`bin/update.sh`: primero regenera/reinicia el bloque persistente de IP del panel y despues ejecuta `repair-caddy-routes.php`, evitando que el reinicio de Caddy borre la ruta runtime del dominio recien creada',
+                        ],
+                        'en' => [
+                            '`bin/update.sh`: persistent panel IP Caddyfile repair now runs before `repair-caddy-routes.php`, preventing the Caddy restart from wiping the freshly restored runtime domain route',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.168',
                 'date' => '2026-04-27',
                 'badge' => 'primary',

@@ -621,7 +621,11 @@ if systemctl is-active --quiet musedock-panel 2>/dev/null; then
     systemctl restart musedock-panel
     ok "Panel service restarted"
 
-    # Repair Caddy runtime routes/listeners after update (best effort).
+    # First repair the persistent IP fallback Caddyfile. This can restart Caddy and
+    # drop runtime API routes, so the runtime repair must run after it.
+    repair_panel_tls_caddy
+
+    # Repair Caddy runtime routes/listeners after any Caddyfile restart (best effort).
     if [ -f "${PANEL_DIR}/cli/repair-caddy-routes.php" ]; then
         REPAIR_OUT=$($PHP_BIN "${PANEL_DIR}/cli/repair-caddy-routes.php" 2>&1 || true)
         if echo "$REPAIR_OUT" | grep -q "\[repair-caddy\] ERROR"; then
@@ -631,8 +635,6 @@ if systemctl is-active --quiet musedock-panel 2>/dev/null; then
             ok "Caddy routes/listeners repaired"
         fi
     fi
-
-    repair_panel_tls_caddy
 else
     warn "Panel service not running — start it with: systemctl start musedock-panel"
 fi

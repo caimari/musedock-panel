@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.169] — 2026-04-27
+
+### Fixed
+- `bin/update.sh`: corrige el orden de reparación de Caddy. Primero regenera/reinicia el bloque persistente de IP del panel y después ejecuta `repair-caddy-routes.php`, evitando que el reinicio de Caddy borre la ruta runtime del dominio recién creada.
+
 ## [1.0.168] — 2026-04-27
 
 ### Fixed
