@@ -446,6 +446,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/caddy/import', 'SettingsController@caddyImport');
 \MuseDockPanel\Router::get('/settings/server', 'SettingsController@server');
 \MuseDockPanel\Router::post('/settings/server/save', 'SettingsController@serverSave');
+\MuseDockPanel\Router::post('/settings/server/acme-assist', 'SettingsController@serverAcmeAssist');
 \MuseDockPanel\Router::get('/settings/php', 'SettingsController@php');
 \MuseDockPanel\Router::post('/settings/php/ini-save', 'SettingsController@phpIniSave');
 \MuseDockPanel\Router::post('/settings/php/opcache-save', 'SettingsController@phpOpcacheSave');

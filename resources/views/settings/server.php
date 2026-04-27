@@ -133,6 +133,12 @@
                                 <div class="small text-muted">
                                     Si guardas con HTTP-01/TLS-ALPN-01, el panel puede pedir password y abrir esos puertos temporalmente para emitir el certificado.
                                 </div>
+                                <button type="submit"
+                                        class="btn btn-sm btn-warning mt-3 panel-acme-assist-btn"
+                                        formaction="/settings/server/acme-assist"
+                                        formmethod="POST">
+                                    <i class="bi bi-unlock me-1"></i>Abrir 80/443 y emitir certificado
+                                </button>
                             </div>
                         </div>
                     <?php endif; ?>
@@ -257,6 +263,7 @@
     if (!form || !btn) return;
     const assistField = document.getElementById('panel_acme_firewall_assist');
     const passwordField = document.getElementById('panel_acme_admin_password');
+    const assistButtons = form.querySelectorAll('.panel-acme-assist-btn');
     const missingAcmePorts = <?= json_encode(array_values($panelAcmeMissingPorts ?? []), JSON_UNESCAPED_SLASHES) ?>;
 
     const hostnameNeedsPublicTls = (value) => {
@@ -269,6 +276,55 @@
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Guardando y aplicando TLS...';
     };
 
+    const askAdminPassword = (message, confirmText, callback) => {
+        if (window.Swal) {
+            Swal.fire({
+                icon: 'warning',
+                title: 'Confirmacion de firewall',
+                html: '<div class="text-start small">' + message + '</div>' +
+                    '<label for="swal-panel-acme-password" class="form-label small mt-3 mb-1">Contrasena admin</label>' +
+                    '<input type="password" id="swal-panel-acme-password" class="swal2-input m-0" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;" placeholder="Tu contrasena de administrador" autocomplete="current-password">',
+                showCancelButton: true,
+                confirmButtonText: confirmText,
+                cancelButtonText: 'Cancelar',
+                focusConfirm: false,
+                preConfirm: () => {
+                    const pwd = document.getElementById('swal-panel-acme-password')?.value || '';
+                    if (!pwd) {
+                        Swal.showValidationMessage('Introduce la contrasena de administrador');
+                        return false;
+                    }
+                    return pwd;
+                }
+            }).then((result) => {
+                if (!result.isConfirmed) return;
+                callback(result.value || '');
+            });
+            return;
+        }
+
+        const ok = window.confirm(message + '\n\nAceptar para introducir la contrasena y continuar.');
+        if (!ok) return;
+        const pwd = window.prompt('Contrasena admin');
+        if (!pwd) return;
+        callback(pwd);
+    };
+
+    assistButtons.forEach((assistBtn) => {
+        assistBtn.addEventListener('click', (ev) => {
+            ev.preventDefault();
+            const message = 'Se abriran temporalmente los puertos ' + (missingAcmePorts.length ? missingAcmePorts.join(', ') : '80, 443') + ' durante 30 minutos para que Let\\'s Encrypt pueda validar el dominio. Despues el panel quitara solo esas reglas temporales.';
+            askAdminPassword(message, 'Abrir y emitir', (pwd) => {
+                assistField.value = '1';
+                passwordField.value = pwd;
+                assistBtn.disabled = true;
+                assistBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Abriendo y emitiendo...';
+                form.action = '/settings/server/acme-assist';
+                form.submit();
+            });
+        });
+    });
+
     form.addEventListener('submit', (ev) => {
         const mode = document.getElementById('panel_tls_mode')?.value || 'self_signed';
         const hostname = form.querySelector('[name="panel_hostname"]')?.value || '';
@@ -278,43 +334,12 @@
             ev.preventDefault();
             const message = 'Para emitir Let\\'s Encrypt con HTTP-01/TLS-ALPN-01, los puertos ' + missingAcmePorts.join(', ') + ' deben aceptar conexiones publicas. El panel puede abrirlos temporalmente durante 30 minutos y luego quitara solo esas reglas.';
 
-            if (window.Swal) {
-                Swal.fire({
-                    icon: 'warning',
-                    title: 'Abrir puertos ACME temporalmente',
-                    html: '<div class="text-start small">' + message + '</div>' +
-                        '<label for="swal-panel-acme-password" class="form-label small mt-3 mb-1">Contrasena admin</label>' +
-                        '<input type="password" id="swal-panel-acme-password" class="swal2-input m-0" style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid #334155;" placeholder="Tu contrasena de administrador" autocomplete="current-password">',
-                    showCancelButton: true,
-                    confirmButtonText: 'Abrir y guardar',
-                    cancelButtonText: 'Cancelar',
-                    focusConfirm: false,
-                    preConfirm: () => {
-                        const pwd = document.getElementById('swal-panel-acme-password')?.value || '';
-                        if (!pwd) {
-                            Swal.showValidationMessage('Introduce la contrasena de administrador');
-                            return false;
-                        }
-                        return pwd;
-                    }
-                }).then((result) => {
-                    if (!result.isConfirmed) return;
-                    assistField.value = '1';
-                    passwordField.value = result.value || '';
-                    setSaving();
-                    form.submit();
-                });
-                return;
-            }
-
-            const ok = window.confirm(message + '\n\nAceptar para introducir la contrasena y continuar.');
-            if (!ok) return;
-            const pwd = window.prompt('Contrasena admin');
-            if (!pwd) return;
-            assistField.value = '1';
-            passwordField.value = pwd;
-            setSaving();
-            form.submit();
+            askAdminPassword(message, 'Abrir y guardar', (pwd) => {
+                assistField.value = '1';
+                passwordField.value = pwd;
+                setSaving();
+                form.submit();
+            });
             return;
         }
 

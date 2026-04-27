@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.176',
+                'date' => '2026-04-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`Settings > Server`: la asistencia ACME ahora tiene boton explicito para abrir temporalmente 80/443 y emitir certificado, ademas del modal al guardar',
+                        ],
+                        'en' => [
+                            '`Settings > Server`: ACME assist now has an explicit button to temporarily open 80/443 and issue the certificate, in addition to the Save modal',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.175',
                 'date' => '2026-04-27',
                 'badge' => 'primary',

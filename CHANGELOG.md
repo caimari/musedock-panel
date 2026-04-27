@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.176] — 2026-04-27
+
+### Improved
+- `Settings > Server`: la asistencia ACME ahora tiene boton explicito para abrir temporalmente 80/443 y emitir certificado, ademas del modal al guardar.
+
 ## [1.0.175] — 2026-04-27
 
 ### Improved

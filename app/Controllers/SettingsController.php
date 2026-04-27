@@ -1266,6 +1266,66 @@ class SettingsController
         Router::redirect('/settings/server');
     }
 
+    public function serverAcmeAssist(): void
+    {
+        $password = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyCurrentAdminPassword($password)) {
+            Flash::set('error', 'Contrasena de administrador incorrecta para asistencia ACME.');
+            Router::redirect('/settings/server');
+            return;
+        }
+
+        $panelHostname = $this->normalizePanelHostname((string)($_POST['panel_hostname'] ?? \MuseDockPanel\Settings::get('panel_hostname', '')));
+        $panelTlsMode = $this->normalizePanelTlsMode((string)($_POST['panel_tls_mode'] ?? \MuseDockPanel\Settings::get('panel_tls_mode', 'self_signed')));
+
+        if ($panelHostname === '' || !$this->panelHostnameNeedsPublicTls($panelHostname)) {
+            Flash::set('error', 'Asistencia ACME requiere un dominio publico del panel configurado.');
+            Router::redirect('/settings/server');
+            return;
+        }
+
+        if ($panelTlsMode !== 'http01') {
+            Flash::set('error', 'Asistencia ACME temporal solo aplica al modo Let\'s Encrypt HTTP-01/TLS-ALPN-01.');
+            Router::redirect('/settings/server');
+            return;
+        }
+
+        $panelAcmeEmail = $this->resolvePanelAcmeEmail((string)($_POST['panel_acme_email'] ?? \MuseDockPanel\Settings::get('panel_acme_email', '')));
+        if ($panelAcmeEmail === '' || !filter_var($panelAcmeEmail, FILTER_VALIDATE_EMAIL)) {
+            Flash::set('error', 'Email ACME invalido para asistencia ACME.');
+            Router::redirect('/settings/server');
+            return;
+        }
+
+        \MuseDockPanel\Settings::set('panel_hostname', $panelHostname);
+        \MuseDockPanel\Settings::set('panel_tls_mode', 'http01');
+        \MuseDockPanel\Settings::set('panel_acme_email', $panelAcmeEmail);
+        \MuseDockPanel\Settings::set('panel_dns_provider', '');
+        \MuseDockPanel\Settings::set('panel_dns_provider_config', '');
+
+        $firewallStatus = FirewallService::publicTcpPortStatus([80, 443]);
+        $missingAcmePorts = array_values(array_filter(array_map('intval', $firewallStatus['missing'] ?? [])));
+        if (!empty($missingAcmePorts)) {
+            $openResult = FirewallService::openTemporaryAcmePorts($missingAcmePorts, 30);
+            if (!($openResult['ok'] ?? false)) {
+                Flash::set('error', 'No se pudieron abrir temporalmente puertos ACME: ' . (string)($openResult['output'] ?? 'error desconocido'));
+                Router::redirect('/settings/server');
+                return;
+            }
+        }
+
+        $routeResult = \MuseDockPanel\Services\SystemService::configurePanelDomainRoute($panelHostname);
+        if (!($routeResult['ok'] ?? false)) {
+            Flash::set('warning', 'Puertos ACME abiertos, pero Caddy no pudo aplicar la ruta/policy del panel: ' . (string)($routeResult['error'] ?? 'error desconocido'));
+            Router::redirect('/settings/server');
+            return;
+        }
+
+        $opened = empty($missingAcmePorts) ? 'ninguno; ya estaban abiertos' : implode(', ', $missingAcmePorts);
+        Flash::set('success', "Asistencia ACME ejecutada para {$panelHostname}. Puertos temporales: {$opened}. Caddy intentara emitir el certificado publico.");
+        Router::redirect('/settings/server');
+    }
+
     private function normalizePanelHostname(string $value): string
     {
         $host = strtolower(trim($value));
