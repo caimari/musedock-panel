@@ -123,7 +123,7 @@
                         $panelAcmeFirewallType = (string)($panelAcmeFirewallStatus['type'] ?? 'none');
                     ?>
                     <?php if (!empty($panelAcmeMissingPorts)): ?>
-                        <div class="mb-3">
+                        <div class="mb-3" id="panel-acme-firewall-card">
                             <div class="rounded p-3" style="border:1px solid rgba(251,191,36,0.35); background:rgba(234,179,8,0.08);">
                                 <div class="fw-semibold mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Firewall y Let's Encrypt</div>
                                 <div class="small text-muted mb-1">
@@ -133,10 +133,8 @@
                                 <div class="small text-muted">
                                     Si guardas con HTTP-01/TLS-ALPN-01, el panel puede pedir password y abrir esos puertos temporalmente para emitir el certificado.
                                 </div>
-                                <button type="submit"
-                                        class="btn btn-sm btn-warning mt-3 panel-acme-assist-btn"
-                                        formaction="/settings/server/acme-assist"
-                                        formmethod="POST">
+                                <button type="button"
+                                        class="btn btn-sm btn-warning mt-3 panel-acme-assist-btn">
                                     <i class="bi bi-unlock me-1"></i>Abrir 80/443 y emitir certificado
                                 </button>
                             </div>
@@ -265,6 +263,7 @@
     const passwordField = document.getElementById('panel_acme_admin_password');
     const assistButtons = form.querySelectorAll('.panel-acme-assist-btn');
     const missingAcmePorts = <?= json_encode(array_values($panelAcmeMissingPorts ?? []), JSON_UNESCAPED_SLASHES) ?>;
+    const firewallCard = document.getElementById('panel-acme-firewall-card');
 
     const hostnameNeedsPublicTls = (value) => {
         const host = String(value || '').trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0].replace(/:\d+$/, '').replace(/\.$/, '');
@@ -276,7 +275,14 @@
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Guardando y aplicando TLS...';
     };
 
-    const askAdminPassword = (message, confirmText, callback) => {
+    const scrollToAcmeCard = () => {
+        if (!firewallCard) return;
+        firewallCard.scrollIntoView({behavior: 'smooth', block: 'center'});
+        firewallCard.classList.add('shadow');
+        window.setTimeout(() => firewallCard.classList.remove('shadow'), 1800);
+    };
+
+    const askAdminPassword = (message, confirmText, callback, onCancel = null) => {
         if (window.Swal) {
             Swal.fire({
                 icon: 'warning',
@@ -297,23 +303,32 @@
                     return pwd;
                 }
             }).then((result) => {
-                if (!result.isConfirmed) return;
+                if (!result.isConfirmed) {
+                    if (typeof onCancel === 'function') onCancel();
+                    return;
+                }
                 callback(result.value || '');
             });
             return;
         }
 
         const ok = window.confirm(message + '\n\nAceptar para introducir la contrasena y continuar.');
-        if (!ok) return;
+        if (!ok) {
+            if (typeof onCancel === 'function') onCancel();
+            return;
+        }
         const pwd = window.prompt('Contrasena admin');
-        if (!pwd) return;
+        if (!pwd) {
+            if (typeof onCancel === 'function') onCancel();
+            return;
+        }
         callback(pwd);
     };
 
     assistButtons.forEach((assistBtn) => {
         assistBtn.addEventListener('click', (ev) => {
             ev.preventDefault();
-            const message = 'Se abriran temporalmente los puertos ' + (missingAcmePorts.length ? missingAcmePorts.join(', ') : '80, 443') + ' durante 30 minutos para que Let\\'s Encrypt pueda validar el dominio. Despues el panel quitara solo esas reglas temporales.';
+            const message = 'Se abriran temporalmente los puertos ' + (missingAcmePorts.length ? missingAcmePorts.join(', ') : '80, 443') + ' durante 30 minutos para que Lets Encrypt pueda validar el dominio. Despues el panel quitara solo esas reglas temporales.';
             askAdminPassword(message, 'Abrir y emitir', (pwd) => {
                 assistField.value = '1';
                 passwordField.value = pwd;
@@ -332,14 +347,14 @@
 
         if (mode === 'http01' && missingAcmePorts.length > 0 && hostnameNeedsPublicTls(hostname) && !alreadyAssisted) {
             ev.preventDefault();
-            const message = 'Para emitir Let\\'s Encrypt con HTTP-01/TLS-ALPN-01, los puertos ' + missingAcmePorts.join(', ') + ' deben aceptar conexiones publicas. El panel puede abrirlos temporalmente durante 30 minutos y luego quitara solo esas reglas.';
+            const message = 'El firewall no tiene apertura publica para los puertos ' + missingAcmePorts.join(', ') + '. Lets Encrypt HTTP-01/TLS-ALPN-01 puede fallar con timeout. Puedes cancelar e ir al bloque Firewall y Lets Encrypt para usar el boton "Abrir 80/443 y emitir certificado", o aceptar ahora para abrirlos temporalmente durante 30 minutos y guardar.';
 
             askAdminPassword(message, 'Abrir y guardar', (pwd) => {
                 assistField.value = '1';
                 passwordField.value = pwd;
                 setSaving();
                 form.submit();
-            });
+            }, scrollToAcmeCard);
             return;
         }
 

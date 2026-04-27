@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.178',
+                'date' => '2026-04-27',
+                'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`Settings > Server`: corrige el modal de asistencia ACME para que el boton `Abrir 80/443 y emitir certificado` no envie el formulario sin pedir password',
+                            '`Settings > Server`: al guardar con HTTP-01/TLS-ALPN-01 y 80/443 cerrados, el aviso explica que se puede usar el bloque `Firewall y Let\'s Encrypt` o abrir temporalmente los puertos desde el propio modal',
+                        ],
+                        'en' => [
+                            '`Settings > Server`: fixes the ACME assist modal so the `Open 80/443 and issue certificate` button cannot submit the form without asking for the password',
+                            '`Settings > Server`: when saving with HTTP-01/TLS-ALPN-01 and 80/443 closed, the warning explains that the `Firewall and Let\'s Encrypt` block can be used or the ports can be opened temporarily from the modal',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.177',
                 'date' => '2026-04-27',
                 'badge' => 'primary',

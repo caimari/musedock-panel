@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.178] — 2026-04-27
+
+### Fixed
+- `Settings > Server`: corrige el modal de asistencia ACME para que el boton `Abrir 80/443 y emitir certificado` no envie el formulario sin pedir password.
+- `Settings > Server`: al guardar con HTTP-01/TLS-ALPN-01 y 80/443 cerrados, el aviso explica que se puede usar el bloque `Firewall y Let's Encrypt` o abrir temporalmente los puertos desde el propio modal.
+
 ## [1.0.177] — 2026-04-27
 
 ### Improved
