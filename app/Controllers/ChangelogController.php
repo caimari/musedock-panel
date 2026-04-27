@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.170',
+                'date' => '2026-04-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'Al configurar un dominio publico del panel en `:8444`, Caddy crea tambien `panel-domain-https-route` en `:443` con redirect 308 hacia `:8444`',
+                            'La ruta `:443` da a Caddy un anclaje estandar para TLS-ALPN/ACME y evita quedarse sirviendo certificado interno',
+                            'No se crea la ruta `:443` si ya existe otra ruta Caddy para ese hostname, evitando pisar hostings manuales',
+                        ],
+                        'en' => [
+                            'When a public panel domain is configured on `:8444`, Caddy also creates `panel-domain-https-route` on `:443` with a 308 redirect to `:8444`',
+                            'The `:443` route gives Caddy a standard TLS-ALPN/ACME anchor and prevents it from staying on an internal certificate',
+                            'The `:443` route is skipped if another Caddy route already owns that hostname, avoiding overwriting manual hostings',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.169',
                 'date' => '2026-04-27',
                 'badge' => 'primary',

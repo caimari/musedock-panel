@@ -11,6 +11,7 @@ class SystemService
     private static array $allowedPhpVersions = ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4'];
     private const PANEL_ADMIN_SERVER_ID = 'srv_panel_admin';
     private const PANEL_DOMAIN_ROUTE_ID = 'panel-domain-route';
+    private const PANEL_DOMAIN_HTTPS_ROUTE_ID = 'panel-domain-https-route';
     private const PANEL_FALLBACK_ROUTE_ID = 'panel-fallback-route';
     private static ?bool $hasCloudflareDnsProvider = null;
     private static array $dnsProviderAvailability = [];
@@ -973,6 +974,7 @@ CONF;
         if (!($panelTlsResult['ok'] ?? false)) {
             return ['ok' => false, 'error' => (string)($panelTlsResult['error'] ?? 'No se pudo aplicar la politica TLS del panel')];
         }
+        $httpsRouteResult = self::ensurePanelDomainHttpsRoute($caddyApi, $hostname, $panelPublicPort);
 
         $route = self::buildPanelDomainRoute($hostname, $panelPublicPort, $internalPort);
         foreach ($routes as $existingRoute) {
@@ -984,6 +986,9 @@ CONF;
                 $warning = self::buildPanelDomainDnsWarning($hostname);
                 if (!empty($panelTlsResult['warning'])) {
                     $warning = trim($warning . ' ' . (string)$panelTlsResult['warning']);
+                }
+                if (!empty($httpsRouteResult['warning'])) {
+                    $warning = trim($warning . ' ' . (string)$httpsRouteResult['warning']);
                 }
                 return [
                     'ok' => true,
@@ -1020,6 +1025,9 @@ CONF;
         $warning = self::buildPanelDomainDnsWarning($hostname);
         if (!empty($panelTlsResult['warning'])) {
             $warning = trim($warning . ' ' . (string)$panelTlsResult['warning']);
+        }
+        if (!empty($httpsRouteResult['warning'])) {
+            $warning = trim($warning . ' ' . (string)$httpsRouteResult['warning']);
         }
         return [
             'ok' => true,
@@ -1073,6 +1081,7 @@ CONF;
         if (!($panelTlsResult['ok'] ?? false)) {
             return ['ok' => false, 'error' => (string)($panelTlsResult['error'] ?? 'No se pudo aplicar la politica TLS del panel')];
         }
+        $httpsRouteResult = self::ensurePanelDomainHttpsRoute($caddyApi, $hostname, $panelPublicPort);
 
         $routesRaw = @file_get_contents("{$caddyApi}/config/apps/http/servers/{$panelRouteServer}/routes");
         $routes = json_decode((string)$routesRaw, true);
@@ -1102,6 +1111,9 @@ CONF;
                 if ($warning !== '') {
                     $result['warning'] = $warning;
                 }
+                if (!empty($httpsRouteResult['warning'])) {
+                    $result['warning'] = trim((string)($result['warning'] ?? '') . ' ' . (string)$httpsRouteResult['warning']);
+                }
                 self::warmupPanelDomainTls($hostname, $panelPublicPort);
                 return $result;
             }
@@ -1119,12 +1131,13 @@ CONF;
         $config = require PANEL_ROOT . '/config/panel.php';
         $caddyApi = $config['caddy']['api_url'] ?? 'http://localhost:2019';
         $routeDeleted = self::deleteRouteById($caddyApi, self::PANEL_DOMAIN_ROUTE_ID);
+        $httpsRouteDeleted = self::deleteRouteById($caddyApi, self::PANEL_DOMAIN_HTTPS_ROUTE_ID);
         $targetHost = self::normalizeStoredHostname((string)$hostname);
         if ($targetHost === '') {
             $targetHost = self::normalizeStoredHostname((string)\MuseDockPanel\Settings::get('panel_hostname', ''));
         }
         $tlsDeleted = self::removePanelTlsPolicy($caddyApi, $targetHost);
-        return $routeDeleted && $tlsDeleted;
+        return $routeDeleted && $httpsRouteDeleted && $tlsDeleted;
     }
 
     private static function getPanelInternalPort(): int
@@ -1627,6 +1640,65 @@ CONF;
         ];
     }
 
+    private static function buildPanelDomainHttpsRoute(string $hostname, int $panelPublicPort): array
+    {
+        $location = "https://{http.request.host}:{$panelPublicPort}{http.request.uri}";
+        if ($panelPublicPort === 443) {
+            $location = 'https://{http.request.host}{http.request.uri}';
+        }
+
+        return [
+            '@id' => self::PANEL_DOMAIN_HTTPS_ROUTE_ID,
+            'match' => [[
+                'host' => [$hostname],
+                'expression' => '{http.request.port} == 443',
+            ]],
+            'handle' => [[
+                'handler' => 'static_response',
+                'status_code' => 308,
+                'headers' => [
+                    'Location' => [$location],
+                ],
+            ]],
+            'terminal' => true,
+        ];
+    }
+
+    private static function panelDomainHttpsRouteMatches(array $route, string $hostname, int $panelPublicPort): bool
+    {
+        if ((string)($route['@id'] ?? '') !== self::PANEL_DOMAIN_HTTPS_ROUTE_ID) {
+            return false;
+        }
+
+        $match = $route['match'][0] ?? [];
+        if (!is_array($match)) {
+            return false;
+        }
+
+        $hosts = $match['host'] ?? [];
+        if (!is_array($hosts) || !in_array($hostname, $hosts, true)) {
+            return false;
+        }
+
+        if (trim((string)($match['expression'] ?? '')) !== '{http.request.port} == 443') {
+            return false;
+        }
+
+        $expected = self::buildPanelDomainHttpsRoute($hostname, $panelPublicPort);
+        $expectedLocation = (string)($expected['handle'][0]['headers']['Location'][0] ?? '');
+        foreach (($route['handle'] ?? []) as $handler) {
+            if (!is_array($handler) || ($handler['handler'] ?? '') !== 'static_response') {
+                continue;
+            }
+            $location = (string)($handler['headers']['Location'][0] ?? '');
+            if ((int)($handler['status_code'] ?? 0) === 308 && $location === $expectedLocation) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private static function panelDomainRouteMatches(array $route, string $hostname, int $panelPublicPort, int $internalPort): bool
     {
         if ((string)($route['@id'] ?? '') !== self::PANEL_DOMAIN_ROUTE_ID) {
@@ -1661,6 +1733,63 @@ CONF;
         }
 
         return false;
+    }
+
+    private static function ensurePanelDomainHttpsRoute(string $caddyApi, string $hostname, int $panelPublicPort): array
+    {
+        if ($panelPublicPort === 443 || !self::panelHostnameNeedsPublicTls($hostname)) {
+            return ['ok' => true, 'skipped' => true];
+        }
+
+        $routesResult = self::fetchCaddyRoutes($caddyApi, false, 'srv0');
+        if (!($routesResult['ok'] ?? false)) {
+            return ['ok' => false, 'warning' => 'No se pudo preparar ruta HTTPS :443 para el dominio del panel.'];
+        }
+        $routes = $routesResult['routes'] ?? [];
+
+        $conflict = self::findHostRouteConflict($routes, $hostname, self::PANEL_DOMAIN_HTTPS_ROUTE_ID);
+        if ($conflict !== null && $conflict !== self::PANEL_DOMAIN_ROUTE_ID) {
+            return [
+                'ok' => true,
+                'skipped' => true,
+                'warning' => "No se crea redirect :443 para {$hostname}: ya existe ruta Caddy '{$conflict}' para ese host.",
+            ];
+        }
+
+        foreach ($routes as $route) {
+            if ((string)($route['@id'] ?? '') !== self::PANEL_DOMAIN_HTTPS_ROUTE_ID) {
+                continue;
+            }
+            if (self::panelDomainHttpsRouteMatches($route, $hostname, $panelPublicPort)) {
+                self::warmupPanelDomainTls($hostname, 443);
+                return ['ok' => true, 'applied' => true, 'idempotent' => true];
+            }
+            break;
+        }
+
+        self::deleteRouteById($caddyApi, self::PANEL_DOMAIN_HTTPS_ROUTE_ID);
+        $route = self::buildPanelDomainHttpsRoute($hostname, $panelPublicPort);
+        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        curl_setopt_array($ch, [
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => json_encode($route),
+            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 8,
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        if (!($httpCode >= 200 && $httpCode < 300)) {
+            return [
+                'ok' => false,
+                'warning' => "No se pudo crear redirect :443 para {$hostname} (HTTP {$httpCode}). {$response}",
+            ];
+        }
+
+        self::warmupPanelDomainTls($hostname, 443);
+        return ['ok' => true, 'applied' => true];
     }
 
     /**

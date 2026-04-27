@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.170] — 2026-04-27
+
+### Fixed
+- Panel domain ACME: al configurar un dominio publico del panel en `:8444`, Caddy crea tambien `panel-domain-https-route` en `:443` para ese hostname, con redirect 308 hacia `:8444`. Esto da a Caddy un anclaje estandar para TLS-ALPN/ACME y evita quedarse sirviendo certificado interno.
+- La ruta `:443` solo se crea si no existe ya otra ruta para ese hostname, para no pisar hostings manuales.
+
 ## [1.0.169] — 2026-04-27
 
 ### Fixed
