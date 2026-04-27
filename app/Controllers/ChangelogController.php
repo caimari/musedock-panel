@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.179',
+                'date' => '2026-04-27',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`Settings > Server`: DNS-01 del TLS del panel ahora detecta proveedores instalados desde `caddy list-modules` y muestra un selector multi-proveedor real',
+                            '`Settings > Server`: al guardar DNS-01 se valida que Caddy tenga cargado `dns.providers.<proveedor>` antes de aplicar la policy ACME',
+                        ],
+                        'en' => [
+                            '`Settings > Server`: panel TLS DNS-01 now detects installed providers from `caddy list-modules` and shows a real multi-provider selector',
+                            '`Settings > Server`: DNS-01 saves now validate that Caddy has `dns.providers.<provider>` loaded before applying the ACME policy',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.178',
                 'date' => '2026-04-27',
                 'badge' => 'danger',

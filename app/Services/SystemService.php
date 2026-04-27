@@ -15,6 +15,7 @@ class SystemService
     private const PANEL_FALLBACK_ROUTE_ID = 'panel-fallback-route';
     private static ?bool $hasCloudflareDnsProvider = null;
     private static array $dnsProviderAvailability = [];
+    private static ?array $installedDnsProviders = null;
 
     /**
      * Generate a unique Caddy route ID for a domain.
@@ -527,6 +528,93 @@ CONF;
         return self::$hasCloudflareDnsProvider;
     }
 
+    public static function installedDnsProviders(): array
+    {
+        if (self::$installedDnsProviders !== null) {
+            return self::$installedDnsProviders;
+        }
+
+        $out = trim((string)shell_exec('caddy list-modules 2>/dev/null'));
+        $providers = [];
+        foreach (preg_split('/\R+/', $out) ?: [] as $line) {
+            $line = strtolower(trim((string)$line));
+            if (!str_starts_with($line, 'dns.providers.')) {
+                continue;
+            }
+            $name = substr($line, strlen('dns.providers.'));
+            if ($name !== '' && preg_match('/^[a-z0-9][a-z0-9_.-]{1,63}$/', $name)) {
+                $providers[$name] = true;
+                self::$dnsProviderAvailability[$name] = true;
+                if ($name === 'cloudflare') {
+                    self::$hasCloudflareDnsProvider = true;
+                }
+            }
+        }
+
+        self::$installedDnsProviders = array_keys($providers);
+        sort(self::$installedDnsProviders, SORT_NATURAL);
+        return self::$installedDnsProviders;
+    }
+
+    public static function isDnsProviderInstalled(string $provider): bool
+    {
+        return self::caddyHasDnsProvider($provider);
+    }
+
+    public static function dnsProviderCatalog(): array
+    {
+        return [
+            'cloudflare' => [
+                'label' => 'Cloudflare',
+                'example' => '{"api_token":"..."}',
+            ],
+            'digitalocean' => [
+                'label' => 'DigitalOcean',
+                'example' => '{"token":"..."}',
+            ],
+            'route53' => [
+                'label' => 'Amazon Route53',
+                'example' => '{"access_key_id":"...","secret_access_key":"...","region":"us-east-1"}',
+            ],
+            'hetzner' => [
+                'label' => 'Hetzner DNS',
+                'example' => '{"api_token":"..."}',
+            ],
+            'ovh' => [
+                'label' => 'OVH',
+                'example' => '{"endpoint":"ovh-eu","application_key":"...","application_secret":"...","consumer_key":"..."}',
+            ],
+            'vultr' => [
+                'label' => 'Vultr',
+                'example' => '{"api_token":"..."}',
+            ],
+            'linode' => [
+                'label' => 'Linode',
+                'example' => '{"token":"..."}',
+            ],
+            'porkbun' => [
+                'label' => 'Porkbun',
+                'example' => '{"api_key":"...","secret_api_key":"..."}',
+            ],
+            'namecheap' => [
+                'label' => 'Namecheap',
+                'example' => '{"api_user":"...","api_key":"..."}',
+            ],
+            'gandi' => [
+                'label' => 'Gandi',
+                'example' => '{"api_token":"..."}',
+            ],
+            'powerdns' => [
+                'label' => 'PowerDNS',
+                'example' => '{"server_url":"https://dns.example.com","api_token":"..."}',
+            ],
+            'rfc2136' => [
+                'label' => 'RFC2136 / BIND',
+                'example' => '{"key_name":"...","key_alg":"hmac-sha256","key":"...","server":"127.0.0.1:53"}',
+            ],
+        ];
+    }
+
     private static function caddyHasDnsProvider(string $provider): bool
     {
         $provider = strtolower(trim($provider));
@@ -536,6 +624,13 @@ CONF;
 
         if (array_key_exists($provider, self::$dnsProviderAvailability)) {
             return self::$dnsProviderAvailability[$provider];
+        }
+
+        foreach (self::installedDnsProviders() as $installedProvider) {
+            if ($installedProvider === $provider) {
+                self::$dnsProviderAvailability[$provider] = true;
+                return true;
+            }
         }
 
         $needle = 'dns.providers.' . $provider;
@@ -1508,7 +1603,7 @@ CONF;
             'email' => $email,
             'challenges' => [
                 'dns' => [
-                    'provider' => array_merge(['name' => $provider], $providerConfig),
+                    'provider' => array_merge($providerConfig, ['name' => $provider]),
                     'resolvers' => ['1.1.1.1:53', '8.8.8.8:53'],
                 ],
             ],

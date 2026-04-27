@@ -73,6 +73,16 @@
                                 $panelTlsMode = 'self_signed';
                             }
                             $panelHostnameConfigured = trim((string)($settings['panel_hostname'] ?? '')) !== '';
+                            $panelDnsProviders = array_values(array_filter(array_map('strval', $panelDnsProviders ?? [])));
+                            $panelDnsProviderCatalog = is_array($panelDnsProviderCatalog ?? null) ? $panelDnsProviderCatalog : [];
+                            $selectedDnsProvider = strtolower(trim((string)($settings['panel_dns_provider'] ?? '')));
+                            if ($selectedDnsProvider !== '' && !in_array($selectedDnsProvider, $panelDnsProviders, true)) {
+                                array_unshift($panelDnsProviders, $selectedDnsProvider);
+                            }
+                            $dnsProviderExamples = [];
+                            foreach ($panelDnsProviders as $dnsProviderName) {
+                                $dnsProviderExamples[$dnsProviderName] = (string)($panelDnsProviderCatalog[$dnsProviderName]['example'] ?? '{"api_token":"..."}');
+                            }
                         ?>
                         <label class="form-label">TLS del panel (puerto <?= (int)$panelPort ?>)</label>
                         <select class="form-select" name="panel_tls_mode" id="panel_tls_mode">
@@ -96,15 +106,35 @@
 
                     <div class="mb-3" id="dns_provider_wrap" style="<?= $panelTlsMode === 'dns01' ? '' : 'display:none;' ?>">
                         <label class="form-label">Proveedor DNS (modulo Caddy)</label>
-                        <input type="text" name="panel_dns_provider" class="form-control" value="<?= View::e($settings['panel_dns_provider'] ?? '') ?>" placeholder="cloudflare / route53 / digitalocean / hetzner / ...">
-                        <small class="text-muted">Nombre del modulo en Caddy: <code>dns.providers.&lt;proveedor&gt;</code>.</small>
+                        <?php if (!empty($panelDnsProviders)): ?>
+                            <select name="panel_dns_provider" id="panel_dns_provider" class="form-select">
+                                <option value="">Selecciona proveedor instalado...</option>
+                                <?php foreach ($panelDnsProviders as $dnsProviderName): ?>
+                                    <?php
+                                        $isInstalledDnsProvider = in_array($dnsProviderName, $panelDnsProviders, true)
+                                            && !($selectedDnsProvider === $dnsProviderName && !\MuseDockPanel\Services\SystemService::isDnsProviderInstalled($dnsProviderName));
+                                        $dnsProviderLabel = (string)($panelDnsProviderCatalog[$dnsProviderName]['label'] ?? ucfirst(str_replace(['_', '-'], ' ', $dnsProviderName)));
+                                        $dnsProviderSuffix = $isInstalledDnsProvider ? '' : ' (no instalado)';
+                                    ?>
+                                    <option value="<?= View::e($dnsProviderName) ?>"
+                                            data-example="<?= View::e($dnsProviderExamples[$dnsProviderName] ?? '{"api_token":"..."}') ?>"
+                                            <?= $selectedDnsProvider === $dnsProviderName ? 'selected' : '' ?>>
+                                        <?= View::e($dnsProviderLabel . $dnsProviderSuffix) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="text-muted">Detectados desde <code>caddy list-modules</code>. El modulo usado sera <code>dns.providers.&lt;proveedor&gt;</code>.</small>
+                        <?php else: ?>
+                            <input type="text" name="panel_dns_provider" id="panel_dns_provider" class="form-control" value="<?= View::e($settings['panel_dns_provider'] ?? '') ?>" placeholder="cloudflare / route53 / digitalocean / hetzner / ...">
+                            <small class="text-warning">Este Caddy no reporta modulos <code>dns.providers.*</code>. DNS-01 no funcionara hasta instalar un build de Caddy con el proveedor elegido.</small>
+                        <?php endif; ?>
                     </div>
 
                     <div class="mb-3" id="dns_provider_cfg_wrap" style="<?= $panelTlsMode === 'dns01' ? '' : 'display:none;' ?>">
                         <label class="form-label">Configuracion JSON del proveedor DNS</label>
-                        <textarea name="panel_dns_provider_config" class="form-control" rows="5" placeholder='{"api_token":"..."}'><?= View::e($settings['panel_dns_provider_config'] ?? '') ?></textarea>
+                        <textarea name="panel_dns_provider_config" id="panel_dns_provider_config" class="form-control" rows="5" placeholder='<?= View::e($dnsProviderExamples[$selectedDnsProvider] ?? '{"api_token":"..."}') ?>'><?= View::e($settings['panel_dns_provider_config'] ?? '') ?></textarea>
                         <small class="text-muted">
-                            Ejemplos: Cloudflare <code>{"api_token":"..."}</code>, DigitalOcean <code>{"token":"..."}</code>, Route53 <code>{"access_key_id":"...","secret_access_key":"..."}</code>.
+                            JSON exacto que espera el modulo DNS de Caddy. No incluyas <code>name</code>; MuseDock lo rellena con el proveedor seleccionado. Cloudflare puede heredar <code>CLOUDFLARE_API_TOKEN</code> si dejas este campo vacio.
                         </small>
                     </div>
 
@@ -241,8 +271,16 @@
     const acmeWrap = document.getElementById('acme_email_wrap');
     const providerWrap = document.getElementById('dns_provider_wrap');
     const providerCfgWrap = document.getElementById('dns_provider_cfg_wrap');
+    const providerSel = document.getElementById('panel_dns_provider');
+    const providerCfg = document.getElementById('panel_dns_provider_config');
 
     if (!modeSel) return;
+    const refreshProviderExample = () => {
+        if (!providerSel || !providerCfg) return;
+        const selected = providerSel.options ? providerSel.options[providerSel.selectedIndex] : null;
+        const example = selected ? selected.getAttribute('data-example') : '';
+        if (example) providerCfg.setAttribute('placeholder', example);
+    };
     const refresh = () => {
         const mode = modeSel.value || 'self_signed';
         const acmeVisible = mode === 'http01' || mode === 'dns01';
@@ -250,8 +288,10 @@
         const dnsVisible = mode === 'dns01';
         providerWrap.style.display = dnsVisible ? '' : 'none';
         providerCfgWrap.style.display = dnsVisible ? '' : 'none';
+        refreshProviderExample();
     };
     modeSel.addEventListener('change', refresh);
+    if (providerSel) providerSel.addEventListener('change', refreshProviderExample);
     refresh();
 })();
 

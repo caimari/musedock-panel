@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.179] — 2026-04-27
+
+### Improved
+- `Settings > Server`: DNS-01 del TLS del panel ahora detecta proveedores instalados desde `caddy list-modules` y muestra un selector multi-proveedor real.
+- `Settings > Server`: al guardar DNS-01 se valida que Caddy tenga cargado `dns.providers.<proveedor>` antes de aplicar la policy ACME.
+
 ## [1.0.178] — 2026-04-27
 
 ### Fixed

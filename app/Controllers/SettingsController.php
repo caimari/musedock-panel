@@ -10,6 +10,7 @@ use MuseDockPanel\Services\FirewallService;
 use MuseDockPanel\Services\LogService;
 use MuseDockPanel\Services\NotificationService;
 use MuseDockPanel\Services\SecurityService;
+use MuseDockPanel\Services\SystemService;
 
 class SettingsController
 {
@@ -1097,6 +1098,8 @@ class SettingsController
         // Panel access info
         $panelPort = \MuseDockPanel\Env::get('PANEL_PORT', '8444');
         $panelAcmeFirewallStatus = FirewallService::publicTcpPortStatus([80, 443]);
+        $panelDnsProviders = SystemService::installedDnsProviders();
+        $panelDnsProviderCatalog = SystemService::dnsProviderCatalog();
 
         View::render('settings/server', [
             'layout' => 'main',
@@ -1115,6 +1118,8 @@ class SettingsController
             'ntpServer' => $ntpServer,
             'rebootNotifyEnabled' => $rebootNotifyEnabled,
             'panelAcmeFirewallStatus' => $panelAcmeFirewallStatus,
+            'panelDnsProviders' => $panelDnsProviders,
+            'panelDnsProviderCatalog' => $panelDnsProviderCatalog,
         ]);
     }
 
@@ -1176,18 +1181,30 @@ class SettingsController
                 Router::redirect('/settings/server');
                 return;
             }
-            if ($panelDnsProviderConfigRaw === '') {
+            if (!SystemService::isDnsProviderInstalled($panelDnsProvider)) {
+                $installed = SystemService::installedDnsProviders();
+                $detail = empty($installed)
+                    ? 'Este Caddy no tiene ningun modulo dns.providers.* instalado.'
+                    : 'Instalados: ' . implode(', ', $installed) . '.';
+                Flash::set('error', "Caddy no tiene cargado dns.providers.{$panelDnsProvider}. {$detail}");
+                Router::redirect('/settings/server');
+                return;
+            }
+            if ($panelDnsProviderConfigRaw === '' && $panelDnsProvider !== 'cloudflare') {
                 Flash::set('error', 'DNS-01 requiere configuracion JSON del proveedor DNS.');
                 Router::redirect('/settings/server');
                 return;
             }
-            $decoded = json_decode($panelDnsProviderConfigRaw, true);
-            if (!is_array($decoded)) {
-                Flash::set('error', 'JSON de configuracion DNS invalido.');
-                Router::redirect('/settings/server');
-                return;
+            if ($panelDnsProviderConfigRaw !== '') {
+                $decoded = json_decode($panelDnsProviderConfigRaw, true);
+                if (!is_array($decoded)) {
+                    Flash::set('error', 'JSON de configuracion DNS invalido.');
+                    Router::redirect('/settings/server');
+                    return;
+                }
+                unset($decoded['name']);
+                $panelDnsProviderConfig = $decoded;
             }
-            $panelDnsProviderConfig = $decoded;
         }
 
         // Validate timezone
