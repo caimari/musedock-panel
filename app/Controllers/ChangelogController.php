@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.183',
+                'date' => '2026-04-28',
+                'badge' => 'primary',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            'Docs: el hijo `Settings > DNS` ahora explica el flujo completo de `/settings/dns`: estado, proveedor, instalacion de modulo Caddy, credenciales JSON, activacion DNS-01, verificacion y rollback',
+                            'Docs: el mapa de Settings usa icono propio para DNS y diferencia claramente `Settings > DNS` de `Settings > Cloudflare DNS`',
+                        ],
+                        'en' => [
+                            'Docs: the `Settings > DNS` child guide now explains the full `/settings/dns` flow: status, provider, Caddy module installation, JSON credentials, DNS-01 activation, verification and rollback',
+                            'Docs: the Settings map uses a dedicated DNS icon and clearly separates `Settings > DNS` from `Settings > Cloudflare DNS`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.182',
                 'date' => '2026-04-28',
                 'badge' => 'success',

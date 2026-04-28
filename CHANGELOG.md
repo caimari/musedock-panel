@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.183] — 2026-04-28
+
+### Improved
+- Docs: el hijo `Settings > DNS` ahora explica el flujo completo de `/settings/dns`: estado, proveedor, instalacion de modulo Caddy, credenciales JSON, activacion DNS-01, verificacion y rollback.
+- Docs: el mapa de Settings usa icono propio para DNS y diferencia claramente `Settings > DNS` de `Settings > Cloudflare DNS`.
+
 ## [1.0.182] — 2026-04-28
 
 ### Added
