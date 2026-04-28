@@ -107,6 +107,13 @@ $sections = [
         'summary' => 'Rutas proxy para exponer servicios internos por dominio.',
     ],
     [
+        'title' => 'DNS',
+        'url' => '/settings/dns',
+        'doc_url' => '/docs/settings/dns',
+        'icon' => 'bi-globe2',
+        'summary' => 'Proveedor DNS-01 del panel, modulos Caddy y credenciales API para certificados sin abrir 80/443.',
+    ],
+    [
         'title' => 'Cloudflare DNS',
         'url' => '/settings/cloudflare-dns',
         'doc_url' => '/docs/settings/cloudflare-dns',

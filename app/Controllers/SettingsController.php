@@ -1064,6 +1064,7 @@ class SettingsController
     public function server(): void
     {
         $settings = \MuseDockPanel\Settings::getAll();
+        $settings['panel_dns_provider_config'] = $this->readPanelDnsProviderConfig();
         $panelHostnameForTls = $this->normalizePanelHostname((string)($settings['panel_hostname'] ?? ''));
         if ($panelHostnameForTls !== ''
             && $this->panelHostnameNeedsPublicTls($panelHostnameForTls)
@@ -1123,6 +1124,140 @@ class SettingsController
             'panelDnsProviderCatalog' => $panelDnsProviderCatalog,
             'caddyDnsProviderInstallStatus' => $caddyDnsProviderInstallStatus,
         ]);
+    }
+
+    public function dnsRedirect(): void
+    {
+        Router::redirect('/settings/dns');
+    }
+
+    public function dns(): void
+    {
+        $settings = \MuseDockPanel\Settings::getAll();
+        $settings['panel_dns_provider_config'] = $this->readPanelDnsProviderConfig();
+
+        $catalog = SystemService::dnsProviderCatalog();
+        $installed = SystemService::installedDnsProviders();
+        $installedSet = array_fill_keys($installed, true);
+        $selectedProvider = strtolower(trim((string)($settings['panel_dns_provider'] ?? '')));
+        $panelTlsMode = strtolower(trim((string)($settings['panel_tls_mode'] ?? 'self_signed')));
+        if (!in_array($panelTlsMode, ['self_signed', 'http01', 'dns01'], true)) {
+            $panelTlsMode = 'self_signed';
+        }
+
+        $providerConfig = [];
+        $providerConfigRaw = trim((string)($settings['panel_dns_provider_config'] ?? ''));
+        if ($providerConfigRaw !== '') {
+            $decoded = json_decode($providerConfigRaw, true);
+            if (is_array($decoded)) {
+                $providerConfig = $decoded;
+            }
+        }
+
+        View::render('settings/dns', [
+            'layout' => 'main',
+            'pageTitle' => 'DNS',
+            'settings' => $settings,
+            'panelTlsMode' => $panelTlsMode,
+            'selectedProvider' => $selectedProvider,
+            'providerConfig' => $providerConfig,
+            'providerConfigRaw' => $providerConfigRaw,
+            'panelDnsProviderCatalog' => $catalog,
+            'installedDnsProviders' => $installed,
+            'installedDnsProviderSet' => $installedSet,
+            'caddyDnsProviderInstallStatus' => $this->readCaddyDnsProviderInstallStatus(),
+            'cloudflareEnvTokenPresent' => $this->hasCaddyCloudflareEnvToken(),
+            'panelPort' => (int)\MuseDockPanel\Env::get('PANEL_PORT', 8444),
+        ]);
+    }
+
+    public function dnsSave(): void
+    {
+        View::verifyCsrf();
+
+        $provider = strtolower(trim((string)($_POST['panel_dns_provider'] ?? '')));
+        $configRaw = trim((string)($_POST['panel_dns_provider_config'] ?? ''));
+        $applyToPanel = (string)($_POST['apply_panel_dns01'] ?? '') === '1';
+        $catalog = SystemService::dnsProviderCatalog();
+
+        if ($provider === '' || !isset($catalog[$provider])) {
+            Flash::set('error', 'Selecciona un proveedor DNS valido.');
+            Router::redirect('/settings/dns');
+            return;
+        }
+
+        if (!SystemService::isDnsProviderInstalled($provider)) {
+            Flash::set('error', "Caddy aun no tiene cargado dns.providers.{$provider}. Instala primero el modulo desde esta pantalla.");
+            Router::redirect('/settings/dns');
+            return;
+        }
+
+        $providerConfig = [];
+        if ($configRaw !== '') {
+            $decoded = json_decode($configRaw, true);
+            if (!is_array($decoded)) {
+                Flash::set('error', 'El JSON del proveedor DNS no es valido.');
+                Router::redirect('/settings/dns');
+                return;
+            }
+            unset($decoded['name']);
+            $providerConfig = $decoded;
+        }
+
+        if ($provider === 'cloudflare' && empty($providerConfig) && $this->hasCaddyCloudflareEnvToken()) {
+            // Keep backward compatibility: SystemService will read CLOUDFLARE_API_TOKEN
+            // from /etc/default/caddy when no explicit JSON is saved.
+        } else {
+            $missing = [];
+            foreach (($catalog[$provider]['required'] ?? []) as $key) {
+                if (trim((string)($providerConfig[$key] ?? '')) === '') {
+                    $missing[] = (string)$key;
+                }
+            }
+            if (!empty($missing)) {
+                Flash::set('error', 'Faltan campos requeridos para ' . ($catalog[$provider]['label'] ?? $provider) . ': ' . implode(', ', $missing) . '.');
+                Router::redirect('/settings/dns');
+                return;
+            }
+        }
+
+        \MuseDockPanel\Settings::set('panel_dns_provider', $provider);
+        $normalizedConfig = empty($providerConfig) ? '' : json_encode($providerConfig, JSON_UNESCAPED_SLASHES);
+        \MuseDockPanel\Settings::set(
+            'panel_dns_provider_config_enc',
+            $normalizedConfig !== '' ? \MuseDockPanel\Services\ReplicationService::encryptPassword($normalizedConfig) : ''
+        );
+        \MuseDockPanel\Settings::set('panel_dns_provider_config', '');
+
+        $messages = ['Proveedor DNS guardado para DNS-01.'];
+        if ($applyToPanel) {
+            $panelHostname = $this->normalizePanelHostname((string)\MuseDockPanel\Settings::get('panel_hostname', ''));
+            $panelAcmeEmail = $this->resolvePanelAcmeEmail((string)\MuseDockPanel\Settings::get('panel_acme_email', ''));
+            if ($panelHostname === '') {
+                Flash::set('warning', 'Proveedor guardado, pero no se activo DNS-01 porque no hay dominio del panel configurado en Settings > Servidor.');
+                Router::redirect('/settings/dns');
+                return;
+            }
+            if ($panelAcmeEmail === '' || !filter_var($panelAcmeEmail, FILTER_VALIDATE_EMAIL)) {
+                Flash::set('warning', 'Proveedor guardado, pero no se activo DNS-01 porque falta un email ACME valido en Settings > Servidor.');
+                Router::redirect('/settings/dns');
+                return;
+            }
+            \MuseDockPanel\Settings::set('panel_tls_mode', 'dns01');
+            \MuseDockPanel\Settings::set('panel_acme_email', $panelAcmeEmail);
+            $routeResult = \MuseDockPanel\Services\SystemService::configurePanelDomainRoute($panelHostname);
+            if ($routeResult['ok'] ?? false) {
+                $messages[] = "TLS del panel cambiado a DNS-01 para {$panelHostname}.";
+            } else {
+                Flash::set('warning', 'Proveedor guardado, pero Caddy no pudo aplicar DNS-01: ' . (string)($routeResult['error'] ?? 'error desconocido'));
+                Router::redirect('/settings/dns');
+                return;
+            }
+        }
+
+        LogService::log('settings.dns', $provider, 'Updated panel DNS-01 provider settings');
+        Flash::set('success', implode(' ', $messages));
+        Router::redirect('/settings/dns');
     }
 
     public function serverSave(): void
@@ -1221,12 +1356,16 @@ class SettingsController
         \MuseDockPanel\Settings::set('panel_protocol', in_array($panelProtocol, ['http', 'https']) ? $panelProtocol : 'http');
         \MuseDockPanel\Settings::set('panel_tls_mode', $panelTlsMode);
         \MuseDockPanel\Settings::set('panel_dns_provider', $panelTlsMode === 'dns01' ? $panelDnsProvider : '');
+        $panelDnsProviderConfigStored = $panelTlsMode === 'dns01'
+            ? json_encode($panelDnsProviderConfig, JSON_UNESCAPED_SLASHES)
+            : '';
         \MuseDockPanel\Settings::set(
-            'panel_dns_provider_config',
-            $panelTlsMode === 'dns01'
-                ? json_encode($panelDnsProviderConfig, JSON_UNESCAPED_SLASHES)
+            'panel_dns_provider_config_enc',
+            $panelDnsProviderConfigStored !== ''
+                ? \MuseDockPanel\Services\ReplicationService::encryptPassword($panelDnsProviderConfigStored)
                 : ''
         );
+        \MuseDockPanel\Settings::set('panel_dns_provider_config', '');
         $panelAcmeEmailToStore = in_array($panelTlsMode, ['http01', 'dns01'], true) ? $panelAcmeEmail : '';
         \MuseDockPanel\Settings::set('panel_acme_email', $panelAcmeEmailToStore);
 
@@ -1321,6 +1460,7 @@ class SettingsController
         \MuseDockPanel\Settings::set('panel_acme_email', $panelAcmeEmail);
         \MuseDockPanel\Settings::set('panel_dns_provider', '');
         \MuseDockPanel\Settings::set('panel_dns_provider_config', '');
+        \MuseDockPanel\Settings::set('panel_dns_provider_config_enc', '');
 
         $firewallStatus = FirewallService::publicTcpPortStatus([80, 443]);
         $missingAcmePorts = array_values(array_filter(array_map('intval', $firewallStatus['missing'] ?? [])));
@@ -1347,23 +1487,28 @@ class SettingsController
 
     public function serverInstallDnsProvider(): void
     {
+        $returnTo = (string)($_POST['return_to'] ?? '/settings/server');
+        if (!in_array($returnTo, ['/settings/server', '/settings/dns'], true)) {
+            $returnTo = '/settings/server';
+        }
+
         $password = (string)($_POST['admin_password'] ?? '');
         if (!$this->verifyCurrentAdminPassword($password)) {
             Flash::set('error', 'Contrasena de administrador incorrecta para instalar modulo DNS de Caddy.');
-            Router::redirect('/settings/server');
+            Router::redirect($returnTo);
             return;
         }
 
         $provider = strtolower(trim((string)($_POST['dns_provider'] ?? '')));
         if ($provider === '' || !preg_match('/^[a-z0-9][a-z0-9_.-]{1,63}$/', $provider)) {
             Flash::set('error', 'Proveedor DNS invalido.');
-            Router::redirect('/settings/server');
+            Router::redirect($returnTo);
             return;
         }
 
         if (SystemService::isDnsProviderInstalled($provider)) {
             Flash::set('success', "dns.providers.{$provider} ya esta instalado.");
-            Router::redirect('/settings/server');
+            Router::redirect($returnTo);
             return;
         }
 
@@ -1388,7 +1533,7 @@ class SettingsController
         Flash::set('success', "Instalacion de dns.providers.{$provider} iniciada en segundo plano. Caddy se recompilara con backup y rollback automatico si falla; recarga esta pagina en unos minutos para ver el resultado.");
         LogService::log('settings.server.dns_provider.install_started', $provider, "Instalacion de dns.providers.{$provider} iniciada");
 
-        Router::redirect('/settings/server');
+        Router::redirect($returnTo);
     }
 
     private function readCaddyDnsProviderInstallStatus(): array
@@ -1400,6 +1545,30 @@ class SettingsController
 
         $decoded = json_decode((string)@file_get_contents($file), true);
         return is_array($decoded) ? $decoded : [];
+    }
+
+    private function readPanelDnsProviderConfig(): string
+    {
+        $encrypted = trim((string)\MuseDockPanel\Settings::get('panel_dns_provider_config_enc', ''));
+        if ($encrypted !== '') {
+            $decrypted = \MuseDockPanel\Services\ReplicationService::decryptPassword($encrypted);
+            if ($decrypted !== '') {
+                return $decrypted;
+            }
+        }
+
+        return trim((string)\MuseDockPanel\Settings::get('panel_dns_provider_config', ''));
+    }
+
+    private function hasCaddyCloudflareEnvToken(): bool
+    {
+        $token = trim((string)getenv('CLOUDFLARE_API_TOKEN'));
+        if ($token !== '') {
+            return true;
+        }
+
+        $caddyEnv = @file_get_contents('/etc/default/caddy');
+        return is_string($caddyEnv) && preg_match('/^CLOUDFLARE_API_TOKEN=.+$/m', $caddyEnv) === 1;
     }
 
     private function normalizePanelHostname(string $value): string

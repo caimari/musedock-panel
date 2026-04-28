@@ -2,6 +2,48 @@
 
 <?php include __DIR__ . '/_tabs.php'; ?>
 
+<style>
+.config-json-file-input.form-control {
+    background: #0f172a;
+    color: #f8fafc;
+    border-color: #334155;
+}
+.config-json-file-input.form-control:focus {
+    background: #0f172a;
+    color: #f8fafc;
+    border-color: #38bdf8;
+    box-shadow: 0 0 0 0.2rem rgba(56, 189, 248, 0.15);
+}
+.config-json-file-input::file-selector-button {
+    margin-right: 0.75rem;
+    border: 1px solid #334155;
+    background: #1e293b;
+    color: #f8fafc;
+    border-radius: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    transition: all .15s ease;
+}
+.config-json-file-input:hover::file-selector-button {
+    background: #334155;
+    color: #fbbf24;
+    border-color: #475569;
+}
+.config-json-file-input::-webkit-file-upload-button {
+    margin-right: 0.75rem;
+    border: 1px solid #334155;
+    background: #1e293b;
+    color: #f8fafc;
+    border-radius: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    transition: all .15s ease;
+}
+.config-json-file-input:hover::-webkit-file-upload-button {
+    background: #334155;
+    color: #fbbf24;
+    border-color: #475569;
+}
+</style>
+
 <!-- Existing crons -->
 <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -110,11 +152,11 @@
                 <form method="POST" action="/settings/crons/import" enctype="multipart/form-data" onsubmit="return confirmCronImportConfig(this)">
                     <?= \MuseDockPanel\View::csrf() ?>
                     <input type="hidden" name="admin_password" class="cfg-admin-password-field" value="">
-                    <div class="row g-2 align-items-end">
-                        <div class="col-md-8">
-                            <label class="form-label small text-muted">Archivo JSON</label>
-                            <input type="file" name="config_file" class="form-control form-control-sm" accept=".json,application/json" required>
-                        </div>
+                        <div class="row g-2 align-items-end">
+                            <div class="col-md-8">
+                                <label class="form-label small fw-semibold" style="color:#f8fafc;">Archivo JSON</label>
+                                <input type="file" name="config_file" class="form-control form-control-sm config-json-file-input" accept=".json,application/json" required>
+                            </div>
                         <div class="col-md-4 d-grid">
                             <button type="submit" class="btn btn-primary btn-sm">
                                 <i class="bi bi-upload me-1"></i>Importar
@@ -268,15 +310,15 @@ function confirmCronConfigAction(form, options) {
 
     S.fire({
         title: options.title || 'Confirmar accion',
-        html: (options.html || '') + '<div class="mt-3 text-start"><label class="form-label fw-semibold mb-1" style="color:#111827;">Contrasena de administrador</label><input id="cronAdminPassword" type="password" class="form-control" autocomplete="current-password"></div>',
+        html: (options.html || '') + '<div class="mt-3 text-start"><label class="form-label fw-semibold mb-1" style="color:#f8fafc;">Contrasena de administrador</label><input id="cronAdminPassword" type="password" class="form-control" autocomplete="current-password" style="background:#0f172a;color:#f8fafc;border-color:#334155;" placeholder="Introduce la contrasena"></div>',
         icon: options.icon || 'warning',
         showCancelButton: true,
         confirmButtonText: options.confirmText || 'Continuar',
         cancelButtonText: 'Cancelar',
         confirmButtonColor: '#2563eb',
         cancelButtonColor: '#6b7280',
-        background: '#ffffff',
-        color: '#111827',
+        background: '#1e293b',
+        color: '#f8fafc',
         focusConfirm: false,
         preConfirm: function() {
             var input = document.getElementById('cronAdminPassword');
@@ -288,8 +330,14 @@ function confirmCronConfigAction(form, options) {
             return password;
         },
         didOpen: function(popup) {
+            var pwdInput = popup.querySelector('#cronAdminPassword');
+            if (pwdInput) {
+                pwdInput.style.setProperty('background', '#0f172a', 'important');
+                pwdInput.style.setProperty('color', '#f8fafc', 'important');
+                pwdInput.style.setProperty('border-color', '#334155', 'important');
+            }
             popup.querySelectorAll('.text-muted, small').forEach(function(el) {
-                el.style.setProperty('color', '#4b5563', 'important');
+                el.style.setProperty('color', '#e2e8f0', 'important');
                 el.style.setProperty('opacity', '1', 'important');
             });
         }

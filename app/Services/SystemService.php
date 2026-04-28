@@ -568,61 +568,73 @@ CONF;
                 'label' => 'Cloudflare',
                 'example' => '{"api_token":"..."}',
                 'module' => 'github.com/caddy-dns/cloudflare',
+                'required' => ['api_token'],
             ],
             'digitalocean' => [
                 'label' => 'DigitalOcean',
                 'example' => '{"token":"..."}',
                 'module' => 'github.com/caddy-dns/digitalocean',
+                'required' => ['token'],
             ],
             'route53' => [
                 'label' => 'Amazon Route53',
                 'example' => '{"access_key_id":"...","secret_access_key":"...","region":"us-east-1"}',
                 'module' => 'github.com/caddy-dns/route53',
+                'required' => ['access_key_id', 'secret_access_key'],
             ],
             'hetzner' => [
                 'label' => 'Hetzner DNS',
                 'example' => '{"api_token":"..."}',
                 'module' => 'github.com/caddy-dns/hetzner',
+                'required' => ['api_token'],
             ],
             'ovh' => [
                 'label' => 'OVH',
                 'example' => '{"endpoint":"ovh-eu","application_key":"...","application_secret":"...","consumer_key":"..."}',
                 'module' => 'github.com/caddy-dns/ovh',
+                'required' => ['endpoint', 'application_key', 'application_secret', 'consumer_key'],
             ],
             'vultr' => [
                 'label' => 'Vultr',
                 'example' => '{"api_token":"..."}',
                 'module' => 'github.com/caddy-dns/vultr',
+                'required' => ['api_token'],
             ],
             'linode' => [
                 'label' => 'Linode',
                 'example' => '{"token":"..."}',
                 'module' => 'github.com/caddy-dns/linode',
+                'required' => ['token'],
             ],
             'porkbun' => [
                 'label' => 'Porkbun',
                 'example' => '{"api_key":"...","secret_api_key":"..."}',
                 'module' => 'github.com/caddy-dns/porkbun',
+                'required' => ['api_key', 'secret_api_key'],
             ],
             'namecheap' => [
                 'label' => 'Namecheap',
                 'example' => '{"api_user":"...","api_key":"..."}',
                 'module' => 'github.com/caddy-dns/namecheap',
+                'required' => ['api_user', 'api_key'],
             ],
             'gandi' => [
                 'label' => 'Gandi',
                 'example' => '{"api_token":"..."}',
                 'module' => 'github.com/caddy-dns/gandi',
+                'required' => ['api_token'],
             ],
             'powerdns' => [
                 'label' => 'PowerDNS',
                 'example' => '{"server_url":"https://dns.example.com","api_token":"..."}',
                 'module' => 'github.com/caddy-dns/powerdns',
+                'required' => ['server_url', 'api_token'],
             ],
             'rfc2136' => [
                 'label' => 'RFC2136 / BIND',
                 'example' => '{"key_name":"...","key_alg":"hmac-sha256","key":"...","server":"127.0.0.1:53"}',
                 'module' => 'github.com/caddy-dns/rfc2136',
+                'required' => ['key_name', 'key_alg', 'key', 'server'],
             ],
         ];
     }
@@ -1674,6 +1686,13 @@ CONF;
 
         $provider = strtolower(trim((string)\MuseDockPanel\Settings::get('panel_dns_provider', '')));
         $providerConfigRaw = trim((string)\MuseDockPanel\Settings::get('panel_dns_provider_config', ''));
+        $providerConfigEnc = trim((string)\MuseDockPanel\Settings::get('panel_dns_provider_config_enc', ''));
+        if ($providerConfigEnc !== '') {
+            $decryptedProviderConfig = \MuseDockPanel\Services\ReplicationService::decryptPassword($providerConfigEnc);
+            if ($decryptedProviderConfig !== '') {
+                $providerConfigRaw = $decryptedProviderConfig;
+            }
+        }
         $providerConfig = [];
         if ($providerConfigRaw !== '') {
             $decoded = json_decode($providerConfigRaw, true);

@@ -448,6 +448,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/server/save', 'SettingsController@serverSave');
 \MuseDockPanel\Router::post('/settings/server/acme-assist', 'SettingsController@serverAcmeAssist');
 \MuseDockPanel\Router::post('/settings/server/dns-provider/install', 'SettingsController@serverInstallDnsProvider');
+\MuseDockPanel\Router::get('/settings/dns', 'SettingsController@dns');
+\MuseDockPanel\Router::post('/settings/dns/save', 'SettingsController@dnsSave');
+\MuseDockPanel\Router::get('/musedock/plugins/caddy-domain-manager/dns-accounts', 'SettingsController@dnsRedirect');
 \MuseDockPanel\Router::get('/settings/php', 'SettingsController@php');
 \MuseDockPanel\Router::post('/settings/php/ini-save', 'SettingsController@phpIniSave');
 \MuseDockPanel\Router::post('/settings/php/opcache-save', 'SettingsController@phpOpcacheSave');

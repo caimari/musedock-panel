@@ -20,6 +20,35 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.182',
+                'date' => '2026-04-28',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '`Settings > DNS`: nueva seccion clara para configurar el proveedor DNS-01 del panel, instalar modulos Caddy y guardar credenciales del proveedor',
+                            'Redireccion desde la URL legacy `/musedock/plugins/caddy-domain-manager/dns-accounts` hacia `/settings/dns` para evitar 404',
+                            'Docs: `Settings > DNS` queda documentado y enlazado desde la guia TLS/DNS-01 del panel',
+                        ],
+                        'en' => [
+                            '`Settings > DNS`: new clear section to configure the panel DNS-01 provider, install Caddy DNS modules and save provider credentials',
+                            'Redirect from legacy URL `/musedock/plugins/caddy-domain-manager/dns-accounts` to `/settings/dns` to avoid 404',
+                            'Docs: `Settings > DNS` is now documented and linked from the panel TLS/DNS-01 guide',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'Las credenciales JSON nuevas para DNS-01 del panel se guardan cifradas, manteniendo compatibilidad con configuraciones antiguas en claro',
+                            'Modales de confirmacion e inputs JSON de Caddy, Cron y Fail2Ban ajustados al tema oscuro para que password y textos sean legibles',
+                        ],
+                        'en' => [
+                            'New panel DNS-01 JSON credentials are stored encrypted while keeping compatibility with legacy plain-text settings',
+                            'Caddy, Cron and Fail2Ban confirmation modals and JSON inputs now match the dark theme so passwords and text remain readable',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.181',
                 'date' => '2026-04-27',
                 'badge' => 'success',

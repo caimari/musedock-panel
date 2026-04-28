@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.182] — 2026-04-28
+
+### Added
+- `Settings > DNS`: nueva seccion clara para configurar el proveedor DNS-01 del panel, instalar modulos Caddy y guardar credenciales del proveedor.
+- Redireccion desde la URL legacy `/musedock/plugins/caddy-domain-manager/dns-accounts` hacia `/settings/dns` para evitar 404.
+- Docs: `Settings > DNS` queda documentado y enlazado desde la guia TLS/DNS-01 del panel.
+
+### Improved
+- Las credenciales JSON nuevas para DNS-01 del panel se guardan cifradas, manteniendo compatibilidad con configuraciones antiguas en claro.
+- Modales de confirmacion e inputs JSON de Caddy, Cron y Fail2Ban ajustados al tema oscuro para que password y textos sean legibles.
+
 ## [1.0.181] — 2026-04-27
 
 ### Added

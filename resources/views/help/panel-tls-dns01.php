@@ -221,7 +221,7 @@
     <div class="card-body">
         <p class="small text-muted mb-3">
             Caddy no carga proveedores DNS como plugins dinamicos. Para usar DNS-01 con un proveedor, el binario de Caddy debe estar compilado
-            con <code>dns.providers.&lt;proveedor&gt;</code>. MuseDock detecta los instalados y puede instalar nuevos desde <code>Settings &gt; Server</code>.
+            con <code>dns.providers.&lt;proveedor&gt;</code>. MuseDock detecta los instalados y puede instalar nuevos desde <code>Settings &gt; DNS</code>.
         </p>
         <div class="table-responsive">
             <table class="table table-sm align-middle mb-0">
@@ -258,10 +258,11 @@
     <div class="card-header"><i class="bi bi-tools me-2"></i>Instalar un proveedor DNS en Caddy desde el panel</div>
     <div class="card-body">
         <ol class="small text-muted mb-3">
-            <li>Abrir <code>Settings &gt; Server</code>.</li>
-            <li>Seleccionar <strong>Let's Encrypt DNS-01</strong>.</li>
-            <li>En el bloque <strong>Instalar modulo DNS en Caddy</strong>, elegir proveedor.</li>
-            <li>Pulsar <strong>Instalar proveedor</strong>.</li>
+            <li>Abrir <code>Settings &gt; DNS</code>.</li>
+            <li>Seleccionar proveedor, instalar modulo si falta y guardar credenciales.</li>
+            <li>Marcar <strong>Activar DNS-01 como TLS del panel</strong> si quieres aplicar el cambio al guardar.</li>
+            <li>Si aun no hay dominio o email ACME, completarlos antes en <code>Settings &gt; Server</code>.</li>
+            <li>En el bloque <strong>Instalar modulo DNS en Caddy</strong>, elegir proveedor y pulsar <strong>Instalar proveedor</strong>.</li>
             <li>Confirmar con password de administrador.</li>
             <li>Esperar unos minutos y recargar la pagina.</li>
             <li>Verificar que el proveedor aparece en el selector de proveedores instalados.</li>

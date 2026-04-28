@@ -539,7 +539,7 @@ class DocsController
                 'quick_steps' => [
                     'Verificar hostname, timezone y URL de acceso real del panel.',
                     'Ajustar TLS del panel (self-signed/http01/dns01) segun tu modelo de red.',
-                    'Si usas DNS-01, revisar la guia especial /docs/panel-tls-dns01 antes de guardar.',
+                    'Si usas DNS-01, revisar /settings/dns y la guia especial /docs/panel-tls-dns01 antes de guardar.',
                     'Guardar cambios y comprobar acceso HTTPS por dominio e IP fallback.',
                     'Gestionar avisos de reinicio/paradas desde Settings > Notifications.',
                 ],
@@ -552,7 +552,7 @@ class DocsController
                 'pitfalls' => [
                     'Cambiar identidad sin revisar DNS puede romper validaciones externas.',
                     'Usar HTTP-01 con firewall cerrado impide emision/renovacion de certificados.',
-                    'Elegir DNS-01 sin instalar el modulo Caddy del proveedor impide crear la policy ACME.',
+                    'Elegir DNS-01 sin instalar el modulo Caddy del proveedor en Settings > DNS impide crear la policy ACME.',
                     'Pensar que los avisos de reinicio se gestionan aqui (ahora van en Notificaciones).',
                 ],
             ],
@@ -922,6 +922,30 @@ class DocsController
                 'pitfalls' => [
                     'Apuntar a destino inexistente genera 502/504.',
                     'Conflictos de hostnames con otras rutas provocan comportamiento ambiguo.',
+                ],
+            ],
+            'dns' => [
+                'title' => 'DNS',
+                'panel_url' => '/settings/dns',
+                'summary' => 'Proveedor DNS-01 del panel, modulos Caddy y credenciales API para certificados sin abrir 80/443.',
+                'what_is' => 'Centraliza el proveedor DNS que Caddy usara para validar certificados del dominio del panel mediante DNS-01. Es independiente del gestor completo de registros Cloudflare.',
+                'quick_steps' => [
+                    'Elegir proveedor DNS del catalogo.',
+                    'Instalar el modulo Caddy si aparece como no instalado.',
+                    'Pegar el JSON de credenciales API del proveedor.',
+                    'Marcar activar DNS-01 si quieres que el panel use ese metodo al guardar.',
+                    'Verificar despues el certificado del dominio del panel.',
+                ],
+                'checklist' => [
+                    'El dominio del panel esta configurado en Settings > Servidor.',
+                    'El email ACME es valido.',
+                    'Caddy lista dns.providers.<proveedor>.',
+                    'Las credenciales API tienen permisos DNS suficientes para crear TXT _acme-challenge.',
+                ],
+                'pitfalls' => [
+                    'DNS-01 valida por DNS publico, no por el puerto 8444.',
+                    'Un proxy/CDN delante no sustituye al token API del proveedor DNS real.',
+                    'Compilar un modulo Caddy reinicia Caddy; el panel crea backup y rollback automatico.',
                 ],
             ],
             'cloudflare-dns' => [
