@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.184] — 2026-04-28
+
+### Changed
+- Licencia del panel actualizada a **Source Available (Provider Use)**: se permite uso comercial como operador de hosting para tus propios clientes.
+- Se mantiene restriccion de no revender/sublicenciar el software del panel ni ofrecerlo como white-label SaaS del propio panel.
+- `MuseDock Portal` y add-ons comerciales siguen con licencia separada de pago.
+
+### Improved
+- README actualizado con resumen claro de derechos y limites de la nueva licencia.
+
 ## [1.0.183] — 2026-04-28
 
 ### Improved

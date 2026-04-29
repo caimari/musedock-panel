@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.184',
+                'date' => '2026-04-28',
+                'badge' => 'primary',
+                'changes' => [
+                    'changed' => [
+                        'es' => [
+                            'Licencia del panel actualizada a `Source Available (Provider Use)`: se permite uso comercial como operador de hosting para clientes propios',
+                            'Se mantiene la restriccion de no revender/sublicenciar el software del panel ni ofrecerlo como white-label SaaS del propio panel',
+                            '`MuseDock Portal` y add-ons comerciales siguen con licencia separada de pago',
+                        ],
+                        'en' => [
+                            'Panel license updated to `Source Available (Provider Use)`: commercial use is allowed for hosting operators serving their own customers',
+                            'Resale/sublicensing of the panel software and white-label SaaS of the panel itself remain prohibited',
+                            '`MuseDock Portal` and commercial add-ons remain under a separate paid license',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            'README actualizado con un resumen claro de derechos y limites de la nueva licencia',
+                        ],
+                        'en' => [
+                            'README updated with a clear summary of rights and limits under the new license',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.183',
                 'date' => '2026-04-28',
                 'badge' => 'primary',

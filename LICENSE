@@ -1,95 +1,91 @@
-MuseDock Panel — Source Available License
+MuseDock Panel — Source Available License (Provider Use)
 Copyright (c) 2026 MuseDock. All rights reserved.
+
+Version: 2.0 (2026-04-28)
 
 1. DEFINITIONS
 
 "Software" means the MuseDock Panel source code, documentation, and
 associated files in this repository.
 
-"Personal Use" means use by an individual for personal projects,
-home servers, learning, experimentation, or educational purposes,
-where no revenue is generated from the Software itself or from
-hosting services powered by the Software.
+"Operator Use" means operating the Software to manage your own
+infrastructure and services, including paid hosting operations for your
+own customers (for example: domains, websites, databases, mail and
+server administration run by your organization).
 
-"Commercial Use" means any use of the Software that directly or
-indirectly generates revenue, including but not limited to:
-  (a) offering hosting services to paying customers;
-  (b) selling, licensing, or sublicensing the Software;
-  (c) bundling the Software with commercial products or services;
-  (d) using the Software as part of a managed service or SaaS offering.
+"Software Resale" means selling, sublicensing, relicensing, white-labeling
+or redistributing the Software itself (source or binaries) as a product.
 
-"Community Edition" means the core features of the Software available
-under this license for Personal Use.
+"Managed Panel SaaS" means offering access to the Software itself as a
+standalone panel product/service to third parties where the panel is the
+core commercial offering.
 
-"Pro Features" means advanced functionality (including but not limited
-to cluster mode, commercial support, and features explicitly marked as
-"Pro" or "Enterprise") that require a separate paid license.
+"Portal Module" means MuseDock Portal and customer-facing modules/features
+explicitly marked as requiring a separate commercial license key.
 
-2. GRANT OF RIGHTS — PERSONAL USE
+2. LICENSE GRANT
 
-Permission is hereby granted, free of charge, to any person obtaining
-a copy of the Software, to use, copy, modify, and run the Software
-for Personal Use, subject to the following conditions:
+Permission is granted, free of charge, to use, copy, run and modify the
+Software for Operator Use, subject to this license.
 
-  (a) This license notice and copyright shall be included in all
-      copies or substantial portions of the Software.
-  (b) You may not remove, alter, or obscure any license notices,
-      copyright notices, or branding in the Software.
-  (c) You may contribute modifications back to the project (pull
-      requests, patches, etc.) and such contributions will be
-      licensed under the same terms as this license.
+This includes commercial Operator Use (charging your hosting customers for
+services managed with the Software).
 
-3. COMMERCIAL USE — SEPARATE LICENSE REQUIRED
-
-Commercial Use of the Software requires a separate commercial license
-obtained from MuseDock. Contact: info@musedock.com
-
-Using the Software commercially without a valid commercial license is
-a violation of this license and applicable copyright law.
-
-4. PRO FEATURES
-
-Pro Features are included in the source code for transparency and
-reference but may only be used with a valid Pro or Enterprise license.
-Using Pro Features without the appropriate license is prohibited.
-
-5. RESTRICTIONS
+3. WHAT YOU MAY NOT DO WITHOUT A SEPARATE COMMERCIAL AGREEMENT
 
 You may NOT:
-  (a) Sell, sublicense, or distribute the Software for a fee.
-  (b) Offer the Software as a hosted or managed service to third
-      parties without a commercial license.
-  (c) Remove or circumvent any license-checking mechanisms.
-  (d) Use the Software in any way that competes with MuseDock's
-      commercial offerings without a commercial license.
-  (e) Represent the Software as your own product.
+  (a) Sell, sublicense, or relicense the Software itself.
+  (b) Offer the Software as a white-label panel product.
+  (c) Offer a Managed Panel SaaS where the panel itself is the product.
+  (d) Distribute paid copies of the Software (source or binary) to third
+      parties.
+  (e) Remove, alter or hide copyright/license notices.
+  (f) Circumvent license checks for paid modules.
 
-6. CONTRIBUTIONS
+4. PORTAL MODULE AND PAID ADD-ONS
 
-By submitting contributions (code, documentation, translations, etc.)
-to this project, you agree that your contributions are licensed under
-the same terms as this license and you grant MuseDock a perpetual,
-worldwide, non-exclusive, royalty-free license to use, modify, and
-distribute your contributions as part of the Software.
+The admin panel can be used under this license for Operator Use.
 
-7. DISCLAIMER OF WARRANTY
+The Portal Module and any feature marked as paid/commercial require a
+separate paid license from MuseDock. This license does not grant rights
+to use paid Portal features without a valid key.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+5. DISTRIBUTION OF MODIFICATIONS
+
+If you distribute modified versions of the Software to third parties, you
+must keep this license and all copyright notices intact.
+
+Distribution does not grant recipients rights beyond this license.
+
+6. TRADEMARKS
+
+"MuseDock" name, logos and marks are trademarks of their respective owner.
+This license does not grant trademark rights.
+
+7. CONTRIBUTIONS
+
+By submitting contributions (code, docs, translations), you agree those
+contributions are licensed under this same license, and you grant MuseDock
+a perpetual, worldwide, non-exclusive, royalty-free right to use and
+redistribute them as part of the Software.
+
+8. DISCLAIMER OF WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE, AND NONINFRINGEMENT.
 
 IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
-TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
-SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT
+OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR
+THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-8. TERMINATION
+9. TERMINATION
 
-This license is automatically terminated if you violate any of its
-terms. Upon termination, you must destroy all copies of the Software
-in your possession.
+This license terminates automatically if you violate its terms. Upon
+termination, you must stop use and destroy copies in your possession.
 
-9. GOVERNING LAW
+10. GOVERNING LAW
 
-This license shall be governed by and construed in accordance with
-the laws of Spain, without regard to conflict of law principles.
+This license is governed by the laws of Spain, without regard to conflict
+of law principles.

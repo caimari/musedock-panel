@@ -134,6 +134,13 @@ Desde el propio panel en `/docs`:
 
 ## Licencia
 
-El proyecto usa licencia **Source Available** (no MIT).
+El proyecto usa licencia **Source Available (Provider Use)**.
+
+Resumen rapido:
+
+- Puedes usar MuseDock Panel gratis para operar tu hosting, incluso cobrando a tus clientes.
+- No puedes revender/sublicenciar el software del panel como producto.
+- No puedes ofrecerlo en modo white-label SaaS del propio panel.
+- El modulo **MuseDock Portal** y features marcadas como comerciales requieren licencia de pago aparte.
 
 Revisa terminos completos en [LICENSE](LICENSE).

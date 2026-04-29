@@ -6,14 +6,14 @@ use MuseDockPanel\Settings;
 /**
  * LicenseService — Feature gating for MuseDock Panel.
  *
- * Admin panel tier: MIT (all admin features included, no Pro gating)
+ * Admin panel tier: Source Available (Provider Use), no Pro gating
  * Portal tier: customer-facing commercial module (separate license)
  *
  * Portal license is verified via JWT signed by license.musedock.com.
  */
 class LicenseService
 {
-    // Admin-panel feature constants (kept for compatibility; MIT = always enabled)
+    // Admin-panel feature constants (kept for compatibility; always enabled)
     public const FEATURE_MULTI_SLAVE    = 'multi-slave';
     public const FEATURE_ELECTION       = 'election';
     public const FEATURE_CHAIN_FAILOVER = 'chain-failover';
@@ -27,7 +27,7 @@ class LicenseService
     public const FEATURE_PORTAL_BACKUPS     = 'portal-backups';
     public const FEATURE_PORTAL_TICKETS     = 'portal-tickets';
 
-    // Features that require Portal license (commercial, separate from MIT panel)
+    // Features that require Portal license (commercial, separate from core panel)
     private static array $portalFeatures = [
         self::FEATURE_PORTAL,
         self::FEATURE_PORTAL_FILEMANAGER,
@@ -51,13 +51,13 @@ class LicenseService
             return self::isPortalLicensed($feature);
         }
 
-        // MIT panel: all non-portal features are always available.
+        // Core panel: all non-portal features are always available.
         return true;
     }
 
     /**
      * Backward-compatible alias.
-     * Admin panel no longer has Pro gating under MIT distribution.
+     * Admin panel no longer has Pro gating in the core distribution.
      */
     public static function isProLicense(): bool
     {

@@ -93,7 +93,7 @@ class ProxyRouteService
     }
 
     /**
-     * MIT panel: proxy routes are unlimited.
+     * Core panel: proxy routes are unlimited.
      */
     public static function canAddRoute(): bool
     {
