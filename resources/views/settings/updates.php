@@ -228,6 +228,25 @@ function panelReadyFetch() {
         cache: 'no-store',
         redirect: 'follow',
         headers: {'X-Requested-With': 'XMLHttpRequest'}
+    }).then(function(response) {
+        if (!response.ok) {
+            throw new Error('HTTP ' + response.status);
+        }
+        var contentType = String(response.headers.get('content-type') || '').toLowerCase();
+        if (contentType && contentType.indexOf('text/html') === -1) {
+            throw new Error('Unexpected content-type: ' + contentType);
+        }
+        return response.text();
+    }).then(function(html) {
+        var text = String(html || '');
+        // Treat transient/empty responses during service restart as "not ready yet".
+        if (text.length < 200) {
+            throw new Error('Panel response still warming up');
+        }
+        if (text.indexOf('updateCheckForm') === -1 && text.indexOf('Actualizacion en progreso') === -1) {
+            throw new Error('Updates page markers not found yet');
+        }
+        return true;
     });
 }
 
@@ -367,7 +386,7 @@ function startUpdatePolling(initialMessage) {
                 }
                 if (data.current && data.current !== UPDATE_PAGE_START_VERSION && (!data.in_progress || data.completed)) {
                     clearInterval(timer);
-                    forceReloadUpdatesPage();
+                    setTimeout(tryReload, 800);
                     return;
                 }
                 if (!data.in_progress || data.completed || (data.output && data.output.includes('Update complete'))) {
@@ -440,7 +459,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 if (data.current && data.current !== UPDATE_PAGE_START_VERSION && (!data.in_progress || data.completed)) {
                     clearInterval(timer);
-                    forceReloadUpdatesPage();
+                    setTimeout(tryReload, 800);
                     return;
                 }
                 if (!data.in_progress || data.completed) {
@@ -453,8 +472,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 catchCount++;
                 if (!sawRestart && catchCount >= 2) {
                     sawRestart = true;
-                    out.textContent += '\n\n  Reiniciando panel... espere...';
-                    out.scrollTop = out.scrollHeight;
+                    if (out) {
+                        out.textContent += '\n\n  Reiniciando panel... espere...';
+                        out.scrollTop = out.scrollHeight;
+                    }
                 }
                 if (catchCount >= 8) {
                     // Panel has been down for ~16s — start trying to reload

@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.185',
+                'date' => '2026-04-29',
+                'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '`Settings > Updates`: la recarga automatica tras update ahora valida que la respuesta HTML del panel sea completa y estable antes de redirigir, evitando la pantalla en blanco puntual durante el reinicio del servicio',
+                        ],
+                        'en' => [
+                            '`Settings > Updates`: post-update auto-reload now validates that the panel HTML response is complete and stable before redirecting, preventing occasional blank pages during service restart',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.184',
                 'date' => '2026-04-28',
                 'badge' => 'primary',

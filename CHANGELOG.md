@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.185] — 2026-04-29
+
+### Fixed
+- `Settings > Updates`: la recarga automatica post-update ahora valida que la respuesta HTML del panel sea real y estable (no vacia/transitoria) antes de hacer `location.replace`, evitando la pantalla en blanco puntual tras reinicio del servicio.
+
 ## [1.0.184] — 2026-04-28
 
 ### Changed
