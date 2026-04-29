@@ -76,10 +76,17 @@ class UpdateService
     public static function localUpdateInfo(): array
     {
         $current = self::currentVersion();
+        $remote = $current;
+        try {
+            $remote = Settings::get('update_remote_version', $current) ?: $current;
+        } catch (\Throwable) {
+            // Keep this method DB-agnostic as documented.
+            $remote = $current;
+        }
 
         return [
             'current'          => $current,
-            'remote'           => Settings::get('update_remote_version', $current) ?: $current,
+            'remote'           => $remote,
             'has_update'       => false,
             'checked_at'       => null,
             'checked_at_epoch' => 0,

@@ -28,7 +28,13 @@ class UpdateController
             $updateStatus = UpdateService::getUpdateStatus();
         } catch (\Throwable $e) {
             $updateError = $e->getMessage();
-            $updateInfo = UpdateService::localUpdateInfo();
+            $updateInfo = [
+                'current'          => PANEL_VERSION,
+                'remote'           => PANEL_VERSION,
+                'has_update'       => false,
+                'checked_at'       => null,
+                'checked_at_epoch' => 0,
+            ];
             $changelog = [];
             $updateStatus = [
                 'in_progress' => false,
@@ -36,6 +42,10 @@ class UpdateController
                 'output' => "Updates page recovered from error:\n" . $e->getMessage(),
                 'elapsed' => 0,
                 'completed' => false,
+                'last_status' => 'recovered',
+                'last_error' => $e->getMessage(),
+                'last_run_id' => '',
+                'last_finished_at' => date('Y-m-d H:i:s'),
             ];
         }
 
