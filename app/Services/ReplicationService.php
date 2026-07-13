@@ -1156,10 +1156,28 @@ class ReplicationService
             return ['ok' => false, 'steps' => $steps, 'error' => 'pg_basebackup falló; el directorio de datos original NO se modificó.'];
         }
 
-        // Swap: move old aside (never delete), move temp in.
-        shell_exec('mv ' . escapeshellarg($dataDir) . ' ' . escapeshellarg($oldDir) . ' 2>&1');
-        shell_exec('mv ' . escapeshellarg($tmpDir) . ' ' . escapeshellarg($dataDir) . ' 2>&1');
-        shell_exec('chown -R postgres:postgres ' . escapeshellarg($dataDir) . ' 2>&1');
+        // Swap: move old aside (never delete), move temp in. Each step's exit
+        // code is checked — a failed mv must not be reported as success.
+        $mvOld = static::runChecked('mv ' . escapeshellarg($dataDir) . ' ' . escapeshellarg($oldDir));
+        if (!$mvOld['ok']) {
+            // Original dir untouched (mv failed); clean the temp copy and restart.
+            static::runChecked('rm -rf ' . escapeshellarg($tmpDir));
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+            $steps[] = ['name' => 'Sustituir directorio de datos', 'ok' => false, 'output' => 'No se pudo apartar el dir original: ' . $mvOld['output']];
+            return ['ok' => false, 'steps' => $steps, 'error' => "No se pudo apartar {$dataDir}; el directorio original NO se modificó."];
+        }
+
+        $mvNew = static::runChecked('mv ' . escapeshellarg($tmpDir) . ' ' . escapeshellarg($dataDir));
+        if (!$mvNew['ok']) {
+            // Restore original immediately — the standby copy never went live.
+            static::runChecked('mv ' . escapeshellarg($oldDir) . ' ' . escapeshellarg($dataDir));
+            static::runChecked('rm -rf ' . escapeshellarg($tmpDir));
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+            $steps[] = ['name' => 'Sustituir directorio de datos', 'ok' => false, 'output' => 'Fallo al mover el standby; original restaurado'];
+            return ['ok' => false, 'steps' => $steps, 'error' => "No se pudo instalar el standby; se restauró {$dataDir} desde {$oldDir}."];
+        }
+
+        static::runChecked('chown -R postgres:postgres ' . escapeshellarg($dataDir));
         $steps[] = ['name' => 'Sustituir directorio de datos', 'ok' => true, 'output' => "anterior apartado en {$oldDir}"];
 
         // Start ONLY this cluster.
@@ -1168,16 +1186,34 @@ class ReplicationService
         $running = PgClusterService::isRunning($cluster);
 
         if (!$running) {
-            // Rollback: restore the old data dir.
-            shell_exec('rm -rf ' . escapeshellarg($dataDir) . ' 2>&1');
-            shell_exec('mv ' . escapeshellarg($oldDir) . ' ' . escapeshellarg($dataDir) . ' 2>&1');
+            // Rollback: remove the (non-starting) standby and restore the original.
+            static::runChecked('rm -rf ' . escapeshellarg($dataDir));
+            $restore = static::runChecked('mv ' . escapeshellarg($oldDir) . ' ' . escapeshellarg($dataDir));
             shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
-            $steps[] = ['name' => 'Rollback', 'ok' => true, 'output' => "Restaurado {$oldDir} → {$dataDir}"];
-            return ['ok' => false, 'steps' => $steps, 'error' => "El clúster {$cluster['key']} no arrancó como slave; se restauró el estado anterior."];
+            if ($restore['ok']) {
+                $steps[] = ['name' => 'Rollback', 'ok' => true, 'output' => "Restaurado {$oldDir} → {$dataDir}"];
+                return ['ok' => false, 'steps' => $steps, 'error' => "El clúster {$cluster['key']} no arrancó como slave; se restauró el estado anterior."];
+            }
+            // Restore itself failed — data is SAFE at $oldDir; surface loudly.
+            $steps[] = ['name' => 'Rollback', 'ok' => false, 'output' => "FALLO al restaurar. Los datos están intactos en {$oldDir}; restaurar manualmente."];
+            return ['ok' => false, 'steps' => $steps, 'error' => "El clúster no arrancó y el rollback automático falló. Datos a salvo en {$oldDir} — restauración manual requerida."];
         }
 
         $steps[] = ['name' => "Iniciar clúster {$cluster['key']}", 'ok' => true, 'output' => 'Activo como standby'];
         return ['ok' => true, 'steps' => $steps, 'error' => null, 'old_data_dir' => $oldDir];
+    }
+
+    /**
+     * Run a shell command and return its exit code + combined output. Unlike
+     * bare shell_exec(), this lets destructive steps detect real failure instead
+     * of hardcoding ok=true.
+     */
+    private static function runChecked(string $cmd): array
+    {
+        $output = [];
+        $code = 0;
+        exec($cmd . ' 2>&1', $output, $code);
+        return ['ok' => $code === 0, 'code' => $code, 'output' => trim(implode("\n", $output))];
     }
 
     /**
@@ -1659,12 +1695,15 @@ class ReplicationService
         // Replication role on THIS cluster's port.
         $safeUser = preg_replace('/[^a-zA-Z0-9_]/', '', $replUser);
         if ($replPass !== '') {
-            $pgpass = static::writeTempPgpass('127.0.0.1', (int)$cluster['port'], '*', 'postgres', '');
-            $safePass = escapeshellarg($replPass);
-            $sql = "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='{$safeUser}') THEN CREATE ROLE {$safeUser} WITH REPLICATION LOGIN PASSWORD {$safePass}; ELSE ALTER ROLE {$safeUser} WITH REPLICATION LOGIN PASSWORD {$safePass}; END IF; END \$\$;";
-            $out = shell_exec('sudo -u postgres psql -p ' . (int)$cluster['port'] . ' -c ' . escapeshellarg($sql) . ' 2>&1');
-            @unlink($pgpass);
-            $steps[] = ['name' => "Rol replicación {$safeUser}", 'ok' => true, 'output' => trim((string)$out) ?: 'OK'];
+            // Proper SQL string literal: double single-quotes (NOT escapeshellarg,
+            // which produces shell quoting and breaks on passwords containing ').
+            $sqlPass = "'" . str_replace("'", "''", $replPass) . "'";
+            $sql = "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='{$safeUser}') THEN CREATE ROLE {$safeUser} WITH REPLICATION LOGIN PASSWORD {$sqlPass}; ELSE ALTER ROLE {$safeUser} WITH REPLICATION LOGIN PASSWORD {$sqlPass}; END IF; END \$\$;";
+            $r = static::runChecked('sudo -u postgres psql -p ' . (int)$cluster['port'] . ' -v ON_ERROR_STOP=1 -c ' . escapeshellarg($sql));
+            $steps[] = ['name' => "Rol replicación {$safeUser}", 'ok' => $r['ok'], 'output' => $r['ok'] ? 'OK' : $r['output']];
+            if (!$r['ok']) {
+                return ['ok' => false, 'steps' => $steps, 'error' => "No se pudo crear el rol de replicación: {$r['output']}"];
+            }
         }
 
         // Physical slots (unique per slave+cluster).
@@ -2084,7 +2123,55 @@ class ReplicationService
     // ─── Switchover ──────────────────────────────────────────
     // ═══════════════════════════════════════════════════════════
 
+    /**
+     * DEPRECATED / UNSAFE. Derived the cluster from the psql CLIENT version (16)
+     * and a hardcoded 'main', so it tried to promote 16/main (nonexistent) and
+     * fell back to promoting whatever the default port 5432 (=14/main) resolved
+     * to — the wrong cluster. Now a blocked stub; use promotePgSlaveForCluster().
+     */
     public static function promotePgSlave(): array
+    {
+        return [
+            'ok'    => false,
+            'steps' => [[
+                'name'   => 'Bloqueado por seguridad',
+                'ok'     => false,
+                'output' => 'promotePgSlave() legacy está deshabilitado: promovía el clúster equivocado. Use promotePgSlaveForCluster($cluster).',
+            ]],
+            'error' => 'Operación bloqueada: la promoción requiere un clúster PostgreSQL explícito.',
+        ];
+    }
+
+    /**
+     * Promote ONE explicit cluster from standby to primary, via pg_ctlcluster on
+     * that cluster only. Verifies recovery state on the cluster's OWN port
+     * (not the panel DB). Never touches other clusters.
+     */
+    public static function promotePgSlaveForCluster(array $cluster): array
+    {
+        $steps = [];
+        foreach (['version', 'cluster', 'port'] as $k) {
+            if (empty($cluster[$k])) {
+                return ['ok' => false, 'steps' => $steps, 'error' => "Descriptor de clúster incompleto (falta '{$k}')."];
+            }
+        }
+
+        $output = shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' promote 2>&1');
+        $ok = $output === null || !str_contains(strtolower((string)$output), 'error');
+        $steps[] = ['name' => "Promover {$cluster['key']}", 'ok' => $ok, 'output' => trim((string)$output) ?: 'OK'];
+
+        sleep(2);
+        // Verify on THIS cluster's own port.
+        $rec = static::queryCluster($cluster, 'SELECT pg_is_in_recovery()');
+        $stillRecovery = isset($rec[0][0]) && ($rec[0][0] === 't' || $rec[0][0] === 'true');
+        $promoted = !$stillRecovery;
+        $steps[] = ['name' => 'Verificar promoción', 'ok' => $promoted, 'output' => $promoted ? 'Master activo' : 'Aún en recovery'];
+
+        return ['ok' => $promoted, 'steps' => $steps, 'error' => $promoted ? null : "El clúster {$cluster['key']} sigue en recovery"];
+    }
+
+    /** Legacy body retained below only for reference — unreachable. */
+    private static function promotePgSlaveLegacyUnused(): array
     {
         $steps = [];
         $pgVer = static::detectPgVersion() ?? '16';

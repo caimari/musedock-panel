@@ -153,6 +153,14 @@ ok('setupPgSlave legacy es stub bloqueado',
 $confirmToken = R::slaveConfirmToken('filemon', $muse);
 ok('token de confirmación embebe slave+cluster+puerto',
     str_contains($confirmToken, 'filemon') && str_contains($confirmToken, '16/musemind') && str_contains($confirmToken, '5434'));
+ok('promotePgSlave legacy bloqueado (no promueve cluster equivocado)',
+    R::promotePgSlave()['ok'] === false);
+ok('promotePgSlaveForCluster requiere descriptor explícito',
+    R::promotePgSlaveForCluster([])['ok'] === false);
+// Verify promote no longer derives cluster from client psql version.
+$svc2 = file_get_contents(PANEL_ROOT . '/app/Services/ReplicationService.php');
+ok('promotePgSlaveForCluster usa pg_ctlcluster con version/cluster explícitos',
+    (bool)preg_match('/promotePgSlaveForCluster.*?pg_ctlcluster.*?cluster\[.version.\]/s', $svc2));
 
 // ── Summary ────────────────────────────────────────────────────────
 echo "\n\033[1m─────────────────────────────────────────\033[0m\n";

@@ -704,12 +704,22 @@ class ReplicationController
                 exit;
             }
 
-            $result = ReplicationService::promotePgSlave();
+            // Promotion now requires an explicit cluster (the old path promoted
+            // the wrong cluster). Resolve from POST, or fall back to the panel
+            // cluster only if a single PG cluster is in recovery.
+            $cluster = PgClusterService::get(trim($_POST['pg_version'] ?? ''), trim($_POST['cluster_name'] ?? ''));
+            if ($cluster === null) {
+                Flash::set('error', 'Selecciona un clúster PostgreSQL explícito (14/main, 14/panel o 16/musemind) para promover.');
+                header('Location: /settings/replication');
+                exit;
+            }
+
+            $result = ReplicationService::promotePgSlaveForCluster($cluster);
             if ($result['ok']) {
                 Settings::set('repl_pg_role', 'master');
                 $this->syncLegacyRole();
-                LogService::log('replication.promote', 'pg', 'PostgreSQL promovido a Master');
-                Flash::set('success', 'PostgreSQL promovido a Master');
+                LogService::log('replication.promote', 'pg', "PostgreSQL {$cluster['key']} promovido a Master");
+                Flash::set('success', "PostgreSQL {$cluster['key']} promovido a Master");
             } else {
                 Flash::set('error', 'Error: ' . $result['error']);
             }
