@@ -1248,6 +1248,77 @@ class ReplicationService
     }
 
     // ═══════════════════════════════════════════════════════════
+    // ─── Replication matrix (UI) ─────────────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Build the replication matrix rows for the UI:
+     *   Slave | Engine | Instance | Port | Role | Status | Lag | Slot | Last error
+     *
+     * Combines configured per-cluster PG instances with the LIVE per-cluster
+     * streaming state, plus a MySQL/MariaDB row per slave. Read-only.
+     */
+    public static function buildMatrix(): array
+    {
+        $rows = [];
+        $liveStreaming = static::getPgStreamingByCluster();
+        $localVendor = static::detectDbVendor();
+
+        foreach (static::getSlaves() as $slave) {
+            // PostgreSQL per-cluster instances.
+            foreach (static::getPgInstances((int)$slave['id']) as $inst) {
+                $key = "{$inst['pg_version']}/{$inst['cluster_name']}";
+                $live = $liveStreaming[$key] ?? null;
+                $status = $inst['status'] ?? 'pending';
+                $lag = '';
+                if ($live && ($live['role'] ?? '') === 'slave') {
+                    $status = $live['streaming'] ? 'streaming' : 'desconectado';
+                    $lag = isset($live['lag_seconds']) ? $live['lag_seconds'] . 's' : '';
+                }
+                $rows[] = [
+                    'slave'      => $slave['name'],
+                    'slave_id'   => (int)$slave['id'],
+                    'engine'     => 'PostgreSQL',
+                    'instance'   => $key,
+                    'port'       => (int)$inst['source_port'],
+                    'role'       => 'slave',
+                    'status'     => $status,
+                    'lag'        => $lag,
+                    'slot'       => $inst['slot_name'] ?? '',
+                    'last_error' => $inst['last_error'] ?? '',
+                    'enabled'    => !empty($inst['enabled']),
+                    'instance_id'=> (int)$inst['id'],
+                ];
+            }
+
+            // MySQL/MariaDB row (if the slave has it enabled).
+            if (!empty($slave['mysql_enabled'])) {
+                // Compatibility check master(local) vs slave engine is advisory here.
+                $slaveVendor = ['vendor' => $slave['mysql_vendor'] ?? '', 'version' => $slave['mysql_version'] ?? ''];
+                $compat = ($slaveVendor['vendor'] && $slaveVendor['vendor'] !== $localVendor['vendor'])
+                    ? 'incompatible (' . $localVendor['vendor'] . '→' . $slaveVendor['vendor'] . ')'
+                    : ($slave['status'] ?? 'pending');
+                $rows[] = [
+                    'slave'      => $slave['name'],
+                    'slave_id'   => (int)$slave['id'],
+                    'engine'     => $localVendor['vendor'] === 'mariadb' ? 'MariaDB' : 'MySQL',
+                    'instance'   => $localVendor['version'] ?: ($slave['mysql_version'] ?? ''),
+                    'port'       => (int)($slave['mysql_port'] ?? 3306),
+                    'role'       => 'slave',
+                    'status'     => $compat,
+                    'lag'        => '',
+                    'slot'       => '',
+                    'last_error' => '',
+                    'enabled'    => true,
+                    'instance_id'=> 0,
+                ];
+            }
+        }
+
+        return $rows;
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // ─── Preflight + confirmation (safety gate) ──────────────
     // ═══════════════════════════════════════════════════════════
 

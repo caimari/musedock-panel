@@ -433,6 +433,64 @@ class ReplicationController
     }
 
     /**
+     * GET /settings/replication/matrix (JSON)
+     * The replication matrix: Slave|Engine|Instance|Port|Role|Status|Lag|Slot|Error.
+     */
+    public function matrix(): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode(['ok' => true, 'rows' => ReplicationService::buildMatrix()]);
+        exit;
+    }
+
+    /**
+     * POST /settings/replication/instance/save (JSON)
+     * Create/update a per-cluster PG instance for a slave.
+     */
+    public function saveInstance(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $slaveId = (int)($_POST['slave_id'] ?? 0);
+        if ($slaveId < 1 || !ReplicationService::getSlave($slaveId)) {
+            echo json_encode(['ok' => false, 'error' => 'Slave no válido']);
+            exit;
+        }
+        $cluster = PgClusterService::get(trim($_POST['pg_version'] ?? ''), trim($_POST['cluster_name'] ?? ''));
+        if ($cluster === null) {
+            echo json_encode(['ok' => false, 'error' => 'Clúster PostgreSQL no existe en este host']);
+            exit;
+        }
+        $id = ReplicationService::upsertPgInstance($slaveId, [
+            'pg_version'       => $cluster['version'],
+            'cluster_name'     => $cluster['cluster'],
+            'source_port'      => $cluster['port'],
+            'target_port'      => (int)($_POST['target_port'] ?? $cluster['port']),
+            'replication_type' => $_POST['replication_type'] ?? 'physical',
+            'sync_mode'        => $_POST['sync_mode'] ?? 'async',
+            'replication_user' => $_POST['replication_user'] ?? 'replicator',
+            'password'         => $_POST['password'] ?? '',
+            'enabled'          => !empty($_POST['enabled']),
+        ]);
+        echo json_encode(['ok' => true, 'id' => $id]);
+        exit;
+    }
+
+    /**
+     * POST /settings/replication/instance/delete (JSON)
+     */
+    public function deleteInstance(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $id = (int)($_POST['id'] ?? 0);
+        if ($id > 0) ReplicationService::deletePgInstance($id);
+        echo json_encode(['ok' => true]);
+        exit;
+    }
+
+    /**
      * GET /settings/replication/pg-clusters (JSON)
      * List the real PostgreSQL clusters on this host with explicit identity, so
      * the UI can offer a cluster picker instead of guessing a default.

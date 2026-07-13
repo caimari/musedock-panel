@@ -519,6 +519,10 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/replication/pg-clusters', 'ReplicationController@listPgClusters');
 \MuseDockPanel\Router::post('/settings/replication/preflight', 'ReplicationController@preflight');
 \MuseDockPanel\Router::post('/settings/replication/convert-to-slave-cluster', 'ReplicationController@convertToSlaveCluster');
+// Replication matrix + per-instance CRUD
+\MuseDockPanel\Router::get('/settings/replication/matrix', 'ReplicationController@matrix');
+\MuseDockPanel\Router::post('/settings/replication/instance/save', 'ReplicationController@saveInstance');
+\MuseDockPanel\Router::post('/settings/replication/instance/delete', 'ReplicationController@deleteInstance');
 // Mode 3: Auto (cluster)
 \MuseDockPanel\Router::post('/settings/replication/auto-configure', 'ReplicationController@autoConfigure');
 // Switchover
