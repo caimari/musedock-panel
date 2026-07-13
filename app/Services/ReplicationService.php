@@ -49,6 +49,85 @@ class ReplicationService
         return null;
     }
 
+    /**
+     * Detect the ACTUAL database vendor and version, from the live server
+     * (SELECT VERSION()) rather than the client binary. Returns:
+     *   ['vendor' => 'mariadb'|'mysql', 'version' => '10.6.x'|'8.0.x', 'raw' => '...']
+     *
+     * This is the fix for the vendor-mixup: MariaDB and Oracle MySQL share the
+     * `mysql` client but need entirely different replication syntax. We must
+     * never send Oracle GTID options to MariaDB, and must never query
+     * @@gtid_mode on MariaDB (it doesn't exist there).
+     */
+    public static function detectDbVendor(?\PDO $pdo = null): array
+    {
+        $raw = '';
+        $pdo = $pdo ?? static::getMysqlPdo();
+        if ($pdo) {
+            try {
+                $raw = (string)$pdo->query("SELECT VERSION()")->fetchColumn();
+            } catch (\Throwable) {}
+        }
+        if ($raw === '') {
+            // Fall back to the client banner (less reliable but better than nothing).
+            $raw = trim((string)shell_exec('mysql --version 2>/dev/null'));
+        }
+
+        $isMaria = stripos($raw, 'mariadb') !== false;
+        $version = '';
+        if (preg_match('/(\d+\.\d+\.\d+)/', $raw, $m)) {
+            $version = $m[1];
+        } elseif (preg_match('/(\d+\.\d+)/', $raw, $m)) {
+            $version = $m[1];
+        }
+
+        return [
+            'vendor'  => $isMaria ? 'mariadb' : 'mysql',
+            'version' => $version,
+            'raw'     => $raw,
+        ];
+    }
+
+    /**
+     * Assess whether native binary replication is viable between this master's
+     * MySQL-family engine and a slave's engine/version. MariaDB↔MySQL binary
+     * replication is NOT reliably supported and must be blocked with a warning.
+     *
+     * @param array $slaveInfo ['vendor'=>..., 'version'=>...] of the slave
+     * @return array ['compatible'=>bool, 'severity'=>'ok'|'warning'|'critical', 'message'=>...]
+     */
+    public static function assessMysqlCompatibility(array $masterInfo, array $slaveInfo): array
+    {
+        $mv = $masterInfo['vendor'] ?? '';
+        $sv = $slaveInfo['vendor'] ?? '';
+
+        if ($mv === '' || $sv === '') {
+            return ['compatible' => false, 'severity' => 'warning',
+                'message' => 'No se pudo determinar el motor de uno de los extremos. No configure replicación nativa hasta verificarlo.'];
+        }
+
+        if ($mv !== $sv) {
+            return ['compatible' => false, 'severity' => 'critical',
+                'message' => "Incompatible: master es {$mv} " . ($masterInfo['version'] ?? '')
+                    . " y slave es {$sv} " . ($slaveInfo['version'] ?? '')
+                    . ". La replicación binaria fiable exige la MISMA familia (ambos MariaDB o ambos MySQL) y versiones compatibles. "
+                    . "Recomendación: instalar {$mv} " . ($masterInfo['version'] ?? '') . " en el slave, o usar sincronización por dumps mientras tanto. "
+                    . "Nunca se sustituirá automáticamente el motor si existen bases de datos."];
+        }
+
+        // Same vendor: warn if major versions differ a lot.
+        $mMajor = (int)explode('.', $masterInfo['version'] ?? '0')[0];
+        $sMajor = (int)explode('.', $slaveInfo['version'] ?? '0')[0];
+        if ($mMajor !== $sMajor) {
+            return ['compatible' => true, 'severity' => 'warning',
+                'message' => "Ambos {$mv} pero versiones mayores distintas ({$masterInfo['version']} vs {$slaveInfo['version']}). "
+                    . "La replicación suele funcionar master→slave más nuevo, pero verifique compatibilidad."];
+        }
+
+        return ['compatible' => true, 'severity' => 'ok',
+            'message' => "Compatible: ambos {$mv} " . ($masterInfo['version'] ?? '') . "."];
+    }
+
     public static function detectMysqlServiceName(): string
     {
         $mariadb = trim((string)shell_exec('systemctl is-active mariadb 2>/dev/null'));
@@ -165,8 +244,8 @@ class ReplicationService
                 } catch (\Throwable) {}
             }
         }
-        if (file_exists('/etc/mysql/debian.cnf')) {
-            $conf = parse_ini_file('/etc/mysql/debian.cnf', true);
+        if (file_exists('/etc/mysql/debian.cnf') && is_readable('/etc/mysql/debian.cnf')) {
+            $conf = @parse_ini_file('/etc/mysql/debian.cnf', true) ?: [];
             $section = $conf['client'] ?? [];
             $user = $section['user'] ?? 'root';
             $pass = $section['password'] ?? '';
@@ -598,8 +677,15 @@ class ReplicationService
             }
         }
         if ($anyGtid || Settings::get('repl_mysql_gtid_mode', '0') === '1') {
-            $mysqlConf['gtid_mode'] = 'ON';
-            $mysqlConf['enforce-gtid-consistency'] = 'ON';
+            $vendor = static::detectDbVendor($pdo ?? null);
+            if ($vendor['vendor'] === 'mariadb') {
+                // MariaDB: GTID is implicit with binlog; use strict mode, never gtid_mode.
+                $mysqlConf['gtid_strict_mode'] = 'ON';
+                $mysqlConf['log_slave_updates'] = 'ON';
+            } else {
+                $mysqlConf['gtid_mode'] = 'ON';
+                $mysqlConf['enforce_gtid_consistency'] = 'ON';
+            }
         }
 
         $ok = static::modifyConfigFile($configPath, $mysqlConf, 'mysqld');
@@ -779,18 +865,37 @@ class ReplicationService
         $steps = [];
         $configPath = static::getMysqlConfigPath();
         $service = static::detectMysqlServiceName();
+        $vendor = static::detectDbVendor();
 
         static::backupFile($configPath);
 
-        $ok = static::modifyConfigFile($configPath, [
-            'gtid_mode'                 => 'ON',
-            'enforce-gtid-consistency'  => 'ON',
-            'log-bin'                   => 'mysql-bin',
-            'binlog_format'             => Settings::get('repl_mysql_binlog_format', 'ROW'),
-        ], 'mysqld');
-        $steps[] = ['name' => 'Configurar GTID master', 'ok' => $ok, 'output' => $ok ? 'gtid_mode=ON' : 'Error'];
+        // Vendor-specific GTID master config.
+        if ($vendor['vendor'] === 'mariadb') {
+            // MariaDB: GTID is implicit once binlog is on; NEVER set gtid_mode /
+            // enforce-gtid-consistency (those are Oracle MySQL only and break MariaDB).
+            $conf = [
+                'log-bin'          => 'mysql-bin',
+                'binlog_format'    => Settings::get('repl_mysql_binlog_format', 'ROW'),
+                'gtid_strict_mode' => 'ON',
+                'log_slave_updates'=> 'ON',
+            ];
+            $label = 'MariaDB GTID (gtid_strict_mode=ON)';
+        } else {
+            // Oracle MySQL 8: gtid_mode + enforce_gtid_consistency.
+            $conf = [
+                'log-bin'                    => 'mysql-bin',
+                'binlog_format'              => Settings::get('repl_mysql_binlog_format', 'ROW'),
+                'gtid_mode'                  => 'ON',
+                'enforce_gtid_consistency'   => 'ON',
+            ];
+            $label = 'MySQL 8 GTID (gtid_mode=ON)';
+        }
+
+        $ok = static::modifyConfigFile($configPath, $conf, 'mysqld');
+        $steps[] = ['name' => 'Configurar GTID master', 'ok' => $ok, 'output' => $ok ? $label : 'Error'];
 
         Settings::set('repl_mysql_gtid_mode', '1');
+        Settings::set('repl_mysql_vendor', $vendor['vendor']);
 
         $output = shell_exec("systemctl restart {$service} 2>&1");
         $running = trim((string)shell_exec("systemctl is-active {$service} 2>/dev/null")) === 'active';
@@ -814,15 +919,28 @@ class ReplicationService
         $parts = explode('.', $localIp);
         $serverId = ((int)($parts[3] ?? 2)) + 100;
 
-        $ok = static::modifyConfigFile($configPath, [
-            'server-id'                 => (string)$serverId,
-            'gtid_mode'                 => 'ON',
-            'enforce-gtid-consistency'  => 'ON',
-            'relay-log'                 => 'relay-bin',
-            'read_only'                 => '1',
-            'log-bin'                   => 'mysql-bin',
-        ], 'mysqld');
-        $steps[] = ['name' => 'Configurar GTID slave', 'ok' => $ok, 'output' => "server-id={$serverId}, GTID=ON"];
+        $vendor = static::detectDbVendor();
+        if ($vendor['vendor'] === 'mariadb') {
+            $conf = [
+                'server-id'        => (string)$serverId,
+                'relay-log'        => 'relay-bin',
+                'read_only'        => '1',
+                'log-bin'          => 'mysql-bin',
+                'gtid_strict_mode' => 'ON',
+                'log_slave_updates'=> 'ON',
+            ];
+        } else {
+            $conf = [
+                'server-id'                 => (string)$serverId,
+                'gtid_mode'                 => 'ON',
+                'enforce_gtid_consistency'  => 'ON',
+                'relay-log'                 => 'relay-bin',
+                'read_only'                 => '1',
+                'log-bin'                   => 'mysql-bin',
+            ];
+        }
+        $ok = static::modifyConfigFile($configPath, $conf, 'mysqld');
+        $steps[] = ['name' => 'Configurar GTID slave', 'ok' => $ok, 'output' => "server-id={$serverId}, {$vendor['vendor']} GTID"];
 
         $output = shell_exec("systemctl restart {$service} 2>&1");
         $running = trim((string)shell_exec("systemctl is-active {$service} 2>/dev/null")) === 'active';
@@ -832,33 +950,40 @@ class ReplicationService
             return ['ok' => false, 'steps' => $steps, 'error' => "{$service} no arranco"];
         }
 
-        // Configure replication with MASTER_AUTO_POSITION
         $pdo = static::getMysqlPdo();
         if (!$pdo) {
             return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo conectar a MySQL local'];
         }
 
         try {
-            $mysqlVer = static::detectMysqlVersion();
-            $isNew = $mysqlVer && version_compare($mysqlVer, '8.0.23', '>=');
-
-            $pdo->exec("STOP SLAVE");
-            if ($isNew) {
-                $pdo->exec("CHANGE REPLICATION SOURCE TO SOURCE_HOST=" . $pdo->quote($masterIp) .
-                    ", SOURCE_PORT={$port}" .
-                    ", SOURCE_USER=" . $pdo->quote($user) .
-                    ", SOURCE_PASSWORD=" . $pdo->quote($pass) .
-                    ", SOURCE_AUTO_POSITION=1");
-                $pdo->exec("START REPLICA");
-            } else {
+            if ($vendor['vendor'] === 'mariadb') {
+                // MariaDB GTID: MASTER_USE_GTID=slave_pos (NOT MASTER_AUTO_POSITION).
+                $pdo->exec("STOP SLAVE");
                 $pdo->exec("CHANGE MASTER TO MASTER_HOST=" . $pdo->quote($masterIp) .
                     ", MASTER_PORT={$port}" .
                     ", MASTER_USER=" . $pdo->quote($user) .
                     ", MASTER_PASSWORD=" . $pdo->quote($pass) .
-                    ", MASTER_AUTO_POSITION=1");
+                    ", MASTER_USE_GTID=slave_pos");
                 $pdo->exec("START SLAVE");
+                $steps[] = ['name' => 'Configurar replicacion GTID', 'ok' => true, 'output' => 'MariaDB: MASTER_USE_GTID=slave_pos'];
+            } else {
+                // Oracle MySQL 8: SOURCE_AUTO_POSITION on 8.0.23+, else MASTER_AUTO_POSITION.
+                $isNew = !empty($vendor['version']) && version_compare($vendor['version'], '8.0.23', '>=');
+                $pdo->exec("STOP REPLICA");
+                if ($isNew) {
+                    $pdo->exec("CHANGE REPLICATION SOURCE TO SOURCE_HOST=" . $pdo->quote($masterIp) .
+                        ", SOURCE_PORT={$port}, SOURCE_USER=" . $pdo->quote($user) .
+                        ", SOURCE_PASSWORD=" . $pdo->quote($pass) . ", SOURCE_AUTO_POSITION=1");
+                    $pdo->exec("START REPLICA");
+                    $steps[] = ['name' => 'Configurar replicacion GTID', 'ok' => true, 'output' => 'MySQL8: SOURCE_AUTO_POSITION=1'];
+                } else {
+                    $pdo->exec("CHANGE MASTER TO MASTER_HOST=" . $pdo->quote($masterIp) .
+                        ", MASTER_PORT={$port}, MASTER_USER=" . $pdo->quote($user) .
+                        ", MASTER_PASSWORD=" . $pdo->quote($pass) . ", MASTER_AUTO_POSITION=1");
+                    $pdo->exec("START SLAVE");
+                    $steps[] = ['name' => 'Configurar replicacion GTID', 'ok' => true, 'output' => 'MySQL: MASTER_AUTO_POSITION=1'];
+                }
             }
-            $steps[] = ['name' => 'Configurar replicacion GTID', 'ok' => true, 'output' => 'MASTER_AUTO_POSITION=1'];
         } catch (\Throwable $e) {
             $steps[] = ['name' => 'Configurar replicacion GTID', 'ok' => false, 'output' => $e->getMessage()];
             return ['ok' => false, 'steps' => $steps, 'error' => $e->getMessage()];
@@ -1569,21 +1694,69 @@ class ReplicationService
     }
 
     /**
-     * Check if streaming replication is currently active (either PG or MySQL).
-     * Used to skip dump-based sync when streaming is already handling it.
+     * Decide, PER PostgreSQL cluster, whether a replica (transfer) dump can be
+     * skipped because streaming is genuinely protecting THAT cluster. A cluster
+     * that is not streaming is never protected, so its replica dump is kept.
+     *
+     * IMPORTANT: this only governs the streaming-optimisation "replica" dumps.
+     * Logical/backup dumps are governed separately and are NEVER dropped just
+     * because streaming is on (see keepLogicalDumps()).
+     *
+     * @return array keyed by "version/cluster": ['skip_replica_dump'=>bool, 'reason'=>...]
+     */
+    public static function dumpDecisionByCluster(): array
+    {
+        $decision = [];
+        $streaming = static::getPgStreamingByCluster();
+        foreach ($streaming as $key => $st) {
+            // Only a cluster acting as a slave AND actively streaming is protected.
+            $protected = ($st['role'] ?? '') === 'slave' && !empty($st['streaming']);
+            $decision[$key] = [
+                'skip_replica_dump' => $protected,
+                'reason' => $protected
+                    ? 'streaming activo en este clúster'
+                    : 'sin streaming: se mantiene el dump de este clúster',
+                'role'      => $st['role'] ?? 'unknown',
+                'streaming' => !empty($st['streaming']),
+            ];
+        }
+        return $decision;
+    }
+
+    /**
+     * Logical/backup dumps are ALWAYS kept, regardless of streaming state, so a
+     * corruption or accidental DELETE on the master (which streaming faithfully
+     * replicates to the slave) is still recoverable from a point-in-time dump.
+     * Honoured via the repl_dumps_keep setting (default '1').
+     */
+    public static function keepLogicalDumps(): bool
+    {
+        return Settings::get('repl_dumps_keep', '1') !== '0';
+    }
+
+    /**
+     * Check if streaming replication is currently active, PER ENGINE and PER
+     * PostgreSQL cluster. Never collapses PostgreSQL to a single boolean: the
+     * old behaviour could skip dumps for 14/panel just because 14/main streamed.
+     *
+     * Returns:
+     *   [
+     *     'pg_by_cluster' => ['14/main'=>bool, '14/panel'=>bool, '16/musemind'=>bool],
+     *     'pg_all'        => bool,   // true only if EVERY pg cluster streams
+     *     'mysql'         => bool,
+     *     'any_active'    => bool,
+     *   ]
      */
     public static function isStreamingActive(): array
     {
-        $pgActive = false;
+        $pgByCluster = [];
+        foreach (static::getPgStreamingByCluster() as $key => $st) {
+            $pgByCluster[$key] = ($st['role'] ?? '') === 'slave' && !empty($st['streaming']);
+        }
+        $pgAll = !empty($pgByCluster) && !in_array(false, $pgByCluster, true);
+        $pgAny = in_array(true, $pgByCluster, true);
+
         $mysqlActive = false;
-
-        try {
-            $pgStatus = static::getPgSlaveStatus();
-            if ($pgStatus && ($pgStatus['status'] ?? '') === 'streaming') {
-                $pgActive = true;
-            }
-        } catch (\Throwable) {}
-
         try {
             $mysqlStatus = static::getMysqlSlaveStatus();
             if ($mysqlStatus &&
@@ -1594,9 +1767,11 @@ class ReplicationService
         } catch (\Throwable) {}
 
         return [
-            'any_active' => $pgActive || $mysqlActive,
-            'pg' => $pgActive,
-            'mysql' => $mysqlActive,
+            'pg_by_cluster' => $pgByCluster,
+            'pg_all'        => $pgAll,       // only true when ALL pg clusters stream
+            'pg'            => $pgAll,       // backwards-compat: conservative (all)
+            'mysql'         => $mysqlActive,
+            'any_active'    => $pgAny || $mysqlActive,
         ];
     }
 
@@ -1636,14 +1811,26 @@ class ReplicationService
         $status = static::getMysqlSlaveStatus();
         if (!$status) return null;
 
-        // Add GTID fields
+        // Add GTID fields — vendor-aware. @@gtid_mode does NOT exist in MariaDB;
+        // querying it there throws, so branch on the detected vendor.
         try {
             $pdo = static::getMysqlPdo();
             if ($pdo) {
-                $gtid = $pdo->query("SELECT @@gtid_mode as gtid_mode, @@global.gtid_executed as gtid_executed")->fetch(\PDO::FETCH_ASSOC);
-                if ($gtid) {
-                    $status['Gtid_Mode'] = $gtid['gtid_mode'] ?? 'OFF';
-                    $status['Gtid_Executed'] = $gtid['gtid_executed'] ?? '';
+                $vendor = static::detectDbVendor($pdo);
+                if ($vendor['vendor'] === 'mariadb') {
+                    // MariaDB exposes GTID position via @@gtid_slave_pos / @@gtid_current_pos.
+                    $gtid = $pdo->query("SELECT @@gtid_slave_pos AS slave_pos, @@gtid_current_pos AS current_pos")->fetch(\PDO::FETCH_ASSOC);
+                    if ($gtid) {
+                        $status['Gtid_Mode'] = 'MariaDB';
+                        $status['Gtid_Slave_Pos'] = $gtid['slave_pos'] ?? '';
+                        $status['Gtid_Current_Pos'] = $gtid['current_pos'] ?? '';
+                    }
+                } else {
+                    $gtid = $pdo->query("SELECT @@gtid_mode as gtid_mode, @@global.gtid_executed as gtid_executed")->fetch(\PDO::FETCH_ASSOC);
+                    if ($gtid) {
+                        $status['Gtid_Mode'] = $gtid['gtid_mode'] ?? 'OFF';
+                        $status['Gtid_Executed'] = $gtid['gtid_executed'] ?? '';
+                    }
                 }
             }
         } catch (\Throwable) {}

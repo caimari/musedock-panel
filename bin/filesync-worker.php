@@ -153,6 +153,10 @@ try {
         if ($syncDue && ($config['db_dumps'] ?? false)) {
             $streamingStatus = \MuseDockPanel\Services\ReplicationService::isStreamingActive();
 
+            // 'pg' is now conservative: true ONLY when EVERY PostgreSQL cluster is
+            // streaming. This fixes the old bug where a single streaming cluster
+            // (e.g. 14/main) suppressed dumps for the others (14/panel, 16/musemind).
+            // Per-cluster detail is in $streamingStatus['pg_by_cluster'].
             $skipPgsql = $streamingStatus['pg'] ?? false;
             $skipMysql = $streamingStatus['mysql'] ?? false;
 
