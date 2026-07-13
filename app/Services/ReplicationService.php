@@ -1248,6 +1248,146 @@ class ReplicationService
     }
 
     // ═══════════════════════════════════════════════════════════
+    // ─── Preflight + confirmation (safety gate) ──────────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Build the required literal confirmation token for a destructive slave
+     * conversion. It embeds slave name, cluster and port so a copy-pasted token
+     * cannot target the wrong instance.
+     * e.g. "SLAVE:filemon CLUSTER:14/main PORT:5432"
+     */
+    public static function slaveConfirmToken(string $slaveName, array $cluster): string
+    {
+        return sprintf(
+            'SLAVE:%s CLUSTER:%s PORT:%d',
+            strtolower(trim($slaveName)),
+            $cluster['key'] ?? '?',
+            $cluster['port'] ?? 0
+        );
+    }
+
+    public static function verifySlaveConfirmToken(string $provided, string $slaveName, array $cluster): bool
+    {
+        return hash_equals(
+            static::slaveConfirmToken($slaveName, $cluster),
+            trim($provided)
+        );
+    }
+
+    /**
+     * Preflight report shown before ANY destructive PostgreSQL slave operation.
+     * Reads-only; never modifies. Surfaces exactly what the prompt requires:
+     * master/slave, engine, version, cluster, port, data dir, data size, free
+     * space, service state, existing target DBs, WireGuard reachability, version
+     * compatibility, the commands that WOULD run, files modified, services
+     * restarted, risks and estimated time.
+     */
+    public static function preflightPgSlave(
+        array $cluster,
+        string $masterIp,
+        int $sourcePort,
+        string $replUser,
+        string $replPass,
+        string $slaveName = ''
+    ): array {
+        $report = [
+            'engine'        => 'PostgreSQL',
+            'slave'         => $slaveName,
+            'cluster'       => $cluster['key'] ?? '?',
+            'version'       => $cluster['version'] ?? '?',
+            'port'          => $cluster['port'] ?? 0,
+            'data_dir'      => $cluster['data_dir'] ?? '',
+            'config_file'   => $cluster['config_file'] ?? '',
+            'unit'          => $cluster['unit'] ?? '',
+            'master_ip'     => $masterIp,
+            'source_port'   => $sourcePort,
+            'checks'        => [],
+            'commands'      => [],
+            'files_modified'=> [],
+            'services'      => [],
+            'risks'         => [],
+            'blocking'      => [],   // conditions that must be resolved first
+            'confirm_token' => static::slaveConfirmToken($slaveName, $cluster),
+        ];
+
+        $add = function (string $name, bool $ok, string $detail) use (&$report) {
+            $report['checks'][] = ['name' => $name, 'ok' => $ok, 'detail' => $detail];
+        };
+
+        // Data size + free space.
+        $sizeBytes = PgClusterService::dataDirSizeBytes($cluster);
+        $freeBytes = PgClusterService::dataDirFreeBytes($cluster);
+        $report['data_size_bytes'] = $sizeBytes;
+        $report['free_bytes']      = $freeBytes;
+        $add('Tamaño de datos', true, static::humanBytes($sizeBytes));
+        $enoughSpace = $freeBytes > $sizeBytes; // basebackup needs a temp copy
+        $add('Espacio libre suficiente para basebackup temporal', $enoughSpace,
+            static::humanBytes($freeBytes) . ' libre vs ' . static::humanBytes($sizeBytes) . ' de datos');
+        if (!$enoughSpace) $report['blocking'][] = 'Espacio libre insuficiente para el directorio temporal de pg_basebackup.';
+
+        // Service state (this cluster only).
+        $running = PgClusterService::isRunning($cluster);
+        $add('Estado del clúster local', true, $running ? 'activo' : 'detenido');
+
+        // Populated target?
+        $hasData = PgClusterService::dataDirHasData($cluster);
+        $add('Directorio de datos con contenido', true, $hasData ? 'SÍ — requiere confirmación explícita' : 'vacío');
+        if ($hasData) {
+            $report['risks'][] = "El directorio {$cluster['data_dir']} contiene datos; se apartará (no se borra) y se sustituirá por el standby.";
+        }
+
+        // WireGuard reachability + master connection + version compatibility.
+        $conn = static::testPgConnection($masterIp, $sourcePort, $replUser, $replPass);
+        $add('Conectividad WireGuard al master', $conn['ok'],
+            $conn['ok'] ? "OK ({$masterIp}:{$sourcePort})" : "FALLO: {$conn['error']}");
+        if (!$conn['ok']) $report['blocking'][] = "No hay conexión al master {$masterIp}:{$sourcePort}.";
+
+        if ($conn['ok']) {
+            $masterMajor = 0;
+            if (preg_match('/PostgreSQL\s+(\d+)/', (string)$conn['version'], $mm)) $masterMajor = (int)$mm[1];
+            $localMajor = (int)($cluster['version'] ?? 0);
+            $compatible = $masterMajor === 0 || $masterMajor === $localMajor;
+            $add('Compatibilidad de versión mayor', $compatible, "master PG{$masterMajor} vs slave PG{$localMajor}");
+            if (!$compatible) $report['blocking'][] = "Versión mayor incompatible (PG{$masterMajor} vs PG{$localMajor}).";
+        }
+
+        // Commands / files / services that WOULD run.
+        $tmpDir = rtrim($cluster['data_dir'], '/') . '.basebackup.<ts>';
+        $report['commands'] = [
+            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} stop",
+            "pg_basebackup -h {$masterIp} -p {$sourcePort} -U {$replUser} -D {$tmpDir} -Fp -Xs -P -R",
+            "mv {$cluster['data_dir']} {$cluster['data_dir']}.old.<ts>",
+            "mv {$tmpDir} {$cluster['data_dir']}",
+            "chown -R postgres:postgres {$cluster['data_dir']}",
+            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} start",
+        ];
+        $report['files_modified'] = [$cluster['data_dir'] . ' (reemplazado; anterior apartado en .old.<ts>)'];
+        $report['services'] = [$cluster['unit'] . ' (stop/start — SOLO este clúster)'];
+        $report['risks'][] = 'Los demás clústeres PostgreSQL NO se detienen.';
+        $report['estimated_time'] = static::estimateBasebackupSeconds($sizeBytes);
+        $report['ok_to_proceed'] = empty($report['blocking']);
+
+        return $report;
+    }
+
+    private static function humanBytes(int $b): string
+    {
+        if ($b <= 0) return '0 B';
+        $u = ['B','KB','MB','GB','TB']; $i = (int)floor(log($b, 1024));
+        $i = min($i, count($u) - 1);
+        return round($b / (1024 ** $i), 1) . ' ' . $u[$i];
+    }
+
+    private static function estimateBasebackupSeconds(int $bytes): string
+    {
+        // Rough: assume ~50 MB/s over WireGuard as a conservative floor.
+        $secs = (int)ceil($bytes / (50 * 1024 * 1024));
+        if ($secs < 60) return "~{$secs}s";
+        return '~' . ceil($secs / 60) . ' min';
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // ─── Per-cluster PG instances CRUD (replication_pg_instances)
     // ═══════════════════════════════════════════════════════════
 

@@ -6,6 +6,7 @@ use MuseDockPanel\Flash;
 use MuseDockPanel\Settings;
 use MuseDockPanel\Database;
 use MuseDockPanel\Services\ReplicationService;
+use MuseDockPanel\Services\PgClusterService;
 use MuseDockPanel\Services\ClusterService;
 use MuseDockPanel\Services\LogService;
 
@@ -401,20 +402,15 @@ class ReplicationController
         }
 
         if ($engine === 'pg') {
-            $result = ReplicationService::setupPgSlave($masterIp, $port, $user, $pass);
-            if ($result['ok']) {
-                Settings::set('repl_pg_role', 'slave');
-                Settings::set('repl_pg_remote_ip', $masterIp);
-                Settings::set('repl_pg_port', (string)$port);
-                Settings::set('repl_pg_user', $user);
-                Settings::set('repl_pg_pass', ReplicationService::encryptPassword($pass));
-                Settings::set('repl_configured_at', date('Y-m-d H:i:s'));
-                $this->syncLegacyRole();
-                LogService::log('replication.slave', 'pg_convert', "PG configurado como slave de {$masterIp}");
-                Flash::set('success', 'PostgreSQL configurado como Slave');
-            } else {
-                Flash::set('error', 'Error: ' . $result['error']);
-            }
+            // The legacy single-cluster PG slave path is destructive on a
+            // multi-cluster host. Redirect operators to the cluster-explicit,
+            // preflight-gated flow instead of running the old data-wipe.
+            Flash::set('error',
+                'La conversión PostgreSQL a slave ahora requiere seleccionar un clúster explícito '
+                . '(14/main, 14/panel o 16/musemind) con preflight y confirmación. '
+                . 'Usa el nuevo asistente por instancia en esta página.');
+            header('Location: /settings/replication');
+            exit;
         } else {
             $result = ReplicationService::setupMysqlSlave($masterIp, $port, $user, $pass);
             if ($result['ok']) {
@@ -433,6 +429,114 @@ class ReplicationController
         }
 
         header('Location: /settings/replication');
+        exit;
+    }
+
+    /**
+     * GET /settings/replication/pg-clusters (JSON)
+     * List the real PostgreSQL clusters on this host with explicit identity, so
+     * the UI can offer a cluster picker instead of guessing a default.
+     */
+    public function listPgClusters(): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode(['ok' => true, 'clusters' => PgClusterService::listClusters()]);
+        exit;
+    }
+
+    /**
+     * POST /settings/replication/preflight (JSON)
+     * Read-only dry-run report for a per-cluster slave conversion. Never writes.
+     */
+    public function preflight(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $version  = trim($_POST['pg_version'] ?? '');
+        $clusterN = trim($_POST['cluster_name'] ?? '');
+        $masterIp = trim($_POST['master_ip'] ?? '');
+        $srcPort  = (int)($_POST['source_port'] ?? 0);
+        $user     = trim($_POST['user'] ?? '');
+        $pass     = $_POST['pass'] ?? '';
+        $slave    = trim($_POST['slave_name'] ?? '');
+
+        $cluster = PgClusterService::get($version, $clusterN);
+        if ($cluster === null) {
+            echo json_encode(['ok' => false, 'error' => "Clúster PostgreSQL {$version}/{$clusterN} no existe en este host."]);
+            exit;
+        }
+        if (!filter_var($masterIp, FILTER_VALIDATE_IP) || !$srcPort || !$user) {
+            echo json_encode(['ok' => false, 'error' => 'Parámetros incompletos (master, puerto, usuario).']);
+            exit;
+        }
+
+        $report = ReplicationService::preflightPgSlave($cluster, $masterIp, $srcPort, $user, $pass, $slave);
+        echo json_encode(['ok' => true, 'report' => $report]);
+        exit;
+    }
+
+    /**
+     * POST /settings/replication/convert-to-slave-cluster (JSON)
+     * Cluster-explicit, preflight-gated, literal-confirmation slave conversion.
+     * This is the SAFE replacement for the old convert-to-slave data-wipe.
+     */
+    public function convertToSlaveCluster(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $version  = trim($_POST['pg_version'] ?? '');
+        $clusterN = trim($_POST['cluster_name'] ?? '');
+        $masterIp = trim($_POST['master_ip'] ?? '');
+        $srcPort  = (int)($_POST['source_port'] ?? 0);
+        $user     = trim($_POST['user'] ?? '');
+        $pass     = $_POST['pass'] ?? '';
+        $slave    = trim($_POST['slave_name'] ?? '');
+        $confirm  = $_POST['confirm'] ?? '';
+        $dryRun   = ($_POST['dry_run'] ?? '') === '1';
+
+        $cluster = PgClusterService::get($version, $clusterN);
+        if ($cluster === null) {
+            echo json_encode(['ok' => false, 'error' => "Clúster PostgreSQL {$version}/{$clusterN} no existe."]);
+            exit;
+        }
+        if (!filter_var($masterIp, FILTER_VALIDATE_IP) || !$srcPort || !$user || !$pass) {
+            echo json_encode(['ok' => false, 'error' => 'Completa master, puerto, usuario y password.']);
+            exit;
+        }
+
+        // Literal confirmation embedding slave + cluster + port (unless dry-run).
+        if (!$dryRun && !ReplicationService::verifySlaveConfirmToken($confirm, $slave, $cluster)) {
+            echo json_encode([
+                'ok' => false,
+                'error' => 'Confirmación incorrecta. Escribe exactamente: '
+                         . ReplicationService::slaveConfirmToken($slave, $cluster),
+            ]);
+            exit;
+        }
+
+        // Preflight always runs; block if not ok_to_proceed.
+        $report = ReplicationService::preflightPgSlave($cluster, $masterIp, $srcPort, $user, $pass, $slave);
+        if (!$report['ok_to_proceed'] && !$dryRun) {
+            echo json_encode(['ok' => false, 'error' => 'Preflight bloqueó la operación.', 'report' => $report]);
+            exit;
+        }
+
+        $hasData = !empty(array_filter($report['checks'], fn($c) => $c['name'] === 'Directorio de datos con contenido' && str_contains($c['detail'], 'SÍ')));
+
+        $result = ReplicationService::setupPgSlaveForCluster(
+            $cluster, $masterIp, $srcPort, $user, $pass,
+            /*confirmWipe*/ true,   // already gated by literal token above
+            /*dryRun*/ $dryRun
+        );
+
+        if (!$dryRun && ($result['ok'] ?? false)) {
+            LogService::log('replication.slave', 'pg_convert_cluster',
+                "PG {$cluster['key']} configurado como slave de {$masterIp}:{$srcPort} (slave={$slave})");
+        }
+
+        echo json_encode(['ok' => $result['ok'] ?? false, 'result' => $result, 'preflight' => $report]);
         exit;
     }
 
