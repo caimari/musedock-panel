@@ -4,6 +4,7 @@ namespace MuseDockPanel\Services;
 use MuseDockPanel\Settings;
 use MuseDockPanel\Database;
 use MuseDockPanel\Env;
+use MuseDockPanel\Services\PgClusterService;
 
 class ReplicationService
 {
@@ -870,45 +871,199 @@ class ReplicationService
     // ─── Setup Slave (single — legacy) ───────────────────────
     // ═══════════════════════════════════════════════════════════
 
+    /**
+     * DEPRECATED / UNSAFE legacy entry point.
+     *
+     * The old implementation ran `systemctl stop postgresql` (stopping ALL
+     * clusters) and `rm -rf` on a data directory resolved implicitly from the
+     * default port — on a multi-cluster host this wiped 14/main. It is now a
+     * hard-blocked stub: it refuses to act and redirects callers to the
+     * cluster-explicit path setupPgSlaveForCluster().
+     *
+     * Kept only so existing callers/signatures do not fatal; it never performs
+     * a destructive operation.
+     */
     public static function setupPgSlave(string $masterIp, int $port, string $replUser, string $replPass): array
     {
+        return [
+            'ok'    => false,
+            'steps' => [[
+                'name'   => 'Bloqueado por seguridad',
+                'ok'     => false,
+                'output' => 'setupPgSlave() legacy está deshabilitado: no distingue clústeres y podría borrar datos. '
+                          . 'Use setupPgSlaveForCluster() con identidad explícita (versión, clúster, puerto).',
+            ]],
+            'error' => 'Operación bloqueada: el procedimiento slave legacy es destructivo en un host multi-clúster. '
+                     . 'Seleccione un clúster PostgreSQL explícito.',
+        ];
+    }
+
+    /**
+     * Safe, cluster-explicit slave setup. Operates on ONE cluster only.
+     *
+     * Guarantees:
+     *  - Never runs `systemctl stop postgresql` (umbrella). Uses pg_ctlcluster
+     *    on the specific (version, cluster) via its own unit.
+     *  - Never `rm -rf` a live data directory. Streams into a fresh TEMP dir,
+     *    validates it, and only then swaps it in — moving the old dir aside
+     *    (never deleting) so a failure is fully recoverable.
+     *  - Verifies master/slave major-version match before touching anything.
+     *  - Refuses to overwrite a populated data dir unless $confirmWipe is true.
+     *  - dry-run mode returns the planned commands without executing them.
+     *
+     * @param array  $cluster      descriptor from PgClusterService (target/local cluster to become standby)
+     * @param string $masterIp     master host (WireGuard IP)
+     * @param int    $sourcePort   master's port for THIS cluster
+     * @param string $replUser     replication role
+     * @param string $replPass     replication password
+     * @param bool   $confirmWipe  explicit confirmation to replace populated data dir
+     * @param bool   $dryRun       if true, do not execute — only plan
+     */
+    public static function setupPgSlaveForCluster(
+        array $cluster,
+        string $masterIp,
+        int $sourcePort,
+        string $replUser,
+        string $replPass,
+        bool $confirmWipe = false,
+        bool $dryRun = false
+    ): array {
         $steps = [];
-        $pgVer = static::detectPgVersion() ?? '16';
-        $dataDir = static::getPgDataDir();
 
-        shell_exec("systemctl stop postgresql 2>&1");
-        $steps[] = ['name' => 'Detener PostgreSQL', 'ok' => true, 'output' => 'OK'];
-
-        shell_exec("rm -rf " . escapeshellarg($dataDir) . "/*");
-        $steps[] = ['name' => 'Limpiar directorio de datos', 'ok' => true, 'output' => $dataDir];
-
-        $safeMaster = escapeshellarg($masterIp);
-        $safeUser = escapeshellarg($replUser);
-        $safeDir = escapeshellarg($dataDir);
-        $cmd = "PGPASSWORD=" . escapeshellarg($replPass) . " pg_basebackup -h {$safeMaster} -p {$port} -U {$safeUser} -D {$safeDir} -Fp -Xs -P -R 2>&1";
-        $output = shell_exec($cmd);
-        $hasSignal = file_exists("{$dataDir}/standby.signal") || file_exists("{$dataDir}/recovery.conf");
-        $steps[] = ['name' => 'pg_basebackup', 'ok' => $hasSignal, 'output' => $hasSignal ? 'Completado' : trim($output ?? 'Error')];
-
-        if (!$hasSignal) {
-            if ((int)$pgVer < 12) {
-                $recoveryConf = "standby_mode = 'on'\nprimary_conninfo = 'host={$masterIp} port={$port} user={$replUser} password={$replPass}'\n";
-                file_put_contents("{$dataDir}/recovery.conf", $recoveryConf);
-                $steps[] = ['name' => 'Crear recovery.conf', 'ok' => true, 'output' => 'PG < 12'];
-            } else {
-                return ['ok' => false, 'steps' => $steps, 'error' => 'pg_basebackup fallo. Verifique credenciales y conectividad.'];
+        // ── Guard 0: descriptor sanity ──────────────────────────────
+        foreach (['version', 'cluster', 'port', 'data_dir', 'unit'] as $k) {
+            if (empty($cluster[$k])) {
+                return ['ok' => false, 'steps' => $steps, 'error' => "Descriptor de clúster incompleto (falta '{$k}'). Operación abortada."];
             }
         }
+        $dataDir = $cluster['data_dir'];
+        // Never allow operating on a root-ish or empty path.
+        $realParent = dirname($dataDir);
+        if ($dataDir === '' || $dataDir === '/' || $realParent === '/' || !str_starts_with($dataDir, '/var/lib/postgresql/')) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "data_dir '{$dataDir}' no es un directorio de clúster válido. Operación abortada."];
+        }
 
-        shell_exec("chown -R postgres:postgres " . escapeshellarg($dataDir));
-        $steps[] = ['name' => 'Corregir permisos', 'ok' => true, 'output' => 'OK'];
+        // ── Guard 1: version match master vs local cluster ──────────
+        $localMajor = (int)$cluster['version'];
+        $masterInfo = static::testPgConnection($masterIp, $sourcePort, $replUser, $replPass);
+        if (!$masterInfo['ok']) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "No se pudo conectar al master {$masterIp}:{$sourcePort}: {$masterInfo['error']}"];
+        }
+        $masterMajor = 0;
+        if (preg_match('/PostgreSQL\s+(\d+)/', (string)$masterInfo['version'], $mm)) {
+            $masterMajor = (int)$mm[1];
+        }
+        if ($masterMajor > 0 && $masterMajor !== $localMajor) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "Versión mayor incompatible: master PG{$masterMajor} vs slave PG{$localMajor}. La replicación física exige la misma versión mayor."];
+        }
+        $steps[] = ['name' => 'Verificar versión master/slave', 'ok' => true, 'output' => "master PG{$masterMajor} = slave PG{$localMajor}"];
 
-        shell_exec("systemctl start postgresql 2>&1");
+        // ── Guard 2: populated data dir requires explicit confirmation ──
+        $hasData = PgClusterService::dataDirHasData($cluster);
+        if ($hasData && !$confirmWipe) {
+            return [
+                'ok'    => false,
+                'steps' => $steps,
+                'error' => "El directorio {$dataDir} contiene datos. Se requiere confirmación explícita (confirmWipe) que incluya slave, clúster y puerto antes de reemplazarlo.",
+            ];
+        }
+
+        $tmpDir  = rtrim($dataDir, '/') . '.basebackup.' . date('Ymd_His');
+        $oldDir  = rtrim($dataDir, '/') . '.old.' . date('Ymd_His');
+        $unit    = $cluster['unit'];
+
+        // ── Plan (used by dry-run and for logging) ──────────────────
+        $plan = [
+            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} stop   # solo este clúster",
+            "pg_basebackup -h {$masterIp} -p {$sourcePort} -U {$replUser} -D {$tmpDir} -Fp -Xs -P -R   # a directorio temporal",
+            "validar {$tmpDir}/PG_VERSION == {$localMajor} y presencia de standby.signal",
+            "mv {$dataDir} {$oldDir}   # apartar, NO borrar",
+            "mv {$tmpDir} {$dataDir}",
+            "chown -R postgres:postgres {$dataDir}",
+            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} start",
+            "(rollback si falla: restaurar {$oldDir} → {$dataDir})",
+        ];
+
+        if ($dryRun) {
+            return [
+                'ok'      => true,
+                'dry_run' => true,
+                'steps'   => $steps,
+                'plan'    => $plan,
+                'error'   => null,
+            ];
+        }
+
+        // ── Execute (safe order) ────────────────────────────────────
+        // Stop ONLY this cluster.
+        shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' stop 2>&1');
+        $steps[] = ['name' => "Detener clúster {$cluster['key']}", 'ok' => true, 'output' => 'pg_ctlcluster stop (solo este clúster)'];
+
+        // Stream into a fresh temp dir using a protected password file (no PGPASSWORD in argv).
+        $pgpass = static::writeTempPgpass($masterIp, $sourcePort, '*', $replUser, $replPass);
+        $safeMaster = escapeshellarg($masterIp);
+        $safeUser   = escapeshellarg($replUser);
+        $safeTmp    = escapeshellarg($tmpDir);
+        $env = 'PGPASSFILE=' . escapeshellarg($pgpass) . ' ';
+        $cmd = $env . "pg_basebackup -h {$safeMaster} -p {$sourcePort} -U {$safeUser} -D {$safeTmp} -Fp -Xs -P -R 2>&1";
+        $output = shell_exec($cmd);
+        @unlink($pgpass);
+
+        $tmpOk = is_file("{$tmpDir}/PG_VERSION")
+              && (file_exists("{$tmpDir}/standby.signal") || file_exists("{$tmpDir}/recovery.conf"));
+        // Validate the streamed cluster's major version matches.
+        if ($tmpOk) {
+            $tmpVer = trim((string)@file_get_contents("{$tmpDir}/PG_VERSION"));
+            if ($tmpVer !== '' && (int)$tmpVer !== $localMajor) {
+                $tmpOk = false;
+                $output = "PG_VERSION del backup ({$tmpVer}) no coincide con el clúster ({$localMajor})";
+            }
+        }
+        $steps[] = ['name' => 'pg_basebackup a directorio temporal', 'ok' => $tmpOk, 'output' => $tmpOk ? "OK → {$tmpDir}" : trim((string)$output)];
+
+        if (!$tmpOk) {
+            // Clean up the failed temp dir; original data dir is untouched.
+            shell_exec('rm -rf ' . escapeshellarg($tmpDir) . ' 2>&1');
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+            return ['ok' => false, 'steps' => $steps, 'error' => 'pg_basebackup falló; el directorio de datos original NO se modificó.'];
+        }
+
+        // Swap: move old aside (never delete), move temp in.
+        shell_exec('mv ' . escapeshellarg($dataDir) . ' ' . escapeshellarg($oldDir) . ' 2>&1');
+        shell_exec('mv ' . escapeshellarg($tmpDir) . ' ' . escapeshellarg($dataDir) . ' 2>&1');
+        shell_exec('chown -R postgres:postgres ' . escapeshellarg($dataDir) . ' 2>&1');
+        $steps[] = ['name' => 'Sustituir directorio de datos', 'ok' => true, 'output' => "anterior apartado en {$oldDir}"];
+
+        // Start ONLY this cluster.
+        shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
         sleep(2);
-        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
-        $steps[] = ['name' => 'Iniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : 'Error al iniciar'];
+        $running = PgClusterService::isRunning($cluster);
 
-        return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : 'PostgreSQL no arranco como slave'];
+        if (!$running) {
+            // Rollback: restore the old data dir.
+            shell_exec('rm -rf ' . escapeshellarg($dataDir) . ' 2>&1');
+            shell_exec('mv ' . escapeshellarg($oldDir) . ' ' . escapeshellarg($dataDir) . ' 2>&1');
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+            $steps[] = ['name' => 'Rollback', 'ok' => true, 'output' => "Restaurado {$oldDir} → {$dataDir}"];
+            return ['ok' => false, 'steps' => $steps, 'error' => "El clúster {$cluster['key']} no arrancó como slave; se restauró el estado anterior."];
+        }
+
+        $steps[] = ['name' => "Iniciar clúster {$cluster['key']}", 'ok' => true, 'output' => 'Activo como standby'];
+        return ['ok' => true, 'steps' => $steps, 'error' => null, 'old_data_dir' => $oldDir];
+    }
+
+    /**
+     * Write a temporary, 0600 .pgpass file so replication passwords never appear
+     * in the process argument list (visible via `ps`). Caller must unlink it.
+     */
+    private static function writeTempPgpass(string $host, int $port, string $db, string $user, string $pass): string
+    {
+        $file = tempnam(sys_get_temp_dir(), 'mdpgpass_');
+        // pgpass format: host:port:db:user:password  ('*' matches any db)
+        $line = sprintf("%s:%d:%s:%s:%s\n", $host, $port, $db, $user, str_replace(['\\', ':'], ['\\\\', '\\:'], $pass));
+        file_put_contents($file, $line);
+        @chmod($file, 0600);
+        return $file;
     }
 
     public static function setupMysqlSlave(string $masterIp, int $port, string $replUser, string $replPass): array
