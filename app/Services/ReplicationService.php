@@ -1067,9 +1067,38 @@ class ReplicationService
         if ($dataDir === '' || $dataDir === '/' || $realParent === '/' || !str_starts_with($dataDir, '/var/lib/postgresql/')) {
             return ['ok' => false, 'steps' => $steps, 'error' => "data_dir '{$dataDir}' no es un directorio de clúster válido. Operación abortada."];
         }
+        $localMajor = (int)$cluster['version'];
+
+        $tmpDir  = rtrim($dataDir, '/') . '.basebackup.' . date('Ymd_His');
+        $oldDir  = rtrim($dataDir, '/') . '.old.' . date('Ymd_His');
+        $unit    = $cluster['unit'];
+
+        // ── Plan (used by dry-run and for logging) ──────────────────
+        $plan = [
+            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} stop   # solo este clúster",
+            "pg_basebackup -h {$masterIp} -p {$sourcePort} -U {$replUser} -D {$tmpDir} -Fp -Xs -P -R   # a directorio temporal",
+            "validar {$tmpDir}/PG_VERSION == {$localMajor} y presencia de standby.signal",
+            "mv {$dataDir} {$oldDir}   # apartar, NO borrar",
+            "mv {$tmpDir} {$dataDir}",
+            "chown -R postgres:postgres {$dataDir}",
+            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} start",
+            "(rollback si falla: restaurar {$oldDir} → {$dataDir})",
+        ];
+
+        // ── dry-run returns the plan even if the master is unreachable ──
+        // (a dry-run must be able to show what WOULD happen; connectivity and
+        //  version checks are surfaced by preflightPgSlave(), not here).
+        if ($dryRun) {
+            return [
+                'ok'      => true,
+                'dry_run' => true,
+                'steps'   => $steps,
+                'plan'    => $plan,
+                'error'   => null,
+            ];
+        }
 
         // ── Guard 1: version match master vs local cluster ──────────
-        $localMajor = (int)$cluster['version'];
         $masterInfo = static::testPgConnection($masterIp, $sourcePort, $replUser, $replPass);
         if (!$masterInfo['ok']) {
             return ['ok' => false, 'steps' => $steps, 'error' => "No se pudo conectar al master {$masterIp}:{$sourcePort}: {$masterInfo['error']}"];
@@ -1090,32 +1119,6 @@ class ReplicationService
                 'ok'    => false,
                 'steps' => $steps,
                 'error' => "El directorio {$dataDir} contiene datos. Se requiere confirmación explícita (confirmWipe) que incluya slave, clúster y puerto antes de reemplazarlo.",
-            ];
-        }
-
-        $tmpDir  = rtrim($dataDir, '/') . '.basebackup.' . date('Ymd_His');
-        $oldDir  = rtrim($dataDir, '/') . '.old.' . date('Ymd_His');
-        $unit    = $cluster['unit'];
-
-        // ── Plan (used by dry-run and for logging) ──────────────────
-        $plan = [
-            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} stop   # solo este clúster",
-            "pg_basebackup -h {$masterIp} -p {$sourcePort} -U {$replUser} -D {$tmpDir} -Fp -Xs -P -R   # a directorio temporal",
-            "validar {$tmpDir}/PG_VERSION == {$localMajor} y presencia de standby.signal",
-            "mv {$dataDir} {$oldDir}   # apartar, NO borrar",
-            "mv {$tmpDir} {$dataDir}",
-            "chown -R postgres:postgres {$dataDir}",
-            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} start",
-            "(rollback si falla: restaurar {$oldDir} → {$dataDir})",
-        ];
-
-        if ($dryRun) {
-            return [
-                'ok'      => true,
-                'dry_run' => true,
-                'steps'   => $steps,
-                'plan'    => $plan,
-                'error'   => null,
             ];
         }
 
