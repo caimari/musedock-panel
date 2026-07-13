@@ -135,20 +135,48 @@ class ReplicationService
     }
 
     // ─── Config Paths ────────────────────────────────────────
+    // These legacy helpers used to mix the psql CLIENT version (16) with the
+    // first-listed cluster name ('main'), producing /etc/postgresql/16/main
+    // (nonexistent) and, for the data dir, the default port 5432 = 14/main.
+    // They now resolve the PANEL's own cluster (from .env DB_PORT) via explicit
+    // identity, so legacy callers act consistently on ONE real cluster.
+
     public static function getPgConfigDir(): string
     {
-        $ver = static::detectPgVersion() ?? '16';
-        $cluster = trim((string)shell_exec("pg_lsclusters -h 2>/dev/null | head -1 | awk '{print \$2}'"));
-        $cluster = $cluster ?: 'main';
-        return "/etc/postgresql/{$ver}/{$cluster}";
+        $panel = PgClusterService::getPanelCluster();
+        if ($panel) return $panel['config_dir'];
+        // Fallback: first real cluster (still a valid, existing path).
+        $first = PgClusterService::listClusters()[0] ?? null;
+        return $first['config_dir'] ?? '/etc/postgresql/14/main';
     }
 
     public static function getPgDataDir(): string
     {
-        $out = trim((string)shell_exec("sudo -u postgres psql -tAc \"SHOW data_directory\" 2>/dev/null"));
-        if ($out && is_dir($out)) return $out;
-        $ver = static::detectPgVersion() ?? '16';
-        return "/var/lib/postgresql/{$ver}/main";
+        $panel = PgClusterService::getPanelCluster();
+        if ($panel) return $panel['data_dir'];
+        $first = PgClusterService::listClusters()[0] ?? null;
+        return $first['data_dir'] ?? '/var/lib/postgresql/14/main';
+    }
+
+    /** The systemd unit for the panel's own cluster (never the umbrella). */
+    public static function getPanelClusterUnit(): string
+    {
+        $panel = PgClusterService::getPanelCluster();
+        return $panel['unit'] ?? 'postgresql';
+    }
+
+    /** Restart/reload ONLY the panel's cluster, never all three. */
+    private static function restartPanelCluster(string $action = 'restart'): string
+    {
+        $panel = PgClusterService::getPanelCluster();
+        if ($panel) {
+            return (string)shell_exec(
+                'pg_ctlcluster ' . escapeshellarg($panel['version']) . ' '
+                . escapeshellarg($panel['cluster']) . ' ' . escapeshellarg($action) . ' 2>&1'
+            );
+        }
+        // No panel cluster resolved — do nothing rather than hit the umbrella.
+        return 'no panel cluster resolved';
     }
 
     public static function getMysqlConfigPath(): string
@@ -490,8 +518,8 @@ class ReplicationService
         $output = shell_exec("sudo -u postgres psql -c " . escapeshellarg($sql) . " 2>&1");
         $steps[] = ['name' => 'Crear usuario replicacion', 'ok' => true, 'output' => trim($output ?? 'OK')];
 
-        $output = shell_exec("systemctl restart postgresql 2>&1");
-        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $output = static::restartPanelCluster("restart");
+        $running = PgClusterService::isRunning(PgClusterService::getPanelCluster() ?? []);
         $steps[] = ['name' => 'Reiniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
 
         return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : 'PostgreSQL no arranco correctamente'];
@@ -636,8 +664,8 @@ class ReplicationService
         }
 
         // Restart PostgreSQL
-        $output = shell_exec("systemctl restart postgresql 2>&1");
-        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $output = static::restartPanelCluster("restart");
+        $running = PgClusterService::isRunning(PgClusterService::getPanelCluster() ?? []);
         $steps[] = ['name' => 'Reiniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
 
         return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : 'PostgreSQL no arranco correctamente'];
@@ -776,8 +804,8 @@ class ReplicationService
         $steps[] = ['name' => 'Modificar synchronous_commit', 'ok' => $ok, 'output' => "mode={$mode}"];
 
         // Reload PostgreSQL (no restart needed for these params)
-        $output = shell_exec("systemctl reload postgresql 2>&1");
-        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $output = static::restartPanelCluster("reload");
+        $running = PgClusterService::isRunning(PgClusterService::getPanelCluster() ?? []);
         $steps[] = ['name' => 'Recargar PostgreSQL', 'ok' => $running, 'output' => $running ? 'OK' : trim($output ?? 'Error')];
 
         return ['ok' => $ok && $running, 'steps' => $steps, 'error' => null];
@@ -808,8 +836,8 @@ class ReplicationService
         $steps[] = ['name' => 'Configurar wal_level=logical', 'ok' => $ok, 'output' => $ok ? 'OK' : 'Error'];
 
         // Restart required for wal_level change
-        $output = shell_exec("systemctl restart postgresql 2>&1");
-        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $output = static::restartPanelCluster("restart");
+        $running = PgClusterService::isRunning(PgClusterService::getPanelCluster() ?? []);
         $steps[] = ['name' => 'Reiniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
 
         if (!$running) {
@@ -2271,8 +2299,8 @@ class ReplicationService
         $steps[] = ['name' => 'Modificar postgresql.conf', 'ok' => $ok, 'output' => $ok ? "wal_level={$walLevel}" : 'Error'];
         if (!$ok) return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo modificar postgresql.conf'];
 
-        $output = shell_exec("systemctl restart postgresql 2>&1");
-        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $output = static::restartPanelCluster("restart");
+        $running = PgClusterService::isRunning(PgClusterService::getPanelCluster() ?? []);
         $steps[] = ['name' => 'Reiniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
 
         return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : 'PostgreSQL no arranco'];
@@ -2478,7 +2506,7 @@ class ReplicationService
                 }
 
                 // Reload PG (not restart — pg_hba changes only need reload)
-                shell_exec("systemctl reload postgresql 2>&1");
+                static::restartPanelCluster("reload");
             }
 
         } elseif ($engine === 'mysql') {
@@ -2527,7 +2555,7 @@ class ReplicationService
                 $content = preg_replace('/^.*' . preg_quote($ip, '/') . '\/32.*$/m', '', $content);
                 $content = preg_replace('/\n{3,}/', "\n\n", $content);
                 file_put_contents($hbaConf, $content);
-                shell_exec("systemctl reload postgresql 2>&1");
+                static::restartPanelCluster("reload");
             }
         } elseif ($engine === 'mysql') {
             $pdo = static::getMysqlPdo();

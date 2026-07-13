@@ -148,6 +148,17 @@ foreach ($lines as $ln) {
     }
 }
 ok('ningún systemctl stop postgresql (umbrella) ejecutable', $badStop === 0, "encontrados: {$badStop}");
+// No umbrella restart/reload/stop of postgresql anywhere (comments allowed).
+$umbrella = 0;
+foreach ($lines as $ln) {
+    $t = ltrim($ln);
+    if (str_starts_with($t, '*') || str_starts_with($t, '//') || str_starts_with($t, '#')) continue;
+    if (preg_match('/systemctl (restart|reload|stop) postgresql\b/', $ln) && !str_contains($ln, 'postgresql@')) $umbrella++;
+    if (str_contains($ln, 'is-active postgresql')) $umbrella++;
+}
+ok('ninguna operación umbrella postgresql (restart/reload/is-active) ejecutable', $umbrella === 0, "encontrados: {$umbrella}");
+ok('getPgConfigDir resuelve al cluster del panel, no /16/main',
+    R::getPgConfigDir() !== '/etc/postgresql/16/main' && str_contains(R::getPgConfigDir(), '/etc/postgresql/'));
 ok('setupPgSlave legacy es stub bloqueado',
     R::setupPgSlave('10.10.70.1', 5432, 'u', 'p')['ok'] === false);
 $confirmToken = R::slaveConfirmToken('filemon', $muse);
