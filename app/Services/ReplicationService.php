@@ -1123,6 +1123,255 @@ class ReplicationService
     }
 
     // ═══════════════════════════════════════════════════════════
+    // ─── Per-cluster PG instances CRUD (replication_pg_instances)
+    // ═══════════════════════════════════════════════════════════
+
+    /** All PG instance relationships for a slave. Password stays encrypted. */
+    public static function getPgInstances(int $slaveId): array
+    {
+        try {
+            return Database::fetchAll(
+                "SELECT * FROM replication_pg_instances WHERE slave_id = :sid ORDER BY source_port ASC",
+                ['sid' => $slaveId]
+            );
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /** Every enabled PG instance across all slaves (for master-side config). */
+    public static function getAllPgInstances(bool $enabledOnly = false): array
+    {
+        try {
+            $sql = "SELECT i.*, s.name AS slave_name, s.primary_ip, s.fallback_ip
+                    FROM replication_pg_instances i
+                    JOIN replication_slaves s ON s.id = i.slave_id";
+            if ($enabledOnly) $sql .= " WHERE i.enabled = true";
+            $sql .= " ORDER BY s.name, i.source_port";
+            return Database::fetchAll($sql);
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * Create/update a per-cluster instance row. Derives a UNIQUE slot_name and
+     * application_name per (slave, cluster) so multiple slaves and clusters never
+     * collide on the master.
+     */
+    public static function upsertPgInstance(int $slaveId, array $data): int
+    {
+        $slave = static::getSlave($slaveId);
+        $slaveTag = $slave ? preg_replace('/[^a-zA-Z0-9_]/', '', strtolower($slave['name'])) : "slave{$slaveId}";
+        $ver = preg_replace('/[^0-9]/', '', (string)($data['pg_version'] ?? ''));
+        $cluster = preg_replace('/[^a-zA-Z0-9_]/', '', (string)($data['cluster_name'] ?? ''));
+
+        // Unique, deterministic identifiers.
+        $slot = $data['slot_name'] ?? '';
+        if ($slot === '') $slot = "slot_{$slaveTag}_{$ver}_{$cluster}";
+        $appName = $data['application_name'] ?? '';
+        if ($appName === '') $appName = "{$slaveTag}_{$ver}_{$cluster}";
+
+        $row = [
+            'slave_id'          => $slaveId,
+            'pg_version'        => $ver,
+            'cluster_name'      => $cluster,
+            'source_port'       => (int)($data['source_port'] ?? 0),
+            'target_port'       => (int)($data['target_port'] ?? ($data['source_port'] ?? 0)),
+            'replication_type'  => in_array($data['replication_type'] ?? 'physical', ['physical','logical'], true) ? $data['replication_type'] : 'physical',
+            'sync_mode'         => in_array($data['sync_mode'] ?? 'async', ['async','sync','remote_apply'], true) ? $data['sync_mode'] : 'async',
+            'replication_user'  => preg_replace('/[^a-zA-Z0-9_]/', '', (string)($data['replication_user'] ?? 'replicator')),
+            'slot_name'         => preg_replace('/[^a-zA-Z0-9_]/', '', $slot),
+            'application_name'  => preg_replace('/[^a-zA-Z0-9_]/', '', $appName),
+            'enabled'           => !empty($data['enabled']),
+            'updated_at'        => date('Y-m-d H:i:s'),
+        ];
+        if (!empty($data['password'])) {
+            $row['encrypted_password'] = static::encryptPassword($data['password']);
+        }
+
+        $existing = Database::fetchOne(
+            "SELECT id FROM replication_pg_instances WHERE slave_id = :sid AND pg_version = :v AND cluster_name = :c",
+            ['sid' => $slaveId, 'v' => $ver, 'c' => $cluster]
+        );
+        if ($existing) {
+            Database::update('replication_pg_instances', $row, 'id = :id', ['id' => $existing['id']]);
+            return (int)$existing['id'];
+        }
+        $row['status'] = 'pending';
+        $row['created_at'] = date('Y-m-d H:i:s');
+        return Database::insert('replication_pg_instances', $row);
+    }
+
+    public static function deletePgInstance(int $id): void
+    {
+        try { Database::delete('replication_pg_instances', 'id = :id', ['id' => $id]); } catch (\Throwable) {}
+    }
+
+    public static function updatePgInstanceStatus(int $id, string $status, string $error = ''): void
+    {
+        try {
+            Database::update('replication_pg_instances', [
+                'status'          => $status,
+                'last_error'      => $error,
+                'last_checked_at' => date('Y-m-d H:i:s'),
+                'updated_at'      => date('Y-m-d H:i:s'),
+            ], 'id = :id', ['id' => $id]);
+        } catch (\Throwable) {}
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Master config, per explicit cluster (safe) ──────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Configure ONE PostgreSQL cluster as a replication master for a set of
+     * slave IPs. Touches only that cluster's postgresql.conf / pg_hba.conf and
+     * reloads/restarts ONLY that cluster — never the umbrella service.
+     *
+     * Security:
+     *  - listen_addresses limited to loopback + WireGuard IP (never '*').
+     *  - pg_hba entries scoped to each slave's /32 (WireGuard IP), not 0.0.0.0.
+     *  - a unique physical replication slot is created per slave+cluster.
+     *
+     * @param array  $cluster    descriptor from PgClusterService
+     * @param array  $slaveIps   list of slave WireGuard IPs to authorize
+     * @param string $replUser   replication role name
+     * @param string $replPass   replication role password (created if missing)
+     * @param array  $slotNames  physical slot names to ensure (per slave+cluster)
+     * @param bool   $dryRun
+     */
+    public static function setupPgMasterForCluster(
+        array $cluster,
+        array $slaveIps,
+        string $replUser,
+        string $replPass,
+        array $slotNames = [],
+        bool $dryRun = false
+    ): array {
+        $steps = [];
+        foreach (['version', 'cluster', 'port', 'config_file', 'hba_file', 'unit'] as $k) {
+            if (empty($cluster[$k])) {
+                return ['ok' => false, 'steps' => $steps, 'error' => "Descriptor de clúster incompleto (falta '{$k}')."];
+            }
+        }
+        $pgConf = $cluster['config_file'];
+        $hbaConf = $cluster['hba_file'];
+        if (!file_exists($pgConf)) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "postgresql.conf no encontrado: {$pgConf}"];
+        }
+
+        // Loopback + WireGuard IP only.
+        $wgIp = static::detectWireguardIp();
+        $listen = "'127.0.0.1" . ($wgIp ? ",{$wgIp}" : "") . "'";
+
+        $pgVer = (int)$cluster['version'];
+        $walKeepParam = $pgVer >= 13 ? 'wal_keep_size' : 'wal_keep_segments';
+        $walKeepValue = $pgVer >= 13 ? '512MB' : '64';
+        $walLevel = Settings::get('repl_pg_wal_level', 'replica');
+        $maxSenders = max(10, count($slaveIps) * 2 + 3);
+        $maxSlots   = max(10, count($slotNames) + count($slaveIps) + 3);
+
+        $pgSettings = [
+            'wal_level'             => $walLevel,
+            'max_wal_senders'       => (string)$maxSenders,
+            'max_replication_slots' => (string)$maxSlots,
+            $walKeepParam           => $walKeepValue,
+            'hot_standby'           => 'on',
+            'listen_addresses'      => $listen,
+        ];
+
+        $hbaLines = [];
+        foreach ($slaveIps as $ip) {
+            if (!filter_var($ip, FILTER_VALIDATE_IP)) continue;
+            $hbaLines[] = "host    replication     {$replUser}     {$ip}/32     scram-sha-256";
+        }
+
+        if ($dryRun) {
+            return [
+                'ok' => true, 'dry_run' => true, 'steps' => $steps, 'error' => null,
+                'plan' => [
+                    "backup {$pgConf} y {$hbaConf}",
+                    "postgresql.conf: " . json_encode($pgSettings),
+                    "pg_hba.conf +=\n  " . implode("\n  ", $hbaLines),
+                    "crear rol de replicación {$replUser} (si falta) en :{$cluster['port']}",
+                    "crear slots físicos: " . implode(', ', $slotNames),
+                    "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} reload   # solo este clúster",
+                ],
+            ];
+        }
+
+        static::backupFile($pgConf);
+        static::backupFile($hbaConf);
+        $steps[] = ['name' => 'Backup config', 'ok' => true, 'output' => $cluster['key']];
+
+        $ok = static::modifyConfigFile($pgConf, $pgSettings);
+        $steps[] = ['name' => 'postgresql.conf', 'ok' => $ok, 'output' => $ok ? "listen={$listen}, wal_level={$walLevel}" : 'Error'];
+        if (!$ok) return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo modificar postgresql.conf'];
+
+        // pg_hba, scoped to WG /32.
+        $existing = file_get_contents($hbaConf);
+        $newLines = array_filter($hbaLines, fn($l) => !str_contains($existing, $l));
+        if (!empty($newLines)) {
+            file_put_contents($hbaConf, rtrim($existing) . "\n" . implode("\n", $newLines) . "\n");
+        }
+        $steps[] = ['name' => 'pg_hba.conf', 'ok' => true, 'output' => count($newLines) . ' entradas /32 (WG)'];
+
+        // Replication role on THIS cluster's port.
+        $safeUser = preg_replace('/[^a-zA-Z0-9_]/', '', $replUser);
+        if ($replPass !== '') {
+            $pgpass = static::writeTempPgpass('127.0.0.1', (int)$cluster['port'], '*', 'postgres', '');
+            $safePass = escapeshellarg($replPass);
+            $sql = "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='{$safeUser}') THEN CREATE ROLE {$safeUser} WITH REPLICATION LOGIN PASSWORD {$safePass}; ELSE ALTER ROLE {$safeUser} WITH REPLICATION LOGIN PASSWORD {$safePass}; END IF; END \$\$;";
+            $out = shell_exec('sudo -u postgres psql -p ' . (int)$cluster['port'] . ' -c ' . escapeshellarg($sql) . ' 2>&1');
+            @unlink($pgpass);
+            $steps[] = ['name' => "Rol replicación {$safeUser}", 'ok' => true, 'output' => trim((string)$out) ?: 'OK'];
+        }
+
+        // Physical slots (unique per slave+cluster).
+        foreach ($slotNames as $slot) {
+            $safeSlot = preg_replace('/[^a-zA-Z0-9_]/', '', $slot);
+            if ($safeSlot === '') continue;
+            $sql = "SELECT pg_create_physical_replication_slot('{$safeSlot}') WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name='{$safeSlot}');";
+            $out = shell_exec('sudo -u postgres psql -p ' . (int)$cluster['port'] . ' -tAc ' . escapeshellarg($sql) . ' 2>&1');
+            $steps[] = ['name' => "Slot físico {$safeSlot}", 'ok' => true, 'output' => trim((string)$out) ?: 'OK/existe'];
+        }
+
+        // Reload ONLY this cluster (config changes here need reload, not restart,
+        // except wal_level which needs restart — surface that to the caller).
+        $needsRestart = ($walLevel !== static::currentPgSetting($cluster, 'wal_level'));
+        if ($needsRestart) {
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' restart 2>&1');
+            $steps[] = ['name' => 'Reiniciar clúster', 'ok' => true, 'output' => 'restart (wal_level cambió)'];
+        } else {
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' reload 2>&1');
+            $steps[] = ['name' => 'Recargar clúster', 'ok' => true, 'output' => 'reload'];
+        }
+        $running = PgClusterService::isRunning($cluster);
+        return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : "El clúster {$cluster['key']} no está activo tras la operación"];
+    }
+
+    /** Read a live GUC value from a specific cluster (via its port). */
+    public static function currentPgSetting(array $cluster, string $name): string
+    {
+        $port = (int)($cluster['port'] ?? 0);
+        if ($port <= 0) return '';
+        $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $name);
+        $out = shell_exec('sudo -u postgres psql -p ' . $port . ' -tAc ' . escapeshellarg("SHOW {$safe}") . ' 2>/dev/null');
+        return trim((string)$out);
+    }
+
+    /** Best-effort WireGuard IP (10.10.70.x on this fleet). */
+    public static function detectWireguardIp(): string
+    {
+        $out = trim((string)shell_exec("ip -o -4 addr show 2>/dev/null | awk '{print \$4}' | cut -d/ -f1"));
+        foreach (preg_split('/\s+/', $out) as $ip) {
+            if (str_starts_with($ip, '10.10.70.')) return $ip;
+        }
+        return '';
+    }
+
+    // ═══════════════════════════════════════════════════════════
     // ─── Monitoring ──────────────────────────────────────────
     // ═══════════════════════════════════════════════════════════
 
@@ -1208,6 +1457,115 @@ class ReplicationService
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * Run a query against a SPECIFIC cluster (by port) as the postgres user and
+     * return rows as arrays. Uses -tA and a caller-controlled separator so we can
+     * monitor 5432 / 5433 / 5434 independently — the old monitoring only ever
+     * queried the panel DB on 5433.
+     *
+     * Returns [] on any error (cluster down, auth, etc).
+     */
+    public static function queryCluster(array $cluster, string $sql): array
+    {
+        $port = (int)($cluster['port'] ?? 0);
+        if ($port <= 0) return [];
+        $cmd = 'sudo -u postgres psql -p ' . $port . ' -tAF "|" -c ' . escapeshellarg($sql) . ' 2>/dev/null';
+        $out = trim((string)shell_exec($cmd));
+        if ($out === '') return [];
+        $rows = [];
+        foreach (preg_split('/\r?\n/', $out) as $line) {
+            if ($line === '') continue;
+            $rows[] = explode('|', $line);
+        }
+        return $rows;
+    }
+
+    /**
+     * Per-cluster master status: what standbys are connected to THIS cluster,
+     * with lag in bytes. Reads pg_stat_replication on the cluster's own port.
+     */
+    public static function getPgMasterStatusForCluster(array $cluster): array
+    {
+        $sql = "SELECT application_name, client_addr, state, sync_state, "
+             . "pg_wal_lsn_diff(sent_lsn, replay_lsn) AS lag_bytes, "
+             . "sent_lsn, replay_lsn FROM pg_stat_replication";
+        $rows = static::queryCluster($cluster, $sql);
+        $result = [];
+        foreach ($rows as $r) {
+            $result[] = [
+                'application_name' => $r[0] ?? '',
+                'client_addr'      => $r[1] ?? '',
+                'state'            => $r[2] ?? '',
+                'sync_state'       => $r[3] ?? '',
+                'lag_bytes'        => (int)($r[4] ?? 0),
+                'sent_lsn'         => $r[5] ?? '',
+                'replay_lsn'       => $r[6] ?? '',
+            ];
+        }
+        return $result;
+    }
+
+    /**
+     * Per-cluster slave/standby status: is THIS cluster in recovery, connected,
+     * streaming, and how far behind. Reads pg_stat_wal_receiver on its own port.
+     */
+    public static function getPgSlaveStatusForCluster(array $cluster): ?array
+    {
+        $rec = static::queryCluster($cluster, "SELECT pg_is_in_recovery()");
+        $inRecovery = isset($rec[0][0]) && ($rec[0][0] === 't' || $rec[0][0] === 'true');
+        if (!$inRecovery) return null;
+
+        $wr = static::queryCluster($cluster,
+            "SELECT status, sender_host, sender_port, slot_name FROM pg_stat_wal_receiver");
+        $lsn = static::queryCluster($cluster,
+            "SELECT pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn(), "
+          . "COALESCE(EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))::int, 0)");
+
+        $status = $wr[0][0] ?? 'disconnected';
+        return [
+            'in_recovery'  => true,
+            'status'       => $status,
+            'sender_host'  => $wr[0][1] ?? '',
+            'sender_port'  => $wr[0][2] ?? '',
+            'slot_name'    => $wr[0][3] ?? '',
+            'receive_lsn'  => $lsn[0][0] ?? '',
+            'replay_lsn'   => $lsn[0][1] ?? '',
+            'lag_seconds'  => (int)($lsn[0][2] ?? 0),
+            'streaming'    => $status === 'streaming',
+        ];
+    }
+
+    /**
+     * Streaming status PER cluster (not a single global boolean). Returns a map
+     * keyed by "version/cluster" so dumps can be decided per instance:
+     *   [ '14/main' => ['streaming'=>true, 'role'=>'slave', 'lag_seconds'=>2], ... ]
+     *
+     * A cluster that is NOT streaming is never considered protected.
+     */
+    public static function getPgStreamingByCluster(): array
+    {
+        $map = [];
+        foreach (PgClusterService::listClusters() as $c) {
+            $slave = static::getPgSlaveStatusForCluster($c);
+            if ($slave !== null) {
+                $map[$c['key']] = [
+                    'role'        => 'slave',
+                    'streaming'   => (bool)$slave['streaming'],
+                    'lag_seconds' => $slave['lag_seconds'],
+                    'slot_name'   => $slave['slot_name'],
+                ];
+            } else {
+                $masters = static::getPgMasterStatusForCluster($c);
+                $map[$c['key']] = [
+                    'role'        => 'master',
+                    'streaming'   => !empty($masters),   // has connected standbys
+                    'standbys'    => count($masters),
+                ];
+            }
+        }
+        return $map;
     }
 
     /**
