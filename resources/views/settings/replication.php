@@ -55,6 +55,82 @@
 </div>
 <?php endif; ?>
 
+<!-- ═══════════════════════════════════════════════════════════ -->
+<!-- Replication Matrix (per-instance)                            -->
+<!-- ═══════════════════════════════════════════════════════════ -->
+<div class="card bg-dark border-secondary mb-4">
+    <div class="card-header border-secondary d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-grid-3x3-gap me-2"></i>Matriz de replicación (por instancia)</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="matrixRefreshBtn">
+            <i class="bi bi-arrow-repeat"></i>
+        </button>
+    </div>
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-dark table-sm align-middle mb-0" id="replicationMatrix">
+                <thead>
+                    <tr class="text-muted">
+                        <th>Slave</th><th>Motor</th><th>Instancia</th><th>Puerto</th>
+                        <th>Rol</th><th>Estado</th><th>Lag</th><th>Slot</th><th>Último error</th>
+                    </tr>
+                </thead>
+                <tbody id="matrixBody">
+                    <tr><td colspan="9" class="text-center text-muted py-3">Cargando…</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <small class="text-muted d-block mt-2">
+            Cada instancia PostgreSQL (14/main, 14/panel, 16/musemind) y MariaDB/MySQL se configura y
+            monitoriza por separado. Un motor no se marca como replicado globalmente porque otra instancia lo esté.
+        </small>
+    </div>
+</div>
+
+<script>
+(function () {
+    const body = document.getElementById('matrixBody');
+    const badge = (s) => {
+        const v = (s || '').toLowerCase();
+        let cls = 'secondary';
+        if (v.includes('streaming')) cls = 'success';
+        else if (v.includes('incompatible')) cls = 'danger';
+        else if (v.includes('error') || v.includes('desconect')) cls = 'warning';
+        else if (v.includes('pending') || v.includes('pendiente')) cls = 'info';
+        return '<span class="badge bg-' + cls + '">' + (s || '—') + '</span>';
+    };
+    const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    function load() {
+        fetch('/settings/replication/matrix', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(r => r.json())
+            .then(d => {
+                if (!d.ok || !Array.isArray(d.rows) || d.rows.length === 0) {
+                    body.innerHTML = '<tr><td colspan="9" class="text-center text-muted py-3">Sin instancias configuradas todavía.</td></tr>';
+                    return;
+                }
+                body.innerHTML = d.rows.map(r =>
+                    '<tr>' +
+                    '<td>' + esc(r.slave) + '</td>' +
+                    '<td>' + esc(r.engine) + '</td>' +
+                    '<td><code>' + esc(r.instance) + '</code></td>' +
+                    '<td>' + esc(r.port) + '</td>' +
+                    '<td>' + esc(r.role) + '</td>' +
+                    '<td>' + badge(r.status) + '</td>' +
+                    '<td>' + esc(r.lag || '—') + '</td>' +
+                    '<td><small class="text-muted">' + esc(r.slot || '—') + '</small></td>' +
+                    '<td><small class="text-danger">' + esc(r.last_error || '') + '</small></td>' +
+                    '</tr>'
+                ).join('');
+            })
+            .catch(() => {
+                body.innerHTML = '<tr><td colspan="9" class="text-center text-danger py-3">Error cargando la matriz.</td></tr>';
+            });
+    }
+    document.getElementById('matrixRefreshBtn').addEventListener('click', load);
+    load();
+    setInterval(load, 15000);
+})();
+</script>
+
 <div class="row g-4">
 
 <!-- ═══════════════════════════════════════════════════════════ -->

@@ -515,6 +515,14 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // Mode 2: Slave (manual)
 \MuseDockPanel\Router::post('/settings/replication/convert-to-slave', 'ReplicationController@convertToSlave');
 \MuseDockPanel\Router::post('/settings/replication/test-slave-master', 'ReplicationController@testSlaveMaster');
+// Mode 2b: Slave per explicit PostgreSQL cluster (safe path)
+\MuseDockPanel\Router::get('/settings/replication/pg-clusters', 'ReplicationController@listPgClusters');
+\MuseDockPanel\Router::post('/settings/replication/preflight', 'ReplicationController@preflight');
+\MuseDockPanel\Router::post('/settings/replication/convert-to-slave-cluster', 'ReplicationController@convertToSlaveCluster');
+// Replication matrix + per-instance CRUD
+\MuseDockPanel\Router::get('/settings/replication/matrix', 'ReplicationController@matrix');
+\MuseDockPanel\Router::post('/settings/replication/instance/save', 'ReplicationController@saveInstance');
+\MuseDockPanel\Router::post('/settings/replication/instance/delete', 'ReplicationController@deleteInstance');
 // Mode 3: Auto (cluster)
 \MuseDockPanel\Router::post('/settings/replication/auto-configure', 'ReplicationController@autoConfigure');
 // Switchover

@@ -4,6 +4,7 @@ namespace MuseDockPanel\Services;
 use MuseDockPanel\Settings;
 use MuseDockPanel\Database;
 use MuseDockPanel\Env;
+use MuseDockPanel\Services\PgClusterService;
 
 class ReplicationService
 {
@@ -48,6 +49,85 @@ class ReplicationService
         return null;
     }
 
+    /**
+     * Detect the ACTUAL database vendor and version, from the live server
+     * (SELECT VERSION()) rather than the client binary. Returns:
+     *   ['vendor' => 'mariadb'|'mysql', 'version' => '10.6.x'|'8.0.x', 'raw' => '...']
+     *
+     * This is the fix for the vendor-mixup: MariaDB and Oracle MySQL share the
+     * `mysql` client but need entirely different replication syntax. We must
+     * never send Oracle GTID options to MariaDB, and must never query
+     * @@gtid_mode on MariaDB (it doesn't exist there).
+     */
+    public static function detectDbVendor(?\PDO $pdo = null): array
+    {
+        $raw = '';
+        $pdo = $pdo ?? static::getMysqlPdo();
+        if ($pdo) {
+            try {
+                $raw = (string)$pdo->query("SELECT VERSION()")->fetchColumn();
+            } catch (\Throwable) {}
+        }
+        if ($raw === '') {
+            // Fall back to the client banner (less reliable but better than nothing).
+            $raw = trim((string)shell_exec('mysql --version 2>/dev/null'));
+        }
+
+        $isMaria = stripos($raw, 'mariadb') !== false;
+        $version = '';
+        if (preg_match('/(\d+\.\d+\.\d+)/', $raw, $m)) {
+            $version = $m[1];
+        } elseif (preg_match('/(\d+\.\d+)/', $raw, $m)) {
+            $version = $m[1];
+        }
+
+        return [
+            'vendor'  => $isMaria ? 'mariadb' : 'mysql',
+            'version' => $version,
+            'raw'     => $raw,
+        ];
+    }
+
+    /**
+     * Assess whether native binary replication is viable between this master's
+     * MySQL-family engine and a slave's engine/version. MariaDB↔MySQL binary
+     * replication is NOT reliably supported and must be blocked with a warning.
+     *
+     * @param array $slaveInfo ['vendor'=>..., 'version'=>...] of the slave
+     * @return array ['compatible'=>bool, 'severity'=>'ok'|'warning'|'critical', 'message'=>...]
+     */
+    public static function assessMysqlCompatibility(array $masterInfo, array $slaveInfo): array
+    {
+        $mv = $masterInfo['vendor'] ?? '';
+        $sv = $slaveInfo['vendor'] ?? '';
+
+        if ($mv === '' || $sv === '') {
+            return ['compatible' => false, 'severity' => 'warning',
+                'message' => 'No se pudo determinar el motor de uno de los extremos. No configure replicación nativa hasta verificarlo.'];
+        }
+
+        if ($mv !== $sv) {
+            return ['compatible' => false, 'severity' => 'critical',
+                'message' => "Incompatible: master es {$mv} " . ($masterInfo['version'] ?? '')
+                    . " y slave es {$sv} " . ($slaveInfo['version'] ?? '')
+                    . ". La replicación binaria fiable exige la MISMA familia (ambos MariaDB o ambos MySQL) y versiones compatibles. "
+                    . "Recomendación: instalar {$mv} " . ($masterInfo['version'] ?? '') . " en el slave, o usar sincronización por dumps mientras tanto. "
+                    . "Nunca se sustituirá automáticamente el motor si existen bases de datos."];
+        }
+
+        // Same vendor: warn if major versions differ a lot.
+        $mMajor = (int)explode('.', $masterInfo['version'] ?? '0')[0];
+        $sMajor = (int)explode('.', $slaveInfo['version'] ?? '0')[0];
+        if ($mMajor !== $sMajor) {
+            return ['compatible' => true, 'severity' => 'warning',
+                'message' => "Ambos {$mv} pero versiones mayores distintas ({$masterInfo['version']} vs {$slaveInfo['version']}). "
+                    . "La replicación suele funcionar master→slave más nuevo, pero verifique compatibilidad."];
+        }
+
+        return ['compatible' => true, 'severity' => 'ok',
+            'message' => "Compatible: ambos {$mv} " . ($masterInfo['version'] ?? '') . "."];
+    }
+
     public static function detectMysqlServiceName(): string
     {
         $mariadb = trim((string)shell_exec('systemctl is-active mariadb 2>/dev/null'));
@@ -55,20 +135,48 @@ class ReplicationService
     }
 
     // ─── Config Paths ────────────────────────────────────────
+    // These legacy helpers used to mix the psql CLIENT version (16) with the
+    // first-listed cluster name ('main'), producing /etc/postgresql/16/main
+    // (nonexistent) and, for the data dir, the default port 5432 = 14/main.
+    // They now resolve the PANEL's own cluster (from .env DB_PORT) via explicit
+    // identity, so legacy callers act consistently on ONE real cluster.
+
     public static function getPgConfigDir(): string
     {
-        $ver = static::detectPgVersion() ?? '16';
-        $cluster = trim((string)shell_exec("pg_lsclusters -h 2>/dev/null | head -1 | awk '{print \$2}'"));
-        $cluster = $cluster ?: 'main';
-        return "/etc/postgresql/{$ver}/{$cluster}";
+        $panel = PgClusterService::getPanelCluster();
+        if ($panel) return $panel['config_dir'];
+        // Fallback: first real cluster (still a valid, existing path).
+        $first = PgClusterService::listClusters()[0] ?? null;
+        return $first['config_dir'] ?? '/etc/postgresql/14/main';
     }
 
     public static function getPgDataDir(): string
     {
-        $out = trim((string)shell_exec("sudo -u postgres psql -tAc \"SHOW data_directory\" 2>/dev/null"));
-        if ($out && is_dir($out)) return $out;
-        $ver = static::detectPgVersion() ?? '16';
-        return "/var/lib/postgresql/{$ver}/main";
+        $panel = PgClusterService::getPanelCluster();
+        if ($panel) return $panel['data_dir'];
+        $first = PgClusterService::listClusters()[0] ?? null;
+        return $first['data_dir'] ?? '/var/lib/postgresql/14/main';
+    }
+
+    /** The systemd unit for the panel's own cluster (never the umbrella). */
+    public static function getPanelClusterUnit(): string
+    {
+        $panel = PgClusterService::getPanelCluster();
+        return $panel['unit'] ?? 'postgresql';
+    }
+
+    /** Restart/reload ONLY the panel's cluster, never all three. */
+    private static function restartPanelCluster(string $action = 'restart'): string
+    {
+        $panel = PgClusterService::getPanelCluster();
+        if ($panel) {
+            return (string)shell_exec(
+                'pg_ctlcluster ' . escapeshellarg($panel['version']) . ' '
+                . escapeshellarg($panel['cluster']) . ' ' . escapeshellarg($action) . ' 2>&1'
+            );
+        }
+        // No panel cluster resolved — do nothing rather than hit the umbrella.
+        return 'no panel cluster resolved';
     }
 
     public static function getMysqlConfigPath(): string
@@ -164,8 +272,8 @@ class ReplicationService
                 } catch (\Throwable) {}
             }
         }
-        if (file_exists('/etc/mysql/debian.cnf')) {
-            $conf = parse_ini_file('/etc/mysql/debian.cnf', true);
+        if (file_exists('/etc/mysql/debian.cnf') && is_readable('/etc/mysql/debian.cnf')) {
+            $conf = @parse_ini_file('/etc/mysql/debian.cnf', true) ?: [];
             $section = $conf['client'] ?? [];
             $user = $section['user'] ?? 'root';
             $pass = $section['password'] ?? '';
@@ -410,8 +518,8 @@ class ReplicationService
         $output = shell_exec("sudo -u postgres psql -c " . escapeshellarg($sql) . " 2>&1");
         $steps[] = ['name' => 'Crear usuario replicacion', 'ok' => true, 'output' => trim($output ?? 'OK')];
 
-        $output = shell_exec("systemctl restart postgresql 2>&1");
-        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $output = static::restartPanelCluster("restart");
+        $running = PgClusterService::isRunning(PgClusterService::getPanelCluster() ?? []);
         $steps[] = ['name' => 'Reiniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
 
         return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : 'PostgreSQL no arranco correctamente'];
@@ -556,8 +664,8 @@ class ReplicationService
         }
 
         // Restart PostgreSQL
-        $output = shell_exec("systemctl restart postgresql 2>&1");
-        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $output = static::restartPanelCluster("restart");
+        $running = PgClusterService::isRunning(PgClusterService::getPanelCluster() ?? []);
         $steps[] = ['name' => 'Reiniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
 
         return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : 'PostgreSQL no arranco correctamente'];
@@ -597,8 +705,15 @@ class ReplicationService
             }
         }
         if ($anyGtid || Settings::get('repl_mysql_gtid_mode', '0') === '1') {
-            $mysqlConf['gtid_mode'] = 'ON';
-            $mysqlConf['enforce-gtid-consistency'] = 'ON';
+            $vendor = static::detectDbVendor($pdo ?? null);
+            if ($vendor['vendor'] === 'mariadb') {
+                // MariaDB: GTID is implicit with binlog; use strict mode, never gtid_mode.
+                $mysqlConf['gtid_strict_mode'] = 'ON';
+                $mysqlConf['log_slave_updates'] = 'ON';
+            } else {
+                $mysqlConf['gtid_mode'] = 'ON';
+                $mysqlConf['enforce_gtid_consistency'] = 'ON';
+            }
         }
 
         $ok = static::modifyConfigFile($configPath, $mysqlConf, 'mysqld');
@@ -689,8 +804,8 @@ class ReplicationService
         $steps[] = ['name' => 'Modificar synchronous_commit', 'ok' => $ok, 'output' => "mode={$mode}"];
 
         // Reload PostgreSQL (no restart needed for these params)
-        $output = shell_exec("systemctl reload postgresql 2>&1");
-        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $output = static::restartPanelCluster("reload");
+        $running = PgClusterService::isRunning(PgClusterService::getPanelCluster() ?? []);
         $steps[] = ['name' => 'Recargar PostgreSQL', 'ok' => $running, 'output' => $running ? 'OK' : trim($output ?? 'Error')];
 
         return ['ok' => $ok && $running, 'steps' => $steps, 'error' => null];
@@ -721,8 +836,8 @@ class ReplicationService
         $steps[] = ['name' => 'Configurar wal_level=logical', 'ok' => $ok, 'output' => $ok ? 'OK' : 'Error'];
 
         // Restart required for wal_level change
-        $output = shell_exec("systemctl restart postgresql 2>&1");
-        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $output = static::restartPanelCluster("restart");
+        $running = PgClusterService::isRunning(PgClusterService::getPanelCluster() ?? []);
         $steps[] = ['name' => 'Reiniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
 
         if (!$running) {
@@ -778,18 +893,37 @@ class ReplicationService
         $steps = [];
         $configPath = static::getMysqlConfigPath();
         $service = static::detectMysqlServiceName();
+        $vendor = static::detectDbVendor();
 
         static::backupFile($configPath);
 
-        $ok = static::modifyConfigFile($configPath, [
-            'gtid_mode'                 => 'ON',
-            'enforce-gtid-consistency'  => 'ON',
-            'log-bin'                   => 'mysql-bin',
-            'binlog_format'             => Settings::get('repl_mysql_binlog_format', 'ROW'),
-        ], 'mysqld');
-        $steps[] = ['name' => 'Configurar GTID master', 'ok' => $ok, 'output' => $ok ? 'gtid_mode=ON' : 'Error'];
+        // Vendor-specific GTID master config.
+        if ($vendor['vendor'] === 'mariadb') {
+            // MariaDB: GTID is implicit once binlog is on; NEVER set gtid_mode /
+            // enforce-gtid-consistency (those are Oracle MySQL only and break MariaDB).
+            $conf = [
+                'log-bin'          => 'mysql-bin',
+                'binlog_format'    => Settings::get('repl_mysql_binlog_format', 'ROW'),
+                'gtid_strict_mode' => 'ON',
+                'log_slave_updates'=> 'ON',
+            ];
+            $label = 'MariaDB GTID (gtid_strict_mode=ON)';
+        } else {
+            // Oracle MySQL 8: gtid_mode + enforce_gtid_consistency.
+            $conf = [
+                'log-bin'                    => 'mysql-bin',
+                'binlog_format'              => Settings::get('repl_mysql_binlog_format', 'ROW'),
+                'gtid_mode'                  => 'ON',
+                'enforce_gtid_consistency'   => 'ON',
+            ];
+            $label = 'MySQL 8 GTID (gtid_mode=ON)';
+        }
+
+        $ok = static::modifyConfigFile($configPath, $conf, 'mysqld');
+        $steps[] = ['name' => 'Configurar GTID master', 'ok' => $ok, 'output' => $ok ? $label : 'Error'];
 
         Settings::set('repl_mysql_gtid_mode', '1');
+        Settings::set('repl_mysql_vendor', $vendor['vendor']);
 
         $output = shell_exec("systemctl restart {$service} 2>&1");
         $running = trim((string)shell_exec("systemctl is-active {$service} 2>/dev/null")) === 'active';
@@ -813,15 +947,28 @@ class ReplicationService
         $parts = explode('.', $localIp);
         $serverId = ((int)($parts[3] ?? 2)) + 100;
 
-        $ok = static::modifyConfigFile($configPath, [
-            'server-id'                 => (string)$serverId,
-            'gtid_mode'                 => 'ON',
-            'enforce-gtid-consistency'  => 'ON',
-            'relay-log'                 => 'relay-bin',
-            'read_only'                 => '1',
-            'log-bin'                   => 'mysql-bin',
-        ], 'mysqld');
-        $steps[] = ['name' => 'Configurar GTID slave', 'ok' => $ok, 'output' => "server-id={$serverId}, GTID=ON"];
+        $vendor = static::detectDbVendor();
+        if ($vendor['vendor'] === 'mariadb') {
+            $conf = [
+                'server-id'        => (string)$serverId,
+                'relay-log'        => 'relay-bin',
+                'read_only'        => '1',
+                'log-bin'          => 'mysql-bin',
+                'gtid_strict_mode' => 'ON',
+                'log_slave_updates'=> 'ON',
+            ];
+        } else {
+            $conf = [
+                'server-id'                 => (string)$serverId,
+                'gtid_mode'                 => 'ON',
+                'enforce_gtid_consistency'  => 'ON',
+                'relay-log'                 => 'relay-bin',
+                'read_only'                 => '1',
+                'log-bin'                   => 'mysql-bin',
+            ];
+        }
+        $ok = static::modifyConfigFile($configPath, $conf, 'mysqld');
+        $steps[] = ['name' => 'Configurar GTID slave', 'ok' => $ok, 'output' => "server-id={$serverId}, {$vendor['vendor']} GTID"];
 
         $output = shell_exec("systemctl restart {$service} 2>&1");
         $running = trim((string)shell_exec("systemctl is-active {$service} 2>/dev/null")) === 'active';
@@ -831,33 +978,40 @@ class ReplicationService
             return ['ok' => false, 'steps' => $steps, 'error' => "{$service} no arranco"];
         }
 
-        // Configure replication with MASTER_AUTO_POSITION
         $pdo = static::getMysqlPdo();
         if (!$pdo) {
             return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo conectar a MySQL local'];
         }
 
         try {
-            $mysqlVer = static::detectMysqlVersion();
-            $isNew = $mysqlVer && version_compare($mysqlVer, '8.0.23', '>=');
-
-            $pdo->exec("STOP SLAVE");
-            if ($isNew) {
-                $pdo->exec("CHANGE REPLICATION SOURCE TO SOURCE_HOST=" . $pdo->quote($masterIp) .
-                    ", SOURCE_PORT={$port}" .
-                    ", SOURCE_USER=" . $pdo->quote($user) .
-                    ", SOURCE_PASSWORD=" . $pdo->quote($pass) .
-                    ", SOURCE_AUTO_POSITION=1");
-                $pdo->exec("START REPLICA");
-            } else {
+            if ($vendor['vendor'] === 'mariadb') {
+                // MariaDB GTID: MASTER_USE_GTID=slave_pos (NOT MASTER_AUTO_POSITION).
+                $pdo->exec("STOP SLAVE");
                 $pdo->exec("CHANGE MASTER TO MASTER_HOST=" . $pdo->quote($masterIp) .
                     ", MASTER_PORT={$port}" .
                     ", MASTER_USER=" . $pdo->quote($user) .
                     ", MASTER_PASSWORD=" . $pdo->quote($pass) .
-                    ", MASTER_AUTO_POSITION=1");
+                    ", MASTER_USE_GTID=slave_pos");
                 $pdo->exec("START SLAVE");
+                $steps[] = ['name' => 'Configurar replicacion GTID', 'ok' => true, 'output' => 'MariaDB: MASTER_USE_GTID=slave_pos'];
+            } else {
+                // Oracle MySQL 8: SOURCE_AUTO_POSITION on 8.0.23+, else MASTER_AUTO_POSITION.
+                $isNew = !empty($vendor['version']) && version_compare($vendor['version'], '8.0.23', '>=');
+                $pdo->exec("STOP REPLICA");
+                if ($isNew) {
+                    $pdo->exec("CHANGE REPLICATION SOURCE TO SOURCE_HOST=" . $pdo->quote($masterIp) .
+                        ", SOURCE_PORT={$port}, SOURCE_USER=" . $pdo->quote($user) .
+                        ", SOURCE_PASSWORD=" . $pdo->quote($pass) . ", SOURCE_AUTO_POSITION=1");
+                    $pdo->exec("START REPLICA");
+                    $steps[] = ['name' => 'Configurar replicacion GTID', 'ok' => true, 'output' => 'MySQL8: SOURCE_AUTO_POSITION=1'];
+                } else {
+                    $pdo->exec("CHANGE MASTER TO MASTER_HOST=" . $pdo->quote($masterIp) .
+                        ", MASTER_PORT={$port}, MASTER_USER=" . $pdo->quote($user) .
+                        ", MASTER_PASSWORD=" . $pdo->quote($pass) . ", MASTER_AUTO_POSITION=1");
+                    $pdo->exec("START SLAVE");
+                    $steps[] = ['name' => 'Configurar replicacion GTID', 'ok' => true, 'output' => 'MySQL: MASTER_AUTO_POSITION=1'];
+                }
             }
-            $steps[] = ['name' => 'Configurar replicacion GTID', 'ok' => true, 'output' => 'MASTER_AUTO_POSITION=1'];
         } catch (\Throwable $e) {
             $steps[] = ['name' => 'Configurar replicacion GTID', 'ok' => false, 'output' => $e->getMessage()];
             return ['ok' => false, 'steps' => $steps, 'error' => $e->getMessage()];
@@ -870,45 +1024,238 @@ class ReplicationService
     // ─── Setup Slave (single — legacy) ───────────────────────
     // ═══════════════════════════════════════════════════════════
 
+    /**
+     * DEPRECATED / UNSAFE legacy entry point.
+     *
+     * The old implementation ran `systemctl stop postgresql` (stopping ALL
+     * clusters) and `rm -rf` on a data directory resolved implicitly from the
+     * default port — on a multi-cluster host this wiped 14/main. It is now a
+     * hard-blocked stub: it refuses to act and redirects callers to the
+     * cluster-explicit path setupPgSlaveForCluster().
+     *
+     * Kept only so existing callers/signatures do not fatal; it never performs
+     * a destructive operation.
+     */
     public static function setupPgSlave(string $masterIp, int $port, string $replUser, string $replPass): array
     {
+        return [
+            'ok'    => false,
+            'steps' => [[
+                'name'   => 'Bloqueado por seguridad',
+                'ok'     => false,
+                'output' => 'setupPgSlave() legacy está deshabilitado: no distingue clústeres y podría borrar datos. '
+                          . 'Use setupPgSlaveForCluster() con identidad explícita (versión, clúster, puerto).',
+            ]],
+            'error' => 'Operación bloqueada: el procedimiento slave legacy es destructivo en un host multi-clúster. '
+                     . 'Seleccione un clúster PostgreSQL explícito.',
+        ];
+    }
+
+    /**
+     * Safe, cluster-explicit slave setup. Operates on ONE cluster only.
+     *
+     * Guarantees:
+     *  - Never runs `systemctl stop postgresql` (umbrella). Uses pg_ctlcluster
+     *    on the specific (version, cluster) via its own unit.
+     *  - Never `rm -rf` a live data directory. Streams into a fresh TEMP dir,
+     *    validates it, and only then swaps it in — moving the old dir aside
+     *    (never deleting) so a failure is fully recoverable.
+     *  - Verifies master/slave major-version match before touching anything.
+     *  - Refuses to overwrite a populated data dir unless $confirmWipe is true.
+     *  - dry-run mode returns the planned commands without executing them.
+     *
+     * @param array  $cluster      descriptor from PgClusterService (target/local cluster to become standby)
+     * @param string $masterIp     master host (WireGuard IP)
+     * @param int    $sourcePort   master's port for THIS cluster
+     * @param string $replUser     replication role
+     * @param string $replPass     replication password
+     * @param bool   $confirmWipe  explicit confirmation to replace populated data dir
+     * @param bool   $dryRun       if true, do not execute — only plan
+     */
+    public static function setupPgSlaveForCluster(
+        array $cluster,
+        string $masterIp,
+        int $sourcePort,
+        string $replUser,
+        string $replPass,
+        bool $confirmWipe = false,
+        bool $dryRun = false
+    ): array {
         $steps = [];
-        $pgVer = static::detectPgVersion() ?? '16';
-        $dataDir = static::getPgDataDir();
 
-        shell_exec("systemctl stop postgresql 2>&1");
-        $steps[] = ['name' => 'Detener PostgreSQL', 'ok' => true, 'output' => 'OK'];
-
-        shell_exec("rm -rf " . escapeshellarg($dataDir) . "/*");
-        $steps[] = ['name' => 'Limpiar directorio de datos', 'ok' => true, 'output' => $dataDir];
-
-        $safeMaster = escapeshellarg($masterIp);
-        $safeUser = escapeshellarg($replUser);
-        $safeDir = escapeshellarg($dataDir);
-        $cmd = "PGPASSWORD=" . escapeshellarg($replPass) . " pg_basebackup -h {$safeMaster} -p {$port} -U {$safeUser} -D {$safeDir} -Fp -Xs -P -R 2>&1";
-        $output = shell_exec($cmd);
-        $hasSignal = file_exists("{$dataDir}/standby.signal") || file_exists("{$dataDir}/recovery.conf");
-        $steps[] = ['name' => 'pg_basebackup', 'ok' => $hasSignal, 'output' => $hasSignal ? 'Completado' : trim($output ?? 'Error')];
-
-        if (!$hasSignal) {
-            if ((int)$pgVer < 12) {
-                $recoveryConf = "standby_mode = 'on'\nprimary_conninfo = 'host={$masterIp} port={$port} user={$replUser} password={$replPass}'\n";
-                file_put_contents("{$dataDir}/recovery.conf", $recoveryConf);
-                $steps[] = ['name' => 'Crear recovery.conf', 'ok' => true, 'output' => 'PG < 12'];
-            } else {
-                return ['ok' => false, 'steps' => $steps, 'error' => 'pg_basebackup fallo. Verifique credenciales y conectividad.'];
+        // ── Guard 0: descriptor sanity ──────────────────────────────
+        foreach (['version', 'cluster', 'port', 'data_dir', 'unit'] as $k) {
+            if (empty($cluster[$k])) {
+                return ['ok' => false, 'steps' => $steps, 'error' => "Descriptor de clúster incompleto (falta '{$k}'). Operación abortada."];
             }
         }
+        $dataDir = $cluster['data_dir'];
+        // Never allow operating on a root-ish or empty path.
+        $realParent = dirname($dataDir);
+        if ($dataDir === '' || $dataDir === '/' || $realParent === '/' || !str_starts_with($dataDir, '/var/lib/postgresql/')) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "data_dir '{$dataDir}' no es un directorio de clúster válido. Operación abortada."];
+        }
+        $localMajor = (int)$cluster['version'];
 
-        shell_exec("chown -R postgres:postgres " . escapeshellarg($dataDir));
-        $steps[] = ['name' => 'Corregir permisos', 'ok' => true, 'output' => 'OK'];
+        $tmpDir  = rtrim($dataDir, '/') . '.basebackup.' . date('Ymd_His');
+        $oldDir  = rtrim($dataDir, '/') . '.old.' . date('Ymd_His');
+        $unit    = $cluster['unit'];
 
-        shell_exec("systemctl start postgresql 2>&1");
+        // ── Plan (used by dry-run and for logging) ──────────────────
+        $plan = [
+            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} stop   # solo este clúster",
+            "pg_basebackup -h {$masterIp} -p {$sourcePort} -U {$replUser} -D {$tmpDir} -Fp -Xs -P -R   # a directorio temporal",
+            "validar {$tmpDir}/PG_VERSION == {$localMajor} y presencia de standby.signal",
+            "mv {$dataDir} {$oldDir}   # apartar, NO borrar",
+            "mv {$tmpDir} {$dataDir}",
+            "chown -R postgres:postgres {$dataDir}",
+            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} start",
+            "(rollback si falla: restaurar {$oldDir} → {$dataDir})",
+        ];
+
+        // ── dry-run returns the plan even if the master is unreachable ──
+        // (a dry-run must be able to show what WOULD happen; connectivity and
+        //  version checks are surfaced by preflightPgSlave(), not here).
+        if ($dryRun) {
+            return [
+                'ok'      => true,
+                'dry_run' => true,
+                'steps'   => $steps,
+                'plan'    => $plan,
+                'error'   => null,
+            ];
+        }
+
+        // ── Guard 1: version match master vs local cluster ──────────
+        $masterInfo = static::testPgConnection($masterIp, $sourcePort, $replUser, $replPass);
+        if (!$masterInfo['ok']) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "No se pudo conectar al master {$masterIp}:{$sourcePort}: {$masterInfo['error']}"];
+        }
+        $masterMajor = 0;
+        if (preg_match('/PostgreSQL\s+(\d+)/', (string)$masterInfo['version'], $mm)) {
+            $masterMajor = (int)$mm[1];
+        }
+        if ($masterMajor > 0 && $masterMajor !== $localMajor) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "Versión mayor incompatible: master PG{$masterMajor} vs slave PG{$localMajor}. La replicación física exige la misma versión mayor."];
+        }
+        $steps[] = ['name' => 'Verificar versión master/slave', 'ok' => true, 'output' => "master PG{$masterMajor} = slave PG{$localMajor}"];
+
+        // ── Guard 2: populated data dir requires explicit confirmation ──
+        $hasData = PgClusterService::dataDirHasData($cluster);
+        if ($hasData && !$confirmWipe) {
+            return [
+                'ok'    => false,
+                'steps' => $steps,
+                'error' => "El directorio {$dataDir} contiene datos. Se requiere confirmación explícita (confirmWipe) que incluya slave, clúster y puerto antes de reemplazarlo.",
+            ];
+        }
+
+        // ── Execute (safe order) ────────────────────────────────────
+        // Stop ONLY this cluster.
+        shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' stop 2>&1');
+        $steps[] = ['name' => "Detener clúster {$cluster['key']}", 'ok' => true, 'output' => 'pg_ctlcluster stop (solo este clúster)'];
+
+        // Stream into a fresh temp dir using a protected password file (no PGPASSWORD in argv).
+        $pgpass = static::writeTempPgpass($masterIp, $sourcePort, '*', $replUser, $replPass);
+        $safeMaster = escapeshellarg($masterIp);
+        $safeUser   = escapeshellarg($replUser);
+        $safeTmp    = escapeshellarg($tmpDir);
+        $env = 'PGPASSFILE=' . escapeshellarg($pgpass) . ' ';
+        $cmd = $env . "pg_basebackup -h {$safeMaster} -p {$sourcePort} -U {$safeUser} -D {$safeTmp} -Fp -Xs -P -R 2>&1";
+        $output = shell_exec($cmd);
+        @unlink($pgpass);
+
+        $tmpOk = is_file("{$tmpDir}/PG_VERSION")
+              && (file_exists("{$tmpDir}/standby.signal") || file_exists("{$tmpDir}/recovery.conf"));
+        // Validate the streamed cluster's major version matches.
+        if ($tmpOk) {
+            $tmpVer = trim((string)@file_get_contents("{$tmpDir}/PG_VERSION"));
+            if ($tmpVer !== '' && (int)$tmpVer !== $localMajor) {
+                $tmpOk = false;
+                $output = "PG_VERSION del backup ({$tmpVer}) no coincide con el clúster ({$localMajor})";
+            }
+        }
+        $steps[] = ['name' => 'pg_basebackup a directorio temporal', 'ok' => $tmpOk, 'output' => $tmpOk ? "OK → {$tmpDir}" : trim((string)$output)];
+
+        if (!$tmpOk) {
+            // Clean up the failed temp dir; original data dir is untouched.
+            shell_exec('rm -rf ' . escapeshellarg($tmpDir) . ' 2>&1');
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+            return ['ok' => false, 'steps' => $steps, 'error' => 'pg_basebackup falló; el directorio de datos original NO se modificó.'];
+        }
+
+        // Swap: move old aside (never delete), move temp in. Each step's exit
+        // code is checked — a failed mv must not be reported as success.
+        $mvOld = static::runChecked('mv ' . escapeshellarg($dataDir) . ' ' . escapeshellarg($oldDir));
+        if (!$mvOld['ok']) {
+            // Original dir untouched (mv failed); clean the temp copy and restart.
+            static::runChecked('rm -rf ' . escapeshellarg($tmpDir));
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+            $steps[] = ['name' => 'Sustituir directorio de datos', 'ok' => false, 'output' => 'No se pudo apartar el dir original: ' . $mvOld['output']];
+            return ['ok' => false, 'steps' => $steps, 'error' => "No se pudo apartar {$dataDir}; el directorio original NO se modificó."];
+        }
+
+        $mvNew = static::runChecked('mv ' . escapeshellarg($tmpDir) . ' ' . escapeshellarg($dataDir));
+        if (!$mvNew['ok']) {
+            // Restore original immediately — the standby copy never went live.
+            static::runChecked('mv ' . escapeshellarg($oldDir) . ' ' . escapeshellarg($dataDir));
+            static::runChecked('rm -rf ' . escapeshellarg($tmpDir));
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+            $steps[] = ['name' => 'Sustituir directorio de datos', 'ok' => false, 'output' => 'Fallo al mover el standby; original restaurado'];
+            return ['ok' => false, 'steps' => $steps, 'error' => "No se pudo instalar el standby; se restauró {$dataDir} desde {$oldDir}."];
+        }
+
+        static::runChecked('chown -R postgres:postgres ' . escapeshellarg($dataDir));
+        $steps[] = ['name' => 'Sustituir directorio de datos', 'ok' => true, 'output' => "anterior apartado en {$oldDir}"];
+
+        // Start ONLY this cluster.
+        shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
         sleep(2);
-        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
-        $steps[] = ['name' => 'Iniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : 'Error al iniciar'];
+        $running = PgClusterService::isRunning($cluster);
 
-        return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : 'PostgreSQL no arranco como slave'];
+        if (!$running) {
+            // Rollback: remove the (non-starting) standby and restore the original.
+            static::runChecked('rm -rf ' . escapeshellarg($dataDir));
+            $restore = static::runChecked('mv ' . escapeshellarg($oldDir) . ' ' . escapeshellarg($dataDir));
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+            if ($restore['ok']) {
+                $steps[] = ['name' => 'Rollback', 'ok' => true, 'output' => "Restaurado {$oldDir} → {$dataDir}"];
+                return ['ok' => false, 'steps' => $steps, 'error' => "El clúster {$cluster['key']} no arrancó como slave; se restauró el estado anterior."];
+            }
+            // Restore itself failed — data is SAFE at $oldDir; surface loudly.
+            $steps[] = ['name' => 'Rollback', 'ok' => false, 'output' => "FALLO al restaurar. Los datos están intactos en {$oldDir}; restaurar manualmente."];
+            return ['ok' => false, 'steps' => $steps, 'error' => "El clúster no arrancó y el rollback automático falló. Datos a salvo en {$oldDir} — restauración manual requerida."];
+        }
+
+        $steps[] = ['name' => "Iniciar clúster {$cluster['key']}", 'ok' => true, 'output' => 'Activo como standby'];
+        return ['ok' => true, 'steps' => $steps, 'error' => null, 'old_data_dir' => $oldDir];
+    }
+
+    /**
+     * Run a shell command and return its exit code + combined output. Unlike
+     * bare shell_exec(), this lets destructive steps detect real failure instead
+     * of hardcoding ok=true.
+     */
+    private static function runChecked(string $cmd): array
+    {
+        $output = [];
+        $code = 0;
+        exec($cmd . ' 2>&1', $output, $code);
+        return ['ok' => $code === 0, 'code' => $code, 'output' => trim(implode("\n", $output))];
+    }
+
+    /**
+     * Write a temporary, 0600 .pgpass file so replication passwords never appear
+     * in the process argument list (visible via `ps`). Caller must unlink it.
+     */
+    private static function writeTempPgpass(string $host, int $port, string $db, string $user, string $pass): string
+    {
+        $file = tempnam(sys_get_temp_dir(), 'mdpgpass_');
+        // pgpass format: host:port:db:user:password  ('*' matches any db)
+        $line = sprintf("%s:%d:%s:%s:%s\n", $host, $port, $db, $user, str_replace(['\\', ':'], ['\\\\', '\\:'], $pass));
+        file_put_contents($file, $line);
+        @chmod($file, 0600);
+        return $file;
     }
 
     public static function setupMysqlSlave(string $masterIp, int $port, string $replUser, string $replPass): array
@@ -965,6 +1312,469 @@ class ReplicationService
         }
 
         return ['ok' => true, 'steps' => $steps, 'error' => null];
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Replication matrix (UI) ─────────────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Build the replication matrix rows for the UI:
+     *   Slave | Engine | Instance | Port | Role | Status | Lag | Slot | Last error
+     *
+     * Combines configured per-cluster PG instances with the LIVE per-cluster
+     * streaming state, plus a MySQL/MariaDB row per slave. Read-only.
+     */
+    public static function buildMatrix(): array
+    {
+        $rows = [];
+        $liveStreaming = static::getPgStreamingByCluster();
+        $localVendor = static::detectDbVendor();
+
+        foreach (static::getSlaves() as $slave) {
+            // PostgreSQL per-cluster instances.
+            foreach (static::getPgInstances((int)$slave['id']) as $inst) {
+                $key = "{$inst['pg_version']}/{$inst['cluster_name']}";
+                $live = $liveStreaming[$key] ?? null;
+                $status = $inst['status'] ?? 'pending';
+                $lag = '';
+                if ($live && ($live['role'] ?? '') === 'slave') {
+                    $status = $live['streaming'] ? 'streaming' : 'desconectado';
+                    $lag = isset($live['lag_seconds']) ? $live['lag_seconds'] . 's' : '';
+                }
+                $rows[] = [
+                    'slave'      => $slave['name'],
+                    'slave_id'   => (int)$slave['id'],
+                    'engine'     => 'PostgreSQL',
+                    'instance'   => $key,
+                    'port'       => (int)$inst['source_port'],
+                    'role'       => 'slave',
+                    'status'     => $status,
+                    'lag'        => $lag,
+                    'slot'       => $inst['slot_name'] ?? '',
+                    'last_error' => $inst['last_error'] ?? '',
+                    'enabled'    => !empty($inst['enabled']),
+                    'instance_id'=> (int)$inst['id'],
+                ];
+            }
+
+            // MySQL/MariaDB row (if the slave has it enabled).
+            if (!empty($slave['mysql_enabled'])) {
+                // Compatibility check master(local) vs slave engine is advisory here.
+                $slaveVendor = ['vendor' => $slave['mysql_vendor'] ?? '', 'version' => $slave['mysql_version'] ?? ''];
+                $compat = ($slaveVendor['vendor'] && $slaveVendor['vendor'] !== $localVendor['vendor'])
+                    ? 'incompatible (' . $localVendor['vendor'] . '→' . $slaveVendor['vendor'] . ')'
+                    : ($slave['status'] ?? 'pending');
+                $rows[] = [
+                    'slave'      => $slave['name'],
+                    'slave_id'   => (int)$slave['id'],
+                    'engine'     => $localVendor['vendor'] === 'mariadb' ? 'MariaDB' : 'MySQL',
+                    'instance'   => $localVendor['version'] ?: ($slave['mysql_version'] ?? ''),
+                    'port'       => (int)($slave['mysql_port'] ?? 3306),
+                    'role'       => 'slave',
+                    'status'     => $compat,
+                    'lag'        => '',
+                    'slot'       => '',
+                    'last_error' => '',
+                    'enabled'    => true,
+                    'instance_id'=> 0,
+                ];
+            }
+        }
+
+        return $rows;
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Preflight + confirmation (safety gate) ──────────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Build the required literal confirmation token for a destructive slave
+     * conversion. It embeds slave name, cluster and port so a copy-pasted token
+     * cannot target the wrong instance.
+     * e.g. "SLAVE:filemon CLUSTER:14/main PORT:5432"
+     */
+    public static function slaveConfirmToken(string $slaveName, array $cluster): string
+    {
+        return sprintf(
+            'SLAVE:%s CLUSTER:%s PORT:%d',
+            strtolower(trim($slaveName)),
+            $cluster['key'] ?? '?',
+            $cluster['port'] ?? 0
+        );
+    }
+
+    public static function verifySlaveConfirmToken(string $provided, string $slaveName, array $cluster): bool
+    {
+        return hash_equals(
+            static::slaveConfirmToken($slaveName, $cluster),
+            trim($provided)
+        );
+    }
+
+    /**
+     * Preflight report shown before ANY destructive PostgreSQL slave operation.
+     * Reads-only; never modifies. Surfaces exactly what the prompt requires:
+     * master/slave, engine, version, cluster, port, data dir, data size, free
+     * space, service state, existing target DBs, WireGuard reachability, version
+     * compatibility, the commands that WOULD run, files modified, services
+     * restarted, risks and estimated time.
+     */
+    public static function preflightPgSlave(
+        array $cluster,
+        string $masterIp,
+        int $sourcePort,
+        string $replUser,
+        string $replPass,
+        string $slaveName = ''
+    ): array {
+        $report = [
+            'engine'        => 'PostgreSQL',
+            'slave'         => $slaveName,
+            'cluster'       => $cluster['key'] ?? '?',
+            'version'       => $cluster['version'] ?? '?',
+            'port'          => $cluster['port'] ?? 0,
+            'data_dir'      => $cluster['data_dir'] ?? '',
+            'config_file'   => $cluster['config_file'] ?? '',
+            'unit'          => $cluster['unit'] ?? '',
+            'master_ip'     => $masterIp,
+            'source_port'   => $sourcePort,
+            'checks'        => [],
+            'commands'      => [],
+            'files_modified'=> [],
+            'services'      => [],
+            'risks'         => [],
+            'blocking'      => [],   // conditions that must be resolved first
+            'confirm_token' => static::slaveConfirmToken($slaveName, $cluster),
+        ];
+
+        $add = function (string $name, bool $ok, string $detail) use (&$report) {
+            $report['checks'][] = ['name' => $name, 'ok' => $ok, 'detail' => $detail];
+        };
+
+        // Data size + free space.
+        $sizeBytes = PgClusterService::dataDirSizeBytes($cluster);
+        $freeBytes = PgClusterService::dataDirFreeBytes($cluster);
+        $report['data_size_bytes'] = $sizeBytes;
+        $report['free_bytes']      = $freeBytes;
+        $add('Tamaño de datos', true, static::humanBytes($sizeBytes));
+        $enoughSpace = $freeBytes > $sizeBytes; // basebackup needs a temp copy
+        $add('Espacio libre suficiente para basebackup temporal', $enoughSpace,
+            static::humanBytes($freeBytes) . ' libre vs ' . static::humanBytes($sizeBytes) . ' de datos');
+        if (!$enoughSpace) $report['blocking'][] = 'Espacio libre insuficiente para el directorio temporal de pg_basebackup.';
+
+        // Service state (this cluster only).
+        $running = PgClusterService::isRunning($cluster);
+        $add('Estado del clúster local', true, $running ? 'activo' : 'detenido');
+
+        // Populated target?
+        $hasData = PgClusterService::dataDirHasData($cluster);
+        $add('Directorio de datos con contenido', true, $hasData ? 'SÍ — requiere confirmación explícita' : 'vacío');
+        if ($hasData) {
+            $report['risks'][] = "El directorio {$cluster['data_dir']} contiene datos; se apartará (no se borra) y se sustituirá por el standby.";
+        }
+
+        // WireGuard reachability + master connection + version compatibility.
+        $conn = static::testPgConnection($masterIp, $sourcePort, $replUser, $replPass);
+        $add('Conectividad WireGuard al master', $conn['ok'],
+            $conn['ok'] ? "OK ({$masterIp}:{$sourcePort})" : "FALLO: {$conn['error']}");
+        if (!$conn['ok']) $report['blocking'][] = "No hay conexión al master {$masterIp}:{$sourcePort}.";
+
+        if ($conn['ok']) {
+            $masterMajor = 0;
+            if (preg_match('/PostgreSQL\s+(\d+)/', (string)$conn['version'], $mm)) $masterMajor = (int)$mm[1];
+            $localMajor = (int)($cluster['version'] ?? 0);
+            $compatible = $masterMajor === 0 || $masterMajor === $localMajor;
+            $add('Compatibilidad de versión mayor', $compatible, "master PG{$masterMajor} vs slave PG{$localMajor}");
+            if (!$compatible) $report['blocking'][] = "Versión mayor incompatible (PG{$masterMajor} vs PG{$localMajor}).";
+        }
+
+        // Commands / files / services that WOULD run.
+        $tmpDir = rtrim($cluster['data_dir'], '/') . '.basebackup.<ts>';
+        $report['commands'] = [
+            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} stop",
+            "pg_basebackup -h {$masterIp} -p {$sourcePort} -U {$replUser} -D {$tmpDir} -Fp -Xs -P -R",
+            "mv {$cluster['data_dir']} {$cluster['data_dir']}.old.<ts>",
+            "mv {$tmpDir} {$cluster['data_dir']}",
+            "chown -R postgres:postgres {$cluster['data_dir']}",
+            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} start",
+        ];
+        $report['files_modified'] = [$cluster['data_dir'] . ' (reemplazado; anterior apartado en .old.<ts>)'];
+        $report['services'] = [$cluster['unit'] . ' (stop/start — SOLO este clúster)'];
+        $report['risks'][] = 'Los demás clústeres PostgreSQL NO se detienen.';
+        $report['estimated_time'] = static::estimateBasebackupSeconds($sizeBytes);
+        $report['ok_to_proceed'] = empty($report['blocking']);
+
+        return $report;
+    }
+
+    private static function humanBytes(int $b): string
+    {
+        if ($b <= 0) return '0 B';
+        $u = ['B','KB','MB','GB','TB']; $i = (int)floor(log($b, 1024));
+        $i = min($i, count($u) - 1);
+        return round($b / (1024 ** $i), 1) . ' ' . $u[$i];
+    }
+
+    private static function estimateBasebackupSeconds(int $bytes): string
+    {
+        // Rough: assume ~50 MB/s over WireGuard as a conservative floor.
+        $secs = (int)ceil($bytes / (50 * 1024 * 1024));
+        if ($secs < 60) return "~{$secs}s";
+        return '~' . ceil($secs / 60) . ' min';
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Per-cluster PG instances CRUD (replication_pg_instances)
+    // ═══════════════════════════════════════════════════════════
+
+    /** All PG instance relationships for a slave. Password stays encrypted. */
+    public static function getPgInstances(int $slaveId): array
+    {
+        try {
+            return Database::fetchAll(
+                "SELECT * FROM replication_pg_instances WHERE slave_id = :sid ORDER BY source_port ASC",
+                ['sid' => $slaveId]
+            );
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /** Every enabled PG instance across all slaves (for master-side config). */
+    public static function getAllPgInstances(bool $enabledOnly = false): array
+    {
+        try {
+            $sql = "SELECT i.*, s.name AS slave_name, s.primary_ip, s.fallback_ip
+                    FROM replication_pg_instances i
+                    JOIN replication_slaves s ON s.id = i.slave_id";
+            if ($enabledOnly) $sql .= " WHERE i.enabled = true";
+            $sql .= " ORDER BY s.name, i.source_port";
+            return Database::fetchAll($sql);
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * Create/update a per-cluster instance row. Derives a UNIQUE slot_name and
+     * application_name per (slave, cluster) so multiple slaves and clusters never
+     * collide on the master.
+     */
+    public static function upsertPgInstance(int $slaveId, array $data): int
+    {
+        $slave = static::getSlave($slaveId);
+        $slaveTag = $slave ? preg_replace('/[^a-zA-Z0-9_]/', '', strtolower($slave['name'])) : "slave{$slaveId}";
+        $ver = preg_replace('/[^0-9]/', '', (string)($data['pg_version'] ?? ''));
+        $cluster = preg_replace('/[^a-zA-Z0-9_]/', '', (string)($data['cluster_name'] ?? ''));
+
+        // Unique, deterministic identifiers.
+        $slot = $data['slot_name'] ?? '';
+        if ($slot === '') $slot = "slot_{$slaveTag}_{$ver}_{$cluster}";
+        $appName = $data['application_name'] ?? '';
+        if ($appName === '') $appName = "{$slaveTag}_{$ver}_{$cluster}";
+
+        $row = [
+            'slave_id'          => $slaveId,
+            'pg_version'        => $ver,
+            'cluster_name'      => $cluster,
+            'source_port'       => (int)($data['source_port'] ?? 0),
+            'target_port'       => (int)($data['target_port'] ?? ($data['source_port'] ?? 0)),
+            'replication_type'  => in_array($data['replication_type'] ?? 'physical', ['physical','logical'], true) ? $data['replication_type'] : 'physical',
+            'sync_mode'         => in_array($data['sync_mode'] ?? 'async', ['async','sync','remote_apply'], true) ? $data['sync_mode'] : 'async',
+            'replication_user'  => preg_replace('/[^a-zA-Z0-9_]/', '', (string)($data['replication_user'] ?? 'replicator')),
+            'slot_name'         => preg_replace('/[^a-zA-Z0-9_]/', '', $slot),
+            'application_name'  => preg_replace('/[^a-zA-Z0-9_]/', '', $appName),
+            'enabled'           => !empty($data['enabled']),
+            'updated_at'        => date('Y-m-d H:i:s'),
+        ];
+        if (!empty($data['password'])) {
+            $row['encrypted_password'] = static::encryptPassword($data['password']);
+        }
+
+        $existing = Database::fetchOne(
+            "SELECT id FROM replication_pg_instances WHERE slave_id = :sid AND pg_version = :v AND cluster_name = :c",
+            ['sid' => $slaveId, 'v' => $ver, 'c' => $cluster]
+        );
+        if ($existing) {
+            Database::update('replication_pg_instances', $row, 'id = :id', ['id' => $existing['id']]);
+            return (int)$existing['id'];
+        }
+        $row['status'] = 'pending';
+        $row['created_at'] = date('Y-m-d H:i:s');
+        return Database::insert('replication_pg_instances', $row);
+    }
+
+    public static function deletePgInstance(int $id): void
+    {
+        try { Database::delete('replication_pg_instances', 'id = :id', ['id' => $id]); } catch (\Throwable) {}
+    }
+
+    public static function updatePgInstanceStatus(int $id, string $status, string $error = ''): void
+    {
+        try {
+            Database::update('replication_pg_instances', [
+                'status'          => $status,
+                'last_error'      => $error,
+                'last_checked_at' => date('Y-m-d H:i:s'),
+                'updated_at'      => date('Y-m-d H:i:s'),
+            ], 'id = :id', ['id' => $id]);
+        } catch (\Throwable) {}
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Master config, per explicit cluster (safe) ──────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Configure ONE PostgreSQL cluster as a replication master for a set of
+     * slave IPs. Touches only that cluster's postgresql.conf / pg_hba.conf and
+     * reloads/restarts ONLY that cluster — never the umbrella service.
+     *
+     * Security:
+     *  - listen_addresses limited to loopback + WireGuard IP (never '*').
+     *  - pg_hba entries scoped to each slave's /32 (WireGuard IP), not 0.0.0.0.
+     *  - a unique physical replication slot is created per slave+cluster.
+     *
+     * @param array  $cluster    descriptor from PgClusterService
+     * @param array  $slaveIps   list of slave WireGuard IPs to authorize
+     * @param string $replUser   replication role name
+     * @param string $replPass   replication role password (created if missing)
+     * @param array  $slotNames  physical slot names to ensure (per slave+cluster)
+     * @param bool   $dryRun
+     */
+    public static function setupPgMasterForCluster(
+        array $cluster,
+        array $slaveIps,
+        string $replUser,
+        string $replPass,
+        array $slotNames = [],
+        bool $dryRun = false
+    ): array {
+        $steps = [];
+        foreach (['version', 'cluster', 'port', 'config_file', 'hba_file', 'unit'] as $k) {
+            if (empty($cluster[$k])) {
+                return ['ok' => false, 'steps' => $steps, 'error' => "Descriptor de clúster incompleto (falta '{$k}')."];
+            }
+        }
+        $pgConf = $cluster['config_file'];
+        $hbaConf = $cluster['hba_file'];
+        if (!file_exists($pgConf)) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "postgresql.conf no encontrado: {$pgConf}"];
+        }
+
+        // Loopback + WireGuard IP only.
+        $wgIp = static::detectWireguardIp();
+        $listen = "'127.0.0.1" . ($wgIp ? ",{$wgIp}" : "") . "'";
+
+        $pgVer = (int)$cluster['version'];
+        $walKeepParam = $pgVer >= 13 ? 'wal_keep_size' : 'wal_keep_segments';
+        $walKeepValue = $pgVer >= 13 ? '512MB' : '64';
+        $walLevel = Settings::get('repl_pg_wal_level', 'replica');
+        $maxSenders = max(10, count($slaveIps) * 2 + 3);
+        $maxSlots   = max(10, count($slotNames) + count($slaveIps) + 3);
+
+        $pgSettings = [
+            'wal_level'             => $walLevel,
+            'max_wal_senders'       => (string)$maxSenders,
+            'max_replication_slots' => (string)$maxSlots,
+            $walKeepParam           => $walKeepValue,
+            'hot_standby'           => 'on',
+            'listen_addresses'      => $listen,
+        ];
+
+        $hbaLines = [];
+        foreach ($slaveIps as $ip) {
+            if (!filter_var($ip, FILTER_VALIDATE_IP)) continue;
+            $hbaLines[] = "host    replication     {$replUser}     {$ip}/32     scram-sha-256";
+        }
+
+        if ($dryRun) {
+            return [
+                'ok' => true, 'dry_run' => true, 'steps' => $steps, 'error' => null,
+                'plan' => [
+                    "backup {$pgConf} y {$hbaConf}",
+                    "postgresql.conf: " . json_encode($pgSettings),
+                    "pg_hba.conf +=\n  " . implode("\n  ", $hbaLines),
+                    "crear rol de replicación {$replUser} (si falta) en :{$cluster['port']}",
+                    "crear slots físicos: " . implode(', ', $slotNames),
+                    "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} reload   # solo este clúster",
+                ],
+            ];
+        }
+
+        static::backupFile($pgConf);
+        static::backupFile($hbaConf);
+        $steps[] = ['name' => 'Backup config', 'ok' => true, 'output' => $cluster['key']];
+
+        $ok = static::modifyConfigFile($pgConf, $pgSettings);
+        $steps[] = ['name' => 'postgresql.conf', 'ok' => $ok, 'output' => $ok ? "listen={$listen}, wal_level={$walLevel}" : 'Error'];
+        if (!$ok) return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo modificar postgresql.conf'];
+
+        // pg_hba, scoped to WG /32.
+        $existing = file_get_contents($hbaConf);
+        $newLines = array_filter($hbaLines, fn($l) => !str_contains($existing, $l));
+        if (!empty($newLines)) {
+            file_put_contents($hbaConf, rtrim($existing) . "\n" . implode("\n", $newLines) . "\n");
+        }
+        $steps[] = ['name' => 'pg_hba.conf', 'ok' => true, 'output' => count($newLines) . ' entradas /32 (WG)'];
+
+        // Replication role on THIS cluster's port.
+        $safeUser = preg_replace('/[^a-zA-Z0-9_]/', '', $replUser);
+        if ($replPass !== '') {
+            // Proper SQL string literal: double single-quotes (NOT escapeshellarg,
+            // which produces shell quoting and breaks on passwords containing ').
+            $sqlPass = "'" . str_replace("'", "''", $replPass) . "'";
+            $sql = "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname='{$safeUser}') THEN CREATE ROLE {$safeUser} WITH REPLICATION LOGIN PASSWORD {$sqlPass}; ELSE ALTER ROLE {$safeUser} WITH REPLICATION LOGIN PASSWORD {$sqlPass}; END IF; END \$\$;";
+            $r = static::runChecked('sudo -u postgres psql -p ' . (int)$cluster['port'] . ' -v ON_ERROR_STOP=1 -c ' . escapeshellarg($sql));
+            $steps[] = ['name' => "Rol replicación {$safeUser}", 'ok' => $r['ok'], 'output' => $r['ok'] ? 'OK' : $r['output']];
+            if (!$r['ok']) {
+                return ['ok' => false, 'steps' => $steps, 'error' => "No se pudo crear el rol de replicación: {$r['output']}"];
+            }
+        }
+
+        // Physical slots (unique per slave+cluster).
+        foreach ($slotNames as $slot) {
+            $safeSlot = preg_replace('/[^a-zA-Z0-9_]/', '', $slot);
+            if ($safeSlot === '') continue;
+            $sql = "SELECT pg_create_physical_replication_slot('{$safeSlot}') WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name='{$safeSlot}');";
+            $out = shell_exec('sudo -u postgres psql -p ' . (int)$cluster['port'] . ' -tAc ' . escapeshellarg($sql) . ' 2>&1');
+            $steps[] = ['name' => "Slot físico {$safeSlot}", 'ok' => true, 'output' => trim((string)$out) ?: 'OK/existe'];
+        }
+
+        // Reload ONLY this cluster (config changes here need reload, not restart,
+        // except wal_level which needs restart — surface that to the caller).
+        $needsRestart = ($walLevel !== static::currentPgSetting($cluster, 'wal_level'));
+        if ($needsRestart) {
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' restart 2>&1');
+            $steps[] = ['name' => 'Reiniciar clúster', 'ok' => true, 'output' => 'restart (wal_level cambió)'];
+        } else {
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' reload 2>&1');
+            $steps[] = ['name' => 'Recargar clúster', 'ok' => true, 'output' => 'reload'];
+        }
+        $running = PgClusterService::isRunning($cluster);
+        return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : "El clúster {$cluster['key']} no está activo tras la operación"];
+    }
+
+    /** Read a live GUC value from a specific cluster (via its port). */
+    public static function currentPgSetting(array $cluster, string $name): string
+    {
+        $port = (int)($cluster['port'] ?? 0);
+        if ($port <= 0) return '';
+        $safe = preg_replace('/[^a-zA-Z0-9_]/', '', $name);
+        $out = shell_exec('sudo -u postgres psql -p ' . $port . ' -tAc ' . escapeshellarg("SHOW {$safe}") . ' 2>/dev/null');
+        return trim((string)$out);
+    }
+
+    /** Best-effort WireGuard IP (10.10.70.x on this fleet). */
+    public static function detectWireguardIp(): string
+    {
+        $out = trim((string)shell_exec("ip -o -4 addr show 2>/dev/null | awk '{print \$4}' | cut -d/ -f1"));
+        foreach (preg_split('/\s+/', $out) as $ip) {
+            if (str_starts_with($ip, '10.10.70.')) return $ip;
+        }
+        return '';
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1056,21 +1866,178 @@ class ReplicationService
     }
 
     /**
-     * Check if streaming replication is currently active (either PG or MySQL).
-     * Used to skip dump-based sync when streaming is already handling it.
+     * Run a query against a SPECIFIC cluster (by port) as the postgres user and
+     * return rows as arrays. Uses -tA and a caller-controlled separator so we can
+     * monitor 5432 / 5433 / 5434 independently — the old monitoring only ever
+     * queried the panel DB on 5433.
+     *
+     * Returns [] on any error (cluster down, auth, etc).
+     */
+    public static function queryCluster(array $cluster, string $sql): array
+    {
+        $port = (int)($cluster['port'] ?? 0);
+        if ($port <= 0) return [];
+        $cmd = 'sudo -u postgres psql -p ' . $port . ' -tAF "|" -c ' . escapeshellarg($sql) . ' 2>/dev/null';
+        $out = trim((string)shell_exec($cmd));
+        if ($out === '') return [];
+        $rows = [];
+        foreach (preg_split('/\r?\n/', $out) as $line) {
+            if ($line === '') continue;
+            $rows[] = explode('|', $line);
+        }
+        return $rows;
+    }
+
+    /**
+     * Per-cluster master status: what standbys are connected to THIS cluster,
+     * with lag in bytes. Reads pg_stat_replication on the cluster's own port.
+     */
+    public static function getPgMasterStatusForCluster(array $cluster): array
+    {
+        $sql = "SELECT application_name, client_addr, state, sync_state, "
+             . "pg_wal_lsn_diff(sent_lsn, replay_lsn) AS lag_bytes, "
+             . "sent_lsn, replay_lsn FROM pg_stat_replication";
+        $rows = static::queryCluster($cluster, $sql);
+        $result = [];
+        foreach ($rows as $r) {
+            $result[] = [
+                'application_name' => $r[0] ?? '',
+                'client_addr'      => $r[1] ?? '',
+                'state'            => $r[2] ?? '',
+                'sync_state'       => $r[3] ?? '',
+                'lag_bytes'        => (int)($r[4] ?? 0),
+                'sent_lsn'         => $r[5] ?? '',
+                'replay_lsn'       => $r[6] ?? '',
+            ];
+        }
+        return $result;
+    }
+
+    /**
+     * Per-cluster slave/standby status: is THIS cluster in recovery, connected,
+     * streaming, and how far behind. Reads pg_stat_wal_receiver on its own port.
+     */
+    public static function getPgSlaveStatusForCluster(array $cluster): ?array
+    {
+        $rec = static::queryCluster($cluster, "SELECT pg_is_in_recovery()");
+        $inRecovery = isset($rec[0][0]) && ($rec[0][0] === 't' || $rec[0][0] === 'true');
+        if (!$inRecovery) return null;
+
+        $wr = static::queryCluster($cluster,
+            "SELECT status, sender_host, sender_port, slot_name FROM pg_stat_wal_receiver");
+        $lsn = static::queryCluster($cluster,
+            "SELECT pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn(), "
+          . "COALESCE(EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp()))::int, 0)");
+
+        $status = $wr[0][0] ?? 'disconnected';
+        return [
+            'in_recovery'  => true,
+            'status'       => $status,
+            'sender_host'  => $wr[0][1] ?? '',
+            'sender_port'  => $wr[0][2] ?? '',
+            'slot_name'    => $wr[0][3] ?? '',
+            'receive_lsn'  => $lsn[0][0] ?? '',
+            'replay_lsn'   => $lsn[0][1] ?? '',
+            'lag_seconds'  => (int)($lsn[0][2] ?? 0),
+            'streaming'    => $status === 'streaming',
+        ];
+    }
+
+    /**
+     * Streaming status PER cluster (not a single global boolean). Returns a map
+     * keyed by "version/cluster" so dumps can be decided per instance:
+     *   [ '14/main' => ['streaming'=>true, 'role'=>'slave', 'lag_seconds'=>2], ... ]
+     *
+     * A cluster that is NOT streaming is never considered protected.
+     */
+    public static function getPgStreamingByCluster(): array
+    {
+        $map = [];
+        foreach (PgClusterService::listClusters() as $c) {
+            $slave = static::getPgSlaveStatusForCluster($c);
+            if ($slave !== null) {
+                $map[$c['key']] = [
+                    'role'        => 'slave',
+                    'streaming'   => (bool)$slave['streaming'],
+                    'lag_seconds' => $slave['lag_seconds'],
+                    'slot_name'   => $slave['slot_name'],
+                ];
+            } else {
+                $masters = static::getPgMasterStatusForCluster($c);
+                $map[$c['key']] = [
+                    'role'        => 'master',
+                    'streaming'   => !empty($masters),   // has connected standbys
+                    'standbys'    => count($masters),
+                ];
+            }
+        }
+        return $map;
+    }
+
+    /**
+     * Decide, PER PostgreSQL cluster, whether a replica (transfer) dump can be
+     * skipped because streaming is genuinely protecting THAT cluster. A cluster
+     * that is not streaming is never protected, so its replica dump is kept.
+     *
+     * IMPORTANT: this only governs the streaming-optimisation "replica" dumps.
+     * Logical/backup dumps are governed separately and are NEVER dropped just
+     * because streaming is on (see keepLogicalDumps()).
+     *
+     * @return array keyed by "version/cluster": ['skip_replica_dump'=>bool, 'reason'=>...]
+     */
+    public static function dumpDecisionByCluster(): array
+    {
+        $decision = [];
+        $streaming = static::getPgStreamingByCluster();
+        foreach ($streaming as $key => $st) {
+            // Only a cluster acting as a slave AND actively streaming is protected.
+            $protected = ($st['role'] ?? '') === 'slave' && !empty($st['streaming']);
+            $decision[$key] = [
+                'skip_replica_dump' => $protected,
+                'reason' => $protected
+                    ? 'streaming activo en este clúster'
+                    : 'sin streaming: se mantiene el dump de este clúster',
+                'role'      => $st['role'] ?? 'unknown',
+                'streaming' => !empty($st['streaming']),
+            ];
+        }
+        return $decision;
+    }
+
+    /**
+     * Logical/backup dumps are ALWAYS kept, regardless of streaming state, so a
+     * corruption or accidental DELETE on the master (which streaming faithfully
+     * replicates to the slave) is still recoverable from a point-in-time dump.
+     * Honoured via the repl_dumps_keep setting (default '1').
+     */
+    public static function keepLogicalDumps(): bool
+    {
+        return Settings::get('repl_dumps_keep', '1') !== '0';
+    }
+
+    /**
+     * Check if streaming replication is currently active, PER ENGINE and PER
+     * PostgreSQL cluster. Never collapses PostgreSQL to a single boolean: the
+     * old behaviour could skip dumps for 14/panel just because 14/main streamed.
+     *
+     * Returns:
+     *   [
+     *     'pg_by_cluster' => ['14/main'=>bool, '14/panel'=>bool, '16/musemind'=>bool],
+     *     'pg_all'        => bool,   // true only if EVERY pg cluster streams
+     *     'mysql'         => bool,
+     *     'any_active'    => bool,
+     *   ]
      */
     public static function isStreamingActive(): array
     {
-        $pgActive = false;
+        $pgByCluster = [];
+        foreach (static::getPgStreamingByCluster() as $key => $st) {
+            $pgByCluster[$key] = ($st['role'] ?? '') === 'slave' && !empty($st['streaming']);
+        }
+        $pgAll = !empty($pgByCluster) && !in_array(false, $pgByCluster, true);
+        $pgAny = in_array(true, $pgByCluster, true);
+
         $mysqlActive = false;
-
-        try {
-            $pgStatus = static::getPgSlaveStatus();
-            if ($pgStatus && ($pgStatus['status'] ?? '') === 'streaming') {
-                $pgActive = true;
-            }
-        } catch (\Throwable) {}
-
         try {
             $mysqlStatus = static::getMysqlSlaveStatus();
             if ($mysqlStatus &&
@@ -1081,9 +2048,11 @@ class ReplicationService
         } catch (\Throwable) {}
 
         return [
-            'any_active' => $pgActive || $mysqlActive,
-            'pg' => $pgActive,
-            'mysql' => $mysqlActive,
+            'pg_by_cluster' => $pgByCluster,
+            'pg_all'        => $pgAll,       // only true when ALL pg clusters stream
+            'pg'            => $pgAll,       // backwards-compat: conservative (all)
+            'mysql'         => $mysqlActive,
+            'any_active'    => $pgAny || $mysqlActive,
         ];
     }
 
@@ -1123,14 +2092,26 @@ class ReplicationService
         $status = static::getMysqlSlaveStatus();
         if (!$status) return null;
 
-        // Add GTID fields
+        // Add GTID fields — vendor-aware. @@gtid_mode does NOT exist in MariaDB;
+        // querying it there throws, so branch on the detected vendor.
         try {
             $pdo = static::getMysqlPdo();
             if ($pdo) {
-                $gtid = $pdo->query("SELECT @@gtid_mode as gtid_mode, @@global.gtid_executed as gtid_executed")->fetch(\PDO::FETCH_ASSOC);
-                if ($gtid) {
-                    $status['Gtid_Mode'] = $gtid['gtid_mode'] ?? 'OFF';
-                    $status['Gtid_Executed'] = $gtid['gtid_executed'] ?? '';
+                $vendor = static::detectDbVendor($pdo);
+                if ($vendor['vendor'] === 'mariadb') {
+                    // MariaDB exposes GTID position via @@gtid_slave_pos / @@gtid_current_pos.
+                    $gtid = $pdo->query("SELECT @@gtid_slave_pos AS slave_pos, @@gtid_current_pos AS current_pos")->fetch(\PDO::FETCH_ASSOC);
+                    if ($gtid) {
+                        $status['Gtid_Mode'] = 'MariaDB';
+                        $status['Gtid_Slave_Pos'] = $gtid['slave_pos'] ?? '';
+                        $status['Gtid_Current_Pos'] = $gtid['current_pos'] ?? '';
+                    }
+                } else {
+                    $gtid = $pdo->query("SELECT @@gtid_mode as gtid_mode, @@global.gtid_executed as gtid_executed")->fetch(\PDO::FETCH_ASSOC);
+                    if ($gtid) {
+                        $status['Gtid_Mode'] = $gtid['gtid_mode'] ?? 'OFF';
+                        $status['Gtid_Executed'] = $gtid['gtid_executed'] ?? '';
+                    }
                 }
             }
         } catch (\Throwable) {}
@@ -1170,7 +2151,55 @@ class ReplicationService
     // ─── Switchover ──────────────────────────────────────────
     // ═══════════════════════════════════════════════════════════
 
+    /**
+     * DEPRECATED / UNSAFE. Derived the cluster from the psql CLIENT version (16)
+     * and a hardcoded 'main', so it tried to promote 16/main (nonexistent) and
+     * fell back to promoting whatever the default port 5432 (=14/main) resolved
+     * to — the wrong cluster. Now a blocked stub; use promotePgSlaveForCluster().
+     */
     public static function promotePgSlave(): array
+    {
+        return [
+            'ok'    => false,
+            'steps' => [[
+                'name'   => 'Bloqueado por seguridad',
+                'ok'     => false,
+                'output' => 'promotePgSlave() legacy está deshabilitado: promovía el clúster equivocado. Use promotePgSlaveForCluster($cluster).',
+            ]],
+            'error' => 'Operación bloqueada: la promoción requiere un clúster PostgreSQL explícito.',
+        ];
+    }
+
+    /**
+     * Promote ONE explicit cluster from standby to primary, via pg_ctlcluster on
+     * that cluster only. Verifies recovery state on the cluster's OWN port
+     * (not the panel DB). Never touches other clusters.
+     */
+    public static function promotePgSlaveForCluster(array $cluster): array
+    {
+        $steps = [];
+        foreach (['version', 'cluster', 'port'] as $k) {
+            if (empty($cluster[$k])) {
+                return ['ok' => false, 'steps' => $steps, 'error' => "Descriptor de clúster incompleto (falta '{$k}')."];
+            }
+        }
+
+        $output = shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' promote 2>&1');
+        $ok = $output === null || !str_contains(strtolower((string)$output), 'error');
+        $steps[] = ['name' => "Promover {$cluster['key']}", 'ok' => $ok, 'output' => trim((string)$output) ?: 'OK'];
+
+        sleep(2);
+        // Verify on THIS cluster's own port.
+        $rec = static::queryCluster($cluster, 'SELECT pg_is_in_recovery()');
+        $stillRecovery = isset($rec[0][0]) && ($rec[0][0] === 't' || $rec[0][0] === 'true');
+        $promoted = !$stillRecovery;
+        $steps[] = ['name' => 'Verificar promoción', 'ok' => $promoted, 'output' => $promoted ? 'Master activo' : 'Aún en recovery'];
+
+        return ['ok' => $promoted, 'steps' => $steps, 'error' => $promoted ? null : "El clúster {$cluster['key']} sigue en recovery"];
+    }
+
+    /** Legacy body retained below only for reference — unreachable. */
+    private static function promotePgSlaveLegacyUnused(): array
     {
         $steps = [];
         $pgVer = static::detectPgVersion() ?? '16';
@@ -1270,8 +2299,8 @@ class ReplicationService
         $steps[] = ['name' => 'Modificar postgresql.conf', 'ok' => $ok, 'output' => $ok ? "wal_level={$walLevel}" : 'Error'];
         if (!$ok) return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo modificar postgresql.conf'];
 
-        $output = shell_exec("systemctl restart postgresql 2>&1");
-        $running = trim((string)shell_exec("systemctl is-active postgresql 2>/dev/null")) === 'active';
+        $output = static::restartPanelCluster("restart");
+        $running = PgClusterService::isRunning(PgClusterService::getPanelCluster() ?? []);
         $steps[] = ['name' => 'Reiniciar PostgreSQL', 'ok' => $running, 'output' => $running ? 'Activo' : trim($output ?? 'Error')];
 
         return ['ok' => $running, 'steps' => $steps, 'error' => $running ? null : 'PostgreSQL no arranco'];
@@ -1477,7 +2506,7 @@ class ReplicationService
                 }
 
                 // Reload PG (not restart — pg_hba changes only need reload)
-                shell_exec("systemctl reload postgresql 2>&1");
+                static::restartPanelCluster("reload");
             }
 
         } elseif ($engine === 'mysql') {
@@ -1526,7 +2555,7 @@ class ReplicationService
                 $content = preg_replace('/^.*' . preg_quote($ip, '/') . '\/32.*$/m', '', $content);
                 $content = preg_replace('/\n{3,}/', "\n\n", $content);
                 file_put_contents($hbaConf, $content);
-                shell_exec("systemctl reload postgresql 2>&1");
+                static::restartPanelCluster("reload");
             }
         } elseif ($engine === 'mysql') {
             $pdo = static::getMysqlPdo();
