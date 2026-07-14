@@ -20,6 +20,61 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.186',
+                'date' => '2026-07-14',
+                'badge' => 'danger',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '`PgClusterService`: identidad explicita de cada cluster PostgreSQL desde `pg_lsclusters` (version, cluster, puerto, data_dir, config, hba, unit systemd). Un cluster inexistente devuelve `NULL` en vez de un fallback peligroso',
+                            '`setupPgSlaveForCluster()`: procedimiento slave **seguro** — actua sobre **un solo cluster** (`pg_ctlcluster`), transmite a un directorio **temporal**, valida `PG_VERSION` y `standby.signal`, **aparta** el directorio anterior (`mv`, nunca borra) y hace **rollback automatico** si el arranque falla. Verifica que la version mayor de master y slave coincide',
+                            'Tabla `replication_pg_instances`: un slave puede replicar **varios clusters** a la vez (14/main, 14/panel, 16/musemind) con slot fisico y `application_name` unicos por slave+cluster',
+                            '**Preflight + dry-run**: informe previo con cluster, puerto, directorio, tamano de datos, espacio libre, conectividad WireGuard, compatibilidad de version, comandos exactos, ficheros y servicios afectados, riesgos y tiempo estimado',
+                            '**Confirmacion literal** que incluye slave, cluster y puerto (`SLAVE:filemon CLUSTER:14/main PORT:5432`), para que un texto copiado no pueda apuntar a la instancia equivocada',
+                            '**Matriz de replicacion** en la UI: `Slave | Motor | Instancia | Puerto | Rol | Estado | Lag | Slot | Ultimo error`, con refresco automatico',
+                            'Suite de tests (`tests/replication_test.php`): 38 comprobaciones sobre 12 escenarios, todas de solo lectura',
+                        ],
+                        'en' => [
+                            '`PgClusterService`: explicit identity for each PostgreSQL cluster from `pg_lsclusters` (version, cluster, port, data_dir, config, hba, systemd unit). A nonexistent cluster returns `NULL` instead of a dangerous fallback',
+                            '`setupPgSlaveForCluster()`: **safe** slave procedure — acts on **one cluster only** (`pg_ctlcluster`), streams into a **temp** directory, validates `PG_VERSION` and `standby.signal`, **moves the old directory aside** (`mv`, never deletes) and **rolls back automatically** if startup fails. Verifies master/slave major versions match',
+                            '`replication_pg_instances` table: one slave can replicate **several clusters** at once (14/main, 14/panel, 16/musemind) with a unique physical slot and `application_name` per slave+cluster',
+                            '**Preflight + dry-run**: pre-flight report with cluster, port, data dir, data size, free space, WireGuard reachability, version compatibility, exact commands, files and services affected, risks and estimated time',
+                            '**Literal confirmation** embedding slave, cluster and port (`SLAVE:filemon CLUSTER:14/main PORT:5432`), so a pasted token cannot target the wrong instance',
+                            '**Replication matrix** in the UI: `Slave | Engine | Instance | Port | Role | Status | Lag | Slot | Last error`, auto-refreshing',
+                            'Test suite (`tests/replication_test.php`): 38 assertions across 12 scenarios, all read-only',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            '**CRITICO — Replicacion PostgreSQL:** `Convertir en Slave` podia **destruir datos** en hosts con varios clusters. El codigo derivaba la version del *cliente* `psql` (16) y el primer cluster listado (`main`), construyendo la ruta inexistente `/etc/postgresql/16/main`; despues ejecutaba `systemctl stop postgresql` (deteniendo **los 3 clusters**: 14/main, 14/panel y 16/musemind) y `rm -rf` sobre el directorio de datos resuelto por el puerto por defecto (5432), **borrando 14/main en caliente**',
+                            '`setupPgSlave()` legacy queda **bloqueado**: todas las rutas que lo invocaban (boton manual, `auto-configure`, failover de cluster) devuelven un error seguro en lugar de borrar datos',
+                            '`promotePgSlave()` **promovia el cluster equivocado** (derivaba `16/main` del cliente psql y caia al datadir del puerto 5432 = 14/main). Bloqueado y sustituido por `promotePgSlaveForCluster()` con cluster explicito',
+                            'Eliminadas **7 llamadas** a `systemctl restart/reload postgresql` (paraguas) en los metodos legacy de master/sync/logical: ahora solo se reinicia el cluster del panel via `pg_ctlcluster`, nunca los tres',
+                            '**MariaDB vs MySQL mezclados:** el codigo detectaba MariaDB pero le aplicaba opciones exclusivas de Oracle MySQL (`gtid_mode`, `enforce-gtid-consistency`, `MASTER_AUTO_POSITION`) que **impiden arrancar MariaDB 10.6**. Ahora se detecta el motor real via `SELECT VERSION()` y se usa la sintaxis correcta de cada uno: MariaDB (`gtid_strict_mode`, `MASTER_USE_GTID=slave_pos`) y MySQL 8 (`gtid_mode`, `SOURCE_AUTO_POSITION`). Ya no se consulta `@@gtid_mode` en MariaDB (no existe alli)',
+                            'Aviso **critico de incompatibilidad** cuando master y slave son de familias distintas (p. ej. MariaDB 10.6 -> MySQL 8): se impide configurar replicacion binaria y se recomienda igualar el motor o sincronizar por dumps. Nunca se sustituye el motor automaticamente',
+                            '**Dumps omitidos indebidamente:** `isStreamingActive()` colapsaba PostgreSQL en un unico booleano, de modo que un solo cluster replicando (p. ej. 14/main) **suprimia los dumps de los demas** (14/panel, 16/musemind). La decision es ahora **por instancia**, y los dumps logicos **nunca** se eliminan por tener streaming activo',
+                            '**Monitorizacion ciega:** el estado de replicacion se leia solo desde la BD del panel (puerto 5433), sin ver 5432 ni 5434. Ahora cada cluster se consulta por **su propio puerto** y reporta rol, streaming, lag y slot de forma independiente',
+                            'Las operaciones destructivas comprueban el **codigo de salida** real de `mv`/`rm` en lugar de reportar exito siempre; si el rollback falla, se avisa de forma explicita indicando donde estan los datos intactos',
+                            'La contrasena del rol de replicacion se escapa como **literal SQL** (comillas duplicadas) en lugar de `escapeshellarg`, que corrompia contrasenas con comilla simple. Ademas, las contrasenas ya no aparecen en la linea de comandos: se usa un fichero `PGPASSFILE` con permisos `0600`',
+                            'Seguridad de red: `listen_addresses` se limita a loopback + WireGuard (nunca `*`) y las entradas de `pg_hba.conf` se acotan a la IP `/32` de cada slave en WireGuard',
+                        ],
+                        'en' => [
+                            '**CRITICAL — PostgreSQL replication:** `Convert to Slave` could **destroy data** on multi-cluster hosts. The code derived the *client* `psql` version (16) and the first listed cluster (`main`), building the nonexistent path `/etc/postgresql/16/main`; it then ran `systemctl stop postgresql` (stopping **all 3 clusters**: 14/main, 14/panel and 16/musemind) and `rm -rf` on the data directory resolved from the default port (5432), **wiping a live 14/main**',
+                            'Legacy `setupPgSlave()` is now **blocked**: every caller (manual button, `auto-configure`, cluster failover) gets a safe error instead of a data wipe',
+                            '`promotePgSlave()` **promoted the wrong cluster** (derived `16/main` from the psql client and fell back to the port-5432 datadir = 14/main). Blocked and replaced by `promotePgSlaveForCluster()` with an explicit cluster',
+                            'Removed **7 umbrella** `systemctl restart/reload postgresql` calls from legacy master/sync/logical methods: only the panel cluster is restarted via `pg_ctlcluster`, never all three',
+                            '**MariaDB vs MySQL mix-up:** the code detected MariaDB but applied Oracle-MySQL-only options (`gtid_mode`, `enforce-gtid-consistency`, `MASTER_AUTO_POSITION`) that **prevent MariaDB 10.6 from starting**. The real engine is now detected via `SELECT VERSION()` and each vendor gets its correct syntax: MariaDB (`gtid_strict_mode`, `MASTER_USE_GTID=slave_pos`) and MySQL 8 (`gtid_mode`, `SOURCE_AUTO_POSITION`). `@@gtid_mode` is no longer queried on MariaDB (it does not exist there)',
+                            '**Critical incompatibility warning** when master and slave are different families (e.g. MariaDB 10.6 -> MySQL 8): binary replication is blocked and the panel recommends matching the engine or syncing via dumps. The engine is never swapped automatically',
+                            '**Wrongly skipped dumps:** `isStreamingActive()` collapsed PostgreSQL into a single boolean, so one streaming cluster (e.g. 14/main) **suppressed dumps for the others** (14/panel, 16/musemind). The decision is now **per instance**, and logical dumps are **never** dropped just because streaming is active',
+                            '**Blind monitoring:** replication state was read only from the panel DB (port 5433), never seeing 5432 or 5434. Each cluster is now queried on **its own port** and reports role, streaming, lag and slot independently',
+                            'Destructive operations now check the real **exit code** of `mv`/`rm` instead of always reporting success; if the rollback fails, an explicit warning states where the intact data is',
+                            'The replication role password is escaped as a **SQL literal** (doubled quotes) instead of `escapeshellarg`, which corrupted passwords containing a single quote. Passwords no longer appear in the command line either: a `0600` `PGPASSFILE` is used',
+                            'Network hardening: `listen_addresses` is limited to loopback + WireGuard (never `*`) and `pg_hba.conf` entries are scoped to each slave WireGuard `/32`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.185',
                 'date' => '2026-04-29',
                 'badge' => 'danger',

@@ -2,6 +2,44 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.186] — 2026-07-14
+
+Reescritura del módulo de replicación para soportar **múltiples clústeres PostgreSQL** y separar correctamente **MariaDB** de **MySQL**.
+
+### Security
+
+- **CRÍTICO — Replicación PostgreSQL:** `Convertir en Slave` podía **destruir datos** en hosts con varios clústeres. El código derivaba la versión del *cliente* `psql` (16) y el primer clúster listado (`main`), construyendo la ruta inexistente `/etc/postgresql/16/main`; después ejecutaba `systemctl stop postgresql` (deteniendo **los 3 clústeres**: `14/main`, `14/panel` y `16/musemind`) y `rm -rf` sobre el directorio de datos resuelto por el puerto por defecto (5432), **borrando `14/main` en caliente**.
+- `setupPgSlave()` legacy queda **bloqueado**: todas las rutas que lo invocaban (botón manual, `auto-configure`, failover de clúster) devuelven un error seguro en lugar de borrar datos.
+- `promotePgSlave()` **promovía el clúster equivocado** (derivaba `16/main` del cliente `psql` y caía al datadir del puerto 5432 = `14/main`). Bloqueado y sustituido por `promotePgSlaveForCluster()` con clúster explícito.
+- Eliminadas **7 llamadas** a `systemctl restart/reload postgresql` (paraguas) en los métodos legacy de master/sync/logical: ahora solo se reinicia el clúster del panel vía `pg_ctlcluster`, nunca los tres.
+- Endurecimiento de red: `listen_addresses` se limita a loopback + WireGuard (nunca `*`) y las entradas de `pg_hba.conf` se acotan a la IP `/32` de cada slave en WireGuard.
+- Las contraseñas de replicación ya no aparecen en la línea de comandos: se usa un fichero `PGPASSFILE` con permisos `0600`.
+
+### Added
+
+- **`PgClusterService`**: identidad explícita de cada clúster PostgreSQL desde `pg_lsclusters` (versión, clúster, puerto, `data_dir`, config, `hba`, unit systemd). Un clúster inexistente devuelve `NULL` en vez de un fallback peligroso.
+- **`setupPgSlaveForCluster()`**: procedimiento slave **seguro** — actúa sobre **un solo clúster** (`pg_ctlcluster`), transmite a un directorio **temporal**, valida `PG_VERSION` y `standby.signal`, **aparta** el directorio anterior (`mv`, nunca lo borra) y hace **rollback automático** si el arranque falla. Verifica que la versión mayor de master y slave coincide.
+- **`setupPgMasterForCluster()`**: configura un clúster como master con slots físicos y `application_name` únicos por slave+clúster, recargando solo ese clúster.
+- **Tabla `replication_pg_instances`**: un slave puede replicar **varios clústeres** a la vez (`14/main`, `14/panel`, `16/musemind`). Migración aditiva e idempotente; `replication_slaves` no se toca y los nodos existentes no se modifican.
+- **Preflight + dry-run**: informe previo con clúster, puerto, directorio, tamaño de datos, espacio libre, conectividad WireGuard, compatibilidad de versión, comandos exactos, ficheros y servicios afectados, riesgos y tiempo estimado.
+- **Confirmación literal** que incluye slave, clúster y puerto (`SLAVE:filemon CLUSTER:14/main PORT:5432`), para que un texto copiado no pueda apuntar a la instancia equivocada.
+- **Matriz de replicación** en la UI: `Slave | Motor | Instancia | Puerto | Rol | Estado | Lag | Slot | Último error`, con refresco automático.
+- Suite de tests (`tests/replication_test.php`): **38 comprobaciones** sobre 12 escenarios, todas de solo lectura.
+
+### Fixed
+
+- **MariaDB y MySQL mezclados:** el código detectaba MariaDB pero le aplicaba opciones exclusivas de Oracle MySQL (`gtid_mode`, `enforce-gtid-consistency`, `MASTER_AUTO_POSITION`) que **impiden arrancar MariaDB 10.6**. Ahora se detecta el motor real vía `SELECT VERSION()` y se usa la sintaxis correcta de cada uno: MariaDB (`gtid_strict_mode`, `MASTER_USE_GTID=slave_pos`) y MySQL 8 (`gtid_mode`, `SOURCE_AUTO_POSITION`). Ya no se consulta `@@gtid_mode` en MariaDB (no existe allí).
+- **Aviso crítico de incompatibilidad** cuando master y slave son de familias distintas (p. ej. MariaDB 10.6 → MySQL 8): se impide configurar replicación binaria y se recomienda igualar el motor o sincronizar por dumps. Nunca se sustituye el motor automáticamente si existen bases de datos.
+- **Dumps omitidos indebidamente:** `isStreamingActive()` colapsaba PostgreSQL en un único booleano, de modo que un solo clúster replicando (p. ej. `14/main`) **suprimía los dumps de los demás** (`14/panel`, `16/musemind`). La decisión es ahora **por instancia**, y los dumps lógicos **nunca** se eliminan por tener streaming activo.
+- **Monitorización ciega:** el estado de replicación se leía solo desde la BD del panel (puerto 5433), sin ver 5432 ni 5434. Ahora cada clúster se consulta por **su propio puerto** y reporta rol, streaming, lag y slot de forma independiente.
+- Las operaciones destructivas comprueban el **código de salida** real de `mv`/`rm` en lugar de reportar éxito siempre; si el rollback falla, se avisa explícitamente indicando dónde están los datos intactos.
+- La contraseña del rol de replicación se escapa como **literal SQL** (comillas duplicadas) en lugar de `escapeshellarg`, que corrompía contraseñas con comilla simple.
+
+### Notes
+
+- La replicación nativa **no se activa** con esta versión: los endpoints existen pero deben usarse explícitamente. El sistema de dumps y `filesync` sigue siendo el mecanismo activo.
+- `getPgConfigDir()` / `getPgDataDir()` ahora resuelven el clúster del panel (según `DB_PORT` de `.env`) en lugar de mezclar la versión del cliente con el primer clúster.
+
 ## [1.0.185] — 2026-04-29
 
 ### Fixed
