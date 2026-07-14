@@ -1685,19 +1685,28 @@ class FileSyncService
     private const FALLBACK_LSYNCD_DEFAULT_EXCLUDES = [
         '.vscode-server',
         '.claude',
+        '.claude.json',
+        '.claude.json.tmp.*',
         '.codex',
         '.cline',
         '.copilot',
+        '.gemini',
         '.git',
         '.cache',
         'node_modules',
+        'sessions',
+        'logs',
+        'php-error.log',
         'storage/logs',
         'storage/framework/cache',
         'storage/framework/sessions',
         'storage/framework/views',
+        'storage/html-cache',
+        'storage/cache',
         '.glide_cache',
         'glide_cache',
         'proxy_cache',
+        '*.tmp.*',
     ];
 
     public static function generateLsyncdConfig(): array
