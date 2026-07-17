@@ -927,9 +927,41 @@ if ($certExists) {
     logLine($logFile, 'SKIP', "SSL cert already exists at {$certDir}");
 } elseif ($sslMode === 'letsencrypt') {
     logLine($logFile, 'INFO', "Requesting Let's Encrypt cert for {$hostname}...");
-    run('systemctl stop postfix 2>/dev/null || true', $logFile, $errors, 'ssl-stop-postfix');
-    run("certbot certonly --standalone -d {$hostname} --agree-tos --non-interactive --register-unsafely-without-email --preferred-challenges http", $logFile, $errors, 'certbot');
-    run('systemctl start postfix 2>/dev/null || true', $logFile, $errors, 'ssl-start-postfix');
+
+    // certbot --standalone needs to own port 80. On a MuseDock master Caddy
+    // already binds 80/443, so --standalone fails with "Could not bind TCP port
+    // 80". Detect a web server on 80 and use the webroot challenge instead
+    // (drops the token in a directory Caddy already serves), so nothing has to be
+    // stopped and the sites stay up. Fall back to --standalone only when 80 is
+    // free (e.g. a dedicated mail node with no web server).
+    $port80Busy = trim((string)shell_exec("ss -ltn 'sport = :80' 2>/dev/null | grep -c ':80'")) !== '0';
+    $webroot = '/var/www/html';
+    if ($port80Busy) {
+        @mkdir($webroot . '/.well-known/acme-challenge', 0755, true);
+        logLine($logFile, 'INFO', "Port 80 in use (Caddy); using --webroot {$webroot}");
+        run("certbot certonly --webroot -w " . escapeshellarg($webroot)
+            . " -d " . escapeshellarg($hostname)
+            . " --agree-tos --non-interactive --register-unsafely-without-email",
+            $logFile, $errors, 'certbot');
+
+        // If webroot did not work (Caddy may not serve that path), retry by
+        // briefly freeing 80: stop Caddy, run standalone, restart Caddy. Short
+        // outage, but only as a last resort and only for this one cert request.
+        if (!file_exists("{$certDir}/fullchain.pem")) {
+            logLine($logFile, 'WARN', 'webroot failed; retrying standalone with a brief Caddy stop');
+            run('systemctl stop caddy 2>/dev/null || true', $logFile, $errors, 'ssl-stop-caddy');
+            run("certbot certonly --standalone -d " . escapeshellarg($hostname)
+                . " --agree-tos --non-interactive --register-unsafely-without-email --preferred-challenges http",
+                $logFile, $errors, 'certbot-standalone');
+            run('systemctl start caddy 2>/dev/null || true', $logFile, $errors, 'ssl-start-caddy');
+        }
+    } else {
+        run('systemctl stop postfix 2>/dev/null || true', $logFile, $errors, 'ssl-stop-postfix');
+        run("certbot certonly --standalone -d " . escapeshellarg($hostname)
+            . " --agree-tos --non-interactive --register-unsafely-without-email --preferred-challenges http",
+            $logFile, $errors, 'certbot');
+        run('systemctl start postfix 2>/dev/null || true', $logFile, $errors, 'ssl-start-postfix');
+    }
 
     if (!file_exists("{$certDir}/fullchain.pem")) {
         logLine($logFile, 'WARN', "Let's Encrypt failed, falling back to self-signed");
