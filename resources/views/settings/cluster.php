@@ -2862,6 +2862,100 @@ function foTestRemoteSources() {
     });
 }
 </script>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Replicación de correo (Dovecot dsync — HA de buzones) -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div class="card bg-dark border-secondary mt-4">
+    <div class="card-header border-secondary d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-envelope-paper me-2"></i>Replicación de correo (buzones)</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="mailReplRefresh"><i class="bi bi-arrow-repeat"></i></button>
+    </div>
+    <div class="card-body">
+        <div class="small text-muted mb-3">
+            La configuración de correo (cuentas, contraseñas, cuotas) ya se replica por la base de datos.
+            Pero <strong>los mensajes en sí</strong> (<code>/var/mail/vhosts</code>) NO — así que en un failover el buzón se vería vacío.
+            Esto activa la <strong>replicación nativa de Dovecot (dsync)</strong> entre dos nodos de correo sobre WireGuard, para que los emails
+            sobrevivan a la caída de un nodo. Usa dsync, no rsync (rsync corrompe buzones en vivo).
+        </div>
+
+        <div id="mailReplStatus" class="mb-3">
+            <span class="text-muted small"><i class="bi bi-hourglass-split me-1"></i>Comprobando estado…</span>
+        </div>
+
+        <div class="d-flex gap-2 flex-wrap align-items-end">
+            <div>
+                <label class="form-label small text-muted mb-1">Nodo pareja de correo</label>
+                <select id="mailReplNode" class="form-select form-select-sm" style="min-width:220px;">
+                    <?php foreach ($nodes as $n): ?>
+                    <option value="<?= (int)$n['id'] ?>"><?= View::e($n['name']) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-info" id="mailReplPreview"><i class="bi bi-eye me-1"></i>Ver plan</button>
+            <button type="button" class="btn btn-sm btn-success" id="mailReplSetup"><i class="bi bi-shield-check me-1"></i>Activar replicación</button>
+        </div>
+        <div class="small text-warning mt-2">
+            <i class="bi bi-exclamation-triangle me-1"></i>Ambos nodos deben tener el servidor de correo (Dovecot) instalado antes de activar.
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const statusEl = document.getElementById('mailReplStatus');
+    if (!statusEl) return;
+    const csrf = document.querySelector('input[name="csrf_token"]')?.value || '';
+
+    function loadStatus() {
+        statusEl.innerHTML = '<span class="text-muted small"><i class="bi bi-hourglass-split me-1"></i>Comprobando estado…</span>';
+        fetch('/settings/cluster/mail-replication/status', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(r => r.json())
+            .then(d => {
+                if (!d.configured) {
+                    statusEl.innerHTML = '<span class="badge bg-secondary"><i class="bi bi-dash-circle me-1"></i>No configurada</span>'
+                        + ' <small class="text-muted ms-1">los mensajes aún no se replican</small>';
+                    return;
+                }
+                const up = d.dovecot_up;
+                statusEl.innerHTML = '<span class="badge bg-' + (up ? 'success' : 'danger') + '">'
+                    + '<i class="bi bi-' + (up ? 'check-circle' : 'x-octagon') + ' me-1"></i>'
+                    + (up ? 'Replicando' : 'Dovecot caído') + '</span>'
+                    + ' <small class="text-muted ms-1">pareja: <code>' + (d.partner || '?') + '</code>'
+                    + (d.configured_at ? ' · desde ' + d.configured_at : '')
+                    + (d.pending_users != null ? ' · ' + d.pending_users + ' usuarios en cola' : '') + '</small>';
+            })
+            .catch(() => { statusEl.innerHTML = '<span class="text-danger small">Error al consultar el estado.</span>'; });
+    }
+
+    function run(dryRun) {
+        const nodeId = document.getElementById('mailReplNode').value;
+        const fd = new FormData();
+        fd.append('csrf_token', csrf);
+        fd.append('node_id', nodeId);
+        if (dryRun) fd.append('dry_run', '1');
+        fetch('/settings/cluster/mail-replication/setup', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(d => {
+                if (dryRun) {
+                    if (!d.ok) { alert('No se puede planificar: ' + (d.error || '')); return; }
+                    alert('Plan de replicación de correo:\n\n' + (d.plan || []).join('\n'));
+                    return;
+                }
+                if (d.ok) { alert('Replicación de correo activada.'); loadStatus(); }
+                else { alert('Error: ' + (d.error || JSON.stringify(d.steps || d))); }
+            })
+            .catch(() => alert('Error de red.'));
+    }
+
+    document.getElementById('mailReplRefresh')?.addEventListener('click', loadStatus);
+    document.getElementById('mailReplPreview')?.addEventListener('click', () => run(true));
+    document.getElementById('mailReplSetup')?.addEventListener('click', () => {
+        if (confirm('Se configurará la replicación de correo entre este nodo y el seleccionado, y se hará una sincronización inicial. ¿Continuar?')) run(false);
+    });
+    loadStatus();
+})();
+</script>
 <?php endif; /* !$foIsSlave */ ?>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
