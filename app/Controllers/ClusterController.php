@@ -1708,18 +1708,37 @@ class ClusterController
                 Settings::set('mail_db_password_enc', \MuseDockPanel\Services\ReplicationService::encryptPassword($dbPass));
             }
 
+            // Same as the setup path: role creation needs CREATEROLE, which
+            // musedock_panel does not have. Do it as the postgres superuser.
             try {
-                $existing = Database::fetchOne("SELECT 1 FROM pg_roles WHERE rolname = 'musedock_mail'");
                 $escapedPass = str_replace("'", "''", $dbPass);
-                if (!$existing) {
-                    Database::execute("CREATE USER musedock_mail WITH PASSWORD '{$escapedPass}'");
-                    Database::execute("GRANT CONNECT ON DATABASE musedock_panel TO musedock_mail");
-                    Database::execute("GRANT USAGE ON SCHEMA public TO musedock_mail");
-                    Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
-                } else {
-                    // User exists — ensure password and grants are current
-                    Database::execute("ALTER USER musedock_mail WITH PASSWORD '{$escapedPass}'");
-                    Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+                $panelPort = (int)\MuseDockPanel\Env::get('DB_PORT', '5433');
+                $panelDb   = \MuseDockPanel\Env::get('DB_NAME', 'musedock_panel');
+
+                $sql = "DO \$\$ BEGIN "
+                     . "IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='musedock_mail') THEN "
+                     . "CREATE ROLE musedock_mail WITH LOGIN PASSWORD '{$escapedPass}'; "
+                     . "ELSE ALTER ROLE musedock_mail WITH LOGIN PASSWORD '{$escapedPass}'; END IF; END \$\$;";
+
+                $runPsql = function (string $statement) use ($panelPort, $panelDb): array {
+                    $cmd = 'sudo -u postgres psql -p ' . $panelPort . ' -d ' . escapeshellarg($panelDb)
+                         . ' -v ON_ERROR_STOP=1 -c ' . escapeshellarg($statement) . ' 2>&1';
+                    $out = []; $code = 0;
+                    exec($cmd, $out, $code);
+                    return ['ok' => $code === 0, 'output' => trim(implode("\n", $out))];
+                };
+
+                foreach ([
+                    $sql,
+                    "GRANT CONNECT ON DATABASE {$panelDb} TO musedock_mail",
+                    "GRANT USAGE ON SCHEMA public TO musedock_mail",
+                    "GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail",
+                ] as $stmt) {
+                    $r = $runPsql($stmt);
+                    if (!$r['ok']) {
+                        echo json_encode(['ok' => false, 'error' => 'Error creando usuario musedock_mail en el master: ' . $r['output']]);
+                        exit;
+                    }
                 }
             } catch (\Exception $e) {
                 echo json_encode(['ok' => false, 'error' => 'Error creando usuario musedock_mail en el master: ' . $e->getMessage()]);
@@ -1945,17 +1964,42 @@ class ClusterController
                 Settings::set('mail_db_password_enc', \MuseDockPanel\Services\ReplicationService::encryptPassword($dbPass));
             }
 
+            // Creating a role requires CREATEROLE, which the panel's own DB user
+            // (musedock_panel) deliberately does NOT have. Run the role creation
+            // and grants as the postgres superuser via a local psql on the panel's
+            // cluster port. The panel runs as root, so sudo -u postgres is available
+            // (same pattern used elsewhere for privileged DB ops).
             try {
-                $existing = Database::fetchOne("SELECT 1 FROM pg_roles WHERE rolname = 'musedock_mail'");
                 $escapedPass = str_replace("'", "''", $dbPass);
-                if (!$existing) {
-                    Database::execute("CREATE USER musedock_mail WITH PASSWORD '{$escapedPass}'");
-                    Database::execute("GRANT CONNECT ON DATABASE musedock_panel TO musedock_mail");
-                    Database::execute("GRANT USAGE ON SCHEMA public TO musedock_mail");
-                    Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
-                } else {
-                    Database::execute("ALTER USER musedock_mail WITH PASSWORD '{$escapedPass}'");
-                    Database::execute("GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail");
+                $panelPort = (int)\MuseDockPanel\Env::get('DB_PORT', '5433');
+                $panelDb   = \MuseDockPanel\Env::get('DB_NAME', 'musedock_panel');
+
+                $sql = "DO \$\$ BEGIN "
+                     . "IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='musedock_mail') THEN "
+                     . "CREATE ROLE musedock_mail WITH LOGIN PASSWORD '{$escapedPass}'; "
+                     . "ELSE ALTER ROLE musedock_mail WITH LOGIN PASSWORD '{$escapedPass}'; END IF; END \$\$;";
+
+                $runPsql = function (string $statement) use ($panelPort, $panelDb): array {
+                    $cmd = 'sudo -u postgres psql -p ' . $panelPort . ' -d ' . escapeshellarg($panelDb)
+                         . ' -v ON_ERROR_STOP=1 -c ' . escapeshellarg($statement) . ' 2>&1';
+                    $out = [];
+                    $code = 0;
+                    exec($cmd, $out, $code);
+                    return ['ok' => $code === 0, 'output' => trim(implode("\n", $out))];
+                };
+
+                $steps = [
+                    $sql,
+                    "GRANT CONNECT ON DATABASE {$panelDb} TO musedock_mail",
+                    "GRANT USAGE ON SCHEMA public TO musedock_mail",
+                    "GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail",
+                ];
+                foreach ($steps as $stmt) {
+                    $r = $runPsql($stmt);
+                    if (!$r['ok']) {
+                        echo json_encode(['ok' => false, 'error' => 'Error creando usuario musedock_mail: ' . $r['output']]);
+                        exit;
+                    }
                 }
             } catch (\Exception $e) {
                 echo json_encode(['ok' => false, 'error' => 'Error creando usuario musedock_mail: ' . $e->getMessage()]);
