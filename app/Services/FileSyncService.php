@@ -1157,10 +1157,15 @@ class FileSyncService
 
         // Step 2: Tell slave to restore via API
         $token = ReplicationService::decryptPassword($node['auth_token'] ?? '');
+        // Restoring can take well over 30s when a DB is large (e.g. the CMS DB is
+        // hundreds of MB) or the node is busy — that 30s cap was the cause of the
+        // intermittent "Operation timed out after 30001 ms" restore failures. Give
+        // it a realistic window; the next worker cycle retries anyway if it still
+        // times out.
         $restoreResult = ClusterService::callNodeDirect($node['api_url'], $token, 'POST', 'api/cluster/action', [
             'action'  => 'restore-db-dumps',
             'payload' => ['dump_path' => $dumpPath],
-        ], 30, [
+        ], 180, [
             'metadata' => $node['metadata'] ?? null,
         ]);
 
