@@ -339,7 +339,18 @@
     <div class="card mb-3 border-success">
         <div class="card-body text-center py-4">
             <h5>Sincronización Completa</h5>
-            <p class="text-muted">Ejecuta todos los pasos en secuencia: provisionar hostings &rarr; sincronizar metadatos &rarr; copiar archivos web &rarr; copiar certificados SSL</p>
+            <?php if (!empty($node['last_sync_at'])): ?>
+            <div class="mb-2">
+                <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Sincronizado</span>
+                <small class="text-muted ms-1">última sincronización completa: <?= View::e($node['last_sync_at']) ?></small>
+            </div>
+            <?php else: ?>
+            <div class="mb-2">
+                <span class="badge bg-secondary"><i class="bi bi-dash-circle me-1"></i>Sin sincronización completa registrada</span>
+                <small class="text-muted ms-1">los archivos se mantienen al día por lsyncd en tiempo real</small>
+            </div>
+            <?php endif; ?>
+            <p class="text-muted">Es una acción de arranque/reparación. La sincronización continua (archivos vía lsyncd, bases por dumps) funciona por su cuenta. Ejecuta todos los pasos en secuencia: provisionar hostings &rarr; sincronizar metadatos &rarr; copiar archivos web &rarr; copiar certificados SSL</p>
             <button class="btn btn-success btn-lg" onclick="fullSync(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
                 <i class="bi bi-play-circle me-1"></i>Sincronización Completa a <?= View::e($node['name']) ?>
             </button>
@@ -4324,8 +4335,9 @@ function _updateSyncModal(data, nodeName, syncId) {
         details.scrollTop = details.scrollHeight;
     }
 
-    // Check if completed
-    if (data.status === 'completed' || data.status === 'error') {
+    // Check if completed. fullsync-run.php writes status 'done'; the older code
+    // only checked 'completed', so the modal span forever on a finished sync.
+    if (data.status === 'completed' || data.status === 'done' || data.status === 'error') {
         if (_syncPollTimer) { clearInterval(_syncPollTimer); _syncPollTimer = null; }
         sessionStorage.removeItem('active_sync');
 

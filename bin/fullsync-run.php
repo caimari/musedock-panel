@@ -299,6 +299,20 @@ try {
 
     writeFullSyncProgress($progressFile, $finalStatus, 'done', $summary, $steps, $startTime);
 
+    // Record WHEN this node was last fully synced, so the UI can show a real
+    // "sincronizado hace X" state instead of only ever offering the action.
+    // last_sync_at existed in the schema but nothing ever wrote it.
+    if (!$hasErrors) {
+        try {
+            \MuseDockPanel\Database::update(
+                'cluster_nodes',
+                ['last_sync_at' => date('Y-m-d H:i:s')],
+                'id = :id',
+                ['id' => $nodeId]
+            );
+        } catch (\Throwable) {}
+    }
+
     LogService::log('cluster.fullsync', 'complete', sprintf(
         "Sync completa nodo #%d finalizada en %.1fs: %s",
         $nodeId, microtime(true) - $startTime, $summary
