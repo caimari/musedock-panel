@@ -1692,6 +1692,20 @@ class FileSyncService
         '.copilot',
         '.git',
         '.cache',
+        // Volatile / non-essential runtime data. These are regenerated on the
+        // slave and must NOT be copied — logs in particular can grow to tens of
+        // GB (a CMS storage/logs was seen at 87 GB) and make a full sync crawl
+        // for hours copying data that is pointless on a replica. lsyncd already
+        // excluded these; the periodic/full rsync did not, until now.
+        'logs',
+        'storage/logs',
+        'sessions',
+        'storage/framework/cache',
+        'storage/framework/sessions',
+        'storage/framework/views',
+        'storage/html-cache',
+        'node_modules',
+        'php-error.log',
     ];
 
     private const FALLBACK_LSYNCD_DEFAULT_EXCLUDES = [
