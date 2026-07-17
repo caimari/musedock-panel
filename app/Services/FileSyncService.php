@@ -187,11 +187,23 @@ class FileSyncService
 
         $output = trim((string)shell_exec($cmd));
 
-        if ($output === 'OK') {
-            return ['ok' => true, 'message' => 'Conexion SSH exitosa'];
+        // The command redirects stderr into stdout (2>&1), and ssh legitimately
+        // writes warnings there — most notably "Warning: Permanently added
+        // '<host>' to the list of known hosts" whenever the host is not yet in
+        // known_hosts (guaranteed here, since we force UserKnownHostsFile=/dev/null).
+        //
+        // Comparing the whole output with === 'OK' therefore reported a WORKING
+        // connection as broken: the full-sync then silently skipped files, DB dumps
+        // and certificates with "SSH no disponible", while ssh from a shell worked
+        // fine. Match the marker anywhere in the output instead, and only treat the
+        // absence of the marker as failure.
+        foreach (preg_split('/\r?\n/', $output) ?: [] as $line) {
+            if (trim($line) === 'OK') {
+                return ['ok' => true, 'message' => 'Conexion SSH exitosa'];
+            }
         }
 
-        return ['ok' => false, 'error' => 'SSH falló: ' . $output];
+        return ['ok' => false, 'error' => 'SSH falló: ' . ($output !== '' ? $output : 'sin salida')];
     }
 
     // ═══════════════════════════════════════════════════════════════
