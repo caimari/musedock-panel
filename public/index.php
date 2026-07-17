@@ -536,6 +536,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/remove-node/{id}', 'ClusterController@removeNode');
 \MuseDockPanel\Router::post('/settings/cluster/test-node', 'ClusterController@testNode');
 \MuseDockPanel\Router::get('/settings/cluster/node-status', 'ClusterController@nodeStatus');
+\MuseDockPanel\Router::get('/settings/cluster/caddy-audit', 'ClusterController@caddyAudit');
+\MuseDockPanel\Router::post('/settings/cluster/caddy-sync-modules', 'ClusterController@caddySyncModules');
 \MuseDockPanel\Router::get('/settings/cluster/node-status-quick', 'ClusterController@nodeStatusQuick');
 \MuseDockPanel\Router::get('/settings/cluster/ping-node', 'ClusterController@pingNode');
 \MuseDockPanel\Router::post('/settings/cluster/process-queue', 'ClusterController@processQueue');

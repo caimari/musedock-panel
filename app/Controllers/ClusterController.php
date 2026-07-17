@@ -414,6 +414,47 @@ class ClusterController
     /**
      * GET /settings/cluster/node-status (JSON for AJAX polling)
      */
+    /**
+     * GET /settings/cluster/caddy-audit (JSON)
+     *
+     * Compare every node's Caddy binary against the master's. DNS provider
+     * modules (cloudflare, route53, …) are compiled INTO the binary, so they
+     * never arrive via DB replication or lsyncd: a stock Caddy on a new slave
+     * looks healthy but cannot issue DNS-01 certificates on failover. This makes
+     * that drift visible. Read-only — it never modifies a binary.
+     */
+    public function caddyAudit(): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode(['ok' => true] + \MuseDockPanel\Services\CaddyBinaryService::auditNodes());
+        exit;
+    }
+
+    /**
+     * POST /settings/cluster/caddy-sync-modules (JSON)
+     * Build the master's missing Caddy DNS modules into a node (via xcaddy on
+     * that node). Supports dry_run=1 to preview without touching anything.
+     */
+    public function caddySyncModules(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        $dryRun = ($_POST['dry_run'] ?? '') === '1';
+        if ($nodeId < 1) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no especificado']);
+            exit;
+        }
+
+        $result = \MuseDockPanel\Services\CaddyBinaryService::syncModulesToNode($nodeId, $dryRun);
+        if (!$dryRun && !empty($result['ok'])) {
+            LogService::log('cluster.caddy', 'sync-modules', "Modulos DNS de Caddy sincronizados al nodo #{$nodeId}");
+        }
+        echo json_encode($result);
+        exit;
+    }
+
     public function nodeStatus(): void
     {
         header('Content-Type: application/json');

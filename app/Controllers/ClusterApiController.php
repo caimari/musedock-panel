@@ -340,6 +340,17 @@ class ClusterApiController
                     $payload['engine'] ?? 'pg',
                     $payload['slave_ip'] ?? ''
                 ),
+                // Report this node's Caddy binary (version/hash/DNS modules) so the
+                // master can detect binary drift — DNS provider modules are compiled
+                // in and never travel via DB replication or lsyncd. Read-only.
+                'caddy-info'       => \MuseDockPanel\Services\CaddyBinaryService::localInfo(),
+                // Build the missing DNS provider module INTO this node's Caddy via
+                // xcaddy (idempotent: no-op if already present). Invoked by the
+                // master so a new slave can be brought to parity without manual
+                // binary copying.
+                'caddy-install-dns-module' => \MuseDockPanel\Services\SystemService::installCaddyDnsProvider(
+                    (string)($payload['provider'] ?? '')
+                ),
                 'receive-files'    => $this->handleReceiveFiles($payload),
                 'install-ssh-key'  => \MuseDockPanel\Services\FileSyncService::installPublicKey($payload['public_key'] ?? ''),
                 'restore-db-dumps' => $this->handleRestoreDbDumps($payload),

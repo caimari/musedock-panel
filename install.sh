@@ -3093,6 +3093,17 @@ else
     apt-get install -y -qq caddy > /dev/null 2>&1
     ok "$(t caddy_installed)"
 
+    # The apt package ships a STOCK Caddy: DNS provider modules (cloudflare,
+    # route53, ...) are compiled INTO the binary and are NOT present here. They
+    # do not arrive via DB replication or lsyncd either, so a slave installed
+    # this way joins the cluster looking healthy yet cannot issue DNS-01
+    # certificates on failover. Warn now instead of discovering it mid-incident.
+    if ! caddy list-modules 2>/dev/null | grep -q '^dns\.providers\.'; then
+        warn "Caddy instalado sin modulos DNS (binario estandar de apt)."
+        warn "  Para DNS-01 (Cloudflare, etc.) instala el modulo desde el panel:"
+        warn "    Settings -> DNS  (o en el master: Settings -> Cluster -> 'Igualar modulos de Caddy')"
+    fi
+
     cat > "$CADDY_FILE" << 'CADDYEOF'
 {
     admin localhost:2019
