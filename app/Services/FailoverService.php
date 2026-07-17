@@ -1280,8 +1280,22 @@ class FailoverService
                 ]);
 
                 if ($response['ok'] ?? false) {
-                    $results[] = ['node' => $node['name'], 'ok' => true, 'method' => 'direct'];
-                    LogService::log('failover.sync', 'push', "Config pushed to {$node['name']}");
+                    // The push succeeding does NOT mean the Caddy token landed:
+                    // the slave may lack update-caddy-token.sh or be unable to
+                    // decrypt it. Surface that instead of reporting a clean OK.
+                    $slave = $response['data']['result'] ?? $response['data'] ?? [];
+                    $tokenErr = (string)($slave['caddy_token_error'] ?? '');
+                    $tokenOk  = !empty($slave['caddy_token_updated']);
+
+                    $results[] = [
+                        'node'                => $node['name'],
+                        'ok'                  => true,
+                        'method'              => 'direct',
+                        'caddy_token_updated' => $tokenOk,
+                        'caddy_token_error'   => $tokenErr,
+                    ];
+                    LogService::log('failover.sync', 'push', "Config pushed to {$node['name']}"
+                        . ($updateCaddyToken ? ($tokenOk ? ' (token Caddy OK)' : ' — TOKEN CADDY NO APLICADO: ' . $tokenErr) : ''));
                     continue;
                 }
             } catch (\Throwable $e) {

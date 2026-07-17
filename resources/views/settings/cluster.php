@@ -1923,6 +1923,59 @@
                     <i class="bi bi-check-circle me-1"></i>Guardar Cuentas CF
                 </button>
             </form>
+
+<script>
+(function () {
+    // Propagating the token rewrites /etc/default/caddy and RESTARTS Caddy, so the
+    // panel itself (served by Caddy on :8444) becomes unreachable for a few seconds.
+    // Without this, the browser hits a dead port and shows ERR_CONNECTION_CLOSED.
+    // Instead: show an overlay, poll until the panel answers again, then reload.
+    const form = document.getElementById('form-cf-accounts');
+    if (!form) return;
+
+    form.addEventListener('submit', function (e) {
+        const cb = document.getElementById('update_caddy_token');
+        if (!cb || !cb.checked) return;   // no restart -> normal submit
+
+        e.preventDefault();
+
+        const ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(0,0,0,.85);display:flex;'
+                         + 'align-items:center;justify-content:center;text-align:center;color:#fff;padding:2rem;';
+        ov.innerHTML = `<div>
+            <div class="spinner-border text-warning mb-3" role="status"></div>
+            <h5 class="mb-2">Propagando token y reiniciando Caddy…</h5>
+            <p class="text-muted mb-0" id="cf-wait-msg">La web puede tardar unos segundos en volver. No cierres esta pestaña.</p>
+        </div>`;
+        document.body.appendChild(ov);
+
+        const msg = ov.querySelector('#cf-wait-msg');
+
+        // Submit out-of-band so the navigation is not killed by the restart.
+        fetch(form.action, { method: 'POST', body: new FormData(form), redirect: 'manual' })
+            .catch(() => {})            // a dropped connection here is expected
+            .finally(() => waitForPanel(0));
+
+        function waitForPanel(attempt) {
+            const maxAttempts = 60;      // ~60s
+            if (attempt >= maxAttempts) {
+                msg.innerHTML = 'El panel tarda mas de lo normal. '
+                              + '<a href="/settings/cluster#failover" class="text-info">Recargar manualmente</a>.';
+                return;
+            }
+            if (attempt > 3) msg.textContent = `Esperando a que Caddy vuelva… (${attempt}s)`;
+
+            fetch('/settings/cluster/node-status?_=' + Date.now(), { cache: 'no-store' })
+                .then(r => {
+                    if (!r.ok) throw new Error('not ready');
+                    // Panel answers again -> safe to reload.
+                    window.location.replace('/settings/cluster?cf_saved=1&_=' + Date.now());
+                })
+                .catch(() => setTimeout(() => waitForPanel(attempt + 1), 1000));
+        }
+    });
+})();
+</script>
         </div>
     </div>
 

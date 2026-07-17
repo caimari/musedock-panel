@@ -576,32 +576,63 @@ class ClusterApiController
             Settings::set('failover_remote_domains', (string)$remoteDomains);
         }
 
-        // Propagate Cloudflare token to /etc/default/caddy on slave (for SSL certificates)
+        // Propagate Cloudflare token to /etc/default/caddy on slave (for SSL certificates).
+        //
+        // Every failure below used to be silent: the master reported "synced with
+        // slaves" while the slave had quietly written nothing (missing helper
+        // script on a freshly installed node, or a token it could not decrypt
+        // because each node derives its key from its OWN DB_PASS). Report the
+        // reason back to the master instead.
         $caddyTokenUpdated = false;
+        $caddyTokenError = '';
         $updateCaddyToken = !empty($payload['update_caddy_token']);
-        if ($updateCaddyToken && !empty($cfAccounts) && is_array($cfAccounts)) {
-            $firstAccount = $cfAccounts[0] ?? null;
-            if ($firstAccount && !empty($firstAccount['token'])) {
-                $tokenRaw = (string)$firstAccount['token'];
-                $token = \MuseDockPanel\Services\ReplicationService::decryptPassword($tokenRaw);
-                if ($token === '') {
-                    // Compatibility: accept plain token from old payloads.
-                    $token = trim($tokenRaw);
-                }
-                if ($token && file_exists('/usr/local/bin/update-caddy-token.sh')) {
-                    $out = shell_exec('sudo /usr/local/bin/update-caddy-token.sh ' . escapeshellarg($token) . ' 2>&1');
-                    $caddyTokenUpdated = str_contains($out ?? '', 'OK');
-                    if ($caddyTokenUpdated) {
-                        LogService::log('failover.sync', 'caddy-token', 'Caddy CLOUDFLARE_API_TOKEN updated on slave from master sync');
+        if ($updateCaddyToken) {
+            if (empty($cfAccounts) || !is_array($cfAccounts)) {
+                $caddyTokenError = 'El master no envio cuentas Cloudflare.';
+            } else {
+                $firstAccount = $cfAccounts[0] ?? null;
+                if (!$firstAccount || empty($firstAccount['token'])) {
+                    $caddyTokenError = 'La primera cuenta Cloudflare no trae token.';
+                } else {
+                    $tokenRaw = (string)$firstAccount['token'];
+                    $token = \MuseDockPanel\Services\ReplicationService::decryptPassword($tokenRaw);
+                    if ($token === '') {
+                        // Compatibility: accept plain token from old payloads.
+                        $token = trim($tokenRaw);
+                    }
+                    if ($token === '') {
+                        $caddyTokenError = 'No se pudo descifrar el token (DB_PASS del slave distinto al del master).';
+                    } elseif (!file_exists('/usr/local/bin/update-caddy-token.sh')) {
+                        $caddyTokenError = 'Falta /usr/local/bin/update-caddy-token.sh en este nodo. '
+                                         . 'Escriba CLOUDFLARE_API_TOKEN en /etc/default/caddy manualmente o reinstale el panel.';
+                    } else {
+                        $out = trim((string)shell_exec('sudo -n /usr/local/bin/update-caddy-token.sh ' . escapeshellarg($token) . ' 2>&1'));
+                        $caddyTokenUpdated = str_contains($out, 'OK');
+                        if ($caddyTokenUpdated) {
+                            LogService::log('failover.sync', 'caddy-token', 'Caddy CLOUDFLARE_API_TOKEN updated on slave from master sync');
+                        } else {
+                            $caddyTokenError = 'update-caddy-token.sh no devolvio OK: ' . ($out !== '' ? $out : '(sin salida; revise sudoers)');
+                        }
                     }
                 }
+            }
+            if ($caddyTokenError !== '') {
+                LogService::log('failover.sync', 'caddy-token-failed', $caddyTokenError);
             }
         }
 
         Settings::set('failover_config_synced_at', date('Y-m-d H:i:s'));
         LogService::log('failover.sync', 'received', 'Failover config synced from master' . ($caddyTokenUpdated ? ' (Caddy token updated)' : ''));
 
-        return ['ok' => true, 'message' => 'Failover config synced', 'synced_at' => date('Y-m-d H:i:s'), 'caddy_token_updated' => $caddyTokenUpdated];
+        return [
+            'ok'                  => true,
+            'message'             => 'Failover config synced',
+            'synced_at'           => date('Y-m-d H:i:s'),
+            'caddy_token_updated' => $caddyTokenUpdated,
+            // Tell the master WHY the token did not land, so the UI can stop
+            // claiming success while the slave silently wrote nothing.
+            'caddy_token_error'   => $caddyTokenError,
+        ];
     }
 
     /**

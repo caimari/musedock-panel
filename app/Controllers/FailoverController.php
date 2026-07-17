@@ -164,13 +164,33 @@ class FailoverController
         }
 
         // Push config to slaves (include caddy token flag so slaves also update their /etc/default/caddy)
-        FailoverService::pushConfigToSlaves($updateCaddyToken);
+        $pushResults = FailoverService::pushConfigToSlaves($updateCaddyToken);
         LogService::log('failover.cloudflare', null, count($accounts) . ' CF accounts saved');
 
         $msg = count($accounts) . ' cuenta(s) Cloudflare guardada(s) y sincronizada(s) con slaves.';
         if ($caddyTokenUpdated) {
-            $msg .= ' Token propagado a Caddy (master y slaves) para certificados SSL.';
+            $msg .= ' Token propagado a Caddy en el master.';
         }
+
+        // Report per-slave token outcome honestly. Previously this claimed
+        // "propagated to master AND slaves" without checking, so a slave that
+        // silently wrote nothing (missing helper script, undecryptable token)
+        // still looked like a success — the exact symptom of "no llega al slave".
+        if ($updateCaddyToken) {
+            // pushConfigToSlaves() returns ['ok'=>bool, 'results'=>[...]].
+            $failed = [];
+            foreach (($pushResults['results'] ?? []) as $r) {
+                if (!empty($r['ok']) && empty($r['caddy_token_updated'])) {
+                    $failed[] = ($r['node'] ?? '?') . (!empty($r['caddy_token_error']) ? ' (' . $r['caddy_token_error'] . ')' : '');
+                }
+            }
+            if (!empty($failed)) {
+                Flash::set('error', 'El token NO se aplico en: ' . implode(' | ', $failed));
+            } else {
+                $msg .= ' Token aplicado tambien en todos los slaves.';
+            }
+        }
+
         Flash::set('success', $msg);
         Router::redirect('/settings/cluster#failover');
     }

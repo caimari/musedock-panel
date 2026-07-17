@@ -144,12 +144,15 @@ install_caddy_runtime_repair_override() {
     # non-zero (Caddy admin API not up yet, DB unreachable, ...) makes systemd
     # SIGKILL Caddy, which takes every site down and can loop on restart.
     # This exact scenario caused a full outage on 2026-07-17.
+    # The repair runs DETACHED (systemd-run --no-block): systemd does not wait for
+    # it, so 'systemctl reload caddy' returns immediately instead of blocking the
+    # web for ~10s (sleep + repair) on every reload. The script itself already
+    # waits for Caddy's admin API and exits 0 when it cannot repair.
+    local repair_cmd="/usr/bin/php ${PANEL_DIR}/cli/repair-caddy-routes.php"
     cat > /etc/systemd/system/caddy.service.d/zz-musedock-panel-repair.conf << OVERRIDEEOF
 [Service]
-ExecStartPost=-/bin/sleep 5
-ExecStartPost=-/usr/bin/php ${PANEL_DIR}/cli/repair-caddy-routes.php
-ExecReload=-/bin/sleep 5
-ExecReload=-/usr/bin/php ${PANEL_DIR}/cli/repair-caddy-routes.php
+ExecStartPost=-/usr/bin/systemd-run --no-block --unit=musedock-caddy-repair-start --description="MuseDock: repair Caddy routes after start" ${repair_cmd}
+ExecReload=-/usr/bin/systemd-run --no-block --unit=musedock-caddy-repair-reload --description="MuseDock: repair Caddy routes after reload" ${repair_cmd}
 OVERRIDEEOF
     chmod 644 /etc/systemd/system/caddy.service.d/zz-musedock-panel-repair.conf
     systemctl daemon-reload 2>/dev/null || true
