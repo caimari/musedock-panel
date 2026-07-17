@@ -519,6 +519,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/replication/pg-clusters', 'ReplicationController@listPgClusters');
 \MuseDockPanel\Router::post('/settings/replication/preflight', 'ReplicationController@preflight');
 \MuseDockPanel\Router::post('/settings/replication/convert-to-slave-cluster', 'ReplicationController@convertToSlaveCluster');
+// Mail replication (Dovecot dsync — real mailbox HA between mail nodes)
+\MuseDockPanel\Router::post('/settings/cluster/mail-replication/setup', 'ClusterController@mailReplicationSetup');
+\MuseDockPanel\Router::get('/settings/cluster/mail-replication/status', 'ClusterController@mailReplicationStatus');
 // Failover safety (read-only preflights; never promote/rebuild by themselves)
 \MuseDockPanel\Router::post('/settings/cluster/failover/preflight-promote', 'ClusterController@preflightPromote');
 \MuseDockPanel\Router::post('/settings/cluster/failover/plan-rebuild', 'ClusterController@planRebuild');

@@ -2,6 +2,24 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.189] — 2026-07-17
+
+Alta disponibilidad de correo: los buzones ahora se pueden replicar de verdad entre dos nodos, no solo la configuración.
+
+### Added
+
+- **Replicación real de correo (Dovecot dsync).** Hasta ahora un slave recibía la *configuración* de correo (cuentas, contraseñas, cuotas, dominios, DKIM) porque vive en la base de datos replicada, pero **NO los mensajes**: `lsyncd` solo copia `/var/www/vhosts`, no `/var/mail/vhosts`. En un failover del nodo de correo el usuario podía autenticarse pero ver el **buzón vacío**. Nuevo `MailReplicationService` que configura la **replicación nativa de Dovecot** (`replicator` + `dsync`) entre dos nodos de correo sobre WireGuard.
+  - Se usa **dsync a propósito, nunca rsync**: rsync sobre un Maildir vivo corrompe buzones cuando hay entregas concurrentes; dsync entiende la semántica de Maildir/IMAP (UIDs, flags, expunges) y fusiona en ambos sentidos con seguridad.
+  - `setupPair` orquesta ambos extremos desde el master (cada nodo apunta al otro), comparte un secreto `doveadm` y lanza la sincronización inicial. Los correos existentes se copian; a partir de ahí, cada cambio se replica al instante.
+  - El puerto de replicación se limita a la red WireGuard; el correo entre nodos nunca sale de la red privada.
+  - Con backup del `.conf` antes de escribir y **rollback automático** si Dovecot no arranca con la nueva config (el correo nunca se queda caído por un error de replicación).
+- **Failover de correo.** Al promover un nodo a master, los dominios de correo que apuntaban al nodo caído (`mail_node_id`) se **reasignan automáticamente al nodo superviviente**, para que el correo nuevo se entregue localmente y los buzones —ya replicados por dsync— estén presentes.
+
+### Notes
+
+- Es apto para el escenario de **dos servidores** (p. ej. mortadelo ↔ Filemon): activa el correo en el principal y replica con el secundario para tener respaldo real de los mensajes.
+- Los nodos deben tener el servidor de correo (Dovecot) instalado antes de activar la replicación.
+
 ## [1.0.188] — 2026-07-17
 
 Corrige una caída total de Caddy y tres fallos silenciosos que impedían que el token de Cloudflare llegara a los slaves.

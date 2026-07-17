@@ -1842,6 +1842,24 @@ class ClusterService
             $errors[] = 'lsyncd: ' . $e->getMessage();
         }
 
+        // Mail failover: domains still point at the old (dead) mail node via
+        // mail_node_id, so new mail would try to deliver there and users would see
+        // an empty mailbox. The messages are already here because dsync kept this
+        // node in sync, so repoint every domain served by the old node to this one.
+        try {
+            $localNode = Database::fetchOne("SELECT id FROM cluster_nodes WHERE api_url LIKE :u LIMIT 1",
+                ['u' => '%' . (trim((string)shell_exec("hostname -I | awk '{print \$1}'"))) . '%']);
+            $oldMailNode = (int)Settings::get('mail_default_node_id', '0');
+            $newMailNodeId = $localNode ? (int)$localNode['id'] : 0;
+            if ($oldMailNode > 0 && $newMailNodeId > 0 && $oldMailNode !== $newMailNodeId) {
+                $results['mail_failover'] = MailReplicationService::reassignMailNode($oldMailNode, $newMailNodeId);
+            } else {
+                $results['mail_failover'] = ['ok' => true, 'skipped' => 'sin reasignacion necesaria'];
+            }
+        } catch (\Throwable $e) {
+            $errors[] = 'mail failover: ' . $e->getMessage();
+        }
+
         // Update env and settings — all three role indicators must be consistent
         self::updateEnvRole('master');
         Settings::set('repl_role', 'master');

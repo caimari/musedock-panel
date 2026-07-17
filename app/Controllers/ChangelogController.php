@@ -20,6 +20,37 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.189',
+                'date' => '2026-07-17',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '**Replicación real de correo (Dovecot dsync) — alta disponibilidad.** Antes un slave recibía la *configuración* de correo (cuentas, contraseñas, cuotas, dominios, DKIM), porque vive en la BBDD replicada, pero **NO los mensajes**: `lsyncd` solo copia `/var/www/vhosts`, no `/var/mail/vhosts`. En un failover del nodo de correo el usuario podia autenticarse pero ver el **buzon vacio**. Nuevo `MailReplicationService` que configura la replicacion nativa de Dovecot (`replicator` + `dsync`) entre dos nodos sobre WireGuard',
+                            'Se usa **dsync a proposito, nunca rsync**: rsync sobre un Maildir vivo corrompe buzones con entregas concurrentes; dsync entiende la semantica de Maildir/IMAP (UIDs, flags, expunges) y fusiona en ambos sentidos con seguridad',
+                            '`setupPair` orquesta ambos extremos desde el master (cada nodo apunta al otro), comparte un secreto doveadm y lanza la sincronizacion inicial. Con backup del `.conf` y **rollback automatico** si Dovecot no arranca — el correo nunca se queda caido por un error de replicacion',
+                            '**Failover de correo:** al promover un nodo a master, los dominios que apuntaban al nodo caido se **reasignan automaticamente al superviviente**, para que el correo nuevo se entregue localmente y los buzones (ya replicados) esten presentes',
+                        ],
+                        'en' => [
+                            '**Real mail replication (Dovecot dsync) — high availability.** Until now a slave received the mail *configuration* (accounts, passwords, quotas, domains, DKIM), because it lives in the replicated DB, but **NOT the messages**: lsyncd only copies /var/www/vhosts, not /var/mail/vhosts. On a mail-node failover a user could authenticate but see an **empty mailbox**. New MailReplicationService configures Dovecot native replication (replicator + dsync) between two nodes over WireGuard',
+                            'dsync is used **deliberately, never rsync**: rsync over a live Maildir corrupts mailboxes under concurrent delivery; dsync understands Maildir/IMAP semantics (UIDs, flags, expunges) and merges both directions safely',
+                            'setupPair orchestrates both ends from the master (each node points at the other), shares a doveadm secret and runs the initial sync. It backs up the .conf and **rolls back automatically** if Dovecot fails to start — mail is never left down by a replication error',
+                            '**Mail failover:** promoting a node to master **reassigns** mail domains that pointed at the dead node to the survivor, so new mail is delivered locally and the (already replicated) mailboxes are present',
+                        ],
+                    ],
+                    'notes' => [
+                        'es' => [
+                            'Pensado para el escenario de **dos servidores** (p. ej. mortadelo y Filemon): activa el correo en el principal y replica con el secundario para tener respaldo real de los mensajes',
+                            'Los nodos deben tener Dovecot instalado antes de activar la replicacion de correo',
+                        ],
+                        'en' => [
+                            'Designed for the **two-server** scenario (e.g. mortadelo and Filemon): enable mail on the primary and replicate with the secondary for a real backup of the messages',
+                            'Nodes must have Dovecot installed before enabling mail replication',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.188',
                 'date' => '2026-07-17',
                 'badge' => 'danger',

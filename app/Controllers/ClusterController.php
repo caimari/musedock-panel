@@ -415,6 +415,39 @@ class ClusterController
      * GET /settings/cluster/node-status (JSON for AJAX polling)
      */
     /**
+     * POST /settings/cluster/mail-replication/setup (JSON)
+     * Configure real mailbox replication (Dovecot dsync) between this node and a
+     * partner mail node so email survives a failover. dry_run=1 previews.
+     */
+    public function mailReplicationSetup(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        $dryRun = ($_POST['dry_run'] ?? '') === '1';
+        if ($nodeId < 1) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo pareja no especificado']);
+            exit;
+        }
+        $result = \MuseDockPanel\Services\MailReplicationService::setupPair($nodeId, $dryRun);
+        if (!$dryRun && !empty($result['ok'])) {
+            LogService::log('mail.replication', 'setup', "Replicacion de correo configurada con nodo #{$nodeId}");
+        }
+        echo json_encode($result);
+        exit;
+    }
+
+    /**
+     * GET /settings/cluster/mail-replication/status (JSON)
+     */
+    public function mailReplicationStatus(): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode(\MuseDockPanel\Services\MailReplicationService::status());
+        exit;
+    }
+
+    /**
      * POST /settings/cluster/failover/preflight-promote (JSON)
      * Read-only: can this node be promoted safely right now? Checks whether the
      * old master is really fenced, so we never create two writable masters.

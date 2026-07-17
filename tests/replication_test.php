@@ -226,6 +226,37 @@ ok('plan de reconstruccion cubre los 3 clusters', count($plan['clusters'] ?? [])
 ok('no se encola reconfiguracion ciega para nodos inalcanzables',
     !str_contains($svc3, "self::enqueue((int)\$node['id'], 'reconfigure-replication'"));
 
+// ── Scenario 14: mail replication (Dovecot dsync HA) ──────────────
+section('14. Replicación de correo (Dovecot dsync)');
+use MuseDockPanel\Services\MailReplicationService as MR;
+
+$cfg = MR::configureNode('10.10.70.154', true);
+ok('config apunta al partner por TCP (dsync)', str_contains($cfg['config'] ?? '', 'mail_replica = tcp:10.10.70.154'));
+ok('usa el servicio replicator de Dovecot (no rsync)', str_contains($cfg['config'] ?? '', 'service replicator'));
+ok('activa el plugin de replicación', str_contains($cfg['config'] ?? '', 'notify replication'));
+ok('IP de partner inválida se rechaza', MR::configureNode('nope', true)['ok'] === false);
+
+$pair = MR::setupPair(2, true);
+ok('setupPair planifica ambos extremos', $pair['ok'] === true &&
+    (bool)array_filter($pair['plan'] ?? [], fn($l) => str_contains($l, 'LOCAL')) &&
+    (bool)array_filter($pair['plan'] ?? [], fn($l) => str_contains($l, 'REMOTO')));
+ok('setupPair menciona sync inicial bidireccional',
+    (bool)array_filter($pair['plan'] ?? [], fn($l) => str_contains(strtolower($l), 'bidireccional')));
+
+// Failover reassignment must not silently corrupt with bad ids.
+$bad = MR::reassignMailNode(0, 5);
+ok('reassignMailNode rechaza ids inválidos', $bad['ok'] === false);
+
+// The dsync choice over rsync must be explicit in the service (rsync corrupts Maildir).
+$mrSrc = file_get_contents(PANEL_ROOT . '/app/Services/MailReplicationService.php');
+ok('usa dsync, nunca rsync sobre Maildir en vivo',
+    str_contains($mrSrc, 'doveadm sync') && !preg_match('/rsync[^\n]*\/var\/mail/', $mrSrc));
+
+// promoteToMaster must repoint mail domains to the survivor.
+$svc4 = file_get_contents(PANEL_ROOT . '/app/Services/ClusterService.php');
+ok('el failover reasigna los dominios de correo al nodo superviviente',
+    str_contains($svc4, 'reassignMailNode'));
+
 // ── Summary ────────────────────────────────────────────────────────
 echo "\n\033[1m─────────────────────────────────────────\033[0m\n";
 echo "  \033[0;32m{$pass} passed\033[0m";

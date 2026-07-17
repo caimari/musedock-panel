@@ -373,6 +373,17 @@ class ClusterApiController
                 'mail_activate_mailbox' => MailService::nodeActivateMailbox($payload),
                 'mail_update_autoresponder' => MailService::nodeUpdateAutoresponder($payload),
                 'mail_enable_sieve'     => MailService::nodeEnableSieve($payload),
+                // Mailbox replication (dsync) — configure this node to replicate
+                // its Maildir with a partner mail node over WireGuard.
+                'mail_setup_replication'   => \MuseDockPanel\Services\MailReplicationService::configureNode(
+                    (string)($payload['partner_ip'] ?? ''),
+                    false,
+                    (string)($payload['shared_secret'] ?? '')
+                ),
+                'mail_replication_status'  => \MuseDockPanel\Services\MailReplicationService::status(),
+                'mail_replication_initial_sync' => \MuseDockPanel\Services\MailReplicationService::initialSync(
+                    (string)($payload['partner_ip'] ?? '')
+                ),
                 'mail_setup_node'          => MailService::nodeSetupMail($payload),
                 'mail_setup_status'        => MailService::nodeSetupStatus($payload),
                 'mail_generate_setup_token' => MailService::nodeGenerateSetupToken($payload),
