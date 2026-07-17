@@ -519,6 +519,10 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/replication/pg-clusters', 'ReplicationController@listPgClusters');
 \MuseDockPanel\Router::post('/settings/replication/preflight', 'ReplicationController@preflight');
 \MuseDockPanel\Router::post('/settings/replication/convert-to-slave-cluster', 'ReplicationController@convertToSlaveCluster');
+// Failover safety (read-only preflights; never promote/rebuild by themselves)
+\MuseDockPanel\Router::post('/settings/cluster/failover/preflight-promote', 'ClusterController@preflightPromote');
+\MuseDockPanel\Router::post('/settings/cluster/failover/plan-rebuild', 'ClusterController@planRebuild');
+\MuseDockPanel\Router::post('/settings/cluster/failover/preflight-switchover', 'ClusterController@preflightSwitchover');
 // Replication matrix + per-instance CRUD
 \MuseDockPanel\Router::get('/settings/replication/matrix', 'ReplicationController@matrix');
 \MuseDockPanel\Router::post('/settings/replication/instance/save', 'ReplicationController@saveInstance');

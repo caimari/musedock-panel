@@ -173,6 +173,59 @@ $svc2 = file_get_contents(PANEL_ROOT . '/app/Services/ReplicationService.php');
 ok('promotePgSlaveForCluster usa pg_ctlcluster con version/cluster explícitos',
     (bool)preg_match('/promotePgSlaveForCluster.*?pg_ctlcluster.*?cluster\[.version.\]/s', $svc2));
 
+// ── Scenario 13: failover safety (fencing, no split-brain) ────────
+section('13. Failover: fencing y anti split-brain');
+use MuseDockPanel\Services\FailoverSafetyService as F;
+
+// A live old master must NEVER be considered fenced.
+$fence = F::fenceOldMaster('10.10.70.1', false);   // mortadelo is up
+ok('master antiguo VIVO no se considera aislado', $fence['fenced'] === false);
+ok('avisa del riesgo de split-brain', str_contains(strtolower($fence['error'] ?? ''), 'split-brain'));
+
+// An unreachable address is treated as down.
+$fenceDown = F::fenceOldMaster('10.10.70.199', false);   // nonexistent
+ok('master antiguo caido se considera aislado', $fenceDown['fenced'] === true && ($fenceDown['method'] ?? '') === 'down');
+
+// force must be explicit and must warn.
+$fenceForced = F::fenceOldMaster('10.10.70.1', true);
+ok('force aisla pero avisa del riesgo',
+    $fenceForced['fenced'] === true && ($fenceForced['method'] ?? '') === 'forced'
+    && str_contains(strtolower($fenceForced['message'] ?? ''), 'split-brain'));
+
+// Promotion must be per-cluster, never the hardcoded /main.
+$pgPlan = F::promoteAllPgClusters(true);
+ok('promocion planificada por CADA cluster', count($pgPlan) === 3);
+$usesExplicit = true;
+foreach ($pgPlan as $key => $p) {
+    if (!empty($p['skipped'])) continue;
+    if (!str_contains($p['message'] ?? '', 'pg_ctlcluster')) $usesExplicit = false;
+}
+ok('usa pg_ctlcluster explicito (no pg_ctl -D .../main)', $usesExplicit);
+$svc3 = file_get_contents(PANEL_ROOT . '/app/Services/ClusterService.php');
+// Only EXECUTABLE lines matter; the fix documents the old command in a comment.
+$badPromote = 0;
+foreach (explode("\n", $svc3) as $ln) {
+    $t = ltrim($ln);
+    if (str_starts_with($t, '*') || str_starts_with($t, '//') || str_starts_with($t, '#')) continue;
+    if (str_contains($ln, 'pg_ctl promote -D /var/lib/postgresql/')) $badPromote++;
+}
+ok('ClusterService ya no promociona /var/lib/postgresql/{ver}/main', $badPromote === 0, "encontrados: {$badPromote}");
+
+// MySQL promotion must persist the role (strip read_only from my.cnf).
+$myPlan = F::promoteMysqlPersistent(true);
+ok('promocion MySQL planifica quitar read_only del my.cnf',
+    (bool)array_filter($myPlan['plan'] ?? [], fn($l) => str_contains($l, 'read_only')));
+
+// Rebuild plan must be explicit that local data is discarded.
+$plan = F::planRebuildAsSlave('10.10.70.154');
+ok('plan de reconstruccion avisa de datos obsoletos/divergentes',
+    (bool)array_filter($plan['warnings'] ?? [], fn($w) => str_contains(strtolower($w), 'obsoletos')));
+ok('plan de reconstruccion cubre los 3 clusters', count($plan['clusters'] ?? []) === 3);
+
+// An unreachable node must NOT be silently queued for a destructive rebuild.
+ok('no se encola reconfiguracion ciega para nodos inalcanzables',
+    !str_contains($svc3, "self::enqueue((int)\$node['id'], 'reconfigure-replication'"));
+
 // ── Summary ────────────────────────────────────────────────────────
 echo "\n\033[1m─────────────────────────────────────────\033[0m\n";
 echo "  \033[0;32m{$pass} passed\033[0m";

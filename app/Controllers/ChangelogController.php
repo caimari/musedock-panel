@@ -20,6 +20,59 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.188',
+                'date' => '2026-07-17',
+                'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '**CRITICO — Caida total de Caddy:** guardar el token de Cloudflare reinicia Caddy, y ese reinicio activo una mina latente: `install.sh` generaba el override de systemd con `ExecStartPost` **sin el prefijo `-`**. Cuando `repair-caddy-routes.php` salia con codigo distinto de 0 (la API admin de Caddy aun no estaba lista), **systemd mataba Caddy con SIGKILL**: todos los dominios caidos y bucle de reinicio. El token era correcto; el fallo era del panel',
+                            'El instalador genera ahora el override con `-` en todos los hooks: un script de reparacion que falle **no puede volver a tumbar Caddy**',
+                            '`repair-caddy-routes.php` espera hasta 30s a que la API admin responda (antes se rendia al primer intento) y sale con **codigo 0** cuando no puede reparar: una BBDD caida o una API no lista **ya no pueden tirar el servidor web**',
+                            '**El token de Cloudflare nunca llegaba a los slaves (cifrado imposible de abrir):** los tokens se cifran con `sha256(DB_PASS)` y **cada nodo tiene su propio `DB_PASS`**, asi que un slave **nunca** podia descifrar un token cifrado por el master. Ahora el master **descifra con su clave** y envia el token por el canal **TLS mutuo** del cluster; el slave lo **re-cifra con su propia clave** al guardarlo, sin quedar en claro en reposo',
+                            '**El token nunca llegaba (helper inexistente):** `/usr/local/bin/update-caddy-token.sh` estaba puesto **a mano** en el master y **el instalador nunca lo creaba**, por lo que **ningun nodo recien instalado podia aplicar el token**: el `file_exists()` del handler se saltaba sin log ni aviso. El instalador lo genera ahora (escritura atomica, backup con fecha de `/etc/default/caddy`, reinicio verificando que Caddy vuelve) junto con su regla de sudoers',
+                            '**Exito falso:** el panel decia «Token propagado a Caddy (master y slaves)» **sin comprobar los slaves**. Ahora cada nodo informa del motivo concreto del fallo y la interfaz indica **que nodo fallo y por que**; solo confirma exito global cuando el token se aplico de verdad en todos',
+                            '**La web se quedaba parada unos 10s en cada recarga de Caddy:** el `ExecReload` encadenaba `sleep 5` mas el script de reparacion. Ahora la reparacion corre **desacoplada** (`systemd-run --no-block`) y `systemctl reload caddy` vuelve al instante',
+                            '**`ERR_CONNECTION_CLOSED` al propagar el token:** el reinicio de Caddy mata la conexion del propio panel. El formulario envia ahora los datos fuera de banda, muestra un aviso de espera, **sondea hasta que el panel responde** y recarga solo entonces',
+                        ],
+                        'en' => [
+                            '**CRITICAL — Full Caddy outage:** saving the Cloudflare token restarts Caddy, and that restart tripped a latent mine: `install.sh` generated the systemd override with `ExecStartPost` **without the `-` prefix**. When `repair-caddy-routes.php` exited non-zero (Caddy admin API not up yet), **systemd SIGKILLed Caddy**: every domain down and a restart loop. The token was fine; the bug was the panel',
+                            'The installer now generates the override with `-` on every hook: a failing repair script **can never take Caddy down again**',
+                            '`repair-caddy-routes.php` waits up to 30s for the admin API (it used to give up on the first probe) and exits with **code 0** when it cannot repair: a downed database or an API that is not ready **can no longer take the web server down**',
+                            '**Cloudflare token never reached the slaves (undecryptable by design):** tokens are encrypted with `sha256(DB_PASS)` and **every node has its own `DB_PASS`**, so a slave could **never** decrypt a token encrypted by the master. The master now **decrypts with its own key** and sends the token over the cluster mutual-TLS channel; the slave **re-encrypts it with its own key** when storing, so it never lands in cleartext at rest',
+                            '**Token never reached the slaves (missing helper):** `/usr/local/bin/update-caddy-token.sh` had been placed **by hand** on the master and **the installer never created it**, so **no freshly installed node could apply the token**: the handler `file_exists()` check just skipped, with no log or warning. The installer now ships it (atomic write, timestamped backup of `/etc/default/caddy`, restart with verification that Caddy came back) plus its sudoers rule',
+                            '**False success:** the panel claimed "Token propagated to Caddy (master and slaves)" **without checking the slaves**. Each node now reports the concrete failure reason and the UI shows **which node failed and why**; global success is only confirmed when the token really applied everywhere',
+                            '**The web stalled for ~10s on every Caddy reload:** `ExecReload` chained `sleep 5` plus the repair script. The repair now runs **detached** (`systemd-run --no-block`) and `systemctl reload caddy` returns immediately',
+                            '**`ERR_CONNECTION_CLOSED` when propagating the token:** restarting Caddy kills the panel own connection. The form now submits out-of-band, shows a waiting overlay, **polls until the panel answers** and only then reloads',
+                        ],
+                    ],
+                    'added' => [
+                        'es' => [
+                            '**Paridad del binario de Caddy entre master y slaves.** Los modulos DNS (`dns.providers.cloudflare`, `route53`...) van **compilados dentro del binario**: no se pueden anadir por la API de Caddy y no viajan ni por la base de datos replicada ni por lsyncd. Un slave instalado desde apt entra en el cluster con aspecto sano pero **no puede emitir certificados DNS-01 en un failover**',
+                            'Nueva tarjeta en `Settings → Cluster → Nodos`: semaforo por nodo (igualado / difiere / faltan modulos) y boton **«Igualar modulos»** que hace **dry-run primero**, muestra el plan, pide confirmacion y solo entonces compila los modulos que faltan via `xcaddy`',
+                            'Nuevo `CaddyBinaryService`: version, hash SHA-256 y modulos DNS de cada nodo, con comparacion contra el master y severidad **critica** cuando faltan modulos que el master si tiene',
+                            '`install.sh` avisa tras instalar el Caddy estandar de apt de que **no trae modulos DNS compilados**, indicando donde instalarlos',
+                        ],
+                        'en' => [
+                            '**Caddy binary parity between master and slaves.** DNS modules (`dns.providers.cloudflare`, `route53`...) are **compiled into the binary**: they cannot be added through Caddy API and travel neither via the replicated database nor lsyncd. A slave installed from apt joins the cluster looking healthy but **cannot issue DNS-01 certificates on failover**',
+                            'New card in `Settings → Cluster → Nodos`: per-node status (matched / differs / missing modules) and an **"Igualar modulos"** button that **dry-runs first**, shows the plan, asks for confirmation and only then builds the missing modules via `xcaddy`',
+                            'New `CaddyBinaryService`: version, SHA-256 hash and DNS modules per node, compared against the master, with **critical** severity when a node misses modules the master has',
+                            '`install.sh` warns after installing the stock apt Caddy that it **ships no compiled DNS modules**, pointing at where to install them',
+                        ],
+                    ],
+                    'notes' => [
+                        'es' => [
+                            '`Failover → Cuentas Cloudflare`: **«Propagar token a Caddy» es una accion puntual, no un ajuste** — reinicia Caddy en el master y en todos los slaves, por eso no se queda marcada. En su lugar se muestra la **fecha de la ultima propagacion**',
+                            'Los nodos instalados **antes** de esta version no tienen `update-caddy-token.sh`: hay que copiarlo una vez o reinstalar el panel en ellos. A partir de esta version, **todo nodo nuevo nace con el**',
+                        ],
+                        'en' => [
+                            '`Failover → Cloudflare accounts`: **"Propagate token to Caddy" is a one-shot action, not a setting** — it restarts Caddy on the master and every slave, which is why it does not stay checked. The **last propagation timestamp** is shown instead',
+                            'Nodes installed **before** this version lack `update-caddy-token.sh`: copy it once or reinstall the panel there. From this version on, **every new node ships with it**',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.186',
                 'date' => '2026-07-14',
                 'badge' => 'danger',

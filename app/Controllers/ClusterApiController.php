@@ -343,6 +343,13 @@ class ClusterApiController
                 // Report this node's Caddy binary (version/hash/DNS modules) so the
                 // master can detect binary drift — DNS provider modules are compiled
                 // in and never travel via DB replication or lsyncd. Read-only.
+                // Stop serving on this node because another node is being promoted.
+                // This is the fencing step that prevents split-brain: without it,
+                // the old master keeps accepting writes while the new one does too.
+                'fence-self'       => \MuseDockPanel\Services\FailoverSafetyService::fenceSelf(
+                    (string)($payload['reason'] ?? 'remote request')
+                ),
+                'unfence-self'     => \MuseDockPanel\Services\FailoverSafetyService::unfenceSelf(),
                 'caddy-info'       => \MuseDockPanel\Services\CaddyBinaryService::localInfo(),
                 // Build the missing DNS provider module INTO this node's Caddy via
                 // xcaddy (idempotent: no-op if already present). Invoked by the

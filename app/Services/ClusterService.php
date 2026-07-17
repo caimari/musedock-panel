@@ -1747,38 +1747,77 @@ class ClusterService
     // ─── Failover ────────────────────────────────────────────
     // ═══════════════════════════════════════════════════════════
 
-    public static function promoteToMaster(): array
+    /**
+     * Promote this node to master.
+     *
+     * @param bool   $force       skip the fencing gate (DANGEROUS: only when you
+     *                            have physically verified the old master is off)
+     * @param string $oldMasterIp old master to fence; defaults to the configured one
+     */
+    public static function promoteToMaster(bool $force = false, string $oldMasterIp = ''): array
     {
         $errors = [];
         $results = [];
 
-        // Promote PostgreSQL on port 5432
-        try {
-            $pgVersion = ReplicationService::detectPgVersion();
-            if ($pgVersion) {
-                $pgCmd = "sudo -u postgres pg_ctl promote -D /var/lib/postgresql/{$pgVersion}/main 2>&1";
-                $output = trim((string)shell_exec($pgCmd));
-                $results['pg_promote'] = $output;
+        // ── FENCING GATE ────────────────────────────────────────────
+        // Promoting while the old master is still alive and writable creates
+        // split-brain: two masters accepting divergent writes, with no automatic
+        // way to reconcile them afterwards. Refuse unless the old master is
+        // proven down / stopped, or the operator explicitly forces it.
+        $oldMasterIp = $oldMasterIp !== '' ? $oldMasterIp : (string)Settings::get('cluster_master_ip', '');
+        if ($oldMasterIp !== '') {
+            $fence = FailoverSafetyService::fenceOldMaster($oldMasterIp, $force);
+            $results['fencing'] = $fence;
+            if (empty($fence['fenced'])) {
+                return [
+                    'ok'      => false,
+                    'results' => $results,
+                    'errors'  => [$fence['error'] ?? 'No se pudo aislar el master antiguo'],
+                ];
+            }
+            LogService::log('cluster.failover', 'fence', 'Fencing del master antiguo: ' . ($fence['method'] ?? '?'));
+        } else {
+            $results['fencing'] = ['fenced' => true, 'method' => 'none', 'message' => 'Sin master antiguo configurado'];
+        }
 
-                // Wait for promotion
-                sleep(2);
-                $isRecovery = trim((string)shell_exec("sudo -u postgres psql -p 5432 -tAc \"SELECT pg_is_in_recovery()\" 2>/dev/null"));
-                if ($isRecovery === 'f') {
-                    $results['pg_status'] = 'promoted';
-                } else {
-                    $errors[] = 'PostgreSQL aun esta en modo recovery despues de promover';
+        // Promote EVERY PostgreSQL cluster that is actually in recovery, each via
+        // its own (version, cluster). The old code ran
+        //   pg_ctl promote -D /var/lib/postgresql/{detectPgVersion()}/main
+        // which mixed the psql CLIENT version with a hardcoded 'main' — on a
+        // multi-cluster host that is a nonexistent path (16/main) or the wrong
+        // cluster (14/main), so the promotion silently did nothing useful.
+        try {
+            $pgResults = FailoverSafetyService::promoteAllPgClusters();
+            $results['pg_promote'] = $pgResults;
+            foreach ($pgResults as $key => $r) {
+                if (empty($r['ok'])) {
+                    $errors[] = "PG {$key}: " . ($r['message'] ?? 'no se pudo promover');
                 }
             }
         } catch (\Throwable $e) {
             $errors[] = 'PG promote: ' . $e->getMessage();
         }
 
-        // Promote MySQL (STOP SLAVE)
+        // Promote MySQL/MariaDB and PERSIST it. The old code only ran STOP SLAVE
+        // and left read_only=1 in my.cnf, so the next restart silently turned the
+        // brand-new master read-only again.
         try {
-            shell_exec("mysql -e \"STOP SLAVE; RESET SLAVE ALL;\" 2>&1");
-            $results['mysql_promote'] = 'STOP SLAVE executed';
+            $myResult = FailoverSafetyService::promoteMysqlPersistent();
+            $results['mysql_promote'] = $myResult;
+            if (empty($myResult['ok'])) {
+                $errors[] = 'MySQL promote: ' . ($myResult['error'] ?? 'fallo');
+            }
         } catch (\Throwable $e) {
             $errors[] = 'MySQL promote: ' . $e->getMessage();
+        }
+
+        // This node is now the source of truth: it must NOT keep receiving files
+        // from anyone, and it must not be a push target. Stop the local pusher if
+        // this node was previously a slave.
+        try {
+            $results['filesync'] = FailoverSafetyService::stopLocalFileSync();
+        } catch (\Throwable $e) {
+            $errors[] = 'lsyncd: ' . $e->getMessage();
         }
 
         // Update env and settings — all three role indicators must be consistent
@@ -1935,10 +1974,22 @@ class ClusterService
                         "Nodo {$node['name']}: " . ($result['error'] ?? json_encode($result['errors'] ?? [])));
                 }
             } catch (\Throwable $e) {
-                // Enqueue for retry — critical that replication gets reconfigured
-                self::enqueue((int)$node['id'], 'reconfigure-replication', ['new_master_ip' => $newMasterIp], 2);
-                LogService::log('cluster.replication', 'broadcast-enqueue',
-                    "Nodo {$node['name']} inalcanzable, encolado para reintento: " . $e->getMessage());
+                // Do NOT enqueue a blind reconfigure for an unreachable node.
+                //
+                // An unreachable node here is very likely the OLD MASTER. Queuing
+                // "become a slave of the new master" means that the moment it comes
+                // back it would rebuild itself from the new master and destroy its
+                // own data — data that may contain writes the new master never saw —
+                // with no preflight, no backup and no human decision.
+                //
+                // Rebuilding a recovered old master is a deliberate, preflighted
+                // operation (FailoverSafetyService::planRebuildAsSlave). Flag it for
+                // the operator instead of doing it behind their back.
+                Settings::set('cluster_pending_rebuild_nodes',
+                    trim(Settings::get('cluster_pending_rebuild_nodes', '') . ',' . $node['id'], ','));
+                LogService::log('cluster.replication', 'broadcast-manual-needed',
+                    "Nodo {$node['name']} inalcanzable: NO se reconfigura automaticamente (podria ser el master antiguo "
+                    . "y perder datos). Requiere reconstruccion manual revisada: " . $e->getMessage());
             }
         }
     }

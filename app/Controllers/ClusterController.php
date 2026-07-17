@@ -415,6 +415,68 @@ class ClusterController
      * GET /settings/cluster/node-status (JSON for AJAX polling)
      */
     /**
+     * POST /settings/cluster/failover/preflight-promote (JSON)
+     * Read-only: can this node be promoted safely right now? Checks whether the
+     * old master is really fenced, so we never create two writable masters.
+     */
+    public function preflightPromote(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $oldMasterIp = trim($_POST['old_master_ip'] ?? '') ?: (string)Settings::get('cluster_master_ip', '');
+        if ($oldMasterIp === '') {
+            echo json_encode(['ok' => false, 'error' => 'No hay IP del master antiguo configurada']);
+            exit;
+        }
+        $fence = \MuseDockPanel\Services\FailoverSafetyService::fenceOldMaster($oldMasterIp, false);
+        $pgPlan = \MuseDockPanel\Services\FailoverSafetyService::promoteAllPgClusters(true);
+        $myPlan = \MuseDockPanel\Services\FailoverSafetyService::promoteMysqlPersistent(true);
+
+        echo json_encode([
+            'ok'      => true,
+            'fencing' => $fence,
+            'pg_plan' => $pgPlan,
+            'mysql_plan' => $myPlan,
+            'can_promote' => !empty($fence['fenced']),
+        ]);
+        exit;
+    }
+
+    /**
+     * POST /settings/cluster/failover/plan-rebuild (JSON)
+     * Read-only plan for rebuilding this (recovered old master) as a slave of the
+     * current master. Never executes.
+     */
+    public function planRebuild(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $newMasterIp = trim($_POST['new_master_ip'] ?? '') ?: (string)Settings::get('cluster_master_ip', '');
+        echo json_encode(\MuseDockPanel\Services\FailoverSafetyService::planRebuildAsSlave($newMasterIp));
+        exit;
+    }
+
+    /**
+     * POST /settings/cluster/failover/preflight-switchover (JSON)
+     * Read-only: is it safe to switch the master role back to a target node?
+     */
+    public function preflightSwitchover(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        if ($nodeId < 1) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no especificado']);
+            exit;
+        }
+        echo json_encode(\MuseDockPanel\Services\FailoverSafetyService::preflightSwitchover($nodeId));
+        exit;
+    }
+
+    /**
      * GET /settings/cluster/caddy-audit (JSON)
      *
      * Compare every node's Caddy binary against the master's. DNS provider

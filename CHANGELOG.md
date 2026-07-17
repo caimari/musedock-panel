@@ -2,6 +2,41 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.188] — 2026-07-17
+
+Corrige una caída total de Caddy y tres fallos silenciosos que impedían que el token de Cloudflare llegara a los slaves.
+
+### Security
+
+- **Caída total (postmortem):** guardar el token de Cloudflare reinicia Caddy, y ese reinicio activó una mina latente: `install.sh` generaba el override de systemd con `ExecStartPost` **sin el prefijo `-`**. Cuando `repair-caddy-routes.php` salía con código ≠ 0 (la API admin de Caddy aún no estaba lista), **systemd mataba Caddy con SIGKILL** — todos los dominios caídos y bucle de reinicio. El token era correcto; el fallo era del panel.
+- El instalador genera ahora el override con `-` en todos los hooks: un script de reparación que falle **no puede volver a tumbar Caddy**.
+- `repair-caddy-routes.php` espera hasta 30s a que la API admin responda (antes se rendía al primer intento) y sale con **código 0** cuando no puede reparar. Una BBDD caída o una API no lista **ya no pueden tirar el servidor web**.
+
+### Fixed
+
+- **El token de Cloudflare nunca llegaba a los slaves.** Dos causas, ambas invisibles:
+  - **Cifrado imposible de abrir:** los tokens se cifran con `sha256(DB_PASS)` y **cada nodo tiene su propio `DB_PASS`**, así que un slave **nunca** podía descifrar un token cifrado por el master. Aun así se enviaba el texto cifrado (el comentario del código afirmaba justo lo contrario). Ahora, solo cuando se pide propagar, el master **descifra con su clave** y envía el token por el canal **TLS mutuo** del clúster a nodos autenticados; el slave lo **re-cifra con su propia clave** al guardarlo, así que nunca queda en claro en reposo.
+  - **Helper inexistente:** `/usr/local/bin/update-caddy-token.sh` se había puesto **a mano** en el master y **el instalador nunca lo creaba**, de modo que **ningún nodo recién instalado podía aplicar el token** — el `file_exists()` del handler simplemente se saltaba, sin log ni aviso. El instalador lo genera ahora (escritura atómica, backup con fecha de `/etc/default/caddy`, reinicio **verificando que Caddy vuelve**) junto con su regla de sudoers.
+- **Éxito falso:** el panel decía *«Token propagado a Caddy (master y slaves)»* **sin comprobar los slaves**. Ahora cada nodo informa del motivo concreto del fallo, el master lo registra y la interfaz indica **qué nodo falló y por qué**; solo confirma el éxito global cuando el token se aplicó de verdad en todos.
+- **La web se quedaba parada ~10s en cada recarga de Caddy:** el `ExecReload` encadenaba `sleep 5` + el script de reparación. Ahora la reparación corre **desacoplada** (`systemd-run --no-block`) y `systemctl reload caddy` vuelve al instante.
+- **`ERR_CONNECTION_CLOSED` al propagar el token:** el reinicio de Caddy mata la conexión del propio panel. El formulario envía ahora los datos fuera de banda, muestra un aviso de espera, **sondea hasta que el panel responde** y recarga solo entonces (mismo patrón que la recarga post-update de la v1.0.185).
+
+### Added
+
+- **Paridad del binario de Caddy entre master y slaves.** Los módulos DNS (`dns.providers.cloudflare`, `route53`…) van **compilados dentro del binario**: no se pueden añadir por la API de Caddy y no viajan ni por la base de datos replicada ni por lsyncd. Un slave instalado desde el paquete apt entra en el clúster con aspecto sano pero **no puede emitir certificados DNS-01 en un failover**, lo que obligaba a copiar el binario del master a mano.
+  - Nuevo `CaddyBinaryService`: versión, hash SHA-256 y módulos DNS de cada nodo, con comparación contra el master. Severidad **crítica** si al nodo le faltan módulos que el master sí tiene, **aviso** si difiere la versión o el build, **OK** si el hash coincide.
+  - Nueva tarjeta en `Settings → Cluster → Nodos`: semáforo por nodo y botón **«Igualar módulos»** que hace **dry-run primero**, muestra el plan, pide confirmación (avisando de que reiniciará Caddy en ese nodo) y solo entonces compila los módulos que faltan mediante `xcaddy`. Se carga solo al abrir la pestaña, ya que consulta a todos los nodos por red.
+  - Nuevas acciones de clúster `caddy-info` (solo lectura) y `caddy-install-dns-module`.
+  - `install.sh` avisa tras instalar el Caddy estándar de apt de que **no trae módulos DNS compilados**, indicando dónde instalarlos.
+
+### Changed
+
+- `Failover → Cuentas Cloudflare`: se aclara que **«Propagar token a Caddy» es una acción puntual, no un ajuste** — reinicia Caddy en el master y en todos los slaves, por eso no se queda marcada. En su lugar se registra y muestra la **fecha de la última propagación**.
+
+### Notes
+
+- Los nodos instalados **antes** de esta versión (p. ej. Nitro, Filemon) no tienen `update-caddy-token.sh`: hay que copiarlo una vez o reinstalar el panel en ellos. A partir de esta versión, **todo nodo nuevo nace con él**.
+
 ## [1.0.186] — 2026-07-14
 
 Reescritura del módulo de replicación para soportar **múltiples clústeres PostgreSQL** y separar correctamente **MariaDB** de **MySQL**.
