@@ -797,19 +797,32 @@ logLine($logFile, 'INFO', "Applied {$postconfCount} postconf directives");
 
 // Submission port 587 in master.cf
 if (file_exists('/etc/postfix/master.cf')) {
-    $masterCf = file_get_contents('/etc/postfix/master.cf');
-    if (!str_contains($masterCf, 'submission inet')) {
-        $submission = "\nsubmission inet n       -       y       -       -       smtpd\n" .
-            "  -o syslog_name=postfix/submission\n" .
-            "  -o smtpd_tls_security_level=encrypt\n" .
-            "  -o smtpd_sasl_auth_enable=yes\n" .
-            "  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject\n" .
-            "  -o milter_macro_daemon_name=ORIGINATING\n";
-        file_put_contents('/etc/postfix/master.cf', $masterCf . $submission);
-        logLine($logFile, 'WRITE', 'Added submission (587) to master.cf');
-    } else {
-        logLine($logFile, 'SKIP', 'Submission already in master.cf');
+    // Configure submission (587) and smtps (465) with postconf -M/-P rather than
+    // appending raw text to master.cf. The hand-written text was fragile (tab vs
+    // space, ordering) and on this install left 587 NOT listening. postconf is the
+    // supported, idempotent way and it reliably brings both ports up.
+    run('postconf -M ' . escapeshellarg('submission/inet=submission inet n - y - - smtpd'), $logFile, $errors, 'submission-service');
+    foreach ([
+        'submission/inet/syslog_name=postfix/submission',
+        'submission/inet/smtpd_tls_security_level=encrypt',
+        'submission/inet/smtpd_sasl_auth_enable=yes',
+        'submission/inet/smtpd_recipient_restrictions=permit_sasl_authenticated,reject',
+        'submission/inet/milter_macro_daemon_name=ORIGINATING',
+    ] as $opt) {
+        run('postconf -P ' . escapeshellarg($opt), $logFile, $errors, 'submission-opt');
     }
+
+    // smtps (465) — implicit TLS submission, used by many mail clients by default.
+    run('postconf -M ' . escapeshellarg('smtps/inet=smtps inet n - y - - smtpd'), $logFile, $errors, 'smtps-service');
+    foreach ([
+        'smtps/inet/syslog_name=postfix/smtps',
+        'smtps/inet/smtpd_tls_wrappermode=yes',
+        'smtps/inet/smtpd_sasl_auth_enable=yes',
+        'smtps/inet/smtpd_recipient_restrictions=permit_sasl_authenticated,reject',
+    ] as $opt) {
+        run('postconf -P ' . escapeshellarg($opt), $logFile, $errors, 'smtps-opt');
+    }
+    logLine($logFile, 'WRITE', 'submission (587) + smtps (465) configured via postconf');
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -920,73 +933,83 @@ $step = 6;
 writeProgress($progressFile, $STEPS[$step], $step, $totalSteps, 'running', $errors);
 logLine($logFile, 'STEP', "── {$step}/{$totalSteps}: {$STEPS[$step]['label']} ──");
 
-$certDir = "/etc/letsencrypt/live/{$hostname}";
-$certExists = file_exists("{$certDir}/fullchain.pem") && file_exists("{$certDir}/privkey.pem");
+// Certificate paths finally used by Postfix/Dovecot. Filled in by whichever
+// method succeeds (Caddy → certbot → self-signed).
+$certPathCrt = '';
+$certPathKey = '';
 
-if ($certExists) {
-    logLine($logFile, 'SKIP', "SSL cert already exists at {$certDir}");
+// Is the existing cert a real CA cert, or the self-signed fallback? A self-signed
+// cert has issuer == subject == CN=<hostname>. The old code SKIPPED whenever any
+// cert existed, so a bad self-signed cert was never upgraded on reinstall.
+$isSelfSigned = function (string $crt) use ($hostname): bool {
+    if (!is_file($crt)) return true;
+    $issuer = trim((string)shell_exec('openssl x509 -in ' . escapeshellarg($crt) . ' -noout -issuer 2>/dev/null'));
+    return stripos($issuer, "CN = {$hostname}") !== false || stripos($issuer, "CN={$hostname}") !== false;
+};
+
+$leDir = "/etc/letsencrypt/live/{$hostname}";
+$haveRealLeCert = file_exists("{$leDir}/fullchain.pem") && !$isSelfSigned("{$leDir}/fullchain.pem");
+
+if ($haveRealLeCert) {
+    logLine($logFile, 'SKIP', "Real Let's Encrypt cert already present at {$leDir}");
+    $certPathCrt = "{$leDir}/fullchain.pem";
+    $certPathKey = "{$leDir}/privkey.pem";
 } elseif ($sslMode === 'letsencrypt') {
-    logLine($logFile, 'INFO', "Requesting Let's Encrypt cert for {$hostname}...");
-
-    // certbot --standalone needs to own port 80. On a MuseDock master Caddy
-    // already binds 80/443, so --standalone fails with "Could not bind TCP port
-    // 80". Detect a web server on 80 and use the webroot challenge instead
-    // (drops the token in a directory Caddy already serves), so nothing has to be
-    // stopped and the sites stay up. Fall back to --standalone only when 80 is
-    // free (e.g. a dedicated mail node with no web server).
-    $port80Busy = trim((string)shell_exec("ss -ltn 'sport = :80' 2>/dev/null | grep -c ':80'")) !== '0';
-    $webroot = '/var/www/html';
-    if ($port80Busy) {
-        @mkdir($webroot . '/.well-known/acme-challenge', 0755, true);
-        logLine($logFile, 'INFO', "Port 80 in use (Caddy); using --webroot {$webroot}");
-        run("certbot certonly --webroot -w " . escapeshellarg($webroot)
-            . " -d " . escapeshellarg($hostname)
-            . " --agree-tos --non-interactive --register-unsafely-without-email",
-            $logFile, $errors, 'certbot');
-
-        // If webroot did not work (Caddy may not serve that path), retry by
-        // briefly freeing 80: stop Caddy, run standalone, restart Caddy. Short
-        // outage, but only as a last resort and only for this one cert request.
-        if (!file_exists("{$certDir}/fullchain.pem")) {
-            logLine($logFile, 'WARN', 'webroot failed; retrying standalone with a brief Caddy stop');
-            run('systemctl stop caddy 2>/dev/null || true', $logFile, $errors, 'ssl-stop-caddy');
-            run("certbot certonly --standalone -d " . escapeshellarg($hostname)
-                . " --agree-tos --non-interactive --register-unsafely-without-email --preferred-challenges http",
-                $logFile, $errors, 'certbot-standalone');
-            run('systemctl start caddy 2>/dev/null || true', $logFile, $errors, 'ssl-start-caddy');
+    // PREFERRED PATH: if Caddy is running it already owns 80/443 and manages ACME
+    // for every hosting domain — let it issue this one too, instead of certbot
+    // (which fights Caddy for port 80). Auto-renewal is then handled by Caddy.
+    $caddyUp = trim((string)shell_exec('systemctl is-active caddy 2>/dev/null')) === 'active';
+    $viaCaddy = false;
+    if ($caddyUp) {
+        logLine($logFile, 'INFO', "Caddy is running; obtaining {$hostname} cert via Caddy (no certbot).");
+        $r = \MuseDockPanel\Services\MailService::ensureMailCertViaCaddy($hostname, 90);
+        if (!empty($r['ok'])) {
+            logLine($logFile, 'OK', "Cert obtenido via Caddy: {$r['issuer']}");
+            $certPathCrt = $r['cert'];
+            $certPathKey = $r['key'];
+            $viaCaddy = true;
+        } else {
+            logLine($logFile, 'WARN', "Caddy no pudo emitir el cert: " . ($r['error'] ?? '') . " — se intentará certbot/self-signed.");
         }
-    } else {
+    }
+
+    // FALLBACK: no Caddy (dedicated mail node) → certbot --standalone owns port 80.
+    if (!$viaCaddy) {
         run('systemctl stop postfix 2>/dev/null || true', $logFile, $errors, 'ssl-stop-postfix');
         run("certbot certonly --standalone -d " . escapeshellarg($hostname)
             . " --agree-tos --non-interactive --register-unsafely-without-email --preferred-challenges http",
             $logFile, $errors, 'certbot');
         run('systemctl start postfix 2>/dev/null || true', $logFile, $errors, 'ssl-start-postfix');
-    }
-
-    if (!file_exists("{$certDir}/fullchain.pem")) {
-        logLine($logFile, 'WARN', "Let's Encrypt failed, falling back to self-signed");
-        $sslMode = 'selfsigned';
-    } else {
-        logLine($logFile, 'OK', "Let's Encrypt cert obtained");
-        @mkdir('/etc/letsencrypt/renewal-hooks/post', 0755, true);
-        file_put_contents('/etc/letsencrypt/renewal-hooks/post/mail-services.sh',
-            "#!/bin/bash\nsystemctl reload postfix dovecot 2>/dev/null || true\n");
-        chmod('/etc/letsencrypt/renewal-hooks/post/mail-services.sh', 0755);
-        logLine($logFile, 'WRITE', '/etc/letsencrypt/renewal-hooks/post/mail-services.sh');
+        if (file_exists("{$leDir}/fullchain.pem") && !$isSelfSigned("{$leDir}/fullchain.pem")) {
+            logLine($logFile, 'OK', "Let's Encrypt cert obtained via certbot");
+            $certPathCrt = "{$leDir}/fullchain.pem";
+            $certPathKey = "{$leDir}/privkey.pem";
+            @mkdir('/etc/letsencrypt/renewal-hooks/post', 0755, true);
+            file_put_contents('/etc/letsencrypt/renewal-hooks/post/mail-services.sh',
+                "#!/bin/bash\nsystemctl reload postfix dovecot 2>/dev/null || true\n");
+            chmod('/etc/letsencrypt/renewal-hooks/post/mail-services.sh', 0755);
+        } else {
+            logLine($logFile, 'WARN', "Let's Encrypt failed, falling back to self-signed");
+        }
     }
 }
 
-if ($sslMode === 'selfsigned' && !$certExists) {
-    logLine($logFile, 'INFO', 'Generating self-signed certificate...');
-    @mkdir($certDir, 0755, true);
-    run("openssl req -new -x509 -days 3650 -nodes -out {$certDir}/fullchain.pem -keyout {$certDir}/privkey.pem -subj '/CN={$hostname}'", $logFile, $errors, 'ssl-selfsigned');
+// LAST RESORT: self-signed, only if nothing above produced a usable cert. Mail
+// still works; clients just warn on connect until a real cert is issued (retry
+// the install once Let's Encrypt is reachable / not rate-limited).
+if ($certPathCrt === '') {
+    logLine($logFile, 'INFO', 'Generating self-signed certificate (temporary)...');
+    @mkdir($leDir, 0755, true);
+    run("openssl req -new -x509 -days 3650 -nodes -out {$leDir}/fullchain.pem -keyout {$leDir}/privkey.pem -subj '/CN={$hostname}'", $logFile, $errors, 'ssl-selfsigned');
+    $certPathCrt = "{$leDir}/fullchain.pem";
+    $certPathKey = "{$leDir}/privkey.pem";
 }
 
-if (file_exists("{$certDir}/fullchain.pem")) {
-    run("postconf -e " . escapeshellarg("smtpd_tls_cert_file = {$certDir}/fullchain.pem"), $logFile, $errors, 'postfix-tls-cert');
-    run("postconf -e " . escapeshellarg("smtpd_tls_key_file = {$certDir}/privkey.pem"), $logFile, $errors, 'postfix-tls-key');
+if (is_file($certPathCrt)) {
+    run("postconf -e " . escapeshellarg("smtpd_tls_cert_file = {$certPathCrt}"), $logFile, $errors, 'postfix-tls-cert');
+    run("postconf -e " . escapeshellarg("smtpd_tls_key_file = {$certPathKey}"), $logFile, $errors, 'postfix-tls-key');
 
-    $sslConf = "ssl = required\nssl_cert = <{$certDir}/fullchain.pem\nssl_key = <{$certDir}/privkey.pem\nssl_min_protocol = TLSv1.2\nssl_prefer_server_ciphers = yes\n";
+    $sslConf = "ssl = required\nssl_cert = <{$certPathCrt}\nssl_key = <{$certPathKey}\nssl_min_protocol = TLSv1.2\nssl_prefer_server_ciphers = yes\n";
     file_put_contents('/etc/dovecot/conf.d/10-ssl.conf', $sslConf);
     logLine($logFile, 'WRITE', '/etc/dovecot/conf.d/10-ssl.conf');
 } else {

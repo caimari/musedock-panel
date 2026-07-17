@@ -3391,4 +3391,144 @@ class MailService
             ],
         ];
     }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Mail TLS certificate via Caddy (not certbot) ────────
+    // ═══════════════════════════════════════════════════════════
+
+    /**
+     * Obtain the mail hostname's TLS certificate THROUGH CADDY instead of certbot.
+     *
+     * certbot --standalone needs to own port 80, which Caddy already binds on a
+     * MuseDock master — so certbot fails ("Could not bind TCP port 80") and the
+     * installer fell back to a self-signed cert (clients then warn on connect).
+     *
+     * Caddy already manages ACME for every hosting domain (HTTP-01 + DNS-01 via
+     * Cloudflare), so the right move is to let Caddy issue this one too: register
+     * the mail hostname as a Caddy route, wait for Caddy to obtain the cert, then
+     * copy it where Postfix/Dovecot read it. No port conflict, auto-renewal comes
+     * for free, and it reuses the panel's existing TLS policy.
+     *
+     * Returns ['ok'=>bool, 'cert'=>path, 'key'=>path, 'issuer'=>..., 'error'=>...].
+     */
+    public static function ensureMailCertViaCaddy(string $hostname, int $waitSeconds = 60): array
+    {
+        $caddyApi = 'http://localhost:2019';
+
+        // Is Caddy actually up?
+        $ping = @file_get_contents($caddyApi . '/config/apps/http', false, stream_context_create(['http' => ['timeout' => 3]]));
+        if ($ping === false) {
+            return ['ok' => false, 'error' => 'Caddy no responde en su API; no se puede emitir el cert por Caddy.'];
+        }
+
+        // 1. Register a minimal route for the mail hostname so Caddy provisions a
+        //    certificate for it (served content is irrelevant — a 200 is enough).
+        $route = [
+            '@id'   => 'mail-cert-' . preg_replace('/[^a-z0-9]/', '', strtolower($hostname)),
+            'match' => [['host' => [$hostname]]],
+            'handle'=> [['handler' => 'static_response', 'status_code' => 200, 'body' => 'mail']],
+        ];
+        self::caddyApiRequest('POST', '/config/apps/http/servers/srv0/routes', $route);
+
+        // Make sure the panel's TLS catch-all covers this host (idempotent).
+        try {
+            SystemService::ensureTlsCatchAllPolicy($caddyApi);
+        } catch (\Throwable) {}
+
+        // 2. Wait for Caddy to obtain the certificate.
+        $found = self::findCaddyCert($hostname);
+        for ($i = 0; $i < $waitSeconds && $found === null; $i++) {
+            sleep(1);
+            $found = self::findCaddyCert($hostname);
+        }
+        if ($found === null) {
+            return ['ok' => false, 'error' => "Caddy no emitió el certificado de {$hostname} en {$waitSeconds}s "
+                . "(posible rate-limit de Let's Encrypt o DNS-01 fallando). El correo sigue con el cert actual."];
+        }
+
+        // 3. Copy into a stable path Postfix/Dovecot read, so a Caddy storage
+        //    reshuffle does not break mail. A cron keeps it fresh after renewals.
+        $dir = '/etc/mail-certs';
+        @mkdir($dir, 0755, true);
+        if (!@copy($found['crt'], "{$dir}/{$hostname}.crt") || !@copy($found['key'], "{$dir}/{$hostname}.key")) {
+            return ['ok' => false, 'error' => "No se pudo copiar el cert de Caddy a {$dir}."];
+        }
+        @chmod("{$dir}/{$hostname}.crt", 0644);
+        @chmod("{$dir}/{$hostname}.key", 0600);
+
+        // 4. Install a small refresh cron so renewals propagate to mail.
+        self::installMailCertRefreshCron($hostname, $found['crt'], $found['key']);
+
+        $issuer = trim((string)shell_exec('openssl x509 -in ' . escapeshellarg("{$dir}/{$hostname}.crt") . ' -noout -issuer 2>/dev/null'));
+        return [
+            'ok'     => true,
+            'cert'   => "{$dir}/{$hostname}.crt",
+            'key'    => "{$dir}/{$hostname}.key",
+            'issuer' => $issuer,
+        ];
+    }
+
+    /** Locate Caddy's on-disk cert/key for a hostname, if it has been issued. */
+    private static function findCaddyCert(string $hostname): ?array
+    {
+        $roots = [
+            '/var/lib/caddy/.local/share/caddy/certificates',
+            '/var/lib/caddy/.config/caddy/certificates',
+            '/root/.local/share/caddy/certificates',
+        ];
+        foreach ($roots as $root) {
+            if (!is_dir($root)) continue;
+            $crt = trim((string)shell_exec('find ' . escapeshellarg($root) . ' -type f -name ' . escapeshellarg($hostname . '.crt') . ' 2>/dev/null | head -1'));
+            if ($crt !== '' && is_file($crt)) {
+                $key = preg_replace('/\.crt$/', '.key', $crt);
+                if (is_file($key)) {
+                    return ['crt' => $crt, 'key' => $key];
+                }
+            }
+        }
+        return null;
+    }
+
+    /** Cron that re-copies Caddy's cert to /etc/mail-certs after renewals + reloads mail. */
+    private static function installMailCertRefreshCron(string $hostname, string $srcCrt, string $srcKey): void
+    {
+        $dir = '/etc/mail-certs';
+        $script = "#!/usr/bin/env bash\n"
+            . "# MuseDock — keep mail TLS cert in sync with Caddy's (auto-renewed) cert.\n"
+            . "set -e\n"
+            . "CRT=\$(find /var/lib/caddy /root/.local -type f -name " . escapeshellarg($hostname . '.crt') . " 2>/dev/null | head -1)\n"
+            . "[ -z \"\$CRT\" ] && exit 0\n"
+            . "KEY=\"\${CRT%.crt}.key\"\n"
+            . "if ! cmp -s \"\$CRT\" {$dir}/{$hostname}.crt; then\n"
+            . "  cp \"\$CRT\" {$dir}/{$hostname}.crt; cp \"\$KEY\" {$dir}/{$hostname}.key\n"
+            . "  chmod 644 {$dir}/{$hostname}.crt; chmod 600 {$dir}/{$hostname}.key\n"
+            . "  systemctl reload postfix dovecot 2>/dev/null || true\n"
+            . "fi\n";
+        @file_put_contents('/usr/local/bin/musedock-mail-cert-sync.sh', $script);
+        @chmod('/usr/local/bin/musedock-mail-cert-sync.sh', 0755);
+        @file_put_contents('/etc/cron.d/musedock-mail-cert-sync',
+            "# Sync mail TLS cert from Caddy (renewals) every 6h\n"
+            . "17 */6 * * * root /usr/local/bin/musedock-mail-cert-sync.sh >/dev/null 2>&1\n");
+        @chmod('/etc/cron.d/musedock-mail-cert-sync', 0644);
+    }
+
+    /** Minimal Caddy admin API request helper. */
+    private static function caddyApiRequest(string $method, string $path, ?array $body = null): array
+    {
+        $ch = curl_init('http://localhost:2019' . $path);
+        $opts = [
+            CURLOPT_CUSTOMREQUEST  => $method,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 10,
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/json'],
+        ];
+        if ($body !== null) {
+            $opts[CURLOPT_POSTFIELDS] = json_encode($body);
+        }
+        curl_setopt_array($ch, $opts);
+        $resp = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        return ['ok' => $code >= 200 && $code < 300, 'code' => $code, 'body' => (string)$resp];
+    }
 }
