@@ -827,8 +827,137 @@
         <input type="hidden" name="node_id" id="sync-all-node-id">
     </form>
 
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- Paridad del binario de Caddy (modulos DNS)          -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <div class="card bg-dark border-secondary mt-4">
+        <div class="card-header border-secondary d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-hdd-network me-2"></i>Binario de Caddy — módulos DNS por nodo</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="caddyAuditRefresh">
+                <i class="bi bi-arrow-repeat"></i>
+            </button>
+        </div>
+        <div class="card-body">
+            <div class="small text-muted mb-3">
+                Los módulos DNS (<code>cloudflare</code>, <code>route53</code>…) van <strong>compilados dentro del binario</strong> de Caddy:
+                no viajan por la base de datos replicada ni por lsyncd. Un slave recién instalado desde apt parece sano
+                pero <strong>no podrá emitir certificados DNS-01 en un failover</strong> si le faltan.
+            </div>
+            <div id="caddyAuditBody">
+                <div class="text-muted small py-2"><i class="bi bi-hourglass-split me-1"></i>Comprobando nodos…</div>
+            </div>
+        </div>
+    </div>
+
 </div>
 <?php endif; ?>
+
+<script>
+(function () {
+    const body = document.getElementById('caddyAuditBody');
+    if (!body) return;
+    const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const csrf = document.querySelector('input[name="csrf_token"]')?.value || '';
+
+    const badge = (sev) => {
+        const map = {
+            ok:       ['success', 'bi-check-circle',        'Igualado'],
+            warning:  ['warning', 'bi-exclamation-triangle', 'Difiere'],
+            critical: ['danger',  'bi-x-octagon',            'Faltan módulos'],
+            unknown:  ['secondary','bi-question-circle',     'Sin datos'],
+        };
+        const [color, icon, text] = map[sev] || map.unknown;
+        return `<span class="badge bg-${color}"><i class="bi ${icon} me-1"></i>${text}</span>`;
+    };
+
+    function render(d) {
+        if (!d.ok) { body.innerHTML = '<div class="text-danger small">Error al auditar los nodos.</div>'; return; }
+        const m = d.master || {};
+        let html = `<div class="small mb-3">
+            <span class="text-muted">Master:</span>
+            <code>v${esc(m.version || '?')}</code>
+            <span class="text-muted ms-2">módulos:</span>
+            ${(m.dns_modules || []).length ? (m.dns_modules || []).map(x => `<code class="ms-1">${esc(x)}</code>`).join('') : '<em class="text-warning ms-1">ninguno</em>'}
+        </div>`;
+
+        if (!d.nodes || !d.nodes.length) {
+            html += '<div class="text-muted small">No hay nodos activos.</div>';
+            body.innerHTML = html; return;
+        }
+
+        html += `<div class="table-responsive"><table class="table table-dark table-sm align-middle mb-0">
+            <thead><tr class="text-muted">
+                <th>Nodo</th><th>Estado</th><th>Versión</th><th>Detalle</th><th class="text-end">Acción</th>
+            </tr></thead><tbody>`;
+        for (const n of d.nodes) {
+            const canFix = n.severity === 'critical' && (n.missing_modules || []).length;
+            html += `<tr>
+                <td>${esc(n.node_name)}</td>
+                <td>${badge(n.severity)}</td>
+                <td><code>${esc(n.remote_version || '—')}</code></td>
+                <td><small class="text-muted">${esc(n.message)}</small></td>
+                <td class="text-end">
+                    ${canFix ? `<button class="btn btn-sm btn-outline-warning caddy-fix" data-node="${n.node_id}" data-name="${esc(n.node_name)}">
+                        <i class="bi bi-tools me-1"></i>Igualar módulos</button>` : ''}
+                </td>
+            </tr>`;
+        }
+        html += '</tbody></table></div>';
+        body.innerHTML = html;
+
+        body.querySelectorAll('.caddy-fix').forEach(btn => {
+            btn.addEventListener('click', () => fix(btn.dataset.node, btn.dataset.name, btn));
+        });
+    }
+
+    function fix(nodeId, name, btn) {
+        // Dry-run first: show exactly what would be built before touching the node.
+        const fd = new FormData();
+        fd.append('csrf_token', csrf);
+        fd.append('node_id', nodeId);
+        fd.append('dry_run', '1');
+        btn.disabled = true;
+        fetch('/settings/cluster/caddy-sync-modules', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(d => {
+                btn.disabled = false;
+                if (!d.ok) { alert('No se pudo comprobar el nodo: ' + (d.error || '')); return; }
+                const plan = (d.plan || []).join('\n');
+                if (!confirm(`Se compilarán en ${name} los módulos que faltan:\n\n${plan}\n\nCaddy se reiniciará en ese nodo al terminar. ¿Continuar?`)) return;
+
+                const fd2 = new FormData();
+                fd2.append('csrf_token', csrf);
+                fd2.append('node_id', nodeId);
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Compilando…';
+                fetch('/settings/cluster/caddy-sync-modules', { method: 'POST', body: fd2 })
+                    .then(r => r.json())
+                    .then(res => {
+                        alert(res.ok ? `Módulos instalados en ${name}.` : `Error: ${JSON.stringify(res.installed || res.error || res)}`);
+                        load();
+                    })
+                    .catch(() => { alert('Error de red al instalar.'); load(); });
+            })
+            .catch(() => { btn.disabled = false; alert('Error de red.'); });
+    }
+
+    function load() {
+        body.innerHTML = '<div class="text-muted small py-2"><i class="bi bi-hourglass-split me-1"></i>Comprobando nodos…</div>';
+        fetch('/settings/cluster/caddy-audit', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(r => r.json()).then(render)
+            .catch(() => { body.innerHTML = '<div class="text-danger small">Error de red al auditar.</div>'; });
+    }
+
+    document.getElementById('caddyAuditRefresh')?.addEventListener('click', load);
+    // Load lazily: only when the Nodos tab is actually opened (the audit calls
+    // every node over the network, so don't do it on every page load).
+    const tabBtn = document.querySelector('[data-bs-target="#tab-nodos"], a[href="#tab-nodos"]');
+    if (tabBtn) {
+        tabBtn.addEventListener('shown.bs.tab', () => { if (!body.dataset.loaded) { body.dataset.loaded = '1'; load(); } }, { once: false });
+    }
+    if (location.hash === '#nodos' || location.hash === '#tab-nodos') { body.dataset.loaded = '1'; load(); }
+})();
+</script>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- TAB 3 — Archivos                                            -->
@@ -1771,11 +1900,24 @@
                     <i class="bi bi-info-circle me-1"></i>Sin cuentas Cloudflare. Añada al menos una para que el failover pueda cambiar DNS automáticamente.
                 </div>
                 <?php endif; ?>
-                <div class="form-check mt-2 mb-2">
+                <div class="form-check mt-2 mb-1">
                     <input class="form-check-input" type="checkbox" id="update_caddy_token" name="update_caddy_token" value="1">
                     <label class="form-check-label small" for="update_caddy_token">
                         <strong>Propagar token a Caddy</strong> — Escribir el primer token en <code>/etc/default/caddy</code> para que Caddy pueda generar certificados SSL via DNS-01
                     </label>
+                </div>
+                <div class="small text-warning mb-2 ms-4">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    Es una <strong>acción puntual</strong>, no un ajuste: al marcarla se reinicia Caddy en el master y en todos los slaves.
+                    Por eso no se queda marcada — desmárcala salvo que quieras volver a propagar.
+                    <?php
+                    $cfTokenAt = \MuseDockPanel\Settings::get('failover_cf_token_propagated_at', '');
+                    if ($cfTokenAt !== ''):
+                    ?>
+                    <div class="text-muted mt-1">
+                        <i class="bi bi-clock-history me-1"></i>Última propagación: <?= View::e($cfTokenAt) ?>
+                    </div>
+                    <?php endif; ?>
                 </div>
                 <button type="submit" class="btn btn-success btn-sm">
                     <i class="bi bi-check-circle me-1"></i>Guardar Cuentas CF

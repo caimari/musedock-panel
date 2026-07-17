@@ -154,6 +154,10 @@ class FailoverController
                 $out = shell_exec("sudo /usr/local/bin/update-caddy-token.sh {$escapedToken} 2>&1");
                 $caddyTokenUpdated = str_contains($out ?? '', 'OK');
                 if ($caddyTokenUpdated) {
+                    // Record WHEN it happened. The checkbox itself is deliberately
+                    // not persisted (it is a one-shot action that restarts Caddy on
+                    // every node, not a preference), but the outcome is useful.
+                    \MuseDockPanel\Settings::set('failover_cf_token_propagated_at', date('Y-m-d H:i:s'));
                     LogService::log('failover.cloudflare', null, 'Caddy CLOUDFLARE_API_TOKEN updated in /etc/default/caddy');
                 }
             }

@@ -139,12 +139,17 @@ install_caddy_runtime_repair_override() {
     fi
 
     mkdir -p /etc/systemd/system/caddy.service.d
+    # NOTE the '-' prefix on every hook: it tells systemd to IGNORE a non-zero
+    # exit instead of killing the unit. Without it, a repair script that exits
+    # non-zero (Caddy admin API not up yet, DB unreachable, ...) makes systemd
+    # SIGKILL Caddy, which takes every site down and can loop on restart.
+    # This exact scenario caused a full outage on 2026-07-17.
     cat > /etc/systemd/system/caddy.service.d/zz-musedock-panel-repair.conf << OVERRIDEEOF
 [Service]
-ExecStartPost=/bin/sleep 5
-ExecStartPost=/usr/bin/php ${PANEL_DIR}/cli/repair-caddy-routes.php
-ExecReload=/bin/sleep 5
-ExecReload=/usr/bin/php ${PANEL_DIR}/cli/repair-caddy-routes.php
+ExecStartPost=-/bin/sleep 5
+ExecStartPost=-/usr/bin/php ${PANEL_DIR}/cli/repair-caddy-routes.php
+ExecReload=-/bin/sleep 5
+ExecReload=-/usr/bin/php ${PANEL_DIR}/cli/repair-caddy-routes.php
 OVERRIDEEOF
     chmod 644 /etc/systemd/system/caddy.service.d/zz-musedock-panel-repair.conf
     systemctl daemon-reload 2>/dev/null || true
