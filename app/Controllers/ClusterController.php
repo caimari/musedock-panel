@@ -1127,9 +1127,9 @@ class ClusterController
             'elapsed' => 0,
         ]));
 
-        // Launch background PHP process
+        // Detached (setsid) so a panel restart does not kill an in-flight sync.
         $cmd = sprintf(
-            'nohup /usr/bin/php /opt/musedock-panel/bin/filesync-run.php %d %s > /dev/null 2>&1 &',
+            'setsid /usr/bin/php /opt/musedock-panel/bin/filesync-run.php %d %s > /dev/null 2>&1 < /dev/null &',
             $nodeId,
             escapeshellarg($syncId)
         );
@@ -1158,6 +1158,24 @@ class ClusterController
         if (!$progress) {
             echo json_encode(['status' => 'unknown', 'error' => 'Sync not found']);
             exit;
+        }
+
+        // Detect a zombie sync: the progress file still says 'running'/'starting'
+        // but its worker died (e.g. the panel was restarted mid-sync) and nothing
+        // updates it anymore. Without this the client polls a 'running' file
+        // forever and the modal spins with no progress. If the file has not been
+        // touched for a while, report it as stale so the UI can close and offer a
+        // retry instead of hanging.
+        $live = in_array($progress['status'] ?? '', ['running', 'starting'], true);
+        if ($live) {
+            $file = FileSyncService::progressFilePath($syncId);
+            $mtime = ($file && is_file($file)) ? @filemtime($file) : 0;
+            $staleFor = $mtime ? (time() - $mtime) : 0;
+            if ($staleFor > 180) { // 3 min without any update = worker is gone
+                $progress['status'] = 'error';
+                $progress['stale'] = true;
+                $progress['phase_label'] = 'Sincronización interrumpida (sin actividad ' . $staleFor . 's; el proceso terminó de forma inesperada). Vuelve a lanzarla.';
+            }
         }
 
         echo json_encode($progress);
@@ -1305,9 +1323,15 @@ class ClusterController
             'steps' => [],
         ]));
 
-        // Launch background PHP process
+        // Launch as a fully detached process.
+        //
+        // 'nohup … &' alone keeps the job in the panel's process tree, so a
+        // 'systemctl restart musedock-panel' mid-sync kills it (that is exactly
+        // what left a sync dead at 3/25 with the progress file stuck on 'running',
+        // spinning the modal forever). setsid makes it a new session leader,
+        // independent of the panel, so it survives a panel restart.
         $cmd = sprintf(
-            'nohup /usr/bin/php /opt/musedock-panel/bin/fullsync-run.php %d %s > /dev/null 2>&1 &',
+            'setsid /usr/bin/php /opt/musedock-panel/bin/fullsync-run.php %d %s > /dev/null 2>&1 < /dev/null &',
             $nodeId,
             escapeshellarg($syncId)
         );
