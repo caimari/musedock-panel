@@ -1164,8 +1164,21 @@ class FileSyncService
             'metadata' => $node['metadata'] ?? null,
         ]);
 
+        $restoreOk = $restoreResult['ok'] ?? false;
+        // Surface WHY the restore failed. Previously this returned ok=false with no
+        // 'error' field, so the worker logged an empty "Database dumps FAILED:" and
+        // the real cause (auth, restore SQL error, unreachable node) was invisible.
+        $restoreErr = '';
+        if (!$restoreOk) {
+            $data = $restoreResult['data'] ?? [];
+            $restoreErr = $restoreResult['error']
+                ?? (is_array($data) ? ($data['error'] ?? json_encode($data)) : (string)$data)
+                ?: 'restauracion fallida sin detalle (revisar restore-db-dumps en el nodo)';
+        }
+
         return [
-            'ok'      => $restoreResult['ok'] ?? false,
+            'ok'      => $restoreOk,
+            'error'   => $restoreOk ? '' : ('Error al restaurar en el nodo: ' . $restoreErr),
             'rsync'   => $rsyncResult,
             'restore' => $restoreResult['data'] ?? $restoreResult,
         ];
