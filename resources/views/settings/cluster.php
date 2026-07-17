@@ -4488,19 +4488,32 @@ function _updateSyncModal(data, nodeName, syncId) {
     }
 }
 
-// Resume sync modal on page load if a sync was in progress
+// Resume sync modal on page load ONLY if a sync is genuinely still running.
+// Previously it reopened the modal from sessionStorage unconditionally; if the
+// sync had already finished, every page load popped the modal again (and, with a
+// stale entry, it never cleared). Check the current status first: reopen only
+// while running/starting, otherwise drop the stale entry silently.
 (function() {
     const saved = sessionStorage.getItem('active_sync');
-    if (saved) {
-        try {
-            const info = JSON.parse(saved);
-            if (info.sync_id) {
+    if (!saved) return;
+    let info;
+    try { info = JSON.parse(saved); } catch(e) { sessionStorage.removeItem('active_sync'); return; }
+    if (!info || !info.sync_id) { sessionStorage.removeItem('active_sync'); return; }
+
+    fetch('/settings/cluster/sync-progress?sync_id=' + encodeURIComponent(info.sync_id) + '&_=' + Date.now(), { cache: 'no-store' })
+        .then(r => r.json())
+        .then(d => {
+            const running = d && (d.status === 'running' || d.status === 'starting');
+            if (running) {
                 _syncStartTime = info.started || Date.now();
                 _showSyncModal('Recuperando progreso...', info.node_name || '');
                 _startSyncPolling(info.sync_id, info.node_name || '');
+            } else {
+                // Already finished (or gone): do not reopen, just clear.
+                sessionStorage.removeItem('active_sync');
             }
-        } catch(e) { sessionStorage.removeItem('active_sync'); }
-    }
+        })
+        .catch(() => { sessionStorage.removeItem('active_sync'); });
 })();
 
 function checkDbHost() {
