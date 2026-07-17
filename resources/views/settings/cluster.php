@@ -346,8 +346,8 @@
             </div>
             <?php else: ?>
             <div class="mb-2">
-                <span class="badge bg-secondary"><i class="bi bi-dash-circle me-1"></i>Sin sincronización completa registrada</span>
-                <small class="text-muted ms-1">los archivos se mantienen al día por lsyncd en tiempo real</small>
+                <span class="badge bg-info"><i class="bi bi-arrow-repeat me-1"></i>Sincronización continua activa</span>
+                <small class="text-muted ms-1">los archivos se mantienen al día por lsyncd en tiempo real; aún no se ha registrado la fecha de una sincronización completa manual</small>
             </div>
             <?php endif; ?>
             <p class="text-muted">Es una acción de arranque/reparación. La sincronización continua (archivos vía lsyncd, bases por dumps) funciona por su cuenta. Ejecuta todos los pasos en secuencia: provisionar hostings &rarr; sincronizar metadatos &rarr; copiar archivos web &rarr; copiar certificados SSL</p>
@@ -362,6 +362,7 @@
                     <li><strong>Mantiene el slave como espejo exacto:</strong> usa <code>--delete</code>, así que <u>borra en el slave lo que ya no existe en el master</u>. No guardes archivos propios en el slave: se eliminarán.</li>
                     <li><strong>No hace falta pulsarlo a menudo:</strong> los archivos ya se mantienen al día solos por <strong>lsyncd en tiempo real</strong>, y hay un refuerzo (rsync + bases) <strong>cada 15 min</strong>. Este botón es para el arranque inicial o una reparación.</li>
                 </ul>
+                <div class="mt-2"><a href="/docs/sync-archivos-lsyncd" class="text-info"><i class="bi bi-book me-1"></i>Guía completa: cómo funciona la sincronización</a></div>
             </div>
             <div class="mt-1 small text-muted text-start mx-auto" style="max-width:600px;">
                 <i class="bi bi-info-circle me-1"></i>

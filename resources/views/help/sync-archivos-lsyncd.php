@@ -15,6 +15,49 @@
     </div>
 </div>
 
+<div class="card mb-4" style="border-color:rgba(25,135,84,.35);">
+    <div class="card-header"><i class="bi bi-arrow-repeat me-2 text-success"></i>Como funciona la sincronizacion de archivos</div>
+    <div class="card-body small">
+        <p class="mb-2">
+            La sincronizacion de archivos hacia los slaves <strong>no es un evento unico</strong>: es continua y automatica.
+            El boton <em>Sincronizacion Completa</em> solo es para el <strong>arranque inicial de un nodo nuevo o una reparacion manual</strong>.
+        </p>
+
+        <div class="fw-bold mt-3 mb-1"><i class="bi bi-clock-history me-1"></i>Cada cuanto se sincroniza</div>
+        <ul class="mb-3">
+            <li><strong>lsyncd — tiempo real:</strong> cualquier cambio en <code>/var/www/vhosts/</code> se copia al slave en segundos.</li>
+            <li><strong>Refuerzo periodico — cada 15 minutos:</strong> un <code>rsync</code> de repaso + sincronizacion de bases de datos (via dump/restore, si no hay replicacion streaming activa).</li>
+            <li><strong>Worker de cluster — cada minuto:</strong> procesa la cola de tareas (altas de hosting, metadatos) y los heartbeats.</li>
+        </ul>
+
+        <div class="fw-bold mb-1"><i class="bi bi-files me-1"></i>Que copia y como (rsync)</div>
+        <ul class="mb-3">
+            <li><strong>Solo lo modificado:</strong> usa <code>rsync -avz</code>, que es <strong>incremental</strong> — compara tamaño y fecha de cada archivo y solo transfiere lo <strong>nuevo o cambiado</strong>. Los archivos identicos ni se tocan.
+                <div class="text-muted mt-1">Ejemplo: si ya hay 107&nbsp;GB copiados y cambias un archivo de 1&nbsp;MB, el siguiente sync transfiere 1&nbsp;MB, no 107&nbsp;GB.</div>
+            </li>
+            <li><strong>Es rapido en repeticiones:</strong> la primera vez copia todo (puede tardar segun el volumen); las siguientes solo mueven los cambios, en segundos o pocos minutos. Calcular lo que falta es rapido: compara metadatos, no relee todo el contenido.</li>
+            <li><strong>Es seguro pulsarlo varias veces:</strong> los hostings se reparan si ya existen y las bases se reimportan sin perder datos.</li>
+        </ul>
+
+        <div class="p-2 rounded" style="background:rgba(255,193,7,.08);border:1px solid rgba(255,193,7,.3);">
+            <div class="fw-bold mb-1"><i class="bi bi-exclamation-triangle me-1 text-warning"></i>Importante: el slave es un espejo EXACTO (<code>--delete</code>)</div>
+            <ul class="mb-0">
+                <li>Si <strong>borras</strong> un archivo en el master, tambien se <strong>borra</strong> en el slave. Correcto: es un espejo.</li>
+                <li>Si alguien crea un archivo <strong>directamente en el slave</strong> que no existe en el master, <strong>rsync lo eliminara</strong> en la siguiente sincronizacion.</li>
+                <li><strong>Regla:</strong> no guardes nunca archivos propios en un slave. La unica fuente de verdad es el master.</li>
+            </ul>
+        </div>
+
+        <div class="fw-bold mt-3 mb-1"><i class="bi bi-info-circle me-1"></i>Que NO se copia</div>
+        <p class="text-muted mb-0">
+            El binario de Caddy (con sus modulos DNS compilados), <code>/etc/default/caddy</code> (token de Cloudflare),
+            la configuracion del sistema (<code>/etc</code>, paquetes, servicios) y los patrones excluidos
+            (<code>.git</code>, <code>.cache</code>, <code>node_modules</code>, logs, sesiones, directorios de IDE).
+            Un slave es una replica de <strong>hostings y bases de clientes</strong>, no un clon completo del sistema operativo.
+        </p>
+    </div>
+</div>
+
 <div class="card mb-4" style="border-color:rgba(239,68,68,.35);">
     <div class="card-header"><i class="bi bi-exclamation-triangle me-2 text-danger"></i>Que significa "Sync degradado"</div>
     <div class="card-body">

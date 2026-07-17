@@ -350,11 +350,11 @@ class DocsController
             ],
             [
                 'title' => 'Sync de archivos (lsyncd)',
-                'description' => 'Diagnostico rapido de Sync degradado, cola lsyncd, SSH entre nodos y autocorreccion desde Cluster > Archivos.',
+                'description' => 'Como funciona la sincronizacion (incremental, espejo con --delete, cada cuanto), y diagnostico de Sync degradado, cola lsyncd y SSH entre nodos.',
                 'url' => '/docs/sync-archivos-lsyncd',
                 'category' => 'Guia especial',
                 'icon' => 'bi-files',
-                'keywords' => 'filesync lsyncd sync degradado cluster archivos ssh queue rsync autocorregir',
+                'keywords' => 'filesync lsyncd sync degradado cluster archivos ssh queue rsync autocorregir incremental sobreescribe sobrescribe borra delete espejo mirror cada cuanto frecuencia intervalo 15 minutos tiempo real sincronizacion completa que copia que no copia slave master',
             ],
             [
                 'title' => 'Modos de correo',
