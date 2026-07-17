@@ -4,6 +4,7 @@ namespace MuseDockPanel\Services;
 use MuseDockPanel\Database;
 use MuseDockPanel\Settings;
 use MuseDockPanel\Security\TlsClient;
+use MuseDockPanel\Services\ReplicationService;
 
 /**
  * FailoverService — Multi-ISP failover orchestration for MuseDock Panel.
@@ -1249,17 +1250,36 @@ class FailoverService
             }
         }
 
-        // Sync must use raw stored accounts (encrypted tokens), not decrypted helper output.
-        // Otherwise slaves receive plain tokens and cannot apply update-caddy-token flow reliably.
         $cfAccountsRaw = json_decode(Settings::get('failover_cf_accounts', '[]'), true);
         if (!is_array($cfAccountsRaw)) {
             $cfAccountsRaw = [];
         }
 
+        // Tokens are stored encrypted with a key derived from THIS node's DB_PASS
+        // (sha256(DB_PASS)). Every node has a different DB_PASS, so a slave can
+        // never decrypt a token encrypted by the master — shipping the ciphertext
+        // guaranteed failure, which is why the token never reached the slaves.
+        //
+        // When the operator explicitly asked to propagate the token, decrypt here
+        // (we hold the key) and send the plaintext. The hop is protected by the
+        // cluster's mutual-TLS channel and the payload is only sent to
+        // authenticated nodes. Without that flag, ciphertext is kept as-is.
+        $cfAccountsForPush = $cfAccountsRaw;
+        if ($updateCaddyToken) {
+            foreach ($cfAccountsForPush as $i => $acc) {
+                if (empty($acc['token'])) continue;
+                $plain = ReplicationService::decryptPassword((string)$acc['token']);
+                if ($plain !== '') {
+                    $cfAccountsForPush[$i]['token'] = $plain;
+                }
+                // If it does not decrypt it is already plaintext (legacy) — leave it.
+            }
+        }
+
         $payload = [
             'config'            => $config,
             'servers'           => self::getServers(),
-            'cf_accounts'       => $cfAccountsRaw,
+            'cf_accounts'       => $cfAccountsForPush,
             'remote_domains'    => Settings::get('failover_remote_domains', ''),
             'update_caddy_token' => $updateCaddyToken,
         ];
