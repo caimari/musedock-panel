@@ -1368,10 +1368,32 @@ class ClusterService
                         SystemService::setPasswordHash($username, $passwordHash);
                     }
 
+                    // customer_id comes from the master's customers table, which
+                    // is NOT replicated to slaves. Inserting it blindly hits
+                    //   hosting_accounts_customer_id_fkey: Key (customer_id)=(N)
+                    //   is not present in table "customers"
+                    // and the whole hosting creation fails — which then cascades
+                    // into "hosting not found on slave" for all its database syncs.
+                    // The customer link is organizational metadata, not needed for
+                    // the slave to serve the site, so drop it to NULL when the
+                    // customer does not exist locally.
+                    $customerId = $hostingData['customer_id'] ?? null;
+                    if ($customerId !== null) {
+                        $exists = Database::fetchOne(
+                            'SELECT id FROM customers WHERE id = :id',
+                            ['id' => $customerId]
+                        );
+                        if (!$exists) {
+                            LogService::log('cluster.sync', 'customer-missing',
+                                "Hosting {$domain}: customer_id={$customerId} no existe en el slave; se guarda sin cliente asociado");
+                            $customerId = null;
+                        }
+                    }
+
                     // Insert into hosting_accounts DB
                     $fpmSocket = "unix//run/php/php{$phpVersion}-fpm-{$username}.sock";
                     $accountId = Database::insert('hosting_accounts', [
-                        'customer_id'    => $hostingData['customer_id'] ?? null,
+                        'customer_id'    => $customerId,
                         'domain'         => $domain,
                         'username'       => $username,
                         'system_uid'     => $result['uid'] ?? null,
