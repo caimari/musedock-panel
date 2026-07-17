@@ -354,7 +354,16 @@
             <button class="btn btn-success btn-lg" onclick="fullSync(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
                 <i class="bi bi-play-circle me-1"></i>Sincronización Completa a <?= View::e($node['name']) ?>
             </button>
-            <div class="mt-3 small text-muted text-start mx-auto" style="max-width:600px;">
+            <div class="mt-3 mb-3 p-3 rounded text-start mx-auto" style="max-width:600px;background:rgba(25,135,84,0.08);border:1px solid rgba(25,135,84,0.2);">
+                <div class="fw-bold mb-2"><i class="bi bi-question-circle me-1"></i>¿Puedo pulsarlo varias veces? Sí, sin miedo.</div>
+                <ul class="small mb-0" style="padding-left:1.1rem;">
+                    <li><strong>No sobreescribe todo:</strong> rsync es <em>incremental</em> — solo copia los archivos <strong>nuevos o modificados</strong>. Lo idéntico ni se toca.</li>
+                    <li><strong>Es rápido en repeticiones:</strong> la primera vez copia todo (puede tardar según el tamaño); las siguientes solo transfieren los cambios, en segundos o pocos minutos.</li>
+                    <li><strong>Mantiene el slave como espejo exacto:</strong> usa <code>--delete</code>, así que <u>borra en el slave lo que ya no existe en el master</u>. No guardes archivos propios en el slave: se eliminarán.</li>
+                    <li><strong>No hace falta pulsarlo a menudo:</strong> los archivos ya se mantienen al día solos por <strong>lsyncd en tiempo real</strong>, y hay un refuerzo (rsync + bases) <strong>cada 15 min</strong>. Este botón es para el arranque inicial o una reparación.</li>
+                </ul>
+            </div>
+            <div class="mt-1 small text-muted text-start mx-auto" style="max-width:600px;">
                 <i class="bi bi-info-circle me-1"></i>
                 <strong>Paso 1 — Hostings (API):</strong> Crea/repara cuentas de sistema, PHP-FPM y Caddy en el nodo remoto. Tambien sincroniza alias de dominio, redirecciones y <strong>asociaciones de bases de datos</strong> registradas en el panel.<br>
                 <strong>Paso 2 — Archivos (rsync vía SSH):</strong> Copia el contenido web de <code>/var/www/vhosts/</code> al slave. Requiere SSH configurado.<br>
