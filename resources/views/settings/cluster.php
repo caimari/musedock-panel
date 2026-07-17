@@ -342,12 +342,12 @@
             <?php if (!empty($node['last_sync_at'])): ?>
             <div class="mb-2">
                 <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Sincronizado</span>
-                <small class="text-muted ms-1">última sincronización completa: <?= View::e($node['last_sync_at']) ?></small>
+                <small class="text-muted ms-1">última sincronización completa: <strong><?= View::e($node['last_sync_at']) ?></strong> · los archivos se mantienen al día en tiempo real</small>
             </div>
             <?php else: ?>
             <div class="mb-2">
-                <span class="badge bg-info"><i class="bi bi-arrow-repeat me-1"></i>Sincronización continua activa</span>
-                <small class="text-muted ms-1">los archivos se mantienen al día por lsyncd en tiempo real; aún no se ha registrado la fecha de una sincronización completa manual</small>
+                <span class="badge bg-secondary"><i class="bi bi-dash-circle me-1"></i>Nunca sincronizado por completo</span>
+                <small class="text-muted ms-1">pulsa el botón para hacer la primera sincronización completa de este nodo</small>
             </div>
             <?php endif; ?>
             <p class="text-muted">Es una acción de arranque/reparación. La sincronización continua (archivos vía lsyncd, bases por dumps) funciona por su cuenta. Ejecuta todos los pasos en secuencia: provisionar hostings &rarr; sincronizar metadatos &rarr; copiar archivos web &rarr; copiar certificados SSL</p>

@@ -299,10 +299,20 @@ try {
 
     writeFullSyncProgress($progressFile, $finalStatus, 'done', $summary, $steps, $startTime);
 
-    // Record WHEN this node was last fully synced, so the UI can show a real
+    // Record WHEN this node was last synced so the UI shows a real
     // "sincronizado hace X" state instead of only ever offering the action.
-    // last_sync_at existed in the schema but nothing ever wrote it.
-    if (!$hasErrors) {
+    //
+    // Register the timestamp whenever the FILES made it across (hostings + rsync),
+    // which is what "synced" means to the operator. A transient DB-restore error
+    // (the worker retries dumps every cycle) must not block the timestamp forever
+    // — otherwise the node looks unsynced even though every site's files are there.
+    $filesOk = true;
+    foreach ($steps as $s) {
+        if (in_array($s['name'], ['Hostings (API)', 'Archivos (rsync)'], true) && ($s['status'] ?? '') === 'error') {
+            $filesOk = false;
+        }
+    }
+    if ($filesOk) {
         try {
             \MuseDockPanel\Database::update(
                 'cluster_nodes',
