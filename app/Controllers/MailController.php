@@ -1807,4 +1807,102 @@ class MailController
 
         echo json_encode(MailService::getSmtpConfig(true), JSON_UNESCAPED_SLASHES);
     }
+
+    // ═══════════════════════════════════════════════════════════
+    // ─── Send policies (anti-abuse) ──────────────────────────
+    // ═══════════════════════════════════════════════════════════
+
+    /** DB config for the sender-login pgsql lookup. */
+    private static function mailDbCfg(): array
+    {
+        $enc = Settings::get('mail_db_password_enc', '');
+        $pass = $enc !== '' ? \MuseDockPanel\Services\ReplicationService::decryptPassword($enc) : '';
+        return [
+            'host'     => \MuseDockPanel\Env::get('DB_HOST', '127.0.0.1'),
+            'port'     => (int)\MuseDockPanel\Env::get('DB_PORT', '5433'),
+            'dbname'   => \MuseDockPanel\Env::get('DB_NAME', 'musedock_panel'),
+            'user'     => 'musedock_mail',
+            'password' => $pass,
+        ];
+    }
+
+    /** GET /mail/policies (JSON) — current policy state. */
+    public function policyStatus(): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode(\MuseDockPanel\Services\MailPolicyService::status());
+    }
+
+    /** POST /mail/policies/toggle — flip a master switch and re-apply. */
+    public function policyToggle(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $key = $_POST['key'] ?? '';
+        $on  = ($_POST['value'] ?? '') === '1';
+        $allowed = [
+            'whitelist' => 'mail_policy_whitelist_enabled',
+            'ratelimit' => 'mail_policy_ratelimit_enabled',
+            'fail2ban'  => 'mail_policy_fail2ban_enabled',
+        ];
+        if (!isset($allowed[$key])) {
+            echo json_encode(['ok' => false, 'error' => 'Opción no válida']);
+            return;
+        }
+        Settings::set($allowed[$key], $on ? '1' : '0');
+
+        // Re-apply the relevant layer.
+        $svc = '\MuseDockPanel\Services\MailPolicyService';
+        $res = match ($key) {
+            'whitelist' => $svc::installSenderPolicy(self::mailDbCfg()),
+            'ratelimit' => $svc::applyRateLimit(),
+            'fail2ban'  => $svc::applyFail2ban(),
+        };
+        LogService::log('mail.policy', 'toggle', "{$key} = " . ($on ? 'on' : 'off'));
+        echo json_encode(['ok' => $res['ok'] ?? true, 'key' => $key, 'enabled' => $on, 'result' => $res]);
+    }
+
+    /** POST /mail/policies/default-rate — set the global rate limit. */
+    public function policyDefaultRate(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $rate = max(1, (int)($_POST['rate'] ?? 100));
+        Settings::set('mail_policy_default_rate_limit', (string)$rate);
+        $res = \MuseDockPanel\Services\MailPolicyService::applyRateLimit();
+        echo json_encode(['ok' => true, 'rate' => $rate, 'result' => $res]);
+    }
+
+    /** POST /mail/accounts/{account_id}/policy — per-mailbox policy. */
+    public function accountPolicy(array $params): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $id = (int)($params['account_id'] ?? 0);
+        if ($id < 1) { echo json_encode(['ok' => false, 'error' => 'Buzón no válido']); return; }
+        $res = \MuseDockPanel\Services\MailPolicyService::setMailboxPolicy($id, [
+            'send_mode'           => $_POST['send_mode'] ?? null,
+            'rate_limit_per_hour' => $_POST['rate_limit_per_hour'] ?? null,
+            'can_send'            => isset($_POST['can_send']) ? ($_POST['can_send'] === '1') : null,
+        ]);
+        // Re-apply the sender map so send_mode/can_send changes take effect on the map too.
+        \MuseDockPanel\Services\MailPolicyService::installSenderPolicy(self::mailDbCfg());
+        echo json_encode($res);
+    }
+
+    /** POST /mail/domains/{id}/policy — per-domain default policy. */
+    public function domainPolicy(array $params): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $id = (int)($params['id'] ?? 0);
+        if ($id < 1) { echo json_encode(['ok' => false, 'error' => 'Dominio no válido']); return; }
+        $res = \MuseDockPanel\Services\MailPolicyService::setDomainPolicy($id, [
+            'default_send_mode'           => $_POST['default_send_mode'] ?? null,
+            'default_rate_limit_per_hour' => $_POST['default_rate_limit_per_hour'] ?? null,
+            'send_allowed'                => isset($_POST['send_allowed']) ? ($_POST['send_allowed'] === '1') : null,
+        ]);
+        \MuseDockPanel\Services\MailPolicyService::installSenderPolicy(self::mailDbCfg());
+        echo json_encode($res);
+    }
 }

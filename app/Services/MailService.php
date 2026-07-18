@@ -185,6 +185,8 @@ class MailService
         // Use Dovecot-compatible password hash: {BLF-CRYPT} (bcrypt)
         $passwordHash = '{BLF-CRYPT}' . password_hash($password, PASSWORD_BCRYPT);
 
+        // Inherit the domain's default send policy so new mailboxes are governed
+        // by the policy the operator set on the domain (falls back to 'normal').
         $data = [
             'mail_domain_id' => $domainId,
             'account_id'     => $extra['account_id'] ?? null,
@@ -196,6 +198,9 @@ class MailService
             'quota_mb'       => $quotaMb,
             'home_dir'       => $homeDir,
             'status'         => 'active',
+            'send_mode'           => $domain['default_send_mode'] ?? 'normal',
+            'rate_limit_per_hour' => (int)($domain['default_rate_limit_per_hour'] ?? 0),
+            'can_send'            => true,
             'created_at'     => date('Y-m-d H:i:s'),
             'updated_at'     => date('Y-m-d H:i:s'),
         ];

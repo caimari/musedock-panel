@@ -415,6 +415,12 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/mail/relay/domains/refresh-all', 'MailController@relayDomainsRefreshAll');
 \MuseDockPanel\Router::post('/mail/deliverability/check', 'MailController@deliverabilityCheck');
 \MuseDockPanel\Router::post('/mail/relay/domains/{id}/delete', 'MailController@relayDomainDelete');
+// Send policies (anti-abuse)
+\MuseDockPanel\Router::get('/mail/policies', 'MailController@policyStatus');
+\MuseDockPanel\Router::post('/mail/policies/toggle', 'MailController@policyToggle');
+\MuseDockPanel\Router::post('/mail/policies/default-rate', 'MailController@policyDefaultRate');
+\MuseDockPanel\Router::post('/mail/accounts/{account_id}/policy', 'MailController@accountPolicy');
+\MuseDockPanel\Router::post('/mail/domains/{id}/policy', 'MailController@domainPolicy');
 \MuseDockPanel\Router::post('/mail/relay/users/store', 'MailController@relayUserStore');
 \MuseDockPanel\Router::post('/mail/relay/users/{id}/update', 'MailController@relayUserUpdate');
 \MuseDockPanel\Router::post('/mail/relay/users/{id}/delete', 'MailController@relayUserDelete');
