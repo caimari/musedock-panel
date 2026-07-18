@@ -3468,7 +3468,14 @@ class MailService
         ];
     }
 
-    /** Locate Caddy's on-disk cert/key for a hostname, if it has been issued. */
+    /**
+     * Locate Caddy's on-disk cert/key that covers a hostname.
+     *
+     * Caddy often issues a WILDCARD (*.musedock.com) via DNS-01 rather than a
+     * per-host cert, so there is no mail.musedock.com.crt file — the cert is
+     * stored as wildcard_.musedock.com.crt. Match by the certificate's SAN
+     * (exact host OR the wildcard for its parent domain), not by filename.
+     */
     private static function findCaddyCert(string $hostname): ?array
     {
         $roots = [
@@ -3476,13 +3483,21 @@ class MailService
             '/var/lib/caddy/.config/caddy/certificates',
             '/root/.local/share/caddy/certificates',
         ];
+        // Wildcard that would cover this host, e.g. *.musedock.com for mail.musedock.com
+        $parent = preg_replace('/^[^.]+\./', '', $hostname);
+        $wildcard = '*.' . $parent;
+
         foreach ($roots as $root) {
             if (!is_dir($root)) continue;
-            $crt = trim((string)shell_exec('find ' . escapeshellarg($root) . ' -type f -name ' . escapeshellarg($hostname . '.crt') . ' 2>/dev/null | head -1'));
-            if ($crt !== '' && is_file($crt)) {
-                $key = preg_replace('/\.crt$/', '.key', $crt);
-                if (is_file($key)) {
-                    return ['crt' => $crt, 'key' => $key];
+            $crts = shell_exec('find ' . escapeshellarg($root) . ' -type f -name "*.crt" 2>/dev/null');
+            foreach (preg_split('/\r?\n/', (string)$crts) as $crt) {
+                if ($crt === '' || !is_file($crt)) continue;
+                $san = (string)shell_exec('openssl x509 -in ' . escapeshellarg($crt) . ' -noout -ext subjectAltName 2>/dev/null');
+                if (str_contains($san, "DNS:{$hostname}") || str_contains($san, "DNS:{$wildcard}")) {
+                    $key = preg_replace('/\.crt$/', '.key', $crt);
+                    if (is_file($key)) {
+                        return ['crt' => $crt, 'key' => $key];
+                    }
                 }
             }
         }
@@ -3493,13 +3508,23 @@ class MailService
     private static function installMailCertRefreshCron(string $hostname, string $srcCrt, string $srcKey): void
     {
         $dir = '/etc/mail-certs';
+        // Match the cert by SAN (covers a wildcard *.parent), not by filename, so a
+        // *.musedock.com cert is picked up for mail.musedock.com after each Caddy
+        // renewal — same logic as findCaddyCert().
+        $parent = preg_replace('/^[^.]+\./', '', $hostname);
         $script = "#!/usr/bin/env bash\n"
             . "# MuseDock — keep mail TLS cert in sync with Caddy's (auto-renewed) cert.\n"
             . "set -e\n"
-            . "CRT=\$(find /var/lib/caddy /root/.local -type f -name " . escapeshellarg($hostname . '.crt') . " 2>/dev/null | head -1)\n"
+            . "HOST=" . escapeshellarg($hostname) . "\n"
+            . "WILD=" . escapeshellarg('DNS:*.' . $parent) . "\n"
+            . "CRT=\"\"\n"
+            . "for c in \$(find /var/lib/caddy /root/.local -type f -name '*.crt' 2>/dev/null); do\n"
+            . "  san=\$(openssl x509 -in \"\$c\" -noout -ext subjectAltName 2>/dev/null)\n"
+            . "  if echo \"\$san\" | grep -qF \"DNS:\$HOST\" || echo \"\$san\" | grep -qF \"\$WILD\"; then CRT=\"\$c\"; break; fi\n"
+            . "done\n"
             . "[ -z \"\$CRT\" ] && exit 0\n"
             . "KEY=\"\${CRT%.crt}.key\"\n"
-            . "if ! cmp -s \"\$CRT\" {$dir}/{$hostname}.crt; then\n"
+            . "if ! cmp -s \"\$CRT\" {$dir}/{$hostname}.crt 2>/dev/null; then\n"
             . "  cp \"\$CRT\" {$dir}/{$hostname}.crt; cp \"\$KEY\" {$dir}/{$hostname}.key\n"
             . "  chmod 644 {$dir}/{$hostname}.crt; chmod 600 {$dir}/{$hostname}.key\n"
             . "  systemctl reload postfix dovecot 2>/dev/null || true\n"

@@ -962,7 +962,11 @@ if ($haveRealLeCert) {
     $viaCaddy = false;
     if ($caddyUp) {
         logLine($logFile, 'INFO', "Caddy is running; obtaining {$hostname} cert via Caddy (no certbot).");
-        $r = \MuseDockPanel\Services\MailService::ensureMailCertViaCaddy($hostname, 90);
+        // 150s, not 90s: Caddy's DNS-01 creates a TXT record on Cloudflare and
+        // waits for propagation, which routinely takes >90s. The 90s cap made the
+        // installer give up and fall back to certbot/self-signed even though Caddy
+        // then finished and issued a real Let's Encrypt cert seconds later.
+        $r = \MuseDockPanel\Services\MailService::ensureMailCertViaCaddy($hostname, 150);
         if (!empty($r['ok'])) {
             logLine($logFile, 'OK', "Cert obtenido via Caddy: {$r['issuer']}");
             $certPathCrt = $r['cert'];
