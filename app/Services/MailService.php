@@ -3556,4 +3556,51 @@ class MailService
         curl_close($ch);
         return ['ok' => $code >= 200 && $code < 300, 'code' => $code, 'body' => (string)$resp];
     }
+
+    /**
+     * TLS certificate status for the mail hostname, for the UI badge.
+     * Returns ['state' => valid|selfsigned|expiring|expired|missing, 'label',
+     *          'class', 'issuer', 'expires', 'days_left'].
+     */
+    public static function certStatus(?string $hostname = null): array
+    {
+        $hostname = $hostname ?: (string)Settings::get('mail_hostname', '');
+
+        // Prefer the cert Postfix is actually configured to use.
+        $crt = trim((string)shell_exec("postconf -h smtpd_tls_cert_file 2>/dev/null"));
+        if ($crt === '' || !is_file($crt)) {
+            foreach (['/etc/mail-certs/mail.crt', "/etc/mail-certs/{$hostname}.crt",
+                      "/etc/letsencrypt/live/{$hostname}/fullchain.pem"] as $c) {
+                if ($c !== '' && is_file($c)) { $crt = $c; break; }
+            }
+        }
+        if ($crt === '' || !is_file($crt)) {
+            return ['state' => 'missing', 'label' => 'Sin certificado', 'class' => 'secondary',
+                    'issuer' => '', 'expires' => '', 'days_left' => null];
+        }
+
+        $issuer  = trim((string)shell_exec('openssl x509 -in ' . escapeshellarg($crt) . ' -noout -issuer 2>/dev/null'));
+        $enddate = trim((string)shell_exec('openssl x509 -in ' . escapeshellarg($crt) . ' -noout -enddate 2>/dev/null'));
+        $expires = str_replace('notAfter=', '', $enddate);
+        $ts = $expires !== '' ? strtotime($expires) : 0;
+        $daysLeft = $ts ? (int)floor(($ts - time()) / 86400) : null;
+
+        $selfSigned = $hostname !== '' && (stripos($issuer, "CN = {$hostname}") !== false
+                    || stripos($issuer, "CN={$hostname}") !== false);
+
+        if ($selfSigned) {
+            return ['state' => 'selfsigned', 'label' => 'Auto-firmado (los clientes avisarán)',
+                    'class' => 'warning', 'issuer' => $issuer, 'expires' => $expires, 'days_left' => $daysLeft];
+        }
+        if ($daysLeft !== null && $daysLeft < 0) {
+            return ['state' => 'expired', 'label' => 'Certificado CADUCADO', 'class' => 'danger',
+                    'issuer' => $issuer, 'expires' => $expires, 'days_left' => $daysLeft];
+        }
+        if ($daysLeft !== null && $daysLeft <= 10) {
+            return ['state' => 'expiring', 'label' => "Caduca en {$daysLeft} días", 'class' => 'warning',
+                    'issuer' => $issuer, 'expires' => $expires, 'days_left' => $daysLeft];
+        }
+        return ['state' => 'valid', 'label' => 'Certificado válido', 'class' => 'success',
+                'issuer' => $issuer, 'expires' => $expires, 'days_left' => $daysLeft];
+    }
 }

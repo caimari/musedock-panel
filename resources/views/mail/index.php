@@ -1328,6 +1328,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                     <th class="ps-3">Servidor</th>
                     <th>Hostname</th>
                     <th>Status</th>
+                    <th>Certificado</th>
                     <th>Domains</th>
                 </tr>
             </thead>
@@ -1336,6 +1337,13 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                     <td class="ps-3 fw-semibold"><i class="bi bi-pc-display me-1 text-success"></i> Este servidor (local)</td>
                     <td class="text-muted"><?= View::e($mailLocalHostname ?? '-') ?></td>
                     <td><span class="badge badge-active">activo</span></td>
+                    <td>
+                        <?php $mc = \MuseDockPanel\Services\MailService::certStatus($mailLocalHostname ?? null); ?>
+                        <span class="badge bg-<?= View::e($mc['class']) ?>" title="<?= View::e($mc['issuer'] . ($mc['expires'] ? ' · caduca ' . $mc['expires'] : '')) ?>">
+                            <i class="bi bi-<?= $mc['state'] === 'valid' ? 'shield-check' : ($mc['state'] === 'selfsigned' || $mc['state'] === 'expiring' ? 'shield-exclamation' : 'shield-x') ?> me-1"></i>
+                            <?= View::e($mc['label']) ?>
+                        </span>
+                    </td>
                     <td>
                         <?php
                             $localCount = \MuseDockPanel\Database::fetchOne(
