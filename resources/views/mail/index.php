@@ -289,14 +289,14 @@
 (function () {
     const box = document.getElementById('antispam-status');
     if (!box) return;
-    const csrf = document.querySelector('input[name="csrf_token"]')?.value || '';
+    const csrf = '<?= View::csrfToken() ?>';
 
     const toggle = (key, on) => {
-        const fd = new FormData(); fd.append('csrf_token', csrf); fd.append('key', key); fd.append('value', on ? '1' : '0');
+        const fd = new FormData(); fd.append('_csrf_token', csrf); fd.append('key', key); fd.append('value', on ? '1' : '0');
         return fetch('/mail/policies/toggle', { method: 'POST', body: fd }).then(r => r.json());
     };
     const setRate = (rate) => {
-        const fd = new FormData(); fd.append('csrf_token', csrf); fd.append('rate', rate);
+        const fd = new FormData(); fd.append('_csrf_token', csrf); fd.append('rate', rate);
         return fetch('/mail/policies/default-rate', { method: 'POST', body: fd }).then(r => r.json());
     };
 
