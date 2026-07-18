@@ -67,6 +67,40 @@
                         <span class="text-muted"><?= $domain['created_at'] ?></span>
                     </div>
                 </div>
+
+                <!-- Política de envío del dominio (anti-abuso) -->
+                <hr class="border-secondary my-3">
+                <div class="row g-3 align-items-end">
+                    <div class="col-12">
+                        <span class="small fw-semibold"><i class="bi bi-shield-lock me-1"></i>Política de envío del dominio</span>
+                    </div>
+                    <div class="col-md-5">
+                        <label class="form-label small text-muted mb-1">Modo por defecto de los buzones nuevos</label>
+                        <?php $dsm = $domain['default_send_mode'] ?? 'normal'; ?>
+                        <select id="dom-send-mode" class="form-select form-select-sm">
+                            <option value="normal" <?= $dsm === 'normal' ? 'selected' : '' ?>>Normal</option>
+                            <option value="webmail_only" <?= $dsm === 'webmail_only' ? 'selected' : '' ?>>Solo webmail</option>
+                            <option value="readonly" <?= $dsm === 'readonly' ? 'selected' : '' ?>>Solo lectura</option>
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small text-muted mb-1">Límite por defecto (correos/hora)</label>
+                        <input type="number" id="dom-rate" class="form-control form-control-sm" min="0"
+                               value="<?= (int)($domain['default_rate_limit_per_hour'] ?? 0) ?>" placeholder="0 = global">
+                    </div>
+                    <div class="col-md-3">
+                        <div class="form-check form-switch">
+                            <?php $sendAllowed = in_array((string)($domain['send_allowed'] ?? 't'), ['1','t','true','yes','on'], true); ?>
+                            <input class="form-check-input" type="checkbox" id="dom-send-allowed" <?= $sendAllowed ? 'checked' : '' ?>>
+                            <label class="form-check-label small" for="dom-send-allowed">Permite envío</label>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <button type="button" id="dom-policy-save" class="btn btn-sm btn-success"><i class="bi bi-check-circle me-1"></i>Guardar política</button>
+                        <span id="dom-policy-msg" class="small ms-2"></span>
+                        <div class="small text-muted mt-1"><i class="bi bi-info-circle me-1"></i>“Permite envío” solo aplica si la lista blanca está activada en <a href="/mail?tab=antispam" class="text-info">Anti-spam</a>.</div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -225,3 +259,29 @@
         <?php endif; ?>
     </div>
 </div>
+
+<script>
+(function () {
+    const btn = document.getElementById('dom-policy-save');
+    if (!btn) return;
+    const csrf = '<?= View::csrfToken() ?>';
+    const msg = document.getElementById('dom-policy-msg');
+    btn.addEventListener('click', function () {
+        const fd = new FormData();
+        fd.append('_csrf_token', csrf);
+        fd.append('default_send_mode', document.getElementById('dom-send-mode').value);
+        fd.append('default_rate_limit_per_hour', document.getElementById('dom-rate').value);
+        fd.append('send_allowed', document.getElementById('dom-send-allowed').checked ? '1' : '0');
+        btn.disabled = true;
+        msg.textContent = 'Guardando…'; msg.className = 'small ms-2 text-muted';
+        fetch('/mail/domains/<?= (int)$domain['id'] ?>/policy', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(d => {
+                btn.disabled = false;
+                if (d.ok) { msg.textContent = '✓ Guardado'; msg.className = 'small ms-2 text-success'; }
+                else { msg.textContent = 'Error: ' + (d.error || ''); msg.className = 'small ms-2 text-danger'; }
+            })
+            .catch(() => { btn.disabled = false; msg.textContent = 'Error de red'; msg.className = 'small ms-2 text-danger'; });
+    });
+})();
+</script>
