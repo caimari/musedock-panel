@@ -2,6 +2,28 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.191] — 2026-07-18
+
+Primera instalación de **Correo Completo por el panel**: se pulieron todos los fallos que salieron al estrenarla, más un monitor de certificados y un badge de estado.
+
+### Fixed
+
+- **Rol de BBDD del correo:** la instalación fallaba con `permission denied to create role` porque el panel intentaba crear el usuario `musedock_mail` con su propio usuario de BBDD (sin `CREATEROLE`, a propósito). Ahora el rol se crea como superusuario `postgres` vía `sudo -u postgres`, idempotente.
+- **Certificado vs Caddy (puerto 80):** el instalador usaba `certbot --standalone`, que exige el puerto 80 — pero Caddy ya lo tiene en un master, así que fallaba (`Could not bind TCP port 80`) y caía a un certificado auto-firmado (los clientes avisaban al conectar). Ahora, si Caddy está activo, **es Caddy quien emite el certificado** (HTTP-01/DNS-01, reutilizando la política TLS del panel y con renovación automática); `certbot` queda solo para un nodo de correo dedicado sin Caddy.
+- **Certificado comodín:** Caddy suele emitir un comodín `*.dominio.com` por DNS-01, así que no existe un fichero `mail.dominio.com.crt`. El instalador lo buscaba por nombre y no lo encontraba, cayendo a auto-firmado aunque ya hubiera un certificado válido. Ahora se localiza por **SAN** (cubre el host o su comodín), y un cron re-sincroniza el certificado con el correo tras cada renovación.
+- **Espera de emisión:** el DNS-01 espera la propagación del registro TXT en Cloudflare, que suele tardar más de 90s; el instalador se rendía antes de tiempo. Ampliada la espera a 150s.
+- **Puertos 587/465:** `submission` se añadía como texto crudo a `master.cf` y a veces quedaba sin escuchar. Ahora se configuran `submission` (587) y `smtps` (465) con `postconf -M/-P` (método soportado e idempotente), y ambos arrancan de forma fiable.
+- **No saltar el certificado auto-firmado:** al reinstalar, el paso SSL se saltaba si ya existía cualquier certificado, dejando el auto-firmado sin actualizar. Ahora detecta el auto-firmado y reintenta el real.
+
+### Added
+
+- **Monitor de certificados en bucle de fallo:** un dominio muerto (DNS movido o caducado) que reintenta su certificado sin parar agota el cupo de Let's Encrypt (5 fallos/hora) y puede **bloquear los certificados de todos los demás dominios y del correo** (le pasó a `gregorioevans.com`, con 1.375 fallos/hora bloqueando `mail.musedock.com`). Ahora el worker revisa cada ~30 min los fallos ACME de Caddy y **avisa al administrador por email** cuando un dominio supera 20 fallos, indicando si está agotando el cupo, si el dominio ya no resuelve, y la acción recomendada. Anti-spam: re-avisa como mucho cada 12h. Solo informa; nunca da de baja un dominio por su cuenta.
+- **Badge de estado del certificado** en `Mail → Servidor de Mail Local`: verde (certificado válido), ámbar (auto-firmado o caduca en ≤10 días), rojo (caducado o inexistente), con el emisor y la fecha de caducidad en el tooltip. Así un certificado roto se ve de un vistazo, no solo en los logs.
+
+### Notes
+
+- En un servidor con Caddy, el certificado del correo lo gestiona **Caddy** (mismo mecanismo que las webs), con renovación automática. No hay que usar `certbot` ni abrir el puerto 80 para el correo.
+
 ## [1.0.189] — 2026-07-17
 
 Alta disponibilidad de correo: los buzones ahora se pueden replicar de verdad entre dos nodos, no solo la configuración.

@@ -20,6 +20,41 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.191',
+                'date' => '2026-07-18',
+                'badge' => 'success',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '**Rol de BBDD del correo:** la instalacion fallaba con `permission denied to create role` porque el panel creaba el usuario `musedock_mail` con su propio usuario de BBDD (sin CREATEROLE). Ahora el rol se crea como superusuario `postgres`, idempotente',
+                            '**Certificado vs Caddy (puerto 80):** el instalador usaba `certbot --standalone`, que exige el puerto 80, pero Caddy ya lo tiene en un master, asi que fallaba y caia a un cert auto-firmado (los clientes avisaban). Ahora, si Caddy esta activo, **Caddy emite el certificado** (reutilizando su politica TLS y con renovacion automatica); certbot queda solo para un nodo de correo sin Caddy',
+                            '**Certificado comodin:** Caddy suele emitir `*.dominio.com` por DNS-01, asi que no existe `mail.dominio.com.crt`. El instalador lo buscaba por nombre y no lo encontraba. Ahora se localiza por **SAN** (host o comodin) y un cron lo re-sincroniza tras cada renovacion',
+                            '**Espera de emision:** el DNS-01 espera la propagacion del TXT en Cloudflare (>90s habitualmente); el instalador se rendia antes. Ampliada la espera a 150s',
+                            '**Puertos 587/465:** `submission` se anadia como texto crudo a master.cf y a veces no escuchaba. Ahora `submission` (587) y `smtps` (465) se configuran con `postconf -M/-P` y arrancan de forma fiable',
+                            '**No saltar el auto-firmado:** al reinstalar, el paso SSL se saltaba si existia cualquier cert, dejando el auto-firmado sin actualizar. Ahora lo detecta y reintenta el real',
+                        ],
+                        'en' => [
+                            '**Mail DB role:** install failed with `permission denied to create role` because the panel created `musedock_mail` with its own DB user (no CREATEROLE). The role is now created as the `postgres` superuser, idempotently',
+                            '**Certificate vs Caddy (port 80):** the installer used `certbot --standalone`, which needs port 80, but Caddy already owns it on a master, so it failed and fell back to a self-signed cert (clients warned). Now, if Caddy is running, **Caddy issues the certificate** (reusing its TLS policy, auto-renewed); certbot is kept only for a dedicated mail node without Caddy',
+                            '**Wildcard certificate:** Caddy usually issues `*.domain.com` via DNS-01, so there is no `mail.domain.com.crt`. The installer looked it up by filename and missed it. It is now matched by **SAN** (host or wildcard) and a cron re-syncs it after each renewal',
+                            '**Issuance wait:** DNS-01 waits for the Cloudflare TXT to propagate (routinely >90s); the installer gave up too early. Wait raised to 150s',
+                            '**Ports 587/465:** submission was appended as raw text to master.cf and sometimes did not listen. submission (587) and smtps (465) are now set via `postconf -M/-P` and come up reliably',
+                            '**Do not skip self-signed:** on reinstall the SSL step skipped if any cert existed, leaving a self-signed one in place. It now detects self-signed and re-issues',
+                        ],
+                    ],
+                    'added' => [
+                        'es' => [
+                            '**Monitor de certificados en bucle de fallo:** un dominio muerto reintentando su cert sin parar agota el cupo de Let\'s Encrypt (5 fallos/hora) y puede bloquear los certificados de todos los demas dominios y del correo (le paso a gregorioevans.com: 1.375 fallos/hora bloqueando mail.musedock.com). Ahora el worker revisa cada ~30 min los fallos ACME de Caddy y **avisa al admin por email** cuando un dominio supera 20 fallos. Anti-spam: re-avisa como mucho cada 12h. Solo informa; nunca da de baja un dominio solo',
+                            '**Badge de estado del certificado** en Mail → Servidor de Mail Local: verde (valido), ambar (auto-firmado o caduca en ≤10 dias), rojo (caducado o inexistente), con emisor y caducidad en el tooltip',
+                        ],
+                        'en' => [
+                            '**Certificate failure-loop monitor:** a dead domain retrying its cert forever exhausts Let\'s Encrypt\'s 5-failures/hour budget and can block certs for every other domain and for mail (gregorioevans.com did: 1375 failures/hour blocking mail.musedock.com). The worker now scans Caddy ACME failures every ~30 min and **emails the admin** when a domain crosses 20 failures. Anti-spam: re-alerts at most every 12h. Reports only; never disables a domain itself',
+                            '**Certificate status badge** in Mail → Local mail server: green (valid), amber (self-signed or expiring in ≤10 days), red (expired or missing), with issuer and expiry in the tooltip',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.189',
                 'date' => '2026-07-17',
                 'badge' => 'success',
