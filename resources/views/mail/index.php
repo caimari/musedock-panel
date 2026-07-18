@@ -120,7 +120,7 @@
             $mailInstallStatusDetail .= ' Revisa alertas de healthcheck.';
         }
     }
-    $tabCandidates = ['general', 'webmail', 'deliverability', 'domains', 'infra'];
+    $tabCandidates = ['general', 'webmail', 'deliverability', 'domains', 'infra', 'antispam'];
     if (($mailMode ?? 'full') === 'relay') {
         $tabCandidates[] = 'relay';
         $tabCandidates[] = 'queue';
@@ -249,10 +249,94 @@
                 <a class="btn btn-sm <?= $activeTab === 'migration' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('migration')) ?>" data-mail-tab-link="migration">Migracion</a>
             <?php endif; ?>
             <a class="btn btn-sm <?= $activeTab === 'infra' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('infra')) ?>" data-mail-tab-link="infra">Infra</a>
+            <a class="btn btn-sm <?= $activeTab === 'antispam' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('antispam')) ?>" data-mail-tab-link="antispam">Anti-spam</a>
             <a class="btn btn-sm <?= $activeTab === 'deliverability' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('deliverability')) ?>" data-mail-tab-link="deliverability">Entregabilidad</a>
         </div>
     </div>
 </div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<!-- Anti-spam / Send policies                            -->
+<!-- ═══════════════════════════════════════════════════ -->
+<div class="mail-tab-pane<?= $activeTab === 'antispam' ? '' : ' d-none' ?>" data-mail-tab="antispam">
+    <div class="card bg-dark border-secondary mb-4">
+        <div class="card-header border-secondary"><i class="bi bi-shield-lock me-2"></i>Políticas de envío (anti-abuso)</div>
+        <div class="card-body">
+            <p class="small text-muted mb-3">
+                Controles combinables para que un buzón comprometido no pueda usarse para enviar spam masivo.
+                Cada capa se activa por separado y se combina con las demás.
+            </p>
+            <div id="antispam-status">
+                <div class="text-muted small"><i class="bi bi-hourglass-split me-1"></i>Cargando estado…</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card bg-dark border-secondary mb-4">
+        <div class="card-header border-secondary"><i class="bi bi-info-circle me-2"></i>Cómo funcionan los modos de envío</div>
+        <div class="card-body small">
+            <ul class="mb-0">
+                <li><span class="badge bg-success">normal</span> el buzón envía desde clientes (Outlook/móvil, 587/465) y desde el webmail.</li>
+                <li><span class="badge bg-warning text-dark">solo webmail</span> solo puede enviar desde el webmail del panel; se rechaza el envío por SMTP externo (bloquea una contraseña robada usada por un bot).</li>
+                <li><span class="badge bg-danger">solo lectura</span> no puede enviar nada; solo recibe y lee (ideal para buzones tipo <code>info@</code>).</li>
+            </ul>
+            <div class="text-muted mt-2">El modo por buzón se ajusta al editar cada buzón; el dominio define el modo por defecto de los buzones nuevos.</div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    const box = document.getElementById('antispam-status');
+    if (!box) return;
+    const csrf = document.querySelector('input[name="csrf_token"]')?.value || '';
+
+    const toggle = (key, on) => {
+        const fd = new FormData(); fd.append('csrf_token', csrf); fd.append('key', key); fd.append('value', on ? '1' : '0');
+        return fetch('/mail/policies/toggle', { method: 'POST', body: fd }).then(r => r.json());
+    };
+    const setRate = (rate) => {
+        const fd = new FormData(); fd.append('csrf_token', csrf); fd.append('rate', rate);
+        return fetch('/mail/policies/default-rate', { method: 'POST', body: fd }).then(r => r.json());
+    };
+
+    function render(s) {
+        const sw = (key, label, on, help) =>
+            `<div class="form-check form-switch mb-2">
+                <input class="form-check-input" type="checkbox" role="switch" id="pol-${key}" ${on ? 'checked' : ''} data-pol="${key}">
+                <label class="form-check-label" for="pol-${key}"><strong>${label}</strong> <span class="text-muted small">— ${help}</span></label>
+            </div>`;
+        box.innerHTML =
+            sw('ratelimit', 'Límite de tasa de envío', s.ratelimit_enabled,
+               `máximo <input type="number" id="pol-rate" value="${s.default_rate}" min="1" style="width:80px" class="form-control form-control-sm d-inline-block"> correos/hora por buzón`) +
+            sw('fail2ban', 'Protección fuerza bruta (fail2ban)', s.fail2ban_enabled, 'banea IPs que fallan la autenticación SMTP/IMAP repetidamente') +
+            sw('whitelist', 'Lista blanca de dominios', s.whitelist_enabled, 'solo los dominios marcados como “permite envío” pueden enviar') +
+            `<hr class="border-secondary"><div class="small text-muted">
+                Buzones por modo: <span class="badge bg-success">${s.modes.normal||0} normal</span>
+                <span class="badge bg-warning text-dark">${s.modes.webmail_only||0} solo webmail</span>
+                <span class="badge bg-danger">${s.modes.readonly||0} solo lectura</span>
+             </div>`;
+
+        box.querySelectorAll('[data-pol]').forEach(el => {
+            el.addEventListener('change', () => {
+                el.disabled = true;
+                toggle(el.dataset.pol, el.checked).then(r => { el.disabled = false; if (!r.ok) { alert('Error: ' + (r.error || JSON.stringify(r.result))); load(); } });
+            });
+        });
+        const rate = document.getElementById('pol-rate');
+        if (rate) rate.addEventListener('change', () => setRate(rate.value).then(() => {}));
+    }
+
+    function load() {
+        fetch('/mail/policies').then(r => r.json()).then(render)
+            .catch(() => { box.innerHTML = '<div class="text-danger small">Error cargando el estado.</div>'; });
+    }
+    // Load when the antispam tab is shown (or if it's the active tab on load).
+    const link = document.querySelector('[data-mail-tab-link="antispam"]');
+    if (link) link.addEventListener('click', () => setTimeout(load, 50));
+    if (document.querySelector('[data-mail-tab="antispam"]:not(.d-none)')) load();
+})();
+</script>
 
 <div class="mail-tab-pane<?= $activeTab === 'general' ? '' : ' d-none' ?>" data-mail-tab="general">
 <div class="card mb-4" style="border-color: rgba(56,189,248,.28);">

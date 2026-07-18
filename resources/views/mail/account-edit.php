@@ -38,6 +38,30 @@
                         </div>
                     </div>
 
+                    <div class="row g-3 mt-1 p-2 rounded" style="background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.18);">
+                        <div class="col-12"><span class="small fw-semibold"><i class="bi bi-shield-lock me-1"></i>Política de envío (anti-abuso)</span></div>
+                        <div class="col-md-4">
+                            <label class="form-label small">Modo de envío</label>
+                            <?php $sm = $account['send_mode'] ?? 'normal'; ?>
+                            <select name="send_mode" class="form-select form-select-sm">
+                                <option value="normal" <?= $sm === 'normal' ? 'selected' : '' ?>>Normal (clientes + webmail)</option>
+                                <option value="webmail_only" <?= $sm === 'webmail_only' ? 'selected' : '' ?>>Solo webmail (sin SMTP externo)</option>
+                                <option value="readonly" <?= $sm === 'readonly' ? 'selected' : '' ?>>Solo lectura (no envía)</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small">Límite propio (correos/hora)</label>
+                            <input type="number" name="rate_limit_per_hour" class="form-control form-control-sm" min="0" value="<?= (int)($account['rate_limit_per_hour'] ?? 0) ?>" placeholder="0 = usar el global">
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <div class="form-check form-switch">
+                                <?php $canSend = in_array((string)($account['can_send'] ?? 't'), ['1','t','true','yes','on'], true); ?>
+                                <input class="form-check-input" type="checkbox" name="can_send" value="1" id="can_send" <?= $canSend ? 'checked' : '' ?>>
+                                <label class="form-check-label small" for="can_send">Puede enviar</label>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="mt-4 p-3 rounded" style="background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.18);">
                         <div class="form-check form-switch mb-3">
                             <?php $autoresponderOn = in_array((string)($account['autoresponder_enabled'] ?? ''), ['1', 't', 'true', 'yes', 'on'], true); ?>

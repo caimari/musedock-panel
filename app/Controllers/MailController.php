@@ -546,6 +546,16 @@ class MailController
         }
 
         MailService::updateAccount($accountId, $data);
+
+        // Send policy (anti-abuse) — applied DB-live via the sender map.
+        \MuseDockPanel\Services\MailPolicyService::setMailboxPolicy($accountId, [
+            'send_mode'           => $_POST['send_mode'] ?? null,
+            'rate_limit_per_hour' => $_POST['rate_limit_per_hour'] ?? null,
+            'can_send'            => isset($_POST['can_send']),
+        ]);
+        // Refresh the Postfix sender-login map so mode/can_send changes take effect.
+        \MuseDockPanel\Services\MailPolicyService::installSenderPolicy(self::mailDbCfg());
+
         LogService::log('mail.account.update', $account['email'], 'Mailbox updated');
         Flash::set('success', "Buzon {$account['email']} actualizado.");
         Router::redirect("/mail/domains/{$account['mail_domain_id']}");
