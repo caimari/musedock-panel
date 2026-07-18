@@ -2,6 +2,25 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.192] — 2026-07-18
+
+Nuevo módulo **anti-abuso de envío de correo**: controles combinables para que un buzón comprometido no pueda usarse para enviar spam masivo.
+
+### Added
+
+- **Políticas de envío combinables** (`Mail → Anti-spam`), todas activables por separado:
+  - **Modo de envío por buzón** (heredado de un valor por defecto del dominio): `normal` (envía desde clientes y webmail), `solo webmail` (solo desde el webmail del panel; se rechaza el SMTP externo, bloqueando una contraseña robada usada por un bot) o `solo lectura` (no envía; solo recibe y lee, ideal para buzones tipo `info@`). Se aplica **en vivo** vía un lookup `smtpd_sender_login_maps` de Postfix + `reject_authenticated_sender_login_mismatch` en submission/smtps — el mismo mecanismo instantáneo y sin recarga que ya usa `status='active'`. El webmail sigue enviando porque inyecta localmente (`permit_mynetworks`).
+  - **Límite de tasa de envío** por buzón (X correos/hora) vía el módulo `ratelimit` de Rspamd.
+  - **Lista blanca de dominios**: interruptor maestro que exige que el dominio tenga el envío permitido.
+  - **Protección de fuerza bruta (fail2ban)**: jails para autenticación fallida SMTP/IMAP (filtros `postfix-sasl` y `dovecot`), que banean IPs que reintentan.
+  - Interruptor **puede enviar** por buzón (corte duro).
+- Selector de política en el **editor de cada buzón** y valores por defecto en el **dominio** (los buzones nuevos los heredan).
+
+### Notes
+
+- Todos los interruptores nacen **desactivados**: nada cambia en el correo hasta que el operador los activa. El módulo genera la configuración de Postfix/Rspamd/fail2ban de forma idempotente y recarga solo el servicio afectado.
+- Los cambios de modo/`can_send` por buzón son instantáneos (columna en BBDD que Postfix consulta en vivo); el límite de tasa y fail2ban se aplican regenerando su config.
+
 ## [1.0.191] — 2026-07-18
 
 Primera instalación de **Correo Completo por el panel**: se pulieron todos los fallos que salieron al estrenarla, más un monitor de certificados y un badge de estado.

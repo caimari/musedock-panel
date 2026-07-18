@@ -20,6 +20,35 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.192',
+                'date' => '2026-07-18',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '**Modulo anti-abuso de envio de correo** (Mail → Anti-spam): controles combinables para que un buzon comprometido no pueda enviar spam masivo. Todos se activan por separado',
+                            '**Modo de envio por buzon** (con valor por defecto por dominio): `normal` (clientes + webmail), `solo webmail` (rechaza SMTP externo, bloquea una contrasena robada usada por un bot) o `solo lectura` (no envia). Se aplica en vivo via `smtpd_sender_login_maps` + `reject_authenticated_sender_login_mismatch`, sin recarga; el webmail sigue enviando (inyeccion local)',
+                            '**Limite de tasa** por buzon (X correos/hora) via el modulo ratelimit de Rspamd; **lista blanca de dominios** (interruptor maestro); **fail2ban** para fuerza bruta SMTP/IMAP (filtros postfix-sasl y dovecot)',
+                            'Selector de politica en el editor de cada buzon y valores por defecto por dominio (los buzones nuevos los heredan)',
+                        ],
+                        'en' => [
+                            '**Mail send anti-abuse module** (Mail → Anti-spam): combinable controls so a compromised mailbox cannot blast spam. Each layer toggles independently',
+                            '**Per-mailbox send mode** (with a per-domain default): `normal` (clients + webmail), `webmail only` (refuses external SMTP, blocks a stolen password used by a bot) or `read only` (cannot send). Applied live via `smtpd_sender_login_maps` + `reject_authenticated_sender_login_mismatch`, no reload; webmail still sends (local injection)',
+                            '**Per-mailbox rate limit** (X mails/hour) via the Rspamd ratelimit module; **domain send whitelist** (master switch); **fail2ban** for SMTP/IMAP brute force (postfix-sasl and dovecot filters)',
+                            'Policy selector in the mailbox editor and per-domain defaults (new mailboxes inherit them)',
+                        ],
+                    ],
+                    'notes' => [
+                        'es' => [
+                            'Todos los interruptores nacen DESACTIVADOS: nada cambia en el correo hasta que el operador los activa. La config de Postfix/Rspamd/fail2ban se genera de forma idempotente y se recarga solo el servicio afectado',
+                        ],
+                        'en' => [
+                            'All switches default OFF: nothing changes until the operator enables them. Postfix/Rspamd/fail2ban config is generated idempotently and only the affected service is reloaded',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.191',
                 'date' => '2026-07-18',
                 'badge' => 'success',
