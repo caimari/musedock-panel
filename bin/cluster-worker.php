@@ -902,6 +902,29 @@ try {
     logMsg("ERROR checking TLS policies: " . $e->getMessage());
 }
 
+// ─── Certificate failure-loop monitor ───────────────────────────
+// A dead domain (DNS moved / expired) retrying its cert forever exhausts Let's
+// Encrypt's 5-failures/hour budget and can block certs for everything, including
+// mail. Every ~30 min, scan Caddy's ACME failures and email the admin about any
+// domain stuck in a failure loop so it can be taken down before it saturates.
+try {
+    $lastCertScan = (int)strtotime(\MuseDockPanel\Settings::get('cert_monitor_last_run', '') ?: '@0');
+    if ((time() - $lastCertScan) >= 1800) {
+        logMsg("Checking certificate failure loops...");
+        $res = \MuseDockPanel\Services\CertMonitorService::checkAndAlert();
+        if (!empty($res['alerted'])) {
+            foreach ($res['alerted'] as $a) {
+                logMsg("  ALERT: {$a['domain']} stuck in ACME failure loop ({$a['count']} fails)"
+                    . ($a['rate_limited'] ? ' — RATE LIMITED' : ''));
+            }
+        } else {
+            logMsg("  No domains over the failure threshold.");
+        }
+    }
+} catch (\Throwable $e) {
+    logMsg("ERROR in cert monitor: " . $e->getMessage());
+}
+
 cleanup:
 
 $elapsed = round((microtime(true) - $startTime) * 1000, 1);
