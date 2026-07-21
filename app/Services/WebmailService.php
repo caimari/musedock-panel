@@ -259,9 +259,15 @@ class WebmailService
             curl_close($del);
         }
 
-        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        // Insert the webmail route at INDEX 0 (PUT .../routes/0), not append (POST
+        // .../routes). Caddy evaluates routes in order and the first host match wins;
+        // a generic wildcard route ('*.musedock.com', the panel's "domain not
+        // configured" fallback) sits early in the list and would otherwise capture
+        // webmail.<domain> before the specific route at the end. Prepending makes the
+        // exact-host webmail route win.
+        $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes/0");
         curl_setopt_array($ch, [
-            CURLOPT_POST => true,
+            CURLOPT_CUSTOMREQUEST => 'PUT',
             CURLOPT_POSTFIELDS => json_encode($route),
             CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
             CURLOPT_RETURNTRANSFER => true,

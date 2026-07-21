@@ -108,15 +108,15 @@ try {
 
     webmail_run('apt-get update -y', true);
     $versionedPkgs = [
-        'curl', 'ca-certificates', 'tar', 'gzip', 'sqlite3', 'unzip', 'dovecot-core',
+        'curl', 'ca-certificates', 'tar', 'gzip', 'unzip', 'dovecot-core',
         "php{$phpVersion}-imap", "php{$phpVersion}-mbstring", "php{$phpVersion}-intl",
-        "php{$phpVersion}-xml", "php{$phpVersion}-curl", "php{$phpVersion}-sqlite3",
+        "php{$phpVersion}-xml", "php{$phpVersion}-curl", "php{$phpVersion}-pgsql",
         "php{$phpVersion}-gd", "php{$phpVersion}-zip",
     ];
     try {
         webmail_run('DEBIAN_FRONTEND=noninteractive apt-get install -y ' . implode(' ', array_map('escapeshellarg', $versionedPkgs)));
     } catch (Throwable $e) {
-        $genericPkgs = ['curl', 'ca-certificates', 'tar', 'gzip', 'sqlite3', 'unzip', 'dovecot-core', 'php-imap', 'php-mbstring', 'php-intl', 'php-xml', 'php-curl', 'php-sqlite3', 'php-gd', 'php-zip'];
+        $genericPkgs = ['curl', 'ca-certificates', 'tar', 'gzip', 'unzip', 'dovecot-core', 'php-imap', 'php-mbstring', 'php-intl', 'php-xml', 'php-curl', 'php-pgsql', 'php-gd', 'php-zip'];
         webmail_log('Versioned PHP package install failed, retrying generic packages: ' . $e->getMessage());
         webmail_run('DEBIAN_FRONTEND=noninteractive apt-get install -y ' . implode(' ', array_map('escapeshellarg', $genericPkgs)));
     }
@@ -148,32 +148,52 @@ try {
     @mkdir($dataDir . '/temp', 0770, true);
     @mkdir($currentDir . '/config', 0755, true);
 
-    $dbPath = $dataDir . '/roundcube.sqlite';
-    if (!is_file($dbPath)) {
-        $sqlFile = $currentDir . '/SQL/sqlite.initial.sql';
-        if (!is_file($sqlFile)) {
-            throw new RuntimeException('No se encontro SQL/sqlite.initial.sql de Roundcube.');
-        }
-        webmail_run('sqlite3 ' . escapeshellarg($dbPath) . ' < ' . escapeshellarg($sqlFile));
-    }
-
     $desKey = bin2hex(random_bytes(16));
     $dbHost = \MuseDockPanel\Env::get('DB_HOST', '127.0.0.1');
-    $dbPort = \MuseDockPanel\Env::get('DB_PORT', '5432');
+    $dbPort = \MuseDockPanel\Env::get('DB_PORT', '5433');
     $dbName = \MuseDockPanel\Env::get('DB_NAME', 'musedock_panel');
     $dbUser = \MuseDockPanel\Env::get('DB_USER', 'musedock_panel');
     $dbPass = \MuseDockPanel\Env::get('DB_PASS', '');
-    $roundcubePasswordDsn = sprintf(
-        'pgsql://%s:%s@%s:%s/%s',
-        rawurlencode($dbUser),
-        rawurlencode($dbPass),
-        rawurlencode($dbHost),
-        rawurlencode($dbPort),
-        rawurlencode($dbName)
-    );
+
+    // Roundcube uses PostgreSQL (a dedicated 'roundcube' database on the panel
+    // cluster), NOT SQLite. SQLite is a local file that wouldn't replicate to a
+    // slave — PostgreSQL keeps identities/contacts/prefs in the DB we already
+    // replicate for HA. Create the DB + a dedicated role, then load Roundcube's
+    // PostgreSQL schema. All done as the postgres superuser (panel runs as root).
+    $rcDb   = 'roundcube';
+    $rcUser = 'roundcube';
+    $rcPass = bin2hex(random_bytes(18));
+    $psql = function (string $sql, string $db = 'postgres') use ($dbPort) {
+        return 'sudo -u postgres psql -p ' . (int)$dbPort . ' -d ' . escapeshellarg($db)
+             . ' -v ON_ERROR_STOP=1 -c ' . escapeshellarg($sql) . ' 2>&1';
+    };
+    $escPass = str_replace("'", "''", $rcPass);
+    // Role (idempotent).
+    webmail_run($psql("DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='{$rcUser}') THEN CREATE ROLE {$rcUser} WITH LOGIN PASSWORD '{$escPass}'; ELSE ALTER ROLE {$rcUser} WITH LOGIN PASSWORD '{$escPass}'; END IF; END \$\$;"), true);
+    // Database (CREATE DATABASE can't run in a DO block; guard with a check).
+    $exists = trim((string)shell_exec('sudo -u postgres psql -p ' . (int)$dbPort . " -tAc \"SELECT 1 FROM pg_database WHERE datname='{$rcDb}'\" 2>/dev/null"));
+    if ($exists !== '1') {
+        webmail_run($psql("CREATE DATABASE {$rcDb} OWNER {$rcUser}"), true);
+        // Load Roundcube's PostgreSQL schema into the fresh DB.
+        $pgSchema = $currentDir . '/SQL/postgres.initial.sql';
+        if (!is_file($pgSchema)) {
+            throw new RuntimeException('No se encontro SQL/postgres.initial.sql de Roundcube.');
+        }
+        webmail_run('sudo -u postgres psql -p ' . (int)$dbPort . ' -d ' . escapeshellarg($rcDb)
+            . ' -v ON_ERROR_STOP=1 -f ' . escapeshellarg($pgSchema) . ' 2>&1');
+        webmail_run($psql("GRANT ALL ON ALL TABLES IN SCHEMA public TO {$rcUser}; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO {$rcUser};", $rcDb), true);
+    }
+
+    $roundcubeDsn = sprintf('pgsql://%s:%s@%s:%s/%s',
+        rawurlencode($rcUser), rawurlencode($rcPass), rawurlencode($dbHost), rawurlencode((string)$dbPort), rawurlencode($rcDb));
+
+    // Password plugin still points at the panel DB (to change mailbox passwords).
+    $roundcubePasswordDsn = sprintf('pgsql://%s:%s@%s:%s/%s',
+        rawurlencode($dbUser), rawurlencode($dbPass), rawurlencode($dbHost), rawurlencode((string)$dbPort), rawurlencode($dbName));
+
     $config = "<?php\n"
         . "\$config = [];\n"
-        . "\$config['db_dsnw'] = " . webmail_php_value('sqlite:///' . $dbPath) . ";\n"
+        . "\$config['db_dsnw'] = " . webmail_php_value($roundcubeDsn) . ";\n"
         . "\$config['default_host'] = " . webmail_php_value('ssl://' . $imapHost) . ";\n"
         . "\$config['default_port'] = 993;\n"
         . "\$config['smtp_host'] = " . webmail_php_value('tls://' . $smtpHost) . ";\n"
@@ -206,9 +226,25 @@ try {
     $docRoot = is_file($currentDir . '/public_html/index.php') ? ($currentDir . '/public_html') : $currentDir;
     @unlink($installRoot . '/current');
     symlink($currentDir, $installRoot . '/current');
+    // Roundcube runs under PHP-FPM as www-data. The code stays root-owned (read
+    // only) but the config file and the writable data dir MUST be accessible to
+    // www-data, or Roundcube dies with "internal error":
+    //   - config.inc.php: group www-data + 0640 (readable by the FPM user, not world)
+    //   - data dir (sqlite/logs/temp): owned by www-data and writable
     webmail_run('chown -R root:root ' . escapeshellarg($currentDir), true);
     webmail_run('chown -R www-data:www-data ' . escapeshellarg($dataDir), true);
+    webmail_run('chgrp www-data ' . escapeshellarg($currentDir . '/config/config.inc.php'), true);
     webmail_run('chmod 640 ' . escapeshellarg($currentDir . '/config/config.inc.php'), true);
+    // Roundcube also needs writable temp/logs inside the tree; point them at the
+    // www-data-owned data dir via config, but ensure the in-tree temp/logs (if used)
+    // are group-writable by www-data as a safety net.
+    foreach (['temp', 'logs'] as $sub) {
+        $d = $currentDir . '/' . $sub;
+        if (is_dir($d)) {
+            webmail_run('chgrp -R www-data ' . escapeshellarg($d), true);
+            webmail_run('chmod -R g+w ' . escapeshellarg($d), true);
+        }
+    }
 
     webmail_state('running', 'caddy-route', ['message' => 'Publicando ruta Caddy para ' . $host]);
     $route = WebmailService::ensureRoundcubeCaddyRoute($host, $docRoot, $phpVersion);
