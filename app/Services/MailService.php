@@ -3399,6 +3399,45 @@ class MailService
     }
 
     /**
+     * MASTER-side: quick per-slave replica status for the Infra table, so each row
+     * shows whether the node already has the replica (and the button reads
+     * "Reinstalar" instead of "Instalar"). Best-effort + cached briefly; a slow or
+     * down node must not block the page.
+     *
+     * Returns one of: 'unknown' | 'none' | 'installing' | 'services_only' | 'ready'.
+     */
+    public static function slaveReplicaStateFor(int $nodeId): string
+    {
+        $cacheKey = "mail_replica_state_node_{$nodeId}";
+        $cached = Settings::get($cacheKey, '');
+        $cachedAt = (int)Settings::get($cacheKey . '_at', '0');
+        // 30s cache to keep the Infra page snappy.
+        if ($cached !== '' && $cachedAt > 0 && (time() - $cachedAt) < 30) {
+            return $cached;
+        }
+        $state = 'unknown';
+        try {
+            $res = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', [
+                'action' => 'mail_replica_status', 'payload' => [],
+            ]);
+            $r = $res['result'] ?? [];
+            if (!empty($res['ok']) && is_array($r)) {
+                $installed  = !empty($r['services_installed']);
+                $dsync      = !empty($r['dsync_configured']);
+                $installing = !empty($r['installing']);
+                $state = $installing ? 'installing'
+                       : ($installed && $dsync ? 'ready'
+                       : ($installed ? 'services_only' : 'none'));
+            }
+        } catch (\Throwable) {
+            $state = 'unknown';
+        }
+        Settings::set($cacheKey, $state);
+        Settings::set($cacheKey . '_at', (string)time());
+        return $state;
+    }
+
+    /**
      * MASTER-side orchestrator: prepare a SLAVE node to be a mail backup replica.
      *
      * This is the ONLY correct place to set this up, because everything it needs

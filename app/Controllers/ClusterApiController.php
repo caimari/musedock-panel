@@ -414,6 +414,8 @@ class ClusterApiController
                 // Phase 2 (enqueued): configure dsync + initial sync once services
                 // are installed. Retried by the cluster worker until Dovecot is ready.
                 'mail_finalize_backup_replica' => MailService::finalizeBackupReplica($payload),
+                // Read-only replica state for the master's Infra table (per node).
+                'mail_replica_status' => ['ok' => true, 'result' => MailService::slaveMailReplicaStatus()],
                 'mail_setup_node'          => MailService::nodeSetupMail($payload),
                 'mail_setup_status'        => MailService::nodeSetupStatus($payload),
                 'mail_generate_setup_token' => MailService::nodeGenerateSetupToken($payload),

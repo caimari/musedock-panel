@@ -1538,19 +1538,30 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
         </p>
         <div class="table-responsive">
         <table class="table table-sm align-middle mb-0">
-            <thead><tr><th class="ps-3">Nodo</th><th>IP</th><th>Rol</th><th class="text-end pe-3">Acción</th></tr></thead>
+            <thead><tr><th class="ps-3">Nodo</th><th>IP</th><th>Estado réplica</th><th class="text-end pe-3">Acción</th></tr></thead>
             <tbody>
                 <?php foreach ($slaveNodes as $sn):
                     $snIp = parse_url((string)($sn['api_url'] ?? ''), PHP_URL_HOST) ?: '';
+                    $rstate = \MuseDockPanel\Services\MailService::slaveReplicaStateFor((int)$sn['id']);
+                    // Badge + button per state.
+                    $badge = ['ready'=>['success','shield-check','Réplica activa'],
+                              'installing'=>['warning text-dark','hourglass-split','Instalando…'],
+                              'services_only'=>['info','hdd','Servicios OK · dsync pendiente'],
+                              'none'=>['secondary','dash-circle','Sin réplica'],
+                              'unknown'=>['secondary','question-circle','No disponible']][$rstate] ?? ['secondary','dash-circle','Sin réplica'];
+                    $btnLabel = $rstate === 'ready' ? 'Reinstalar' : ($rstate === 'installing' ? 'Instalando…' : 'Instalar réplica');
+                    $btnIcon  = $rstate === 'ready' ? 'arrow-repeat' : 'download';
+                    $btnClass = $rstate === 'ready' ? 'btn-outline-secondary' : 'btn-outline-primary';
                 ?>
                 <tr>
                     <td class="ps-3 fw-semibold"><i class="bi bi-hdd-network me-1 text-info"></i><?= View::e($sn['name'] ?? ('#'.$sn['id'])) ?></td>
                     <td class="text-muted"><?= View::e($snIp) ?></td>
-                    <td><span class="badge bg-secondary"><?= View::e($sn['role'] ?? '?') ?></span></td>
+                    <td><span class="badge bg-<?= $badge[0] ?>"><i class="bi bi-<?= $badge[1] ?> me-1"></i><?= $badge[2] ?></span></td>
                     <td class="text-end pe-3">
-                        <button type="button" class="btn btn-outline-primary btn-sm prepare-mail-replica-btn"
-                                data-node-id="<?= (int)$sn['id'] ?>" data-node-name="<?= View::e($sn['name'] ?? '') ?>">
-                            <i class="bi bi-download me-1"></i>Instalar réplica de correo
+                        <button type="button" class="btn <?= $btnClass ?> btn-sm prepare-mail-replica-btn"
+                                data-node-id="<?= (int)$sn['id'] ?>" data-node-name="<?= View::e($sn['name'] ?? '') ?>"
+                                <?= $rstate === 'installing' ? 'disabled' : '' ?>>
+                            <i class="bi bi-<?= $btnIcon ?> me-1"></i><?= $btnLabel ?>
                         </button>
                     </td>
                 </tr>
@@ -1558,6 +1569,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
             </tbody>
         </table>
         </div>
+        <div class="form-text mt-2"><i class="bi bi-arrow-clockwise me-1"></i>El estado se cachea ~30s. Recarga para refrescar.</div>
         <div id="prepareReplicaResult" class="mt-3 small" style="display:none;"></div>
     </div>
 </div>
