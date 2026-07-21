@@ -136,6 +136,14 @@ class DocsController
                 'keywords' => 'mail infra instalar actualizar servidor modo correo postfix dovecot opendkim',
                 'view' => 'mail-infra',
             ],
+            'ha' => [
+                'title' => 'Correo HA (master + slave)',
+                'summary' => 'Guia paso a paso: instalar correo en el master, crear dominio/buzones, configurar DNS, y activar la replica de respaldo en un slave.',
+                'panel_url' => '/mail?tab=infra',
+                'icon' => 'bi-shield-lock',
+                'keywords' => 'mail ha alta disponibilidad failover master slave replica respaldo dsync dns mx spf dkim dmarc ptr buzon dominio musedock replicacion correo',
+                'view' => 'mail-ha',
+            ],
             'deliverability' => [
                 'title' => 'Entregabilidad',
                 'summary' => 'Checks DNS en tiempo real: SPF, DKIM, DMARC, A hostname, PTR/rDNS y blacklist.',

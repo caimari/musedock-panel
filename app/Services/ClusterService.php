@@ -1911,18 +1911,25 @@ class ClusterService
             return ['ok' => false, 'results' => [], 'errors' => ['IP del nuevo master no valida']];
         }
 
-        // Reconfigure PG as slave
+        // Reconfigure every local PG cluster as a slave of the new master. Prefer
+        // pg_rewind (incremental — absorbs only what changed while this node was
+        // master) and fall back to a full pg_basebackup when rewind isn't possible.
+        // This replaces the old single-cluster setupPgSlave() (now a blocked legacy
+        // stub) which would have failed here.
         try {
-            $pgVersion = ReplicationService::detectPgVersion();
-            if ($pgVersion) {
-                $pgUser = Settings::get('repl_pg_user', 'replicator');
-                $pgPass = ReplicationService::decryptPassword(Settings::get('repl_pg_pass', ''));
-                $pgPort = (int)Settings::get('repl_pg_port', '5432');
-
-                $result = ReplicationService::setupPgSlave($newMasterIp, $pgPort, $pgUser, $pgPass);
-                $results['pg_demote'] = $result;
-                if (!$result['ok']) {
-                    $errors[] = 'PG demote: ' . ($result['error'] ?? 'Unknown error');
+            $pgUser = Settings::get('repl_pg_user', Settings::get('repl_panel_slave_ip', '') !== '' ? 'repl_panel' : 'replicator');
+            $pgPass = ReplicationService::decryptPassword(Settings::get('repl_pg_password', Settings::get('repl_pg_pass', '')));
+            foreach (PgClusterService::listClusters() as $cluster) {
+                $srcPort = (int)$cluster['port']; // same cluster identity on the new master
+                // Try incremental rewind first.
+                $r = ReplicationService::rewindPgClusterFrom($cluster, $newMasterIp, $srcPort, $pgUser, $pgPass);
+                if (empty($r['ok'])) {
+                    // Rewind not possible/failed → full basebackup rebuild (confirmed wipe).
+                    $r = ReplicationService::setupPgSlaveForCluster($cluster, $newMasterIp, $srcPort, $pgUser, $pgPass, true);
+                }
+                $results['pg_demote'][$cluster['key']] = $r;
+                if (empty($r['ok'])) {
+                    $errors[] = "PG demote {$cluster['key']}: " . ($r['error'] ?? 'error desconocido');
                 }
             }
         } catch (\Throwable $e) {

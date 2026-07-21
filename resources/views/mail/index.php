@@ -38,17 +38,17 @@
 
         <div class="list-group mb-3">
             <?php foreach ($steps as $st): ?>
-            <div class="list-group-item d-flex align-items-center" style="background:transparent;">
+            <div class="list-group-item d-flex align-items-center" style="background:transparent;border-color:rgba(255,255,255,.08);">
                 <span class="me-3 fs-5">
                     <?php if ($st['done']): ?>
                         <i class="bi bi-check-circle-fill text-success"></i>
                     <?php else: ?>
-                        <i class="bi bi-circle text-secondary"></i>
+                        <i class="bi bi-circle" style="color:#8b98a5;"></i>
                     <?php endif; ?>
                 </span>
                 <div class="flex-grow-1">
-                    <div class="fw-semibold small">Paso <?= $st['n'] ?>: <?= View::e($st['label']) ?></div>
-                    <div class="text-muted" style="font-size:.8rem;"><?= $st['detail'] ?></div>
+                    <div class="fw-semibold small" style="color:#e9edf1;">Paso <?= $st['n'] ?>: <?= View::e($st['label']) ?></div>
+                    <div style="font-size:.8rem;color:#9aa7b4;"><?= $st['detail'] ?></div>
                 </div>
             </div>
             <?php endforeach; ?>
