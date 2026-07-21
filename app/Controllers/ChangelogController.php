@@ -20,6 +20,45 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.193',
+                'date' => '2026-07-21',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '**Reingreso incremental del master (pg_rewind):** cuando un master caido vuelve, se reincorpora como slave absorbiendo solo lo que cambio durante la caida, sin recopiar el cluster entero. Con guards (verifica que el origen es PRIMARY, prerrequisito `wal_log_hints` leido incluso con el cluster parado), copia previa con `--reflink=auto` y rollback en cada fallo',
+                            '**Banda de UID dedicada para hostings** (desde 20000): los usuarios de sistema de los hostings se asignan fuera del rango del SO, de modo que el mismo UID queda libre en todos los nodos y la sincronizacion lo reproduce identico. GID = UID en todos los nodos',
+                            '**Correo en modo replica de respaldo (failover):** desde el panel del master (Mail → Infra) se instala el correo en un nodo slave como copia viva. El master orquesta todo por el canal seguro del cluster (abre pg_hba, comparte el secreto dsync, configura ambos lados) y el slave lee las cuentas del master por WireGuard; los mensajes se replican por dsync. Si el master cae, el slave sirve el correo con los buzones ya copiados',
+                        ],
+                        'en' => [
+                            '**Incremental master rejoin (pg_rewind):** when a downed master returns, it rejoins as a slave absorbing only what changed while it was down, instead of recopying the whole cluster. With guards (source must be PRIMARY, `wal_log_hints` prerequisite read even when the cluster is stopped), a prior backup via `--reflink=auto`, and rollback on every failure',
+                            '**Dedicated hosting UID band** (from 20000): hosting system users are allocated outside the OS range, so the same UID stays free on every node and sync reproduces it identically. GID = UID across nodes',
+                            '**Mail backup-replica (failover):** from the master panel (Mail → Infra) you install mail on a slave node as a live copy. The master orchestrates everything over the secure cluster channel (opens pg_hba, shares the dsync secret, configures both ends) and the slave reads accounts from the master over WireGuard; messages replicate via dsync. If the master goes down, the slave serves mail with the mailboxes already copied',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            '**Deriva silenciosa de UID entre nodos:** al sincronizar un hosting, si el UID del master estaba ocupado en el slave, se asignaba otro sin avisar. Ahora el conflicto se registra y el usuario se mantiene dentro de la banda dedicada',
+                            '**Fuga de credenciales en el log replicado:** la accion de cluster registraba el payload completo (con contrasenas en claro) en `panel_log`, que se replica a todos los nodos. Ahora los campos sensibles se redactan antes de loguear',
+                            '**dsync:** el drop-in de Dovecot no incluia el fichero de secreto (la autenticacion nunca se aplicaba) y cada lado generaba un secreto distinto; ademas faltaba la sincronizacion inicial de los buzones existentes. Corregido: secreto compartido a ambos lados, `!include` del fichero, y sync inicial encolado que se reintenta hasta que Dovecot esta listo',
+                        ],
+                        'en' => [
+                            '**Silent UID drift between nodes:** when syncing a hosting, if the master UID was taken on the slave, another was assigned without warning. The conflict is now logged and the user is kept inside the dedicated band',
+                            '**Credential leak in the replicated log:** the cluster action logged the full payload (with cleartext passwords) into `panel_log`, which replicates to every node. Sensitive fields are now redacted before logging',
+                            '**dsync:** the Dovecot drop-in did not include the secret file (auth never applied) and each side generated a different secret; the initial sync of existing mailboxes was also missing. Fixed: shared secret on both ends, `!include` of the file, and an enqueued initial sync retried until Dovecot is ready',
+                        ],
+                    ],
+                    'notes' => [
+                        'es' => [
+                            '`wal_log_hints=on` + `listen_addresses` en la WireGuard aplicados al cluster panel (5433) en produccion, habilitando pg_rewind. El panel replica la configuracion entre nodos de forma logica (por API/cola), no por replicacion fisica de PostgreSQL',
+                        ],
+                        'en' => [
+                            '`wal_log_hints=on` + `listen_addresses` on WireGuard applied to the panel cluster (5433) in production, enabling pg_rewind. The panel replicates config between nodes logically (via API/queue), not via physical PostgreSQL replication',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.192',
                 'date' => '2026-07-18',
                 'badge' => 'success',

@@ -149,7 +149,9 @@ class FederationApiController
             return;
         }
 
-        // Try original UID, fallback to auto-assign
+        // Try to preserve the origin UID; if taken, pass null so createSystemUser
+        // allocates from the dedicated hosting band (never the OS/admin range) and
+        // records the divergence — keeping federated nodes consistent.
         $assignedUid = null;
         if ($uid > 0) {
             $output = [];

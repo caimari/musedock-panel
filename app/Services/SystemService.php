@@ -9,6 +9,17 @@ namespace MuseDockPanel\Services;
 class SystemService
 {
     private static array $allowedPhpVersions = ['7.4', '8.0', '8.1', '8.2', '8.3', '8.4'];
+
+    /**
+     * Dedicated UID range for HOSTING system users, kept clear of the OS/admin
+     * range (1000-9999). Reserving a high band means a hosting UID assigned on the
+     * master is almost always free on every slave, so cluster sync can reproduce
+     * the SAME UID everywhere and file ownership stays consistent across nodes.
+     * (login.defs default UID_MAX is 60000, so 20000-59999 is safely inside it.)
+     */
+    public const HOSTING_UID_MIN = 20000;
+    public const HOSTING_UID_MAX = 59999;
+
     private const PANEL_ADMIN_SERVER_ID = 'srv_panel_admin';
     private const PANEL_DOMAIN_ROUTE_ID = 'panel-domain-route';
     private const PANEL_DOMAIN_HTTPS_ROUTE_ID = 'panel-domain-https-route';
@@ -110,18 +121,56 @@ class SystemService
             return (int) trim($check);
         }
 
-        // Build useradd command — force UID if provided (for cluster sync)
-        $uidFlag = '';
+        // Decide the UID to use.
+        //  - forceUid set (cluster sync from master): reproduce the master's UID
+        //    exactly. If it's taken by ANOTHER user we must NOT silently drift —
+        //    record the conflict AND still keep the divergent account inside the
+        //    dedicated hosting band (never let it land in the OS/admin range 1000+).
+        //  - forceUid not set (fresh account on the master): pick the next free UID
+        //    from the dedicated hosting band so slaves can reproduce it later.
+        $chosenUid = null;
         if ($forceUid !== null && $forceUid > 0) {
-            // Check if UID is already taken by another user
-            $uidCheck = shell_exec(sprintf('getent passwd %d 2>/dev/null', $forceUid));
-            if (empty(trim($uidCheck ?? ''))) {
-                $uidFlag = sprintf(' -u %d', $forceUid);
+            $uidCheck = trim((string)shell_exec(sprintf('getent passwd %d 2>/dev/null', $forceUid)));
+            if ($uidCheck === '') {
+                $chosenUid = $forceUid;
+            } else {
+                // UID collision: the master's UID is used by a different account here.
+                // Keep the divergent user inside the hosting band anyway (fix #2) and
+                // record it. Logging must NEVER break user creation (fix #6).
+                $chosenUid = self::nextFreeHostingUid();
+                self::safeLog(
+                    'system.uid_conflict',
+                    $username,
+                    "El UID {$forceUid} del master ya está ocupado en este nodo por: {$uidCheck}. "
+                    . "Se asigna " . ($chosenUid ?? 'auto') . " (divergente); requiere reconciliación."
+                );
             }
+        } elseif ($forceUid === null) {
+            // Fresh account: allocate from the dedicated hosting band.
+            $chosenUid = self::nextFreeHostingUid();
+        }
+
+        // Band exhausted (fix #3): surface it — 40k UIDs used up is an operational
+        // event, and a hosting user landing in 1000+ would break cluster sync.
+        if ($chosenUid === null) {
+            self::safeLog('system.uid_band_exhausted', $username,
+                "Banda de UID de hosting (" . self::HOSTING_UID_MIN . "-" . self::HOSTING_UID_MAX
+                . ") agotada. El usuario se creará con UID del rango por defecto — riesgo de divergencia.");
+        }
+
+        // Force the primary GID to equal the UID (fix #4): with -u N + -g N +
+        // --user-group, the per-user group gets the SAME number as the UID on every
+        // node, so numeric owner:group in tar/rsync/backups stays consistent. Create
+        // the group first (idempotent) so useradd -g can reference it.
+        $uidFlag = '';
+        if ($chosenUid !== null) {
+            shell_exec(sprintf('getent group %1$d >/dev/null 2>&1 || groupadd -g %1$d %2$s 2>/dev/null',
+                $chosenUid, escapeshellarg($username)));
+            $uidFlag = sprintf(' -u %d -g %d', $chosenUid, $chosenUid);
         }
 
         $cmd = sprintf(
-            'useradd -m -d %s -s %s -G www-data%s %s 2>&1',
+            'useradd -m -d %s -s %s%s -G www-data %s 2>&1',
             escapeshellarg($homeDir),
             escapeshellarg($shell),
             $uidFlag,
@@ -131,6 +180,42 @@ class SystemService
 
         $uid = shell_exec(sprintf('id -u %s 2>/dev/null', escapeshellarg($username)));
         return $uid ? (int) trim($uid) : null;
+    }
+
+    /**
+     * Log without ever letting a logging failure break the caller. Used on the
+     * system-user creation path, where a transient panel-DB outage during cluster
+     * sync must not abort account creation.
+     */
+    private static function safeLog(string $event, string $target, string $message): void
+    {
+        try {
+            LogService::log($event, $target, $message);
+        } catch (\Throwable $e) {
+            error_log("musedock safeLog({$event}): " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Next free UID in the dedicated hosting band (HOSTING_UID_MIN..MAX). Scans the
+     * existing passwd entries once and returns the first gap. Returns null if the
+     * band is exhausted (caller then logs and lets useradd pick).
+     */
+    public static function nextFreeHostingUid(): ?int
+    {
+        $taken = [];
+        $out = (string)shell_exec("getent passwd | awk -F: '{print $3}'");
+        foreach (preg_split('/\s+/', trim($out)) as $u) {
+            if ($u === '') continue;
+            $n = (int)$u;
+            if ($n >= self::HOSTING_UID_MIN && $n <= self::HOSTING_UID_MAX) {
+                $taken[$n] = true;
+            }
+        }
+        for ($uid = self::HOSTING_UID_MIN; $uid <= self::HOSTING_UID_MAX; $uid++) {
+            if (empty($taken[$uid])) return $uid;
+        }
+        return null;
     }
 
     /**

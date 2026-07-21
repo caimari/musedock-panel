@@ -11,6 +11,25 @@ use MuseDockPanel\Services\LogService;
 
 class ClusterApiController
 {
+    /** Payload keys whose values must never be written to the (replicated) log. */
+    private const SECRET_KEYS = [
+        'master_db_pass', 'db_pass', 'dsync_secret', 'shared_secret', 'password',
+        'admin_password', 'setup_token', 'db_password', 'secret',
+    ];
+
+    /** Return a copy of $payload with secret values masked, recursively. */
+    private static function redactSecrets(array $payload): array
+    {
+        foreach ($payload as $k => $v) {
+            if (is_array($v)) {
+                $payload[$k] = self::redactSecrets($v);
+            } elseif (in_array((string)$k, self::SECRET_KEYS, true) && $v !== '' && $v !== null) {
+                $payload[$k] = '***';
+            }
+        }
+        return $payload;
+    }
+
     /**
      * GET /api/health
      * Lightweight health check for failover monitoring.
@@ -328,7 +347,10 @@ class ClusterApiController
 
         $callerNodeId = (int)($_REQUEST['_api_node_id'] ?? 0);
 
-        LogService::log('cluster.api', $action, "Recibido de nodo #{$callerNodeId}" . ($action !== 'receive-files' ? ': ' . json_encode($payload) : ''));
+        // Redact secrets before logging: panel_log is replicated (publication FOR
+        // ALL TABLES), so a cleartext password/secret here would be persisted and
+        // copied to every node. Never let credentials reach the log.
+        LogService::log('cluster.api', $action, "Recibido de nodo #{$callerNodeId}" . ($action !== 'receive-files' ? ': ' . json_encode(self::redactSecrets($payload)) : ''));
 
         try {
             $result = match ($action) {
@@ -384,6 +406,14 @@ class ClusterApiController
                 'mail_replication_initial_sync' => \MuseDockPanel\Services\MailReplicationService::initialSync(
                     (string)($payload['partner_ip'] ?? '')
                 ),
+                // Backup-replica install driven by the master orchestrator: install
+                // mail services reading the master's DB (clear password provided by
+                // the master), then set up this node's dsync side with the shared
+                // secret. All secrets arrive over the authenticated cluster channel.
+                'mail_setup_backup_replica' => MailService::nodeSetupBackupReplica($payload),
+                // Phase 2 (enqueued): configure dsync + initial sync once services
+                // are installed. Retried by the cluster worker until Dovecot is ready.
+                'mail_finalize_backup_replica' => MailService::finalizeBackupReplica($payload),
                 'mail_setup_node'          => MailService::nodeSetupMail($payload),
                 'mail_setup_status'        => MailService::nodeSetupStatus($payload),
                 'mail_generate_setup_token' => MailService::nodeGenerateSetupToken($payload),

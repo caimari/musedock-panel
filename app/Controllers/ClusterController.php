@@ -15,6 +15,14 @@ use MuseDockPanel\Services\SystemService;
 
 class ClusterController
 {
+    /** True when THIS node is a slave (role from settings, falling back to .env). */
+    private function isSlaveNode(): bool
+    {
+        $role = Settings::get('cluster_role', '');
+        if ($role === '' || $role === 'standalone') $role = Env::get('PANEL_ROLE', 'standalone');
+        return $role === 'slave';
+    }
+
     /**
      * GET /settings/cluster
      */
@@ -1635,6 +1643,40 @@ class ClusterController
      *
      * The actual installation runs asynchronously on the node.
      */
+    /**
+     * MASTER-only: prepare a slave node as a mail BACKUP REPLICA. Orchestrates the
+     * whole thing from the master (pg_hba, clear password, shared dsync secret,
+     * both dsync ends) over the authenticated master→slave channel.
+     */
+    public function prepareMailReplica(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        if ($this->isSlaveNode()) {
+            echo json_encode(['ok' => false, 'error' => 'Esta acción se ejecuta desde el master, no desde un slave.']);
+            exit;
+        }
+
+        // Require admin password (privileged, cross-node operation).
+        $adminPassword = $_POST['admin_password'] ?? '';
+        $adminId = $_SESSION['admin_id'] ?? $_SESSION['panel_user']['id'] ?? 0;
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        if (!$admin || !password_verify($adminPassword, $admin['password_hash'])) {
+            echo json_encode(['ok' => false, 'error' => 'Contraseña de administrador incorrecta']);
+            exit;
+        }
+
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        if ($nodeId <= 0) {
+            echo json_encode(['ok' => false, 'error' => 'Falta node_id del nodo slave.']);
+            exit;
+        }
+
+        $res = \MuseDockPanel\Services\MailService::prepareMailReplicaOnNode($nodeId);
+        echo json_encode($res);
+    }
+
     public function setupMailNode(): void
     {
         View::verifyCsrf();
@@ -1954,8 +1996,11 @@ class ClusterController
         $dbPort = \MuseDockPanel\Env::int('DB_PORT', 5433);
 
         // Create/reuse musedock_mail PostgreSQL user on this (master) server (full mode only).
+        // Skipped when reading from the master's DB (backup-replica): the role already
+        // exists on the master and this node has no local mail DB to grant on.
+        $readsFromMaster = (($_POST['mail_db_source'] ?? '') === 'master');
         $dbPass = '';
-        if ($mailMode === 'full') {
+        if ($mailMode === 'full' && !$readsFromMaster) {
             $encryptedDbPass = Settings::get('mail_db_password_enc', '');
             if ($encryptedDbPass) {
                 $dbPass = \MuseDockPanel\Services\ReplicationService::decryptPassword($encryptedDbPass);
@@ -2007,9 +2052,41 @@ class ClusterController
             }
         }
 
+        // Backup-replica mode (slave): read mail accounts from the MASTER's DB over
+        // WireGuard instead of a local one. The master's 5433 is already exposed to
+        // the WG (G1), and mail accounts live there — this node only mirrors the
+        // messages via dsync. So point db_host at the master and use the master's
+        // musedock_mail credential.
+        //
+        // This mode is ONLY valid on a real slave, and the master's DB password is
+        // NOT taken from local encrypted settings (the encryption key is per-node,
+        // so a replicated ciphertext can't be decrypted here). Instead the master
+        // orchestrates this call and passes db_pass IN CLEAR over the cluster's
+        // TLS+token channel. We just require it to be present.
+        $dbHost = 'localhost';
+        if ($readsFromMaster) {
+            if (!$this->isSlaveNode()) {
+                echo json_encode(['ok' => false, 'error' => 'mail_db_source=master solo es válido en un nodo slave.']);
+                exit;
+            }
+            $masterIp = trim($_POST['master_db_host'] ?? '') ?: Settings::get('cluster_master_ip', '');
+            if (!filter_var($masterIp, FILTER_VALIDATE_IP)) {
+                echo json_encode(['ok' => false, 'error' => 'No se conoce la IP del master. La orquestación debe enviarla.']);
+                exit;
+            }
+            $dbHost = $masterIp;
+            // Password provided IN CLEAR by the master orchestrator (never decrypted
+            // from local settings — see comment above).
+            $dbPass = (string)($_POST['master_db_pass'] ?? '');
+            if ($dbPass === '') {
+                echo json_encode(['ok' => false, 'error' => 'Falta la contraseña de correo del master (debe enviarla la orquestación del master).']);
+                exit;
+            }
+        }
+
         // Launch mail-setup-run.php locally (same code that runs on remote nodes)
         $payload = [
-            'db_host'       => 'localhost',
+            'db_host'       => $dbHost,
             'db_port'       => (string)$dbPort,
             'db_name'       => 'musedock_panel',
             'db_user'       => 'musedock_mail',

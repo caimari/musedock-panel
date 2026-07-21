@@ -106,6 +106,8 @@ class MailController
         $mailLocalHostname   = Settings::get('mail_local_hostname', '');
         $localMailRepairStatus = $clusterRole !== 'slave' ? $this->getLocalMailRepairStatus() : [];
         $mailSetupPrefill = $clusterRole !== 'slave' ? $this->buildMailSetupPrefill($clusterNodes) : [];
+        // For a slave: the state of its mail backup-replica (services + dsync).
+        $slaveMailReplica = $clusterRole === 'slave' ? MailService::slaveMailReplicaStatus() : [];
 
         View::render('mail/index', [
             'layout'              => 'main',
@@ -139,6 +141,7 @@ class MailController
             'webmailInstallStatus'=> $webmailInstallStatus,
             'relayNewCredentials' => $relayNewCredentials,
             'mailSetupPrefill'    => $mailSetupPrefill,
+            'slaveMailReplica'    => $slaveMailReplica,
         ]);
     }
 

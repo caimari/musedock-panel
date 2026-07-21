@@ -27,6 +27,7 @@ use MuseDockPanel\Database;
 class MailReplicationService
 {
     private const DROPIN = '/etc/dovecot/conf.d/95-musedock-replication.conf';
+    private const SECRET_FILE = '/etc/dovecot/musedock-repl.secret';
     private const REPL_PORT = 12345; // doveadm replication (dsync) TCP port, WG-only
 
     /**
@@ -43,6 +44,7 @@ class MailReplicationService
 
         $localIp = static::wireguardIp();
         $port = self::REPL_PORT;
+        $secretFile = self::SECRET_FILE;
 
         // Notify plugin fires dsync on every change; replicator manages the queue.
         // mail_replica points at the partner over doveadm TCP on the WG network.
@@ -77,8 +79,11 @@ plugin {
     mail_replica = tcp:{$partnerIp}:{$port}
 }
 
-# doveadm must authenticate to the partner with a shared secret.
+# doveadm must authenticate to the partner with a shared secret. The secret lives
+# in a 0600 file (written by ensureSharedSecret) and is pulled in here — WITHOUT
+# this include, doveadm_password is never set and dsync auth fails silently.
 doveadm_port = {$port}
+!include {$secretFile}
 CONF;
 
         if ($dryRun) {
@@ -122,6 +127,15 @@ CONF;
             shell_exec('systemctl restart dovecot 2>&1');
             return ['ok' => false, 'error' => 'Dovecot no arranco con la config de replicacion; se revirtio. Salida: ' . trim((string)$out)];
         }
+
+        // Open the dsync port ONLY to the partner over WireGuard. The WG subnet is
+        // already trusted (panel 8444, ssh 22 flow over it), but make the dsync port
+        // explicit rather than relying on that implicit trust (H3). Scoped to the
+        // partner /32 on the WG network; no exposure to the public interface.
+        $safePartner = escapeshellarg($partnerIp);
+        shell_exec('iptables -C INPUT -p tcp -s ' . $safePartner . ' --dport ' . self::REPL_PORT
+            . ' -j ACCEPT 2>/dev/null || iptables -A INPUT -p tcp -s ' . $safePartner
+            . ' --dport ' . self::REPL_PORT . ' -j ACCEPT 2>/dev/null');
 
         Settings::set('mail_replication_partner', $partnerIp);
         Settings::set('mail_replication_configured_at', date('Y-m-d H:i:s'));
@@ -303,9 +317,11 @@ CONF;
                 $secret = $dec !== '' ? $dec : $secret;
             }
         }
-        $file = '/etc/dovecot/musedock-repl.secret';
-        @file_put_contents($file, "doveadm_password = {$secret}\n");
-        @chmod($file, 0600);
+        @file_put_contents(self::SECRET_FILE, "doveadm_password = {$secret}\n");
+        @chmod(self::SECRET_FILE, 0600);
+        // Dovecot reads its config as root but drops privileges; the secret file is
+        // 0600 root-owned and included from the drop-in, which is fine since the
+        // master process reads it before dropping. Keep it root-only.
         return $secret;
     }
 

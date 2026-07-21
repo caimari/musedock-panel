@@ -344,17 +344,34 @@ class FailoverSafetyService
             $blocking[] = 'IP del nuevo master no valida.';
         }
 
+        // Per cluster, prefer pg_rewind (incremental: absorbs only what diverged
+        // while this node was down) when its prerequisite is met; fall back to a
+        // full pg_basebackup otherwise. This is what lets the old master rejoin
+        // WITHOUT recopying the whole cluster.
         $clusters = PgClusterService::listClusters();
+        $methods  = [];
         foreach ($clusters as $c) {
-            $plan[] = "PostgreSQL {$c['key']} (:{$c['port']}): pg_basebackup desde {$newMasterIp} → standby "
-                    . '(directorio actual apartado, no borrado; rollback disponible)';
+            $wlh = ReplicationService::currentPgSetting($c, 'wal_log_hints');
+            $chk = ReplicationService::currentPgSetting($c, 'data_checksums');
+            $rewindOk = ($wlh === 'on' || $chk === 'on');
+            if ($rewindOk) {
+                $methods[$c['key']] = 'pg_rewind';
+                $plan[] = "PostgreSQL {$c['key']} (:{$c['port']}): pg_rewind desde {$newMasterIp} → standby "
+                        . '(incremental; solo rebobina lo divergente; copia pre-rewind conservada, rollback disponible)';
+            } else {
+                $methods[$c['key']] = 'pg_basebackup';
+                $plan[] = "PostgreSQL {$c['key']} (:{$c['port']}): pg_basebackup desde {$newMasterIp} → standby "
+                        . '(recopia total; directorio actual apartado, no borrado; rollback disponible)';
+                $warnings[] = "El clúster {$c['key']} no tiene wal_log_hints/checksums: se usará pg_basebackup (recopia total). "
+                            . 'Active wal_log_hints (G2) para habilitar el reingreso incremental por pg_rewind.';
+            }
         }
         $plan[] = 'MySQL/MariaDB: CHANGE MASTER hacia ' . $newMasterIp . ' + read_only=1 (persistido)';
         $plan[] = 'Este nodo deja de empujar ficheros (lsyncd detenido) y pasa a recibirlos';
         $plan[] = 'Rol local → slave (cluster_role, repl_role, servers.role, .env)';
 
-        $warnings[] = 'Los datos locales actuales se consideran OBSOLETOS y DIVERGENTES: '
-                    . 'seran reemplazados por los del nuevo master. Haga un dump logico antes si necesita conservarlos.';
+        $warnings[] = 'pg_basebackup reemplaza los datos locales por completo; pg_rewind los conserva y solo '
+                    . 'aplica lo divergente. En ambos casos se guarda una copia antes de actuar.';
         $warnings[] = 'No existe una vuelta automatica: el retorno al master original es un switchover manual posterior.';
 
         return [
@@ -363,6 +380,7 @@ class FailoverSafetyService
             'warnings'  => $warnings,
             'blocking'  => $blocking,
             'clusters'  => array_map(fn($c) => $c['key'], $clusters),
+            'methods'   => $methods,
         ];
     }
 

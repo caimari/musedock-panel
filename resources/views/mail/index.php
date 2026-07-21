@@ -2,20 +2,73 @@
 
 <?php $isSlave = ($clusterRole ?? '') === 'slave'; ?>
 
-<?php if ($isSlave): ?>
-<div class="card mb-4" style="border: 1px solid rgba(251,191,36,0.3);">
-    <div class="card-body py-3">
-        <i class="bi bi-info-circle text-warning me-2"></i>
-        <strong>Modo Slave:</strong>
-        <span class="text-muted">
-            Este servidor es un nodo slave. La configuracion y gestion del correo se realiza desde el panel master.
-            <?php
-                $masterIp = \MuseDockPanel\Settings::get('cluster_master_ip', '');
-                if ($masterIp):
-            ?>
-                <a href="https://<?= View::e($masterIp) ?>:8444/mail" class="text-info" target="_blank">Abrir panel master <i class="bi bi-box-arrow-up-right"></i></a>
+<?php if ($isSlave):
+    $rep = $slaveMailReplica ?? [];
+    $repServicesInstalled = !empty($rep['services_installed']);
+    $repServicesActive    = !empty($rep['services_active']);
+    $repDsyncConfigured   = !empty($rep['dsync_configured']);
+    $repNextStep          = $rep['next_step'] ?? 'install_services';
+    $repMasterIp          = $rep['master_ip'] ?? \MuseDockPanel\Settings::get('cluster_master_ip', '');
+    $repPartner           = $rep['dsync_partner'] ?? '';
+    // Three-step semaphore for the operator.
+    $steps = [
+        ['n' => 1, 'label' => 'Servicios de correo instalados', 'done' => $repServicesInstalled,
+         'detail' => $repServicesInstalled ? ($repServicesActive ? 'Postfix + Dovecot activos' : 'Instalados (algún servicio parado)') : 'Postfix/Dovecot aún no instalados en este nodo'],
+        ['n' => 2, 'label' => 'Replicación de mensajes (dsync) con el master', 'done' => $repDsyncConfigured,
+         'detail' => $repDsyncConfigured ? ('Replicando con '.View::e($repPartner ?: $repMasterIp)) : 'Sin configurar — los mensajes del master aún no se copian aquí'],
+    ];
+    $allReady = $repServicesInstalled && $repDsyncConfigured;
+?>
+<div class="card mb-4" style="border: 1px solid rgba(251,191,36,0.35);">
+    <div class="card-body">
+        <div class="d-flex align-items-center mb-3">
+            <span class="badge bg-warning text-dark me-2"><i class="bi bi-hdd-network me-1"></i>Nodo Slave</span>
+            <strong>Réplica de respaldo de correo</strong>
+            <?php if ($allReady): ?>
+                <span class="badge bg-success ms-2"><i class="bi bi-check-circle me-1"></i>Lista para failover</span>
             <?php endif; ?>
-        </span>
+        </div>
+        <p class="text-muted small mb-3">
+            El correo se gestiona en el <strong>master</strong>. Este nodo mantiene una <strong>copia viva</strong> de los buzones
+            para poder tomar el relevo si el master cae. Los dominios y buzones se crean en el master y se replican aquí automáticamente.
+            <?php if ($repMasterIp): ?>
+                <a href="https://<?= View::e($repMasterIp) ?>:8444/mail" class="text-info" target="_blank">Abrir panel master <i class="bi bi-box-arrow-up-right"></i></a>
+            <?php endif; ?>
+        </p>
+
+        <div class="list-group mb-3">
+            <?php foreach ($steps as $st): ?>
+            <div class="list-group-item d-flex align-items-center" style="background:transparent;">
+                <span class="me-3 fs-5">
+                    <?php if ($st['done']): ?>
+                        <i class="bi bi-check-circle-fill text-success"></i>
+                    <?php else: ?>
+                        <i class="bi bi-circle text-secondary"></i>
+                    <?php endif; ?>
+                </span>
+                <div class="flex-grow-1">
+                    <div class="fw-semibold small">Paso <?= $st['n'] ?>: <?= View::e($st['label']) ?></div>
+                    <div class="text-muted" style="font-size:.8rem;"><?= $st['detail'] ?></div>
+                </div>
+            </div>
+            <?php endforeach; ?>
+        </div>
+
+        <?php if ($repNextStep === 'ready'): ?>
+            <div class="alert alert-success mb-0 py-2 small">
+                <i class="bi bi-shield-check me-1"></i>
+                Este nodo está listo: servicios instalados y replicación activa. Si el master cae, puede servir el correo con los buzones ya copiados.
+            </div>
+        <?php else: ?>
+            <div class="alert alert-info mb-0 py-2 small">
+                <i class="bi bi-info-circle me-1"></i>
+                La instalación de la réplica de correo en este nodo se lanza <strong>desde el panel del master</strong>
+                (el master abre el acceso a la BBDD, comparte el secreto de replicación y configura ambos lados de forma segura).
+                <?php if ($repMasterIp): ?>
+                    <a href="https://<?= View::e($repMasterIp) ?>:8444/mail?tab=infra" class="alert-link" target="_blank">Ir al master → Infraestructura de correo</a>.
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
     </div>
 </div>
 <?php endif; ?>
@@ -1442,6 +1495,78 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
     </div>
 </div>
 <?php endif; ?>
+
+<!-- Backup replica on slave nodes (master-orchestrated) -->
+<?php if (!$isSlave && ($mailLocalConfigured ?? false) && !empty($clusterNodes)):
+    $slaveNodes = array_values(array_filter($clusterNodes, function($n){
+        return (string)($n['role'] ?? '') === 'slave' || (string)($n['role'] ?? '') === 'standalone';
+    }));
+    if (!empty($slaveNodes)):
+?>
+<div class="card mb-4">
+    <div class="card-header">
+        <i class="bi bi-shield-lock me-2"></i>Réplica de respaldo de correo (failover)
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">
+            Instala el correo en un nodo slave como <strong>copia viva</strong> de este master: el nodo leerá las cuentas de esta
+            BBDD por WireGuard y replicará los mensajes por dsync. Si este master cae, el slave podrá servir el correo con los buzones ya copiados.
+            El master abre el acceso, comparte el secreto de replicación y configura ambos lados automáticamente.
+        </p>
+        <div class="table-responsive">
+        <table class="table table-sm align-middle mb-0">
+            <thead><tr><th class="ps-3">Nodo</th><th>IP</th><th>Rol</th><th class="text-end pe-3">Acción</th></tr></thead>
+            <tbody>
+                <?php foreach ($slaveNodes as $sn):
+                    $snIp = parse_url((string)($sn['api_url'] ?? ''), PHP_URL_HOST) ?: '';
+                ?>
+                <tr>
+                    <td class="ps-3 fw-semibold"><i class="bi bi-hdd-network me-1 text-info"></i><?= View::e($sn['name'] ?? ('#'.$sn['id'])) ?></td>
+                    <td class="text-muted"><?= View::e($snIp) ?></td>
+                    <td><span class="badge bg-secondary"><?= View::e($sn['role'] ?? '?') ?></span></td>
+                    <td class="text-end pe-3">
+                        <button type="button" class="btn btn-outline-primary btn-sm prepare-mail-replica-btn"
+                                data-node-id="<?= (int)$sn['id'] ?>" data-node-name="<?= View::e($sn['name'] ?? '') ?>">
+                            <i class="bi bi-download me-1"></i>Instalar réplica de correo
+                        </button>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+            </tbody>
+        </table>
+        </div>
+        <div id="prepareReplicaResult" class="mt-3 small" style="display:none;"></div>
+    </div>
+</div>
+<script>
+(function(){
+    var csrf = <?= json_encode(View::csrfToken()) ?>;
+    var out = document.getElementById('prepareReplicaResult');
+    document.querySelectorAll('.prepare-mail-replica-btn').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            var nodeId = btn.getAttribute('data-node-id');
+            var nodeName = btn.getAttribute('data-node-name') || ('#'+nodeId);
+            var pass = prompt('Confirma tu contraseña de administrador para instalar la réplica de correo en "'+nodeName+'":');
+            if(!pass) return;
+            btn.disabled = true;
+            if(out){ out.style.display='block'; out.className='mt-3 small text-muted'; out.textContent='Preparando réplica en '+nodeName+'… (abriendo acceso, configurando dsync e instalando servicios)'; }
+            var body = new URLSearchParams();
+            body.set('_csrf_token', csrf);
+            body.set('admin_password', pass);
+            body.set('node_id', nodeId);
+            fetch('/settings/cluster/prepare-mail-replica', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:body})
+              .then(function(r){return r.json();})
+              .then(function(d){
+                btn.disabled = false;
+                if(d.ok){ if(out){ out.className='mt-3 small text-success'; out.innerHTML='<i class="bi bi-check-circle me-1"></i>Réplica en marcha en '+nodeName+'. La instalación de servicios continúa en segundo plano en el nodo.'; } }
+                else { if(out){ out.className='mt-3 small text-danger'; out.textContent='Error: '+(d.error||'no se pudo preparar la réplica'); } }
+              })
+              .catch(function(e){ btn.disabled=false; if(out){ out.className='mt-3 small text-danger'; out.textContent='Error de red: '+e; } });
+        });
+    });
+})();
+</script>
+<?php endif; endif; ?>
 
 <!-- Mail Nodes Status (remote) -->
 <?php if (!empty($mailNodes) && !$isSlave): ?>

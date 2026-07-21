@@ -583,6 +583,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/save-exclusions', 'ClusterController@saveExclusions');
 \MuseDockPanel\Router::post('/settings/cluster/mute-node-alerts', 'ClusterController@muteNodeAlerts');
 \MuseDockPanel\Router::post('/settings/cluster/unmute-node-alerts', 'ClusterController@unmuteNodeAlerts');
+\MuseDockPanel\Router::post('/settings/cluster/prepare-mail-replica', 'ClusterController@prepareMailReplica');
 \MuseDockPanel\Router::post('/settings/cluster/setup-mail-node', 'ClusterController@setupMailNode');
 \MuseDockPanel\Router::post('/settings/cluster/setup-mail-local', 'ClusterController@setupMailLocal');
 \MuseDockPanel\Router::get('/settings/cluster/mail-setup-progress', 'ClusterController@mailSetupProgress');

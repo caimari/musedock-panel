@@ -1232,6 +1232,228 @@ class ReplicationService
     }
 
     /**
+     * Rejoin a former master as a standby of the NEW master using pg_rewind —
+     * WITHOUT a full pg_basebackup. This is the piece that lets the old master
+     * come back and absorb only what changed while it was down, instead of
+     * recopying the whole cluster.
+     *
+     * Preconditions (checked here, refuse to act if unmet):
+     *   - This cluster has wal_log_hints=on OR data checksums (pg_rewind needs one).
+     *   - The new master ($newMasterIp) is reachable and is a PRIMARY (not in recovery).
+     *   - Same major version on both sides.
+     *
+     * Safety model mirrors setupPgSlaveForCluster:
+     *   - Full copy of the data dir is set aside first (never deleted) so a failed
+     *     rewind can always be rolled back.
+     *   - The cluster is stopped cleanly before rewind (pg_rewind requires it).
+     *   - pg_rewind writes standby.signal + primary_conninfo (--write-recovery-conf).
+     *
+     * On any failure the original data dir is restored from the aside copy.
+     *
+     * @param array  $cluster      cluster descriptor (PgClusterService::get)
+     * @param string $newMasterIp  IP of the promoted node to rewind FROM
+     * @param int    $sourcePort   its PostgreSQL port
+     * @param string $replUser     replication role
+     * @param string $replPass     its password
+     */
+    public static function rewindPgClusterFrom(
+        array $cluster,
+        string $newMasterIp,
+        int $sourcePort,
+        string $replUser,
+        string $replPass,
+        bool $dryRun = false
+    ): array {
+        $steps = [];
+
+        // ── Guard 0: descriptor sanity (same checks as basebackup path) ──
+        foreach (['version', 'cluster', 'port', 'data_dir', 'unit'] as $k) {
+            if (empty($cluster[$k])) {
+                return ['ok' => false, 'steps' => $steps, 'error' => "Descriptor de clúster incompleto (falta '{$k}'). Operación abortada."];
+            }
+        }
+        $dataDir = $cluster['data_dir'];
+        $realParent = dirname($dataDir);
+        if ($dataDir === '' || $dataDir === '/' || $realParent === '/' || !str_starts_with($dataDir, '/var/lib/postgresql/')) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "data_dir '{$dataDir}' no es un directorio de clúster válido. Operación abortada."];
+        }
+        if (!filter_var($newMasterIp, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "IP del nuevo master inválida: {$newMasterIp}."];
+        }
+        $localMajor = (int)$cluster['version'];
+        $asideDir   = rtrim($dataDir, '/') . '.pre-rewind.' . date('Ymd_His');
+        $connStr    = "host={$newMasterIp} port={$sourcePort} user={$replUser} dbname=postgres";
+
+        $plan = [
+            "verificar wal_log_hints=on o data checksums en {$cluster['key']}",
+            "verificar que {$newMasterIp}:{$sourcePort} es PRIMARY (no in-recovery) y misma versión mayor",
+            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} stop   # parada limpia (requisito de pg_rewind)",
+            "cp -a --reflink=auto {$dataDir} → {$asideDir}   # copia de seguridad (CoW si es posible), NO se borra",
+            "pg_rewind --target-pgdata={$dataDir} --source-server=\"{$connStr}\" --write-recovery-conf --progress",
+            "asegurar standby.signal + primary_conninfo apuntando a {$newMasterIp}",
+            "chown -R postgres:postgres {$dataDir}",
+            "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} start   # arranca como standby",
+            "(rollback si falla: rm -rf {$dataDir} && mv {$asideDir} {$dataDir})",
+        ];
+        if ($dryRun) {
+            return ['ok' => true, 'dry_run' => true, 'steps' => $steps, 'plan' => $plan, 'error' => null];
+        }
+
+        // ── Guard 1: pg_rewind prerequisite on the LOCAL cluster ────────
+        // pg_rewind needs wal_log_hints=on OR data checksums. Try the live GUCs
+        // first (cluster still running), but ALSO read pg_controldata from disk —
+        // that works even when the cluster is stopped and is the authoritative
+        // source. Refuse if BOTH are provably off; only proceed when at least one
+        // is confirmed on. (An indeterminate result — everything empty — is
+        // treated as unsafe and blocked, not waved through.)
+        $wlh = static::currentPgSetting($cluster, 'wal_log_hints');   // 'on'/'off'/''
+        $chk = static::currentPgSetting($cluster, 'data_checksums');  // 'on'/'off'/''
+        $ctl = static::pgControlData($cluster);                       // ['wal_log_hints'=>?, 'data_checksums'=>?]
+        $hintsOn = ($wlh === 'on') || (($ctl['wal_log_hints'] ?? '') === 'on');
+        $sumsOn  = ($chk === 'on') || (($ctl['data_checksums'] ?? '') === 'on');
+        if (!$hintsOn && !$sumsOn) {
+            $why = ($wlh === '' && $chk === '' && empty($ctl))
+                 ? "no se pudo determinar wal_log_hints/data checksums (clúster parado y pg_controldata ilegible)"
+                 : "wal_log_hints=off y sin data checksums";
+            return [
+                'ok' => false, 'steps' => $steps,
+                'error' => "pg_rewind no es posible: {$why} en {$cluster['key']}. "
+                         . "Active wal_log_hints (G2) y reinícielo antes, o use pg_basebackup (setupPgSlaveForCluster).",
+            ];
+        }
+        $steps[] = ['name' => 'Prerrequisito pg_rewind', 'ok' => true,
+            'output' => "wal_log_hints=" . ($hintsOn ? 'on' : 'off') . ", data_checksums=" . ($sumsOn ? 'on' : 'off')
+                      . " (live: {$wlh}/{$chk}, control: " . ($ctl['wal_log_hints'] ?? '?') . "/" . ($ctl['data_checksums'] ?? '?') . ")"];
+
+        // ── Guard 2: new master reachable, is PRIMARY, same major version ──
+        $srcInfo = static::testPgConnection($newMasterIp, $sourcePort, $replUser, $replPass);
+        if (!$srcInfo['ok']) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "No se pudo conectar al nuevo master {$newMasterIp}:{$sourcePort}: {$srcInfo['error']}"];
+        }
+        $srcMajor = 0;
+        if (preg_match('/PostgreSQL\s+(\d+)/', (string)$srcInfo['version'], $mm)) $srcMajor = (int)$mm[1];
+        if ($srcMajor > 0 && $srcMajor !== $localMajor) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "Versión mayor incompatible: nuevo master PG{$srcMajor} vs este clúster PG{$localMajor}."];
+        }
+        // Must be a real primary — rewinding from a standby is meaningless.
+        $pgpassChk = static::writeTempPgpass($newMasterIp, $sourcePort, '*', $replUser, $replPass);
+        $recovery = trim((string)shell_exec(
+            'PGPASSFILE=' . escapeshellarg($pgpassChk) .
+            ' psql -h ' . escapeshellarg($newMasterIp) . ' -p ' . (int)$sourcePort .
+            ' -U ' . escapeshellarg($replUser) . ' -d postgres -tAc ' .
+            escapeshellarg('SELECT pg_is_in_recovery();') . ' 2>&1'
+        ));
+        @unlink($pgpassChk);
+        if ($recovery !== 'f') {
+            return ['ok' => false, 'steps' => $steps, 'error' => "El origen {$newMasterIp}:{$sourcePort} no es PRIMARY (pg_is_in_recovery={$recovery}). No se puede hacer rewind desde un standby."];
+        }
+        $steps[] = ['name' => 'Verificar nuevo master', 'ok' => true, 'output' => "PG{$srcMajor} PRIMARY en {$newMasterIp}:{$sourcePort}"];
+
+        // ── Stop the cluster cleanly (pg_rewind requires a clean shutdown) ──
+        shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' stop 2>&1');
+        $steps[] = ['name' => "Detener clúster {$cluster['key']}", 'ok' => true, 'output' => 'pg_ctlcluster stop (solo este clúster)'];
+
+        // ── Set aside a FULL backup of the data dir (never delete) ──────
+        // --reflink=auto makes this near-instant on CoW filesystems (btrfs/XFS)
+        // and falls back to a full copy elsewhere — the cluster is stopped during
+        // this copy, so on a large data dir a reflink dramatically cuts downtime.
+        $cp = static::runChecked('cp -a --reflink=auto ' . escapeshellarg($dataDir) . ' ' . escapeshellarg($asideDir));
+        if (!$cp['ok']) {
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+            return ['ok' => false, 'steps' => $steps, 'error' => "No se pudo respaldar el data dir antes del rewind: {$cp['output']}. Operación abortada, clúster reiniciado."];
+        }
+        $steps[] = ['name' => 'Backup pre-rewind', 'ok' => true, 'output' => $asideDir];
+
+        // ── pg_rewind (run as postgres, password via .pgpass, not argv) ──
+        // CRITICAL: pg_rewind runs as the `postgres` user (uid 115), but the panel
+        // process is uid !=postgres. A 0600 .pgpass owned by the panel user is
+        // UNREADABLE by postgres → pg_rewind would fail auth on every run. So we
+        // write the .pgpass and hand ownership to postgres (chown), keeping 0600.
+        $pgpass = static::writeTempPgpassForPostgres($newMasterIp, $sourcePort, '*', $replUser, $replPass);
+        // pg_rewind binary lives under the versioned bindir (avoid a PATH pg_rewind
+        // of a DIFFERENT major version, which would be catastrophic).
+        $rewindBin = "/usr/lib/postgresql/{$localMajor}/bin/pg_rewind";
+        if (!is_file($rewindBin)) $rewindBin = 'pg_rewind'; // fall back to PATH
+        // `env PGPASSFILE=` AFTER sudo is what counts: sudo sanitizes the parent
+        // environment, so a PGPASSFILE set before `sudo` would be dropped.
+        $cmd = 'sudo -u postgres env PGPASSFILE=' . escapeshellarg($pgpass) . ' '
+             . escapeshellarg($rewindBin)
+             . ' --target-pgdata=' . escapeshellarg($dataDir)
+             . ' --source-server=' . escapeshellarg($connStr)
+             . ' --write-recovery-conf --progress 2>&1';
+        $rw = static::runChecked($cmd);
+        @unlink($pgpass);
+        $steps[] = ['name' => 'pg_rewind', 'ok' => $rw['ok'], 'output' => $rw['ok'] ? 'OK' : $rw['output']];
+
+        if (!$rw['ok']) {
+            // Restore from the aside backup — rewind may have partially written.
+            static::runChecked('rm -rf ' . escapeshellarg($dataDir));
+            $restore = static::runChecked('mv ' . escapeshellarg($asideDir) . ' ' . escapeshellarg($dataDir));
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+            if ($restore['ok']) {
+                $steps[] = ['name' => 'Rollback', 'ok' => true, 'output' => "Restaurado {$asideDir} → {$dataDir}"];
+                return ['ok' => false, 'steps' => $steps, 'error' => "pg_rewind falló; se restauró el estado anterior. Detalle: {$rw['output']}"];
+            }
+            $steps[] = ['name' => 'Rollback', 'ok' => false, 'output' => "FALLO al restaurar. Copia intacta en {$asideDir}."];
+            return ['ok' => false, 'steps' => $steps, 'error' => "pg_rewind falló y el rollback automático falló. Datos a salvo en {$asideDir} — restauración manual."];
+        }
+
+        // ── Belt-and-suspenders: guarantee standby.signal + primary_conninfo ──
+        // --write-recovery-conf handles this on PG12+, but make it explicit so a
+        // node that came from an older config can't accidentally start as primary.
+        if (!file_exists("{$dataDir}/standby.signal")) {
+            static::runChecked('sudo -u postgres touch ' . escapeshellarg("{$dataDir}/standby.signal"));
+        }
+        // Read the auto.conf as postgres (it may already be postgres:postgres 0600
+        // after the rewind, unreadable by the panel user — a plain file_get_contents
+        // would return '' and force a duplicate append). The password IS included so
+        // the standby can authenticate even in the fallback path where
+        // --write-recovery-conf didn't run.
+        $sqlPass = str_replace(["\\", "'"], ["\\\\", "\\'"], $replPass);
+        $connInfo = "primary_conninfo = 'host={$newMasterIp} port={$sourcePort} user={$replUser} password=''{$sqlPass}'''";
+        $autoConf = "{$dataDir}/postgresql.auto.conf";
+        $auto = (string)shell_exec('sudo -u postgres cat ' . escapeshellarg($autoConf) . ' 2>/dev/null');
+        if (!str_contains($auto, 'primary_conninfo')) {
+            static::runChecked('sudo -u postgres bash -c ' . escapeshellarg('echo ' . escapeshellarg($connInfo) . ' >> ' . escapeshellarg($autoConf)));
+        }
+        static::runChecked('chown -R postgres:postgres ' . escapeshellarg($dataDir));
+        $steps[] = ['name' => 'Configurar standby', 'ok' => true, 'output' => "standby.signal + primary_conninfo → {$newMasterIp}"];
+
+        // ── Start as standby ────────────────────────────────────────────
+        shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+        // Poll for up to ~20s instead of a fixed sleep(2): a large cluster can take
+        // longer than 2s to open its port after recovery, and a false "no arrancó"
+        // would trigger a needless rollback of a rewind that actually SUCCEEDED.
+        $running = false;
+        for ($i = 0; $i < 10; $i++) {
+            usleep(2_000_000); // 2s
+            if (PgClusterService::isRunning($cluster)) { $running = true; break; }
+        }
+        if (!$running) {
+            static::runChecked('rm -rf ' . escapeshellarg($dataDir));
+            $restore = static::runChecked('mv ' . escapeshellarg($asideDir) . ' ' . escapeshellarg($dataDir));
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+            if ($restore['ok']) {
+                $steps[] = ['name' => 'Rollback', 'ok' => true, 'output' => "No arrancó como standby; restaurado {$asideDir}"];
+                return ['ok' => false, 'steps' => $steps, 'error' => "El clúster no arrancó tras el rewind; se restauró el estado anterior."];
+            }
+            $steps[] = ['name' => 'Rollback', 'ok' => false, 'output' => "FALLO al restaurar. Copia intacta en {$asideDir}."];
+            return ['ok' => false, 'steps' => $steps, 'error' => "El clúster no arrancó y el rollback falló. Datos a salvo en {$asideDir}."];
+        }
+
+        // Confirm it actually came up in recovery (as a standby, not a primary).
+        $inRecovery = trim((string)shell_exec('sudo -u postgres psql -p ' . (int)$cluster['port'] . " -tAc 'SELECT pg_is_in_recovery();' 2>&1"));
+        $steps[] = ['name' => "Iniciar clúster {$cluster['key']}", 'ok' => true, 'output' => $inRecovery === 't' ? 'Activo como standby (in-recovery)' : "Activo pero pg_is_in_recovery={$inRecovery} — REVISAR"];
+
+        return [
+            'ok' => true, 'steps' => $steps, 'error' => null,
+            'aside_data_dir' => $asideDir,
+            'in_recovery'    => ($inRecovery === 't'),
+            'note'           => "Antiguo master reincorporado como standby de {$newMasterIp} vía pg_rewind. Copia de seguridad en {$asideDir} (borrar cuando se confirme la salud).",
+        ];
+    }
+
+    /**
      * Run a shell command and return its exit code + combined output. Unlike
      * bare shell_exec(), this lets destructive steps detect real failure instead
      * of hardcoding ok=true.
@@ -1255,6 +1477,60 @@ class ReplicationService
         $line = sprintf("%s:%d:%s:%s:%s\n", $host, $port, $db, $user, str_replace(['\\', ':'], ['\\\\', '\\:'], $pass));
         file_put_contents($file, $line);
         @chmod($file, 0600);
+        return $file;
+    }
+
+    /**
+     * Read wal_log_hints / data_page_checksum_version from pg_controldata — works
+     * even when the cluster is STOPPED (reads pg_control on disk). Returns
+     * ['wal_log_hints'=>'on'|'off', 'data_checksums'=>'on'|'off'] with keys absent
+     * when pg_controldata can't be read.
+     */
+    private static function pgControlData(array $cluster): array
+    {
+        $ver = (int)($cluster['version'] ?? 0);
+        $dataDir = $cluster['data_dir'] ?? '';
+        if ($ver <= 0 || $dataDir === '') return [];
+        $bin = "/usr/lib/postgresql/{$ver}/bin/pg_controldata";
+        if (!is_file($bin)) $bin = 'pg_controldata';
+        $out = shell_exec('sudo -u postgres ' . escapeshellarg($bin) . ' -D ' . escapeshellarg($dataDir) . ' 2>/dev/null');
+        if (!$out) return [];
+        $res = [];
+        if (preg_match('/wal_log_hints setting:\s*(\w+)/i', $out, $m)) {
+            $res['wal_log_hints'] = strtolower($m[1]) === 'on' ? 'on' : 'off';
+        }
+        if (preg_match('/Data page checksum version:\s*(\d+)/i', $out, $m)) {
+            // 0 = checksums disabled, non-zero = enabled.
+            $res['data_checksums'] = ((int)$m[1] > 0) ? 'on' : 'off';
+        }
+        return $res;
+    }
+
+    /**
+     * Same as writeTempPgpass but the file is made readable by the `postgres`
+     * system user — required when the consumer runs under `sudo -u postgres`
+     * (e.g. pg_rewind). Postgres refuses a .pgpass that is group/other-readable,
+     * so we transfer OWNERSHIP to postgres and keep it 0600, rather than loosening
+     * the mode. Falls back to 0640 + postgres group if chown is unavailable.
+     * Written under postgres' home so /tmp mount options (noexec/nosuid) and
+     * per-user tmp isolation can't hide it from postgres.
+     */
+    private static function writeTempPgpassForPostgres(string $host, int $port, string $db, string $user, string $pass): string
+    {
+        $dir = '/var/lib/postgresql';
+        if (!is_dir($dir) || !is_writable($dir)) $dir = sys_get_temp_dir();
+        $file = tempnam($dir, 'mdpgpass_pg_');
+        $line = sprintf("%s:%d:%s:%s:%s\n", $host, $port, $db, $user, str_replace(['\\', ':'], ['\\\\', '\\:'], $pass));
+        file_put_contents($file, $line);
+        @chmod($file, 0600);
+        // Give it to postgres so `sudo -u postgres` can read it. chown needs root;
+        // the panel runs as root under systemd in production. If chown fails
+        // (e.g. running as a normal user in tests), fall back to postgres-group +
+        // 0640 so the file is at least group-readable by postgres.
+        if (!@chown($file, 'postgres')) {
+            @chgrp($file, 'postgres');
+            @chmod($file, 0640);
+        }
         return $file;
     }
 
@@ -1681,6 +1957,9 @@ class ReplicationService
             'max_replication_slots' => (string)$maxSlots,
             $walKeepParam           => $walKeepValue,
             'hot_standby'           => 'on',
+            // Required by pg_rewind so the old master can rejoin as slave without a
+            // full pg_basebackup. Only takes effect after a restart (postmaster GUC).
+            'wal_log_hints'         => 'on',
             'listen_addresses'      => $listen,
         ];
 
@@ -1744,8 +2023,10 @@ class ReplicationService
         }
 
         // Reload ONLY this cluster (config changes here need reload, not restart,
-        // except wal_level which needs restart — surface that to the caller).
-        $needsRestart = ($walLevel !== static::currentPgSetting($cluster, 'wal_level'));
+        // except postmaster-level GUCs — wal_level and wal_log_hints — which need a
+        // restart. Surface that to the caller.)
+        $needsRestart = ($walLevel !== static::currentPgSetting($cluster, 'wal_level'))
+            || (static::currentPgSetting($cluster, 'wal_log_hints') !== 'on');
         if ($needsRestart) {
             shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' restart 2>&1');
             $steps[] = ['name' => 'Reiniciar clúster', 'ok' => true, 'output' => 'restart (wal_level cambió)'];

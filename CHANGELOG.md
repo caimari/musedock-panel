@@ -2,6 +2,36 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.193] — 2026-07-21 — Alta disponibilidad y consistencia de nodos
+
+Trabajo de base para el **failover master↔slave** y para que los nodos nuevos nazcan consistentes entre sí.
+
+### Added
+
+- **`pg_rewind` para el reingreso del antiguo master** (`ReplicationService::rewindPgClusterFrom`): cuando un master caído vuelve, se reincorpora como slave absorbiendo **solo lo que cambió** durante la caída, en vez de recopiar el clúster entero con `pg_basebackup`. Con guards de seguridad (verifica que el origen es PRIMARY, prerrequisito `wal_log_hints`/checksums leído incluso con el clúster parado vía `pg_controldata`), copia de seguridad previa con `--reflink=auto` y rollback en cada rama de fallo. Integrado en `planRebuildAsSlave`, que ahora elige `pg_rewind` o `pg_basebackup` por clúster. 28 tests.
+- **Banda de UID dedicada para hostings** (`SystemService::HOSTING_UID_MIN`=20000): los usuarios de sistema de los hostings se asignan a partir de 20000, fuera del rango del SO/admin (1000-9999). Así un UID asignado en el master queda libre en los slaves y la sincronización reproduce **el mismo UID en todos los nodos**, manteniendo la propiedad de los ficheros coherente tras un failover. 10 tests.
+
+### Fixed
+
+- **Deriva silenciosa de UID entre nodos**: al sincronizar un hosting a un slave, si el UID del master ya estaba ocupado, el código asignaba **otro UID distinto sin avisar** (origen de los UID divergentes observados en Filemon: `musedock.com` 1000→1020, etc.). Ahora el conflicto se registra (`system.uid_conflict`, marcado como DIVERGENTE) en lugar de ocultarse, para que la reconciliación pueda verlo. Los hostings ya existentes no se tocan (siguen funcionando porque rsync remapea la propiedad por **nombre** con `--chown`, no por número).
+
+- **Correo en modo réplica de respaldo (failover), orquestado desde el master**: desde el panel del **master** (Mail → Infra) se puede instalar el correo en un nodo slave como copia viva. El master orquesta todo por el canal cluster autenticado (TLS + token): abre su `pg_hba` para que el slave lea las cuentas por WireGuard (conexión normal de `musedock_mail`, complementa la apertura de G1), comparte el secreto de replicación **dsync** y configura **ambos** lados, y ordena al slave instalar los servicios leyendo la BBDD del master. Si el master cae, el slave ya tiene los buzones y puede servir el correo. El panel del **slave** muestra el estado (servicios / dsync / listo) e indica que la instalación se lanza desde el master. Nuevos: `MailService::prepareMailReplicaOnNode()` + `nodeSetupBackupReplica()` + `slaveMailReplicaStatus()`, acción de cluster `mail_setup_backup_replica`, endpoint `/settings/cluster/prepare-mail-replica`.
+
+### Fixed (revisión adversarial del flujo de correo-réplica)
+
+- **Clave de cifrado por-nodo**: un slave no podía descifrar la contraseña de correo del master (`mail_db_password_enc` se cifra con la clave local de cada nodo). Ahora el master pasa la contraseña **en claro por el canal seguro del cluster**, no vía settings replicados.
+- **`pg_hba` del master**: la apertura de G1 solo añadía una línea `replication`, que no cubre una conexión normal de `musedock_mail`. Se añade una línea `host <db> musedock_mail <slaveWG>/32 scram-sha-256` al preparar la réplica.
+- **dsync unilateral**: el drop-in de Dovecot no hacía `!include` del fichero de secreto (así que `doveadm_password` nunca se aplicaba) y cada lado generaba un secreto distinto. Ahora el drop-in incluye el fichero de secreto y el master comparte **el mismo** secreto a ambos extremos.
+- **Fuga de credenciales en el log replicado** (2ª revisión): la acción de cluster registraba el payload completo en `panel_log` (tabla replicada a todos los nodos), incluida la contraseña de correo en claro. Se redactan ahora los campos sensibles (`master_db_pass`, `db_pass`, `dsync_secret`, tokens, etc.) antes de loguear.
+- **Sin sincronización inicial de buzones** (2ª revisión): la réplica solo copiaba el correo entregado *después* del setup. Se añade una fase 2 (`finalizeBackupReplica`) que hace `doveadm sync -A` inicial para traer los buzones ya existentes del master.
+- **Carrera instalación/dsync** (2ª revisión): la config de dsync se intentaba mientras la instalación de Dovecot aún corría en segundo plano. Ahora la finalización (dsync + sync inicial) se **encola** y el worker la reintenta hasta que Dovecot está listo, de forma idempotente.
+- **Puerto dsync (12345)**: se abre explícitamente en el firewall, scoped al `/32` del partner por WireGuard, en vez de depender solo de la confianza implícita de la interfaz.
+
+### Notes
+
+- El panel replica la configuración de hostings/correo entre nodos **de forma lógica** (por API/cola `cluster_queue`), no por replicación física de PostgreSQL. Una auditoría confirmó que Filemon tiene los 25 hostings, 16 BBDD MySQL + 4 PostgreSQL y 165 certificados de Caddy — la réplica lógica funciona.
+- `wal_log_hints=on` + `listen_addresses` en la WireGuard ya aplicados al clúster panel (5433) en producción, habilitando `pg_rewind` y el acceso de réplica.
+
 ## [1.0.192] — 2026-07-18
 
 Nuevo módulo **anti-abuso de envío de correo**: controles combinables para que un buzón comprometido no pueda usarse para enviar spam masivo.

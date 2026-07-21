@@ -216,10 +216,13 @@ $myPlan = F::promoteMysqlPersistent(true);
 ok('promocion MySQL planifica quitar read_only del my.cnf',
     (bool)array_filter($myPlan['plan'] ?? [], fn($l) => str_contains($l, 'read_only')));
 
-// Rebuild plan must be explicit that local data is discarded.
+// Rebuild plan must be explicit about how local data is treated (pg_rewind keeps
+// it and applies only the divergence; pg_basebackup replaces it wholesale).
 $plan = F::planRebuildAsSlave('10.10.70.154');
-ok('plan de reconstruccion avisa de datos obsoletos/divergentes',
-    (bool)array_filter($plan['warnings'] ?? [], fn($w) => str_contains(strtolower($w), 'obsoletos')));
+ok('plan de reconstruccion explica el trato de los datos divergentes',
+    (bool)array_filter($plan['warnings'] ?? [], fn($w) => str_contains(strtolower($w), 'divergente') || str_contains(strtolower($w), 'reemplaza')));
+ok('plan de reconstruccion ofrece metodo por cluster (rewind/basebackup)',
+    isset($plan['methods']) && !array_diff($plan['methods'] ?? [], ['pg_rewind', 'pg_basebackup']));
 ok('plan de reconstruccion cubre los 3 clusters', count($plan['clusters'] ?? []) === 3);
 
 // An unreachable node must NOT be silently queued for a destructive rebuild.

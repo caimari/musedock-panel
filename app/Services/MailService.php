@@ -3330,6 +3330,308 @@ class MailService
     }
 
     /**
+     * Consolidated state of "mail backup replica" for a SLAVE node's own UI.
+     *
+     * In backup-replica mode the master keeps serving mailboxes; this slave keeps
+     * a live copy (Dovecot dsync) so it can take over on failover. The slave's UI
+     * needs three things to guide the operator through setup:
+     *   - are the mail services installed here yet? (postfix + dovecot)
+     *   - is dsync replication configured with the master?
+     *   - what is the master's IP/hostname (the partner to replicate from)?
+     *
+     * Read-only. Safe to call on every /mail render for a slave.
+     */
+    public static function slaveMailReplicaStatus(): array
+    {
+        // Services installed locally on this slave?
+        $svc = [];
+        foreach (['postfix', 'dovecot'] as $s) {
+            exec("systemctl is-active {$s} 2>/dev/null", $o, $c);
+            // "installed" is broader than "active": a freshly-installed but stopped
+            // unit still counts as present. `is-active` returns 'inactive'/'failed'
+            // for an installed-but-down unit and errors for a truly-absent one.
+            $state = trim(implode('', $o));
+            $svc[$s] = [
+                'installed' => ($state !== '' && $state !== 'unknown') || is_dir("/etc/{$s}"),
+                'active'    => $state === 'active',
+            ];
+            $o = [];
+        }
+        $servicesInstalled = $svc['postfix']['installed'] && $svc['dovecot']['installed'];
+        $servicesActive    = $svc['postfix']['active'] && $svc['dovecot']['active'];
+
+        // dsync configured? (the drop-in written by MailReplicationService)
+        $dsyncDropin = '/etc/dovecot/conf.d/95-musedock-replication.conf';
+        $dsyncConfigured = is_file($dsyncDropin);
+        $dsyncPartner = Settings::get('mail_replication_partner', '');
+
+        // Who is the master (partner to replicate from)?
+        $masterIp = Settings::get('cluster_master_ip', '');
+
+        return [
+            'services'           => $svc,
+            'services_installed' => $servicesInstalled,
+            'services_active'    => $servicesActive,
+            'dsync_configured'   => $dsyncConfigured,
+            'dsync_partner'      => $dsyncPartner,
+            'master_ip'          => $masterIp,
+            // The operator's next step, so the view can show one clear call to action.
+            'next_step'          => !$servicesInstalled ? 'install_services'
+                                  : (!$dsyncConfigured ? 'configure_dsync' : 'ready'),
+        ];
+    }
+
+    /**
+     * MASTER-side orchestrator: prepare a SLAVE node to be a mail backup replica.
+     *
+     * This is the ONLY correct place to set this up, because everything it needs
+     * lives on the master: the musedock_mail password in clear, the pg_hba of the
+     * master's DB, and the shared dsync secret. It runs on the master and drives
+     * the slave over the existing (authenticated) master→slave cluster channel.
+     *
+     * Steps:
+     *   1. Ensure the master's musedock_mail role + password (clear text in hand).
+     *   2. Open the master's pg_hba so musedock_mail can connect from the slave's
+     *      WG IP to musedock_panel (NORMAL connection, not replication) — fix C.
+     *   3. Ensure a shared dsync secret (clear text) — fix D.
+     *   4. Configure the master's OWN dsync side pointing at the slave, with that
+     *      secret — fix D (both ends configured, same secret).
+     *   5. Call the slave to (a) install mail services reading the master's DB with
+     *      the clear password (fix A — no per-node-key decryption), and (b) set up
+     *      its dsync side with the same shared secret.
+     *
+     * @param int $slaveNodeId  cluster_nodes.id of the slave
+     */
+    public static function prepareMailReplicaOnNode(int $slaveNodeId): array
+    {
+        $steps = [];
+        $node = ClusterService::getNode($slaveNodeId);
+        if (!$node) {
+            return ['ok' => false, 'error' => "Nodo #{$slaveNodeId} no encontrado."];
+        }
+        // Resolve the slave's WireGuard IP from its api_url host.
+        $slaveWgIp = parse_url((string)($node['api_url'] ?? ''), PHP_URL_HOST) ?: '';
+        if (!filter_var($slaveWgIp, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'error' => "No se pudo determinar la IP WireGuard del nodo #{$slaveNodeId}."];
+        }
+        $masterWgIp = ReplicationService::detectWireguardIp();
+        if (!filter_var($masterWgIp, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'error' => 'No se pudo determinar la IP WireGuard del master.'];
+        }
+
+        // 1) musedock_mail password on the master (clear text).
+        $mailPass = self::ensureMasterMailPassword();
+        if ($mailPass === '') {
+            return ['ok' => false, 'error' => 'No se pudo obtener/crear la contraseña de correo del master.'];
+        }
+        $steps[] = ['name' => 'Password musedock_mail del master', 'ok' => true, 'output' => 'OK'];
+
+        // 2) Open the master's pg_hba for musedock_mail from the slave WG /32.
+        $hba = self::openMasterHbaForMailUser($slaveWgIp);
+        $steps[] = ['name' => 'pg_hba master → musedock_mail desde slave', 'ok' => $hba['ok'], 'output' => $hba['output'] ?? ''];
+        if (!$hba['ok']) {
+            return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo abrir pg_hba del master: ' . ($hba['output'] ?? '')];
+        }
+
+        // 3) Shared dsync secret (clear text), reused on both ends.
+        $secret = MailReplicationService::currentSecret();
+        if ($secret === '') $secret = bin2hex(random_bytes(24));
+
+        // 4) Configure the MASTER's own dsync side, pointing at the slave.
+        $localDsync = MailReplicationService::configureNode($slaveWgIp, false, $secret);
+        $steps[] = ['name' => 'dsync lado master → slave', 'ok' => !empty($localDsync['ok']), 'output' => $localDsync['error'] ?? 'OK'];
+        if (empty($localDsync['ok'])) {
+            return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo configurar dsync en el master: ' . ($localDsync['error'] ?? '')];
+        }
+
+        // 5) Drive the slave over the cluster channel: install services reading the
+        //    master DB (clear password), then set up its dsync side with the secret.
+        $installRes = ClusterService::callNode($slaveNodeId, 'POST', 'api/cluster/action', [
+            'action'  => 'mail_setup_backup_replica',
+            'payload' => [
+                'master_db_host' => $masterWgIp,
+                'master_db_pass' => $mailPass,       // clear, over TLS+token channel
+                'mail_hostname'  => (string)($node['mail_hostname'] ?? Settings::get('mail_hostname', '')),
+                'dsync_secret'   => $secret,
+                'dsync_partner'  => $masterWgIp,
+            ],
+        ]);
+        $steps[] = ['name' => 'Instalar réplica en el slave', 'ok' => !empty($installRes['ok']), 'output' => $installRes['error'] ?? ($installRes['message'] ?? 'OK')];
+        if (empty($installRes['ok'])) {
+            return ['ok' => false, 'steps' => $steps, 'error' => 'El slave no pudo instalar la réplica: ' . ($installRes['error'] ?? 'error remoto')];
+        }
+
+        // 6) Finalize (dsync + initial sync) must wait until the slave's background
+        //    install finishes. Enqueue it so the cluster worker retries until the
+        //    slave reports Dovecot ready — avoids the install/dsync race (H4) and
+        //    guarantees the initial mailbox sync happens (H2). The job is idempotent
+        //    (finalizeBackupReplica no-ops once mail_replica_pending is cleared).
+        ClusterService::enqueue($slaveNodeId, 'mail_finalize_backup_replica', [
+            'partner_ip' => $masterWgIp,
+        ]);
+        $steps[] = ['name' => 'Programar dsync + sync inicial', 'ok' => true, 'output' => 'encolado (se ejecuta al terminar la instalación)'];
+
+        LogService::log('mail.replica_prepare', (string)$slaveNodeId,
+            "Réplica de correo preparada en nodo #{$slaveNodeId} ({$slaveWgIp}); finalización encolada.");
+        return ['ok' => true, 'steps' => $steps, 'slave_ip' => $slaveWgIp];
+    }
+
+    /**
+     * SLAVE-side handler (invoked by the master orchestrator over the cluster
+     * channel): install mail services reading the MASTER's DB, then set up the
+     * dsync side with the shared secret. All secrets come in the payload over the
+     * authenticated TLS+token channel — never decrypted from local settings.
+     */
+    public static function nodeSetupBackupReplica(array $payload): array
+    {
+        $masterDbHost = (string)($payload['master_db_host'] ?? '');
+        $masterDbPass = (string)($payload['master_db_pass'] ?? '');
+        $hostname     = (string)($payload['mail_hostname'] ?? Settings::get('mail_hostname', ''));
+        $dsyncSecret  = (string)($payload['dsync_secret'] ?? '');
+        $dsyncPartner = (string)($payload['dsync_partner'] ?? $masterDbHost);
+
+        if (!filter_var($masterDbHost, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'error' => 'master_db_host no válido'];
+        }
+        if ($masterDbPass === '') {
+            return ['ok' => false, 'error' => 'Falta master_db_pass (lo envía la orquestación del master).'];
+        }
+        if ($hostname === '') {
+            return ['ok' => false, 'error' => 'Falta mail_hostname para este nodo.'];
+        }
+
+        // A one-time setup token is required by nodeSetupMail; generate one locally
+        // (this call is already authenticated at the cluster layer).
+        $token = self::nodeGenerateSetupToken([])['setup_token'] ?? '';
+
+        // Install mail services on THIS node, pointing the mail DB at the master.
+        // This runs the installer in the BACKGROUND (nohup) and returns a task_id.
+        $install = self::nodeSetupMail([
+            'db_host'       => $masterDbHost,
+            'db_port'       => (string)\MuseDockPanel\Env::int('DB_PORT', 5433),
+            'db_name'       => \MuseDockPanel\Env::get('DB_NAME', 'musedock_panel'),
+            'db_user'       => 'musedock_mail',
+            'db_pass'       => $masterDbPass,
+            'mail_hostname' => $hostname,
+            'mail_mode'     => 'full',
+            'setup_token'   => $token,
+        ]);
+        if (empty($install['ok']) && empty($install['task_id'])) {
+            return ['ok' => false, 'error' => 'Instalación de servicios de correo falló: ' . ($install['error'] ?? '')];
+        }
+
+        // Stash the dsync params so the SECOND phase (finalizeBackupReplica) can
+        // configure dsync + initial sync once Dovecot is actually installed. We do
+        // NOT configure dsync now because the installer is still running in the
+        // background and configureNode would abort (no /etc/dovecot yet) — H4 race.
+        Settings::set('mail_db_source', 'master');
+        Settings::set('mail_replica_pending', '1');
+        Settings::set('mail_replica_dsync_partner', $dsyncPartner);
+        // Secret stored encrypted, consistent with how the shared secret is kept.
+        Settings::set('mail_replica_dsync_secret_enc', ReplicationService::encryptPassword($dsyncSecret));
+
+        return [
+            'ok'      => true,
+            'install' => $install,
+            'phase'   => 'installing',
+            'note'    => 'Servicios en instalación (background). El master finalizará dsync + sync inicial al terminar.',
+        ];
+    }
+
+    /**
+     * SLAVE-side phase 2 (invoked by the master once services are installed):
+     * configure this node's dsync side and pull the initial sync of existing
+     * mailboxes from the master. Idempotent; only acts if a replica was pending.
+     */
+    public static function finalizeBackupReplica(array $payload = []): array
+    {
+        if (Settings::get('mail_replica_pending', '') !== '1') {
+            return ['ok' => true, 'skipped' => true, 'note' => 'No hay réplica pendiente de finalizar.'];
+        }
+        if (!is_dir('/etc/dovecot')) {
+            return ['ok' => false, 'error' => 'Dovecot aún no está instalado; reintenta cuando termine la instalación.'];
+        }
+        $partner = Settings::get('mail_replica_dsync_partner', '');
+        $secret  = ReplicationService::decryptPassword(Settings::get('mail_replica_dsync_secret_enc', ''));
+        if (!filter_var($partner, FILTER_VALIDATE_IP) || $secret === '') {
+            return ['ok' => false, 'error' => 'Parámetros de dsync no disponibles para finalizar.'];
+        }
+
+        // Configure this node's dsync side with the shared secret.
+        $dsync = MailReplicationService::configureNode($partner, false, $secret);
+        if (empty($dsync['ok'])) {
+            return ['ok' => false, 'error' => 'No se pudo configurar dsync: ' . ($dsync['error'] ?? '')];
+        }
+
+        // Pull the initial sync of EXISTING mailboxes from the master (H2 fix):
+        // without this, the slave would only replicate mail delivered AFTER setup.
+        $sync = MailReplicationService::initialSync($partner);
+
+        Settings::set('mail_replica_pending', '0');
+        LogService::log('mail.replica_finalize', $partner, 'dsync + sync inicial completados en el slave.');
+        return ['ok' => true, 'dsync' => $dsync, 'initial_sync' => $sync];
+    }
+
+    /** Master's musedock_mail password in clear (create/store encrypted if missing). */
+    private static function ensureMasterMailPassword(): string
+    {
+        $enc = Settings::get('mail_db_password_enc', '');
+        if ($enc !== '') {
+            $dec = ReplicationService::decryptPassword($enc);
+            if ($dec !== '') return $dec;
+        }
+        // Not set yet (mail not installed on master) — generate, store, and ensure
+        // the role exists with it.
+        $pass = bin2hex(random_bytes(20));
+        Settings::set('mail_db_password_enc', ReplicationService::encryptPassword($pass));
+        $escaped = str_replace("'", "''", $pass);
+        $port = (int)\MuseDockPanel\Env::get('DB_PORT', '5433');
+        $db   = \MuseDockPanel\Env::get('DB_NAME', 'musedock_panel');
+        $sql = "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='musedock_mail') THEN "
+             . "CREATE ROLE musedock_mail WITH LOGIN PASSWORD '{$escaped}'; "
+             . "ELSE ALTER ROLE musedock_mail WITH LOGIN PASSWORD '{$escaped}'; END IF; END \$\$;";
+        shell_exec('sudo -u postgres psql -p ' . $port . ' -d ' . escapeshellarg($db)
+            . ' -v ON_ERROR_STOP=1 -c ' . escapeshellarg($sql) . ' 2>&1');
+        foreach ([
+            "GRANT CONNECT ON DATABASE {$db} TO musedock_mail",
+            'GRANT USAGE ON SCHEMA public TO musedock_mail',
+            'GRANT SELECT ON mail_domains, mail_accounts, mail_aliases TO musedock_mail',
+        ] as $g) {
+            shell_exec('sudo -u postgres psql -p ' . $port . ' -d ' . escapeshellarg($db)
+                . ' -c ' . escapeshellarg($g) . ' 2>&1');
+        }
+        return $pass;
+    }
+
+    /**
+     * Add a pg_hba line letting musedock_mail connect from the slave's WG /32 to
+     * the panel DB (a NORMAL connection — NOT replication, which G1 already covers).
+     * Idempotent + reload only the panel cluster.
+     */
+    private static function openMasterHbaForMailUser(string $slaveWgIp): array
+    {
+        if (!filter_var($slaveWgIp, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'output' => 'IP de slave no válida'];
+        }
+        $cluster = PgClusterService::getPanelCluster();
+        if (!$cluster || empty($cluster['hba_file'])) {
+            return ['ok' => false, 'output' => 'No se pudo resolver el pg_hba del clúster panel'];
+        }
+        $db   = \MuseDockPanel\Env::get('DB_NAME', 'musedock_panel');
+        $line = "host    {$db}    musedock_mail    {$slaveWgIp}/32    scram-sha-256";
+        $hba  = (string)@file_get_contents($cluster['hba_file']);
+        if (!str_contains($hba, $line)) {
+            ReplicationService::backupFile($cluster['hba_file']);
+            if (@file_put_contents($cluster['hba_file'], rtrim($hba) . "\n{$line}\n") === false) {
+                return ['ok' => false, 'output' => 'No se pudo escribir pg_hba'];
+            }
+        }
+        shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' '
+            . escapeshellarg($cluster['cluster']) . ' reload 2>&1');
+        return ['ok' => true, 'output' => $line];
+    }
+
+    /**
      * Check if mail stack is configured on this node.
      * Runs ON THE NODE — checks for mail_node_configured setting and key config files.
      */
