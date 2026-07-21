@@ -56,9 +56,9 @@
 
         <?php if ($repNextStep === 'installing'):
             $ip = $rep['install_progress'] ?? [];
-            $step = (int)($ip['step'] ?? 0); $total = (int)($ip['total_steps'] ?? 9);
-            $pct = $total ? min(100, round(($step/$total)*100)) : 30;
-            $msg = $ip['label'] ?? $ip['message'] ?? 'Instalando servicios de correo…';
+            $step = (int)($ip['step'] ?? 0); $total = (int)($ip['total_steps'] ?? 10);
+            $pct = $total ? min(100, round(($step/$total)*100)) : 10;
+            $msg = $ip['label'] ?? $ip['current'] ?? $ip['message'] ?? 'Instalando servicios de correo…';
         ?>
             <div class="alert alert-warning py-2 mb-0">
                 <div class="d-flex align-items-center mb-2 small fw-semibold">

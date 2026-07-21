@@ -3711,7 +3711,19 @@ class MailService
         }
         shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' '
             . escapeshellarg($cluster['cluster']) . ' reload 2>&1');
-        return ['ok' => true, 'output' => $line];
+
+        // Open the panel DB port (5433) in the master's firewall ONLY to the slave's
+        // WG /32. G1 opened listen_addresses + pg_hba but NOT the firewall, so the
+        // slave's connection was dropped at the packet level (the installer hangs on
+        // "verify PostgreSQL connectivity", step 1/10). Scope it to the slave; never
+        // expose 5433 to the public interface.
+        $port = (int)$cluster['port'];
+        $safeSlave = escapeshellarg($slaveWgIp);
+        shell_exec('iptables -C INPUT -p tcp -s ' . $safeSlave . ' --dport ' . $port
+            . ' -j ACCEPT 2>/dev/null || iptables -A INPUT -p tcp -s ' . $safeSlave
+            . ' --dport ' . $port . ' -j ACCEPT 2>/dev/null');
+
+        return ['ok' => true, 'output' => $line . " + firewall 5433←{$slaveWgIp}"];
     }
 
     /**

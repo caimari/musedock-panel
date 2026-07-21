@@ -619,7 +619,10 @@ exec("pg_isready -h {$dbHost} -p {$dbPort} 2>&1", $pgOut, $pgCode);
 if ($pgCode !== 0) {
     $msg = $localMode
         ? "PostgreSQL no accesible en {$dbHost}:{$dbPort}. Verifica que el servicio esta corriendo."
-        : "PostgreSQL no accesible en {$dbHost}:{$dbPort}. No se detecta replica local activa. Configurala primero desde Cluster → Nodos → Replicacion.";
+        : "PostgreSQL del master no accesible en {$dbHost}:{$dbPort} desde este nodo. "
+        . "Causas habituales: (1) el firewall del master no permite el puerto {$dbPort} desde la IP WireGuard de este nodo; "
+        . "(2) listen_addresses del master no incluye la IP WireGuard; (3) pg_hba del master sin linea para musedock_mail desde este /32. "
+        . "La orquestacion desde el master (Mail → Infra → Instalar replica) configura los tres automaticamente.";
     logLine($logFile, 'FATAL', $msg);
     logLine($logFile, 'FATAL', implode("\n", $pgOut));
     $errors[] = ['step' => 'verify_database', 'command' => "pg_isready -h {$dbHost} -p {$dbPort}", 'exit' => $pgCode, 'output' => $msg];
