@@ -3408,33 +3408,21 @@ class MailService
      */
     public static function slaveReplicaStateFor(int $nodeId): string
     {
-        $cacheKey = "mail_replica_state_node_{$nodeId}";
-        $cached = Settings::get($cacheKey, '');
-        $cachedAt = (int)Settings::get($cacheKey . '_at', '0');
-        // 30s cache to keep the Infra page snappy.
-        if ($cached !== '' && $cachedAt > 0 && (time() - $cachedAt) < 30) {
-            return $cached;
-        }
-        $state = 'unknown';
+        // Read the value the heartbeat already stored in node metadata — instant,
+        // never blocks the page, never fails on a slow/TLS-flaky node. It refreshes
+        // every heartbeat (~30s). Returns 'unknown' until the first heartbeat with
+        // the new field arrives (e.g. a node not yet updated to this version).
         try {
-            $res = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', [
-                'action' => 'mail_replica_status', 'payload' => [],
-            ]);
-            $r = $res['result'] ?? [];
-            if (!empty($res['ok']) && is_array($r)) {
-                $installed  = !empty($r['services_installed']);
-                $dsync      = !empty($r['dsync_configured']);
-                $installing = !empty($r['installing']);
-                $state = $installing ? 'installing'
-                       : ($installed && $dsync ? 'ready'
-                       : ($installed ? 'services_only' : 'none'));
+            $node = ClusterService::getNode($nodeId);
+            if ($node) {
+                $meta = json_decode((string)($node['metadata'] ?? '{}'), true) ?: [];
+                $v = (string)($meta['mail_replica'] ?? '');
+                if (in_array($v, ['ready', 'installing', 'services_only', 'none'], true)) {
+                    return $v;
+                }
             }
-        } catch (\Throwable) {
-            $state = 'unknown';
-        }
-        Settings::set($cacheKey, $state);
-        Settings::set($cacheKey . '_at', (string)time());
-        return $state;
+        } catch (\Throwable) {}
+        return 'unknown';
     }
 
     /**
@@ -3512,16 +3500,33 @@ class MailService
                 'dsync_partner'  => $masterWgIp,
             ],
         ]);
-        $steps[] = ['name' => 'Instalar réplica en el slave', 'ok' => !empty($installRes['ok']), 'output' => $installRes['error'] ?? ($installRes['message'] ?? 'OK')];
-        if (empty($installRes['ok'])) {
-            return ['ok' => false, 'steps' => $steps, 'error' => 'El slave no pudo instalar la réplica: ' . ($installRes['error'] ?? 'error remoto')];
+        // Two levels of success: (1) the HTTP call reached the slave (transport ok)
+        // and (2) the slave's handler itself succeeded (remote ok). callNode wraps
+        // the remote return in 'result'/'data'; a transport-ok call can still carry
+        // a remote failure. Check BOTH so we never enqueue finalize on a silent fail.
+        $remote = $installRes['result'] ?? $installRes['data'] ?? [];
+        $transportOk = !empty($installRes['ok']);
+        $remoteOk    = !empty($remote['ok']) || !empty($remote['install']['task_id']) || !empty($remote['task_id']);
+        $steps[] = ['name' => 'Instalar réplica en el slave', 'ok' => $transportOk && $remoteOk,
+            'output' => (!$transportOk ? ($installRes['error'] ?? 'sin conexión con el nodo')
+                       : (!$remoteOk ? ($remote['error'] ?? 'el nodo rechazó la instalación') : 'OK'))];
+        if (!$transportOk) {
+            return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo contactar con el nodo slave: ' . ($installRes['error'] ?? 'error de red/TLS')];
+        }
+        if (!$remoteOk) {
+            return ['ok' => false, 'steps' => $steps, 'error' => 'El nodo rechazó la instalación: ' . ($remote['error'] ?? 'error remoto')];
         }
 
         // Surface the slave's background install task_id so the UI can poll its
         // progress via /settings/cluster/mail-setup-progress?node_id=..&task_id=..
-        $taskId = $installRes['install']['task_id'] ?? ($installRes['task_id'] ?? '');
+        $taskId = $remote['install']['task_id']
+               ?? $remote['task_id']
+               ?? '';
         if ($taskId !== '') {
+            // Master-side timer for the progress endpoint + the node the UI polls.
             Settings::set('mail_setup_started_at', date('Y-m-d H:i:s'));
+            Settings::set('mail_setup_node_id', (string)$slaveNodeId);
+            Settings::set('mail_setup_task_id', $taskId);
         }
 
         // 6) Finalize (dsync + initial sync) must wait until the slave's background

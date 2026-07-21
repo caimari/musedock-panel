@@ -569,7 +569,7 @@ class ClusterService
              WHERE q.status = 'pending'
                AND q.action LIKE 'mail\\_%' ESCAPE '\\'
                AND q.paused_reason IS NOT NULL
-               AND q.paused_at < NOW() - (:hours * INTERVAL '1 hour')
+               AND q.paused_at < NOW() - make_interval(hours => :hours)
              ORDER BY q.paused_at ASC",
             ['hours' => $hours]
         );
@@ -1169,6 +1169,9 @@ class ClusterService
             }
             if (!empty($remoteData['panel_version'])) {
                 $existingMeta['panel_version'] = (string)$remoteData['panel_version'];
+            }
+            if (array_key_exists('mail_replica', $remoteData)) {
+                $existingMeta['mail_replica'] = (string)$remoteData['mail_replica'];
             }
 
             Database::update('cluster_nodes', [

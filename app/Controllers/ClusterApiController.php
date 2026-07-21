@@ -289,6 +289,16 @@ class ClusterApiController
             $dbHashMismatch = ($masterDbHash !== $localDbHash);
         }
 
+        // Mail backup-replica state, so the master's Infra table can show it without
+        // an extra live call per render (best-effort; never let it break heartbeat).
+        $mailReplica = 'unknown';
+        try {
+            $rep = MailService::slaveMailReplicaStatus();
+            $mailReplica = $rep['next_step'] === 'ready' ? 'ready'
+                         : (!empty($rep['installing']) ? 'installing'
+                         : (!empty($rep['services_installed']) ? 'services_only' : 'none'));
+        } catch (\Throwable) {}
+
         echo json_encode([
             'ok'                => true,
             'timestamp'         => date('Y-m-d H:i:s'),
@@ -296,6 +306,7 @@ class ClusterApiController
             'cluster_role'      => $clusterRole ?: $envRole,
             'panel_version'     => defined('PANEL_VERSION') ? PANEL_VERSION : 'unknown',
             'db_hash_mismatch'  => $dbHashMismatch,
+            'mail_replica'      => $mailReplica,
         ]);
         exit;
     }
