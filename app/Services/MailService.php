@@ -3368,6 +3368,22 @@ class MailService
         // Who is the master (partner to replicate from)?
         $masterIp = Settings::get('cluster_master_ip', '');
 
+        // Is an install running right now? (background task started by the master)
+        $installing = false; $installProgress = null;
+        $taskId = Settings::get('mail_setup_task_id', '');
+        if ($taskId !== '' && !$servicesActive) {
+            $prog = self::nodeSetupStatus(['task_id' => $taskId]);
+            $status = $prog['status'] ?? ($prog['progress']['status'] ?? '');
+            if (in_array($status, ['starting', 'running'], true)) {
+                $installing = true;
+                $installProgress = $prog['progress'] ?? $prog;
+            }
+        }
+
+        $nextStep = $installing ? 'installing'
+                  : (!$servicesInstalled ? 'install_services'
+                  : (!$dsyncConfigured ? 'configure_dsync' : 'ready'));
+
         return [
             'services'           => $svc,
             'services_installed' => $servicesInstalled,
@@ -3375,9 +3391,10 @@ class MailService
             'dsync_configured'   => $dsyncConfigured,
             'dsync_partner'      => $dsyncPartner,
             'master_ip'          => $masterIp,
+            'installing'         => $installing,
+            'install_progress'   => $installProgress,
             // The operator's next step, so the view can show one clear call to action.
-            'next_step'          => !$servicesInstalled ? 'install_services'
-                                  : (!$dsyncConfigured ? 'configure_dsync' : 'ready'),
+            'next_step'          => $nextStep,
         ];
     }
 
@@ -3461,19 +3478,35 @@ class MailService
             return ['ok' => false, 'steps' => $steps, 'error' => 'El slave no pudo instalar la réplica: ' . ($installRes['error'] ?? 'error remoto')];
         }
 
+        // Surface the slave's background install task_id so the UI can poll its
+        // progress via /settings/cluster/mail-setup-progress?node_id=..&task_id=..
+        $taskId = $installRes['install']['task_id'] ?? ($installRes['task_id'] ?? '');
+        if ($taskId !== '') {
+            Settings::set('mail_setup_started_at', date('Y-m-d H:i:s'));
+        }
+
         // 6) Finalize (dsync + initial sync) must wait until the slave's background
         //    install finishes. Enqueue it so the cluster worker retries until the
         //    slave reports Dovecot ready — avoids the install/dsync race (H4) and
         //    guarantees the initial mailbox sync happens (H2). The job is idempotent
         //    (finalizeBackupReplica no-ops once mail_replica_pending is cleared).
+        // High max_attempts: the worker runs ~every minute, so 40 attempts covers a
+        // ~40-min install window. Each failed attempt while Dovecot installs simply
+        // reschedules; once ready, finalize succeeds and stops.
         ClusterService::enqueue($slaveNodeId, 'mail_finalize_backup_replica', [
             'partner_ip' => $masterWgIp,
-        ]);
-        $steps[] = ['name' => 'Programar dsync + sync inicial', 'ok' => true, 'output' => 'encolado (se ejecuta al terminar la instalación)'];
+        ], 5, 40);
+        $steps[] = ['name' => 'Programar dsync + sync inicial', 'ok' => true, 'output' => 'encolado (reintenta hasta que la instalación termine)'];
 
         LogService::log('mail.replica_prepare', (string)$slaveNodeId,
             "Réplica de correo preparada en nodo #{$slaveNodeId} ({$slaveWgIp}); finalización encolada.");
-        return ['ok' => true, 'steps' => $steps, 'slave_ip' => $slaveWgIp];
+        return [
+            'ok'       => true,
+            'steps'    => $steps,
+            'slave_ip' => $slaveWgIp,
+            'node_id'  => $slaveNodeId,
+            'task_id'  => $taskId,   // for progress polling
+        ];
     }
 
     /**
@@ -3548,8 +3581,14 @@ class MailService
         if (Settings::get('mail_replica_pending', '') !== '1') {
             return ['ok' => true, 'skipped' => true, 'note' => 'No hay réplica pendiente de finalizar.'];
         }
-        if (!is_dir('/etc/dovecot')) {
-            return ['ok' => false, 'error' => 'Dovecot aún no está instalado; reintenta cuando termine la instalación.'];
+        // Dovecot may still be installing in the background (takes minutes). If it
+        // isn't ready, return a failure so the queue RETRIES — the finalize job is
+        // enqueued with a high max_attempts (see prepareMailReplicaOnNode) so it
+        // keeps retrying across the install window instead of giving up after 3.
+        $dovecotReady = is_dir('/etc/dovecot')
+            && trim((string)shell_exec('command -v dovecot 2>/dev/null')) !== '';
+        if (!$dovecotReady) {
+            return ['ok' => false, 'error' => 'Dovecot aún no está instalado; reintentando…', 'retryable' => true];
         }
         $partner = Settings::get('mail_replica_dsync_partner', '');
         $secret  = ReplicationService::decryptPassword(Settings::get('mail_replica_dsync_secret_enc', ''));

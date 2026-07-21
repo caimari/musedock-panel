@@ -54,10 +54,33 @@
             <?php endforeach; ?>
         </div>
 
-        <?php if ($repNextStep === 'ready'): ?>
+        <?php if ($repNextStep === 'installing'):
+            $ip = $rep['install_progress'] ?? [];
+            $step = (int)($ip['step'] ?? 0); $total = (int)($ip['total_steps'] ?? 9);
+            $pct = $total ? min(100, round(($step/$total)*100)) : 30;
+            $msg = $ip['label'] ?? $ip['message'] ?? 'Instalando servicios de correo…';
+        ?>
+            <div class="alert alert-warning py-2 mb-0">
+                <div class="d-flex align-items-center mb-2 small fw-semibold">
+                    <span class="spinner-border spinner-border-sm me-2"></span>
+                    Instalación en curso (lanzada desde el master)
+                </div>
+                <div class="progress mb-1" style="height:16px;background:#1b232b;">
+                    <div class="progress-bar progress-bar-striped progress-bar-animated" style="width:<?= $pct ?>%;"><?= $pct ?>%</div>
+                </div>
+                <div class="small" style="color:#9aa7b4;"><?= View::e($msg) ?> (paso <?= $step ?>/<?= $total ?>)</div>
+            </div>
+            <script>setTimeout(function(){ location.reload(); }, 5000);</script>
+        <?php elseif ($repNextStep === 'ready'): ?>
             <div class="alert alert-success mb-0 py-2 small">
                 <i class="bi bi-shield-check me-1"></i>
                 Este nodo está listo: servicios instalados y replicación activa. Si el master cae, puede servir el correo con los buzones ya copiados.
+            </div>
+        <?php elseif ($repNextStep === 'configure_dsync'): ?>
+            <div class="alert alert-info mb-0 py-2 small">
+                <i class="bi bi-hourglass-split me-1"></i>
+                Servicios instalados. La replicación de mensajes (dsync) se está configurando automáticamente desde el master;
+                se completará en breve (incluye el sync inicial de los buzones existentes).
             </div>
         <?php else: ?>
             <div class="alert alert-info mb-0 py-2 small">
@@ -1542,28 +1565,110 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
 (function(){
     var csrf = <?= json_encode(View::csrfToken()) ?>;
     var out = document.getElementById('prepareReplicaResult');
+
+    function swal(){ return (typeof SwalDark !== 'undefined') ? SwalDark : (window.SwalDark || window.Swal || null); }
+
+    // Poll the slave's install progress and drive a SweetAlert2 progress modal.
+    function pollProgress(nodeId, nodeName, taskId){
+        var S = swal();
+        var url = '/settings/cluster/mail-setup-progress?node_id=' + encodeURIComponent(nodeId) + '&task_id=' + encodeURIComponent(taskId);
+        function tick(){
+            fetch(url, {headers:{'X-Requested-With':'XMLHttpRequest'}})
+              .then(function(r){return r.json();})
+              .then(function(d){
+                var p = (d && d.progress) ? d.progress : (d || {});
+                var status = p.status || 'running';
+                var step = p.step || 0, total = p.total_steps || 9;
+                var pct = total ? Math.min(100, Math.round((step/total)*100)) : 50;
+                var label = p.label || p.current || p.message || 'Instalando servicios de correo…';
+                if(status === 'completed'){
+                    if(S) S.fire({icon:'success', title:'Réplica instalada', html:'<div class="small">Servicios instalados en <b>'+nodeName+'</b>. La replicación de mensajes (dsync) se configurará automáticamente y hará el sync inicial.</div>', confirmButtonText:'Entendido'});
+                    return;
+                }
+                if(status === 'error' || status === 'timeout'){
+                    var err = (p.errors && p.errors[0] && p.errors[0].output) ? p.errors[0].output : (status === 'timeout' ? 'La instalación no terminó a tiempo; puede seguir en segundo plano en el nodo.' : 'La instalación falló en el nodo.');
+                    if(S) S.fire({icon: (status==='timeout'?'warning':'error'), title:(status==='timeout'?'Sin confirmación':'Error en la instalación'), html:'<div class="small text-start">'+err+'</div>', confirmButtonText:'Cerrar'});
+                    return;
+                }
+                // still running → update the modal body
+                if(S && S.getHtmlContainer){
+                    var bar = document.getElementById('replInstBar');
+                    var msg = document.getElementById('replInstMsg');
+                    if(bar){ bar.style.width = pct + '%'; bar.textContent = pct + '%'; }
+                    if(msg){ msg.textContent = label + '  (paso ' + step + '/' + total + ')'; }
+                }
+                setTimeout(tick, 2500);
+              })
+              .catch(function(){ setTimeout(tick, 4000); });
+        }
+        tick();
+    }
+
+    function progressModalHtml(nodeName){
+        return '<div class="small text-muted mb-2">Instalando el correo en <b>'+nodeName+'</b>. Puedes cerrar esta ventana; la instalación continúa en el nodo.</div>'
+             + '<div class="progress" style="height:18px;background:#1b232b;"><div id="replInstBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%;">0%</div></div>'
+             + '<div id="replInstMsg" class="small text-muted mt-2">Iniciando…</div>';
+    }
+
     document.querySelectorAll('.prepare-mail-replica-btn').forEach(function(btn){
         btn.addEventListener('click', function(){
             var nodeId = btn.getAttribute('data-node-id');
             var nodeName = btn.getAttribute('data-node-name') || ('#'+nodeId);
-            var pass = prompt('Confirma tu contraseña de administrador para instalar la réplica de correo en "'+nodeName+'":');
-            if(!pass) return;
-            btn.disabled = true;
-            if(out){ out.style.display='block'; out.className='mt-3 small text-muted'; out.textContent='Preparando réplica en '+nodeName+'… (abriendo acceso, configurando dsync e instalando servicios)'; }
-            var body = new URLSearchParams();
-            body.set('_csrf_token', csrf);
-            body.set('admin_password', pass);
-            body.set('node_id', nodeId);
-            fetch('/settings/cluster/prepare-mail-replica', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:body})
-              .then(function(r){return r.json();})
-              .then(function(d){
-                btn.disabled = false;
-                if(d.ok){ if(out){ out.className='mt-3 small text-success'; out.innerHTML='<i class="bi bi-check-circle me-1"></i>Réplica en marcha en '+nodeName+'. La instalación de servicios continúa en segundo plano en el nodo.'; } }
-                else { if(out){ out.className='mt-3 small text-danger'; out.textContent='Error: '+(d.error||'no se pudo preparar la réplica'); } }
-              })
-              .catch(function(e){ btn.disabled=false; if(out){ out.className='mt-3 small text-danger'; out.textContent='Error de red: '+e; } });
+            var S = swal();
+            if(!S){
+                // Fallback if SweetAlert isn't present.
+                var pass0 = prompt('Confirma tu contraseña de administrador para instalar la réplica en "'+nodeName+'":');
+                if(!pass0) return;
+                return doInstall(pass0, nodeId, nodeName, null);
+            }
+            S.fire({
+                title: 'Instalar réplica en ' + nodeName,
+                html: '<div class="small text-muted mb-2 text-start">Introduce tu contraseña de administrador. El master abrirá el acceso, compartirá el secreto de replicación y ordenará al nodo instalar el correo.</div>',
+                input: 'password',
+                inputPlaceholder: 'Contraseña de administrador',
+                inputAttributes: { autocomplete: 'current-password' },
+                showCancelButton: true,
+                confirmButtonText: 'Instalar réplica',
+                cancelButtonText: 'Cancelar',
+                preConfirm: function(pass){
+                    if(!pass){ S.showValidationMessage('La contraseña es obligatoria'); return false; }
+                    return pass;
+                }
+            }).then(function(res){
+                if(!res.isConfirmed) return;
+                doInstall(res.value, nodeId, nodeName, S);
+            });
         });
     });
+
+    function doInstall(pass, nodeId, nodeName, S){
+        var btn = document.querySelector('.prepare-mail-replica-btn[data-node-id="'+nodeId+'"]');
+        if(btn) btn.disabled = true;
+        if(S){ S.fire({title:'Preparando réplica…', html:'<div class="small text-muted">Abriendo acceso, configurando dsync y lanzando la instalación en '+nodeName+'…</div>', allowOutsideClick:false, didOpen:function(){ S.showLoading(); }}); }
+        var body = new URLSearchParams();
+        body.set('_csrf_token', csrf);
+        body.set('admin_password', pass);
+        body.set('node_id', nodeId);
+        fetch('/settings/cluster/prepare-mail-replica', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:body})
+          .then(function(r){return r.json();})
+          .then(function(d){
+            if(btn) btn.disabled = false;
+            if(!d.ok){
+                if(S) S.fire({icon:'error', title:'No se pudo preparar la réplica', html:'<div class="small text-start">'+(d.error||'error desconocido')+'</div>'});
+                else if(out){ out.style.display='block'; out.className='mt-3 small text-danger'; out.textContent='Error: '+(d.error||'error'); }
+                return;
+            }
+            // Success → show progress modal and poll the slave's install task.
+            if(d.task_id && S){
+                S.fire({ title:'Instalando en '+nodeName, html: progressModalHtml(nodeName), allowOutsideClick:true, showConfirmButton:true, confirmButtonText:'Cerrar (sigue en segundo plano)' });
+                pollProgress(nodeId, nodeName, d.task_id);
+            } else if(S){
+                S.fire({icon:'success', title:'Réplica en marcha', html:'<div class="small">La instalación continúa en segundo plano en '+nodeName+'.</div>'});
+            }
+            if(out){ out.style.display='block'; out.className='mt-3 small text-success'; out.innerHTML='<i class="bi bi-check-circle me-1"></i>Réplica en marcha en '+nodeName+'.'; }
+          })
+          .catch(function(e){ if(btn) btn.disabled=false; if(S) S.fire({icon:'error', title:'Error de red', text:String(e)}); });
+    }
 })();
 </script>
 <?php endif; endif; ?>

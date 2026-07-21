@@ -415,7 +415,7 @@ class ClusterService
     // ─── Queue Management ────────────────────────────────────
     // ═══════════════════════════════════════════════════════════
 
-    public static function enqueue(int $nodeId, string $action, array $payload, int $priority = 5): int
+    public static function enqueue(int $nodeId, string $action, array $payload, int $priority = 5, int $maxAttempts = 3): int
     {
         $idempotencyKey = self::buildQueueIdempotencyKey($nodeId, $action, $payload);
         if ($idempotencyKey !== null) {
@@ -453,7 +453,7 @@ class ClusterService
             'paused_at' => $pausedAt,
             'priority'     => $priority,
             'attempts'     => 0,
-            'max_attempts' => 3,
+            'max_attempts' => max(1, $maxAttempts),
             'scheduled_at' => date('Y-m-d H:i:s'),
             'created_at'   => date('Y-m-d H:i:s'),
         ]);
