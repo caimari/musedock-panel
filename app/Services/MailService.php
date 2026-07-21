@@ -319,12 +319,24 @@ class MailService
 
     public static function createAlias(int $domainId, string $source, string $destination, bool $isCatchall = false): int
     {
+        // Only ONE catchall per domain makes sense (it captures everything not
+        // matched by a real mailbox). If this alias is a catchall, clear the flag
+        // on any existing catchall for the domain first.
+        if ($isCatchall) {
+            Database::query(
+                "UPDATE mail_aliases SET is_catchall = false WHERE mail_domain_id = :d AND is_catchall = true",
+                ['d' => $domainId]
+            );
+        }
+        // PDO binds PHP false as '' (empty string), which PostgreSQL rejects for a
+        // boolean column ("invalid input syntax for type boolean"). Pass explicit
+        // 'true'/'false' string literals that PG accepts.
         return Database::insert('mail_aliases', [
             'mail_domain_id' => $domainId,
             'source'         => strtolower(trim($source)),
             'destination'    => strtolower(trim($destination)),
-            'is_catchall'    => $isCatchall,
-            'is_active'      => true,
+            'is_catchall'    => $isCatchall ? 'true' : 'false',
+            'is_active'      => 'true',
             'created_at'     => date('Y-m-d H:i:s'),
         ]);
     }

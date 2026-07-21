@@ -106,7 +106,23 @@
     </div>
     <div class="col-md-4">
         <div class="card">
-            <div class="card-header"><i class="bi bi-signpost me-2"></i>DNS Records</div>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-signpost me-2"></i>DNS Records</span>
+                <?php if (!empty($dnsRecords)):
+                    // Build a tab-separated block of ALL records for one-click copy.
+                    $allLines = [];
+                    foreach ($dnsRecords as $r) {
+                        $v = (isset($r['priority']) ? $r['priority'] . ' ' : '') . $r['value'];
+                        $allLines[] = $r['type'] . "\t" . $r['name'] . "\t" . $v;
+                    }
+                    $allBlock = implode("\n", $allLines);
+                ?>
+                <button type="button" class="btn btn-outline-light btn-sm py-0 px-2 dns-copy-all"
+                        title="Copiar todos los registros" data-copy="<?= View::e($allBlock) ?>">
+                    <i class="bi bi-clipboard-check me-1"></i>Copiar todo
+                </button>
+                <?php endif; ?>
+            </div>
             <div class="card-body p-0">
                 <?php if (empty($dnsRecords)): ?>
                     <div class="p-3 text-muted">No DNS records available.</div>
@@ -117,12 +133,30 @@
                                 <tr><th class="ps-3">Type</th><th>Name</th><th>Value</th></tr>
                             </thead>
                             <tbody>
-                                <?php foreach ($dnsRecords as $r): ?>
+                                <?php foreach ($dnsRecords as $r):
+                                    // Full value (with priority prefix for MX) — this is what gets copied.
+                                    $fullValue = (isset($r['priority']) ? $r['priority'] . ' ' : '') . $r['value'];
+                                    $shown = mb_substr($fullValue, 0, 80) . (mb_strlen($fullValue) > 80 ? '…' : '');
+                                ?>
                                 <tr>
-                                    <td class="ps-3"><code><?= $r['type'] ?></code></td>
-                                    <td class="text-break"><?= View::e($r['name']) ?></td>
-                                    <td class="text-break" style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">
-                                        <?= View::e(isset($r['priority']) ? $r['priority'] . ' ' : '') ?><?= View::e(substr($r['value'], 0, 80)) ?><?= strlen($r['value']) > 80 ? '...' : '' ?>
+                                    <td class="ps-3 align-middle"><code><?= $r['type'] ?></code>
+                                        <?php if ($r['type'] === 'TXT' && str_contains($r['value'], 'DKIM')): ?>
+                                            <div class="badge bg-secondary mt-1" style="font-size:.6rem;"><?= mb_strlen($fullValue) ?> chars</div>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td class="align-middle">
+                                        <div class="d-flex align-items-center justify-content-between gap-2">
+                                            <span class="text-break" style="min-width:0;"><?= View::e($r['name']) ?></span>
+                                            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 flex-shrink-0 dns-copy-name"
+                                                    title="Copiar nombre" data-copy="<?= View::e($r['name']) ?>"><i class="bi bi-clipboard"></i></button>
+                                        </div>
+                                    </td>
+                                    <td class="align-middle" style="max-width:240px;">
+                                        <div class="d-flex align-items-center justify-content-between gap-2">
+                                            <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; font-family:monospace; font-size:.72rem;" title="<?= View::e($fullValue) ?>"><?= View::e($shown) ?></span>
+                                            <button type="button" class="btn btn-outline-primary btn-sm py-0 px-1 flex-shrink-0 dns-copy-value"
+                                                    title="Copiar valor completo" data-copy="<?= View::e($fullValue) ?>"><i class="bi bi-clipboard"></i></button>
+                                        </div>
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
@@ -171,7 +205,7 @@
                     <tr>
                         <td class="ps-3 fw-semibold"><?= View::e($a['email']) ?></td>
                         <td><?= View::e($a['display_name'] ?: '-') ?></td>
-                        <td><?= $a['quota_mb'] ?> MB</td>
+                        <td><?= (int)$a['quota_mb'] === 0 ? '<span class="badge bg-secondary">Ilimitado</span>' : ((int)$a['quota_mb'] . ' MB') ?></td>
                         <td>
                             <?= $a['used_mb'] ?> MB
                             <?php if ($a['quota_mb'] > 0): ?>
@@ -239,12 +273,26 @@
         <form method="POST" action="/mail/domains/<?= $domain['id'] ?>/aliases/store" class="row g-2 align-items-end">
             <?= View::csrf() ?>
             <div class="col-md-4">
-                <label class="form-label small">Source</label>
-                <input type="text" name="source" class="form-control form-control-sm" placeholder="alias@<?= View::e($domain['domain']) ?>" required>
+                <label class="form-label small">Source (origen)</label>
+                <input type="text" name="source" list="alias-source-list" class="form-control form-control-sm"
+                       placeholder="alias@<?= View::e($domain['domain']) ?>" required>
+                <datalist id="alias-source-list">
+                    <?php foreach (($accounts ?? []) as $a): ?>
+                        <option value="<?= View::e($a['email']) ?>"></option>
+                    <?php endforeach; ?>
+                </datalist>
+                <div class="form-text">Elige un buzón existente o escribe una dirección nueva.</div>
             </div>
             <div class="col-md-4">
-                <label class="form-label small">Destination</label>
-                <input type="text" name="destination" class="form-control form-control-sm" placeholder="user@example.com" required>
+                <label class="form-label small">Destination (destino)</label>
+                <input type="text" name="destination" list="alias-dest-list" class="form-control form-control-sm"
+                       placeholder="user@example.com" required>
+                <datalist id="alias-dest-list">
+                    <?php foreach (($accounts ?? []) as $a): ?>
+                        <option value="<?= View::e($a['email']) ?>"></option>
+                    <?php endforeach; ?>
+                </datalist>
+                <div class="form-text">A dónde se reenvía (buzón local u otra dirección).</div>
             </div>
             <div class="col-md-2">
                 <div class="form-check">
@@ -261,6 +309,31 @@
 </div>
 
 <script>
+// Copy-to-clipboard for DNS records (copies the FULL value, not the truncated one).
+(function () {
+    function copyText(text, btn) {
+        var done = function () {
+            var icon = btn.querySelector('i');
+            if (!icon) return;
+            var prev = icon.className;
+            icon.className = 'bi bi-check-lg text-success';
+            setTimeout(function () { icon.className = prev; }, 1200);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(done).catch(function () { fallback(text, done); });
+        } else { fallback(text, done); }
+    }
+    function fallback(text, done) {
+        var ta = document.createElement('textarea');
+        ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(); } catch (e) {}
+        document.body.removeChild(ta);
+    }
+    document.querySelectorAll('.dns-copy-value, .dns-copy-name, .dns-copy-all').forEach(function (btn) {
+        btn.addEventListener('click', function () { copyText(btn.getAttribute('data-copy') || '', btn); });
+    });
+})();
 (function () {
     const btn = document.getElementById('dom-policy-save');
     if (!btn) return;

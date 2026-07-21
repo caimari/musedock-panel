@@ -27,7 +27,8 @@
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Quota (MB)</label>
-                            <input type="number" name="quota_mb" class="form-control" value="<?= $account['quota_mb'] ?>" min="1">
+                            <input type="number" name="quota_mb" class="form-control" value="<?= $account['quota_mb'] ?>" min="0">
+                            <div class="form-text"><strong>0 = sin límite</strong> (ilimitado).</div>
                         </div>
                         <div class="col-md-3">
                             <label class="form-label">Status</label>

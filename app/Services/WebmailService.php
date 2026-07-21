@@ -205,10 +205,21 @@ class WebmailService
         }
 
         $routeId = self::routeIdForHost($host);
-        $socket = "/run/php/php{$phpVersion}-fpm.sock";
-        if (!is_file($socket)) $socket = '/run/php/php-fpm.sock';
-        if (!is_file($socket)) $socket = "/run/php/php{$phpVersion}-fpm-www.sock";
-        if (!is_file($socket)) {
+        // A PHP-FPM socket is a Unix SOCKET, not a regular file — is_file() returns
+        // false for it, so use file_exists()/filetype() which recognise sockets.
+        // Otherwise the socket "isn't found" even though it exists, and the webmail
+        // route never gets published (page shows "Dominio no configurado").
+        $sockOk = static fn(string $p): bool => @file_exists($p) && @filetype($p) === 'socket';
+        $candidates = [
+            "/run/php/php{$phpVersion}-fpm.sock",
+            '/run/php/php-fpm.sock',
+            "/run/php/php{$phpVersion}-fpm-www.sock",
+        ];
+        // Fallback: any php*-fpm.sock in /run/php (pick the highest version).
+        foreach (glob('/run/php/php*-fpm.sock') ?: [] as $g) { $candidates[] = $g; }
+        $socket = '';
+        foreach ($candidates as $c) { if ($sockOk($c)) { $socket = $c; break; } }
+        if ($socket === '') {
             return ['ok' => false, 'error' => 'No se encontro socket PHP-FPM para publicar Roundcube'];
         }
 

@@ -2413,10 +2413,62 @@ initWebmailConfigLock();
                 confirmButtonText: 'Continuar',
                 confirmButtonColor: '#22c55e'
             }));
-            if (result.isConfirmed) {
-                installForm.submit();
+            if (!result.isConfirmed) return;
+
+            // Submit via AJAX and show a live progress modal (polling /mail/webmail/status),
+            // same UX as the mail backup-replica install.
+            const S = (typeof SwalDark !== 'undefined') ? SwalDark : (window.SwalDark || window.Swal || null);
+            const fd = new FormData(installForm);
+            try {
+                const resp = await fetch('/mail/webmail/install', {
+                    method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
+                });
+                let data = {};
+                try { data = await resp.json(); } catch (e) { /* non-JSON = old flow */ }
+                if (data && data.ok === false) {
+                    if (S) S.fire({ icon: 'error', title: 'No se pudo iniciar', html: '<div class="small text-start">' + (data.error || 'error') + '</div>' });
+                    return;
+                }
+                if (S) {
+                    S.fire({
+                        title: 'Instalando Roundcube',
+                        html: '<div class="small text-muted mb-2">Descargando dependencias, Roundcube y creando la ruta Caddy. Puedes cerrar; sigue en segundo plano.</div>'
+                            + '<div class="progress" style="height:18px;background:#1b232b;"><div id="wmBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:5%;">5%</div></div>'
+                            + '<div id="wmMsg" class="small text-muted mt-2">Iniciando…</div>',
+                        allowOutsideClick: true, showConfirmButton: true, confirmButtonText: 'Cerrar (sigue en segundo plano)'
+                    });
+                }
+                pollWebmailProgress(S);
+            } catch (e) {
+                if (S) S.fire({ icon: 'error', title: 'Error de red', text: String(e) });
             }
         });
+    }
+
+    function pollWebmailProgress(S) {
+        fetch('/mail/webmail/status', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+          .then(function (r) { return r.json(); })
+          .then(function (p) {
+            var status = p.status || 'running';
+            var step = p.step || 0, total = p.total_steps || p.total || 8;
+            var pct = total ? Math.min(100, Math.round((step / total) * 100)) : 40;
+            var msg = p.label || p.message || p.current || 'Instalando…';
+            if (status === 'completed' || status === 'done' || status === 'ok') {
+                if (S) S.fire({ icon: 'success', title: 'Webmail instalado', html: '<div class="small">Roundcube instalado y ruta Caddy creada. Recargando…</div>' });
+                setTimeout(function () { location.reload(); }, 1500);
+                return;
+            }
+            if (status === 'failed' || status === 'error') {
+                var err = (p.errors && p.errors[0] && p.errors[0].output) ? p.errors[0].output : (p.message || 'La instalación falló.');
+                if (S) S.fire({ icon: 'error', title: 'Error en la instalación', html: '<div class="small text-start">' + err + '</div>' });
+                return;
+            }
+            var bar = document.getElementById('wmBar'), m = document.getElementById('wmMsg');
+            if (bar) { bar.style.width = pct + '%'; bar.textContent = pct + '%'; }
+            if (m) { m.textContent = msg + (total ? ('  (paso ' + step + '/' + total + ')') : ''); }
+            setTimeout(function () { pollWebmailProgress(S); }, 2500);
+          })
+          .catch(function () { setTimeout(function () { pollWebmailProgress(S); }, 4000); });
     }
 
     const sieveForm = document.querySelector('form[data-webmail-sieve-form]');

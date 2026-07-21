@@ -1348,18 +1348,19 @@ class MailController
 
     public function webmailInstall(): void
     {
-        if (self::isSlave()) {
-            Flash::set('error', 'Este servidor es Slave.');
+        // AJAX requests (the progress-modal flow) get JSON; classic form posts keep
+        // the redirect+flash behaviour.
+        $isXhr = strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+        $fail = function (string $msg) use ($isXhr) {
+            if ($isXhr) { header('Content-Type: application/json'); echo json_encode(['ok' => false, 'error' => $msg]); return; }
+            Flash::set('error', $msg);
             Router::redirect('/mail?tab=webmail#webmail');
-            return;
-        }
+        };
+
+        if (self::isSlave()) { $fail('Este servidor es Slave.'); return; }
 
         $adminPassword = (string)($_POST['admin_password'] ?? '');
-        if (!$this->verifyAdminPassword($adminPassword)) {
-            Flash::set('error', 'Password de admin incorrecta.');
-            Router::redirect('/mail?tab=webmail#webmail');
-            return;
-        }
+        if (!$this->verifyAdminPassword($adminPassword)) { $fail('Password de admin incorrecta.'); return; }
 
         $result = WebmailService::startInstall(
             (string)($_POST['provider'] ?? 'roundcube'),
@@ -1368,6 +1369,11 @@ class MailController
             (string)($_POST['smtp_host'] ?? '')
         );
 
+        if ($isXhr) {
+            header('Content-Type: application/json');
+            echo json_encode($result, JSON_UNESCAPED_SLASHES);
+            return;
+        }
         Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
             ? 'Instalacion de Roundcube iniciada. Puedes refrescar esta pagina para ver el estado.'
             : ($result['error'] ?? 'No se pudo iniciar la instalacion de webmail.'));

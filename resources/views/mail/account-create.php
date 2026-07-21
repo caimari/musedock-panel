@@ -32,7 +32,8 @@
                         <div class="col-md-6">
                             <label class="form-label">Quota (MB)</label>
                             <input type="number" name="quota_mb" class="form-control"
-                                   value="<?= View::e(\MuseDockPanel\Settings::get('mail_default_quota_mb', '1024')) ?>" min="1">
+                                   value="<?= View::e(\MuseDockPanel\Settings::get('mail_default_quota_mb', '1024')) ?>" min="0">
+                            <div class="form-text"><strong>0 = sin límite</strong> (ilimitado). Cualquier otro valor es el máximo en MB.</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Customer</label>
@@ -46,14 +47,32 @@
                             </select>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label">Link to Hosting Account</label>
+                            <label class="form-label">Cuenta de hosting vinculada</label>
+                            <?php
+                                // Auto-select the hosting whose domain matches this mail domain
+                                // (the sensible default). Falls back to "none" if the domain has
+                                // no hosting on this server (mail-only domain).
+                                $mailDom = strtolower((string)($domain['domain'] ?? ''));
+                                $autoId = null;
+                                foreach ($hostingAccounts as $h) {
+                                    if (strtolower((string)$h['domain']) === $mailDom) { $autoId = (int)$h['id']; break; }
+                                }
+                            ?>
                             <select name="account_id" class="form-select">
-                                <option value="">-- None (standalone mail) --</option>
+                                <option value="">-- Ninguna (correo independiente) --</option>
                                 <?php foreach ($hostingAccounts as $h): ?>
-                                    <option value="<?= $h['id'] ?>"><?= View::e($h['domain']) ?> (<?= View::e($h['username']) ?>)</option>
+                                    <option value="<?= $h['id'] ?>" <?= ($autoId === (int)$h['id']) ? 'selected' : '' ?>>
+                                        <?= View::e($h['domain']) ?> (<?= View::e($h['username']) ?>)
+                                    </option>
                                 <?php endforeach; ?>
                             </select>
-                            <div class="form-text">Optional. Link this mailbox to a hosting account.</div>
+                            <div class="form-text">
+                                <?php if ($autoId !== null): ?>
+                                    Vinculado automáticamente al hosting de <strong><?= View::e($mailDom) ?></strong>. Cámbialo solo si es correo independiente.
+                                <?php else: ?>
+                                    No hay hosting para <strong><?= View::e($mailDom) ?></strong> en este servidor — buzón de solo correo. Puedes vincularlo a otro hosting si quieres.
+                                <?php endif; ?>
+                            </div>
                         </div>
                     </div>
                     <div class="mt-4 d-flex gap-2">
