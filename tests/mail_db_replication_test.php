@@ -61,6 +61,13 @@ ok('promoteToMaster hace resync de mail a los nodos', str_contains($cs, 'resyncM
 ok('documentado como "last promotion wins" (modelo simple seguro)',
     str_contains($cs, 'last promotion wins') || str_contains($cs, 're-absorbs'));
 
+section('5b. Aliases también se replican (mismo modelo)');
+ok('createAlias replica a los nodos', str_contains($ms, "self::replicateMailOp('mail_upsert_alias'"));
+ok('deleteAlias replica el borrado', str_contains($ms, "self::replicateMailOp('mail_delete_alias'"));
+ok('el slave hace upsert local del alias', str_contains($ms, 'function nodeUpsertAlias') && str_contains($ms, "WHERE mail_domain_id = :d AND source = :s"));
+ok('acciones de alias en el dispatcher', str_contains(file_get_contents(PANEL_ROOT.'/app/Controllers/ClusterApiController.php'), 'mail_upsert_alias') && str_contains(file_get_contents(PANEL_ROOT.'/app/Controllers/ClusterApiController.php'), 'nodeUpsertAlias'));
+ok('el resync inicial incluye los aliases', str_contains($ms, "'mail_upsert_alias'") && str_contains($ms, '$ac++'));
+
 section('6. Fixes de la review adversarial');
 $apic = file_get_contents(PANEL_ROOT . '/app/Controllers/ClusterApiController.php');
 ok('C: password_hash NO se loguea (en SECRET_KEYS)', str_contains($apic, "'password_hash'"));

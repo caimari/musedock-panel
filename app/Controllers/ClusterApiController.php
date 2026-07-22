@@ -404,6 +404,8 @@ class ClusterApiController
                 'mail_delete_domain'    => MailService::nodeDeleteDomain($payload),
                 'mail_create_mailbox'   => MailService::nodeCreateMailbox($payload),
                 'mail_delete_mailbox'   => MailService::nodeDeleteMailbox($payload),
+                'mail_upsert_alias'     => MailService::nodeUpsertAlias($payload),
+                'mail_delete_alias'     => MailService::nodeDeleteAlias($payload),
                 'mail_update_quota'     => MailService::nodeUpdateQuota($payload),
                 'mail_suspend_mailbox'  => MailService::nodeSuspendMailbox($payload),
                 'mail_activate_mailbox' => MailService::nodeActivateMailbox($payload),

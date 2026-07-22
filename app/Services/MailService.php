@@ -343,7 +343,7 @@ class MailService
         // PDO binds PHP false as '' (empty string), which PostgreSQL rejects for a
         // boolean column ("invalid input syntax for type boolean"). Pass explicit
         // 'true'/'false' string literals that PG accepts.
-        return Database::insert('mail_aliases', [
+        $id = Database::insert('mail_aliases', [
             'mail_domain_id' => $domainId,
             'source'         => strtolower(trim($source)),
             'destination'    => strtolower(trim($destination)),
@@ -351,11 +351,84 @@ class MailService
             'is_active'      => 'true',
             'created_at'     => date('Y-m-d H:i:s'),
         ]);
+
+        // Backup-replica: replicate the alias to every mail node's local DB.
+        $dom = Database::fetchOne("SELECT domain FROM mail_domains WHERE id = :id", ['id' => $domainId]);
+        if ($dom) {
+            self::replicateMailOp('mail_upsert_alias', [
+                'domain'      => $dom['domain'],
+                'source'      => strtolower(trim($source)),
+                'destination' => strtolower(trim($destination)),
+                'is_catchall' => $isCatchall,
+            ]);
+        }
+        return $id;
     }
 
     public static function deleteAlias(int $id): void
     {
+        // Capture the alias identity before deleting so we can replicate the delete.
+        $al = Database::fetchOne(
+            "SELECT a.source, d.domain FROM mail_aliases a JOIN mail_domains d ON d.id = a.mail_domain_id WHERE a.id = :id",
+            ['id' => $id]
+        );
         Database::delete('mail_aliases', 'id = :id', ['id' => $id]);
+        if ($al) {
+            self::replicateMailOp('mail_delete_alias', [
+                'domain' => $al['domain'], 'source' => $al['source'],
+            ]);
+        }
+    }
+
+    /** NODE-side: upsert an alias into this node's LOCAL mail_aliases (idempotent). */
+    public static function nodeUpsertAlias(array $payload): array
+    {
+        $source = strtolower(trim((string)($payload['source'] ?? '')));
+        $domain = strtolower(trim((string)($payload['domain'] ?? '')));
+        if ($source === '' || $domain === '') return ['ok' => false, 'error' => 'Falta source/domain'];
+        try {
+            $dom = Database::fetchOne("SELECT id FROM mail_domains WHERE domain = :d", ['d' => $domain]);
+            if (!$dom) { self::upsertLocalMailDomain($payload); $dom = Database::fetchOne("SELECT id FROM mail_domains WHERE domain = :d", ['d' => $domain]); }
+            if (!$dom) return ['ok' => false, 'error' => 'Dominio no encontrado localmente'];
+            $isCatchall = !empty($payload['is_catchall']);
+            if ($isCatchall) {
+                Database::query("UPDATE mail_aliases SET is_catchall = false WHERE mail_domain_id = :d AND is_catchall = true", ['d' => (int)$dom['id']]);
+            }
+            $existing = Database::fetchOne("SELECT id FROM mail_aliases WHERE mail_domain_id = :d AND source = :s", ['d' => (int)$dom['id'], 's' => $source]);
+            $fields = [
+                'mail_domain_id' => (int)$dom['id'],
+                'source'         => $source,
+                'destination'    => strtolower(trim((string)($payload['destination'] ?? ''))),
+                'is_catchall'    => $isCatchall ? 'true' : 'false',
+                'is_active'      => 'true',
+            ];
+            if ($existing) {
+                Database::update('mail_aliases', $fields, 'id = :id', ['id' => (int)$existing['id']]);
+            } else {
+                $fields['created_at'] = date('Y-m-d H:i:s');
+                Database::insert('mail_aliases', $fields);
+            }
+            return ['ok' => true];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    /** NODE-side: delete an alias from this node's LOCAL mail_aliases. */
+    public static function nodeDeleteAlias(array $payload): array
+    {
+        $source = strtolower(trim((string)($payload['source'] ?? '')));
+        $domain = strtolower(trim((string)($payload['domain'] ?? '')));
+        if ($source === '' || $domain === '') return ['ok' => false, 'error' => 'Falta source/domain'];
+        try {
+            $dom = Database::fetchOne("SELECT id FROM mail_domains WHERE domain = :d", ['d' => $domain]);
+            if ($dom) {
+                Database::delete('mail_aliases', 'mail_domain_id = :d AND source = :s', ['d' => (int)$dom['id'], 's' => $source]);
+            }
+            return ['ok' => true];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -3173,7 +3246,7 @@ class MailService
     public static function resyncMailToNode(int $nodeId): array
     {
         $domains = Database::fetchAll("SELECT * FROM mail_domains WHERE status != 'deleted' ORDER BY domain");
-        $dc = 0; $mc = 0;
+        $dc = 0; $mc = 0; $ac = 0;
         foreach ($domains as $d) {
             ClusterService::enqueue($nodeId, 'mail_create_domain', [
                 'domain'           => $d['domain'],
@@ -3200,9 +3273,23 @@ class MailService
                 ]);
                 $mc++;
             }
+            // Aliases of this domain.
+            $aliases = Database::fetchAll(
+                "SELECT source, destination, is_catchall FROM mail_aliases WHERE mail_domain_id = :did",
+                ['did' => (int)$d['id']]
+            );
+            foreach ($aliases as $al) {
+                ClusterService::enqueue($nodeId, 'mail_upsert_alias', [
+                    'domain'      => $d['domain'],
+                    'source'      => $al['source'],
+                    'destination' => $al['destination'],
+                    'is_catchall' => !empty($al['is_catchall']),
+                ]);
+                $ac++;
+            }
         }
-        LogService::log('mail.replica', 'resync', "Resync a nodo #{$nodeId}: {$dc} dominios, {$mc} buzones encolados.");
-        return ['domains' => $dc, 'mailboxes' => $mc];
+        LogService::log('mail.replica', 'resync', "Resync a nodo #{$nodeId}: {$dc} dominios, {$mc} buzones, {$ac} aliases encolados.");
+        return ['domains' => $dc, 'mailboxes' => $mc, 'aliases' => $ac];
     }
 
     /**
