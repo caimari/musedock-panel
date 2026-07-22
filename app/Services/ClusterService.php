@@ -1898,6 +1898,20 @@ class ClusterService
             self::broadcastReconfigureReplication($myIp);
         }
 
+        // Fase B (simple): this promoted node is now the mail source of truth. Push
+        // its current domains/mailboxes to every OTHER mail node so they converge on
+        // this node's state. When the old master returns as a slave, it receives this
+        // resync and re-absorbs the mailboxes created during the outage. (No in-flight
+        // bidirectional merge — last promotion wins, which is the safe simple model.)
+        try {
+            foreach (\MuseDockPanel\Services\MailService::getMailReplicaNodes() as $mnode) {
+                \MuseDockPanel\Services\MailService::resyncMailToNode((int)$mnode['id']);
+            }
+            $results['mail_resync'] = 'enqueued to mail nodes';
+        } catch (\Throwable $e) {
+            $errors[] = 'mail resync: ' . $e->getMessage();
+        }
+
         return [
             'ok'      => empty($errors),
             'results' => $results,

@@ -15,6 +15,9 @@ class ClusterApiController
     private const SECRET_KEYS = [
         'master_db_pass', 'db_pass', 'dsync_secret', 'shared_secret', 'password',
         'admin_password', 'setup_token', 'db_password', 'secret',
+        // Mailbox password hash: travels in mail_create_mailbox payloads and would
+        // otherwise land (bcrypt hash) in the replicated panel_log.
+        'password_hash', 'dkim_private_key',
     ];
 
     /** Return a copy of $payload with secret values masked, recursively. */
@@ -427,6 +430,10 @@ class ClusterApiController
                 'mail_finalize_backup_replica' => MailService::finalizeBackupReplica($payload),
                 // Read-only replica state for the master's Infra table (per node).
                 'mail_replica_status' => ['ok' => true, 'result' => MailService::slaveMailReplicaStatus()],
+                // Apply an anti-abuse policy toggle pushed from the master, so every
+                // mail node shares the same fail2ban/rate-limit/whitelist protection.
+                'mail_apply_policy' => \MuseDockPanel\Services\MailPolicyService::nodeApplyPolicy($payload),
+                'mail_set_rate'     => \MuseDockPanel\Services\MailPolicyService::nodeSetRate($payload),
                 'mail_setup_node'          => MailService::nodeSetupMail($payload),
                 'mail_setup_status'        => MailService::nodeSetupStatus($payload),
                 'mail_generate_setup_token' => MailService::nodeGenerateSetupToken($payload),

@@ -89,6 +89,26 @@ function webmail_php_value(string $value): string
     return var_export($value, true);
 }
 
+/**
+ * Is the mail server (IMAP host) running on THIS machine? True when the host is a
+ * loopback name/IP, or resolves to an IP that is bound locally. When true, Roundcube
+ * connects to 127.0.0.1 (fast loopback) instead of routing out to the public IP.
+ */
+function webmail_mail_is_local(string $imapHost): bool
+{
+    $h = strtolower(trim($imapHost));
+    if ($h === '' || $h === 'localhost' || $h === '127.0.0.1' || $h === '::1') return true;
+    // Resolve the host and check if any resolved IP is assigned to this machine.
+    $ips = @gethostbynamel($h) ?: [];
+    if (!$ips) return false;
+    $localIps = [];
+    foreach (preg_split('/\s+/', trim((string)shell_exec("ip -o -4 addr show 2>/dev/null | awk '{print \$4}' | cut -d/ -f1"))) as $lip) {
+        if ($lip !== '') $localIps[$lip] = true;
+    }
+    foreach ($ips as $ip) { if (isset($localIps[$ip])) return true; }
+    return false;
+}
+
 try {
     $provider = strtolower(trim((string)($payload['provider'] ?? 'roundcube')));
     $host = strtolower(trim((string)($payload['host'] ?? '')));
@@ -111,12 +131,12 @@ try {
         'curl', 'ca-certificates', 'tar', 'gzip', 'unzip', 'dovecot-core',
         "php{$phpVersion}-imap", "php{$phpVersion}-mbstring", "php{$phpVersion}-intl",
         "php{$phpVersion}-xml", "php{$phpVersion}-curl", "php{$phpVersion}-pgsql",
-        "php{$phpVersion}-gd", "php{$phpVersion}-zip",
+        "php{$phpVersion}-gd", "php{$phpVersion}-zip", "php{$phpVersion}-redis",
     ];
     try {
         webmail_run('DEBIAN_FRONTEND=noninteractive apt-get install -y ' . implode(' ', array_map('escapeshellarg', $versionedPkgs)));
     } catch (Throwable $e) {
-        $genericPkgs = ['curl', 'ca-certificates', 'tar', 'gzip', 'unzip', 'dovecot-core', 'php-imap', 'php-mbstring', 'php-intl', 'php-xml', 'php-curl', 'php-pgsql', 'php-gd', 'php-zip'];
+        $genericPkgs = ['curl', 'ca-certificates', 'tar', 'gzip', 'unzip', 'dovecot-core', 'php-imap', 'php-mbstring', 'php-intl', 'php-xml', 'php-curl', 'php-pgsql', 'php-redis', 'php-gd', 'php-zip'];
         webmail_log('Versioned PHP package install failed, retrying generic packages: ' . $e->getMessage());
         webmail_run('DEBIAN_FRONTEND=noninteractive apt-get install -y ' . implode(' ', array_map('escapeshellarg', $genericPkgs)));
     }
@@ -181,7 +201,19 @@ try {
         }
         webmail_run('sudo -u postgres psql -p ' . (int)$dbPort . ' -d ' . escapeshellarg($rcDb)
             . ' -v ON_ERROR_STOP=1 -f ' . escapeshellarg($pgSchema) . ' 2>&1');
-        webmail_run($psql("GRANT ALL ON ALL TABLES IN SCHEMA public TO {$rcUser}; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO {$rcUser};", $rcDb), true);
+        // The schema loads as the postgres superuser, so the tables end up owned by
+        // postgres. Roundcube's message/index CACHE needs to OWN the tables (it does
+        // TRUNCATE/ALTER on them) — a plain GRANT is not enough and the cache fails
+        // silently with "permission denied for table cache_messages", making the
+        // webmail re-download everything on every load. Transfer ownership to the
+        // roundcube role, then grant, so caching actually works.
+        $ownAll = "DO \$\$ DECLARE r RECORD; BEGIN "
+            . "FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP "
+            . "EXECUTE 'ALTER TABLE public.' || quote_ident(r.tablename) || ' OWNER TO {$rcUser}'; END LOOP; "
+            . "FOR r IN SELECT sequencename FROM pg_sequences WHERE schemaname='public' LOOP "
+            . "EXECUTE 'ALTER SEQUENCE public.' || quote_ident(r.sequencename) || ' OWNER TO {$rcUser}'; END LOOP; END \$\$;";
+        webmail_run($psql($ownAll, $rcDb), true);
+        webmail_run($psql("GRANT ALL ON ALL TABLES IN SCHEMA public TO {$rcUser}; GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO {$rcUser}; GRANT ALL ON SCHEMA public TO {$rcUser};", $rcDb), true);
     }
 
     $roundcubeDsn = sprintf('pgsql://%s:%s@%s:%s/%s',
@@ -191,12 +223,26 @@ try {
     $roundcubePasswordDsn = sprintf('pgsql://%s:%s@%s:%s/%s',
         rawurlencode($dbUser), rawurlencode($dbPass), rawurlencode($dbHost), rawurlencode((string)$dbPort), rawurlencode($dbName));
 
+    // PERFORMANCE: when Dovecot/Postfix run on THIS machine (the usual case), connect
+    // to 127.0.0.1 with STARTTLS instead of the public hostname over SSL. Connecting
+    // to the public hostname makes every IMAP/SMTP/ManageSieve op leave to the public
+    // IP and come back (+ full TLS handshake, + an IPv6 timeout when 'localhost'
+    // resolves to ::1 first) — that is what made the webmail feel slow vs Plesk.
+    // Using tls://127.0.0.1 keeps traffic on the loopback: fast, still encrypted.
+    // The cert is *.<domain> (not "127.0.0.1"), so peer verification is disabled for
+    // these LOCAL connections only — safe because the traffic never leaves the host.
+    $localMail = webmail_mail_is_local($imapHost); // true when IMAP host is this machine
+    $imapConnHost = $localMail ? 'tls://127.0.0.1' : ('ssl://' . $imapHost);
+    $imapConnPort = $localMail ? 143 : 993;
+    $smtpConnHost = $localMail ? 'tls://127.0.0.1' : ('tls://' . $smtpHost);
+    $sieveConnHost = $localMail ? 'tls://127.0.0.1' : $imapHost;
+
     $config = "<?php\n"
         . "\$config = [];\n"
         . "\$config['db_dsnw'] = " . webmail_php_value($roundcubeDsn) . ";\n"
-        . "\$config['default_host'] = " . webmail_php_value('ssl://' . $imapHost) . ";\n"
-        . "\$config['default_port'] = 993;\n"
-        . "\$config['smtp_host'] = " . webmail_php_value('tls://' . $smtpHost) . ";\n"
+        . "\$config['default_host'] = " . webmail_php_value($imapConnHost) . ";\n"
+        . "\$config['default_port'] = {$imapConnPort};\n"
+        . "\$config['smtp_host'] = " . webmail_php_value($smtpConnHost) . ";\n"
         . "\$config['smtp_port'] = 587;\n"
         . "\$config['smtp_user'] = '%u';\n"
         . "\$config['smtp_pass'] = '%p';\n"
@@ -206,6 +252,24 @@ try {
         . "\$config['temp_dir'] = " . webmail_php_value($dataDir . '/temp') . ";\n"
         . "\$config['log_dir'] = " . webmail_php_value($dataDir . '/logs') . ";\n"
         . "\$config['enable_installer'] = false;\n"
+        . "\n"
+        . "// Local IMAP/SMTP over STARTTLS: don't verify the cert name (it is *.<domain>,\n"
+        . "// not 127.0.0.1). Safe because traffic stays on loopback.\n"
+        . "\$config['imap_conn_options'] = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false, 'allow_self_signed' => true]];\n"
+        . "\$config['smtp_conn_options'] = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false, 'allow_self_signed' => true]];\n"
+        . "\n"
+        . "// PERFORMANCE: cache messages/index in the DB + sessions in Redis (RAM), and\n"
+        . "// trim per-load IMAP chatter. Makes reading cached mail near-instant.\n"
+        . "\$config['messages_cache'] = 'db';\n"
+        . "\$config['imap_cache'] = 'db';\n"
+        . "\$config['message_cache_lifetime'] = '10d';\n"
+        . "\$config['imap_cache_ttl'] = '10d';\n"
+        . "\$config['messages_cache_ttl'] = '10d';\n"
+        . "\$config['session_storage'] = 'redis';\n"
+        . "\$config['redis_hosts'] = ['127.0.0.1:6379'];\n"
+        . "\$config['check_all_folders'] = false;\n"
+        . "\$config['refresh_interval'] = 60;\n"
+        . "\$config['imap_timeout'] = 5;\n"
         . "\n"
         . "// Password plugin: changes MuseDock mailbox password in panel DB.\n"
         . "\$config['password_driver'] = 'sql';\n"
@@ -217,13 +281,19 @@ try {
         . "\$config['password_dovecotpw_with_method'] = true;\n"
         . "\n"
         . "// ManageSieve plugin: filters, vacation/autoresponder and forwards.\n"
-        . "\$config['managesieve_host'] = " . webmail_php_value($imapHost) . ";\n"
+        . "\$config['managesieve_host'] = " . webmail_php_value($sieveConnHost) . ";\n"
         . "\$config['managesieve_port'] = 4190;\n"
         . "\$config['managesieve_usetls'] = true;\n"
+        . "\$config['managesieve_conn_options'] = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false, 'allow_self_signed' => true]];\n"
         . "\$config['managesieve_auth_type'] = null;\n";
     file_put_contents($currentDir . '/config/config.inc.php', $config);
 
-    $docRoot = is_file($currentDir . '/public_html/index.php') ? ($currentDir . '/public_html') : $currentDir;
+    // Roundcube 1.7 REQUIRES the docroot to be public_html/ (it refuses to run
+    // otherwise: "configure your HTTP server to point to /public_html"). The assets
+    // (skins/, program/, plugins/) live in the ROOT and are served via static.php.
+    // So the docroot is public_html, and asset paths are routed to static.php by
+    // the Caddy route (ensureRoundcubeCaddyRoute handles that).
+    $docRoot = is_dir($currentDir . '/public_html') ? ($currentDir . '/public_html') : $currentDir;
     @unlink($installRoot . '/current');
     symlink($currentDir, $installRoot . '/current');
     // Roundcube runs under PHP-FPM as www-data. The code stays root-owned (read

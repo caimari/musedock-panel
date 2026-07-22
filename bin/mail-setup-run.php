@@ -870,12 +870,20 @@ mail_gid = {$vmailGid}
 mail_privileged_group = vmail
 first_valid_uid = {$vmailUid}
 
-# Quota + Sieve
-mail_plugins = \$mail_plugins quota sieve
+# Quota + Sieve.
+# IMPORTANT: sieve must NOT be in the GLOBAL mail_plugins. The sieve plugin needs
+# a symbol (mail_deliver_ctx_get_log_var_expand_table) that only exists in the LDA
+# context; loading it globally makes imap/auth/doveadm fail to start with
+# "undefined symbol", which breaks ALL authentication. Load sieve ONLY in the
+# delivery protocols (lmtp/lda), where filters actually run.
+mail_plugins = \$mail_plugins quota
 protocol imap {
   mail_plugins = \$mail_plugins imap_quota
 }
 protocol lmtp {
+  mail_plugins = \$mail_plugins sieve
+}
+protocol lda {
   mail_plugins = \$mail_plugins sieve
 }
 

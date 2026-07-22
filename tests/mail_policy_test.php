@@ -68,6 +68,20 @@ $mig = file_get_contents(PANEL_ROOT . '/database/migrations/2026_07_18_000001_cr
 ok('usa ADD COLUMN IF NOT EXISTS', substr_count($mig, 'ADD COLUMN IF NOT EXISTS') >= 6);
 ok('settings con ON CONFLICT DO NOTHING', str_contains($mig, 'ON CONFLICT (key) DO NOTHING'));
 
+section('8. Propagación de políticas al slave (mismas protecciones en el cluster)');
+$mc = file_get_contents(PANEL_ROOT . '/app/Controllers/MailController.php');
+$ps = file_get_contents(PANEL_ROOT . '/app/Services/MailPolicyService.php');
+$apic = file_get_contents(PANEL_ROOT . '/app/Controllers/ClusterApiController.php');
+ok('el toggle de política se propaga a los nodos de mail',
+    str_contains($mc, 'function propagatePolicyToNodes') && str_contains($mc, "'mail_apply_policy'"));
+ok('el rate por defecto también se propaga', str_contains($mc, "'mail_set_rate'"));
+ok('el slave aplica la política recibida (nodeApplyPolicy)',
+    str_contains($ps, 'function nodeApplyPolicy') && str_contains($ps, 'applyFail2ban'));
+ok('el slave aplica el rate recibido (nodeSetRate)', str_contains($ps, 'function nodeSetRate'));
+ok('acciones cluster registradas', str_contains($apic, 'mail_apply_policy') && str_contains($apic, 'mail_set_rate'));
+ok('se propaga vía enqueue (reintenta si el nodo está caído)',
+    str_contains($mc, "ClusterService::enqueue((int)\$node['id'], 'mail_apply_policy'"));
+
 echo "\n\033[1m─────────────────────────────────────────\033[0m\n";
 echo "  \033[0;32m{$pass} passed\033[0m" . ($fail ? ", \033[0;31m{$fail} failed\033[0m" : '') . "\n\n";
 exit($fail > 0 ? 1 : 0);

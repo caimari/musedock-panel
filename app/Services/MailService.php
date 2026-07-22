@@ -90,6 +90,8 @@ class MailService
             // Local mail server — execute filesystem operations directly
             self::nodeCreateDomain($domainPayload);
         }
+        // Backup-replica: also push to every mail replica node so each has a local copy.
+        self::replicateMailOp('mail_create_domain', $domainPayload);
 
         return $domainId;
     }
@@ -114,6 +116,7 @@ class MailService
         } elseif (Settings::get('mail_local_configured', '') === '1') {
             self::nodeDeleteDomain($deletePayload);
         }
+        self::replicateMailOp('mail_delete_domain', $deletePayload);
 
         // Cascade deletes accounts and aliases (FK ON DELETE CASCADE)
         Database::delete('mail_domains', 'id = :id', ['id' => $id]);
@@ -207,13 +210,20 @@ class MailService
 
         $accountId = Database::insert('mail_accounts', $data);
 
-        // Enqueue Maildir creation on mail node or execute locally
+        // Enqueue Maildir creation on mail node or execute locally. The payload also
+        // carries the DB fields so a replica node can upsert the account into its
+        // OWN mail_accounts (needed for local auth + UI when the master is down).
         $nodeId = $domain['mail_node_id'];
         $mailboxPayload = [
-            'email'    => $email,
-            'home_dir' => $homeDir,
-            'quota_mb' => $quotaMb,
-            'domain'   => $domain['domain'],
+            'email'         => $email,
+            'home_dir'      => $homeDir,
+            'quota_mb'      => $quotaMb,
+            'domain'        => $domain['domain'],
+            'local_part'    => strtolower(trim($localPart)),
+            'password_hash' => $passwordHash,
+            'display_name'  => $extra['display_name'] ?? '',
+            'send_mode'     => $data['send_mode'],
+            'rate_limit_per_hour' => $data['rate_limit_per_hour'],
         ];
 
         if ($nodeId) {
@@ -221,6 +231,7 @@ class MailService
         } elseif (Settings::get('mail_local_configured', '') === '1') {
             self::nodeCreateMailbox($mailboxPayload);
         }
+        self::replicateMailOp('mail_create_mailbox', $mailboxPayload);
 
         return $accountId;
     }
@@ -300,6 +311,7 @@ class MailService
         } elseif (Settings::get('mail_local_configured', '') === '1') {
             self::nodeDeleteMailbox($deletePayload);
         }
+        self::replicateMailOp('mail_delete_mailbox', $deletePayload);
 
         Database::delete('mail_accounts', 'id = :id', ['id' => $id]);
     }
@@ -2315,6 +2327,11 @@ class MailService
             return ['ok' => false, 'error' => 'Missing home_dir or email'];
         }
 
+        // Backup-replica: upsert the account into THIS node's LOCAL mail_accounts so
+        // its Dovecot can authenticate the user from its own DB (works with the
+        // master down) and the panel UI shows it. Idempotent.
+        self::upsertLocalMailAccount($payload);
+
         // Create Maildir structure
         $maildirPath = $homeDir . '/Maildir';
         foreach (['cur', 'new', 'tmp'] as $sub) {
@@ -2347,6 +2364,11 @@ class MailService
         if (!$domain) {
             return ['ok' => false, 'error' => 'Missing domain'];
         }
+
+        // Backup-replica: upsert the domain into THIS node's LOCAL mail_domains, so
+        // the node's Postfix/Dovecot read accounts from their own DB (works when the
+        // master is down) and the panel UI reflects it. Idempotent.
+        self::upsertLocalMailDomain($payload);
 
         // Create domain base directory
         $domainDir = '/var/mail/vhosts/' . $domain;
@@ -2392,6 +2414,9 @@ class MailService
             return ['ok' => false, 'error' => 'Invalid home_dir path'];
         }
 
+        // Backup-replica: remove from this node's LOCAL mail_accounts too.
+        self::deleteLocalMailAccount($email);
+
         // Move to trash instead of hard delete (recoverable for 30 days)
         $trashDir = '/var/mail/trash/' . date('Ymd') . '/' . basename(dirname($homeDir)) . '/' . basename($homeDir);
         if (is_dir($homeDir)) {
@@ -2411,6 +2436,9 @@ class MailService
         if (!$domain) {
             return ['ok' => false, 'error' => 'Missing domain'];
         }
+
+        // Backup-replica: remove from this node's LOCAL mail_domains (+ accounts).
+        self::deleteLocalMailDomain($domain);
 
         // Move domain Maildirs to trash
         $domainDir = '/var/mail/vhosts/' . $domain;
@@ -2998,6 +3026,215 @@ class MailService
     }
 
     /**
+     * NODE-side: upsert a domain into this node's LOCAL mail_domains. Idempotent —
+     * keyed by domain name. Only touches DB rows, never the master's. Used so a
+     * replica node has its own copy of the domain (local auth + UI + failover).
+     */
+    public static function upsertLocalMailDomain(array $payload): void
+    {
+        $domain = strtolower(trim((string)($payload['domain'] ?? '')));
+        if ($domain === '') return;
+        try {
+            $existing = Database::fetchOne("SELECT id FROM mail_domains WHERE domain = :d", ['d' => $domain]);
+            $fields = [
+                'domain'           => $domain,
+                'status'           => 'active',
+                'dkim_selector'    => $payload['dkim_selector'] ?? 'default',
+                'dkim_private_key' => $payload['dkim_private_key'] ?? '',
+                'updated_at'       => date('Y-m-d H:i:s'),
+            ];
+            if ($existing) {
+                Database::update('mail_domains', $fields, 'id = :id', ['id' => (int)$existing['id']]);
+            } else {
+                $fields['created_at'] = date('Y-m-d H:i:s');
+                Database::insert('mail_domains', $fields);
+            }
+        } catch (\Throwable $e) {
+            LogService::log('mail.replica', 'upsert_domain', "Fallo upsert dominio {$domain}: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * NODE-side: upsert an account into this node's LOCAL mail_accounts. Idempotent —
+     * keyed by email. Resolves the local mail_domain_id from the domain name.
+     */
+    public static function upsertLocalMailAccount(array $payload): void
+    {
+        $email  = strtolower(trim((string)($payload['email'] ?? '')));
+        $domain = strtolower(trim((string)($payload['domain'] ?? '')));
+        if ($email === '' || $domain === '') return;
+        try {
+            $dom = Database::fetchOne("SELECT id, customer_id FROM mail_domains WHERE domain = :d", ['d' => $domain]);
+            if (!$dom) { self::upsertLocalMailDomain($payload); $dom = Database::fetchOne("SELECT id, customer_id FROM mail_domains WHERE domain = :d", ['d' => $domain]); }
+            if (!$dom) return;
+            $existing = Database::fetchOne("SELECT id FROM mail_accounts WHERE email = :e", ['e' => $email]);
+            $fields = [
+                'mail_domain_id' => (int)$dom['id'],
+                'email'          => $email,
+                'local_part'     => (string)($payload['local_part'] ?? explode('@', $email)[0]),
+                'password_hash'  => (string)($payload['password_hash'] ?? ''),
+                'display_name'   => (string)($payload['display_name'] ?? ''),
+                'quota_mb'       => (int)($payload['quota_mb'] ?? 1024),
+                'home_dir'       => (string)($payload['home_dir'] ?? ''),
+                'status'         => 'active',
+                'send_mode'      => (string)($payload['send_mode'] ?? 'normal'),
+                'rate_limit_per_hour' => (int)($payload['rate_limit_per_hour'] ?? 0),
+                'can_send'       => 'true',
+                'updated_at'     => date('Y-m-d H:i:s'),
+            ];
+            if ($existing) {
+                // Don't overwrite a locally-changed password with an empty one.
+                if ($fields['password_hash'] === '') unset($fields['password_hash']);
+                Database::update('mail_accounts', $fields, 'id = :id', ['id' => (int)$existing['id']]);
+            } else {
+                // A brand-new account with an empty hash would be un-authenticatable
+                // (password_hash is NOT NULL and '' never matches). Skip rather than
+                // create a broken row — the normal flow always sends the hash.
+                if ($fields['password_hash'] === '') {
+                    LogService::log('mail.replica', 'upsert_account', "Cuenta {$email} omitida: sin password_hash en el payload.");
+                    return;
+                }
+                $fields['created_at'] = date('Y-m-d H:i:s');
+                Database::insert('mail_accounts', $fields);
+            }
+        } catch (\Throwable $e) {
+            LogService::log('mail.replica', 'upsert_account', "Fallo upsert cuenta {$email}: " . $e->getMessage());
+        }
+    }
+
+    /** NODE-side: remove a domain from this node's LOCAL mail_domains (+ its accounts). */
+    public static function deleteLocalMailDomain(string $domain): void
+    {
+        $domain = strtolower(trim($domain));
+        if ($domain === '') return;
+        try {
+            $dom = Database::fetchOne("SELECT id FROM mail_domains WHERE domain = :d", ['d' => $domain]);
+            if ($dom) {
+                Database::delete('mail_accounts', 'mail_domain_id = :id', ['id' => (int)$dom['id']]);
+                Database::delete('mail_domains', 'id = :id', ['id' => (int)$dom['id']]);
+            }
+        } catch (\Throwable) {}
+    }
+
+    /** NODE-side: remove an account from this node's LOCAL mail_accounts. */
+    public static function deleteLocalMailAccount(string $email): void
+    {
+        $email = strtolower(trim($email));
+        if ($email === '') return;
+        try { Database::delete('mail_accounts', 'email = :e', ['e' => $email]); } catch (\Throwable) {}
+    }
+
+    /**
+     * Replicate a mail operation to every mail REPLICA node so each keeps a full
+     * LOCAL copy of the domains/mailboxes. This is the core of the backup-replica
+     * model: a slave must have its own copy in its own DB, so it can serve mail
+     * when the master is DOWN (it must NOT depend on reading the master's DB).
+     *
+     * Enqueued (retried by the worker if a node is momentarily unreachable) and
+     * idempotent on the node side (nodeCreate* upsert; nodeDelete* are no-ops if
+     * absent). Runs from the master; a slave never calls this.
+     */
+    public static function replicateMailOp(string $action, array $payload): int
+    {
+        $n = 0;
+        foreach (self::getMailReplicaNodes() as $node) {
+            ClusterService::enqueue((int)$node['id'], $action, $payload);
+            $n++;
+        }
+        return $n;
+    }
+
+    /** MASTER-side: add 'mail' to a node's services so mail ops replicate to it. */
+    public static function markNodeAsMail(int $nodeId): void
+    {
+        try {
+            $node = Database::fetchOne("SELECT services, mail_hostname FROM cluster_nodes WHERE id = :id", ['id' => $nodeId]);
+            if (!$node) return;
+            $services = json_decode((string)($node['services'] ?? '[]'), true) ?: [];
+            if (!in_array('mail', $services, true)) {
+                $services[] = 'mail';
+                Database::update('cluster_nodes', [
+                    'services'      => json_encode($services),
+                    'mail_hostname' => $node['mail_hostname'] ?: Settings::get('mail_hostname', ''),
+                ], 'id = :id', ['id' => $nodeId]);
+            }
+        } catch (\Throwable $e) {
+            LogService::log('mail.replica', 'mark_node', "Fallo marcar nodo #{$nodeId} como mail: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * MASTER-side: push ALL existing domains + mailboxes to a node, so a freshly
+     * installed replica gets the current state (replicateMailOp only covers future
+     * creations). Idempotent on the node side. Call after installing mail on a slave.
+     *
+     * @return array{domains:int, mailboxes:int}
+     */
+    public static function resyncMailToNode(int $nodeId): array
+    {
+        $domains = Database::fetchAll("SELECT * FROM mail_domains WHERE status != 'deleted' ORDER BY domain");
+        $dc = 0; $mc = 0;
+        foreach ($domains as $d) {
+            ClusterService::enqueue($nodeId, 'mail_create_domain', [
+                'domain'           => $d['domain'],
+                'dkim_selector'    => $d['dkim_selector'] ?: 'default',
+                'dkim_private_key' => $d['dkim_private_key'] ?? '',
+            ]);
+            $dc++;
+            $accts = Database::fetchAll(
+                "SELECT a.*, d.domain FROM mail_accounts a JOIN mail_domains d ON d.id = a.mail_domain_id
+                 WHERE a.mail_domain_id = :did AND a.status != 'deleted'",
+                ['did' => (int)$d['id']]
+            );
+            foreach ($accts as $a) {
+                ClusterService::enqueue($nodeId, 'mail_create_mailbox', [
+                    'email'         => $a['email'],
+                    'home_dir'      => $a['home_dir'],
+                    'quota_mb'      => (int)$a['quota_mb'],
+                    'domain'        => $a['domain'],
+                    'local_part'    => $a['local_part'],
+                    'password_hash' => $a['password_hash'],
+                    'display_name'  => $a['display_name'] ?? '',
+                    'send_mode'     => $a['send_mode'] ?? 'normal',
+                    'rate_limit_per_hour' => (int)($a['rate_limit_per_hour'] ?? 0),
+                ]);
+                $mc++;
+            }
+        }
+        LogService::log('mail.replica', 'resync', "Resync a nodo #{$nodeId}: {$dc} dominios, {$mc} buzones encolados.");
+        return ['domains' => $dc, 'mailboxes' => $mc];
+    }
+
+    /**
+     * Mail REPLICA nodes: online cluster nodes that have a mail server installed
+     * (services include 'mail'). These get a full copy of every domain/mailbox.
+     */
+    public static function getMailReplicaNodes(): array
+    {
+        try {
+            $rows = Database::fetchAll(
+                "SELECT * FROM cluster_nodes WHERE status = 'online' AND services::text LIKE '%mail%' ORDER BY id"
+            ) ?: [];
+            // Exclude a possible self-row: in some topologies the local node has its
+            // own cluster_nodes row. Replicating to self would loopback-POST a job the
+            // master already ran locally (idempotent but wasteful). Filter by local IPs.
+            $localIps = [];
+            foreach (preg_split('/\s+/', trim((string)shell_exec("hostname -I 2>/dev/null"))) as $ip) {
+                if ($ip !== '') $localIps[$ip] = true;
+            }
+            // Also the WireGuard IP.
+            $wg = trim((string)shell_exec("ip -o -4 addr show 2>/dev/null | awk '{print \$4}' | cut -d/ -f1 | grep '^10\\.10\\.70\\.' | head -1"));
+            if ($wg !== '') $localIps[$wg] = true;
+            return array_values(array_filter($rows, function ($n) use ($localIps) {
+                $host = parse_url((string)($n['api_url'] ?? ''), PHP_URL_HOST) ?: '';
+                return $host === '' || !isset($localIps[$host]);
+            }));
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
      * Get mail nodes (cluster_nodes with 'mail' in services).
      */
     public static function getMailNodes(): array
@@ -3554,6 +3791,13 @@ class MailService
         ], 5, 40);
         $steps[] = ['name' => 'Programar dsync + sync inicial', 'ok' => true, 'output' => 'encolado (reintenta hasta que la instalación termine)'];
 
+        // Mark the node as a mail node so future domain/mailbox ops replicate to it,
+        // and push ALL existing domains/mailboxes so its local DB starts in sync.
+        self::markNodeAsMail($slaveNodeId);
+        $resync = self::resyncMailToNode($slaveNodeId);
+        $steps[] = ['name' => 'Sincronizar buzones existentes', 'ok' => true,
+            'output' => "{$resync['domains']} dominios, {$resync['mailboxes']} buzones encolados"];
+
         LogService::log('mail.replica_prepare', (string)$slaveNodeId,
             "Réplica de correo preparada en nodo #{$slaveNodeId} ({$slaveWgIp}); finalización encolada.");
         return [
@@ -3593,14 +3837,19 @@ class MailService
         // (this call is already authenticated at the cluster layer).
         $token = self::nodeGenerateSetupToken([])['setup_token'] ?? '';
 
-        // Install mail services on THIS node, pointing the mail DB at the master.
-        // This runs the installer in the BACKGROUND (nohup) and returns a task_id.
+        // Install mail services on THIS node reading its OWN LOCAL DB (127.0.0.1).
+        // This is the key of the backup-replica model: the node's Postfix/Dovecot
+        // read domains/mailboxes from its LOCAL musedock_panel (replicated by the
+        // mail-op sync), so it keeps working when the master is DOWN. It must NOT
+        // depend on reading the master's DB over WireGuard. A local musedock_mail
+        // role + password is ensured here first.
+        $localMailPass = self::ensureLocalMailRole();
         $install = self::nodeSetupMail([
-            'db_host'       => $masterDbHost,
+            'db_host'       => '127.0.0.1',
             'db_port'       => (string)\MuseDockPanel\Env::int('DB_PORT', 5433),
             'db_name'       => \MuseDockPanel\Env::get('DB_NAME', 'musedock_panel'),
             'db_user'       => 'musedock_mail',
-            'db_pass'       => $masterDbPass,
+            'db_pass'       => $localMailPass,
             'mail_hostname' => $hostname,
             'mail_mode'     => 'full',
             'setup_token'   => $token,
@@ -3613,7 +3862,7 @@ class MailService
         // configure dsync + initial sync once Dovecot is actually installed. We do
         // NOT configure dsync now because the installer is still running in the
         // background and configureNode would abort (no /etc/dovecot yet) — H4 race.
-        Settings::set('mail_db_source', 'master');
+        Settings::set('mail_db_source', 'local');
         Settings::set('mail_replica_pending', '1');
         Settings::set('mail_replica_dsync_partner', $dsyncPartner);
         // Secret stored encrypted, consistent with how the shared secret is kept.
@@ -3668,6 +3917,17 @@ class MailService
     }
 
     /** Master's musedock_mail password in clear (create/store encrypted if missing). */
+    /**
+     * NODE-side: ensure a LOCAL musedock_mail role exists in this node's own panel
+     * DB, with SELECT on the mail tables, and return its password. Used so a replica
+     * slave's Postfix/Dovecot read from 127.0.0.1 (its own copy), independent of the
+     * master. Reuses the same idempotent create/grant as the master path.
+     */
+    public static function ensureLocalMailRole(): string
+    {
+        return self::ensureMasterMailPassword();
+    }
+
     private static function ensureMasterMailPassword(): string
     {
         $enc = Settings::get('mail_db_password_enc', '');

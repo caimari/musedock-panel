@@ -223,6 +223,19 @@ class WebmailService
             return ['ok' => false, 'error' => 'No se encontro socket PHP-FPM para publicar Roundcube'];
         }
 
+        // Roundcube 1.7 layout: docroot is public_html/ (only index.php + static.php),
+        // and assets (skins/, program/, plugins/) live one level up, served THROUGH
+        // static.php. The Caddy route therefore:
+        //  1. site root = public_html;
+        //  2. block sensitive paths (403);
+        //  3. asset paths (/skins /program /plugins) → rewrite to static.php/<path> → PHP;
+        //  4. real files in public_html (favicon etc.) → file_server;
+        //  5. everything else → index.php over FastCGI.
+        $fastcgi = [
+            'handler' => 'reverse_proxy',
+            'transport' => ['protocol' => 'fastcgi', 'root' => $docRoot, 'split_path' => ['.php']],
+            'upstreams' => [['dial' => 'unix/' . $socket]],
+        ];
         $route = [
             '@id' => $routeId,
             'match' => [['host' => [$host]]],
@@ -231,22 +244,45 @@ class WebmailService
                 'routes' => [
                     ['handle' => [['handler' => 'vars', 'root' => $docRoot]]],
                     [
-                        'match' => [['path' => ['/config/*', '/logs/*', '/temp/*', '/SQL/*', '/vendor/*', '/installer/*', '/composer.*', '/.git/*']]],
+                        'match' => [['path' => ['/config/*', '/logs/*', '/temp/*', '/SQL/*', '/vendor/*', '/bin/*', '/installer/*', '/composer.*', '/.git/*']]],
                         'handle' => [['handler' => 'static_response', 'status_code' => 403]],
                     ],
+                    // 3. Assets: Roundcube itself builds URLs as static.php/skins/...
+                    //    so requests arrive as /static.php/<asset>. static.php must run
+                    //    as PHP with the asset path in PATH_INFO — split on "static.php"
+                    //    so PATH_INFO becomes /skins/... . (Also handle bare /skins,
+                    //    /program, /plugins by rewriting them through static.php.)
                     [
-                        'match' => [['file' => ['try_files' => ['{http.request.uri.path}', '{http.request.uri.path}/index.php', '/index.php']]]],
-                        'handle' => [['handler' => 'rewrite', 'uri' => '{http.matchers.file.relative}']],
-                    ],
-                    [
-                        'match' => [['path' => ['*.php']]],
+                        'match' => [['path' => ['/static.php', '/static.php/*']]],
                         'handle' => [[
                             'handler' => 'reverse_proxy',
-                            'transport' => ['protocol' => 'fastcgi', 'root' => $docRoot, 'split_path' => ['.php']],
+                            'transport' => ['protocol' => 'fastcgi', 'root' => $docRoot, 'split_path' => ['static.php']],
                             'upstreams' => [['dial' => 'unix/' . $socket]],
                         ]],
                     ],
-                    ['handle' => [['handler' => 'file_server', 'root' => $docRoot, 'hide' => ['.git', '.env', 'config', 'logs', 'temp', 'SQL', 'vendor', 'composer.json', 'composer.lock']]]],
+                    [
+                        'match' => [['path' => ['/program/*', '/skins/*', '/plugins/*']]],
+                        'handle' => [
+                            ['handler' => 'rewrite', 'uri' => '/static.php{http.request.uri.path}'],
+                            [
+                                'handler' => 'reverse_proxy',
+                                'transport' => ['protocol' => 'fastcgi', 'root' => $docRoot, 'split_path' => ['static.php']],
+                                'upstreams' => [['dial' => 'unix/' . $socket]],
+                            ],
+                        ],
+                    ],
+                    // 4. Real files inside public_html (favicon, robots) → file_server.
+                    [
+                        'match' => [['file' => ['try_files' => ['{http.request.uri.path}']]]],
+                        'handle' => [['handler' => 'file_server', 'root' => $docRoot]],
+                    ],
+                    // 5. Everything else → index.php over FastCGI.
+                    [
+                        'handle' => [
+                            ['handler' => 'rewrite', 'uri' => '/index.php{http.request.uri}'],
+                            $fastcgi,
+                        ],
+                    ],
                 ],
             ]],
             'terminal' => true,

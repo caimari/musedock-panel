@@ -301,6 +301,57 @@ JAIL;
     public static function rateLimitEnabled(): bool { return Settings::get('mail_policy_ratelimit_enabled', '0') === '1'; }
     public static function fail2banEnabled(): bool  { return Settings::get('mail_policy_fail2ban_enabled', '0') === '1'; }
 
+    /**
+     * NODE-side: apply a policy toggle pushed from the master, so every mail node
+     * runs the SAME anti-abuse protections (fail2ban/rate-limit/whitelist). fail2ban
+     * and the Rspamd rate-limit are OS/Rspamd config, not DB, so they must be applied
+     * per node. Invoked via the cluster action mail_apply_policy.
+     *
+     * @param array $payload ['key' => whitelist|ratelimit|fail2ban, 'value' => '0'|'1']
+     */
+    public static function nodeApplyPolicy(array $payload): array
+    {
+        $keys = [
+            'whitelist' => 'mail_policy_whitelist_enabled',
+            'ratelimit' => 'mail_policy_ratelimit_enabled',
+            'fail2ban'  => 'mail_policy_fail2ban_enabled',
+        ];
+        $key = (string)($payload['key'] ?? '');
+        if (!isset($keys[$key])) {
+            return ['ok' => false, 'error' => "Política desconocida: {$key}"];
+        }
+        Settings::set($keys[$key], ($payload['value'] ?? '0') === '1' ? '1' : '0');
+        // Re-apply the affected layer on THIS node.
+        $res = match ($key) {
+            'whitelist' => self::installSenderPolicy(self::nodeMailDbCfg()),
+            'ratelimit' => self::applyRateLimit(),
+            'fail2ban'  => self::applyFail2ban(),
+        };
+        LogService::log('mail.policy', 'node-apply', "{$key} = {$payload['value']} (aplicado en este nodo)");
+        return ['ok' => $res['ok'] ?? true, 'key' => $key, 'result' => $res];
+    }
+
+    /** NODE-side: set the default rate limit pushed from the master and re-apply. */
+    public static function nodeSetRate(array $payload): array
+    {
+        $rate = max(1, (int)($payload['rate'] ?? 100));
+        Settings::set('mail_policy_default_rate_limit', (string)$rate);
+        $res = self::applyRateLimit();
+        LogService::log('mail.policy', 'node-rate', "default_rate = {$rate} (aplicado en este nodo)");
+        return ['ok' => $res['ok'] ?? true, 'rate' => $rate];
+    }
+
+    /** Local mail DB config for the sender-policy lookup on this node. */
+    private static function nodeMailDbCfg(): array
+    {
+        return [
+            'host' => '127.0.0.1',
+            'port' => (int)\MuseDockPanel\Env::get('DB_PORT', '5433'),
+            'name' => \MuseDockPanel\Env::get('DB_NAME', 'musedock_panel'),
+            'user' => 'musedock_mail',
+        ];
+    }
+
     private static function runCmd(string $cmd): array
     {
         $out = [];

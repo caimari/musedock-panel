@@ -1211,12 +1211,13 @@ class FileSyncService
             $dbUser = $entry['db_user'];
             $dbType = $entry['db_type'];
             $file = $dumpPath . '/' . $entry['file'];
-            $tempDb = $dbName . '_sync_tmp';
 
             if (!file_exists($file) || filesize($file) < 20) {
                 $results[] = ['db_name' => $dbName, 'ok' => false, 'error' => 'Dump vacío o no encontrado'];
                 continue;
             }
+
+            $tempDb = $dbName . '_sync_tmp';
 
             // Strategy: Import into temp DB → DROP original → RENAME temp → original
             // This minimizes downtime to the instant of the rename.

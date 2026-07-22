@@ -2,6 +2,36 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [Unreleased] — Webmail Roundcube: correcciones, rendimiento y failover
+
+Webmail Roundcube funcionando (`webmail.<dominio>`) sirviendo todos los dominios. Estreno con múltiples correcciones, todas en el instalador para que los nodos nuevos nazcan bien.
+
+### Fixed (instalación del webmail)
+
+- **Socket PHP-FPM no detectado**: `is_file()` devuelve `false` para un socket Unix; ahora se usa `file_exists()` + `filetype()==='socket'`. Sin esto la ruta de Caddy no se publicaba y salía «Dominio no configurado».
+- **Ruta Caddy tapada por el wildcard**: la ruta del webmail se añadía al final y el `*.<dominio>` la interceptaba; ahora se inserta al principio (índice 0).
+- **Assets sin estilos**: Roundcube 1.7 exige docroot `public_html` y sirve `skins/program/plugins` vía `static.php`; la ruta ahora enruta `/static.php/*` con `split_path`.
+- **PostgreSQL en vez de SQLite**: el webmail usa una BBDD `roundcube` en el clúster panel (replicable para HA), no un fichero SQLite local.
+- **Caché rota por permisos** (crítico): el schema se cargaba como `postgres`, dejando las tablas con ese dueño; el rol `roundcube` no podía escribir en la caché y re-descargaba todo en cada carga. Ahora el rol pasa a ser **dueño** de las tablas + GRANT.
+- **Autenticación caía por Sieve** (Dovecot): `sieve` estaba en el `mail_plugins` global, lo que rompía imap/auth con `undefined symbol`; ahora solo en `protocol lmtp`/`lda`.
+
+### Performance (webmail)
+
+- **Conexión local por `127.0.0.1`**: cuando el correo corre en la misma máquina, Roundcube conecta a `tls://127.0.0.1` (IMAP/SMTP/ManageSieve) en vez de al hostname público. Evita el rodeo por la IP pública y el timeout de IPv6 de `localhost` — la causa principal de la lentitud percibida frente a Plesk. Cert no verificado solo en estas conexiones de loopback (seguro, no salen de la máquina).
+- **Caché + Redis**: `messages_cache`/`imap_cache` en la BBDD y sesiones en Redis; leer correo cacheado es casi instantáneo.
+
+### Added
+
+- El instalador de webmail detecta si el correo es local para elegir la conexión óptima (`webmail_mail_is_local`).
+
+- **Correo del slave con copia LOCAL (failover real)**: antes el Postfix/Dovecot del slave leía las cuentas del 5433 del **master** por WireGuard — lo que fallaba si el master caía (el slave se quedaba sin poder autenticar). Ahora cada dominio/buzón se **replica a la BBDD local de cada nodo de mail** (por la cola, como los hostings): al crear/borrar un buzón en el master se propaga a todos los nodos réplica, que hacen upsert en su propio `mail_domains`/`mail_accounts`. El slave lee de `127.0.0.1` (rol `musedock_mail` local) → **sirve correo aunque el master esté caído**. Al instalar la réplica se hace un **sync inicial** de los buzones existentes. Nuevos: `MailService::replicateMailOp/upsertLocalMailDomain/upsertLocalMailAccount/resyncMailToNode/markNodeAsMail/ensureLocalMailRole`.
+- **Retorno tras failover (simple)**: cuando un slave se promueve a master, re-sincroniza su estado de correo a los demás nodos; al reintegrarse el viejo master, recibe los buzones creados durante la caída. Modelo «última promoción gana» (sin merge bidireccional en caliente, que sería multi-master).
+- Fixes de la revisión adversarial: el hash de contraseña de buzón y la clave DKIM privada ya **no se registran** en `panel_log` (que se replica); `getMailReplicaNodes` excluye el nodo local para no auto-encolar por loopback; no se crea una cuenta réplica con hash vacío.
+
+### Notes
+
+- El **webmail en nodos slave** (para failover) se pospone: la BBDD `roundcube` viviría en el clúster panel (5433), que en un slave con réplica en streaming es de solo lectura → `CREATE DATABASE` fallaría. Se retomará junto con la decisión de la réplica del 5433 (BBDD `roundcube` en un clúster escribible independiente).
+
 ## [1.0.193] — 2026-07-21 — Alta disponibilidad y consistencia de nodos
 
 Trabajo de base para el **failover master↔slave** y para que los nodos nuevos nazcan consistentes entre sí.

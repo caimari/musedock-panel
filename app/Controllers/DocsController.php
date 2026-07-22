@@ -160,6 +160,22 @@ class DocsController
                 'keywords' => 'mail hostname dominio raiz subdominio mail.example.com example.com ptr rdns mx cloudflare proxy solo dns certificado postfix imap smtp',
                 'view' => 'mail-hostname',
             ],
+            'ports' => [
+                'title' => 'Puertos y clientes',
+                'summary' => 'Puertos IMAP/SMTP para conectar clientes externos (Outlook, apps, CRM), cifrado recomendado y datos de conexion.',
+                'panel_url' => '/mail?tab=general',
+                'icon' => 'bi-hdd-network',
+                'keywords' => 'mail puertos imap smtp 993 587 465 143 25 4190 imaps smtps submission starttls ssl tls managesieve outlook thunderbird cliente externo crm conexion cifrado certificado',
+                'view' => 'mail-ports',
+            ],
+            'security' => [
+                'title' => 'Seguridad y anti-abuso',
+                'summary' => 'Como se protege el servidor: autenticacion obligatoria (no open relay), fail2ban, limite de tasa por buzon, lista blanca. Que protege cada capa.',
+                'panel_url' => '/mail?tab=antispam',
+                'icon' => 'bi-shield-lock',
+                'keywords' => 'mail seguridad antispam anti-abuso open relay sasl autenticacion fail2ban limite tasa rate limit buzon spam password robada fuerza bruta ban whitelist lista blanca proteccion hacker',
+                'view' => 'mail-security',
+            ],
         ];
     }
 

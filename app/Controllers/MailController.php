@@ -1870,15 +1870,38 @@ class MailController
         }
         Settings::set($allowed[$key], $on ? '1' : '0');
 
-        // Re-apply the relevant layer.
+        // Re-apply the relevant layer LOCALLY (master).
         $svc = '\MuseDockPanel\Services\MailPolicyService';
         $res = match ($key) {
             'whitelist' => $svc::installSenderPolicy(self::mailDbCfg()),
             'ratelimit' => $svc::applyRateLimit(),
             'fail2ban'  => $svc::applyFail2ban(),
         };
-        LogService::log('mail.policy', 'toggle', "{$key} = " . ($on ? 'on' : 'off'));
-        echo json_encode(['ok' => $res['ok'] ?? true, 'key' => $key, 'enabled' => $on, 'result' => $res]);
+        // Propagate to the mail nodes (slaves): fail2ban and Rspamd rate-limit live
+        // in the OS/Rspamd config, NOT the DB, so they don't replicate on their own.
+        // Push the toggle + re-apply so a promoted slave has the SAME protections.
+        $propagated = self::propagatePolicyToNodes($key, $on);
+        LogService::log('mail.policy', 'toggle', "{$key} = " . ($on ? 'on' : 'off')
+            . ($propagated ? " (propagado a {$propagated} nodo(s))" : ''));
+        echo json_encode(['ok' => $res['ok'] ?? true, 'key' => $key, 'enabled' => $on,
+            'result' => $res, 'propagated_nodes' => $propagated]);
+    }
+
+    /**
+     * Push a policy toggle to every mail node so the whole cluster shares the same
+     * anti-abuse protections (fail2ban / rate-limit / whitelist). Enqueued so it's
+     * retried by the worker if a node is momentarily down. Returns node count.
+     */
+    private static function propagatePolicyToNodes(string $key, bool $on): int
+    {
+        $n = 0;
+        foreach (MailService::getMailNodes() as $node) {
+            ClusterService::enqueue((int)$node['id'], 'mail_apply_policy', [
+                'key' => $key, 'value' => $on ? '1' : '0',
+            ]);
+            $n++;
+        }
+        return $n;
     }
 
     /** POST /mail/policies/default-rate — set the global rate limit. */
@@ -1889,7 +1912,13 @@ class MailController
         $rate = max(1, (int)($_POST['rate'] ?? 100));
         Settings::set('mail_policy_default_rate_limit', (string)$rate);
         $res = \MuseDockPanel\Services\MailPolicyService::applyRateLimit();
-        echo json_encode(['ok' => true, 'rate' => $rate, 'result' => $res]);
+        // Propagate the new rate to every mail node (Rspamd config is per-node).
+        $propagated = 0;
+        foreach (MailService::getMailNodes() as $node) {
+            ClusterService::enqueue((int)$node['id'], 'mail_set_rate', ['rate' => $rate]);
+            $propagated++;
+        }
+        echo json_encode(['ok' => true, 'rate' => $rate, 'result' => $res, 'propagated_nodes' => $propagated]);
     }
 
     /** POST /mail/accounts/{account_id}/policy — per-mailbox policy. */
