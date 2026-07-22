@@ -792,6 +792,7 @@
             </div>
         </div>
     </div>
+</div><!-- /#webmail card: cerrado aquí para que la tarjeta CardDAV sea hermana, no hija -->
 
 <?php
     // ── Contactos y calendarios (CardDAV/CalDAV) ──
@@ -1687,7 +1688,13 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
 
 <!-- CardDAV/CalDAV replica on slave nodes (master-orchestrated) -->
 <?php
+    // Self-contained: compute our own state + slave list so this card renders
+    // regardless of the mail-replica block's conditionals above (which live
+    // inside an if/endif that may not run).
     $cardDavStForInfra = \MuseDockPanel\Services\CardDavService::status();
+    $cardDavSlaveNodes = array_values(array_filter($clusterNodes ?? [], function($n){
+        return (string)($n['role'] ?? '') === 'slave' || (string)($n['role'] ?? '') === 'standalone';
+    }));
 ?>
 <div id="carddav-replica" class="card mb-3" style="border-color:rgba(129,140,248,.28);">
     <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
@@ -1695,9 +1702,11 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
         <span class="badge bg-<?= !empty($cardDavStForInfra['installed']) ? 'success' : 'secondary' ?>"><?= !empty($cardDavStForInfra['installed']) ? 'Master instalado' : 'Master pendiente' ?></span>
     </div>
     <div class="card-body">
-        <?php if (empty($cardDavStForInfra['installed'])): ?>
+        <?php if (!empty($isSlave)): ?>
+            <div class="alert alert-secondary small mb-0">Este servidor es <strong>Slave</strong>: la réplica se prepara desde el <strong>Master</strong>.</div>
+        <?php elseif (empty($cardDavStForInfra['installed'])): ?>
             <div class="alert alert-secondary small mb-0">Primero instala CardDAV en este master (pestaña <strong>Webmail</strong> → tarjeta Contactos). Luego podrás preparar la réplica en el slave aquí.</div>
-        <?php elseif (empty($slaveNodes)): ?>
+        <?php elseif (empty($cardDavSlaveNodes)): ?>
             <div class="alert alert-secondary small mb-0">No hay nodos slave para replicar.</div>
         <?php else: ?>
             <p class="small text-muted">
@@ -1709,7 +1718,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                 <div class="col-md-5">
                     <label class="form-label small text-muted mb-1">Nodo slave</label>
                     <select name="node_id" class="form-select form-select-sm" required>
-                        <?php foreach ($slaveNodes as $sn): ?>
+                        <?php foreach ($cardDavSlaveNodes as $sn): ?>
                             <option value="<?= (int)$sn['id'] ?>"><?= View::e($sn['name'] ?? ('#'.$sn['id'])) ?></option>
                         <?php endforeach; ?>
                     </select>

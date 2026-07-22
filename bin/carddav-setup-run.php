@@ -265,9 +265,25 @@ try {
     }
 
     // ── 5. Permissions ────────────────────────────────────────────────────
+    // Baïkal (running as the PHP-FPM pool user) must be able to WRITE config/
+    // and Specific/ (it rewrites baikal.yaml on boot and stores runtime data).
+    // The FPM pool user is NOT necessarily www-data (here it's the panel user),
+    // so detect it from the pool config instead of hardcoding www-data — a
+    // www-data-owned, group-read-only file makes Baïkal throw
+    // "config/baikal.yaml is not writable".
     cd_state('running', 'permissions');
-    cd_run('chown -R www-data:www-data ' . escapeshellarg(BAIKAL_DIR . '/config'), true);
-    cd_run('chown -R www-data:www-data ' . escapeshellarg(BAIKAL_DIR . '/Specific'), true);
+    $fpmUser = 'www-data';
+    if (isset($poolFile) && is_file($poolFile)) {
+        $poolTxt = (string) file_get_contents($poolFile);
+        if (preg_match('/^\s*user\s*=\s*(\S+)/m', $poolTxt, $mu)) $fpmUser = $mu[1];
+    }
+    $fpmGroup = 'www-data';
+    if (isset($poolTxt) && preg_match('/^\s*group\s*=\s*(\S+)/m', $poolTxt, $mg)) $fpmGroup = $mg[1];
+    foreach ([BAIKAL_DIR . '/config', BAIKAL_DIR . '/Specific'] as $wdir) {
+        cd_run('chown -R ' . escapeshellarg($fpmUser . ':' . $fpmGroup) . ' ' . escapeshellarg($wdir), true);
+        cd_run('chmod -R u+rwX,g+rwX ' . escapeshellarg($wdir), true);
+    }
+    cd_log("Permisos de escritura para {$fpmUser}:{$fpmGroup} en config/ y Specific/.");
 
     // ── 5b. Roundcube integration: carddav plugin + SSO preset ────────────
     // Only if Roundcube is installed on this node. The plugin lets webmail read

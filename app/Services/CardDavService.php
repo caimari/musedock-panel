@@ -153,6 +153,11 @@ class CardDavService
         if ($socket === '') return ['ok' => false, 'error' => 'No se encontró socket PHP-FPM para publicar CardDAV'];
 
         $routeId = self::routeIdForHost($host);
+        // Standard php_fastcgi: split on ".php" so dav.php runs with the rest of
+        // the path in PATH_INFO. NO manual "/dav.php{uri}" rewrite — that made
+        // SabreDAV compute a wrong base and throw "Requested uri (/) is out of
+        // base uri (/dav.php/)". Instead we serve dav.php directly for DAV paths
+        // and redirect the bare root + .well-known to /dav.php/.
         $fastcgi = [
             'handler' => 'reverse_proxy',
             'transport' => ['protocol' => 'fastcgi', 'root' => $docRoot, 'split_path' => ['.php']],
@@ -171,25 +176,29 @@ class CardDavService
                         'match' => [['path' => ['/Core/*', '/Specific/*', '/config/*', '/vendor/*', '/.git/*']]],
                         'handle' => [['handler' => 'static_response', 'status_code' => 403]],
                     ],
-                    // Autodiscovery: iOS/Android hit /.well-known/carddav|caldav on
-                    // the bare host; redirect to the DAV entrypoint so clients find
-                    // the collection root with just "dav.<domain>" + credentials.
+                    // Bare root + autodiscovery → redirect to the DAV entrypoint so
+                    // clients (and a browser hitting "/") land on /dav.php/, which
+                    // is exactly the base SabreDAV expects.
                     [
-                        'match' => [['path' => ['/.well-known/carddav', '/.well-known/caldav']]],
+                        'match' => [['path' => ['/', '/.well-known/carddav', '/.well-known/caldav']]],
                         'handle' => [['handler' => 'static_response', 'status_code' => 301, 'headers' => ['Location' => ['/dav.php/']]]],
+                    ],
+                    // DAV requests (/dav.php, /card.php, /cal.php and their subpaths)
+                    // → FastCGI. split_path ".php" puts the collection path in
+                    // PATH_INFO, so SabreDAV's base_uri (/dav.php/) matches.
+                    [
+                        'match' => [['path' => ['/dav.php', '/dav.php/*', '/card.php', '/card.php/*', '/cal.php', '/cal.php/*']]],
+                        'handle' => [$fastcgi],
                     ],
                     // Real static files inside html/ (robots.txt, res/…) → file_server.
                     [
                         'match' => [['file' => ['try_files' => ['{http.request.uri.path}']]]],
                         'handle' => [['handler' => 'file_server', 'root' => $docRoot]],
                     ],
-                    // Everything else → dav.php (SabreDAV front controller). Baïkal
-                    // sets base_uri to dav.php/, so route the full request into it.
+                    // Anything else → send to dav.php/ too (so a client that probes
+                    // /principals/... still reaches the DAV server).
                     [
-                        'handle' => [
-                            ['handler' => 'rewrite', 'uri' => '/dav.php{http.request.uri}'],
-                            $fastcgi,
-                        ],
+                        'handle' => [['handler' => 'static_response', 'status_code' => 301, 'headers' => ['Location' => ['/dav.php/']]]],
                     ],
                 ],
             ]],
