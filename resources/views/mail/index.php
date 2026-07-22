@@ -824,6 +824,7 @@
             </div>
         <?php else: ?>
             <form id="carddavInstallForm" method="post" action="/mail/carddav/install" class="row g-2 align-items-end">
+                <?= View::csrf() ?>
                 <div class="col-md-5">
                     <label class="form-label small text-muted mb-1">Host DAV</label>
                     <input type="text" name="host" id="carddavHost" class="form-control form-control-sm" value="<?= View::e($cardDavHost) ?>" placeholder="dav.musedock.com">
@@ -846,6 +847,7 @@
                 if(!form) return;
                 function swal(){ return (typeof SwalDark !== 'undefined') ? SwalDark : (window.SwalDark || window.Swal || null); }
                 var davHostVal = <?= json_encode($cardDavHost) ?>;
+                var csrfTok = <?= json_encode(View::csrfToken()) ?>;
 
                 function progressHtml(){
                     return '<div class="small text-muted mb-2 text-start">Instalando el servidor de contactos. Puedes cerrar esta ventana; la instalación continúa en segundo plano.</div>'
@@ -887,7 +889,7 @@
                     var host = (document.getElementById('carddavHost')||{}).value || davHostVal;
                     var pass = (document.getElementById('carddavAdminPass')||{}).value || '';
                     if(!pass){ if(S){ S.fire({icon:'warning', title:'Falta la contraseña de admin'});} return; }
-                    var body = new URLSearchParams(); body.append('host', host); body.append('admin_password', pass);
+                    var body = new URLSearchParams(); body.append('_csrf_token', csrfTok); body.append('host', host); body.append('admin_password', pass);
                     if(S){ S.fire({title:'Instalando CardDAV', html: progressHtml(), allowOutsideClick:false, showConfirmButton:false, didOpen:function(){ S.showLoading && S.showLoading(); }}); }
                     fetch('/mail/carddav/install', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body: body})
                       .then(function(r){return r.json();})
@@ -1703,6 +1705,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                 Si el master cae, el slave los sirve. Al hacer failover, la dirección se invierte automáticamente.
             </p>
             <form method="post" action="/mail/carddav/prepare-replica" class="row g-2 align-items-end">
+                <?= View::csrf() ?>
                 <div class="col-md-5">
                     <label class="form-label small text-muted mb-1">Nodo slave</label>
                     <select name="node_id" class="form-select form-select-sm" required>
