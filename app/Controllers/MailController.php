@@ -1386,6 +1386,65 @@ class MailController
         echo json_encode(WebmailService::installStatus(), JSON_UNESCAPED_SLASHES);
     }
 
+    public function carddavInstall(): void
+    {
+        $isXhr = strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+        $fail = function (string $msg) use ($isXhr) {
+            if ($isXhr) { header('Content-Type: application/json'); echo json_encode(['ok' => false, 'error' => $msg]); return; }
+            Flash::set('error', $msg);
+            Router::redirect('/mail?tab=general#carddav');
+        };
+        if (self::isSlave()) { $fail('Este servidor es Slave.'); return; }
+        $adminPassword = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPassword($adminPassword)) { $fail('Password de admin incorrecta.'); return; }
+
+        $result = \MuseDockPanel\Services\CardDavService::startInstall(
+            (string)($_POST['host'] ?? 'dav.musedock.com'),
+            (string)($_POST['imap_host'] ?? '127.0.0.1')
+        );
+        if ($isXhr) {
+            header('Content-Type: application/json');
+            echo json_encode($result, JSON_UNESCAPED_SLASHES);
+            return;
+        }
+        Flash::set(($result['ok'] ?? false) ? 'success' : 'error', ($result['ok'] ?? false)
+            ? 'Instalacion de contactos (CardDAV) iniciada. Refresca para ver el estado.'
+            : ($result['error'] ?? 'No se pudo iniciar la instalacion de CardDAV.'));
+        Router::redirect('/mail?tab=general#carddav');
+    }
+
+    public function carddavStatus(): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode(\MuseDockPanel\Services\CardDavService::installStatus(), JSON_UNESCAPED_SLASHES);
+    }
+
+    public function carddavPrepareReplica(): void
+    {
+        $isXhr = strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+        $fail = function (string $msg) use ($isXhr) {
+            if ($isXhr) { header('Content-Type: application/json'); echo json_encode(['ok' => false, 'error' => $msg]); return; }
+            Flash::set('error', $msg);
+            Router::redirect('/mail?tab=infra#carddav-replica');
+        };
+        if (self::isSlave()) { $fail('Este servidor es Slave; prepara la réplica desde el Master.'); return; }
+        $adminPassword = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPassword($adminPassword)) { $fail('Password de admin incorrecta.'); return; }
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        if ($nodeId <= 0) { $fail('Nodo slave no indicado.'); return; }
+
+        $result = \MuseDockPanel\Services\CardDavService::prepareReplicaOnNode($nodeId);
+        if ($isXhr) {
+            header('Content-Type: application/json');
+            echo json_encode($result, JSON_UNESCAPED_SLASHES);
+            return;
+        }
+        Flash::set(($result['ok'] ?? false) ? 'success' : 'error',
+            ($result['ok'] ?? false) ? ($result['message'] ?? 'Réplica CardDAV preparada en el slave.')
+            : ($result['error'] ?? 'No se pudo preparar la réplica CardDAV.'));
+        Router::redirect('/mail?tab=infra#carddav-replica');
+    }
+
     public function webmailAliasStore(): void
     {
         if (self::isSlave()) {

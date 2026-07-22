@@ -176,6 +176,14 @@ class DocsController
                 'keywords' => 'mail seguridad antispam anti-abuso open relay sasl autenticacion fail2ban limite tasa rate limit buzon spam password robada fuerza bruta ban whitelist lista blanca proteccion hacker',
                 'view' => 'mail-security',
             ],
+            'contacts' => [
+                'title' => 'Contactos y calendarios (CardDAV/CalDAV)',
+                'summary' => 'Servicio integral: contactos y calendarios compartidos con failover, sincronizables con webmail e iPhone/Android usando la contraseña del buzón.',
+                'panel_url' => '/mail?tab=general',
+                'icon' => 'bi-person-lines-fill',
+                'keywords' => 'contactos calendarios carddav caldav baikal sabredav agenda vcard iphone android davx5 sincronizar movil webmail roundcube failover replica dav.musedock.com libreta direcciones sso',
+                'view' => 'mail-contacts',
+            ],
         ];
     }
 

@@ -2,6 +2,21 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [Unreleased] — Contactos y calendarios (CardDAV/CalDAV) con failover
+
+Servicio **integral** de correo: además de mensajes, ahora hay **contactos y calendarios** compartidos, con failover y sincronización con el webmail y el móvil (iPhone/Android), usando la **misma contraseña del buzón**.
+
+### Added (CardDAV/CalDAV)
+
+- **Servidor Baïkal (SabreDAV) sobre PostgreSQL**: instalador idempotente `bin/carddav-setup-run.php` que descarga Baïkal 0.10.1, crea la BBDD `baikal` en el clúster 5433, carga el schema PgSQL (+ los índices UNIQUE que el schema no trae, necesarios para el auto-aprovisionamiento race-safe), y genera `baikal.yaml` con el formato exacto que Baïkal espera.
+- **Auth contra el buzón por IMAP (una sola fuente de verdad)**: backend `resources/carddav/IMAPBasicAuth.php` que valida cada petición DAV abriendo IMAP contra Dovecot local. No se duplican ni convierten hashes de contraseña. En el primer login se **auto-aprovisiona** el principal + libreta + calendario del usuario (idempotente). Cada usuario accede **solo a su** principal (`principals/<email>`).
+- **Plugin en el webmail con SSO**: `roundcube/carddav` con preset fijo (`%u`/`%p` de la sesión) → el usuario ve los mismos contactos en el webmail sin volver a autenticarse. El instalador de webmail añade `carddav` a los plugins si el servicio está instalado.
+- **Ruta Caddy `dav.<dominio>`** (`CardDavService::ensureCaddyRoute`): insertada en índice 0, bloquea `Core/Specific/config`, y publica `/.well-known/carddav|caldav` para el autodescubrimiento del móvil. El cert lo emite la policy catch-all DNS-01 existente.
+- **Failover por rol (última promoción gana)**: como los contactos los crea el usuario directamente en Baïkal (el panel no los ve), la réplica es un **push periódico** (cron `carddav-sync-worker.php`, cada minuto): el nodo que es master empuja un snapshot completo de las tablas DAV al otro nodo, que hace un **reemplazo autoritativo** en su BBDD local. Al hacer failover se **invierte la dirección** automáticamente; `promoteToMaster` empuja al instante. Acción de cluster `carddav_apply_snapshot`.
+- **Réplica en el slave orquestada desde el master** (botón «Preparar réplica» en el tab Infra, como el correo): el master ordena al slave instalar Baïkal con las **mismas credenciales** (`carddav_setup_replica` → `CardDavService::nodeSetupReplica`, que lanza el mismo instalador) y le envía el primer snapshot. Sin esto el slave rechazaría los pushes (no tendría la BBDD `baikal`), y el failover no funcionaría.
+- **Privacidad**: el snapshot (PII de contactos) está en las acciones "bulk" que **no** se vuelcan al `panel_log` replicado.
+- Guía en el panel (`/docs/mail/contacts`) con estado real, pasos para iPhone/Android y explicación del failover. Tests `tests/carddav_test.php` (40 checks).
+
 ## [Unreleased] — Webmail Roundcube: correcciones, rendimiento y failover
 
 Webmail Roundcube funcionando (`webmail.<dominio>`) sirviendo todos los dominios. Estreno con múltiples correcciones, todas en el instalador para que los nodos nuevos nazcan bien.

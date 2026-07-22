@@ -3031,7 +3031,18 @@ class MailService
                     continue;
                 }
                 [$key, $value] = array_map('trim', explode('=', $line, 2));
-                if ($key === 'hosts') $cfg['host'] = preg_split('/\s+/', $value)[0] ?? $cfg['host'];
+                if ($key === 'hosts') {
+                    $first = preg_split('/\s+/', $value)[0] ?? $cfg['host'];
+                    // Postfix pgsql 'hosts' can be "host:port" — split so the health
+                    // check doesn't try to resolve "127.0.0.1:5433" as a hostname
+                    // (SQLSTATE[08006] could not translate host name ... to address).
+                    if (preg_match('/^(.+):(\d+)$/', $first, $m)) {
+                        $cfg['host'] = $m[1];
+                        $cfg['port'] = $m[2];
+                    } else {
+                        $cfg['host'] = $first;
+                    }
+                }
                 if ($key === 'port') $cfg['port'] = $value;
                 if ($key === 'dbname') $cfg['dbname'] = $value;
                 if ($key === 'user') $cfg['user'] = $value;

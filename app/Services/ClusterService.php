@@ -1867,6 +1867,9 @@ class ClusterService
         self::updateEnvRole('master');
         Settings::set('repl_role', 'master');
         Settings::set('cluster_role', 'master');
+        // Stamp the promotion time so DAV snapshots carry "last promotion wins"
+        // ordering (CardDavService::exportSnapshot / applySnapshot C2 guard).
+        Settings::set('cluster_promoted_at', gmdate('c'));
 
         try {
             Database::update('servers', ['role' => 'master'], 'is_local = true');
@@ -1910,6 +1913,22 @@ class ClusterService
             $results['mail_resync'] = 'enqueued to mail nodes';
         } catch (\Throwable $e) {
             $errors[] = 'mail resync: ' . $e->getMessage();
+        }
+
+        // CardDAV/CalDAV: same "last promotion wins" model. This node is now the
+        // DAV source of truth, so push its contacts/calendars snapshot to the
+        // other nodes immediately (don't wait for the next cron tick). The old
+        // master, when it returns as a slave, re-absorbs this snapshot. The
+        // periodic carddav-sync-worker keeps them converged thereafter.
+        try {
+            if (\MuseDockPanel\Services\CardDavService::isInstalled()) {
+                foreach (\MuseDockPanel\Services\CardDavService::replicaNodes() as $dnode) {
+                    \MuseDockPanel\Services\CardDavService::syncToNode((int)$dnode['id']);
+                }
+                $results['carddav_resync'] = 'pushed to DAV nodes';
+            }
+        } catch (\Throwable $e) {
+            $errors[] = 'carddav resync: ' . $e->getMessage();
         }
 
         return [

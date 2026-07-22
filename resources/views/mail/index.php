@@ -792,6 +792,55 @@
             </div>
         </div>
     </div>
+
+<?php
+    // ── Contactos y calendarios (CardDAV/CalDAV) ──
+    $cardDav = \MuseDockPanel\Services\CardDavService::status();
+    $cardDavInstalled = !empty($cardDav['installed']);
+    $cardDavHost = (string)($cardDav['host'] ?? 'dav.musedock.com');
+    $cardDavSt = \MuseDockPanel\Services\CardDavService::installStatus();
+    $cardDavRunning = (($cardDavSt['status'] ?? 'idle') === 'running');
+?>
+<div id="carddav" class="card mb-4" style="border-color:rgba(129,140,248,.28);">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span><i class="bi bi-person-lines-fill me-2"></i>Contactos y calendarios (CardDAV/CalDAV)</span>
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-<?= $cardDavInstalled ? 'success' : 'secondary' ?>"><?= $cardDavInstalled ? 'Instalado' : 'Pendiente' ?></span>
+            <a href="/docs/mail/contacts" class="btn btn-outline-light btn-sm"><i class="bi bi-book me-1"></i>Guía</a>
+        </div>
+    </div>
+    <div class="card-body">
+        <p class="small text-muted">
+            Servicio integral: libreta de contactos y calendarios compartidos, con failover y sincronización
+            con el webmail e iPhone/Android, usando la <strong>misma contraseña del buzón</strong>.
+            Servidor: <code><?= View::e($cardDavHost) ?></code>.
+        </p>
+        <?php if ($isSlave): ?>
+            <div class="alert alert-secondary small mb-0">Este servidor es <strong>Slave</strong>: el servicio CardDAV se instala y gestiona desde el <strong>Master</strong>. Este nodo recibe la réplica automáticamente.</div>
+        <?php elseif ($cardDavInstalled): ?>
+            <div class="alert alert-success small mb-0">
+                <i class="bi bi-check-circle me-1"></i>Instalado. Los contactos aparecen en el webmail y son sincronizables con el móvil apuntando a <code><?= View::e($cardDavHost) ?></code>.
+                <?php if (!empty($cardDav['roundcube_plugin'])): ?><span class="badge bg-success ms-1">Plugin webmail activo</span><?php endif; ?>
+            </div>
+        <?php else: ?>
+            <form method="post" action="/mail/carddav/install" class="row g-2 align-items-end" data-carddav-install>
+                <div class="col-md-5">
+                    <label class="form-label small text-muted mb-1">Host DAV</label>
+                    <input type="text" name="host" class="form-control form-control-sm" value="<?= View::e($cardDavHost) ?>" placeholder="dav.musedock.com">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small text-muted mb-1">Contraseña de admin</label>
+                    <input type="password" name="admin_password" class="form-control form-control-sm" required autocomplete="current-password">
+                </div>
+                <div class="col-md-3">
+                    <button type="submit" class="btn btn-primary btn-sm w-100" <?= $cardDavRunning ? 'disabled' : '' ?>>
+                        <i class="bi bi-<?= $cardDavRunning ? 'hourglass-split' : 'download' ?> me-1"></i><?= $cardDavRunning ? 'Instalando…' : 'Instalar' ?>
+                    </button>
+                </div>
+            </form>
+            <p class="small text-muted mt-2 mb-0">Instala Baïkal (contactos + calendarios) sobre PostgreSQL, con auth contra los buzones y réplica al nodo de respaldo. Requiere que el correo ya esté operativo en este servidor.</p>
+        <?php endif; ?>
+    </div>
 </div>
 </div>
 
@@ -1571,6 +1620,47 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
         </div>
         <div class="form-text mt-2"><i class="bi bi-arrow-clockwise me-1"></i>El estado se cachea ~30s. Recarga para refrescar.</div>
         <div id="prepareReplicaResult" class="mt-3 small" style="display:none;"></div>
+    </div>
+</div>
+
+<!-- CardDAV/CalDAV replica on slave nodes (master-orchestrated) -->
+<?php
+    $cardDavStForInfra = \MuseDockPanel\Services\CardDavService::status();
+?>
+<div id="carddav-replica" class="card mb-3" style="border-color:rgba(129,140,248,.28);">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span><i class="bi bi-person-lines-fill me-2"></i>Réplica de contactos/calendarios (CardDAV)</span>
+        <span class="badge bg-<?= !empty($cardDavStForInfra['installed']) ? 'success' : 'secondary' ?>"><?= !empty($cardDavStForInfra['installed']) ? 'Master instalado' : 'Master pendiente' ?></span>
+    </div>
+    <div class="card-body">
+        <?php if (empty($cardDavStForInfra['installed'])): ?>
+            <div class="alert alert-secondary small mb-0">Primero instala CardDAV en este master (pestaña <strong>Webmail</strong> → tarjeta Contactos). Luego podrás preparar la réplica en el slave aquí.</div>
+        <?php elseif (empty($slaveNodes)): ?>
+            <div class="alert alert-secondary small mb-0">No hay nodos slave para replicar.</div>
+        <?php else: ?>
+            <p class="small text-muted">
+                Instala Baïkal en un nodo slave como <strong>copia viva</strong>: recibe los contactos y calendarios de este master cada minuto.
+                Si el master cae, el slave los sirve. Al hacer failover, la dirección se invierte automáticamente.
+            </p>
+            <form method="post" action="/mail/carddav/prepare-replica" class="row g-2 align-items-end">
+                <div class="col-md-5">
+                    <label class="form-label small text-muted mb-1">Nodo slave</label>
+                    <select name="node_id" class="form-select form-select-sm" required>
+                        <?php foreach ($slaveNodes as $sn): ?>
+                            <option value="<?= (int)$sn['id'] ?>"><?= View::e($sn['name'] ?? ('#'.$sn['id'])) ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small text-muted mb-1">Contraseña de admin</label>
+                    <input type="password" name="admin_password" class="form-control form-control-sm" required autocomplete="current-password">
+                </div>
+                <div class="col-md-3">
+                    <button type="submit" class="btn btn-primary btn-sm w-100"><i class="bi bi-hdd-network me-1"></i>Preparar réplica</button>
+                </div>
+            </form>
+            <p class="small text-muted mt-2 mb-0">El master ordena al slave instalar Baïkal con las mismas credenciales, y le envía el primer snapshot. El cron mantiene la copia al día.</p>
+        <?php endif; ?>
     </div>
 </div>
 <script>

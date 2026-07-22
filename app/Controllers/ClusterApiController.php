@@ -18,6 +18,9 @@ class ClusterApiController
         // Mailbox password hash: travels in mail_create_mailbox payloads and would
         // otherwise land (bcrypt hash) in the replicated panel_log.
         'password_hash', 'dkim_private_key',
+        // CardDAV DB credentials + encryption key sent to the slave when preparing
+        // its DAV replica (carddav_setup_replica).
+        'enc_key',
     ];
 
     /** Return a copy of $payload with secret values masked, recursively. */
@@ -364,7 +367,15 @@ class ClusterApiController
         // Redact secrets before logging: panel_log is replicated (publication FOR
         // ALL TABLES), so a cleartext password/secret here would be persisted and
         // copied to every node. Never let credentials reach the log.
-        LogService::log('cluster.api', $action, "Recibido de nodo #{$callerNodeId}" . ($action !== 'receive-files' ? ': ' . json_encode(self::redactSecrets($payload)) : ''));
+        // Some payloads are bulk data, not control metadata: 'receive-files' and
+        // 'carddav_apply_snapshot' (a full contacts/calendars snapshot = PII +
+        // large). Log only a summary for those — never dump the body into the
+        // replicated panel_log.
+        $bulkActions = ['receive-files', 'carddav_apply_snapshot'];
+        $logSuffix = in_array($action, $bulkActions, true)
+            ? ' (payload omitido: datos en bloque)'
+            : ': ' . json_encode(self::redactSecrets($payload));
+        LogService::log('cluster.api', $action, "Recibido de nodo #{$callerNodeId}{$logSuffix}");
 
         try {
             $result = match ($action) {
@@ -436,6 +447,13 @@ class ClusterApiController
                 // mail node shares the same fail2ban/rate-limit/whitelist protection.
                 'mail_apply_policy' => \MuseDockPanel\Services\MailPolicyService::nodeApplyPolicy($payload),
                 'mail_set_rate'     => \MuseDockPanel\Services\MailPolicyService::nodeSetRate($payload),
+                // CardDAV/CalDAV failover: the master pushes a full snapshot of
+                // the Baïkal data tables; this node replaces its local baikal DB
+                // with that authoritative snapshot (see CardDavService).
+                'carddav_apply_snapshot' => \MuseDockPanel\Services\CardDavService::applySnapshot($payload),
+                // Master-orchestrated: install Baïkal on this slave so it can
+                // receive DAV snapshots and serve after a failover.
+                'carddav_setup_replica'  => \MuseDockPanel\Services\CardDavService::nodeSetupReplica($payload),
                 'mail_setup_node'          => MailService::nodeSetupMail($payload),
                 'mail_setup_status'        => MailService::nodeSetupStatus($payload),
                 'mail_generate_setup_token' => MailService::nodeGenerateSetupToken($payload),
