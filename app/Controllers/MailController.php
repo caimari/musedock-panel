@@ -1445,6 +1445,14 @@ class MailController
         Router::redirect('/mail?tab=infra#carddav-replica');
     }
 
+    public function carddavReplicaStatus(): void
+    {
+        header('Content-Type: application/json');
+        $nodeId = (int)($_GET['node_id'] ?? 0);
+        if ($nodeId <= 0) { echo json_encode(['status' => 'unknown', 'error' => 'node_id requerido']); return; }
+        echo json_encode(\MuseDockPanel\Services\CardDavService::replicaStatusOnNode($nodeId), JSON_UNESCAPED_SLASHES);
+    }
+
     public function webmailAliasStore(): void
     {
         if (self::isSlave()) {

@@ -511,7 +511,25 @@ class CardDavService
         // cron retries next minute.
         try { self::syncToNode($slaveNodeId); } catch (\Throwable $e) { /* cron will retry */ }
 
-        return ['ok' => true, 'result' => $remote, 'message' => 'Réplica CardDAV preparada en el slave (instalación lanzada; el primer sync llegará en ~1 min).'];
+        return ['ok' => true, 'result' => $remote, 'task_id' => ($remote['task_id'] ?? ''),
+            'message' => 'Réplica CardDAV preparada en el slave (instalación lanzada; el primer sync llegará en ~1 min).'];
+    }
+
+    /**
+     * Query the CardDAV install progress ON a slave node (for the master's UI
+     * progress modal). Proxies to the slave's carddav_install_status handler.
+     */
+    public static function replicaStatusOnNode(int $slaveNodeId): array
+    {
+        $res = ClusterService::callNode($slaveNodeId, 'POST', 'api/cluster/action', [
+            'action'  => 'carddav_install_status',
+            'payload' => [],
+        ]);
+        if (empty($res['ok'])) {
+            return ['status' => 'running', 'percent' => 5, 'label' => 'Contactando con el nodo…'];
+        }
+        $remote = $res['result'] ?? $res['data'] ?? [];
+        return is_array($remote) && $remote ? $remote : ['status' => 'running', 'percent' => 10, 'label' => 'Instalando en el nodo…'];
     }
 
     /**

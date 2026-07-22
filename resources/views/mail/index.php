@@ -817,7 +817,7 @@
             Servidor: <code><?= View::e($cardDavHost) ?></code>.
         </p>
         <?php if ($isSlave): ?>
-            <div class="alert alert-secondary small mb-0">Este servidor es <strong>Slave</strong>: el servicio CardDAV se instala y gestiona desde el <strong>Master</strong>. Este nodo recibe la réplica automáticamente.</div>
+            <div class="alert alert-info small mb-0">Este servidor es <strong>Slave</strong>: el servicio CardDAV se instala y gestiona desde el <strong>Master</strong>. Este nodo recibe la réplica automáticamente.</div>
         <?php elseif ($cardDavInstalled): ?>
             <div class="alert alert-success small mb-0">
                 <i class="bi bi-check-circle me-1"></i>Instalado. Los contactos aparecen en el webmail y son sincronizables con el móvil apuntando a <code><?= View::e($cardDavHost) ?></code>.
@@ -1703,21 +1703,21 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
     </div>
     <div class="card-body">
         <?php if (!empty($isSlave)): ?>
-            <div class="alert alert-secondary small mb-0">Este servidor es <strong>Slave</strong>: la réplica se prepara desde el <strong>Master</strong>.</div>
+            <div class="alert alert-info small mb-0">Este servidor es <strong>Slave</strong>: la réplica se prepara desde el <strong>Master</strong>.</div>
         <?php elseif (empty($cardDavStForInfra['installed'])): ?>
-            <div class="alert alert-secondary small mb-0">Primero instala CardDAV en este master (pestaña <strong>Webmail</strong> → tarjeta Contactos). Luego podrás preparar la réplica en el slave aquí.</div>
+            <div class="alert alert-info small mb-0">Primero instala CardDAV en este master (pestaña <strong>Webmail</strong> → tarjeta Contactos). Luego podrás preparar la réplica en el slave aquí.</div>
         <?php elseif (empty($cardDavSlaveNodes)): ?>
-            <div class="alert alert-secondary small mb-0">No hay nodos slave para replicar.</div>
+            <div class="alert alert-info small mb-0">No hay nodos slave para replicar.</div>
         <?php else: ?>
             <p class="small text-muted">
                 Instala Baïkal en un nodo slave como <strong>copia viva</strong>: recibe los contactos y calendarios de este master cada minuto.
                 Si el master cae, el slave los sirve. Al hacer failover, la dirección se invierte automáticamente.
             </p>
-            <form method="post" action="/mail/carddav/prepare-replica" class="row g-2 align-items-end">
+            <form id="carddavReplicaForm" method="post" action="/mail/carddav/prepare-replica" class="row g-2 align-items-end">
                 <?= View::csrf() ?>
                 <div class="col-md-5">
                     <label class="form-label small text-muted mb-1">Nodo slave</label>
-                    <select name="node_id" class="form-select form-select-sm" required>
+                    <select name="node_id" id="carddavReplicaNode" class="form-select form-select-sm" required>
                         <?php foreach ($cardDavSlaveNodes as $sn): ?>
                             <option value="<?= (int)$sn['id'] ?>"><?= View::e($sn['name'] ?? ('#'.$sn['id'])) ?></option>
                         <?php endforeach; ?>
@@ -1725,13 +1725,69 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                 </div>
                 <div class="col-md-4">
                     <label class="form-label small text-muted mb-1">Contraseña de admin</label>
-                    <input type="password" name="admin_password" class="form-control form-control-sm" required autocomplete="current-password">
+                    <input type="password" name="admin_password" id="carddavReplicaPass" class="form-control form-control-sm" required autocomplete="current-password">
                 </div>
                 <div class="col-md-3">
                     <button type="submit" class="btn btn-primary btn-sm w-100"><i class="bi bi-hdd-network me-1"></i>Preparar réplica</button>
                 </div>
             </form>
             <p class="small text-muted mt-2 mb-0">El master ordena al slave instalar Baïkal con las mismas credenciales, y le envía el primer snapshot. El cron mantiene la copia al día.</p>
+
+            <script>
+            (function(){
+                var form = document.getElementById('carddavReplicaForm');
+                if(!form) return;
+                function swal(){ return (typeof SwalDark !== 'undefined') ? SwalDark : (window.SwalDark || window.Swal || null); }
+                var csrfR = <?= json_encode(View::csrfToken()) ?>;
+
+                function progHtml(nodeName){
+                    return '<div class="small text-muted mb-2 text-start">Instalando Baïkal en <b>'+nodeName+'</b> y enviando el primer snapshot. Puedes cerrar; sigue en segundo plano.</div>'
+                         + '<div class="progress" style="height:18px;background:#1b232b;"><div id="cdrBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:5%;">5%</div></div>'
+                         + '<div id="cdrMsg" class="small text-muted mt-2">Enviando orden al nodo…</div>';
+                }
+
+                function poll(nodeId, nodeName){
+                    fetch('/mail/carddav/replica-status?node_id='+encodeURIComponent(nodeId), {headers:{'X-Requested-With':'XMLHttpRequest'}})
+                      .then(function(r){return r.json();})
+                      .then(function(d){
+                        var S=swal(); var st=d.status||'running'; var pct=(typeof d.percent==='number')?d.percent:15; var label=d.label||'Instalando en el nodo…';
+                        var bar=document.getElementById('cdrBar'), msg=document.getElementById('cdrMsg');
+                        if(bar){ bar.style.width=pct+'%'; bar.textContent=pct+'%'; }
+                        if(msg){ msg.textContent=label; }
+                        if(st==='done'||st==='completed'||pct>=100){
+                            if(S) S.fire({icon:'success', title:'Réplica preparada',
+                                html:'<div class="small text-start">Baïkal instalado en <b>'+nodeName+'</b>. El master le envía los contactos cada minuto. Si el master cae, el slave los sirve.</div>',
+                                confirmButtonText:'Entendido'}).then(function(){ location.reload(); });
+                            return;
+                        }
+                        if(st==='error'||st==='failed'){
+                            if(S) S.fire({icon:'error', title:'Error en el nodo', html:'<div class="small text-start">'+(d.error||'La instalación falló en el slave.')+'</div>', confirmButtonText:'Cerrar'});
+                            return;
+                        }
+                        setTimeout(function(){ poll(nodeId, nodeName); }, 2500);
+                      })
+                      .catch(function(){ setTimeout(function(){ poll(nodeId, nodeName); }, 3500); });
+                }
+
+                form.addEventListener('submit', function(ev){
+                    ev.preventDefault();
+                    var S=swal();
+                    var sel=document.getElementById('carddavReplicaNode');
+                    var nodeId=sel.value; var nodeName=sel.options[sel.selectedIndex].text;
+                    var pass=(document.getElementById('carddavReplicaPass')||{}).value||'';
+                    if(!pass){ if(S) S.fire({icon:'warning', title:'Falta la contraseña de admin'}); return; }
+                    var body=new URLSearchParams(); body.append('_csrf_token', csrfR); body.append('node_id', nodeId); body.append('admin_password', pass);
+                    if(S) S.fire({title:'Preparando réplica', html:progHtml(nodeName), allowOutsideClick:false, showConfirmButton:false, didOpen:function(){ S.showLoading&&S.showLoading(); }});
+                    fetch('/mail/carddav/prepare-replica', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:body})
+                      .then(function(r){return r.json();})
+                      .then(function(d){
+                        if(d&&d.ok){ poll(nodeId, nodeName); }
+                        else { if(S) S.fire({icon:'error', title:'No se pudo iniciar', html:'<div class="small text-start">'+((d&&d.error)||'Error desconocido')+'</div>'}); }
+                      })
+                      .catch(function(){ if(S) S.fire({icon:'error', title:'Error de red'}); });
+                });
+            })();
+            </script>
         <?php endif; ?>
     </div>
 </div>

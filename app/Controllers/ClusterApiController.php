@@ -454,6 +454,8 @@ class ClusterApiController
                 // Master-orchestrated: install Baïkal on this slave so it can
                 // receive DAV snapshots and serve after a failover.
                 'carddav_setup_replica'  => \MuseDockPanel\Services\CardDavService::nodeSetupReplica($payload),
+                // Report this node's CardDAV install progress (for the master's modal).
+                'carddav_install_status' => \MuseDockPanel\Services\CardDavService::installStatus(),
                 'mail_setup_node'          => MailService::nodeSetupMail($payload),
                 'mail_setup_status'        => MailService::nodeSetupStatus($payload),
                 'mail_generate_setup_token' => MailService::nodeGenerateSetupToken($payload),
