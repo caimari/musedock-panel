@@ -82,15 +82,44 @@ class CardDavService
         return ['ok' => true, 'task_id' => $taskId];
     }
 
+    /** Ordered install stages → human label, for the progress modal. */
+    private const STAGE_LABELS = [
+        'start'           => 'Iniciando…',
+        'download'        => 'Descargando Baïkal…',
+        'database'        => 'Creando base de datos (PostgreSQL)…',
+        'auth-backend'    => 'Instalando autenticación por buzón…',
+        'config'          => 'Escribiendo configuración…',
+        'fpm-env'         => 'Configurando PHP-FPM…',
+        'permissions'     => 'Ajustando permisos…',
+        'roundcube-plugin'=> 'Integrando con el webmail…',
+        'cron'            => 'Instalando la réplica (cron)…',
+        'caddy-route'     => 'Publicando en Caddy + certificado…',
+        'complete'        => 'Completado',
+        'failed'          => 'Error',
+    ];
+
     public static function installStatus(?string $taskId = null): array
     {
         $taskId = $taskId ?: Settings::get('carddav_install_task_id', '');
         if ($taskId === '') return ['status' => 'idle'];
         $safe = preg_replace('/[^a-zA-Z0-9_-]/', '', $taskId);
         $file = PANEL_ROOT . '/storage/carddav-setup-' . $safe . '.json';
-        if (!is_file($file)) return ['status' => Settings::get('carddav_install_status', 'running') ?: 'running', 'task_id' => $safe];
+        if (!is_file($file)) {
+            return ['status' => Settings::get('carddav_install_status', 'running') ?: 'running', 'task_id' => $safe, 'percent' => 5, 'label' => 'Iniciando…'];
+        }
         $data = json_decode((string) file_get_contents($file), true);
-        return is_array($data) ? $data + ['task_id' => $safe] : ['status' => 'unknown', 'task_id' => $safe];
+        if (!is_array($data)) return ['status' => 'unknown', 'task_id' => $safe];
+        // Add a percent + friendly label so the UI can drive a progress bar.
+        $stages = array_keys(self::STAGE_LABELS);
+        $stage  = (string)($data['stage'] ?? 'start');
+        $status = (string)($data['status'] ?? 'running');
+        $idx = array_search($stage, $stages, true);
+        $idx = $idx === false ? 0 : $idx;
+        $percent = $status === 'done' || $stage === 'complete' ? 100
+            : (int) round(($idx / (count($stages) - 1)) * 100);
+        $data['percent'] = $percent;
+        $data['label']   = self::STAGE_LABELS[$stage] ?? $stage;
+        return $data + ['task_id' => $safe];
     }
 
     /**

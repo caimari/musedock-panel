@@ -91,7 +91,17 @@ try {
     // ── 1. Download + extract Baïkal (idempotent) ─────────────────────────
     cd_state('running', 'download');
     if (!is_dir(BAIKAL_DIR)) {
-        cd_run('mkdir -p ' . escapeshellarg(BAIKAL_ROOT));
+        // Create the install root. /opt is root-owned, so this only works when
+        // the installer runs as root (it does under the panel's systemd unit).
+        // Give a precise, actionable error if it can't — the raw "mkdir: Permission
+        // denied" is confusing from the UI.
+        if (!is_dir(BAIKAL_ROOT) && !@mkdir(BAIKAL_ROOT, 0755, true) && !is_dir(BAIKAL_ROOT)) {
+            $whoami = trim((string) shell_exec('id -un 2>/dev/null')) ?: 'desconocido';
+            throw new RuntimeException(
+                "No se pudo crear " . BAIKAL_ROOT . " (usuario: {$whoami}). "
+                . "El instalador debe ejecutarse como root; verifica que el panel corre bajo su unit systemd (User=root)."
+            );
+        }
         $zip = BAIKAL_ROOT . '/baikal.zip';
         cd_run('curl -fsSL -o ' . escapeshellarg($zip) . ' ' . escapeshellarg(BAIKAL_URL));
         cd_run('cd ' . escapeshellarg(BAIKAL_ROOT) . ' && unzip -q -o baikal.zip');

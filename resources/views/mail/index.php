@@ -823,22 +823,82 @@
                 <?php if (!empty($cardDav['roundcube_plugin'])): ?><span class="badge bg-success ms-1">Plugin webmail activo</span><?php endif; ?>
             </div>
         <?php else: ?>
-            <form method="post" action="/mail/carddav/install" class="row g-2 align-items-end" data-carddav-install>
+            <form id="carddavInstallForm" method="post" action="/mail/carddav/install" class="row g-2 align-items-end">
                 <div class="col-md-5">
                     <label class="form-label small text-muted mb-1">Host DAV</label>
-                    <input type="text" name="host" class="form-control form-control-sm" value="<?= View::e($cardDavHost) ?>" placeholder="dav.musedock.com">
+                    <input type="text" name="host" id="carddavHost" class="form-control form-control-sm" value="<?= View::e($cardDavHost) ?>" placeholder="dav.musedock.com">
                 </div>
                 <div class="col-md-4">
                     <label class="form-label small text-muted mb-1">Contraseña de admin</label>
-                    <input type="password" name="admin_password" class="form-control form-control-sm" required autocomplete="current-password">
+                    <input type="password" name="admin_password" id="carddavAdminPass" class="form-control form-control-sm" required autocomplete="current-password">
                 </div>
                 <div class="col-md-3">
-                    <button type="submit" class="btn btn-primary btn-sm w-100" <?= $cardDavRunning ? 'disabled' : '' ?>>
+                    <button type="submit" id="carddavInstallBtn" class="btn btn-primary btn-sm w-100" <?= $cardDavRunning ? 'disabled' : '' ?>>
                         <i class="bi bi-<?= $cardDavRunning ? 'hourglass-split' : 'download' ?> me-1"></i><?= $cardDavRunning ? 'Instalando…' : 'Instalar' ?>
                     </button>
                 </div>
             </form>
             <p class="small text-muted mt-2 mb-0">Instala Baïkal (contactos + calendarios) sobre PostgreSQL, con auth contra los buzones y réplica al nodo de respaldo. Requiere que el correo ya esté operativo en este servidor.</p>
+
+            <script>
+            (function(){
+                var form = document.getElementById('carddavInstallForm');
+                if(!form) return;
+                function swal(){ return (typeof SwalDark !== 'undefined') ? SwalDark : (window.SwalDark || window.Swal || null); }
+                var davHostVal = <?= json_encode($cardDavHost) ?>;
+
+                function progressHtml(){
+                    return '<div class="small text-muted mb-2 text-start">Instalando el servidor de contactos. Puedes cerrar esta ventana; la instalación continúa en segundo plano.</div>'
+                         + '<div class="progress" style="height:18px;background:#1b232b;"><div id="cdBar" class="progress-bar progress-bar-striped progress-bar-animated" style="width:5%;">5%</div></div>'
+                         + '<div id="cdMsg" class="small text-muted mt-2">Iniciando…</div>';
+                }
+
+                function poll(){
+                    fetch('/mail/carddav/status', {headers:{'X-Requested-With':'XMLHttpRequest'}})
+                      .then(function(r){return r.json();})
+                      .then(function(d){
+                        var S = swal();
+                        var status = d.status || 'running';
+                        var pct = (typeof d.percent === 'number') ? d.percent : 10;
+                        var label = d.label || 'Trabajando…';
+                        var bar = document.getElementById('cdBar');
+                        var msg = document.getElementById('cdMsg');
+                        if(bar){ bar.style.width = pct + '%'; bar.textContent = pct + '%'; }
+                        if(msg){ msg.textContent = label; }
+                        if(status === 'done' || status === 'completed' || pct >= 100){
+                            if(S) S.fire({icon:'success', title:'CardDAV instalado',
+                                html:'<div class="small text-start">Contactos y calendarios listos en <b>'+davHostVal+'</b>.<br>Configúralos en el móvil con tu email + contraseña del correo. Ahora prepara la réplica en el tab <b>Infra</b>.</div>',
+                                confirmButtonText:'Entendido'}).then(function(){ location.reload(); });
+                            return;
+                        }
+                        if(status === 'error' || status === 'failed'){
+                            if(S) S.fire({icon:'error', title:'Error en la instalación',
+                                html:'<div class="small text-start">'+(d.error || 'La instalación falló.')+'</div>', confirmButtonText:'Cerrar'});
+                            return;
+                        }
+                        setTimeout(poll, 2000);
+                      })
+                      .catch(function(){ setTimeout(poll, 3000); });
+                }
+
+                form.addEventListener('submit', function(ev){
+                    ev.preventDefault();
+                    var S = swal();
+                    var host = (document.getElementById('carddavHost')||{}).value || davHostVal;
+                    var pass = (document.getElementById('carddavAdminPass')||{}).value || '';
+                    if(!pass){ if(S){ S.fire({icon:'warning', title:'Falta la contraseña de admin'});} return; }
+                    var body = new URLSearchParams(); body.append('host', host); body.append('admin_password', pass);
+                    if(S){ S.fire({title:'Instalando CardDAV', html: progressHtml(), allowOutsideClick:false, showConfirmButton:false, didOpen:function(){ S.showLoading && S.showLoading(); }}); }
+                    fetch('/mail/carddav/install', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body: body})
+                      .then(function(r){return r.json();})
+                      .then(function(d){
+                        if(d && d.ok){ poll(); }
+                        else { if(S) S.fire({icon:'error', title:'No se pudo iniciar', html:'<div class="small text-start">'+((d && d.error) || 'Error desconocido')+'</div>'}); }
+                      })
+                      .catch(function(){ if(S) S.fire({icon:'error', title:'Error de red al iniciar la instalación'}); });
+                });
+            })();
+            </script>
         <?php endif; ?>
     </div>
 </div>
