@@ -465,7 +465,13 @@ class ClusterService
             return null;
         }
 
+        // For aliases the unique target is the SOURCE address, not email/domain.
+        // Bug fix: without this, several aliases on the same domain all fell back
+        // to $payload['domain'] and produced the SAME idempotency key, so only
+        // the first of a batch was enqueued and the rest were dropped as
+        // "duplicates" — leaving the slave missing aliases after a resync.
         $target = $payload['email']
+            ?? $payload['source']          // mail_upsert_alias / mail_delete_alias
             ?? $payload['domain']
             ?? $payload['home_dir']
             ?? $payload['mail_hostname']
