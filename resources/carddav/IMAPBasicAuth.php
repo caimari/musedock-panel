@@ -67,20 +67,71 @@ class IMAPBasicAuth extends \Sabre\DAV\Auth\Backend\AbstractBasic {
             return false;
         }
 
-        // Force TLS on the local port and skip cert validation for 127.0.0.1
-        // (the cert is for the public mail hostname, not the loopback IP).
-        $mailbox = '{' . $this->imapHost . ':' . $this->imapPort . '/imap/tls/novalidate-cert}INBOX';
+        // PERFORMANCE: a CardDAV/CalDAV client fires many requests in a burst,
+        // and validating each one against Dovecot (TLS handshake + Dovecot's
+        // anti-bruteforce auth_failure_delay) is slow. Cache the RESULT of a
+        // validation for a short TTL, keyed by a salted hash of user+password
+        // (never the plaintext). A positive result is cached 30s; we do NOT
+        // cache negatives (so a password change / typo retries immediately).
+        $cacheKey = 'mdcarddav_' . hash('sha256', $username . "\0" . $password . "\0" . $this->authRealm);
+        $ttl = 30;
+        if (function_exists('apcu_fetch')) {
+            $hit = @apcu_fetch($cacheKey, $ok);
+            if ($ok && $hit === 1) { $this->currentUser = $username; return true; }
+        } else {
+            $cf = sys_get_temp_dir() . '/' . $cacheKey;
+            if (@is_file($cf) && (time() - (int) @filemtime($cf)) < $ttl) {
+                $this->currentUser = $username; return true;
+            }
+        }
 
-        // Suppress the connection warnings; we only care about success/failure.
-        $imap = @imap_open($mailbox, $username, $password, OP_HALFOPEN, 1);
-        if ($imap === false) {
-            // Clear the error stack so it doesn't leak into later requests.
+        // Validate against the LOCAL Dovecot. We try connection modes in order
+        // of preference and stop at the first that AUTHENTICATES (or cleanly
+        // rejects the password). Traffic never leaves the machine (127.0.0.1),
+        // so cert validation is disabled on every mode.
+        //
+        // NOTE: PHP's "/imap/tls" (STARTTLS on 143) fails "SSL negotiation
+        // failed" against this Dovecot build, so we prefer implicit SSL on 993,
+        // then fall back to plain 143 (notls) — both loopback-only.
+        $host = $this->imapHost;
+        $modes = [
+            '{' . $host . ':993/imap/ssl/novalidate-cert}INBOX',   // implicit TLS, works
+            '{' . $host . ':' . $this->imapPort . '/imap/notls}INBOX', // plain loopback fallback
+        ];
+
+        $authed = false;
+        foreach ($modes as $mailbox) {
+            $imap = @imap_open($mailbox, $username, $password, OP_HALFOPEN, 1);
+            // Clear the error/alert stacks so nothing leaks into later requests.
             if (function_exists('imap_errors')) { @imap_errors(); }
             if (function_exists('imap_alerts')) { @imap_alerts(); }
+            if ($imap !== false) {
+                @imap_close($imap);
+                if (function_exists('imap_errors')) { @imap_errors(); }
+                $authed = true;
+                break;
+            }
+            // If the connection reached Dovecot but the PASSWORD was wrong, the
+            // error is AUTHENTICATIONFAILED — that's a definitive "no", don't
+            // try the next mode (it would give the same answer). Only fall
+            // through on transport/negotiation errors.
+            $last = function_exists('imap_last_error') ? (string) @imap_last_error() : '';
+            if (stripos($last, 'AUTHENTICATIONFAILED') !== false || stripos($last, 'authenticate') !== false) {
+                if (function_exists('imap_errors')) { @imap_errors(); }
+                return false;
+            }
+            if (function_exists('imap_errors')) { @imap_errors(); }
+        }
+        if (!$authed) {
             return false;
         }
-        @imap_close($imap);
-        if (function_exists('imap_errors')) { @imap_errors(); }
+
+        // Cache the positive result for the short TTL (see top of method).
+        if (function_exists('apcu_store')) {
+            @apcu_store($cacheKey, 1, $ttl);
+        } else {
+            @touch(sys_get_temp_dir() . '/' . $cacheKey);
+        }
 
         // Auth OK — make sure the principal + default address book + calendar
         // exist so the client actually sees an account. Idempotent.

@@ -2,22 +2,38 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [Unreleased] — Contactos y calendarios (CardDAV/CalDAV) con failover
+## [1.0.203 – 1.0.207] — 2026-07-22 — Servicio integral: Contactos y calendarios (CardDAV/CalDAV) con failover
 
-Servicio **integral** de correo: además de mensajes, ahora hay **contactos y calendarios** compartidos, con failover y sincronización con el webmail y el móvil (iPhone/Android), usando la **misma contraseña del buzón**.
+Servicio **integral** de correo: además de mensajes, ahora hay **contactos y calendarios** compartidos, con failover y sincronización con el webmail y el móvil (iPhone/Android), usando la **misma contraseña del buzón**. Servido en `dav.<dominio>` por Baïkal (SabreDAV) sobre PostgreSQL.
 
 ### Added (CardDAV/CalDAV)
 
 - **Servidor Baïkal (SabreDAV) sobre PostgreSQL**: instalador idempotente `bin/carddav-setup-run.php` que descarga Baïkal 0.10.1, crea la BBDD `baikal` en el clúster 5433, carga el schema PgSQL (+ los índices UNIQUE que el schema no trae, necesarios para el auto-aprovisionamiento race-safe), y genera `baikal.yaml` con el formato exacto que Baïkal espera.
 - **Auth contra el buzón por IMAP (una sola fuente de verdad)**: backend `resources/carddav/IMAPBasicAuth.php` que valida cada petición DAV abriendo IMAP contra Dovecot local. No se duplican ni convierten hashes de contraseña. En el primer login se **auto-aprovisiona** el principal + libreta + calendario del usuario (idempotente). Cada usuario accede **solo a su** principal (`principals/<email>`).
 - **Plugin en el webmail con SSO**: `roundcube/carddav` con preset fijo (`%u`/`%p` de la sesión) → el usuario ve los mismos contactos en el webmail sin volver a autenticarse. El instalador de webmail añade `carddav` a los plugins si el servicio está instalado.
-- **Ruta Caddy `dav.<dominio>`** (`CardDavService::ensureCaddyRoute`): insertada en índice 0, bloquea `Core/Specific/config`, y publica `/.well-known/carddav|caldav` para el autodescubrimiento del móvil. El cert lo emite la policy catch-all DNS-01 existente.
+- **Ruta Caddy `dav.<dominio>`** (`CardDavService::ensureCaddyRoute`): insertada en índice 0, bloquea `Core/Specific/config`, redirige la raíz + `/.well-known/carddav|caldav` a `/dav.php/` para el autodescubrimiento del móvil. El cert lo emite la policy catch-all DNS-01 existente.
 - **Failover por rol (última promoción gana)**: como los contactos los crea el usuario directamente en Baïkal (el panel no los ve), la réplica es un **push periódico** (cron `carddav-sync-worker.php`, cada minuto): el nodo que es master empuja un snapshot completo de las tablas DAV al otro nodo, que hace un **reemplazo autoritativo** en su BBDD local. Al hacer failover se **invierte la dirección** automáticamente; `promoteToMaster` empuja al instante. Acción de cluster `carddav_apply_snapshot`.
-- **Réplica en el slave orquestada desde el master** (botón «Preparar réplica» en el tab Infra, como el correo): el master ordena al slave instalar Baïkal con las **mismas credenciales** (`carddav_setup_replica` → `CardDavService::nodeSetupReplica`, que lanza el mismo instalador) y le envía el primer snapshot. Sin esto el slave rechazaría los pushes (no tendría la BBDD `baikal`), y el failover no funcionaría.
-- **Privacidad**: el snapshot (PII de contactos) está en las acciones "bulk" que **no** se vuelcan al `panel_log` replicado.
-- Guía en el panel (`/docs/mail/contacts`) con estado real, pasos para iPhone/Android y explicación del failover. Tests `tests/carddav_test.php` (40 checks).
+- **Réplica en el slave orquestada desde el master** (botón «Preparar réplica» en el tab Infra, con modal de progreso, como el correo): el master ordena al slave instalar Baïkal con las **mismas credenciales** (`carddav_setup_replica` → `CardDavService::nodeSetupReplica`, que lanza el mismo instalador) y le envía el primer snapshot. Sin esto el slave rechazaría los pushes (no tendría la BBDD `baikal`), y el failover no funcionaría.
+- **Modales de progreso** para instalar CardDAV (tab Webmail) y preparar la réplica (tab Infra), con barra y polling del estado real (`/mail/carddav/status`, `/mail/carddav/replica-status`).
+- **Privacidad**: el snapshot (PII de contactos) está en las acciones "bulk" que **no** se vuelcan al `panel_log` replicado; credenciales DAV (`db_pass`, `enc_key`) en `SECRET_KEYS`.
+- Guía en el panel (`/docs/mail/contacts`) con estado real, pasos para iPhone/Android y explicación del failover. Tests `tests/carddav_test.php` (56 checks).
 
-## [Unreleased] — Webmail Roundcube: correcciones, rendimiento y failover
+### Fixed (CardDAV, sobre la marcha)
+
+- **Permisos de `baikal.yaml`**: Baïkal (usuario del pool FPM) debe poder escribir su config; el instalador ahora detecta el usuario real del pool y da escritura a `config/` y `Specific/` (antes quedaba `www-data` solo-lectura → «config/baikal.yaml is not writable»).
+- **Routing `dav.php`**: la reescritura manual `/dav.php{uri}` hacía a SabreDAV calcular mal el base («Requested uri (/) is out of base uri») → ahora se sirve `dav.php`/`card.php`/`cal.php` directo y se redirige la raíz a `/dav.php/`.
+- **Auth IMAP: STARTTLS→SSL**: PHP daba «SSL negotiation failed» con `/imap/tls` (143 STARTTLS); el backend usa ahora `993/imap/ssl` (con fallback a 143 plano), todo loopback. Además **caché de 30 s** de la validación (hash de user+pass, nunca la contraseña) para que las ráfagas de peticiones del cliente DAV no re-autentiquen cada vez.
+- **HTML del tab Webmail**: un `<div>` sin cerrar en la tarjeta CardDAV anidaba los tabs siguientes (Dominios/Infra salían vacíos en el navegador); corregido el balance.
+- **CSRF en los modales** + **contraste**: los avisos usan `alert-info` (texto legible sobre el tema) en vez de `alert-secondary`.
+
+## [1.0.201 – 1.0.202] — 2026-07-22 — Correo del slave con copia LOCAL (failover real)
+
+- **Correo del slave con copia LOCAL (failover real)**: antes el Postfix/Dovecot del slave leía las cuentas del 5433 del **master** por WireGuard — lo que fallaba si el master caía (el slave se quedaba sin poder autenticar). Ahora cada dominio/buzón/alias se **replica a la BBDD local de cada nodo de mail** (por la cola, como los hostings): al crear/borrar en el master se propaga a todos los nodos réplica, que hacen upsert en su propio `mail_domains`/`mail_accounts`. El slave lee de `127.0.0.1` (rol `musedock_mail` local) → **sirve correo aunque el master esté caído**. Al instalar la réplica se hace un **sync inicial** de dominios+buzones+aliases existentes. Nuevos: `MailService::replicateMailOp/upsertLocalMailDomain/upsertLocalMailAccount/nodeUpsertAlias/resyncMailToNode/markNodeAsMail/ensureLocalMailRole`.
+- **Retorno tras failover (simple)**: cuando un slave se promueve a master, re-sincroniza su estado de correo a los demás nodos; al reintegrarse el viejo master, recibe los buzones creados durante la caída. Modelo «última promoción gana» (sin merge bidireccional en caliente).
+- **Propagación de políticas anti-abuso al slave**: los toggles de fail2ban/rate-limit/whitelist se envían a los nodos de mail (`mail_apply_policy`, `mail_set_rate`) para que la protección sea idéntica en todos.
+- Fixes de la revisión adversarial: el hash de contraseña de buzón y la clave DKIM privada ya **no se registran** en `panel_log` (que se replica); `getMailReplicaNodes` excluye el nodo local para no auto-encolar por loopback; no se crea una cuenta réplica con hash vacío. Health check del nodo: parseo correcto de `host:port` (`127.0.0.1:5433`) para no dar «could not translate host name». Tests `tests/mail_db_replication_test.php` (28 checks).
+
+## [1.0.199 – 1.0.200] — 2026-07-22 — Webmail Roundcube: correcciones, rendimiento y failover
 
 Webmail Roundcube funcionando (`webmail.<dominio>`) sirviendo todos los dominios. Estreno con múltiples correcciones, todas en el instalador para que los nodos nuevos nazcan bien.
 
@@ -45,7 +61,18 @@ Webmail Roundcube funcionando (`webmail.<dominio>`) sirviendo todos los dominios
 
 ### Notes
 
-- El **webmail en nodos slave** (para failover) se pospone: la BBDD `roundcube` viviría en el clúster panel (5433), que en un slave con réplica en streaming es de solo lectura → `CREATE DATABASE` fallaría. Se retomará junto con la decisión de la réplica del 5433 (BBDD `roundcube` en un clúster escribible independiente).
+- El **webmail en nodos slave** (para failover) se pospone: la BBDD `roundcube` viviría en el clúster panel (5433), que en un slave con réplica en streaming es de solo lectura → `CREATE DATABASE` fallaría. Se retomará junto con la decisión de la réplica del 5433 (BBDD `roundcube` en un clúster escribible independiente). Nota: CardDAV sí lo resolvió más tarde porque su BBDD `baikal` se replica por la cola lógica (push periódico), no por streaming — el patrón que aquí faltaba.
+
+## [1.0.194 – 1.0.198] — 2026-07-22 — Correo HA master ↔ slave (backup-replica por dsync)
+
+Base del servicio de correo en alta disponibilidad sobre la que se construyeron el webmail, el failover local y CardDAV.
+
+### Added (correo HA)
+
+- **Backup-replica de correo orquestada desde el master**: botón «Preparar réplica» en Mail → Infra que instala Postfix/Dovecot/Rspamd en un nodo slave como copia viva, abre el `pg_hba` del master para `musedock_mail` desde la IP WireGuard del slave, comparte el secreto de replicación y configura **dsync** en ambos lados (`MailService::prepareMailReplicaOnNode`, `nodeSetupBackupReplica`, `finalizeBackupReplica`). Los mensajes se replican por Dovecot dsync sobre WireGuard.
+- **Reconciliación «última promoción gana»**: al promover un slave a master (`ClusterService::promoteToMaster`), re-sincroniza el estado de correo a los demás nodos; documentado como modelo simple sin merge multi-master.
+- **Guía «Correo HA (master + slave)»** en el panel (`/docs/mail/ha`), dinámica con hostname/IP reales, más las guías de puertos y seguridad anti-abuso (`mail-ports`, `mail-security`).
+- Consolidación de los fixes del instalador de correo en `bin/mail-setup-run.php` (Sieve solo en `protocol lmtp`/`lda`, para no romper la auth IMAP con `undefined symbol`).
 
 ## [1.0.193] — 2026-07-21 — Alta disponibilidad y consistencia de nodos
 
