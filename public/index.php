@@ -437,6 +437,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/mail/carddav/status', 'MailController@carddavStatus');
 \MuseDockPanel\Router::post('/mail/carddav/prepare-replica', 'MailController@carddavPrepareReplica');
 \MuseDockPanel\Router::get('/mail/carddav/replica-status', 'MailController@carddavReplicaStatus');
+\MuseDockPanel\Router::post('/mail/resync-node', 'MailController@mailResyncNode');
+\MuseDockPanel\Router::post('/mail/carddav/resync-node', 'MailController@carddavResyncNode');
 \MuseDockPanel\Router::post('/mail/webmail/aliases/store', 'MailController@webmailAliasStore');
 \MuseDockPanel\Router::post('/mail/webmail/aliases/delete', 'MailController@webmailAliasDelete');
 \MuseDockPanel\Router::post('/mail/webmail/sieve-enable', 'MailController@webmailEnableSieve');

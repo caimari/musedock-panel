@@ -1670,6 +1670,13 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                     <td class="text-muted"><?= View::e($snIp) ?></td>
                     <td><span class="badge bg-<?= $badge[0] ?>"><i class="bi bi-<?= $badge[1] ?> me-1"></i><?= $badge[2] ?></span></td>
                     <td class="text-end pe-3">
+                        <?php if ($rstate === 'ready'): ?>
+                        <button type="button" class="btn btn-outline-info btn-sm me-1 mail-resync-btn"
+                                data-node-id="<?= (int)$sn['id'] ?>" data-node-name="<?= View::e($sn['name'] ?? '') ?>"
+                                title="Reenvía dominios, buzones y aliases al nodo (upsert, sin borrar). Repara desajustes sin reinstalar.">
+                            <i class="bi bi-arrow-repeat me-1"></i>Sincronizar
+                        </button>
+                        <?php endif; ?>
                         <button type="button" class="btn <?= $btnClass ?> btn-sm prepare-mail-replica-btn"
                                 data-node-id="<?= (int)$sn['id'] ?>" data-node-name="<?= View::e($sn['name'] ?? '') ?>"
                                 <?= $rstate === 'installing' ? 'disabled' : '' ?>>
@@ -1732,6 +1739,11 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                 </div>
             </form>
             <p class="small text-muted mt-2 mb-0">El master ordena al slave instalar Baïkal con las mismas credenciales, y le envía el primer snapshot. El cron mantiene la copia al día.</p>
+            <div class="mt-2">
+                <button type="button" id="carddavResyncBtn" class="btn btn-outline-info btn-sm" title="Envía ahora un snapshot completo de contactos y calendarios al nodo seleccionado (además del cron cada minuto).">
+                    <i class="bi bi-arrow-repeat me-1"></i>Sincronizar contactos ahora
+                </button>
+            </div>
 
             <script>
             (function(){
@@ -1785,6 +1797,31 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                         else { if(S) S.fire({icon:'error', title:'No se pudo iniciar', html:'<div class="small text-start">'+((d&&d.error)||'Error desconocido')+'</div>'}); }
                       })
                       .catch(function(){ if(S) S.fire({icon:'error', title:'Error de red'}); });
+                });
+
+                // "Sincronizar contactos ahora": empuja un snapshot al nodo elegido.
+                var rbtn = document.getElementById('carddavResyncBtn');
+                if(rbtn) rbtn.addEventListener('click', function(){
+                    var S=swal();
+                    var sel=document.getElementById('carddavReplicaNode');
+                    var nodeId=sel.value, nodeName=sel.options[sel.selectedIndex].text;
+                    var run=function(pass){
+                        if(!pass) return;
+                        rbtn.disabled=true;
+                        if(S) S.fire({title:'Sincronizando contactos…', html:'<div class="small text-muted">Enviando snapshot a '+nodeName+'…</div>', allowOutsideClick:false, didOpen:function(){ S.showLoading&&S.showLoading(); }});
+                        var body=new URLSearchParams(); body.append('_csrf_token', csrfR); body.append('node_id', nodeId); body.append('admin_password', pass);
+                        fetch('/mail/carddav/resync-node', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:body})
+                          .then(function(r){return r.json();}).then(function(d){
+                            rbtn.disabled=false;
+                            if(d&&d.ok){ if(S) S.fire({icon:'success', title:'Sincronizado', html:'<div class="small text-start">'+(d.message||'Hecho.')+'</div>'}); }
+                            else { if(S) S.fire({icon:'error', title:'Error', html:'<div class="small text-start">'+((d&&d.error)||'error')+'</div>'}); }
+                          }).catch(function(){ rbtn.disabled=false; if(S) S.fire({icon:'error', title:'Error de red'}); });
+                    };
+                    if(!S){ run(prompt('Contraseña de admin para sincronizar contactos a "'+nodeName+'":')); return; }
+                    S.fire({ title:'Sincronizar contactos en '+nodeName, input:'password', inputPlaceholder:'Contraseña de administrador',
+                        inputAttributes:{autocomplete:'current-password'}, showCancelButton:true, confirmButtonText:'Sincronizar', cancelButtonText:'Cancelar',
+                        preConfirm:function(p){ if(!p){ S.showValidationMessage('Introduce la contraseña'); return false; } return p; }
+                    }).then(function(res){ if(res.isConfirmed) run(res.value); });
                 });
             })();
             </script>
@@ -1868,6 +1905,36 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                 if(!res.isConfirmed) return;
                 doInstall(res.value, nodeId, nodeName, S);
             });
+        });
+    });
+
+    // "Sincronizar ahora" — reenvía dominios/buzones/aliases al slave (upsert,
+    // no borra). Repara desajustes sin reinstalar la réplica.
+    document.querySelectorAll('.mail-resync-btn').forEach(function(btn){
+        btn.addEventListener('click', function(){
+            var nodeId = btn.getAttribute('data-node-id');
+            var nodeName = btn.getAttribute('data-node-name') || ('#'+nodeId);
+            var S = swal();
+            var run = function(pass){
+                if(!pass) return;
+                if(btn){ btn.disabled = true; }
+                if(S){ S.fire({title:'Sincronizando…', html:'<div class="small text-muted">Reenviando dominios, buzones y aliases a '+nodeName+' (upsert, sin borrar)…</div>', allowOutsideClick:false, didOpen:function(){ S.showLoading&&S.showLoading(); }}); }
+                var body = new URLSearchParams(); body.set('_csrf_token', csrf); body.set('admin_password', pass); body.set('node_id', nodeId);
+                fetch('/mail/resync-node', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:body})
+                  .then(function(r){return r.json();})
+                  .then(function(d){
+                    if(btn) btn.disabled = false;
+                    if(d.ok){ if(S) S.fire({icon:'success', title:'Sincronizado', html:'<div class="small text-start">'+(d.message||'Hecho.')+'</div>', confirmButtonText:'Entendido'}); }
+                    else { if(S) S.fire({icon:'error', title:'Error', html:'<div class="small text-start">'+(d.error||'error')+'</div>'}); }
+                  })
+                  .catch(function(){ if(btn) btn.disabled=false; if(S) S.fire({icon:'error', title:'Error de red'}); });
+            };
+            if(!S){ run(prompt('Contraseña de administrador para sincronizar "'+nodeName+'":')); return; }
+            S.fire({ title:'Sincronizar correo en '+nodeName, html:'<div class="small text-muted mb-2 text-start">Reenvía dominios, buzones y aliases al nodo. No borra nada (upsert). Útil cuando algo no se propagó.</div>',
+                input:'password', inputPlaceholder:'Contraseña de administrador', inputAttributes:{autocomplete:'current-password'},
+                showCancelButton:true, confirmButtonText:'Sincronizar', cancelButtonText:'Cancelar',
+                preConfirm:function(p){ if(!p){ S.showValidationMessage('Introduce la contraseña'); return false; } return p; }
+            }).then(function(res){ if(res.isConfirmed) run(res.value); });
         });
     });
 

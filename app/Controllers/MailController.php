@@ -1453,6 +1453,62 @@ class MailController
         echo json_encode(\MuseDockPanel\Services\CardDavService::replicaStatusOnNode($nodeId), JSON_UNESCAPED_SLASHES);
     }
 
+    /**
+     * Manual re-sync of mail (domains + mailboxes + aliases) master → one slave.
+     * Reuses resyncMailToNode (idempotent upsert; never deletes on the slave), so
+     * it heals drift — e.g. aliases that didn't propagate — WITHOUT reinstalling.
+     */
+    public function mailResyncNode(): void
+    {
+        $isXhr = strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+        $fail = function (string $msg) use ($isXhr) {
+            if ($isXhr) { header('Content-Type: application/json'); echo json_encode(['ok' => false, 'error' => $msg]); return; }
+            Flash::set('error', $msg);
+            Router::redirect('/mail?tab=infra');
+        };
+        if (self::isSlave()) { $fail('Este servidor es Slave; sincroniza desde el Master.'); return; }
+        $adminPassword = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPassword($adminPassword)) { $fail('Password de admin incorrecta.'); return; }
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        if ($nodeId <= 0) { $fail('Nodo no indicado.'); return; }
+
+        try {
+            $res = \MuseDockPanel\Services\MailService::resyncMailToNode($nodeId);
+        } catch (\Throwable $e) {
+            $fail('Error al sincronizar: ' . $e->getMessage()); return;
+        }
+        $msg = 'Sincronización encolada: ' . (int)($res['domains'] ?? 0) . ' dominios, '
+             . (int)($res['mailboxes'] ?? 0) . ' buzones, ' . (int)($res['aliases'] ?? 0) . ' aliases. '
+             . 'El nodo los aplicará en unos segundos (upsert, no borra nada).';
+        if ($isXhr) { header('Content-Type: application/json'); echo json_encode(['ok' => true, 'message' => $msg] + $res, JSON_UNESCAPED_SLASHES); return; }
+        Flash::set('success', $msg);
+        Router::redirect('/mail?tab=infra');
+    }
+
+    /** Manual CardDAV/CalDAV re-sync (master pushes a full snapshot to one slave). */
+    public function carddavResyncNode(): void
+    {
+        $isXhr = strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) === 'xmlhttprequest';
+        $fail = function (string $msg) use ($isXhr) {
+            if ($isXhr) { header('Content-Type: application/json'); echo json_encode(['ok' => false, 'error' => $msg]); return; }
+            Flash::set('error', $msg);
+            Router::redirect('/mail?tab=infra#carddav-replica');
+        };
+        if (self::isSlave()) { $fail('Este servidor es Slave; sincroniza desde el Master.'); return; }
+        $adminPassword = (string)($_POST['admin_password'] ?? '');
+        if (!$this->verifyAdminPassword($adminPassword)) { $fail('Password de admin incorrecta.'); return; }
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        if ($nodeId <= 0) { $fail('Nodo no indicado.'); return; }
+
+        $res = \MuseDockPanel\Services\CardDavService::syncToNode($nodeId);
+        $ok = !empty($res['ok']);
+        $msg = $ok ? 'Contactos y calendarios sincronizados al nodo (snapshot completo enviado).'
+                   : ('No se pudo sincronizar CardDAV: ' . ($res['error'] ?? 'error'));
+        if ($isXhr) { header('Content-Type: application/json'); echo json_encode(['ok' => $ok, 'message' => $msg, 'error' => ($res['error'] ?? null)], JSON_UNESCAPED_SLASHES); return; }
+        Flash::set($ok ? 'success' : 'error', $msg);
+        Router::redirect('/mail?tab=infra#carddav-replica');
+    }
+
     public function webmailAliasStore(): void
     {
         if (self::isSlave()) {
