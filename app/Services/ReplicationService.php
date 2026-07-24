@@ -2728,7 +2728,28 @@ class ReplicationService
      * Activate PostgreSQL as master: only touches postgresql.conf + restart.
      * Does NOT create users or modify pg_hba.conf.
      */
+    /**
+     * @deprecated PELIGROSO — bloqueado. Resolvía SOLO el clúster del panel
+     * (getPgConfigDir → 5433), ponía listen_addresses='*' (abre a todas las
+     * interfaces) y reiniciaba el clúster del panel → mataba el propio panel
+     * (HTTP 500) sin tocar el clúster de clientes 5432. Usa el flujo por-clúster
+     * setupPgMasterForCluster($cluster, $slaveIps) que limita listen_addresses a
+     * loopback+WireGuard y actúa sobre el clúster correcto.
+     */
     public static function activatePgMaster(): array
+    {
+        return [
+            'ok' => false,
+            'steps' => [['name' => 'Activar master (legacy)', 'ok' => false,
+                'output' => 'Bloqueado: usaba el clúster del panel (5433) y listen_addresses=* — reiniciaba el panel.']],
+            'error' => 'Operación bloqueada por seguridad. La activación como master ahora es POR CLÚSTER '
+                     . '(setupPgMasterForCluster): selecciona el clúster (5432 clientes) y los slaves autorizados. '
+                     . 'El método antiguo abría PostgreSQL a todas las interfaces y reiniciaba el clúster equivocado.',
+        ];
+    }
+
+    /** Legacy body retained below only for reference — unreachable. */
+    private static function activatePgMasterLegacyUnused(): array
     {
         $steps = [];
         $configDir = static::getPgConfigDir();
