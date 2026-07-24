@@ -1534,60 +1534,203 @@ class ReplicationService
         return $file;
     }
 
-    public static function setupMysqlSlave(string $masterIp, int $port, string $replUser, string $replPass): array
+    /**
+     * Configure this node as a MySQL/MariaDB replication slave of $masterIp.
+     *
+     * CRITICAL: this SEEDS the slave's data from the master before starting
+     * replication. The previous version only ran CHANGE MASTER on the existing
+     * datadir, so a slave never received the master's pre-existing client
+     * databases and diverged silently. We now take a consistent logical dump
+     * from the master (with its binlog/GTID coordinates), import it locally,
+     * then start replication from exactly that point — the standard, safe way.
+     *
+     * Vendor-aware: MariaDB uses MASTER_USE_GTID=slave_pos, not the Oracle
+     * MASTER_AUTO_POSITION=1 (which fails / mis-replicates on MariaDB 10.6).
+     *
+     * @param bool $seed  When true (default) dump+import the master's data first.
+     *                    Pass false ONLY when you know the datadir is already an
+     *                    exact copy of the master at a known coordinate.
+     */
+    public static function setupMysqlSlave(string $masterIp, int $port, string $replUser, string $replPass, bool $seed = true): array
     {
         $steps = [];
         $configPath = static::getMysqlConfigPath();
         $service = static::detectMysqlServiceName();
 
+        // Detect vendor: MariaDB vs Oracle MySQL. Governs replication syntax.
+        $vendorInfo = static::detectDbVendor();
+        $isMaria = ($vendorInfo['vendor'] ?? 'mariadb') === 'mariadb';
+
         static::backupFile($configPath);
 
+        // server-id: derive from the LAST octet but keep master/slave apart and
+        // avoid the .10/.110 collision by using a wider offset. Still not
+        // globally unique — a follow-up should source it from a cluster counter.
         $localIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
         $parts = explode('.', $localIp);
-        $serverId = ((int)($parts[3] ?? 2)) + 100;
+        $serverId = ((int)($parts[3] ?? 2)) + 1000;
 
         $ok = static::modifyConfigFile($configPath, [
             'server-id'  => (string)$serverId,
             'relay-log'  => 'relay-bin',
             'read_only'  => '1',
+            'log-bin'    => 'mysql-bin', // needed so this node can later become master
         ], 'mysqld');
-        $steps[] = ['name' => 'Configurar MySQL slave', 'ok' => $ok, 'output' => "server-id={$serverId}"];
+        $steps[] = ['name' => 'Configurar MySQL slave', 'ok' => $ok, 'output' => "server-id={$serverId} vendor=" . ($isMaria ? 'mariadb' : 'mysql')];
 
-        shell_exec("systemctl restart {$service} 2>&1");
-        $steps[] = ['name' => "Reiniciar {$service}", 'ok' => true, 'output' => 'OK'];
+        $restartOut = shell_exec("systemctl restart {$service} 2>&1");
+        $running = trim((string)shell_exec("systemctl is-active {$service} 2>/dev/null")) === 'active';
+        $steps[] = ['name' => "Reiniciar {$service}", 'ok' => $running, 'output' => $running ? 'OK' : trim((string)$restartOut)];
+        if (!$running) {
+            return ['ok' => false, 'steps' => $steps, 'error' => "{$service} no arrancó tras configurar el slave"];
+        }
 
         $pdo = static::getMysqlPdo();
         if (!$pdo) {
             return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo conectar a MySQL local'];
         }
 
-        try {
-            $mysqlVer = static::detectMysqlVersion();
-            $isNew = $mysqlVer && version_compare($mysqlVer, '8.0.23', '>=');
+        // ── Seed the slave from the master (the fix for the missing-data bug) ──
+        // A logical dump with --master-data=1 EMBEDS AND EXECUTES the exact binlog
+        // / GTID coordinate on import, so replication resumes from precisely the
+        // dump point. If the seed fails, we abort WITHOUT starting replication.
+        // WARNING: the import writes over the local datadir; a mid-import failure
+        // can leave it partially overwritten — the returned error says so and the
+        // node must be rebuilt from scratch. (There is no safe atomic logical
+        // import over a live datadir; the alternative would be a filesystem-level
+        // snapshot, out of scope here.)
+        if ($seed) {
+            $seedRes = static::seedMysqlSlaveFromMaster($masterIp, $port, $replUser, $replPass, $isMaria);
+            $steps[] = ['name' => 'Sembrar datos desde el master', 'ok' => !empty($seedRes['ok']), 'output' => $seedRes['output'] ?? ''];
+            if (empty($seedRes['ok'])) {
+                return ['ok' => false, 'steps' => $steps, 'error' => 'Falló la siembra de datos: ' . ($seedRes['error'] ?? 'desconocido') . ' — NO se inició la replicación.'];
+            }
+        }
 
-            $pdo->exec("STOP SLAVE");
-            if ($isNew) {
+        try {
+            $pdo->exec($isMaria ? "STOP SLAVE" : "STOP REPLICA");
+
+            if ($isMaria) {
+                // MariaDB 10.x: GTID-based. When we seeded with --master-data=1,
+                // the import already ran a CHANGE MASTER that set gtid_slave_pos
+                // to the exact dump coordinate. Re-issuing CHANGE MASTER with
+                // MASTER_USE_GTID=slave_pos here only sets the connection params
+                // and PRESERVES that gtid_slave_pos, so replication resumes from
+                // the correct point (not from zero).
+                $pdo->exec("CHANGE MASTER TO MASTER_HOST=" . $pdo->quote($masterIp) .
+                    ", MASTER_PORT={$port}" .
+                    ", MASTER_USER=" . $pdo->quote($replUser) .
+                    ", MASTER_PASSWORD=" . $pdo->quote($replPass) .
+                    ", MASTER_USE_GTID=slave_pos");
+                $pdo->exec("START SLAVE");
+            } else {
+                // Oracle MySQL 8: GTID auto-position (seeded via --source-data=1).
                 $pdo->exec("CHANGE REPLICATION SOURCE TO SOURCE_HOST=" . $pdo->quote($masterIp) .
                     ", SOURCE_PORT={$port}" .
                     ", SOURCE_USER=" . $pdo->quote($replUser) .
                     ", SOURCE_PASSWORD=" . $pdo->quote($replPass) .
                     ", SOURCE_AUTO_POSITION=1");
                 $pdo->exec("START REPLICA");
-            } else {
-                $pdo->exec("CHANGE MASTER TO MASTER_HOST=" . $pdo->quote($masterIp) .
-                    ", MASTER_PORT={$port}" .
-                    ", MASTER_USER=" . $pdo->quote($replUser) .
-                    ", MASTER_PASSWORD=" . $pdo->quote($replPass) .
-                    ", MASTER_AUTO_POSITION=1");
-                $pdo->exec("START SLAVE");
             }
-            $steps[] = ['name' => 'Configurar replicacion MySQL', 'ok' => true, 'output' => 'OK'];
+
+            // Re-assert read-only now that the seed import (which needed writes)
+            // is done. The slave must not accept client writes.
+            try { $pdo->exec("SET GLOBAL read_only=1"); } catch (\Throwable) {}
+
+            $steps[] = ['name' => 'Configurar replicacion MySQL', 'ok' => true, 'output' => $isMaria ? 'MASTER_USE_GTID=slave_pos' : 'SOURCE_AUTO_POSITION=1'];
         } catch (\Throwable $e) {
             $steps[] = ['name' => 'Configurar replicacion MySQL', 'ok' => false, 'output' => $e->getMessage()];
             return ['ok' => false, 'steps' => $steps, 'error' => $e->getMessage()];
         }
 
         return ['ok' => true, 'steps' => $steps, 'error' => null];
+    }
+
+    /**
+     * Take a consistent logical dump from the master and import it locally, so
+     * the slave starts replication with an exact copy of the master's data.
+     * Uses mysqldump/mariadb-dump over the network (no mariabackup needed).
+     */
+    private static function seedMysqlSlaveFromMaster(string $masterIp, int $port, string $replUser, string $replPass, bool $isMaria): array
+    {
+        if (!filter_var($masterIp, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'error' => 'IP del master inválida'];
+        }
+        $dumpBin = trim((string)shell_exec('command -v mariadb-dump || command -v mysqldump 2>/dev/null'));
+        if ($dumpBin === '') {
+            return ['ok' => false, 'error' => 'No hay mysqldump/mariadb-dump disponible para la siembra'];
+        }
+        $cliBin = trim((string)shell_exec('command -v mariadb || command -v mysql 2>/dev/null')) ?: 'mysql';
+
+        // Private work dir (0700), NOT /var/lib. Everything created here is
+        // removed in the finally block — the dump contains ALL client data
+        // (incl. the mysql user table), so it must never persist. (M1)
+        $workDir = sys_get_temp_dir() . '/md-repl-seed';
+        @mkdir($workDir, 0700, true);
+        @chmod($workDir, 0700);
+        $stamp = gmdate('YmdHis') . '-' . bin2hex(random_bytes(3));
+        $dumpFile = $workDir . '/seed-' . $stamp . '.sql.gz';
+        $dumpErr  = $workDir . '/dump-' . $stamp . '.err';
+        $impErrF  = $workDir . '/imp-'  . $stamp . '.err';
+
+        // Credentials via a temp defaults-file (never on argv). MySQL [client]
+        // needs the password quoted and backslashes/quotes doubled/escaped. (M2)
+        $cnf = @tempnam($workDir, 'cnf-');
+        if ($cnf === false) return ['ok' => false, 'error' => 'No se pudo crear defaults-file temporal'];
+        @chmod($cnf, 0600);
+        $escPw = str_replace(['\\', '"'], ['\\\\', '\\"'], $replPass);
+        @file_put_contents($cnf,
+            "[client]\nhost=" . $masterIp . "\nport=" . (int)$port .
+            "\nuser=" . $replUser . "\npassword=\"" . $escPw . "\"\n"
+        );
+
+        // CRITICAL (C3): use --master-data=1 (NOT =2). With =1 the CHANGE MASTER
+        // line is UNCOMMENTED and the import EXECUTES it, setting the exact
+        // binlog/GTID coordinate. With =2 it's a comment and the slave would
+        // start from the wrong position (duplicate/skip). --gtid on MariaDB then
+        // makes CHANGE MASTER carry the GTID position. --single-transaction =
+        // consistent InnoDB snapshot without locking.
+        $gtidFlag = $isMaria ? '--gtid' : '--set-gtid-purged=ON';
+        $masterDataFlag = $isMaria ? '--master-data=1' : '--source-data=1';
+        try {
+            $dumpCmd = escapeshellarg($dumpBin) . ' --defaults-extra-file=' . escapeshellarg($cnf)
+                . ' --single-transaction ' . $masterDataFlag . ' ' . $gtidFlag
+                . ' --routines --triggers --events --all-databases 2>' . escapeshellarg($dumpErr)
+                . ' | gzip > ' . escapeshellarg($dumpFile);
+            $out = []; $code = 0;
+            exec($dumpCmd, $out, $code);
+            if ($code !== 0 || !is_file($dumpFile) || filesize($dumpFile) < 100) {
+                $err = @file_get_contents($dumpErr);
+                return ['ok' => false, 'error' => 'mysqldump falló (code ' . $code . '): ' . trim((string)$err)];
+            }
+
+            // Import locally over the root socket. Prepend session settings so:
+            //  - sql_log_bin=0: the import isn't re-logged into this node's binlog
+            //  - read_only=0: a SUPER session can write even with read_only=1 set,
+            //    but we make it explicit so the seed can't be silently blocked (C1).
+            // The dump's uncommented CHANGE MASTER (from --master-data=1) sets the
+            // replication coordinate as part of the import (C3).
+            $initSql = "SET SESSION sql_log_bin=0; SET GLOBAL read_only=0;";
+            $impCmd = '{ printf %s ' . escapeshellarg($initSql) . '; gunzip -c ' . escapeshellarg($dumpFile) . '; } | '
+                . escapeshellarg($cliBin) . ' 2>' . escapeshellarg($impErrF);
+            $out2 = []; $code2 = 0;
+            exec($impCmd, $out2, $code2);
+            if ($code2 !== 0) {
+                $impErr = @file_get_contents($impErrF);
+                // NOTE: a partial import may have run. The caller MUST treat this
+                // node as needing a full rebuild — we return ok=false and the
+                // caller does NOT start replication (setupMysqlSlave aborts).
+                return ['ok' => false, 'error' => 'Import falló (code ' . $code2 . '): ' . trim((string)$impErr)
+                    . ' — el datadir puede haber quedado a medias; reconstruye el slave por completo.'];
+            }
+            return ['ok' => true, 'output' => 'Sembrado desde ' . $masterIp . ' (coordenada aplicada por el dump)'];
+        } finally {
+            // Always remove credentials + the full-data dump, success or failure. (M1)
+            @unlink($cnf);
+            @unlink($dumpFile);
+            @unlink($dumpErr);
+            @unlink($impErrF);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -2456,13 +2599,46 @@ class ReplicationService
      * that cluster only. Verifies recovery state on the cluster's OWN port
      * (not the panel DB). Never touches other clusters.
      */
-    public static function promotePgSlaveForCluster(array $cluster): array
+    /**
+     * @param array    $cluster        Cluster descriptor (version/cluster/port).
+     * @param int|null $maxLagSeconds  Refuse to promote if the standby is behind
+     *   by more than this many seconds (prevents promoting a stale slave and
+     *   silently losing every unreceived transaction). Default 5s. Pass null to
+     *   FORCE promotion regardless of lag — only for a real disaster where the
+     *   master is gone and some data loss is accepted. The override is logged.
+     */
+    public static function promotePgSlaveForCluster(array $cluster, ?int $maxLagSeconds = 5): array
     {
         $steps = [];
         foreach (['version', 'cluster', 'port'] as $k) {
             if (empty($cluster[$k])) {
                 return ['ok' => false, 'steps' => $steps, 'error' => "Descriptor de clúster incompleto (falta '{$k}')."];
             }
+        }
+
+        // C4 guard: don't promote a stale standby. Check replication lag first,
+        // unless the caller explicitly forced it ($maxLagSeconds === null).
+        if ($maxLagSeconds !== null) {
+            $st = static::getPgSlaveStatusForCluster($cluster);
+            if ($st !== null) {
+                $lag = (int)($st['lag_seconds'] ?? 999999);
+                if ($lag > $maxLagSeconds) {
+                    $steps[] = ['name' => 'Comprobar retraso (lag)', 'ok' => false,
+                        'output' => "lag {$lag}s > {$maxLagSeconds}s permitido"];
+                    return ['ok' => false, 'steps' => $steps,
+                        'error' => "Promoción bloqueada: el standby {$cluster['key']} está retrasado {$lag}s (máx {$maxLagSeconds}s). "
+                                 . "Promoverlo perdería las transacciones no recibidas. Fuerza explícitamente si aceptas esa pérdida."];
+                }
+                $steps[] = ['name' => 'Comprobar retraso (lag)', 'ok' => true, 'output' => "lag {$lag}s (OK)"];
+            } else {
+                // Not a recognizable standby: if it's already primary, promotion
+                // is a no-op; otherwise we can't measure lag → let it proceed but
+                // note it (the recovery-state verify below is the real gate).
+                $steps[] = ['name' => 'Comprobar retraso (lag)', 'ok' => true, 'output' => 'estado de standby no disponible; se continúa'];
+            }
+        } else {
+            $steps[] = ['name' => 'Comprobar retraso (lag)', 'ok' => true, 'output' => 'FORZADO: promoción sin comprobar lag (posible pérdida de datos)'];
+            LogService::log('replication', 'promote-forced', "Promoción FORZADA sin guard de lag para {$cluster['key']}");
         }
 
         $output = shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' promote 2>&1');

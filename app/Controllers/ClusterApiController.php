@@ -377,12 +377,55 @@ class ClusterApiController
             : ': ' . json_encode(self::redactSecrets($payload));
         LogService::log('cluster.api', $action, "Recibido de nodo #{$callerNodeId}{$logSuffix}");
 
+        // C5 hardening: 'promote' and 'demote' are destructive (demote rebuilds
+        // this node's databases from new_master_ip via pg_rewind/basebackup and a
+        // full MySQL reseed). A leaked node token must NOT be able to point a node
+        // at an arbitrary IP and wipe it. Require that new_master_ip be a
+        // REGISTERED cluster node, and that these actions arrive from an
+        // authenticated peer (the caller node id must resolve). We also refuse if
+        // the caller isn't a known node.
+        if (in_array($action, ['promote', 'demote'], true)) {
+            if ($callerNodeId <= 0 || !ClusterService::getNode($callerNodeId)) {
+                http_response_code(403);
+                echo json_encode(['ok' => false, 'error' => 'Acción de failover rechazada: llamante no es un nodo del clúster reconocido.']);
+                return;
+            }
+            if ($action === 'demote') {
+                $newMasterIp = trim((string)($payload['new_master_ip'] ?? ''));
+                if (!ClusterService::isKnownNodeIp($newMasterIp)) {
+                    http_response_code(400);
+                    echo json_encode(['ok' => false, 'error' => 'demote rechazado: new_master_ip no corresponde a ningún nodo registrado del clúster.']);
+                    return;
+                }
+            }
+        }
+
         try {
             $result = match ($action) {
                 'sync-hosting'     => ClusterService::handleSyncAction($action, $payload),
                 'promote'          => ClusterService::promoteToMaster(),
                 'demote'           => ClusterService::demoteToSlave($payload['new_master_ip'] ?? ''),
                 'test-connection'  => ['ok' => true, 'message' => 'Connection successful'],
+                // Witness probe: does THIS node reach $ip? Used by the failover
+                // quorum guard to distinguish a dead master from a network
+                // partition before auto-promoting (anti split-brain).
+                'probe-host'       => (function () use ($payload) {
+                    $ip = trim((string)($payload['ip'] ?? ''));
+                    if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+                        return ['ok' => false, 'error' => 'ip inválida'];
+                    }
+                    // Anti-SSRF: only probe a REGISTERED cluster node, and only on
+                    // an allowed port (panel port / 443). Otherwise a leaked token
+                    // could turn this into an arbitrary TCP port scanner. (M3)
+                    if (!\MuseDockPanel\Services\ClusterService::isKnownNodeIp($ip)) {
+                        return ['ok' => false, 'error' => 'ip no es un nodo del clúster'];
+                    }
+                    $panelPort = (int)\MuseDockPanel\Settings::get('panel_port', '8444') ?: 8444;
+                    $reqPort = (int)($payload['port'] ?? $panelPort);
+                    $port = in_array($reqPort, [$panelPort, 443], true) ? $reqPort : $panelPort;
+                    $r = \MuseDockPanel\Services\FailoverService::checkHost($ip, $port, 4);
+                    return ['ok' => true, 'reachable' => !empty($r['ok'] ?? $r['up'] ?? false), 'ip' => $ip];
+                })(),
                 'repl-create-user' => \MuseDockPanel\Services\ReplicationService::createReplicationUserForRemote(
                     $payload['engine'] ?? 'pg',
                     $payload['slave_ip'] ?? ''

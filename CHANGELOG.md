@@ -2,6 +2,32 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [Unreleased] — Endurecimiento de la replicación de BBDD de clientes (auditoría de seguridad)
+
+Tras una auditoría del módulo de replicación (nunca activado en producción), se corrigieron 5 problemas críticos antes de poder activarlo con datos de clientes reales. El camino PostgreSQL ya estaba bien construido; MariaDB era una carcasa que corrompía datos.
+
+### Fixed (críticos)
+
+- **C1 — El slave MariaDB no copiaba los datos**: `setupMysqlSlave` sólo hacía `CHANGE MASTER` sobre el datadir existente, así que las BBDD de clientes preexistentes nunca se replicaban y el slave divergía en silencio. Además usaba `MASTER_AUTO_POSITION=1` (sintaxis de Oracle MySQL) que en MariaDB 10.6 no funciona. Ahora **siembra los datos** desde el master (`seedMysqlSlaveFromMaster`: `mysqldump --single-transaction --master-data=2 --gtid --all-databases` → import local) ANTES de arrancar la replicación, detecta el vendor real (`detectDbVendor`) y usa `MASTER_USE_GTID=slave_pos` en MariaDB. Si la siembra falla, **no arranca la replicación** (evita el slave incompleto).
+- **C2 — Degradar un ex-master MariaDB corrompía datos**: como no hay `pg_rewind` en MySQL, un viejo master con escrituras divergentes aplicaba el binlog del nuevo encima → corrupción silenciosa. `demoteToSlave` ahora fuerza `setupMysqlSlave(..., seed=true)` = **reconstrucción completa** desde el nuevo master, descartando los datos divergentes (equivalente a la ruta rewind/basebackup de PG).
+- **C4 — Se promocionaba un standby retrasado sin avisar**: `promotePgSlaveForCluster` promovía sin mirar el lag → se perdían las transacciones no recibidas. Ahora comprueba el lag (máx 5 s por defecto) y **bloquea** la promoción de un standby retrasado, con override explícito y registrado (`$maxLagSeconds = null`) para desastres reales.
+- **C5 — `promote`/`demote` en `/api/cluster/action` reconstruían BBDD apuntando a una IP arbitraria**: un token filtrado podía wipear un nodo. Ahora se valida que `new_master_ip` sea un **nodo registrado** (`ClusterService::isKnownNodeIp`) y que el llamante sea un nodo del clúster reconocido.
+- **C3 — Auto-promote sin quórum = split-brain**: en una partición de red, un slave veía el master «caído» y se auto-promovía mientras el viejo master seguía sirviendo escrituras → dos masters. Ahora, antes de auto-promocionar, consulta a **nodos testigo** (`probe-host`): si un testigo alcanza el master, **aborta** (partición, no muerte); si ninguno confirma, **aplaza** y notifica. El modo por defecto sigue siendo `manual`.
+
+### Fixed (segunda pasada — revisión adversarial de los propios fixes)
+
+- **La siembra MariaDB arrancaba la replicación en la posición equivocada**: se usaba `--master-data=2` (que escribe la coordenada COMENTADA, sin ejecutarla) → el slave replicaba desde una posición GTID vieja, duplicando o saltando transacciones. Corregido a **`--master-data=1`/`--source-data=1`**, que ejecuta el `CHANGE MASTER` en el import y fija la coordenada exacta; el `CHANGE MASTER` posterior con `MASTER_USE_GTID=slave_pos` la preserva.
+- **El import podía quedar bloqueado por `read_only`** y no reasentaba read-only después. Ahora el import corre con `SET GLOBAL read_only=0; SET SESSION sql_log_bin=0` y **se restaura `read_only=1`** al terminar.
+- **Fuga de datos de clientes**: el dump (`--all-databases`, incluye la tabla `mysql` con hashes) se dejaba en `/var/lib` sin borrar. Ahora vive en un dir temporal 0700 y **se borra siempre** (`try/finally`), en éxito y en error. Password del defaults-file con escape correcto de `\` y `"`.
+- **SSRF en `probe-host`**: aceptaba IP y puerto arbitrarios → escáner de puertos vía token de nodo. Ahora solo sondea **nodos registrados** en el **puerto del panel/443**.
+- **`isKnownNodeIp` con falsos positivos**: rechaza explícitamente `0.0.0.0`/loopback aunque aparezcan en el metadata de un nodo, y valida que los valores del metadata sean IPs reales.
+
+### Notes
+
+- `mysqldump`/`mariadb-dump` disponibles en el host; no se requiere mariabackup para la siembra lógica. Tests: `tests/replication_safety_test.php` (27 checks). Suite de replicación/failover completa: 146 checks OK.
+- **Limitación conocida** (documentada, no bloqueante para modo manual): el import lógico se hace sobre el datadir vivo; un fallo a mitad puede dejarlo parcial → el error lo indica y el nodo debe reconstruirse por completo. Un import atómico requeriría snapshot de filesystem (fuera de alcance).
+- **Pendiente antes de activar auto en producción**: testigo/quórum externo real (STONITH), clave de cifrado dedicada para credenciales de replicación (hoy derivada de `DB_PASS`), y política de purga de los datadirs apartados (`.old.*`/`.pre-rewind.*`). Recomendado: ensayo en staging del ciclo completo con datos de mentira.
+
 ## [1.0.208 – 1.0.210] — 2026-07-23 — Sincronización manual de nodos y fix crítico de replicación de aliases
 
 ### Fixed

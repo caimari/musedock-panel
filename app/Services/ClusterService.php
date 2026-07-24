@@ -66,6 +66,45 @@ class ClusterService
     }
 
     /**
+     * True if $ip belongs to a REGISTERED cluster node (its api_url host or a
+     * WireGuard/address field in metadata). Used to gate destructive failover
+     * actions so a leaked token can't point a node at an arbitrary IP and wipe
+     * its databases. Also accepts the local node's own IPs.
+     */
+    public static function isKnownNodeIp(string $ip): bool
+    {
+        $ip = trim($ip);
+        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            return false;
+        }
+        // Local IPs count as known.
+        foreach (preg_split('/\s+/', trim((string) shell_exec('hostname -I 2>/dev/null'))) as $lip) {
+            if ($lip !== '' && $lip === $ip) return true;
+        }
+        // Never treat wildcard/loopback as a "known node" even if it appears in
+        // node metadata — that would let a destructive action target this host.
+        $dangerous = ['0.0.0.0', '127.0.0.1', '::', '::1'];
+        if (in_array($ip, $dangerous, true)) {
+            return false;
+        }
+        foreach (self::getNodes() as $n) {
+            $host = parse_url((string)($n['api_url'] ?? ''), PHP_URL_HOST) ?: '';
+            if ($host !== '' && $host === $ip) return true;
+            // metadata may carry wg_ip / address — only accept valid, non-dangerous IPs.
+            $meta = json_decode((string)($n['metadata'] ?? '{}'), true);
+            if (is_array($meta)) {
+                foreach (['wg_ip', 'address', 'ip', 'private_ip'] as $k) {
+                    $v = trim((string)($meta[$k] ?? ''));
+                    if ($v !== '' && filter_var($v, FILTER_VALIDATE_IP) && !in_array($v, $dangerous, true) && $v === $ip) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
      * Describe TLS trust state for a node from current metadata/config.
      *
      * status: ok|warning|critical|info
@@ -2005,7 +2044,14 @@ class ClusterService
             $mysqlPass = ReplicationService::decryptPassword(Settings::get('repl_mysql_pass', ''));
             $mysqlPort = (int)Settings::get('repl_mysql_port', '3306');
 
-            $result = ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass);
+            // MySQL/MariaDB has no pg_rewind: a former master that took writes
+            // during the outage has diverged from the new master. Doing a plain
+            // CHANGE MASTER over its existing datadir would apply the new
+            // master's binlog on top of divergent rows → silent corruption.
+            // seed=true forces a FULL rebuild from the new master (dump+import),
+            // discarding the divergent local data — the MySQL equivalent of the
+            // PG rewind/basebackup path. This is the only safe way to demote.
+            $result = ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass, true);
             $results['mysql_demote'] = $result;
             if (!$result['ok']) {
                 $errors[] = 'MySQL demote: ' . ($result['error'] ?? 'Unknown error');

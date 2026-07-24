@@ -454,6 +454,61 @@ function autoPromoteIfNeeded(array $checks, array $foConfig): void
         return;
     }
 
+    // ── C3 quorum guard: don't auto-promote on THIS node's view alone ──
+    // A network partition looks identical to a dead master from here: the old
+    // master may be alive and still serving writes to clients that can reach it.
+    // Promoting anyway = split-brain (two masters). Before promoting, confirm the
+    // master is down from a SECOND vantage point (another cluster node acting as
+    // witness). If no witness confirms — or a witness sees the master ALIVE — we
+    // refuse to auto-promote and fall back to notifying the admin (semiauto
+    // behaviour). To promote with a single node's view, the admin must do it
+    // manually from the panel.
+    $witnessConfirmedDown = false;
+    $witnessSawAlive = false;
+    $witnesses = 0;
+    foreach (\MuseDockPanel\Services\ClusterService::getNodes() as $wn) {
+        $wHost = parse_url((string)($wn['api_url'] ?? ''), PHP_URL_HOST) ?: '';
+        if ($wHost === '' || $wHost === $myIp || $wHost === $masterIp) continue; // skip self & the master
+        $witnesses++;
+        try {
+            $probe = \MuseDockPanel\Services\ClusterService::callNode(
+                (int)$wn['id'], 'POST', 'api/cluster/action',
+                ['action' => 'probe-host', 'payload' => ['ip' => $masterIp]]
+            );
+            $res = $probe['result'] ?? $probe['data'] ?? [];
+            if (!empty($probe['ok']) && isset($res['reachable'])) {
+                if ($res['reachable'] === true)  { $witnessSawAlive = true; }
+                if ($res['reachable'] === false) { $witnessConfirmedDown = true; }
+            }
+        } catch (\Throwable $e) {
+            logMsg("Auto-promote: witness {$wHost} probe error: " . $e->getMessage());
+        }
+    }
+    if ($witnessSawAlive) {
+        logMsg("Auto-promote: ABORTED — a witness node still reaches the master ({$masterIp}). Likely a partition, not a dead master. Notifying admin instead.");
+        \MuseDockPanel\Services\NotificationService::send(
+            "Failover: auto-promote ABORTADO (posible partición de red)",
+            "Este nodo veía el master ({$masterIp}) caído, pero otro nodo SÍ lo alcanza.\n" .
+            "No se ha promovido para evitar split-brain (dos masters). Revisa la red y actúa manualmente si procede."
+        );
+        return;
+    }
+    if ($witnesses > 0 && !$witnessConfirmedDown) {
+        logMsg("Auto-promote: DEFERRED — no witness could confirm the master is down (witnesses unreachable). Not promoting on a single node's view.");
+        \MuseDockPanel\Services\NotificationService::send(
+            "Failover: auto-promote aplazado (sin confirmación de quórum)",
+            "Este nodo ve el master ({$masterIp}) caído, pero ningún nodo testigo pudo confirmarlo.\n" .
+            "No se promueve automáticamente para evitar split-brain. Actúa manualmente si el master está realmente caído."
+        );
+        return;
+    }
+    // witnesses === 0 → no other node to ask (2-node cluster). We still proceed
+    // (the election already ran), but this is exactly why auto mode needs a real
+    // external witness; documented as a known limitation.
+    if ($witnesses === 0) {
+        logMsg("Auto-promote: WARNING — no witness node available (single-slave cluster). Proceeding on local view only; consider semiauto mode.");
+    }
+
     // Master is down and we're the highest-priority slave — promote ourselves
     logMsg("Auto-promote: master ({$masterIp}) is DOWN, election won — promoting this slave to master");
 
