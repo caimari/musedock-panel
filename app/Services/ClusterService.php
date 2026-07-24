@@ -860,6 +860,11 @@ class ClusterService
 
         // If CA is already configured manually, do not override.
         // Only allow automatic re-bootstrap for auto-managed node CA files.
+        // (An auto-managed CA that exists but is UNREADABLE by this process —
+        // e.g. written root:root 0640 by the cluster worker, so the PHP-FPM
+        // panel user can't read it — still reaches the `return true` below and
+        // gets re-bootstrapped; otherwise verification silently falls back to
+        // the system bundle and the node shows "pending / 0 domains" forever.)
         if ($caPath !== null && !str_contains($caPath, '/storage/tls/node-')) {
             return false;
         }
@@ -1044,6 +1049,22 @@ class ClusterService
             return null;
         }
         @chmod($path, 0640);
+
+        // The CA is written by whoever ran the bootstrap — often root (cluster
+        // worker / cron). With 0640 root:root the PHP-FPM user that serves the
+        // panel CANNOT read it, so every later TLS verification to that node
+        // fails ("unable to get local issuer certificate") and the node shows as
+        // "pending / 0 domains" in the UI even though replication works.
+        // Align ownership with the panel directory's owner so both root and the
+        // web user can read it.
+        $ownerUid = @fileowner($baseDir);
+        $ownerGid = @filegroup($baseDir);
+        if ($ownerUid !== false && @fileowner($path) !== $ownerUid) {
+            @chown($path, $ownerUid);
+        }
+        if ($ownerGid !== false && @filegroup($path) !== $ownerGid) {
+            @chgrp($path, $ownerGid);
+        }
         return $path;
     }
 

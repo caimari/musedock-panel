@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.208 – 1.0.210] — 2026-07-23 — Sincronización manual de nodos y fix crítico de replicación de aliases
+
+### Fixed
+
+- **Solo se replicaba UN alias por dominio (bug crítico de la cola)**: `ClusterService::buildQueueIdempotencyKey` construía la clave de idempotencia con `email ?? domain ?? …`, pero el payload de un alias no lleva `email` — caía en `domain`, así que **todos los aliases del mismo dominio generaban la MISMA clave** y solo el primero del lote se encolaba; el resto se descartaba como «duplicado pendiente». Efecto: por mucho que se reinstalara o resincronizara la réplica, el slave se quedaba con un único alias (aquí: `calamar@` de 4). Ahora la clave incluye `source`, de modo que cada alias se encola por separado. Afecta a `mail_upsert_alias` y `mail_delete_alias`.
+- **Nodo mostrado como «DB Mail: pending / Domains: 0» pese a replicar bien**: el CA del nodo auto-bootstrapeado (`storage/tls/node-<ip>-root-ca.pem`) lo escribe quien ejecuta el bootstrap — normalmente **root** (worker/cron) — quedando `root:root 0640`. El **panel web** (usuario PHP-FPM) no podía leerlo, así que toda verificación TLS contra ese nodo fallaba con «unable to get local issuer certificate» y el health check lo pintaba como pendiente/0, aunque la cola (ejecutada por root) sí replicaba correctamente. Ahora `storeNodeCaFile` **alinea propietario/grupo** con los del directorio del panel, y un CA auto-gestionado ilegible dispara un **re-bootstrap** en vez de caer en silencio al bundle del sistema.
+
+### Added
+
+- **Botón «Sincronizar» por nodo (correo)** en Mail → Infra: reenvía **dominios + buzones + aliases** al slave reutilizando `MailService::resyncMailToNode` (upsert idempotente, **nunca borra** en el destino). Repara desajustes de replicación **sin reinstalar** la réplica. Modal con confirmación y recuento de lo encolado (`POST /mail/resync-node`).
+- **Botón «Sincronizar contactos ahora» (CardDAV/CalDAV)**: empuja un snapshot completo al nodo elegido al margen del cron de cada minuto (`POST /mail/carddav/resync-node`).
+
 ## [1.0.203 – 1.0.207] — 2026-07-22 — Servicio integral: Contactos y calendarios (CardDAV/CalDAV) con failover
 
 Servicio **integral** de correo: además de mensajes, ahora hay **contactos y calendarios** compartidos, con failover y sincronización con el webmail y el móvil (iPhone/Android), usando la **misma contraseña del buzón**. Servido en `dav.<dominio>` por Baïkal (SabreDAV) sobre PostgreSQL.
