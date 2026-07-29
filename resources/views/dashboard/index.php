@@ -146,11 +146,23 @@
                     <table class="table table-sm mb-0">
                         <thead><tr><th class="ps-2">Nodo</th><th class="text-center">Fallidos</th><th>Desde</th><th>Ejemplo</th></tr></thead>
                         <tbody>
-                        <?php foreach (($syncDrift['nodes'] ?? []) as $dn): if (($dn['dead'] ?? 0) < 1) continue; ?>
+                        <?php foreach (($syncDrift['nodes'] ?? []) as $dn): if (($dn['dead'] ?? 0) < 1) continue;
+                            // Fecha en formato español dd/mm/aaaa HH:MM + "hace X días".
+                            $oldestRaw = (string)($dn['oldest'] ?? '');
+                            $fechaEs = '—'; $haceDias = '';
+                            if ($oldestRaw !== '') {
+                                $ts = strtotime($oldestRaw);
+                                if ($ts) {
+                                    $fechaEs = date('d/m/Y H:i', $ts);
+                                    $dias = (int) floor((time() - $ts) / 86400);
+                                    $haceDias = $dias > 0 ? "hace {$dias} día" . ($dias === 1 ? '' : 's') : 'hoy';
+                                }
+                            }
+                        ?>
                             <tr>
                                 <td class="ps-2 fw-semibold"><i class="bi bi-hdd-network me-1 text-warning"></i><?= View::e($dn['name']) ?></td>
                                 <td class="text-center"><span class="badge bg-warning text-dark"><?= (int)$dn['dead'] ?></span></td>
-                                <td class="small text-muted"><?= View::e(substr((string)($dn['oldest'] ?? ''), 0, 16)) ?></td>
+                                <td class="small text-muted"><?= View::e($fechaEs) ?><?php if ($haceDias): ?> <span class="text-secondary">(<?= View::e($haceDias) ?>)</span><?php endif; ?></td>
                                 <td class="small text-muted" style="font-family:monospace;"><?= View::e(substr((string)($dn['sample_error'] ?? ''), 0, 60)) ?></td>
                             </tr>
                         <?php endforeach; ?>

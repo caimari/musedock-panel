@@ -85,6 +85,11 @@ ok('fullsync (Sincronización Completa) sincroniza aliases/redirects attached', 
 ok('fullsync incluye standalone redirects', str_contains($fs, "'sync_standalone_redirect'") && str_contains($fs, "hosting_account_id IS NULL AND type = 'redirect'"));
 ok('fullsync limpia items muertos', str_contains($fs, "status = 'cancelled'"));
 
+section('BUG latente: suspend/activate_hosting en slave (Too few arguments)');
+ok('suspend_hosting pasa fpmSocket + maneja void (try/catch)', str_contains($clu2, "SystemService::suspendAccount(\$username, \$sock") && str_contains($clu2, 'suspend failed'));
+ok('activate_hosting pasa fpmSocket + maneja void', str_contains($clu2, "SystemService::activateAccount(\$username, \$sock"));
+ok('ya NO lee $result[success] sobre un void', !str_contains($clu2, "suspendAccount(\$username);"));
+
 section('Aviso de desincronización en el dashboard (drift silencioso)');
 $cs = file_get_contents(PANEL_ROOT . '/app/Services/ClusterService.php');
 $dc = file_get_contents(PANEL_ROOT . '/app/Controllers/DashboardController.php');
@@ -93,6 +98,8 @@ ok('getSyncDriftSummary cuenta items muertos (attempts>=max)', str_contains($cs,
 ok('el dashboard recibe syncDrift (solo en master)', str_contains($dc, "'syncDrift' =>") && str_contains($dc, 'getSyncDriftSummary'));
 ok('banner de aviso en la vista con enlace a Sincronizar Todo', str_contains($dv, "syncDrift['has_drift']") && str_contains($dv, 'Sincronizar Todo'));
 ok('el banner explica que NO se cura solo', str_contains($dv, 'no se reintentan solas') || str_contains($dv, 'No se curan solas'));
+ok('fecha en formato español dd/mm/aaaa HH:MM', str_contains($dv, "date('d/m/Y H:i'"));
+ok('muestra "hace X días"', str_contains($dv, 'haceDias') && str_contains($dv, 'día'));
 
 echo "\n\033[1m─────────────────────────────────────────\033[0m\n";
 echo "  \033[0;32m{$pass} passed\033[0m" . ($fail ? ", \033[0;31m{$fail} failed\033[0m" : '') . "\n\n";

@@ -1609,19 +1609,36 @@ class ClusterService
 
                 case 'suspend_hosting':
                     $username = $hostingData['username'] ?? '';
-                    if ($username) {
-                        $result = SystemService::suspendAccount($username);
-                        return ['ok' => $result['success'] ?? false, 'message' => $result['error'] ?? 'Account suspended'];
+                    if (!$username) return ['ok' => false, 'message' => 'Username required'];
+                    // BUG FIX: suspendAccount needs (username, fpmSocket, domain,
+                    // phpVersion) and returns void (throws on error). The old code
+                    // passed only $username and read $result['success'] — it failed
+                    // with "Too few arguments" and always reported failure. Resolve
+                    // the socket/params from THIS node's local hosting record.
+                    $acc = Database::fetchOne("SELECT * FROM hosting_accounts WHERE username = :u", ['u' => $username]);
+                    if (!$acc) return ['ok' => false, 'message' => "Hosting {$username} not found on slave"];
+                    $php = $acc['php_version'] ?? ($hostingData['php_version'] ?? '8.3');
+                    $sock = $acc['fpm_socket'] ?? "unix//run/php/php{$php}-fpm-{$username}.sock";
+                    try {
+                        SystemService::suspendAccount($username, $sock, $acc['domain'] ?? ($hostingData['domain'] ?? ''), $php);
+                        return ['ok' => true, 'message' => "Hosting {$username} suspended"];
+                    } catch (\Throwable $e) {
+                        return ['ok' => false, 'message' => 'suspend failed: ' . $e->getMessage()];
                     }
-                    return ['ok' => false, 'message' => 'Username required'];
 
                 case 'activate_hosting':
                     $username = $hostingData['username'] ?? '';
-                    if ($username) {
-                        $result = SystemService::activateAccount($username);
-                        return ['ok' => $result['success'] ?? false, 'message' => $result['error'] ?? 'Account activated'];
+                    if (!$username) return ['ok' => false, 'message' => 'Username required'];
+                    $acc = Database::fetchOne("SELECT * FROM hosting_accounts WHERE username = :u", ['u' => $username]);
+                    if (!$acc) return ['ok' => false, 'message' => "Hosting {$username} not found on slave"];
+                    $php = $acc['php_version'] ?? ($hostingData['php_version'] ?? '8.3');
+                    $sock = $acc['fpm_socket'] ?? "unix//run/php/php{$php}-fpm-{$username}.sock";
+                    try {
+                        SystemService::activateAccount($username, $sock, $acc['domain'] ?? '', $acc['document_root'] ?? '', $php);
+                        return ['ok' => true, 'message' => "Hosting {$username} activated"];
+                    } catch (\Throwable $e) {
+                        return ['ok' => false, 'message' => 'activate failed: ' . $e->getMessage()];
                     }
-                    return ['ok' => false, 'message' => 'Username required'];
 
                 case 'delete_hosting':
                     $username = $hostingData['username'] ?? '';
