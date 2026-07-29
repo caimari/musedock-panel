@@ -79,6 +79,11 @@ ok('slave: handler remove_standalone_redirect', str_contains($clu2, "case 'remov
 ok('Sincronizar Todo ahora incluye los standalone', str_contains($cctrl, "hosting_account_id IS NULL AND type = 'redirect'"));
 ok('Sincronizar Todo limpia items muertos (banner se aclara)', str_contains($cctrl, "status = 'cancelled'") && str_contains($cctrl, 'attempts >= max_attempts'));
 ok('Settings importado en DomainController (no fatal en runtime)', str_contains($dctrl, 'use MuseDockPanel\Settings;'));
+// El OTRO botón: "Sincronización Completa" (fullsync-run.php) también debe incluir todo.
+$fs = file_get_contents(PANEL_ROOT . '/bin/fullsync-run.php');
+ok('fullsync (Sincronización Completa) sincroniza aliases/redirects attached', str_contains($fs, "'sync_domain_aliases'") && str_contains($fs, 'exportForSync'));
+ok('fullsync incluye standalone redirects', str_contains($fs, "'sync_standalone_redirect'") && str_contains($fs, "hosting_account_id IS NULL AND type = 'redirect'"));
+ok('fullsync limpia items muertos', str_contains($fs, "status = 'cancelled'"));
 
 section('Aviso de desincronización en el dashboard (drift silencioso)');
 $cs = file_get_contents(PANEL_ROOT . '/app/Services/ClusterService.php');

@@ -108,8 +108,55 @@ try {
                 'description' => $acc['description'] ?? '',
             ],
         ], 5);
+
+        // Also sync this hosting's domain aliases + attached redirects. Without
+        // this, the full sync created the hosting but left its aliases/redirects
+        // unreplicated (they only synced via the separate "Sync All" button).
+        $aliases = \MuseDockPanel\Services\DomainAliasService::exportForSync((int)$acc['id']);
+        if (!empty($aliases)) {
+            ClusterService::enqueue($nodeId, 'sync-hosting', [
+                'hosting_action' => 'sync_domain_aliases',
+                'hosting_data' => [
+                    'main_domain'   => $acc['domain'],
+                    'aliases'       => $aliases,
+                    'username'      => $acc['username'],
+                    'document_root' => $acc['document_root'],
+                    'php_version'   => $acc['php_version'] ?? '8.3',
+                ],
+            ], 6);
+        }
         $hostingCount++;
     }
+
+    // Standalone redirects (domain → URL, NO hosting account). Not covered by the
+    // per-hosting loop, so previously never reached a slave via full sync either.
+    $standaloneRedirects = Database::fetchAll(
+        "SELECT domain, target_url, redirect_code, preserve_path, customer_id
+         FROM hosting_domain_aliases WHERE hosting_account_id IS NULL AND type = 'redirect'"
+    );
+    foreach ($standaloneRedirects as $red) {
+        ClusterService::enqueue($nodeId, 'sync-hosting', [
+            'hosting_action' => 'sync_standalone_redirect',
+            'hosting_data' => [
+                'domain'        => $red['domain'],
+                'target_url'    => $red['target_url'],
+                'redirect_code' => (int)($red['redirect_code'] ?? 301),
+                'preserve_path' => in_array((string)($red['preserve_path'] ?? 't'), ['t','1','true'], true),
+                'customer_id'   => $red['customer_id'] ?? null,
+            ],
+        ], 6);
+    }
+
+    // Supersede stale dead queue items for this node (see syncAllHostings): a
+    // fresh full sync re-provisions everything, so exhausted-retry 'failed' rows
+    // no longer reflect reality — cancel them so the drift banner clears.
+    try {
+        Database::query(
+            "UPDATE cluster_queue SET status = 'cancelled'
+             WHERE node_id = :nid AND status = 'failed' AND attempts >= max_attempts",
+            ['nid' => $nodeId]
+        );
+    } catch (\Throwable) {}
 
     // Process the queue immediately
     $queueResults = ClusterService::processQueue();
