@@ -101,6 +101,19 @@ ok('el banner explica que NO se cura solo', str_contains($dv, 'no se reintentan 
 ok('fecha en formato español dd/mm/aaaa HH:MM', str_contains($dv, "date('d/m/Y H:i'"));
 ok('muestra "hace X días"', str_contains($dv, 'haceDias') && str_contains($dv, 'día'));
 
+section('UX fullsync: falso "Error" en hostings grandes + robustez rsync');
+$fss = file_get_contents(PANEL_ROOT . '/app/Services/FileSyncService.php');
+$fsr = file_get_contents(PANEL_ROOT . '/bin/fullsync-run.php');
+ok('rsync tiene --timeout (no se cuelga para siempre si se corta la red)', str_contains($fss, '--timeout=') && str_contains($fss, 'io_timeout'));
+ok('rsyncHosting soporta heartbeat vía proc_open', str_contains($fss, "\$options['heartbeat']") && str_contains($fss, 'proc_open'));
+ok('fullsync pasa un heartbeat que refresca el progreso', str_contains($fsr, "'heartbeat' => \$heartbeat") && str_contains($fsr, 'transferencia en curso'));
+
+section('BUG CSRF: Igualar módulos / mail-replication mandaban campo mal nombrado');
+$clv = file_get_contents(PANEL_ROOT . '/resources/views/settings/cluster.php');
+ok('el token se envía como _csrf_token (con underscore, como espera verifyCsrf)', !str_contains($clv, "append('csrf_token'"));
+ok('el token se lee del input _csrf_token correcto (no de uno inexistente)', !str_contains($clv, 'input[name="csrf_token"]'));
+ok('verifyCsrf lee _csrf_token', str_contains(file_get_contents(PANEL_ROOT.'/app/View.php'), "\$_POST['_csrf_token']"));
+
 echo "\n\033[1m─────────────────────────────────────────\033[0m\n";
 echo "  \033[0;32m{$pass} passed\033[0m" . ($fail ? ", \033[0;31m{$fail} failed\033[0m" : '') . "\n\n";
 exit($fail > 0 ? 1 : 0);

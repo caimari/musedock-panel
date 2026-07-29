@@ -878,7 +878,7 @@
     const body = document.getElementById('caddyAuditBody');
     if (!body) return;
     const esc = (t) => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-    const csrf = document.querySelector('input[name="csrf_token"]')?.value || '';
+    const csrf = document.querySelector('[name="_csrf_token"]')?.value || '';
 
     const badge = (sev) => {
         const map = {
@@ -934,7 +934,7 @@
     function fix(nodeId, name, btn) {
         // Dry-run first: show exactly what would be built before touching the node.
         const fd = new FormData();
-        fd.append('csrf_token', csrf);
+        fd.append('_csrf_token', csrf);
         fd.append('node_id', nodeId);
         fd.append('dry_run', '1');
         btn.disabled = true;
@@ -947,7 +947,7 @@
                 if (!confirm(`Se compilarán en ${name} los módulos que faltan:\n\n${plan}\n\nCaddy se reiniciará en ese nodo al terminar. ¿Continuar?`)) return;
 
                 const fd2 = new FormData();
-                fd2.append('csrf_token', csrf);
+                fd2.append('_csrf_token', csrf);
                 fd2.append('node_id', nodeId);
                 btn.disabled = true;
                 btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Compilando…';
@@ -2905,7 +2905,7 @@ function foTestRemoteSources() {
 (function () {
     const statusEl = document.getElementById('mailReplStatus');
     if (!statusEl) return;
-    const csrf = document.querySelector('input[name="csrf_token"]')?.value || '';
+    const csrf = document.querySelector('[name="_csrf_token"]')?.value || '';
 
     function loadStatus() {
         statusEl.innerHTML = '<span class="text-muted small"><i class="bi bi-hourglass-split me-1"></i>Comprobando estado…</span>';
@@ -2931,7 +2931,7 @@ function foTestRemoteSources() {
     function run(dryRun) {
         const nodeId = document.getElementById('mailReplNode').value;
         const fd = new FormData();
-        fd.append('csrf_token', csrf);
+        fd.append('_csrf_token', csrf);
         fd.append('node_id', nodeId);
         if (dryRun) fd.append('dry_run', '1');
         fetch('/settings/cluster/mail-replication/setup', { method: 'POST', body: fd })

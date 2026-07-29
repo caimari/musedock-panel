@@ -264,6 +264,11 @@ class FileSyncService
             $cmd .= ' --exclude=' . escapeshellarg($excPath);
         }
 
+        // Robustness: abort if no data flows for this long (a genuinely stalled
+        // transfer / dropped network won't hang the whole sync forever).
+        $ioTimeout = (int)($options['io_timeout'] ?? 300);
+        $cmd .= ' --timeout=' . $ioTimeout;
+
         // SSH options
         $sshCmd = sprintf(
             'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -o BatchMode=yes -o PasswordAuthentication=no -o PreferredAuthentications=publickey -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0 -p %d -i %s',
@@ -281,10 +286,43 @@ class FileSyncService
             escapeshellarg(rtrim($remotePath, '/'))
         );
 
-        $cmd .= ' 2>&1';
-
         $startTime = microtime(true);
-        $output = shell_exec($cmd);
+
+        // A big hosting (e.g. several GB) can transfer for many minutes. The
+        // caller's progress file must not look "stale" during that single rsync
+        // (the sync-progress endpoint flags a file untouched for >180s as a dead
+        // worker → false "Error"). If a `heartbeat` callable is passed, run rsync
+        // via proc_open and fire the heartbeat every ~10s so the progress file
+        // keeps a fresh mtime while data flows. No heartbeat → simple shell_exec.
+        $heartbeat = $options['heartbeat'] ?? null;
+        if (is_callable($heartbeat)) {
+            $output = '';
+            $proc = @proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+            if (is_resource($proc)) {
+                @stream_set_blocking($pipes[1], false);
+                @stream_set_blocking($pipes[2], false);
+                $lastBeat = microtime(true);
+                while (true) {
+                    $status = proc_get_status($proc);
+                    $output .= (string) @stream_get_contents($pipes[1]);
+                    $output .= (string) @stream_get_contents($pipes[2]);
+                    if (!$status['running']) break;
+                    if (microtime(true) - $lastBeat >= 10) {
+                        try { $heartbeat(); } catch (\Throwable) {}
+                        $lastBeat = microtime(true);
+                    }
+                    usleep(400000); // 0.4s
+                }
+                $output .= (string) @stream_get_contents($pipes[1]);
+                $output .= (string) @stream_get_contents($pipes[2]);
+                @fclose($pipes[1]); @fclose($pipes[2]);
+                @proc_close($proc);
+            } else {
+                $output = shell_exec($cmd . ' 2>&1');
+            }
+        } else {
+            $output = shell_exec($cmd . ' 2>&1');
+        }
         $elapsed = round(microtime(true) - $startTime, 2);
 
         // Parse rsync exit code by checking output

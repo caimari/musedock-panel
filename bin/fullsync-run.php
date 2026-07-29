@@ -203,7 +203,18 @@ try {
                 continue;
             }
 
-            $result = FileSyncService::rsyncHosting($sourcePath, $host, $destPath);
+            // Heartbeat: keep the progress file fresh during a big hosting's rsync
+            // so the sync-progress endpoint doesn't declare a false "Error" (it
+            // flags a file untouched for >180s as a dead worker). Fires ~every 10s.
+            $heartbeat = function () use ($progressFile, &$steps, $startTime, $accounts, $i, &$fileOk, &$fileFail, $acc, $totalSteps) {
+                writeFullSyncProgress($progressFile, 'running', 'files',
+                    "Paso 2/{$totalSteps}: Copiando {$acc['domain']}… (transferencia en curso)", $steps, $startTime, [
+                    'total' => count($accounts), 'current' => $i, 'ok' => $fileOk, 'fail' => $fileFail,
+                    'current_domain' => $acc['domain'],
+                ]);
+            };
+
+            $result = FileSyncService::rsyncHosting($sourcePath, $host, $destPath, ['heartbeat' => $heartbeat]);
             if ($result['ok'] ?? false) {
                 $fileOk++;
             } else {

@@ -2,7 +2,7 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [1.0.211 – 1.0.216] — 2026-07-29 — Failover de BBDD de clientes: auditoría, endurecimiento e incidente Proxmox
+## [1.0.211 – 1.0.217] — 2026-07-29 — Failover de BBDD de clientes: auditoría, endurecimiento e incidente Proxmox
 
 Sesión centrada en el failover de bases de datos de clientes (PostgreSQL + MariaDB) con modelo de **un solo escritor**: auditoría de seguridad del módulo, endurecimiento, un incidente real de corrupción de disco en un nodo Proxmox resuelto **sin pérdida de datos de clientes** (mortadelo, el master, tenía todo; los nodos locales son esclavos), y el arreglo de varios bugs de replicación que llevaban meses ocultos.
 
@@ -11,6 +11,15 @@ Sesión centrada en el failover de bases de datos de clientes (PostgreSQL + Mari
 - **Fallo real corregido**: las redirecciones **standalone** (dominio → URL, sin cuenta de hosting; `hosting_account_id = NULL`) **nunca llegaban a los nodos slave**. Al crearlas no se encolaba nada, y «Sincronizar Todo» solo recorría `hosting_accounts` (las standalone no están ahí). Las redirecciones *attached* a un hosting sí se replicaban; solo las standalone quedaban solo en el master. Ahora: (a) crear/borrar una standalone la propaga a los nodos web (`sync_standalone_redirect`/`remove_standalone_redirect`, con handler en el slave que crea/borra la ruta Caddy + upsert del registro), y (b) «Sincronizar Todo» las incluye. **Fix de arrastre**: faltaba `use MuseDockPanel\Settings;` en `DomainController` (habría dado fatal al replicar).
 - **«Sincronizar Todo» limpia los items muertos**: al re-provisionar un nodo, los items de la cola `failed` con reintentos agotados se marcan `cancelled` (ya no reflejan la realidad), de modo que el banner de drift del dashboard se aclara tras una sincronización correcta en vez de mostrar fallos antiguos para siempre.
 - **La «Sincronización Completa» (fullsync) también se completó**: ese botón (distinto de «Sincronizar Todo») solo encolaba `create_hosting` — **no sincronizaba ni los aliases/redirects attached ni los standalone**. Ahora `bin/fullsync-run.php` incluye ambos (aliases attached vía `sync_domain_aliases`, standalone vía `sync_standalone_redirect`) y la limpieza de items muertos, igual que «Sincronizar Todo». Los dos caminos quedan equivalentes en cuanto a hostings + redirecciones.
+
+### Fix CSRF: «Igualar módulos» (Caddy) y setup de réplica de correo fallaban con «Token CSRF inválido»
+
+- Dos bugs en el JS de `Settings → Cluster`: (1) el token se enviaba como `csrf_token` (sin underscore) cuando `View::verifyCsrf()` lee `_csrf_token`; (2) el valor se leía de `input[name="csrf_token"]`, que **no existe** (el input real es `_csrf_token`), así que iba vacío. Afectaba a «Igualar módulos» (Caddy DNS) y al setup de replicación de correo. Corregidos ambos → las acciones ya validan el CSRF.
+
+### UX: falso «Error» en la Sincronización Completa con hostings grandes + robustez rsync
+
+- **Falso «Error durante la sincronización»**: el endpoint `sync-progress` marca como zombi cualquier sync cuyo fichero de progreso lleve >180 s sin actualizarse. Pero durante el rsync de **un hosting grande** (p. ej. 2.3 GB → ~8 min) el progreso solo se actualizaba *entre* hostings, así que a los 3 min se declaraba «Error» aunque el rsync estaba transfiriendo correctamente. Ahora `rsyncHosting` acepta un **heartbeat** (vía `proc_open`) que refresca el fichero de progreso cada ~10 s durante la transferencia, y `fullsync-run.php` lo usa. El sync ya no da falsos errores en hostings grandes.
+- **Robustez rsync**: se añadió `--timeout=300` — si una transferencia se estanca de verdad (caída de red), rsync aborta en 5 min en vez de colgarse indefinidamente y el bucle continúa con el resto.
 
 ### Fix bug latente suspend/activate en slaves + fecha del banner en español
 
