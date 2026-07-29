@@ -5,6 +5,7 @@ use MuseDockPanel\Database;
 use MuseDockPanel\Flash;
 use MuseDockPanel\Router;
 use MuseDockPanel\View;
+use MuseDockPanel\Settings;
 use MuseDockPanel\Services\LogService;
 
 class DomainController
@@ -129,8 +130,32 @@ class DomainController
         );
 
         LogService::log('domain.redirect', $domain, "Standalone redirect created: {$domain} → {$targetUrl} ({$code})");
+
+        // Replicate to slaves (standalone redirects were NOT synced before this).
+        if (Settings::get('cluster_role', 'standalone') === 'master') {
+            self::syncStandaloneRedirectToCluster('sync', $domain, $targetUrl, $code, $preservePath, $customerId);
+        }
+
         Flash::set('success', "Redirect creado: {$domain} → {$targetUrl}");
         Router::redirect('/domains');
+    }
+
+    /** Enqueue a standalone-redirect create/remove to every web node. */
+    private static function syncStandaloneRedirectToCluster(string $op, string $domain, string $targetUrl = '', int $code = 301, bool $preservePath = true, ?int $customerId = null): void
+    {
+        $action = $op === 'remove' ? 'remove_standalone_redirect' : 'sync_standalone_redirect';
+        foreach (\MuseDockPanel\Services\ClusterService::getWebNodes() as $node) {
+            \MuseDockPanel\Services\ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                'hosting_action' => $action,
+                'hosting_data'   => [
+                    'domain'        => $domain,
+                    'target_url'    => $targetUrl,
+                    'redirect_code' => $code,
+                    'preserve_path' => $preservePath,
+                    'customer_id'   => $customerId,
+                ],
+            ], 6);
+        }
     }
 
     /**
@@ -169,6 +194,12 @@ class DomainController
 
         Database::query("DELETE FROM hosting_domain_aliases WHERE id = :id", ['id' => $id]);
         LogService::log('domain.redirect', $record['domain'], "Redirect deleted: {$record['domain']}");
+
+        // Propagate the removal to slaves (only for standalone redirects).
+        if (empty($record['hosting_account_id']) && Settings::get('cluster_role', 'standalone') === 'master') {
+            self::syncStandaloneRedirectToCluster('remove', (string)$record['domain']);
+        }
+
         Flash::set('success', "Redirect '{$record['domain']}' eliminado.");
         Router::redirect('/domains');
     }

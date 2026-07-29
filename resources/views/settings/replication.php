@@ -147,14 +147,85 @@
         <?php if ($pgRole === 'standalone'): ?>
         <!-- ── PG STANDALONE ── -->
 
-        <!-- Opcion 1: Activar como Master -->
-        <form method="POST" action="/settings/replication/activate-master" id="pgActivateMasterForm">
-            <?= \MuseDockPanel\View::csrf() ?>
-            <input type="hidden" name="engine" value="pg">
-            <button type="submit" class="btn btn-success w-100 mb-3" onclick="return confirmActivateMaster(event, 'pg', this.form)">
-                <i class="bi bi-star me-1"></i>Activar como Master
+        <!-- Opcion 1: Activar como Master (POR CLÚSTER — seguro) -->
+        <div class="mb-3">
+            <button class="btn btn-success w-100" type="button" data-bs-toggle="collapse" data-bs-target="#pgMasterCollapse">
+                <i class="bi bi-star me-1"></i>Activar como Master (por clúster)
             </button>
-        </form>
+            <div class="collapse mt-3" id="pgMasterCollapse">
+                <div class="card bg-dark border-secondary">
+                    <div class="card-body">
+                        <p class="small text-muted mb-3">Configura un clúster concreto como master: limita el acceso a loopback + WireGuard (nunca a todas las interfaces) y abre pg_hba solo para las IPs de slave indicadas.</p>
+                        <div class="mb-3">
+                            <label class="form-label text-light">Clúster PostgreSQL</label>
+                            <select class="form-select bg-dark text-light border-secondary" id="pgMasterCluster"></select>
+                            <div class="form-text">Para las BBDD de clientes elige <code>14/main</code> (puerto 5432).</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-light">IPs de los slaves (WireGuard)</label>
+                            <input type="text" class="form-control bg-dark text-light border-secondary" id="pgMasterSlaveIps" placeholder="10.10.70.154">
+                            <div class="form-text">Separadas por coma. Solo nodos registrados del clúster.</div>
+                        </div>
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-outline-info btn-sm" onclick="setupMasterCluster(true)">
+                                <i class="bi bi-search me-1"></i>Simular (dry-run)
+                            </button>
+                            <button type="button" class="btn btn-success btn-sm" onclick="setupMasterCluster(false)">
+                                <i class="bi bi-star me-1"></i>Activar Master
+                            </button>
+                        </div>
+                        <div id="pgMasterResult" class="mt-3 small"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        (function(){
+            var csrf = <?= json_encode(\MuseDockPanel\View::csrfToken()) ?>;
+            // Poblar el selector de clústeres reales del host.
+            fetch('/settings/replication/pg-clusters', {headers:{'X-Requested-With':'XMLHttpRequest'}})
+              .then(function(r){return r.json();}).then(function(d){
+                var sel=document.getElementById('pgMasterCluster'); if(!sel||!d.ok) return;
+                (d.clusters||[]).forEach(function(c){
+                    var o=document.createElement('option');
+                    o.value=c.version+'|'+c.cluster;
+                    o.textContent=c.key+' (puerto '+c.port+')';
+                    sel.appendChild(o);
+                });
+              }).catch(function(){});
+
+            window.setupMasterCluster = function(dry){
+                var sel=document.getElementById('pgMasterCluster');
+                if(!sel||!sel.value){ alert('Elige un clúster'); return; }
+                var parts=sel.value.split('|');
+                var ips=(document.getElementById('pgMasterSlaveIps')||{}).value||'';
+                var out=document.getElementById('pgMasterResult');
+                var body=new URLSearchParams();
+                body.set('_csrf_token', csrf);
+                body.set('pg_version', parts[0]); body.set('cluster_name', parts[1]);
+                body.set('slave_ips', ips); body.set('dry_run', dry?'1':'0');
+                if(!dry){
+                    var token='MASTER CLUSTER:'+parts[0]+'/'+parts[1]+' PORT:'+(sel.options[sel.selectedIndex].text.match(/\d+/)||[''])[0];
+                    var typed=prompt('Confirmación. Escribe exactamente:\n'+token);
+                    if(typed===null) return;
+                    body.set('confirm', typed);
+                }
+                if(out){ out.innerHTML='<span class="text-info">Procesando…</span>'; }
+                fetch('/settings/replication/setup-master-cluster', {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body:body})
+                  .then(function(r){return r.json();}).then(function(d){
+                    if(!out) return;
+                    if(d.ok && d.dry_run){
+                        out.innerHTML='<div class="alert alert-info py-2 mb-0"><b>Simulación (no se cambió nada):</b><ul class="mb-0 mt-1">'+((d.plan||[]).map(function(p){return '<li>'+p+'</li>';}).join(''))+'</ul></div>';
+                    } else if(d.ok){
+                        out.innerHTML='<div class="alert alert-success py-2 mb-0"><b>Master activado.</b><br>Usuario replicación: <code>'+(d.repl_user||'')+'</code><br>Password: <code>'+(d.repl_pass||'(ya existía)')+'</code><br><small>Copia estos datos para configurar el slave.</small></div>';
+                    } else {
+                        out.innerHTML='<div class="alert alert-danger py-2 mb-0">'+(d.error||'Error')+'</div>';
+                    }
+                  }).catch(function(){ if(out) out.innerHTML='<div class="alert alert-danger py-2 mb-0">Error de red</div>'; });
+            };
+        })();
+        </script>
 
         <!-- Opcion 2: Configurar como Slave -->
         <div class="mb-3">

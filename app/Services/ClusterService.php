@@ -44,6 +44,56 @@ class ClusterService
         return Database::fetchAll('SELECT * FROM cluster_nodes ORDER BY name');
     }
 
+    /**
+     * Summarize replication DRIFT toward each node: cluster_queue items that
+     * FAILED (exhausted retries = "dead", they never self-heal) or are stuck
+     * pending. The panel replicates by events + a manual "Sync Todo"; there is
+     * no auto-reconciliation, so dead items are silent drift. The dashboard uses
+     * this to warn the admin instead of the drift going unnoticed (as happened
+     * with 163 dead alias/redirect items that sat unnoticed since July).
+     *
+     * Returns ['total_dead'=>int, 'total_pending'=>int, 'nodes'=>[{node_id,name,
+     * dead,pending,oldest,sample_error}], 'has_drift'=>bool]. Read-only, cheap.
+     */
+    public static function getSyncDriftSummary(): array
+    {
+        $out = ['total_dead' => 0, 'total_pending' => 0, 'nodes' => [], 'has_drift' => false];
+        try {
+            $rows = Database::fetchAll(
+                "SELECT q.node_id,
+                        COUNT(*) FILTER (WHERE q.status = 'failed' AND q.attempts >= q.max_attempts) AS dead,
+                        COUNT(*) FILTER (WHERE q.status = 'pending') AS pending,
+                        MIN(q.created_at) FILTER (WHERE q.status = 'failed' AND q.attempts >= q.max_attempts) AS oldest,
+                        (ARRAY_AGG(q.error_message) FILTER (WHERE q.status = 'failed' AND q.attempts >= q.max_attempts))[1] AS sample_error
+                 FROM cluster_queue q
+                 WHERE q.status IN ('failed','pending')
+                 GROUP BY q.node_id"
+            );
+        } catch (\Throwable $e) {
+            // Older schema / no queue table: no drift info, fail safe (no banner).
+            return $out;
+        }
+        $nodeNames = [];
+        foreach (self::getNodes() as $n) { $nodeNames[(int)$n['id']] = $n['name'] ?? ('#' . $n['id']); }
+        foreach ($rows as $r) {
+            $dead = (int)($r['dead'] ?? 0);
+            $pending = (int)($r['pending'] ?? 0);
+            if ($dead === 0 && $pending === 0) continue;
+            $out['total_dead'] += $dead;
+            $out['total_pending'] += $pending;
+            $out['nodes'][] = [
+                'node_id'      => (int)$r['node_id'],
+                'name'         => $nodeNames[(int)$r['node_id']] ?? ('#' . $r['node_id']),
+                'dead'         => $dead,
+                'pending'      => $pending,
+                'oldest'       => $r['oldest'] ?? null,
+                'sample_error' => $r['sample_error'] ?? '',
+            ];
+        }
+        $out['has_drift'] = $out['total_dead'] > 0;
+        return $out;
+    }
+
     /** Get only nodes with web service — use for hosting sync (excludes mail-only nodes) */
     public static function getWebNodes(): array
     {
@@ -1731,6 +1781,61 @@ class ClusterService
                         return $result;
                     }
                     return ['ok' => true, 'message' => "Alias {$aliasDomain} not found on slave, skipping"];
+
+                // Standalone redirect (domain → target URL, NO hosting account).
+                // These were never replicated before — the master only synced
+                // redirects attached to a hosting, so standalone ones stayed
+                // master-only. Idempotent upsert: create/refresh the Caddy route
+                // and the DB row (hosting_account_id = NULL).
+                case 'sync_standalone_redirect':
+                    $domain    = strtolower(trim((string)($hostingData['domain'] ?? '')));
+                    $targetUrl = trim((string)($hostingData['target_url'] ?? ''));
+                    $code      = (int)($hostingData['redirect_code'] ?? 301);
+                    $preserve  = (bool)($hostingData['preserve_path'] ?? true);
+                    $customerId = !empty($hostingData['customer_id']) ? (int)$hostingData['customer_id'] : null;
+                    if ($domain === '' || $targetUrl === '') {
+                        return ['ok' => false, 'message' => 'domain y target_url requeridos'];
+                    }
+                    if (!in_array($code, [301, 302], true)) $code = 301;
+                    $targetDomain = preg_replace('#^https?://#', '', rtrim($targetUrl, '/'));
+                    $targetDomain = explode('/', (string)$targetDomain)[0];
+                    // (Re)create the Caddy route on this node.
+                    $routeId = SystemService::addCaddyRedirectRoute($domain, $targetDomain, $code, $preserve);
+                    // Upsert the DB row (keyed by domain; standalone = NULL account).
+                    $existing = Database::fetchOne("SELECT id FROM hosting_domain_aliases WHERE domain = :d", ['d' => $domain]);
+                    if ($existing) {
+                        Database::query(
+                            "UPDATE hosting_domain_aliases SET type='redirect', redirect_code=:c, preserve_path=:pp,
+                                    caddy_route_id=:rid, customer_id=:cid, target_url=:t, hosting_account_id=NULL WHERE id=:id",
+                            ['c'=>$code,'pp'=>$preserve?'t':'f','rid'=>$routeId,'cid'=>$customerId,'t'=>$targetUrl,'id'=>(int)$existing['id']]
+                        );
+                    } else {
+                        Database::query(
+                            "INSERT INTO hosting_domain_aliases (hosting_account_id, domain, type, redirect_code, preserve_path, caddy_route_id, customer_id, target_url)
+                             VALUES (NULL, :d, 'redirect', :c, :pp, :rid, :cid, :t)",
+                            ['d'=>$domain,'c'=>$code,'pp'=>$preserve?'t':'f','rid'=>$routeId,'cid'=>$customerId,'t'=>$targetUrl]
+                        );
+                    }
+                    LogService::log('cluster.sync', $domain, "Standalone redirect synced from master: {$domain} → {$targetUrl}");
+                    return ['ok' => true, 'message' => "Standalone redirect {$domain} synced"];
+
+                case 'remove_standalone_redirect':
+                    $domain = strtolower(trim((string)($hostingData['domain'] ?? '')));
+                    if ($domain === '') return ['ok' => false, 'message' => 'domain requerido'];
+                    $row = Database::fetchOne("SELECT id, caddy_route_id FROM hosting_domain_aliases WHERE domain = :d AND hosting_account_id IS NULL", ['d' => $domain]);
+                    if ($row) {
+                        if (!empty($row['caddy_route_id'])) {
+                            $cfg = require PANEL_ROOT . '/config/panel.php';
+                            $capi = rtrim($cfg['caddy']['api_url'], '/');
+                            $ch = curl_init("{$capi}/id/{$row['caddy_route_id']}");
+                            curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
+                            curl_exec($ch); curl_close($ch);
+                        }
+                        Database::query("DELETE FROM hosting_domain_aliases WHERE id = :id", ['id' => (int)$row['id']]);
+                        LogService::log('cluster.sync', $domain, "Standalone redirect removed from master: {$domain}");
+                        return ['ok' => true, 'message' => "Standalone redirect {$domain} removed"];
+                    }
+                    return ['ok' => true, 'message' => "Standalone redirect {$domain} not found on slave, skipping"];
 
                 case 'sync_domain_aliases':
                     $mainDomain = $hostingData['main_domain'] ?? '';

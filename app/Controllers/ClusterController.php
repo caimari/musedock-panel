@@ -987,8 +987,42 @@ class ClusterController
             $count++;
         }
 
-        LogService::log('cluster.sync', 'sync-all', "Sincronizados {$count} hostings al nodo {$node['name']}");
-        Flash::set('success', "{$count} hostings encolados para sincronizar al nodo '{$node['name']}'");
+        // Standalone redirects (domain → URL, NO hosting account). These are NOT
+        // covered by the per-hosting loop above (they have hosting_account_id =
+        // NULL), so before this they never reached a slave. Enqueue each one.
+        $standalone = Database::fetchAll(
+            "SELECT domain, target_url, redirect_code, preserve_path, customer_id
+             FROM hosting_domain_aliases WHERE hosting_account_id IS NULL AND type = 'redirect'"
+        );
+        $sr = 0;
+        foreach ($standalone as $red) {
+            ClusterService::enqueue($nodeId, 'sync-hosting', [
+                'hosting_action' => 'sync_standalone_redirect',
+                'hosting_data'   => [
+                    'domain'        => $red['domain'],
+                    'target_url'    => $red['target_url'],
+                    'redirect_code' => (int)($red['redirect_code'] ?? 301),
+                    'preserve_path' => in_array((string)($red['preserve_path'] ?? 't'), ['t','1','true'], true),
+                    'customer_id'   => $red['customer_id'] ?? null,
+                ],
+            ], 6);
+            $sr++;
+        }
+
+        // Supersede stale DEAD queue items for this node: a fresh full sync
+        // re-provisions everything, so old exhausted-retry 'failed' rows no longer
+        // reflect reality. Mark them cancelled so the dashboard drift banner
+        // clears once this sync completes (instead of showing ancient failures).
+        try {
+            Database::query(
+                "UPDATE cluster_queue SET status = 'cancelled'
+                 WHERE node_id = :nid AND status = 'failed' AND attempts >= max_attempts",
+                ['nid' => $nodeId]
+            );
+        } catch (\Throwable) {}
+
+        LogService::log('cluster.sync', 'sync-all', "Sincronizados {$count} hostings + {$sr} redirects standalone al nodo {$node['name']}");
+        Flash::set('success', "{$count} hostings y {$sr} redirects standalone encolados para el nodo '{$node['name']}'");
         header('Location: /settings/cluster');
         exit;
     }

@@ -111,6 +111,8 @@ class DashboardController
             'failoverStatus' => $failoverStatus,
             'caddyTokenStatus' => $caddyTokenStatus,
             'clusterRole' => $clusterRole,
+            // Silent replication drift (dead sync-queue items that never self-heal).
+            'syncDrift' => ($clusterRole === 'master') ? ClusterService::getSyncDriftSummary() : ['has_drift' => false],
         ]);
     }
 

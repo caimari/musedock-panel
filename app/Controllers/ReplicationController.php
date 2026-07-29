@@ -503,6 +503,91 @@ class ReplicationController
     }
 
     /**
+     * POST /settings/replication/setup-master-cluster (JSON)
+     *
+     * Configure ONE explicit PostgreSQL cluster as replication master, the SAFE
+     * per-cluster way (replaces the blocked legacy activatePgMaster which touched
+     * the panel cluster and opened listen_addresses='*'):
+     *   1) create/reuse the replication user (credentials stored encrypted),
+     *   2) setupPgMasterForCluster: listen limited to loopback+WireGuard, pg_hba
+     *      opened only for the given slave /32s, wal_log_hints=on, restart ONLY
+     *      this cluster.
+     * Supports dry_run (returns the plan, writes nothing) and requires a literal
+     * confirmation token embedding the cluster identity.
+     */
+    public function setupMasterCluster(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+
+        $version  = trim($_POST['pg_version'] ?? '');
+        $clusterN = trim($_POST['cluster_name'] ?? '');
+        $slaveCsv = trim($_POST['slave_ips'] ?? '');
+        $confirm  = $_POST['confirm'] ?? '';
+        $dryRun   = ($_POST['dry_run'] ?? '') === '1';
+
+        $cluster = PgClusterService::get($version, $clusterN);
+        if ($cluster === null) {
+            echo json_encode(['ok' => false, 'error' => "Clúster PostgreSQL {$version}/{$clusterN} no existe en este host."]);
+            exit;
+        }
+
+        // Parse + validate slave IPs (only registered cluster nodes allowed, so a
+        // typo can't open pg_hba to an arbitrary address).
+        $slaveIps = [];
+        foreach (preg_split('/[\s,]+/', $slaveCsv) as $ip) {
+            $ip = trim($ip);
+            if ($ip === '') continue;
+            if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+                echo json_encode(['ok' => false, 'error' => "IP de slave inválida: {$ip}"]); exit;
+            }
+            if (!ClusterService::isKnownNodeIp($ip)) {
+                echo json_encode(['ok' => false, 'error' => "La IP {$ip} no es un nodo registrado del clúster."]); exit;
+            }
+            $slaveIps[] = $ip;
+        }
+        if (!$slaveIps) {
+            echo json_encode(['ok' => false, 'error' => 'Indica al menos una IP de slave (nodo del clúster).']); exit;
+        }
+
+        // Literal confirmation embedding the cluster (skip only on dry-run).
+        $token = 'MASTER CLUSTER:' . $cluster['key'] . ' PORT:' . $cluster['port'];
+        if (!$dryRun && !hash_equals($token, trim((string)$confirm))) {
+            echo json_encode(['ok' => false, 'error' => 'Confirmación incorrecta. Escribe exactamente: ' . $token]);
+            exit;
+        }
+
+        // Ensure a replication user + password exist (reuse if already created).
+        $replUser = Settings::get('repl_pg_user', '');
+        $replPass = ReplicationService::decryptPassword(Settings::get('repl_pg_password', ''));
+        if ($replUser === '' || $replPass === '') {
+            $u = ReplicationService::createReplicationUser('pg');
+            if (empty($u['ok'])) {
+                echo json_encode(['ok' => false, 'error' => 'No se pudo crear el usuario de replicación: ' . ($u['error'] ?? '?')]);
+                exit;
+            }
+            $replUser = $u['username'] ?? Settings::get('repl_pg_user', 'replicator');
+            $replPass = $u['password'] ?? ReplicationService::decryptPassword(Settings::get('repl_pg_password', ''));
+        }
+
+        $result = ReplicationService::setupPgMasterForCluster($cluster, $slaveIps, $replUser, $replPass, [], $dryRun);
+
+        if (!$dryRun && !empty($result['ok'])) {
+            Settings::set('repl_pg_role', 'master');
+            Settings::set('repl_pg_port', (string)$cluster['port']);
+            Settings::set('repl_configured_at', date('Y-m-d H:i:s'));
+            LogService::log('replication.setup_master', $cluster['key'],
+                "Clúster {$cluster['key']} configurado como master de: " . implode(', ', $slaveIps));
+        }
+        // Surface the repl user + password so the admin can paste them into the
+        // slave's convert form (password shown once here, over the panel's TLS).
+        $result['repl_user'] = $replUser;
+        $result['repl_pass'] = $dryRun ? null : $replPass;
+        echo json_encode($result);
+        exit;
+    }
+
+    /**
      * POST /settings/replication/preflight (JSON)
      * Read-only dry-run report for a per-cluster slave conversion. Never writes.
      */

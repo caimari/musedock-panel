@@ -529,6 +529,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/replication/test-slave-master', 'ReplicationController@testSlaveMaster');
 // Mode 2b: Slave per explicit PostgreSQL cluster (safe path)
 \MuseDockPanel\Router::get('/settings/replication/pg-clusters', 'ReplicationController@listPgClusters');
+\MuseDockPanel\Router::post('/settings/replication/setup-master-cluster', 'ReplicationController@setupMasterCluster');
 \MuseDockPanel\Router::post('/settings/replication/preflight', 'ReplicationController@preflight');
 \MuseDockPanel\Router::post('/settings/replication/convert-to-slave-cluster', 'ReplicationController@convertToSlaveCluster');
 // Mail replication (Dovecot dsync — real mailbox HA between mail nodes)

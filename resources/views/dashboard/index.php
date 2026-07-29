@@ -127,6 +127,42 @@
 </div>
 <?php endif; ?>
 
+<!-- Replication Drift Alert Banner: dead sync-queue items that never self-heal -->
+<?php if (!empty($syncDrift['has_drift'])): ?>
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card border-warning">
+            <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center py-2">
+                <span><i class="bi bi-exclamation-triangle-fill me-2"></i>Desincronización entre nodos detectada</span>
+                <a href="/settings/cluster" class="btn btn-dark btn-sm py-0 px-2"><i class="bi bi-arrow-repeat me-1"></i>Sincronizar Todo</a>
+            </div>
+            <div class="card-body py-2">
+                <p class="small text-muted mb-2">
+                    Hay <strong><?= (int)$syncDrift['total_dead'] ?></strong> operación(es) de replicación
+                    que <strong>fallaron y no se reintentan solas</strong> (agotaron reintentos). Suelen quedar así cuando un nodo estuvo caído
+                    o se creó algo antes de darlo de alta. No se curan solas: usa <strong>Sincronizar Todo</strong> para re-provisionar.
+                </p>
+                <div class="table-responsive">
+                    <table class="table table-sm mb-0">
+                        <thead><tr><th class="ps-2">Nodo</th><th class="text-center">Fallidos</th><th>Desde</th><th>Ejemplo</th></tr></thead>
+                        <tbody>
+                        <?php foreach (($syncDrift['nodes'] ?? []) as $dn): if (($dn['dead'] ?? 0) < 1) continue; ?>
+                            <tr>
+                                <td class="ps-2 fw-semibold"><i class="bi bi-hdd-network me-1 text-warning"></i><?= View::e($dn['name']) ?></td>
+                                <td class="text-center"><span class="badge bg-warning text-dark"><?= (int)$dn['dead'] ?></span></td>
+                                <td class="small text-muted"><?= View::e(substr((string)($dn['oldest'] ?? ''), 0, 16)) ?></td>
+                                <td class="small text-muted" style="font-family:monospace;"><?= View::e(substr((string)($dn['sample_error'] ?? ''), 0, 60)) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Caddy Cloudflare Token Warning -->
 <?php if (!empty($caddyTokenStatus) && !$caddyTokenStatus['has_token'] && !\MuseDockPanel\Settings::get('dismiss_cf_token_warning')): ?>
 <div class="row g-3 mb-4" id="cf-token-warning">

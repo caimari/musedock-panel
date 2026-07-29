@@ -59,6 +59,36 @@ ok('acción probe-host existe en el dispatcher', str_contains($api, "'probe-host
 ok('probe-host acotado: solo nodos conocidos + puerto permitido (anti-SSRF)', str_contains($api, 'isKnownNodeIp($ip)') && str_contains($api, 'anti-SSRF') || str_contains($api, 'Anti-SSRF'));
 ok('isKnownNodeIp rechaza IPs peligrosas (0.0.0.0/loopback en metadata)', str_contains($clu, "'0.0.0.0', '127.0.0.1'") && str_contains($clu, 'dangerous'));
 
+section('Incidente — botón master legacy bloqueado + flujo por-cluster en UI');
+$rc = file_get_contents(PANEL_ROOT . '/app/Controllers/ReplicationController.php');
+ok('activatePgMaster legacy bloqueado (ya no reinicia el panel)', str_contains($repl, 'Bloqueado: usaba el clúster del panel'));
+ok('nuevo setupMasterCluster por-cluster en el controller', str_contains($rc, 'function setupMasterCluster'));
+ok('valida slaves contra nodos registrados (isKnownNodeIp)', str_contains($rc, 'ClusterService::isKnownNodeIp($ip)'));
+ok('confirmación literal + dry-run en el master por-cluster', str_contains($rc, "'MASTER CLUSTER:'") && str_contains($rc, "\$dryRun"));
+ok('setupPgMasterForCluster limita listen a loopback+WG (no *)', str_contains($repl, '$listen = "\'127.0.0.1" . ($wgIp'));
+ok('ruta setup-master-cluster registrada', str_contains(file_get_contents(PANEL_ROOT.'/public/index.php'), 'setup-master-cluster'));
+
+section('BUG real: standalone redirects NO se replicaban — arreglado');
+$dctrl = file_get_contents(PANEL_ROOT . '/app/Controllers/DomainController.php');
+$cctrl = file_get_contents(PANEL_ROOT . '/app/Controllers/ClusterController.php');
+$clu2  = file_get_contents(PANEL_ROOT . '/app/Services/ClusterService.php');
+ok('crear standalone redirect replica al cluster', str_contains($dctrl, "syncStandaloneRedirectToCluster('sync'"));
+ok('borrar standalone redirect replica el borrado', str_contains($dctrl, "syncStandaloneRedirectToCluster('remove'"));
+ok('slave: handler sync_standalone_redirect (crea ruta Caddy + upsert)', str_contains($clu2, "case 'sync_standalone_redirect':") && str_contains($clu2, 'addCaddyRedirectRoute'));
+ok('slave: handler remove_standalone_redirect', str_contains($clu2, "case 'remove_standalone_redirect':"));
+ok('Sincronizar Todo ahora incluye los standalone', str_contains($cctrl, "hosting_account_id IS NULL AND type = 'redirect'"));
+ok('Sincronizar Todo limpia items muertos (banner se aclara)', str_contains($cctrl, "status = 'cancelled'") && str_contains($cctrl, 'attempts >= max_attempts'));
+ok('Settings importado en DomainController (no fatal en runtime)', str_contains($dctrl, 'use MuseDockPanel\Settings;'));
+
+section('Aviso de desincronización en el dashboard (drift silencioso)');
+$cs = file_get_contents(PANEL_ROOT . '/app/Services/ClusterService.php');
+$dc = file_get_contents(PANEL_ROOT . '/app/Controllers/DashboardController.php');
+$dv = file_get_contents(PANEL_ROOT . '/resources/views/dashboard/index.php');
+ok('getSyncDriftSummary cuenta items muertos (attempts>=max)', str_contains($cs, 'function getSyncDriftSummary') && str_contains($cs, 'attempts >= q.max_attempts'));
+ok('el dashboard recibe syncDrift (solo en master)', str_contains($dc, "'syncDrift' =>") && str_contains($dc, 'getSyncDriftSummary'));
+ok('banner de aviso en la vista con enlace a Sincronizar Todo', str_contains($dv, "syncDrift['has_drift']") && str_contains($dv, 'Sincronizar Todo'));
+ok('el banner explica que NO se cura solo', str_contains($dv, 'no se reintentan solas') || str_contains($dv, 'No se curan solas'));
+
 echo "\n\033[1m─────────────────────────────────────────\033[0m\n";
 echo "  \033[0;32m{$pass} passed\033[0m" . ($fail ? ", \033[0;31m{$fail} failed\033[0m" : '') . "\n\n";
 exit($fail > 0 ? 1 : 0);

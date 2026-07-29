@@ -2,6 +2,20 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [Unreleased] — Bug: los "standalone redirects" no se replicaban a los slaves
+
+- **Fallo real corregido**: las redirecciones **standalone** (dominio → URL, sin cuenta de hosting; `hosting_account_id = NULL`) **nunca llegaban a los nodos slave**. Al crearlas no se encolaba nada, y «Sincronizar Todo» solo recorría `hosting_accounts` (las standalone no están ahí). Las redirecciones *attached* a un hosting sí se replicaban; solo las standalone quedaban solo en el master. Ahora: (a) crear/borrar una standalone la propaga a los nodos web (`sync_standalone_redirect`/`remove_standalone_redirect`, con handler en el slave que crea/borra la ruta Caddy + upsert del registro), y (b) «Sincronizar Todo» las incluye. **Fix de arrastre**: faltaba `use MuseDockPanel\Settings;` en `DomainController` (habría dado fatal al replicar).
+- **«Sincronizar Todo» limpia los items muertos**: al re-provisionar un nodo, los items de la cola `failed` con reintentos agotados se marcan `cancelled` (ya no reflejan la realidad), de modo que el banner de drift del dashboard se aclara tras una sincronización correcta en vez de mostrar fallos antiguos para siempre.
+
+## [Unreleased] — Aviso de desincronización de nodos en el dashboard
+
+- **El drift de replicación ya no es silencioso**: la replicación del panel es por eventos + «Sincronizar Todo» manual, sin auto-reconciliación. Si un nodo estuvo caído o algo se creó antes de darlo de alta, los items de la cola **agotan reintentos y quedan muertos sin avisar** (se detectaron 170 items muertos, algunos desde marzo, que nadie había visto). Ahora el dashboard muestra un **banner de aviso** cuando hay operaciones de sync fallidas por nodo (cuántas, desde cuándo, ejemplo del error), con enlace directo a «Sincronizar Todo». Nuevo `ClusterService::getSyncDriftSummary()` (solo se evalúa en el master, read-only).
+
+## [Unreleased] — Botón "Activar como Master" legacy bloqueado + flujo por-clúster en la UI
+
+- **Incidente resuelto**: el botón «Activar como Master» de Settings→Replicación ejecutaba el legacy `activatePgMaster`, que resolvía el clúster **del panel** (5433) en vez del elegido, ponía `listen_addresses='*'` (abre a todas las interfaces) y reiniciaba el clúster del panel → **HTTP 500** (mató la conexión del panel). El clúster de clientes (5432) NO se tocó y el firewall ya limitaba 5433 a la IP de Filemon, así que no hubo exposición real. `activatePgMaster` queda **bloqueado** (devuelve error explicativo).
+- **Nuevo flujo master POR-CLÚSTER en la UI** (`setupMasterCluster` → `setupPgMasterForCluster`, ya auditado como seguro): selector de clúster real + IPs de slave (validadas contra `isKnownNodeIp`), **simulación (dry-run)** que no cambia nada, y confirmación literal. Limita `listen_addresses` a loopback+WireGuard (nunca `*`), abre `pg_hba` solo para los slaves indicados, activa `wal_log_hints=on` y reinicia SOLO ese clúster. Crea/reutiliza el usuario de replicación y muestra las credenciales para configurar el slave.
+
 ## [Unreleased] — Endurecimiento de la replicación de BBDD de clientes (auditoría de seguridad)
 
 Tras una auditoría del módulo de replicación (nunca activado en producción), se corrigieron 5 problemas críticos antes de poder activarlo con datos de clientes reales. El camino PostgreSQL ya estaba bien construido; MariaDB era una carcasa que corrompía datos.
