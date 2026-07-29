@@ -724,6 +724,49 @@ CONF;
         ];
     }
 
+    /**
+     * Start the DNS-provider build in the BACKGROUND (detached) and return a
+     * task id immediately. xcaddy takes minutes; PHP-FPM kills requests at 120s,
+     * so the build must not run inline. The detached CLI (nohup + setsid) keeps
+     * running after the HTTP request returns. Poll with caddyDnsBuildStatus().
+     */
+    public static function startCaddyDnsProviderBuild(string $provider): array
+    {
+        $provider = strtolower(trim($provider));
+        if ($provider === '' || !preg_match('/^[a-z0-9][a-z0-9_.-]{1,63}$/', $provider)) {
+            return ['ok' => false, 'error' => 'Proveedor DNS invalido'];
+        }
+        if (self::caddyHasDnsProvider($provider)) {
+            return ['ok' => true, 'installed' => false, 'status' => 'done', 'message' => "dns.providers.{$provider} ya esta instalado"];
+        }
+        $taskId = 'caddybuild-' . $provider . '-' . gmdate('YmdHis') . '-' . bin2hex(random_bytes(3));
+        $dir = '/var/lib/musedock';
+        @mkdir($dir, 0750, true);
+        $statusFile = "{$dir}/caddy-build-" . preg_replace('/[^a-zA-Z0-9_-]/', '', $taskId) . '.json';
+        @file_put_contents($statusFile, json_encode(['status' => 'building', 'provider' => $provider, 'started_at' => gmdate('c')]));
+        $cmd = sprintf(
+            'setsid nohup php %s %s %s > /dev/null 2>&1 &',
+            escapeshellarg(PANEL_ROOT . '/bin/caddy-build-run.php'),
+            escapeshellarg($provider),
+            escapeshellarg($taskId)
+        );
+        shell_exec($cmd);
+        return ['ok' => true, 'status' => 'building', 'task_id' => $taskId, 'message' => "Compilando dns.providers.{$provider} en segundo plano"];
+    }
+
+    /** Read the status of an async DNS-provider build launched above. */
+    public static function caddyDnsBuildStatus(string $taskId): array
+    {
+        $safe = preg_replace('/[^a-zA-Z0-9_-]/', '', $taskId);
+        if ($safe === '') return ['status' => 'unknown', 'error' => 'task_id vacío'];
+        $statusFile = "/var/lib/musedock/caddy-build-{$safe}.json";
+        if (!is_file($statusFile)) {
+            return ['status' => 'unknown', 'error' => 'build no encontrado'];
+        }
+        $data = json_decode((string)@file_get_contents($statusFile), true);
+        return is_array($data) ? $data : ['status' => 'unknown'];
+    }
+
     public static function installCaddyDnsProvider(string $provider): array
     {
         $provider = strtolower(trim($provider));

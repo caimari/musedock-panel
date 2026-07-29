@@ -942,24 +942,67 @@
             .then(r => r.json())
             .then(d => {
                 btn.disabled = false;
-                if (!d.ok) { alert('No se pudo comprobar el nodo: ' + (d.error || '')); return; }
-                const plan = (d.plan || []).join('\n');
-                if (!confirm(`Se compilarán en ${name} los módulos que faltan:\n\n${plan}\n\nCaddy se reiniciará en ese nodo al terminar. ¿Continuar?`)) return;
-
-                const fd2 = new FormData();
-                fd2.append('_csrf_token', csrf);
-                fd2.append('node_id', nodeId);
-                btn.disabled = true;
-                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Compilando…';
-                fetch('/settings/cluster/caddy-sync-modules', { method: 'POST', body: fd2 })
-                    .then(r => r.json())
-                    .then(res => {
-                        alert(res.ok ? `Módulos instalados en ${name}.` : `Error: ${JSON.stringify(res.installed || res.error || res)}`);
-                        load();
-                    })
-                    .catch(() => { alert('Error de red al instalar.'); load(); });
+                if (!d.ok) {
+                    Swal.fire({ title: 'No se pudo comprobar el nodo', html: '<div class="small text-start">' + (d.error || '') + '</div>', icon: 'error', background: '#1e1e2e', color: '#fff' });
+                    return;
+                }
+                const planHtml = (d.plan || []).map(p => '<li>' + p + '</li>').join('');
+                Swal.fire({
+                    title: 'Compilar módulos en ' + name,
+                    html: '<div class="small text-start mb-2">Se compilarán los módulos DNS que faltan (Caddy se reiniciará en el nodo al terminar):</div><ul class="small text-start">' + planHtml + '</ul>',
+                    icon: 'question', showCancelButton: true, confirmButtonText: 'Compilar', cancelButtonText: 'Cancelar',
+                    background: '#1e1e2e', color: '#fff',
+                }).then(r => {
+                    if (!r.isConfirmed) return;
+                    const fd2 = new FormData();
+                    fd2.append('_csrf_token', csrf);
+                    fd2.append('node_id', nodeId);
+                    btn.disabled = true;
+                    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Compilando…';
+                    fetch('/settings/cluster/caddy-sync-modules', { method: 'POST', body: fd2 })
+                        .then(r2 => r2.json())
+                        .then(res => {
+                            if (!res.tasks && !res.ok) {
+                                btn.disabled = false; load();
+                                Swal.fire({ title: 'Error al iniciar', html: '<div class="small text-start">' + (res.error || JSON.stringify(res.errors || res)) + '</div>', icon: 'error', background: '#1e1e2e', color: '#fff' });
+                                return;
+                            }
+                            Swal.fire({
+                                title: 'Compilando en ' + name,
+                                html: '<div class="small text-muted">xcaddy está compilando los módulos DNS en el nodo.<br>Puede tardar unos minutos… no cierres el navegador.</div>',
+                                allowOutsideClick: false, didOpen: () => Swal.showLoading(),
+                                background: '#1e1e2e', color: '#fff',
+                            });
+                            pollBuild(nodeId, res.tasks || {}, name, btn);
+                        })
+                        .catch(() => { btn.disabled = false; load(); Swal.fire({ title: 'Error de red al iniciar', icon: 'error', background: '#1e1e2e', color: '#fff' }); });
+                });
             })
-            .catch(() => { btn.disabled = false; alert('Error de red.'); });
+            .catch(() => { btn.disabled = false; Swal.fire({ title: 'Error de red', icon: 'error', background: '#1e1e2e', color: '#fff' }); });
+    }
+
+    // Poll the async xcaddy build on the node (runs for minutes; each poll is fast).
+    function pollBuild(nodeId, tasks, name, btn) {
+        const tick = () => {
+            const fd = new FormData();
+            fd.append('_csrf_token', csrf);
+            fd.append('node_id', nodeId);
+            fd.append('tasks', JSON.stringify(tasks));
+            fetch('/settings/cluster/caddy-sync-status', { method: 'POST', body: fd })
+                .then(r => r.json())
+                .then(st => {
+                    if (st.status === 'building') { setTimeout(tick, 4000); return; }
+                    if (btn) btn.disabled = false;
+                    if (st.status === 'done') {
+                        Swal.fire({ title: 'Módulos compilados', html: '<div class="small text-start">Caddy en <b>' + name + '</b> ya tiene los módulos DNS. Listo para emitir certificados DNS-01 en un failover.</div>', icon: 'success', background: '#1e1e2e', color: '#fff' }).then(() => load());
+                    } else {
+                        const detail = Object.entries(st.providers || {}).map(([p, v]) => p + ': ' + (v.message || v.status)).join('<br>');
+                        Swal.fire({ title: 'La compilación falló', html: '<div class="small text-start">' + detail + '</div>', icon: 'error', background: '#1e1e2e', color: '#fff' }).then(() => load());
+                    }
+                })
+                .catch(() => setTimeout(tick, 5000));
+        };
+        tick();
     }
 
     function load() {

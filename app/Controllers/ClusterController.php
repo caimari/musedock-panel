@@ -552,9 +552,26 @@ class ClusterController
 
         $result = \MuseDockPanel\Services\CaddyBinaryService::syncModulesToNode($nodeId, $dryRun);
         if (!$dryRun && !empty($result['ok'])) {
-            LogService::log('cluster.caddy', 'sync-modules', "Modulos DNS de Caddy sincronizados al nodo #{$nodeId}");
+            LogService::log('cluster.caddy', 'sync-modules', "Compilación de módulos DNS iniciada en el nodo #{$nodeId}");
         }
         echo json_encode($result);
+        exit;
+    }
+
+    /**
+     * POST /settings/cluster/caddy-sync-status (JSON)
+     * Poll the async Caddy module build on a node (see syncModulesToNode). The
+     * build runs for minutes on the node; this returns fast on each poll.
+     */
+    public function caddySyncStatus(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        $tasks = $_POST['tasks'] ?? [];
+        if (!is_array($tasks)) { $tasks = json_decode((string)$tasks, true) ?: []; }
+        if ($nodeId < 1) { echo json_encode(['ok' => false, 'error' => 'Nodo no especificado']); exit; }
+        echo json_encode(\MuseDockPanel\Services\CaddyBinaryService::moduleBuildStatus($nodeId, $tasks));
         exit;
     }
 

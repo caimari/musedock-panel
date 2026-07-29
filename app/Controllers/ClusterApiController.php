@@ -442,11 +442,14 @@ class ClusterApiController
                 'unfence-self'     => \MuseDockPanel\Services\FailoverSafetyService::unfenceSelf(),
                 'caddy-info'       => \MuseDockPanel\Services\CaddyBinaryService::localInfo(),
                 // Build the missing DNS provider module INTO this node's Caddy via
-                // xcaddy (idempotent: no-op if already present). Invoked by the
-                // master so a new slave can be brought to parity without manual
-                // binary copying.
-                'caddy-install-dns-module' => \MuseDockPanel\Services\SystemService::installCaddyDnsProvider(
+                // xcaddy. ASYNC: xcaddy takes minutes but FPM kills requests at
+                // 120s, so we launch the build detached and return a task_id
+                // immediately; the master polls 'caddy-install-status'.
+                'caddy-install-dns-module' => \MuseDockPanel\Services\SystemService::startCaddyDnsProviderBuild(
                     (string)($payload['provider'] ?? '')
+                ),
+                'caddy-install-status' => \MuseDockPanel\Services\SystemService::caddyDnsBuildStatus(
+                    (string)($payload['task_id'] ?? '')
                 ),
                 'receive-files'    => $this->handleReceiveFiles($payload),
                 'install-ssh-key'  => \MuseDockPanel\Services\FileSyncService::installPublicKey($payload['public_key'] ?? ''),

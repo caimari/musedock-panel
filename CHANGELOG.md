@@ -12,6 +12,11 @@ Sesión centrada en el failover de bases de datos de clientes (PostgreSQL + Mari
 - **«Sincronizar Todo» limpia los items muertos**: al re-provisionar un nodo, los items de la cola `failed` con reintentos agotados se marcan `cancelled` (ya no reflejan la realidad), de modo que el banner de drift del dashboard se aclara tras una sincronización correcta en vez de mostrar fallos antiguos para siempre.
 - **La «Sincronización Completa» (fullsync) también se completó**: ese botón (distinto de «Sincronizar Todo») solo encolaba `create_hosting` — **no sincronizaba ni los aliases/redirects attached ni los standalone**. Ahora `bin/fullsync-run.php` incluye ambos (aliases attached vía `sync_domain_aliases`, standalone vía `sync_standalone_redirect`) y la limpieza de items muertos, igual que «Sincronizar Todo». Los dos caminos quedan equivalentes en cuanto a hostings + redirecciones.
 
+### Compilación de módulos Caddy: asíncrona (FPM mata a 120 s) + modales bonitos
+
+- **«Igualar módulos» daba «Operation timed out after 30000 ms»**: la llamada al nodo tenía timeout de 30 s, pero xcaddy compila en 2–5 min. Peor: `request_terminate_timeout=120` en PHP-FPM mataba la petición **en ambos nodos** aunque se subiera el timeout. Rediseñado a **asíncrono**: el nodo lanza el build detached (`setsid nohup bin/caddy-build-run.php`) y responde al instante con un `task_id`; el master **hace polling** (`caddy-sync-status` → `caddy-install-status`) sin bloquear ninguna petición. El build sobrevive al límite del FPM.
+- **Modales bonitos**: la tarjeta de módulos Caddy usaba `alert()`/`confirm()` nativos del navegador. Ahora usa **SweetAlert** (como el resto del panel): plan de compilación con confirmación, spinner «Compilando…» mientras xcaddy trabaja, y resultado final con icono.
+
 ### Fix CSRF: «Igualar módulos» (Caddy) y setup de réplica de correo fallaban con «Token CSRF inválido»
 
 - Dos bugs en el JS de `Settings → Cluster`: (1) el token se enviaba como `csrf_token` (sin underscore) cuando `View::verifyCsrf()` lee `_csrf_token`; (2) el valor se leía de `input[name="csrf_token"]`, que **no existe** (el input real es `_csrf_token`), así que iba vacío. Afectaba a «Igualar módulos» (Caddy DNS) y al setup de replicación de correo. Corregidos ambos → las acciones ya validan el CSRF.

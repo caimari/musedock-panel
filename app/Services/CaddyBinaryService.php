@@ -171,21 +171,68 @@ class CaddyBinaryService
             ];
         }
 
-        $results = [];
+        // Trigger each build ASYNC on the node (returns fast with a task_id;
+        // the actual xcaddy compile runs detached for minutes). Collect the
+        // task ids so the caller can poll moduleBuildStatus().
+        $tasks = [];
+        $errors = [];
         foreach ($missing as $provider) {
             $resp = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', [
                 'action'  => 'caddy-install-dns-module',
                 'payload' => ['provider' => $provider],
             ]);
-            $data = $resp['data']['result'] ?? $resp['data'] ?? [];
-            $results[$provider] = [
-                'ok'      => !empty($resp['ok']) && !empty($data['ok']),
-                'message' => $data['message'] ?? ($data['error'] ?? ($resp['error'] ?? 'sin respuesta')),
-            ];
+            $data = $resp['result'] ?? $resp['data'] ?? [];
+            if (!empty($resp['ok']) && !empty($data['task_id'])) {
+                $tasks[$provider] = $data['task_id'];
+            } elseif (!empty($resp['ok']) && ($data['status'] ?? '') === 'done') {
+                $tasks[$provider] = null; // already present, nothing to build
+            } else {
+                $errors[$provider] = $data['message'] ?? ($data['error'] ?? ($resp['error'] ?? 'sin respuesta'));
+            }
         }
+        if ($errors && !$tasks) {
+            return ['ok' => false, 'error' => 'No se pudo iniciar la compilación', 'errors' => $errors];
+        }
+        return ['ok' => true, 'status' => 'building', 'tasks' => $tasks, 'errors' => $errors,
+            'message' => 'Compilación iniciada en el nodo (puede tardar unos minutos).'];
+    }
 
-        $allOk = !in_array(false, array_column($results, 'ok'), true);
-        return ['ok' => $allOk, 'installed' => $results, 'verify' => static::compareWithNode($nodeId)['severity']];
+    /**
+     * Poll the async build status on a node for the given per-provider task ids.
+     * Returns overall status: 'building' until all done/failed, then 'done' or
+     * 'failed'. The master's UI polls this so no request blocks for minutes.
+     */
+    public static function moduleBuildStatus(int $nodeId, array $tasks): array
+    {
+        $providers = [];
+        $anyBuilding = false;
+        $anyFailed = false;
+        foreach ($tasks as $provider => $taskId) {
+            if ($taskId === null || $taskId === '') {
+                $providers[$provider] = ['status' => 'done', 'ok' => true, 'message' => 'ya presente'];
+                continue;
+            }
+            $resp = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', [
+                'action'  => 'caddy-install-status',
+                'payload' => ['task_id' => $taskId],
+            ]);
+            $data = $resp['result'] ?? $resp['data'] ?? [];
+            $st = (string)($data['status'] ?? 'unknown');
+            $providers[$provider] = [
+                'status'  => $st,
+                'ok'      => !empty($data['ok']) || $st === 'done',
+                'message' => (string)($data['message'] ?? ''),
+            ];
+            if (in_array($st, ['building', 'unknown'], true)) $anyBuilding = true;
+            if ($st === 'failed') $anyFailed = true;
+        }
+        $overall = $anyBuilding ? 'building' : ($anyFailed ? 'failed' : 'done');
+        return [
+            'ok'       => !$anyBuilding && !$anyFailed,
+            'status'   => $overall,
+            'providers'=> $providers,
+            'verify'   => $overall === 'done' ? static::compareWithNode($nodeId)['severity'] : null,
+        ];
     }
 
     /**

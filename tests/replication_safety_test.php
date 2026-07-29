@@ -114,6 +114,17 @@ ok('el token se envía como _csrf_token (con underscore, como espera verifyCsrf)
 ok('el token se lee del input _csrf_token correcto (no de uno inexistente)', !str_contains($clv, 'input[name="csrf_token"]'));
 ok('verifyCsrf lee _csrf_token', str_contains(file_get_contents(PANEL_ROOT.'/app/View.php'), "\$_POST['_csrf_token']"));
 
+section('Compilación de módulos Caddy: async (FPM mata a 120s) + modales bonitos');
+$sys = file_get_contents(PANEL_ROOT . '/app/Services/SystemService.php');
+$cbs = file_get_contents(PANEL_ROOT . '/app/Services/CaddyBinaryService.php');
+$clv2 = file_get_contents(PANEL_ROOT . '/resources/views/settings/cluster.php');
+ok('build async: startCaddyDnsProviderBuild lanza en background (setsid nohup)', str_contains($sys, 'function startCaddyDnsProviderBuild') && str_contains($sys, 'setsid nohup'));
+ok('script CLI de build existe', is_file(PANEL_ROOT . '/bin/caddy-build-run.php'));
+ok('nodo responde caddy-install-status', str_contains(file_get_contents(PANEL_ROOT.'/app/Controllers/ClusterApiController.php'), "'caddy-install-status'"));
+ok('master hace polling (moduleBuildStatus) sin bloquear', str_contains($cbs, 'function moduleBuildStatus'));
+ok('frontend hace polling (pollBuild) y NO usa alert/confirm feos', str_contains($clv2, 'function pollBuild') && str_contains($clv2, 'caddy-sync-status'));
+ok('modales con SweetAlert (no alert/confirm nativo) en fix()', str_contains($clv2, "'Compilar módulos en '") && str_contains($clv2, 'Módulos compilados'));
+
 echo "\n\033[1m─────────────────────────────────────────\033[0m\n";
 echo "  \033[0;32m{$pass} passed\033[0m" . ($fail ? ", \033[0;31m{$fail} failed\033[0m" : '') . "\n\n";
 exit($fail > 0 ? 1 : 0);
