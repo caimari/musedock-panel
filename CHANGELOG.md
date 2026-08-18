@@ -2,7 +2,7 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [Sin publicar] — Red de seguridad del reparador de Caddy (incidente web caída 9 días)
+## [1.0.219] — 2026-08-18 — Red de seguridad del reparador de Caddy (incidente web caída 9 días)
 
 Tras un incidente en un servidor con panel + app Laravel compartiendo Caddy: el hook de reparación (`repair-caddy-routes.php`, ejecutado por systemd tras cada arranque/recarga de Caddy) dejó la config **activa** reducida al host del panel, tirando la web principal (y con ella los webhooks de Meta) durante **9 días** de forma invisible.
 

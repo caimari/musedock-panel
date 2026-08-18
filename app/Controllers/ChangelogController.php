@@ -20,6 +20,37 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.219',
+                'date' => '2026-08-18',
+                'badge' => 'success',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '**Caddy: el reparador podia dejar sin servicio la web (incidente critico).** En servidores donde el panel comparte Caddy con otras webs, el hook de reparacion (`repair-caddy-routes.php`, que systemd ejecuta tras cada arranque/recarga) podia dejar la config activa reducida a un unico host (el del panel), tirando el resto de sitios y sus certificados TLS de forma invisible. Causa: un TOCTOU en `ensureCaddyHttpServerReady()` — al parchear el `listen` de `srv0`, la lectura inmediata de las rutas podia devolver `null` de forma transitoria; el codigo lo interpretaba como "servidor vacio" y hacia `PUT []`, borrando todas las rutas reales. Corregido con: (1) **relectura con reintentos** antes de actuar, (2) **testigo** del numero de rutas previo al parcheo y (3) **nunca vaciar `srv0`** (server compartido) por una lectura perdida — solo se inicializa cuando se confirma genuinamente vacio',
+                        ],
+                        'en' => [
+                            '**Caddy: the repair hook could take the website down (critical incident).** On servers where the panel shares Caddy with other sites, the repair hook (`repair-caddy-routes.php`, run by systemd after every start/reload) could reduce the active config to a single host (the panel), silently dropping every other site and its TLS certificate. Cause: a TOCTOU in `ensureCaddyHttpServerReady()` — after patching `srv0`\'s `listen`, the immediate read of routes could transiently return `null`; the code read that as "empty server" and issued `PUT []`, wiping all real routes. Fixed with: (1) **re-read with retries** before acting, (2) a **witness** of the route count taken before the patch, and (3) **never empty `srv0`** (a shared server) on a lost read — it is only initialized when confirmed genuinely empty',
+                        ],
+                    ],
+                    'added' => [
+                        'es' => [
+                            '**Red de seguridad del reparador de Caddy:** `repair-caddy-routes.php` fotografia la config completa y el conjunto de hosts servidos ANTES de tocar nada; al terminar, si desaparecio cualquier host, **revierte** a la instantanea previa (`POST /load`, sin re-disparar el hook) y **avisa** por email/notificacion (registro `caddy.repair`). El nucleo del incidente fue que nadie se entero durante 9 dias: ahora cualquier reduccion de hosts se detecta, se revierte y se notifica',
+                        ],
+                        'en' => [
+                            '**Caddy repair safety net:** `repair-caddy-routes.php` snapshots the full config and the set of served hosts BEFORE touching anything; on completion, if any host disappeared it **reverts** to the prior snapshot (`POST /load`, without re-firing the hook) and **alerts** by email/notification (`caddy.repair` log). The core of the incident was that nobody noticed for 9 days: any host reduction is now detected, reverted and reported',
+                        ],
+                    ],
+                    'notes' => [
+                        'es' => [
+                            'Tras actualizar, `bin/update.sh` reinstala el hook de reparacion ya corregido. En servidores que aplicaron la mitigacion interina (borrar el drop-in `zz-musedock-panel-repair.conf`), la actualizacion lo repone con la version segura',
+                        ],
+                        'en' => [
+                            'After updating, `bin/update.sh` reinstalls the (now fixed) repair hook. On servers that applied the interim mitigation (removing the `zz-musedock-panel-repair.conf` drop-in), the update restores it with the safe version',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.193',
                 'date' => '2026-07-21',
                 'badge' => 'success',
