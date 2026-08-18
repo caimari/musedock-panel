@@ -114,6 +114,19 @@ ok('el token se envía como _csrf_token (con underscore, como espera verifyCsrf)
 ok('el token se lee del input _csrf_token correcto (no de uno inexistente)', !str_contains($clv, 'input[name="csrf_token"]'));
 ok('verifyCsrf lee _csrf_token', str_contains(file_get_contents(PANEL_ROOT.'/app/View.php'), "\$_POST['_csrf_token']"));
 
+section('Falsa alarma "Master caído" cuando el que cayó fue el SLAVE');
+$cw = file_get_contents(PANEL_ROOT . '/bin/cluster-worker.php');
+ok('antes de alertar, sondea ACTIVAMENTE al master (fsockopen/ping)', str_contains($cw, 'fsockopen($masterIp') && str_contains($cw, '$masterReachable'));
+ok('si el master responde ahora, suprime la falsa alarma', str_contains($cw, 'el master {$masterIp} SÍ responde'));
+ok('suprime si el slave acaba de arrancar (reinicio propio)', str_contains($cw, 'slaveJustBooted') && str_contains($cw, '/proc/uptime'));
+
+section('Modos failover: semiauto hace forward (cambia IP) pero NO failback');
+$fw = file_get_contents(PANEL_ROOT . '/bin/failover-worker.php');
+ok('semiauto FORWARD ejecuta transitionTo + autoPromoteIfNeeded (cambia IPs)', str_contains($fw, "transitionTo(\$shouldBe, 'semiauto-worker')") && str_contains($fw, 'Forward failover EJECUTADO'));
+ok('semiauto FAILBACK sigue siendo manual (solo notifica, no autoFailbackDemote)', str_contains($fw, 'notifying admin to confirm failback') && !str_contains($fw, "autoFailbackDemote(\$foConfig);\n\n            } elseif (\$foMode === 'semiauto')"));
+ok('auto SÍ hace failback automático (autoFailbackDemote)', str_contains($fw, "transitionTo(\$shouldBe, 'auto-failback')") && str_contains($fw, 'autoFailbackDemote($foConfig)'));
+ok('manual no ejecuta acciones (worker skip)', str_contains($fw, "\$foMode === 'manual'") && str_contains($fw, 'skipping automatic checks'));
+
 section('Compilación de módulos Caddy: async (FPM mata a 120s) + modales bonitos');
 $sys = file_get_contents(PANEL_ROOT . '/app/Services/SystemService.php');
 $cbs = file_get_contents(PANEL_ROOT . '/app/Services/CaddyBinaryService.php');

@@ -2350,6 +2350,24 @@ CONF;
             return false;
         }
 
+        // WITNESS (anti-TOCTOU, incidente 2026-08-06): cuántas rutas tiene srv0 ANTES
+        // de tocar el listen. Parchear el listen puede hacer que la lectura inmediata
+        // de /routes devuelva null/vacío de forma TRANSITORIA; sin este testigo,
+        // confundiríamos esa lectura perdida con un server realmente vacío y borraríamos
+        // las webs de terceros (srv0 es compartido). -1 = desconocido.
+        $routesCountBefore = -1;
+        $wch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+        curl_setopt_array($wch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 8]);
+        $witnessRaw = curl_exec($wch);
+        $witnessCode = (int)curl_getinfo($wch, CURLINFO_HTTP_CODE);
+        curl_close($wch);
+        if ($witnessCode >= 200 && $witnessCode < 300) {
+            $witnessDecoded = json_decode((string)$witnessRaw, true);
+            if (is_array($witnessDecoded) && array_is_list($witnessDecoded)) {
+                $routesCountBefore = count($witnessDecoded);
+            }
+        }
+
         // Ensure listen includes :443 and panel port (fallback IP access).
         $existingListen = [];
         $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/listen");
@@ -2456,19 +2474,50 @@ CONF;
             // Do not touch routes in any other malformed case.
             $routesRawTrim = trim((string)$routesRaw);
             if ($routesRawTrim === '' || strtolower($routesRawTrim) === 'null') {
-                $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
-                curl_setopt_array($ch, [
-                    CURLOPT_CUSTOMREQUEST => 'PUT',
-                    CURLOPT_POSTFIELDS => json_encode([]),
-                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_TIMEOUT => 8,
-                ]);
-                curl_exec($ch);
-                $putCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
-                if (!($putCode >= 200 && $putCode < 300)) {
+                // ── Anti-TOCTOU (incidente 2026-08-06) ──
+                // Un routes vacío/null AQUÍ suele ser un artefacto TRANSITORIO del PATCH
+                // de listen de arriba, no un server realmente vacío. Reintentamos la
+                // lectura antes de actuar; y NUNCA vaciamos srv0 (server compartido con
+                // webs de terceros) por una sola lectura perdida.
+                $reappeared = false;
+                for ($attempt = 0; $attempt < 3 && !$reappeared; $attempt++) {
+                    usleep(500000); // 0.5s entre reintentos
+                    $rch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+                    curl_setopt_array($rch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 8]);
+                    $reRaw = curl_exec($rch);
+                    $reCode = (int)curl_getinfo($rch, CURLINFO_HTTP_CODE);
+                    curl_close($rch);
+                    $reDecoded = json_decode((string)$reRaw, true);
+                    if ($reCode >= 200 && $reCode < 300 && is_array($reDecoded) && array_is_list($reDecoded) && count($reDecoded) > 0) {
+                        $reappeared = true; // era un null transitorio; las rutas siguen ahí
+                    }
+                }
+                if ($reappeared) {
+                    // Config intacta: no hay nada que inicializar; no tocar srv0.
+                    $routesRaw = null;
+                } elseif ($routesCountBefore > 0) {
+                    // Teníamos rutas antes y siguen sin leerse tras los reintentos: es una
+                    // lectura perdida, NO un estado vacío. Rehusar vaciar un server
+                    // compartido; abortar (el guard del CLI / el caller decide).
+                    error_log("[caddy] ensureCaddyHttpServerReady: srv0/routes se leyó vacío tras {$routesCountBefore} ruta(s) previa(s); se aborta para no vaciar el server compartido (posible null transitorio del PATCH de listen).");
                     return false;
+                } else {
+                    // Genuinamente vacío (no había rutas antes y persiste vacío tras
+                    // reintentos) → inicializar la clave a [] es seguro.
+                    $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/routes");
+                    curl_setopt_array($ch, [
+                        CURLOPT_CUSTOMREQUEST => 'PUT',
+                        CURLOPT_POSTFIELDS => json_encode([]),
+                        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_TIMEOUT => 8,
+                    ]);
+                    curl_exec($ch);
+                    $putCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    curl_close($ch);
+                    if (!($putCode >= 200 && $putCode < 300)) {
+                        return false;
+                    }
                 }
             } else {
                 $decodedRoutes = json_decode((string)$routesRaw, true);

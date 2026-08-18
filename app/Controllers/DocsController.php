@@ -405,6 +405,14 @@ class DocsController
                 'keywords' => 'postgresql master slave replication espejo streaming wal hot standby pg_hba postgresql.conf root ip privada wireguard panel 5433 no replica',
             ],
             [
+                'title' => 'Failover: modos, prioridades e IDs',
+                'description' => 'Que hace cada modo (manual/semiauto/auto), a que nodo va el failover y como se asignan prioridades e IDs.',
+                'url' => '/docs/failover-modes',
+                'category' => 'Guia especial',
+                'icon' => 'bi-toggles',
+                'keywords' => 'failover manual semiauto auto modo prioridad priority id nodo completo web mail cloudflare dns registro a ttl promocion promote revertir failback caddy-l4 eleccion split-brain quorum master caido nodo caido interruptor dos momentos',
+            ],
+            [
                 'title' => 'Instalacion y recuperacion',
                 'description' => 'Primera instalacion desde GitHub, opciones del instalador, actualizacion por shell y recuperacion de PostgreSQL/.env.',
                 'url' => '/docs/install-recovery',
@@ -481,6 +489,10 @@ class DocsController
 
         if ($url === '/docs/mail-modes') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'mail-modes.php');
+        }
+
+        if ($url === '/docs/failover-modes') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'failover-modes.php');
         }
 
         if ($url === '/docs/install-recovery') {
@@ -1374,6 +1386,14 @@ class DocsController
         View::render('help/cluster-basics', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Cluster Basics',
+        ]);
+    }
+
+    public function failoverModes(): void
+    {
+        View::render('help/failover-modes', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Failover: modos y prioridades',
         ]);
     }
 

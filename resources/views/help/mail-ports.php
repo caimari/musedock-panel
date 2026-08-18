@@ -49,6 +49,16 @@ if ($publicIp === '') {
     </div>
 </div>
 
+<!-- Regla de oro: hostname -->
+<div class="alert alert-danger">
+    <h6 class="alert-heading"><i class="bi bi-exclamation-octagon me-2"></i>Regla de oro (el error más común)</h6>
+    <p class="small mb-2">El servidor es <strong>siempre</strong> <code><?= View::e($mailHost) ?></code>, tanto para entrada como para salida, <strong>aunque tu correo sea de otro dominio</strong> (p. ej. <code>hola@otrodominio.com</code>). El certificado es un <strong>wildcard de <?= View::e($mailHost) ?></strong>, así que si pones <code>mail.otrodominio.com</code> el cliente dará <strong>error de certificado / "servidor bloqueado"</strong> aunque el usuario y la contraseña sean correctos.</p>
+    <ul class="small mb-0">
+        <li>✅ Servidor entrada y salida: <code><?= View::e($mailHost) ?></code></li>
+        <li>❌ Nunca: <code>mail.&lt;tu-dominio&gt;</code> ni la IP directamente.</li>
+    </ul>
+</div>
+
 <!-- Recibir -->
 <div class="card mb-4">
     <div class="card-header"><i class="bi bi-inbox me-2"></i>Recibir / leer correo — IMAP</div>
@@ -129,8 +139,15 @@ Usuario:       email completo</pre>
             <li><strong>Autenticación</strong>: el usuario es <strong>siempre el email completo</strong>, no solo el nombre. Mismo usuario y contraseña para IMAP y SMTP.</li>
             <li><strong>Multi-dominio</strong>: un único servidor sirve todos los dominios del panel. No hace falta un servidor por dominio.</li>
             <li><strong>SPF / DKIM / DMARC</strong>: si están publicados en el DNS (ver <a href="/mail?tab=deliverability" class="text-info">Entregabilidad</a>), los envíos llegan autenticados y no caen en spam.</li>
+            <li><strong>Solo IMAP</strong>: el servidor <strong>no ofrece POP3</strong> (110/995). Configura el cliente como IMAP.</li>
+            <li><strong>Cifrado obligatorio</strong>: el servidor exige TLS (mínimo TLS 1.2). Sin cifrado (opción "None") rechaza la conexión.</li>
         </ul>
     </div>
+</div>
+
+<div class="alert alert-warning small">
+    <i class="bi bi-shield-lock me-1"></i>
+    <strong>Cuidado al configurar (fail2ban)</strong>: tras <strong>5 intentos fallidos</strong> de contraseña, el servidor <strong>bloquea tu IP durante 1 hora</strong>, y el bloqueo afecta a la vez a IMAP y al envío. Si te sale "IMAP bloqueado" justo después de pelearte con la config, suele ser esto: revisa hostname/usuario/contraseña y espera a que expire el baneo (o pide el desbaneo al administrador).
 </div>
 
 <div class="alert alert-warning small">

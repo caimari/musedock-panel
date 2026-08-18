@@ -715,6 +715,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/docs/settings/{slug}/shortcut-toggle', 'DocsController@settingsGuideShortcutToggle');
 \MuseDockPanel\Router::get('/docs/settings/{slug}', 'DocsController@settingsGuide');
 \MuseDockPanel\Router::get('/docs/cluster-basics', 'DocsController@clusterBasics');
+\MuseDockPanel\Router::get('/docs/failover-modes', 'DocsController@failoverModes');
 \MuseDockPanel\Router::get('/docs/mail-modes', 'DocsController@mailModes');
 \MuseDockPanel\Router::get('/docs/postgresql-mirror-master-slave', 'DocsController@postgresqlMirrorMasterSlave');
 \MuseDockPanel\Router::get('/docs/install-recovery', 'DocsController@installRecovery');

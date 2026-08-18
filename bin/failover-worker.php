@@ -324,17 +324,35 @@ try {
                 autoPromoteIfNeeded($checks, $foConfig);
 
             } elseif ($foMode === 'semiauto') {
+                // SEMIAUTO: ejecuta el FORWARD automáticamente (repunta DNS al
+                // slave + lo promociona con el guard de quórum de
+                // autoPromoteIfNeeded) para que los sitios sigan online. El
+                // FAILBACK permanece MANUAL (más abajo): el sistema NUNCA revierte
+                // solo un slave promovido de vuelta a slave cuando el master
+                // regresa — evita el flapping en recuperaciones inestables. El
+                // admin confirma el failback desde el panel.
                 $stateLabel = FailoverService::stateLabel($shouldBe);
-                logMsg("SEMIAUTO mode — state should change to {$shouldBe}, notifying admin");
+                logMsg("SEMIAUTO mode — forward failover a {$shouldBe} (DNS+promote automático; failback manual)");
+
+                $result = FailoverService::transitionTo($shouldBe, 'semiauto-worker');
+                logMsg("Transition result: " . implode('; ', $result['actions'] ?? []));
+
+                if ($currentState === FailoverService::STATE_NORMAL) {
+                    Settings::set('failover_activated_at', date('Y-m-d H:i:s'));
+                    Settings::set('failover_resync_status', '');
+                }
+
+                autoPromoteIfNeeded($checks, $foConfig);
 
                 NotificationService::send(
-                    "Failover: acción requerida → {$stateLabel}",
-                    "El estado del failover debería cambiar a: {$stateLabel}\n" .
-                    "Estado actual: " . FailoverService::stateLabel($currentState) . "\n\n" .
+                    "Failover EJECUTADO (semiauto) → {$stateLabel}",
+                    "El master cayó y el sistema ejecutó el failover automáticamente:\n" .
+                    "- DNS repuntado al slave de mayor prioridad\n" .
+                    "- Slave promovido (si el quórum lo confirmó)\n\n" .
                     "Servidores caídos: " . implode(', ', array_map(fn($id) => $checks[$id]['name'] ?? $id, $newlyDown)) . "\n\n" .
-                    "Accede al panel para ejecutar el failover manualmente."
+                    "IMPORTANTE: en semiauto el FAILBACK no es automático. Cuando el master vuelva, revisa y pulsa 'Revertir Failover' en el panel cuando TÚ decidas."
                 );
-                LogService::log('failover.semiauto', $shouldBe, "Estado recomendado: {$shouldBe}. Admin notificado.");
+                LogService::log('failover.semiauto', $shouldBe, "Forward failover EJECUTADO (DNS+promote). Failback queda manual.");
             }
             // manual mode: worker detects but does nothing, dashboard shows the state
 

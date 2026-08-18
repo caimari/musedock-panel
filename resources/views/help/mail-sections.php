@@ -64,6 +64,13 @@ $sections = [
         'icon' => 'bi-signpost-2',
         'summary' => 'Dominio raiz vs mail.dominio.com para SMTP/IMAP, PTR, MX, TLS y Cloudflare.',
     ],
+    [
+        'title' => 'Puertos y clientes',
+        'url' => '/mail?tab=general',
+        'doc_url' => '/docs/mail/ports',
+        'icon' => 'bi-hdd-network',
+        'summary' => 'Configurar Thunderbird/Outlook/movil: hostname, puertos IMAP/SMTP, cifrado y el error tipico de certificado.',
+    ],
 ];
 ?>
 

@@ -719,9 +719,34 @@ if ($clusterRole === 'slave') {
                 $localHttpsUrl = "https://127.0.0.1:{$localPanelPort}/";
                 $localHttpsCode = trim((string)shell_exec('curl -sk -o /dev/null -w "%{http_code}" --max-time 3 ' . escapeshellarg($localHttpsUrl) . ' 2>/dev/null'));
                 $localHttpsOk = in_array($localHttpsCode, ['200', '301', '302', '403'], true);
-                if (!$localHttpsOk) {
-                    logMsg("  [POSSIBLE-FALSE-POSITIVE] local panel HTTPS check failed on {$localHttpsUrl} (HTTP {$localHttpsCode}); suppressing master-down alert.");
-                    LogService::log('cluster.alert', 'master-down-suppressed', "Master-down suprimido: HTTPS local {$localHttpsUrl} fallo (HTTP {$localHttpsCode})");
+
+                // July 2026 false-alarm fix: a stale heartbeat can mean "master is
+                // down" OR "I (the slave) was offline and couldn't RECEIVE it". The
+                // local-panel check above passes once the slave has recovered, so
+                // it doesn't catch a slave that rebooted (Proxmox failover / power
+                // cut) — exactly what produced a false "Master caído" email. Before
+                // alerting, ACTIVELY probe the master: if it answers now, it isn't
+                // down (the stale heartbeat was our own downtime). Also suppress if
+                // this slave booted more recently than the timeout window.
+                $masterReachable = false;
+                $mport = (int)\MuseDockPanel\Env::get('PANEL_PORT', 8444) ?: 8444;
+                $fp = @fsockopen($masterIp, $mport, $e1, $e2, 4);
+                if ($fp) { $masterReachable = true; @fclose($fp); }
+                if (!$masterReachable) {
+                    $ping = trim((string)shell_exec('ping -c1 -W2 ' . escapeshellarg($masterIp) . ' >/dev/null 2>&1 && echo up'));
+                    if ($ping === 'up') $masterReachable = true;
+                }
+                $uptime = (float)@file_get_contents('/proc/uptime');
+                $slaveJustBooted = $uptime > 0 && $uptime < $timeoutSec;
+
+                $suppressReason = '';
+                if (!$localHttpsOk)       $suppressReason = "HTTPS local fallo (HTTP {$localHttpsCode})";
+                elseif ($masterReachable) $suppressReason = "el master {$masterIp} SÍ responde ahora (heartbeat viejo por caída propia del slave)";
+                elseif ($slaveJustBooted) $suppressReason = "el slave arrancó hace " . round($uptime) . "s (< timeout {$timeoutSec}s), probablemente reinicio propio";
+
+                if ($suppressReason !== '') {
+                    logMsg("  [FALSE-POSITIVE] {$suppressReason}; se suprime la alerta de master caído.");
+                    LogService::log('cluster.alert', 'master-down-suppressed', "Master-down suprimido: {$suppressReason}");
                 } else {
 
                 // Master is down — escalating re-alert intervals to avoid spam

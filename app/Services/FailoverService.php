@@ -154,8 +154,69 @@ class FailoverService
     public static function getFailoverServersByPriority(): array
     {
         $servers = self::getServersByRole(self::ROLE_FAILOVER);
-        usort($servers, fn($a, $b) => ((int)($a['failover_priority'] ?? 99)) - ((int)($b['failover_priority'] ?? 99)));
+
+        // LAST-RESORT NET for the ELECTION ONLY: if no failover-role servers are
+        // configured, derive candidates from the live cluster nodes so shouldPromote()
+        // still has a deterministic "who promotes" answer. NOTE: this does NOT enable
+        // DNS/traffic failover — the cluster nodes only expose their WireGuard
+        // private IP (10.10.70.x), which is useless (and dangerous) as a public DNS
+        // target. Public-DNS failover REQUIRES the configured failover_servers list
+        // (public IPs + Cloudflare zone mapping); the failover-worker still skips
+        // automatic action when that list is empty. This net's real value is
+        // tie-breaking when the list IS configured but priority numbers weren't set.
+        if (empty($servers)) {
+            foreach (\MuseDockPanel\Services\ClusterService::getWebNodes() as $n) {
+                $host = parse_url((string)($n['api_url'] ?? ''), PHP_URL_HOST) ?: '';
+                if ($host === '') continue;
+                $servers[] = [
+                    'id'   => (string)($n['id'] ?? ''),
+                    'name' => $n['name'] ?? $host,
+                    'ip'   => $host,
+                    'role' => self::ROLE_FAILOVER,
+                    'failover_priority' => 99,   // no explicit priority
+                    'enabled' => true,
+                    '_from_cluster' => true,
+                ];
+            }
+        }
+
+        // Completeness per IP (more services / has mail = "more complete"), used
+        // ONLY to break ties when priorities aren't explicitly differentiated.
+        $completeness = self::nodeCompletenessMap();
+
+        usort($servers, function ($a, $b) use ($completeness) {
+            // 1) Explicit priority wins (1 = highest). If the admin set IDs/
+            //    priorities, they are respected — forced.
+            $pa = (int)($a['failover_priority'] ?? 99);
+            $pb = (int)($b['failover_priority'] ?? 99);
+            if ($pa !== $pb) return $pa - $pb;
+            // 2) Tie → the MOST COMPLETE node first (has mail, more services).
+            $ca = $completeness[$a['ip'] ?? ''] ?? 0;
+            $cb = $completeness[$b['ip'] ?? ''] ?? 0;
+            if ($ca !== $cb) return $cb - $ca; // higher completeness first
+            // 3) Still tied → lowest id first (deterministic "el primero").
+            return strcmp((string)($a['id'] ?? ''), (string)($b['id'] ?? ''));
+        });
         return $servers;
+    }
+
+    /**
+     * IP → completeness score from each cluster node's services. Mail-capable
+     * nodes score far higher (a full web+mail node is "more complete" than a
+     * web-only one), so with no explicit priorities the failover prefers the
+     * most capable surviving node — the one closest to what the master offered.
+     */
+    private static function nodeCompletenessMap(): array
+    {
+        $map = [];
+        foreach (\MuseDockPanel\Services\ClusterService::getNodes() as $n) {
+            $host = parse_url((string)($n['api_url'] ?? ''), PHP_URL_HOST) ?: '';
+            if ($host === '') continue;
+            $svc = json_decode((string)($n['services'] ?? '[]'), true);
+            $svc = is_array($svc) ? $svc : [];
+            $map[$host] = count($svc) + (in_array('mail', $svc, true) ? 100 : 0);
+        }
+        return $map;
     }
 
     /**
