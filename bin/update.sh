@@ -445,6 +445,19 @@ chmod 644 /etc/cron.d/musedock-monitor
 systemctl reload cron 2>/dev/null || systemctl reload crond 2>/dev/null || true
 ok "Monitor cron ensured"
 
+# Repair certificate propagation on mail nodes upgraded from older releases.
+# Best effort: dedicated mail nodes without Caddy continue to use certbot.
+if [ -f "${PANEL_DIR}/cli/repair-mail-cert-sync.php" ]; then
+    MAIL_CERT_OUT=$($PHP_BIN "${PANEL_DIR}/cli/repair-mail-cert-sync.php" 2>&1 || true)
+    if echo "$MAIL_CERT_OUT" | grep -q '\[repair-mail-cert\] ERROR'; then
+        warn "Mail TLS auto-repair reported an issue"
+        echo "$MAIL_CERT_OUT" | sed 's/^/    /'
+    else
+        echo "$MAIL_CERT_OUT" | sed 's/^/  /'
+        ok "Mail TLS renewal propagation ensured"
+    fi
+fi
+
 # Install/update bandwidth collector cron
 cat > /etc/cron.d/musedock-bandwidth << CRONEOF
 # MuseDock Panel — Bandwidth + Web Stats collector (staggered: +20s, every 10 min)

@@ -20,6 +20,29 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.221',
+                'date' => '2026-09-11',
+                'badge' => 'success',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '**Renovacion del certificado del correo:** el servidor de correo reutiliza el wildcard `*.musedock.com` que Caddy renueva solo. Una incoherencia de rutas podia dejar Postfix/Dovecot apuntando a un cert desincronizado tras una renovacion. Ahora `ensureMailCertViaCaddy()` escribe siempre el par estable `/etc/mail-certs/mail.crt` + `mail.key` como canonico (mas las copias por hostname por compatibilidad), y el cron de sincronizacion (`17 */6 * * *`) refresca ambos y recarga Postfix+Dovecot en cada renovacion',
+                        ],
+                        'en' => [
+                            '**Mail certificate renewal:** the mail server reuses the `*.musedock.com` wildcard that Caddy auto-renews. A path mismatch could leave Postfix/Dovecot pointing at a stale cert after a renewal. `ensureMailCertViaCaddy()` now always writes the stable pair `/etc/mail-certs/mail.crt` + `mail.key` as canonical (plus per-hostname copies for compatibility), and the sync cron (`17 */6 * * *`) refreshes both and reloads Postfix+Dovecot on every renewal',
+                        ],
+                    ],
+                    'added' => [
+                        'es' => [
+                            '**`cli/repair-mail-cert-sync.php`**: repara la propagacion del cert en nodos de correo con Caddy (apunta Postfix y reescribe `10-ssl.conf` de Dovecot a la ruta estable, y recarga). Se salta los nodos sin Caddy (gestionados por certbot). Se ejecuta automaticamente tras cada actualizacion del panel via `bin/update.sh`, corrigiendo los nodos que venian de versiones antiguas',
+                        ],
+                        'en' => [
+                            '**`cli/repair-mail-cert-sync.php`**: repairs cert propagation on Caddy-based mail nodes (points Postfix and rewrites Dovecot `10-ssl.conf` to the stable path, then reloads). Skips non-Caddy nodes (certbot-managed). Runs automatically after each panel update via `bin/update.sh`, fixing nodes upgraded from older releases',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.219',
                 'date' => '2026-08-18',
                 'badge' => 'success',

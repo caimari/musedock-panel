@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.221] — 2026-09-11 — Renovación del certificado del correo: propagación robusta a Postfix/Dovecot
+
+El servidor de correo no tiene certbot propio: reutiliza el wildcard `*.musedock.com` que **Caddy renueva solo**, copiándolo a `/etc/mail-certs/`. Había una incoherencia de rutas que podía dejar el correo apuntando a un cert desincronizado tras una renovación.
+
+### Arreglado
+
+- **Propagación del cert renovado a Postfix/Dovecot**: `MailService::ensureMailCertViaCaddy()` ahora escribe siempre el par **estable** `/etc/mail-certs/mail.crt` + `mail.key` como canónico (el que consumen tanto los nodos legacy como los actuales) y mantiene las copias `{hostname}.crt/.key` por compatibilidad. El script de sincronización que instala (`/usr/local/bin/musedock-mail-cert-sync.sh`, cron `17 */6 * * *`) refresca **ambos** pares en cada renovación de Caddy y recarga Postfix+Dovecot. Antes, config y copia podían apuntar a rutas distintas y el correo se quedaba con el cert viejo.
+
+### Añadido
+
+- **`cli/repair-mail-cert-sync.php`**: repara la propagación en nodos de correo con Caddy — obtiene el cert vigente, apunta `smtpd_tls_cert_file`/`key_file` de Postfix y reescribe `/etc/dovecot/conf.d/10-ssl.conf` a la ruta estable, y recarga. Se **salta** los nodos sin Caddy (gestionados por certbot), que no se tocan.
+- **Hook en `bin/update.sh`**: tras cada actualización del panel se ejecuta ese repair (best-effort), de modo que los nodos de correo que venían de versiones antiguas quedan corregidos automáticamente al actualizar.
+
 ## [1.0.219] — 2026-08-18 — Red de seguridad del reparador de Caddy (incidente web caída 9 días)
 
 Tras un incidente en un servidor con panel + app Laravel compartiendo Caddy: el hook de reparación (`repair-caddy-routes.php`, ejecutado por systemd tras cada arranque/recarga de Caddy) dejó la config **activa** reducida al host del panel, tirando la web principal (y con ella los webhooks de Meta) durante **9 días** de forma invisible.

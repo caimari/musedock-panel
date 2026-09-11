@@ -4222,9 +4222,16 @@ class MailService
         //    reshuffle does not break mail. A cron keeps it fresh after renewals.
         $dir = '/etc/mail-certs';
         @mkdir($dir, 0755, true);
-        if (!@copy($found['crt'], "{$dir}/{$hostname}.crt") || !@copy($found['key'], "{$dir}/{$hostname}.key")) {
+        // mail.crt/mail.key are the stable paths used by both legacy nodes and
+        // current installations. Keep the hostname copies for compatibility,
+        // but always configure and refresh the stable pair.
+        if (!@copy($found['crt'], "{$dir}/mail.crt") || !@copy($found['key'], "{$dir}/mail.key")) {
             return ['ok' => false, 'error' => "No se pudo copiar el cert de Caddy a {$dir}."];
         }
+        @chmod("{$dir}/mail.crt", 0644);
+        @chmod("{$dir}/mail.key", 0600);
+        @copy($found['crt'], "{$dir}/{$hostname}.crt");
+        @copy($found['key'], "{$dir}/{$hostname}.key");
         @chmod("{$dir}/{$hostname}.crt", 0644);
         @chmod("{$dir}/{$hostname}.key", 0600);
 
@@ -4234,8 +4241,8 @@ class MailService
         $issuer = trim((string)shell_exec('openssl x509 -in ' . escapeshellarg("{$dir}/{$hostname}.crt") . ' -noout -issuer 2>/dev/null'));
         return [
             'ok'     => true,
-            'cert'   => "{$dir}/{$hostname}.crt",
-            'key'    => "{$dir}/{$hostname}.key",
+            'cert'   => "{$dir}/mail.crt",
+            'key'    => "{$dir}/mail.key",
             'issuer' => $issuer,
         ];
     }
@@ -4296,9 +4303,10 @@ class MailService
             . "done\n"
             . "[ -z \"\$CRT\" ] && exit 0\n"
             . "KEY=\"\${CRT%.crt}.key\"\n"
-            . "if ! cmp -s \"\$CRT\" {$dir}/{$hostname}.crt 2>/dev/null; then\n"
+            . "if ! cmp -s \"\$CRT\" {$dir}/mail.crt 2>/dev/null; then\n"
+            . "  cp \"\$CRT\" {$dir}/mail.crt; cp \"\$KEY\" {$dir}/mail.key\n"
             . "  cp \"\$CRT\" {$dir}/{$hostname}.crt; cp \"\$KEY\" {$dir}/{$hostname}.key\n"
-            . "  chmod 644 {$dir}/{$hostname}.crt; chmod 600 {$dir}/{$hostname}.key\n"
+            . "  chmod 644 {$dir}/mail.crt {$dir}/{$hostname}.crt; chmod 600 {$dir}/mail.key {$dir}/{$hostname}.key\n"
             . "  systemctl reload postfix dovecot 2>/dev/null || true\n"
             . "fi\n";
         @file_put_contents('/usr/local/bin/musedock-mail-cert-sync.sh', $script);
