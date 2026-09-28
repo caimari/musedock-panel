@@ -2,7 +2,24 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [1.0.221] — 2026-09-11 — Renovación del certificado del correo: propagación robusta a Postfix/Dovecot
+## [1.0.221] — 2026-09-28 — Reparador de Caddy (TLS end-to-end + solo arranque), OPcache JIT off, y cert de correo
+
+### Reparador de Caddy: verificación TLS end-to-end, idempotencia de políticas y solo en arranque
+
+Segundo incidente del hook de reparación: el 14-sep, tras el update a 1.0.220, el TLS de `muserelay.com` dejó de servir certificado **dos veces** (el vigilante recargó desde disco en ~6s, impacto nulo, pero la causa seguía). No era «srv0 sin rutas» como en agosto, sino **«no peer certificate»**: la ruta existía pero el handshake TLS no devolvía cert. Causa: `patchTlsPolicies()` hacía **`DELETE` de TODAS las políticas TLS + rebuild desde cero** en cada ejecución (incluida cada recarga vía `ExecReload`); con inputs transitoriamente incompletos (proveedor DNS/token CF no detectado ese instante) el rebuild dejaba un host sin política aplicable.
+
+- **Idempotencia + reemplazo atómico de políticas TLS**: `patchTlsPolicies()` ahora **no toca nada si las políticas actuales ya equivalen a las nuevas**, y cuando cambian usa un único PATCH atómico en vez de `DELETE` + rebuild (se elimina la ventana en la que no existía ninguna política y el handshake fallaba).
+- **Verificación TLS end-to-end con revert** (`cli/repair-caddy-routes.php`): el reparador captura, con un handshake SNI local, **qué hosts sirven certificado ANTES**; al terminar comprueba que **cada uno siga sirviéndolo**. Si algún host que servía cert deja de hacerlo (o se pierde de la config), **revierte** al snapshot previo (`POST /load`), avisa y sale con error. Ya no basta con que la ruta exista: tiene que **resolver certificado de verdad**. Complementa el guard de pérdida de rutas de agosto.
+- **El reparador ya solo corre en ARRANQUE, no en cada recarga**: se quitó `ExecReload` del drop-in `zz-musedock-panel-repair.conf` (queda solo `ExecStartPost`). Que el panel se ejecutara tras CADA `reload` de Caddy le daba autoridad permanente sobre la config de apps de terceros que conviven en el server. El `caddy reload` nativo (desde disco) sigue intacto; y al actualizar el panel, `update.sh` ejecuta el reparador directamente.
+- **Log de constancia**: cada ejecución del reparador queda registrada en `LogService` (`caddy.repair` → `ok`/`reverted`/`revert_failed`) con hosts antes/después y certs verificados, para poder auditar desde el panel qué tocó y por qué.
+
+### OPcache JIT desactivado en PHP-FPM (fix 502 intermitente de WordPress)
+
+Los sitios **WordPress** en php8.3 devolvían **502** de forma intermitente: el worker de PHP-FPM **segfaulteaba al instante** (sin dejar log), mientras las apps que no son WP seguían a 200. Causa: el **JIT de OPcache** (`opcache.jit=1255`), que compila a código máquina y tiene segfaults conocidos con bases dinámicas grandes como WordPress; un auto-update de WP disparó un miscompile persistente hasta recargar FPM.
+
+- **`bin/update.sh` desactiva el JIT en todos los PHP-FPM instalados** (drop-in propio `99-musedock-opcache.ini`: `opcache.jit=disable` + `opcache.jit_buffer_size=0`) y reinicia el FPM afectado. Idempotente. OPcache normal sigue activo (rendimiento intacto); el JIT no aporta en cargas web (I/O-bound) y era la única fuente del crash. Así ningún nodo nuevo ni pool futuro vuelve a nacer con el JIT activo.
+
+### Renovación del certificado del correo: propagación robusta a Postfix/Dovecot
 
 El servidor de correo no tiene certbot propio: reutiliza el wildcard `*.musedock.com` que **Caddy renueva solo**, copiándolo a `/etc/mail-certs/`. Había una incoherencia de rutas que podía dejar el correo apuntando a un cert desincronizado tras una renovación.
 

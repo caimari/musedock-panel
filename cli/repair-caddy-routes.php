@@ -60,13 +60,48 @@ $capturedHosts = static function (string $api): array {
     return array_keys($hosts);
 };
 
+// TLS end-to-end (incidente 2026-09-14): el fallo NO fue "srv0 sin rutas" sino
+// "no peer certificate" — la ruta existía pero el handshake TLS dejó de devolver
+// certificado (política TLS perdida). Este helper comprueba, con un handshake SNI
+// local, si Caddy PRESENTA certificado para un host. Verificamos que cada host que
+// servía cert ANTES sigue sirviéndolo DESPUÉS; si no, revertimos.
+$servesCert = static function (string $host): bool {
+    $ctx = stream_context_create(['ssl' => [
+        'SNI_enabled'       => true,
+        'peer_name'         => $host,
+        'verify_peer'       => false,
+        'verify_peer_name'  => false,
+        'capture_peer_cert' => true,
+    ]]);
+    $cli = @stream_socket_client('ssl://127.0.0.1:443', $errno, $errstr, 2, STREAM_CLIENT_CONNECT, $ctx);
+    if ($cli === false) {
+        return false;
+    }
+    $params = stream_context_get_params($cli);
+    fclose($cli);
+    return !empty($params['options']['ssl']['peer_certificate']);
+};
+// Solo dominios reales (los IPs/localhost usan el emisor internal y no son la clase
+// de "web de terceros" que protegemos).
+$domainHosts = static function (array $hosts): array {
+    return array_values(array_filter($hosts, static function (string $h): bool {
+        if ($h === 'localhost' || filter_var($h, FILTER_VALIDATE_IP)) return false;
+        return strpos($h, '.') !== false;
+    }));
+};
+
 $configSnapshotBefore = @file_get_contents("{$caddyApi}/config/");
 $hostsBefore = $capturedHosts($caddyApi);
 $guardArmed = is_string($configSnapshotBefore)
     && trim($configSnapshotBefore) !== ''
     && strtolower(trim($configSnapshotBefore)) !== 'null';
+$certServedBefore = [];
 if ($guardArmed) {
-    echo "[repair-caddy] GUARD: " . count($hostsBefore) . " host(s) servidos antes de reparar.\n";
+    foreach ($domainHosts($hostsBefore) as $h) {
+        if ($servesCert($h)) { $certServedBefore[] = $h; }
+    }
+    echo "[repair-caddy] GUARD: " . count($hostsBefore) . " host(s) servidos, "
+        . count($certServedBefore) . " con certificado, antes de reparar.\n";
 }
 
 $repairWebmailRoute = static function (): void {
@@ -171,64 +206,77 @@ if (!empty($result['skipped'])) {
 
 $repairWebmailRoute();
 
-// ── SAFETY GUARD post-check: ¿hemos perdido algún host? (ver cabecera) ──
+// Revert reutilizable: POST /load del snapshot previo + alerta + log + salida != 0.
+// POST /load es una recarga INTERNA de Caddy (no systemd), no re-dispara el hook.
+$revertNow = function (string $summary) use ($caddyApi, $configSnapshotBefore, $hostsBefore): void {
+    fwrite(STDERR, "[repair-caddy] CRITICAL: {$summary} Revirtiendo a la config previa (POST /load).\n");
+    $ch = curl_init("{$caddyApi}/load");
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $configSnapshotBefore,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 15,
+    ]);
+    $revertResp = curl_exec($ch);
+    $revertCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    $reverted = $revertCode >= 200 && $revertCode < 300;
+    if ($reverted) {
+        fwrite(STDERR, "[repair-caddy] OK: config revertida; los " . count($hostsBefore) . " host(s) previos siguen servidos.\n");
+    } else {
+        fwrite(STDERR, "[repair-caddy] ERROR: fallo al revertir (HTTP {$revertCode}). {$revertResp}\n");
+    }
+    try {
+        \MuseDockPanel\Services\LogService::log('caddy.repair', $reverted ? 'reverted' : 'revert_failed',
+            $summary . ' ' . ($reverted ? 'Revertido automaticamente a la config previa.' : 'NO se pudo revertir — requiere intervencion manual.'));
+    } catch (\Throwable $e) {
+        // logging best-effort
+    }
+    try {
+        \MuseDockPanel\Services\NotificationService::send(
+            '[MuseDock] Caddy: reparacion revertida para no romper TLS/web',
+            $summary . "\n\n" . ($reverted
+                ? "Se revirtio automaticamente a la configuracion previa; el servicio sigue en pie.\n"
+                : "El intento de revertir FALLO (HTTP {$revertCode}). Ejecuta 'systemctl reload caddy' para recargar el Caddyfile de disco.\n") .
+            "\nFecha: " . date('Y-m-d H:i:s')
+        );
+    } catch (\Throwable $e) {
+        // alert best-effort
+    }
+    exit($reverted ? 1 : 2);
+};
+
+// ── SAFETY GUARD post-check (ver cabecera + incidente TLS 2026-09-14) ──
 if ($guardArmed) {
+    // 1) ¿Se perdió algún host de la config?
     $hostsAfter = $capturedHosts($caddyApi);
     $lost = array_values(array_diff($hostsBefore, $hostsAfter));
     if (!empty($lost)) {
-        $lostList = implode(', ', $lost);
-        fwrite(STDERR, "[repair-caddy] CRITICAL: la reparacion eliminaria host(s) [{$lostList}]. Revirtiendo a la config previa (POST /load).\n");
-
-        // Revert to the pre-repair snapshot. POST /load is an admin-API reload
-        // INSIDE Caddy (not a systemd reload), so it does NOT re-fire this hook:
-        // no recursion.
-        $ch = curl_init("{$caddyApi}/load");
-        curl_setopt_array($ch, [
-            CURLOPT_POST => true,
-            CURLOPT_POSTFIELDS => $configSnapshotBefore,
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 15,
-        ]);
-        $revertResp = curl_exec($ch);
-        $revertCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        $reverted = $revertCode >= 200 && $revertCode < 300;
-        if ($reverted) {
-            fwrite(STDERR, "[repair-caddy] OK: config revertida; los " . count($hostsBefore) . " host(s) previos siguen servidos.\n");
-        } else {
-            fwrite(STDERR, "[repair-caddy] ERROR: fallo al revertir (HTTP {$revertCode}). {$revertResp}\n");
-        }
-
-        // Alertar SIEMPRE: el núcleo del incidente fue que nadie se enteró en 9 días.
-        try {
-            \MuseDockPanel\Services\LogService::log(
-                'caddy.repair',
-                $reverted ? 'reverted' : 'revert_failed',
-                "repair-caddy-routes iba a dejar sin servicio host(s): {$lostList}. " .
-                ($reverted ? 'Revertido automaticamente a la config previa.' : 'NO se pudo revertir — requiere intervencion manual.')
-            );
-        } catch (\Throwable $e) {
-            // logging best-effort
-        }
-        try {
-            \MuseDockPanel\Services\NotificationService::send(
-                '[MuseDock] Caddy: reparacion abortada para no tirar la web',
-                "El reparador de Caddy del panel habria eliminado host(s) del servidor:\n  {$lostList}\n\n" .
-                ($reverted
-                    ? "Se revirtio automaticamente a la configuracion previa; el servicio sigue en pie.\n"
-                    : "El intento de revertir FALLO (HTTP {$revertCode}). Ejecuta 'systemctl reload caddy' para recargar el Caddyfile de disco.\n") .
-                "\nFecha: " . date('Y-m-d H:i:s')
-            );
-        } catch (\Throwable $e) {
-            // alert best-effort
-        }
-
-        // Salida != 0 para que systemd/ops vea que la reparacion falló.
-        exit($reverted ? 1 : 2);
+        $revertNow('La reparacion eliminaria host(s): ' . implode(', ', $lost) . '.');
     }
-    echo "[repair-caddy] GUARD: OK, ningun host perdido (" . count($hostsAfter) . " servidos).\n";
+
+    // 2) TLS END-TO-END: cada host que servía certificado ANTES debe seguir
+    //    sirviéndolo DESPUÉS. Esto captura el fallo del 2026-09-14 ("no peer
+    //    certificate") aunque la ruta siga en la config — no basta con que exista
+    //    la ruta, tiene que RESOLVER certificado de verdad.
+    $tlsBroken = [];
+    foreach ($certServedBefore as $h) {
+        if (!$servesCert($h)) { $tlsBroken[] = $h; }
+    }
+    if (!empty($tlsBroken)) {
+        $revertNow('La reparacion dejo sin certificado a host(s) que SI lo servian antes: ' . implode(', ', $tlsBroken) . '.');
+    }
+
+    echo "[repair-caddy] GUARD: OK, " . count($hostsAfter) . " hosts sin perdida, " . count($certServedBefore) . " certs sin regresion.\n";
+    // Log de constancia (report #4): cada ejecucion queda registrada con antes/despues.
+    try {
+        \MuseDockPanel\Services\LogService::log('caddy.repair', 'ok',
+            'repair-caddy-routes OK: hosts antes=' . count($hostsBefore) . ' despues=' . count($hostsAfter)
+            . ', certs verificados=' . count($certServedBefore) . ', sin perdida ni regresion TLS.');
+    } catch (\Throwable $e) {
+        // logging best-effort
+    }
 }
 
 echo "[repair-caddy] DONE\n";

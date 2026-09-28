@@ -1023,17 +1023,22 @@ CONF;
 
         $ensureTlsPath();
 
-        // Use DELETE + POST to fully replace (PATCH merges and can leave stale policies)
-        $ch = curl_init("{$caddyApi}/config/apps/tls/automation/policies");
-        curl_setopt_array($ch, [
-            CURLOPT_CUSTOMREQUEST => 'DELETE',
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 10,
-        ]);
-        curl_exec($ch);
-        curl_close($ch);
+        // IDEMPOTENCIA (incidente TLS 2026-09-14): si las políticas actuales ya son
+        // equivalentes a las nuevas, NO tocar nada. El reparador corría tras CADA
+        // recarga de Caddy y hacía DELETE + rebuild de las políticas cada vez; un
+        // rebuild con inputs transitoriamente incompletos (proveedor DNS/token CF no
+        // detectado en ese instante) dejaba algún host sin política aplicable →
+        // "no peer certificate". No reescribir cuando no cambia elimina el caso común.
+        $curRaw = @file_get_contents("{$caddyApi}/config/apps/tls/automation/policies");
+        $curPolicies = json_decode((string)$curRaw, true);
+        if (is_array($curPolicies) && json_encode($curPolicies) === json_encode($policies)) {
+            return;
+        }
 
-        // Set the complete policy list
+        // Reemplazo ATÓMICO: un solo PATCH del objeto automation con la lista completa
+        // reemplaza el array de políticas de golpe. Se ELIMINA el DELETE previo, que
+        // creaba una ventana en la que NO existía ninguna política y un handshake en
+        // ese instante fallaba con "no peer certificate".
         $ch = curl_init("{$caddyApi}/config/apps/tls/automation");
         curl_setopt_array($ch, [
             CURLOPT_CUSTOMREQUEST => 'PATCH',

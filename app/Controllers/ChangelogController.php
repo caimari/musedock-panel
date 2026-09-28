@@ -21,22 +21,28 @@ class ChangelogController
         return [
             [
                 'version' => '1.0.221',
-                'date' => '2026-09-11',
+                'date' => '2026-09-28',
                 'badge' => 'success',
                 'changes' => [
                     'fixed' => [
                         'es' => [
+                            '**Caddy: TLS de un dominio caia tras el reparador (incidente 14-sep).** El hook de reparacion hacia DELETE de TODAS las politicas TLS + rebuild desde cero en cada ejecucion; con inputs CF transitoriamente incompletos, un host se quedaba sin politica aplicable y el handshake devolvia "no peer certificate" aunque la ruta existiera. Ahora `patchTlsPolicies()` es idempotente (no toca nada si no cambia) y usa un reemplazo atomico (sin la ventana del DELETE). Ademas el reparador verifica end-to-end, con un handshake SNI local, que cada host que servia certificado ANTES siga sirviendolo DESPUES; si no, revierte al snapshot previo y avisa',
+                            '**WordPress devolvia 502 intermitente:** el worker de PHP-FPM segfaulteaba al instante por el JIT de OPcache (`opcache.jit`), que tiene crashes conocidos con WordPress y no aporta en cargas web. `bin/update.sh` ahora desactiva el JIT en todos los PHP-FPM (drop-in `99-musedock-opcache.ini`) y reinicia el FPM; OPcache normal sigue activo',
                             '**Renovacion del certificado del correo:** el servidor de correo reutiliza el wildcard `*.musedock.com` que Caddy renueva solo. Una incoherencia de rutas podia dejar Postfix/Dovecot apuntando a un cert desincronizado tras una renovacion. Ahora `ensureMailCertViaCaddy()` escribe siempre el par estable `/etc/mail-certs/mail.crt` + `mail.key` como canonico (mas las copias por hostname por compatibilidad), y el cron de sincronizacion (`17 */6 * * *`) refresca ambos y recarga Postfix+Dovecot en cada renovacion',
                         ],
                         'en' => [
+                            '**Caddy: a domain\'s TLS dropped after the repair hook (14-Sep incident).** The repair DELETEd all TLS policies and rebuilt from scratch every run; with transiently incomplete CF inputs a host was left without an applicable policy and the handshake returned "no peer certificate" even though the route existed. `patchTlsPolicies()` is now idempotent (no change → no write) and uses an atomic replace (no DELETE window). The repair also verifies end-to-end, via a local SNI handshake, that every host serving a certificate BEFORE still serves one AFTER; if not, it reverts to the prior snapshot and alerts',
+                            '**WordPress returned intermittent 502:** the PHP-FPM worker segfaulted instantly due to OPcache JIT (`opcache.jit`), which has known crashes with WordPress and adds nothing for web loads. `bin/update.sh` now disables JIT on all PHP-FPM (`99-musedock-opcache.ini` drop-in) and restarts FPM; regular OPcache stays on',
                             '**Mail certificate renewal:** the mail server reuses the `*.musedock.com` wildcard that Caddy auto-renews. A path mismatch could leave Postfix/Dovecot pointing at a stale cert after a renewal. `ensureMailCertViaCaddy()` now always writes the stable pair `/etc/mail-certs/mail.crt` + `mail.key` as canonical (plus per-hostname copies for compatibility), and the sync cron (`17 */6 * * *`) refreshes both and reloads Postfix+Dovecot on every renewal',
                         ],
                     ],
                     'added' => [
                         'es' => [
+                            '**Reparador de Caddy solo en arranque + log de constancia:** se quito `ExecReload` del drop-in (queda solo `ExecStartPost`), para que el panel no tenga la ultima palabra sobre la config de Caddy tras cada recarga de terceros. Cada ejecucion se registra en `LogService` (`caddy.repair`) con hosts antes/despues y certs verificados',
                             '**`cli/repair-mail-cert-sync.php`**: repara la propagacion del cert en nodos de correo con Caddy (apunta Postfix y reescribe `10-ssl.conf` de Dovecot a la ruta estable, y recarga). Se salta los nodos sin Caddy (gestionados por certbot). Se ejecuta automaticamente tras cada actualizacion del panel via `bin/update.sh`, corrigiendo los nodos que venian de versiones antiguas',
                         ],
                         'en' => [
+                            '**Caddy repair runs only at startup + audit log:** `ExecReload` was removed from the drop-in (only `ExecStartPost` remains), so the panel no longer has the last word over Caddy config after every third-party reload. Each run is logged to `LogService` (`caddy.repair`) with hosts before/after and certs verified',
                             '**`cli/repair-mail-cert-sync.php`**: repairs cert propagation on Caddy-based mail nodes (points Postfix and rewrites Dovecot `10-ssl.conf` to the stable path, then reloads). Skips non-Caddy nodes (certbot-managed). Runs automatically after each panel update via `bin/update.sh`, fixing nodes upgraded from older releases',
                         ],
                     ],

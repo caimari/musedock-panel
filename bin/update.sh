@@ -231,10 +231,16 @@ install_caddy_runtime_repair_override() {
     mkdir -p /etc/systemd/system/caddy.service.d
     cat > /etc/systemd/system/caddy.service.d/zz-musedock-panel-repair.conf << OVERRIDEEOF
 [Service]
+# Solo en ARRANQUE, no en cada reload (incidentes 2026-08-06 y 2026-09-14).
+# ExecReload hacia que el panel tuviera la ULTIMA palabra sobre la config de Caddy
+# tras CADA recarga, incluidas apps de terceros que conviven en el mismo servidor:
+# en arranque tiene sentido reponer las rutas runtime del panel; en cada reload es
+# un riesgo permanente. El reparador ya trae guard de rutas + verificacion TLS
+# end-to-end con revert, pero reducir la superficie (arranque, no reload) es la
+# defensa principal. El reload nativo de Caddy (caddy reload desde disco) sigue
+# intacto — solo dejamos de encadenarle el reparador del panel.
 ExecStartPost=/bin/sleep 5
 ExecStartPost=${PHP_BIN} ${PANEL_DIR}/cli/repair-caddy-routes.php
-ExecReload=/bin/sleep 5
-ExecReload=${PHP_BIN} ${PANEL_DIR}/cli/repair-caddy-routes.php
 OVERRIDEEOF
     chmod 644 /etc/systemd/system/caddy.service.d/zz-musedock-panel-repair.conf
     systemctl daemon-reload 2>/dev/null || true
@@ -456,6 +462,28 @@ if [ -f "${PANEL_DIR}/cli/repair-mail-cert-sync.php" ]; then
         echo "$MAIL_CERT_OUT" | sed 's/^/  /'
         ok "Mail TLS renewal propagation ensured"
     fi
+fi
+
+# Desactivar el JIT de OPcache en TODOS los PHP-FPM instalados (incidente
+# 2026-09-28): el JIT causa segfaults intermitentes en workers que sirven
+# WordPress (los pools morian al instante -> Caddy devolvia 502), y no aporta
+# rendimiento en cargas web (I/O-bound). OPcache normal sigue activo. Drop-in
+# propio (99-*) que sobrevive a updates del paquete y gana al opcache.ini base.
+JIT_ANY_CHANGED=0
+for FPM_CONF_DIR in /etc/php/*/fpm/conf.d; do
+    [ -d "$FPM_CONF_DIR" ] || continue
+    DROPIN="${FPM_CONF_DIR}/99-musedock-opcache.ini"
+    if grep -qs 'opcache.jit_buffer_size=0' "$DROPIN" 2>/dev/null; then
+        continue   # ya aplicado en esta version
+    fi
+    printf '; MuseDock: JIT off (segfaults con WordPress, sin beneficio en web).\nopcache.jit=disable\nopcache.jit_buffer_size=0\n' > "$DROPIN"
+    chmod 644 "$DROPIN"
+    JIT_ANY_CHANGED=1
+    PHP_V=$(printf '%s' "$FPM_CONF_DIR" | sed -n 's#/etc/php/\([0-9.]*\)/.*#\1#p')
+    [ -n "$PHP_V" ] && systemctl restart "php${PHP_V}-fpm" 2>/dev/null || true
+done
+if [ "$JIT_ANY_CHANGED" = "1" ]; then
+    ok "OPcache JIT disabled on PHP-FPM (prevents WordPress segfault/502)"
 fi
 
 # Install/update bandwidth collector cron
