@@ -705,8 +705,8 @@ repair_panel_tls_caddy() {
     panel_site_labels="${panel_site_labels}, https://localhost:${panel_port}"
 
     existing_sites=$(awk '
-        /^{$/ && NR<=5 { in_global=1; next }
-        in_global && /^}$/ { in_global=0; next }
+        !past_global && /^[[:space:]]*\{[[:space:]]*$/ { in_global=1; next }
+        in_global && /^[[:space:]]*\}[[:space:]]*$/ { in_global=0; past_global=1; next }
         in_global { next }
         /^https?:\/\/:'"${panel_port}"'/ || /^https?:\/\/[^ ]*:'"${panel_port}"'/ || /^:'"${panel_port}"'/ {
             in_panel=1

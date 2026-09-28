@@ -20,7 +20,22 @@ class ChangelogController
     {
         return [
             [
-                'version' => '1.0.221',
+                'version' => '1.0.223',
+                'date' => '2026-09-29',
+                'badge' => 'success',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '**El regenerador de Caddyfile de `bin/update.sh` producia un fichero invalido** (aviso "Generated Caddyfile failed validation... server block without any key... must be first") y restauraba el anterior. El `awk` detectaba el bloque global de opciones con `NR<=5`, pero la cabecera de comentarios empuja el `{` global a la linea 6, asi que no lo eliminaba y lo re-pegaba tras el bloque del panel como bloque sin etiqueta no-primero. Ahora se detecta como el primer bloque `{` sin etiqueta sea cual sea la linea. Impacto previo bajo (Caddy conservaba su config al restaurar), pero la regeneracion del bloque TLS del panel quedaba inutilizada',
+                        ],
+                        'en' => [
+                            '**The `bin/update.sh` Caddyfile regenerator produced an invalid file** ("Generated Caddyfile failed validation... server block without any key... must be first") and restored the previous one. The `awk` detected the global options block with `NR<=5`, but the comment header pushes the global `{` to line 6, so it was not stripped and got re-appended after the panel block as an unlabeled non-first block. It is now detected as the first unlabeled `{` block regardless of line number. Prior impact was low (Caddy kept its config on restore), but the panel TLS-block regeneration was broken',
+                        ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.222',
                 'date' => '2026-09-28',
                 'badge' => 'success',
                 'changes' => [

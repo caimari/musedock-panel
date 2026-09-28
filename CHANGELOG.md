@@ -2,7 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [1.0.221] — 2026-09-28 — Reparador de Caddy (TLS end-to-end + solo arranque), OPcache JIT off, y cert de correo
+## [1.0.223] — 2026-09-29 — Fix: el regenerador de Caddyfile de update.sh producía un fichero inválido
+
+- **`bin/update.sh` regeneraba un Caddyfile inválido y restauraba el anterior** (aviso «Generated Caddyfile failed validation… server block without any key is global configuration, and if used, it must be first»). Causa: el `awk` que extrae los sitios existentes detectaba el bloque global de opciones con `NR<=5`, pero el Caddyfile tiene una cabecera de comentarios que empuja el `{` global a la línea 6 → no lo eliminaba → lo re-pegaba **después** del bloque del panel como un bloque sin etiqueta y no-primero → fallaba la validación. Ahora el bloque global se detecta como **el primer bloque `{` sin etiqueta, sea cual sea la línea** (`past_global`), robusto ante cabeceras de comentarios. Impacto previo bajo (Caddy conservaba su config al restaurar), pero la regeneración del bloque TLS del panel quedaba inutilizada. Verificado: el Caddyfile generado ahora **adapta a JSON sin errores**.
+
+## [1.0.222] — 2026-09-28 — Reparador de Caddy (TLS end-to-end + solo arranque), OPcache JIT off, y cert de correo
 
 ### Reparador de Caddy: verificación TLS end-to-end, idempotencia de políticas y solo en arranque
 
