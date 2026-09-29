@@ -539,9 +539,17 @@ class MailController
             'autoresponder_body' => trim((string)($_POST['autoresponder_body'] ?? '')),
         ];
 
-        if (!empty($_POST['password'])) {
-            if (strlen($_POST['password']) < 8) {
+        if (!empty($_POST['password']) || !empty($_POST['password_confirm'])) {
+            if (strlen((string)($_POST['password'] ?? '')) < 8) {
                 Flash::set('error', 'La contraseña debe tener al menos 8 caracteres.');
+                Router::redirect("/mail/accounts/{$accountId}/edit");
+                return;
+            }
+            // Doble campo: si viene la confirmación, debe coincidir (evita fijar una
+            // contraseña con una errata que luego nadie sabe).
+            if (array_key_exists('password_confirm', $_POST)
+                && !hash_equals((string)$_POST['password'], (string)$_POST['password_confirm'])) {
+                Flash::set('error', 'Las contraseñas no coinciden. No se ha cambiado nada.');
                 Router::redirect("/mail/accounts/{$accountId}/edit");
                 return;
             }

@@ -112,6 +112,37 @@ class CloudflareService
     }
 
     /**
+     * TODAS las zonas de la cuenta, recorriendo todas las páginas de la API.
+     * Mismo formato de retorno que listZones() (ok/result/error).
+     *
+     * listZones() solo devuelve una página (50 zonas). Usarlo para "todas las
+     * zonas" dejaba fuera a las cuentas con más de 50: el failover DNS no las
+     * repuntaba y el publicador de DNS de correo no las encontraba.
+     */
+    public static function listAllZones(string $token): array
+    {
+        $all = [];
+        for ($page = 1; $page <= 40; $page++) {        // tope: 2.000 zonas
+            $resp = self::listZones($token, $page, 50);
+            if (!($resp['ok'] ?? false)) {
+                if ($page === 1) {
+                    return $resp;                       // error real: se propaga igual
+                }
+                // Fallo a mitad: mejor devolver lo leído que perder todo, pero avisando.
+                return ['ok' => true, 'result' => $all, 'errors' => $resp['errors'] ?? [],
+                    'error' => 'Lectura de zonas incompleta a partir de la página ' . $page . ': ' . ($resp['error'] ?? ''),
+                    'http_code' => $resp['http_code'] ?? 0, 'partial' => true];
+            }
+            $batch = is_array($resp['result'] ?? null) ? $resp['result'] : [];
+            array_push($all, ...$batch);
+            if (count($batch) < 50) {
+                break;
+            }
+        }
+        return ['ok' => true, 'result' => $all, 'errors' => [], 'error' => '', 'http_code' => 200];
+    }
+
+    /**
      * Get zone details by ID.
      */
     public static function getZone(string $token, string $zoneId): array
@@ -311,7 +342,7 @@ class CloudflareService
             $decrypted = ReplicationService::decryptPassword($token);
             $plainToken = ($decrypted !== '') ? $decrypted : $token;
 
-            $resp = self::listZones($plainToken);
+            $resp = self::listAllZones($plainToken);
             if (!($resp['ok'] ?? false) || empty($resp['result'])) continue;
 
             $newZones = [];

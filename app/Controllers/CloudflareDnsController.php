@@ -52,7 +52,7 @@ class CloudflareDnsController
         }
 
         $token = $accounts[$idx]['token'] ?? '';
-        $result = CloudflareService::listZones($token);
+        $result = CloudflareService::listAllZones($token);
 
         if (!$result['ok']) {
             echo json_encode(['ok' => false, 'error' => $result['error']]);

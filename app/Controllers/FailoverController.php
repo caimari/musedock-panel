@@ -128,7 +128,7 @@ class FailoverController
             if (!$name || !$token) continue;
 
             $zones = [];
-            $resp = CloudflareService::listZones($token);
+            $resp = CloudflareService::listAllZones($token);
             if ($resp['ok'] && !empty($resp['result'])) {
                 foreach ($resp['result'] as $z) {
                     $zones[] = ['id' => $z['id'], 'name' => $z['name']];
@@ -207,7 +207,7 @@ class FailoverController
         $verify = CloudflareService::verifyToken($token);
         if (!$verify['ok']) { echo json_encode(['ok' => false, 'error' => $verify['error'] ?? 'Token inválido']); return; }
 
-        $zones = CloudflareService::listZones($token);
+        $zones = CloudflareService::listAllZones($token);
         $zoneList = [];
         if ($zones['ok']) {
             foreach ($zones['result'] ?? [] as $z) $zoneList[] = ['id' => $z['id'], 'name' => $z['name']];

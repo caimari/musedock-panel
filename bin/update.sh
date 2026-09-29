@@ -464,6 +464,34 @@ if [ -f "${PANEL_DIR}/cli/repair-mail-cert-sync.php" ]; then
     fi
 fi
 
+# Importación de mail.log en segundo plano (cada minuto, prioridad baja).
+# Antes la hacía la página Mail → general en cada visita (~3 s de espera).
+# En nodos sin log de correo el script termina en silencio.
+cat > /etc/cron.d/musedock-mail-log << CRONEOF
+# MuseDock Panel — importa mail.log a mail_relay_events (incremental)
+* * * * * root nice -n 10 ${PHP_BIN} ${PANEL_DIR}/bin/mail-log-ingest.php >/dev/null 2>&1
+CRONEOF
+chmod 644 /etc/cron.d/musedock-mail-log
+ok "Mail log ingest cron installed/updated"
+
+# Refrescar la lista de zonas de Cloudflare guardada (failover DNS, publicador de
+# DNS de correo). Hasta 1.0.223 solo se leían las 50 primeras zonas de cada cuenta:
+# en cuentas con más, los dominios restantes NO se repuntaban en un failover.
+# Solo actualiza la lista de zonas (no toca Caddy ni re-cifra tokens). Best effort.
+CF_REFRESH_OUT=$($PHP_BIN -r '
+require "'"${PANEL_DIR}"'/app/bootstrap.php";
+if (\MuseDockPanel\Settings::get("failover_cf_accounts", "") === "") { echo "skip"; exit(0); }
+$before = array_sum(array_map(fn($a) => count($a["zones"] ?? []), \MuseDockPanel\Services\CloudflareService::getConfiguredAccounts()));
+\MuseDockPanel\Services\CloudflareService::refreshZones();
+$after = array_sum(array_map(fn($a) => count($a["zones"] ?? []), \MuseDockPanel\Services\CloudflareService::getConfiguredAccounts()));
+echo "{$before}->{$after}";
+' 2>/dev/null || echo "error")
+case "$CF_REFRESH_OUT" in
+    skip)  ;;
+    error) warn "Cloudflare zone refresh failed (run it later from Settings → Cloudflare DNS)" ;;
+    *)     ok "Cloudflare zones refreshed (${CF_REFRESH_OUT})" ;;
+esac
+
 # Desactivar el JIT de OPcache en TODOS los PHP-FPM instalados (incidente
 # 2026-09-28): el JIT causa segfaults intermitentes en workers que sirven
 # WordPress (los pools morian al instante -> Caddy devolvia 502), y no aporta

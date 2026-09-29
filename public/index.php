@@ -211,6 +211,11 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/api/cluster/heartbeat', 'ClusterApiController@heartbeat');
 \MuseDockPanel\Router::post('/api/cluster/action', 'ClusterApiController@action');
 
+// MCP server (Model Context Protocol). Apagado por defecto; autenticación propia
+// por token Bearer dentro del controlador (no pasa por ApiAuthMiddleware).
+\MuseDockPanel\Router::post('/api/mcp', 'McpController@handle');
+\MuseDockPanel\Router::get('/api/mcp', 'McpController@handle');
+
 // Federation API (token auth — called by remote peers)
 \MuseDockPanel\Router::get('/api/federation/health', 'FederationApiController@health');
 \MuseDockPanel\Router::post('/api/federation/check-space', 'FederationApiController@checkSpace');
@@ -506,6 +511,10 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/updates/api/status', 'UpdateController@apiStatus');
 
 // Notifications
+\MuseDockPanel\Router::get('/settings/mcp', 'McpController@settings');
+\MuseDockPanel\Router::post('/settings/mcp/save', 'McpController@save');
+\MuseDockPanel\Router::post('/settings/mcp/token', 'McpController@token');
+\MuseDockPanel\Router::post('/settings/mcp/credentials/clear', 'McpController@clearCredentials');
 \MuseDockPanel\Router::get('/settings/notifications', 'NotificationController@index');
 \MuseDockPanel\Router::post('/settings/notifications/save', 'NotificationController@save');
 \MuseDockPanel\Router::post('/settings/notifications/test-email', 'NotificationController@testEmail');

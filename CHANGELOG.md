@@ -2,6 +2,53 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.224] — 2026-09-29 — Servidor MCP (fase 1), Mail general 29× más rápida, fixes de correo
+
+### Añadido: servidor MCP (Model Context Protocol), fase 1 — solo lectura
+
+Permite que un asistente de IA (Claude Code, VS Code, ChatGPT…) consulte el panel con herramientas tipadas en vez de comandos a mano. **Apagado por defecto** en cada nodo.
+
+- **Dos transportes**: HTTP en `/api/mcp` (token Bearer; respuestas JSON sin streaming, porque el panel corre en `php -S` monohilo) y **stdio por SSH** (`bin/mcp-stdio.php`, autenticado con la clave SSH, no expone nada nuevo).
+- **11 herramientas de solo lectura**: `panel_info`, `list_nodes`, `node_status`, `services_status`, `failover_status`, `hosting_accounts`, `mail_domains`, `mail_domain`, `tls_check` (handshake SNI real: sujeto, SANs, días restantes), `caddy_hosts` y **`clone_inventory`** (todo lo que habría que clonar para un slave exacto, marcando lo que el panel **no** gestiona: sitios del Caddyfile fuera del panel, unidades systemd propias, Redis, procesos Node/PM2, Docker, bases de datos, crons, puertos). Todas aceptan `node` para ejecutarse en otro nodo del cluster vía la API del cluster (acción `mcp-call`); el nodo destino debe tener también su MCP activado.
+- **Seguridad**: desactivado → `404`; token obligatorio guardado solo como SHA-256 y mostrado una vez; tokens erróneos escritos en `/var/log/musedock-panel-auth.log` (el jail fail2ban `musedock-panel` los banea: 5 fallos → 1 h); rate limit por IP; rechazo de peticiones con `Origin` (anti DNS-rebinding, exigido por la especificación MCP); `ALLOWED_IPS` del `.env` se aplica antes. Todas las salidas pasan por un filtro de secretos (contraseñas, hashes, claves, tokens) y cada llamada queda en el log de actividad (sin argumentos sensibles: `panel_log` se replica a todos los nodos).
+- **Ajustes → MCP**: activar/desactivar, generar/regenerar/revocar token, y la configuración lista para copiar para VS Code (`mcp.json`, por SSH o HTTP) y Claude Code.
+- Protocolo MCP 2025-06-18 (compatible con 2025-03-26 y 2024-11-05), JSON-RPC 2.0 sin dependencias.
+
+### Arreglado: cuentas de Cloudflare con más de 50 zonas (afectaba al failover DNS)
+
+- **El panel solo veía las 50 primeras zonas de cada cuenta de Cloudflare.** `listZones()` devuelve una sola página de la API (50 zonas), y se usaba como si fuera la lista completa en cuatro sitios: `refreshZones()` (lista guardada que usan el **failover DNS** y el publicador de DNS de correo), las dos rutas de alta/verificación de cuentas en `FailoverController` y la página **Ajustes → Cloudflare DNS**. La cuenta «Screen Art FIlms» tiene **83 zonas**: **33 dominios** (entre ellos screenart.es y screenartfilms.es) eran invisibles para el panel, así que **en un failover no se habrían repuntado al slave**. Nuevo `CloudflareService::listAllZones()` que recorre todas las páginas (tope 2.000 zonas; si falla a mitad devuelve lo leído y lo avisa), usado en los cuatro sitios. Aplicado ya en mortadelo: 50 → 83 zonas, tokens intactos (el guardado no re-cifra tokens ya cifrados). **`bin/update.sh` refresca la lista automáticamente en cada actualización** (solo si el nodo tiene cuentas de Cloudflare; muestra `Cloudflare zones refreshed (antes->después)`), así que los slaves quedan corregidos al actualizar sin pasos manuales. En el próximo arranque/actualización, las políticas TLS por cuenta incluirán también esas 33 zonas (comportamiento correcto: DNS-01 con el token de su cuenta).
+
+### Añadido: MCP — paquete de correo (acciones que modifican, con candado)
+
+«Créame un dominio solo de correo, configúralo en Cloudflare y crea las cuentas» con una frase. Cinco herramientas nuevas (`app/Mcp/McpMailTools.php`), que **reutilizan el código del panel**, de modo que el DKIM, la carpeta del buzón y la réplica a los nodos de correo ocurren igual que desde la web:
+
+- `mail_domain_create`: alta del dominio con su DKIM.
+- `mail_dns_publish`: publica en Cloudflare MX, SPF, DKIM y DMARC. Es nuevo: el panel no tenía publicador de DNS de correo.
+- `mail_mailbox_create` y `mail_alias_create`: buzones, alias y catch-all.
+- `mail_domain_verify` (solo lectura): comprueba el DNS desde 1.1.1.1 y 8.8.8.8, compara la **clave DKIM completa** con la del panel y ejecuta `opendkim-testkey`.
+
+Candados:
+- **Interruptor aparte** «Permitir acciones que modifican» (`mcp_allow_write`), apagado por defecto.
+- **Plan antes de actuar**: sin `apply: true` solo devuelven el plan, y se anuncian como no-solo-lectura, así que el cliente MCP pide permiso en cada llamada.
+- **Nunca se reenvían a otros nodos** (ni por el argumento `node` ni por la acción de cluster `mcp-call`) ni se ejecutan en un slave.
+- **Contraseñas**: si no se indica una, se genera y se guarda **cifrada** en *Ajustes → MCP → Credenciales pendientes* (caducan a los 7 días). Nunca vuelve al chat.
+
+DNS con cabeza:
+- **SPF: sumar, nunca sustituir.** Si el SPF existente ya autoriza a este servidor se respeta tal cual; si no, se añade `mx ip4:…` antes del `all` sin quitar a nadie. Así no se retira el permiso a otros remitentes, como asterisk o sweego en muserelay.com.
+- **MX: nunca dos proveedores.** Si hay MX de otro proveedor (incluido el Enrutamiento de correo de Cloudflare, que detecta y explica), no añade el propio salvo con `replace_conflicts`. Aun así, solo lo añade si todos los MX ajenos se pudieron borrar.
+- Probado en solo lectura contra los datos reales: musedock.com y muserelay.com, todo `ok`; screenart.es, verificación completa `✓` y `key OK`.
+
+### Correo: rendimiento, fixes y mejoras de interfaz
+
+- **Mail → general cargaba en ~3,3 s; ahora en ~0,15 s.** Medido como root: `getDeliveryLogStats()` se llevaba **3,13 s** (el 95 %) porque en **cada visita** releía las últimas 20.000 líneas de `mail.log` (decenas de MB) y las volcaba a `mail_relay_events`, antes de contar enviados/diferidos/rebotes. Ahora la página **solo lee de BD** y la importación pasa a un cron en segundo plano (`bin/mail-log-ingest.php`, cada minuto, `nice -n 10`, con `flock`), que además es **incremental**: recuerda hasta qué byte leyó (`storage/cache/mail-log-ingest.json`, local al nodo) y solo procesa lo nuevo; ante rotación del log, primera ejecución o hueco > 20 MB vuelve a las últimas 20.000 líneas. Lee con 256 KB de solape para no perder el remitente de colas partidas; las líneas repetidas se descartan por `ON CONFLICT (line_hash)`. La página del log de relay deja también de importar al cargar. `update.sh` instala el cron (`/etc/cron.d/musedock-mail-log`) en todos los nodos.
+
+- **Fix: editar un buzón daba error 500 y no guardaba nada** (ni la contraseña). Al guardar con el autorespondedor desmarcado se enviaba `false` a la columna booleana `autoresponder_enabled`; PDO manda `false` como cadena vacía `""` y PostgreSQL la rechaza (*invalid input syntax for type boolean*). Corregido **en el origen** (`Database::query`): `false` se envía como `"0"`, simétrico con `true` → `"1"`, válido tanto en columnas boolean como integer. Arregla de paso el mismo fallo latente en `can_send` de la política de envío y en cualquier otra escritura con un booleano `false`.
+- **Editar buzón: doble campo de contraseña** («Nueva» + «Repetir»), cada uno con **botón de ojo** para mostrar/ocultar. Validación en vivo (mínimo 8 caracteres y que coincidan) que bloquea el envío, y comprobación también en el servidor (`hash_equals`) para no fijar una contraseña con una errata.
+
+- **Confirmación con modal al borrar** dominio, buzón o alias (modal oscuro del panel, botón rojo «Eliminar», el foco por defecto en «Cancelar»). Antes, **borrar un alias no pedía confirmación** (un clic y se borraba) y dominio/buzón usaban el `confirm()` nativo. El modal dice exactamente qué se borra y sus consecuencias; si es el **catch-all**, avisa de que los correos a direcciones inexistentes dejarán de llegar. Si SweetAlert no cargase, cae al `confirm()` nativo: nunca se borra sin preguntar. El texto del modal va doble-escapado (sin riesgo de XSS con nombres de alias o buzones).
+
+- **Mail → dominio**: la tarjeta **DNS Records** pasa de una columna estrecha a la derecha a **ancho completo debajo** de la ficha del dominio. Los nombres ya no se parten letra a letra («scree / nart. / es»): van en una línea y en monoespaciado. El valor ocupa el ancho restante y muestra hasta 160 caracteres antes de recortar; el botón de copiar sigue copiando el valor **completo**.
+
 ## [1.0.223] — 2026-09-29 — Fix: el regenerador de Caddyfile de update.sh producía un fichero inválido
 
 - **`bin/update.sh` regeneraba un Caddyfile inválido y restauraba el anterior** (aviso «Generated Caddyfile failed validation… server block without any key is global configuration, and if used, it must be first»). Causa: el `awk` que extrae los sitios existentes detectaba el bloque global de opciones con `NR<=5`, pero el Caddyfile tiene una cabecera de comentarios que empuja el `{` global a la línea 6 → no lo eliminaba → lo re-pegaba **después** del bloque del panel como un bloque sin etiqueta y no-primero → fallaba la validación. Ahora el bloque global se detecta como **el primer bloque `{` sin etiqueta, sea cual sea la línea** (`past_global`), robusto ante cabeceras de comentarios. Impacto previo bajo (Caddy conservaba su config al restaurar), pero la regeneración del bloque TLS del panel quedaba inutilizada. Verificado: el Caddyfile generado ahora **adapta a JSON sin errores**.

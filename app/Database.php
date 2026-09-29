@@ -65,6 +65,16 @@ class Database
 
     public static function query(string $sql, array $params = []): \PDOStatement
     {
+        // PDO::execute() envía todo como texto: true → "1" (válido) pero false → ""
+        // (cadena vacía), que PostgreSQL rechaza en columnas boolean/integer con
+        // "invalid input syntax" → 500. Ej.: guardar un buzón con el autorespondedor
+        // desmarcado. Normalizamos false → "0" para que sea simétrico con true → "1"
+        // (PostgreSQL acepta "0"/"1" tanto en boolean como en integer).
+        foreach ($params as $k => $v) {
+            if ($v === false) {
+                $params[$k] = '0';
+            }
+        }
         $stmt = self::connect()->prepare($sql);
         $stmt->execute($params);
         return $stmt;

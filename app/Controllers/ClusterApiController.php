@@ -531,6 +531,7 @@ class ClusterApiController
                 'notify-iface-down' => $this->handleNotifyIfaceDown($payload),
                 'notify-iface-up'   => $this->handleNotifyIfaceUp($payload),
                 'query-local-state' => $this->handleQueryLocalState(),
+                'mcp-call'         => $this->handleMcpCall($payload),
 
                 // ── Remote backup operations ──────────────────
                 'backup-preflight'   => $this->handleBackupPreflight($payload),
@@ -988,6 +989,35 @@ class ClusterApiController
      * Master asks: "did you change anything while I was down?"
      * Returns local flags so master can reconcile before taking action.
      */
+    /**
+     * Ejecuta una herramienta MCP de solo lectura en ESTE nodo, a petición del
+     * master (MCP con argumento `node`). Llega ya autenticada con el token del
+     * cluster, pero además exige que el MCP esté activado en este nodo: por
+     * defecto todo está parado en cada nodo. Sin `node` anidado (no hay saltos).
+     */
+    private function handleMcpCall(array $payload): array
+    {
+        if (\MuseDockPanel\Settings::get('mcp_enabled', '0') !== '1') {
+            return ['ok' => false, 'error' => 'El MCP está desactivado en este nodo (Ajustes → MCP).'];
+        }
+        $tool = (string)($payload['tool'] ?? '');
+        if (!\MuseDockPanel\Mcp\McpTools::exists($tool)) {
+            return ['ok' => false, 'error' => "Herramienta desconocida: {$tool}"];
+        }
+        // Por la vía nodo-a-nodo solo se permiten herramientas de lectura.
+        if (\MuseDockPanel\Mcp\McpTools::isWrite($tool)) {
+            return ['ok' => false, 'error' => 'Las acciones que modifican no se ejecutan a través de otro nodo.'];
+        }
+        $args = is_array($payload['arguments'] ?? null) ? $payload['arguments'] : [];
+        unset($args['node']);
+        try {
+            $data = \MuseDockPanel\Mcp\McpTools::runLocal($tool, $args);
+            return ['ok' => true, 'data' => \MuseDockPanel\Mcp\McpTools::redact($data)];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
+    }
+
     private function handleQueryLocalState(): array
     {
         return [

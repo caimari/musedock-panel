@@ -1691,8 +1691,8 @@ class MailService
     {
         $page = max(1, $page);
         $perPage = max(5, min(1000, $perPage));
-        $scanLines = (int)min(60000, max(2500, ($perPage * 30), ($page * $perPage * 3)));
-        self::ingestRelayLogFromFile($scanLines);
+        // La importación de mail.log la hace el cron bin/mail-log-ingest.php
+        // (incremental, cada minuto); aquí solo se lee de BD para no bloquear la página.
 
         try {
             self::ensureRelayEventsTable();
@@ -1732,7 +1732,9 @@ class MailService
 
     public static function getDeliveryLogStats(int $scanLines = 20000): array
     {
-        self::ingestRelayLogFromFile($scanLines);
+        // Solo lectura de BD. La importación de mail.log la hace el cron
+        // bin/mail-log-ingest.php (incremental, cada minuto): hacerla aquí costaba
+        // ~3 s en CADA carga de Mail → general. $scanLines se mantiene por compat.
         $stats = [
             'available' => true,
             'sent' => 0,
@@ -1831,17 +1833,92 @@ class MailService
         $ensured = true;
     }
 
-    private static function ingestRelayLogFromFile(int $scanLines = 20000): int
+    private static function deliveryLogFile(): string
     {
-        $file = is_readable('/var/log/mail.log') ? '/var/log/mail.log' : (is_readable('/var/log/maillog') ? '/var/log/maillog' : '');
+        return is_readable('/var/log/mail.log') ? '/var/log/mail.log' : (is_readable('/var/log/maillog') ? '/var/log/maillog' : '');
+    }
+
+    /**
+     * Importa mail.log a mail_relay_events de forma INCREMENTAL. Lo llama el cron
+     * bin/mail-log-ingest.php (cada minuto), NUNCA la carga de una página.
+     *
+     * Antes cada visita a Mail → general releía las últimas 20.000 líneas de un
+     * mail.log de decenas de MB: ~3 s de los 3,3 s que tardaba la página. Ahora el
+     * cron recuerda hasta qué byte leyó (estado en storage/cache, local a este
+     * nodo) y solo procesa lo nuevo. Si el log rotó (cambio de inodo o menor
+     * tamaño), es la primera vez, o el hueco es enorme, vuelve a las últimas
+     * 20.000 líneas como antes. Se lee con un solape de 256 KB para no perder el
+     * remitente (from=) de colas que quedan a caballo del corte; las líneas
+     * repetidas se descartan solas por ON CONFLICT (line_hash).
+     */
+    public static function ingestDeliveryLogIncremental(): int
+    {
+        $file = self::deliveryLogFile();
+        if ($file === '') {
+            return 0;
+        }
+        clearstatcache(true, $file);
+        $st = @stat($file);
+        if (!$st) {
+            return 0;
+        }
+        $inode = (int)$st['ino'];
+        $size  = (int)$st['size'];
+
+        $stateFile = PANEL_ROOT . '/storage/cache/mail-log-ingest.json';
+        $state = json_decode((string)@file_get_contents($stateFile), true) ?: [];
+        $prevOffset = (int)($state['offset'] ?? 0);
+        $sameFile   = (int)($state['inode'] ?? -1) === $inode && $prevOffset > 0 && $prevOffset <= $size;
+        $maxChunk   = 20 * 1024 * 1024; // hueco > 20 MB → mejor la cola del fichero
+
+        $newOffset = $size;
+        if (!$sameFile || ($size - $prevOffset) > $maxChunk) {
+            $count = self::ingestRelayLogFromFile(20000);
+        } elseif ($size === $prevOffset) {
+            $count = 0;
+        } else {
+            $start = max(0, $prevOffset - 262144);
+            $fh = @fopen($file, 'rb');
+            if (!$fh) {
+                return 0;
+            }
+            fseek($fh, $start);
+            $chunk = (string)stream_get_contents($fh, $size - $start);
+            fclose($fh);
+            // Descartar la primera línea (probablemente cortada) si no empezamos en 0,
+            // y la última si aún se está escribiendo (sin salto de línea final).
+            if ($start > 0 && ($nl = strpos($chunk, "\n")) !== false) {
+                $chunk = substr($chunk, $nl + 1);
+                $start += $nl + 1;
+            }
+            $lastNl = strrpos($chunk, "\n");
+            if ($lastNl === false) {
+                return 0; // aún no hay una línea completa nueva
+            }
+            $newOffset = $start + $lastNl + 1;
+            $count = self::ingestRelayLogFromFile(0, explode("\n", substr($chunk, 0, $lastNl)));
+        }
+
+        @mkdir(dirname($stateFile), 0755, true);
+        @file_put_contents($stateFile, json_encode([
+            'file' => $file, 'inode' => $inode, 'offset' => $newOffset, 'at' => time(), 'ingested' => $count,
+        ]));
+        return $count;
+    }
+
+    private static function ingestRelayLogFromFile(int $scanLines = 20000, ?array $lines = null): int
+    {
+        $file = self::deliveryLogFile();
         if ($file === '') {
             return 0;
         }
 
         try {
             self::ensureRelayEventsTable();
-            $scanLines = max(1000, min(60000, $scanLines));
-            $lines = explode("\n", trim((string)shell_exec('tail -n ' . $scanLines . ' ' . escapeshellarg($file) . ' 2>/dev/null')));
+            if ($lines === null) {
+                $scanLines = max(1000, min(60000, $scanLines));
+                $lines = explode("\n", trim((string)shell_exec('tail -n ' . $scanLines . ' ' . escapeshellarg($file) . ' 2>/dev/null')));
+            }
             $pdo = Database::connect();
             $stmt = $pdo->prepare("
                 INSERT INTO mail_relay_events

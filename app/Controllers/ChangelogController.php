@@ -20,6 +20,47 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.224',
+                'date' => '2026-09-29',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '**Servidor MCP (fase 1, solo lectura):** un asistente de IA (Claude Code, VS Code…) puede consultar el panel con 11 herramientas: estado del servidor y del cluster, servicios, failover, hostings, correo, certificados TLS, hosts de Caddy y un inventario para clonar un slave exacto (incluido lo que el panel no gestiona). Por HTTP (`/api/mcp`, token Bearer) o por SSH (`bin/mcp-stdio.php`). Apagado por defecto; token guardado solo como hash; fallos de token vigilados por fail2ban; filtro de secretos en todas las salidas. Se configura en Ajustes → MCP',
+                            '**MCP - paquete de correo:** con el interruptor "Permitir acciones que modifican" (apagado por defecto) la IA puede crear un dominio de correo con DKIM, publicar MX/SPF/DKIM/DMARC en Cloudflare, crear buzones y alias, y verificarlo todo (DNS publico, clave DKIM completa y opendkim-testkey). Siempre devuelve primero un plan y solo ejecuta con apply; nunca se reenvia a otros nodos; las contrasenas generadas se ven solo en Ajustes → MCP. El SPF existente se amplia, nunca se sustituye',
+                        ],
+                        'en' => [
+                            '**MCP server (phase 1, read-only):** an AI assistant (Claude Code, VS Code…) can query the panel with 11 tools: server and cluster status, services, failover, hostings, mail, TLS certificates, Caddy hosts and an inventory to clone an exact slave (including what the panel does not manage). Over HTTP (`/api/mcp`, Bearer token) or SSH (`bin/mcp-stdio.php`). Off by default; token stored only as a hash; token failures watched by fail2ban; secrets filtered from all output. Configured in Settings → MCP',
+                            '**MCP mail pack:** with the "Allow actions that modify" switch (off by default) the AI can create a mail domain with DKIM, publish MX/SPF/DKIM/DMARC to Cloudflare, create mailboxes and aliases, and verify everything (public DNS, full DKIM key and opendkim-testkey). It always returns a plan first and only runs with apply; never forwarded to other nodes; generated passwords are shown only in Settings → MCP. Existing SPF is extended, never replaced',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => [
+                            '**Mail → general: de ~3,3 s a ~0,15 s.** La pagina releia en cada visita las ultimas 20.000 lineas de `mail.log` para las estadisticas de envio (3,1 s). Ahora solo lee de BD, y la importacion del log la hace un cron en segundo plano cada minuto, de forma incremental (solo las lineas nuevas)',
+                            '**Mail → dominio:** la tarjeta de registros DNS pasa a ancho completo debajo de la ficha del dominio. Los nombres ya no se parten letra a letra y el valor usa todo el ancho disponible; copiar sigue copiando el valor completo',
+                            '**Confirmacion con modal al borrar** dominio, buzon o alias. Antes borrar un alias no pedia confirmacion. El modal indica que se borra y sus consecuencias (con aviso especial si es el catch-all)',
+                            '**Editar buzon: doble campo de contrasena** con boton de ojo en cada uno y validacion en vivo (minimo 8 y que coincidan), comprobada tambien en el servidor',
+                        ],
+                        'en' => [
+                            '**Mail → general: from ~3.3 s to ~0.15 s.** The page re-read the last 20,000 lines of `mail.log` on every visit for the delivery stats (3.1 s). It now reads only from the DB, and log ingestion runs in a background cron every minute, incrementally (new lines only)',
+                            '**Mail → domain:** the DNS records card now spans the full width below the domain details. Names no longer break letter by letter and the value uses all available width; copy still copies the full value',
+                            '**Confirmation modal before deleting** a domain, mailbox or alias. Deleting an alias previously asked for no confirmation. The modal states what is deleted and the consequences (with a special warning for the catch-all)',
+                            '**Edit mailbox: double password field** with an eye button on each and live validation (min 8 and matching), also checked server-side',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            '**Cloudflare: el panel solo veia las 50 primeras zonas de cada cuenta.** La cuenta Screen Art Films tiene 83: 33 dominios (entre ellos screenart.es y screenartfilms.es) eran invisibles, y en un failover no se habrian repuntado al slave. Ahora se leen todas las paginas de la API (listAllZones) en la lista guardada, el alta de cuentas y Ajustes → Cloudflare DNS, y bin/update.sh refresca la lista automaticamente al actualizar cada nodo',
+                            '**Editar un buzon daba error 500 y no guardaba nada:** con el autorespondedor desmarcado se enviaba `false` a una columna booleana y PDO lo manda como cadena vacia, que PostgreSQL rechaza. Corregido en `Database::query` (false se envia como "0"); arregla tambien el mismo fallo latente en `can_send` y cualquier otra escritura con `false`',
+                        ],
+                        'en' => [
+                            '**Cloudflare: the panel only saw the first 50 zones of each account.** The Screen Art Films account has 83: 33 domains (including screenart.es and screenartfilms.es) were invisible and would not have been repointed to the slave during a failover. All API pages are now read (listAllZones) for the stored list, account setup and Settings → Cloudflare DNS, and bin/update.sh refreshes the list automatically on every node update',
+                            '**Editing a mailbox returned a 500 and saved nothing:** with the autoresponder unchecked, `false` was sent to a boolean column and PDO sends it as an empty string, which PostgreSQL rejects. Fixed in `Database::query` (false is sent as "0"); also fixes the same latent bug in `can_send` and any other write of `false`',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.223',
                 'date' => '2026-09-29',
                 'badge' => 'success',

@@ -10,8 +10,9 @@
         <a href="/mail/domains/<?= $domain['id'] ?>/accounts/create" class="btn btn-primary btn-sm">
             <i class="bi bi-plus-lg me-1"></i> New Mailbox
         </a>
-        <form method="POST" action="/mail/domains/<?= $domain['id'] ?>/delete" class="d-inline"
-              onsubmit="return confirm('Delete domain <?= View::e($domain['domain']) ?> and all its accounts?')">
+        <form method="POST" action="/mail/domains/<?= $domain['id'] ?>/delete" class="d-inline js-confirm-delete"
+              data-confirm-title="¿Eliminar el dominio de correo?"
+              data-confirm-html="<?= View::e('Se eliminará <strong>' . View::e($domain['domain']) . '</strong> con <strong>todos sus buzones, alias y correos</strong>.<br>Esta acción no se puede deshacer.') ?>">
             <?= View::csrf() ?>
             <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
         </form>
@@ -27,7 +28,7 @@
 
 <!-- Domain info -->
 <div class="row g-3 mb-4">
-    <div class="col-md-8">
+    <div class="col-12">
         <div class="card">
             <div class="card-header"><i class="bi bi-globe2 me-2"></i><?= View::e($domain['domain']) ?></div>
             <div class="card-body">
@@ -104,7 +105,7 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-12">
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-signpost me-2"></i>DNS Records</span>
@@ -130,13 +131,13 @@
                     <div class="table-responsive">
                         <table class="table table-sm mb-0" style="font-size: 0.78rem;">
                             <thead>
-                                <tr><th class="ps-3">Type</th><th>Name</th><th>Value</th></tr>
+                                <tr><th class="ps-3" style="width:90px;">Type</th><th style="width:1%;white-space:nowrap;">Name</th><th>Value</th></tr>
                             </thead>
                             <tbody>
                                 <?php foreach ($dnsRecords as $r):
                                     // Full value (with priority prefix for MX) — this is what gets copied.
                                     $fullValue = (isset($r['priority']) ? $r['priority'] . ' ' : '') . $r['value'];
-                                    $shown = mb_substr($fullValue, 0, 80) . (mb_strlen($fullValue) > 80 ? '…' : '');
+                                    $shown = mb_substr($fullValue, 0, 160) . (mb_strlen($fullValue) > 160 ? '…' : '');
                                 ?>
                                 <tr>
                                     <td class="ps-3 align-middle"><code><?= $r['type'] ?></code>
@@ -146,12 +147,12 @@
                                     </td>
                                     <td class="align-middle">
                                         <div class="d-flex align-items-center justify-content-between gap-2">
-                                            <span class="text-break" style="min-width:0;"><?= View::e($r['name']) ?></span>
+                                            <span class="text-nowrap" style="font-family:monospace;"><?= View::e($r['name']) ?></span>
                                             <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-1 flex-shrink-0 dns-copy-name"
                                                     title="Copiar nombre" data-copy="<?= View::e($r['name']) ?>"><i class="bi bi-clipboard"></i></button>
                                         </div>
                                     </td>
-                                    <td class="align-middle" style="max-width:240px;">
+                                    <td class="align-middle" style="max-width:0; width:100%;">
                                         <div class="d-flex align-items-center justify-content-between gap-2">
                                             <span style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; font-family:monospace; font-size:.72rem;" title="<?= View::e($fullValue) ?>"><?= View::e($shown) ?></span>
                                             <button type="button" class="btn btn-outline-primary btn-sm py-0 px-1 flex-shrink-0 dns-copy-value"
@@ -223,8 +224,9 @@
                         <?php if (!$ro): ?>
                         <td>
                             <a href="/mail/accounts/<?= $a['id'] ?>/edit" class="btn btn-outline-light btn-sm"><i class="bi bi-pencil"></i></a>
-                            <form method="POST" action="/mail/accounts/<?= $a['id'] ?>/delete" class="d-inline"
-                                  onsubmit="return confirm('Delete <?= View::e($a['email']) ?>?')">
+                            <form method="POST" action="/mail/accounts/<?= $a['id'] ?>/delete" class="d-inline js-confirm-delete"
+                                  data-confirm-title="¿Eliminar el buzón?"
+                                  data-confirm-html="<?= View::e('Se eliminará <strong>' . View::e($a['email']) . '</strong> y <strong>todos sus correos</strong>.<br>Esta acción no se puede deshacer.') ?>">
                                 <?= View::csrf() ?>
                                 <button class="btn btn-outline-danger btn-sm"><i class="bi bi-trash"></i></button>
                             </form>
@@ -255,7 +257,11 @@
                         <td><?= $al['is_catchall'] ? '<span class="badge bg-info">Yes</span>' : '-' ?></td>
                         <?php if (!$ro): ?>
                         <td>
-                            <form method="POST" action="/mail/domains/<?= $domain['id'] ?>/aliases/<?= $al['id'] ?>/delete" class="d-inline">
+                            <form method="POST" action="/mail/domains/<?= $domain['id'] ?>/aliases/<?= $al['id'] ?>/delete" class="d-inline js-confirm-delete"
+                                  data-confirm-title="<?= $al['is_catchall'] ? '¿Eliminar el catch-all?' : '¿Eliminar el alias?' ?>"
+                                  data-confirm-html="<?= View::e($al['is_catchall']
+                                      ? 'Se eliminará el catch-all <strong>' . View::e($al['source'] ?? '') . '</strong> → <strong>' . View::e($al['destination']) . '</strong>.<br>Los correos a direcciones <strong>que no existan</strong> dejarán de llegar y serán rechazados.'
+                                      : 'Se eliminará el alias <strong>' . View::e($al['source'] ?? '') . '</strong> → <strong>' . View::e($al['destination']) . '</strong>.<br>Los correos a esa dirección dejarán de reenviarse.') ?>">
                                 <?= View::csrf() ?>
                                 <button class="btn btn-outline-danger btn-sm py-0"><i class="bi bi-trash"></i></button>
                             </form>
@@ -355,6 +361,40 @@
                 else { msg.textContent = 'Error: ' + (d.error || ''); msg.className = 'small ms-2 text-danger'; }
             })
             .catch(() => { btn.disabled = false; msg.textContent = 'Error de red'; msg.className = 'small ms-2 text-danger'; });
+    });
+})();
+</script>
+<script>
+// Confirmación con modal antes de borrar dominio / buzón / alias.
+// Si SweetAlert no está disponible (CDN caído), cae al confirm() nativo: nunca se
+// borra sin preguntar. El HTML del mensaje viene doble-escapado desde PHP.
+(function () {
+    document.querySelectorAll('form.js-confirm-delete').forEach(function (form) {
+        form.addEventListener('submit', function (ev) {
+            if (form.dataset.confirmed === '1') return;
+            ev.preventDefault();
+            var title = form.dataset.confirmTitle || '¿Eliminar?';
+            var html  = form.dataset.confirmHtml || 'Esta acción no se puede deshacer.';
+            var S = window.SwalDark || window.Swal;
+            if (!S || typeof S.fire !== 'function') {
+                var tmp = document.createElement('div'); tmp.innerHTML = html;
+                if (confirm(title + '\n\n' + tmp.textContent)) { form.dataset.confirmed = '1'; form.submit(); }
+                return;
+            }
+            S.fire({
+                icon: 'warning',
+                title: title,
+                html: html,
+                showCancelButton: true,
+                confirmButtonText: '<i class="bi bi-trash me-1"></i>Eliminar',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#ef4444',
+                focusCancel: true,
+                reverseButtons: true
+            }).then(function (r) {
+                if (r.isConfirmed) { form.dataset.confirmed = '1'; form.submit(); }
+            });
+        });
     });
 })();
 </script>

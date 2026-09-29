@@ -10,16 +10,29 @@
         <div class="card">
             <div class="card-header"><i class="bi bi-pencil me-2"></i>Edit: <?= View::e($account['email']) ?></div>
             <div class="card-body">
-                <form method="POST" action="/mail/accounts/<?= $account['id'] ?>/update">
+                <form method="POST" action="/mail/accounts/<?= $account['id'] ?>/update" id="account-edit-form">
                     <?= View::csrf() ?>
                     <div class="row g-3">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label class="form-label">Email</label>
                             <input type="text" class="form-control" value="<?= View::e($account['email']) ?>" disabled>
                         </div>
-                        <div class="col-md-6">
-                            <label class="form-label">New Password</label>
-                            <input type="password" name="password" class="form-control" minlength="8" placeholder="Leave empty to keep current">
+                        <div class="col-md-4">
+                            <label class="form-label" for="pw1">Nueva contraseña</label>
+                            <div class="input-group">
+                                <input type="password" name="password" id="pw1" class="form-control" minlength="8"
+                                       autocomplete="new-password" placeholder="Vacío = no cambiar">
+                                <button type="button" class="btn btn-outline-secondary pw-eye" data-target="pw1" title="Mostrar/ocultar" tabindex="-1"><i class="bi bi-eye"></i></button>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label" for="pw2">Repetir contraseña</label>
+                            <div class="input-group">
+                                <input type="password" name="password_confirm" id="pw2" class="form-control" minlength="8"
+                                       autocomplete="new-password" placeholder="Vacío = no cambiar">
+                                <button type="button" class="btn btn-outline-secondary pw-eye" data-target="pw2" title="Mostrar/ocultar" tabindex="-1"><i class="bi bi-eye"></i></button>
+                            </div>
+                            <div id="pw-msg" class="form-text"></div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Display Name</label>
@@ -115,3 +128,37 @@
         </div>
     </div>
 </div>
+<script>
+// Contraseña: ojito para mostrar/ocultar + validación en vivo (coinciden y >= 8).
+(function () {
+    document.querySelectorAll('.pw-eye').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var input = document.getElementById(btn.dataset.target);
+            var show = input.type === 'password';
+            input.type = show ? 'text' : 'password';
+            btn.querySelector('i').className = show ? 'bi bi-eye-slash' : 'bi bi-eye';
+        });
+    });
+
+    var form = document.getElementById('account-edit-form');
+    var p1 = document.getElementById('pw1'), p2 = document.getElementById('pw2');
+    var msg = document.getElementById('pw-msg');
+    if (!form || !p1 || !p2) return;
+
+    function check() {
+        var a = p1.value, b = p2.value;
+        p1.classList.remove('is-invalid', 'is-valid'); p2.classList.remove('is-invalid', 'is-valid');
+        if (a === '' && b === '') { msg.textContent = ''; msg.className = 'form-text'; return true; }
+        if (a.length < 8) { msg.textContent = 'Mínimo 8 caracteres.'; msg.className = 'form-text text-danger'; p1.classList.add('is-invalid'); return false; }
+        if (a !== b) { msg.textContent = 'Las contraseñas no coinciden.'; msg.className = 'form-text text-danger'; p2.classList.add('is-invalid'); return false; }
+        msg.textContent = '✓ Las contraseñas coinciden.'; msg.className = 'form-text text-success';
+        p1.classList.add('is-valid'); p2.classList.add('is-valid');
+        return true;
+    }
+    p1.addEventListener('input', check);
+    p2.addEventListener('input', check);
+    form.addEventListener('submit', function (ev) {
+        if (!check()) { ev.preventDefault(); (p1.value.length < 8 ? p1 : p2).focus(); }
+    });
+})();
+</script>
