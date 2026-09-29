@@ -2,6 +2,33 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.227] — 2026-09-29 — MCP: inventario completo para clonar un servidor en un slave exacto
+
+### Mejorado
+- **`clone_inventory` rehecho** (nueva clase `app/Mcp/McpInventory.php`) para el futuro asistente «Añadir slave». Nuevo argumento `section` (`sites`, `processes`, `services`, `apps`, `databases`, `cron`, `runtime`, `network`, `caddy` o `all`): así se puede pedir una sola parte y comparar dos servidores sección a sección.
+- **Quién arranca cada proceso**: supervisor (por `SUPERVISOR_PROCESS_NAME`), PM2, unidad systemd o cron (por el cgroup), o **«manual»** si vive en una sesión SSH, lo que significa que no sobrevive a un reinicio. Aplica a los puertos en escucha y a los procesos de aplicación (Node, PHP fuera de FPM como artisan/Octane/Reverb, Python).
+- **Servicios**: programas de supervisor (comando, directorio, usuario, `numprocs`, solo los *nombres* de sus variables de entorno) y su estado; drop-ins de `/etc/systemd/system/*.d`; servicios en marcha y fallidos. Las unidades `snap.*` ya no cuentan como propias.
+- **Apps propias**: se descubren por el Caddyfile, los procesos, supervisor, systemd y cron. De cada una se muestra:
+  - el tipo (Laravel, Node, PHP o Python);
+  - el estado de git (remoto sin credenciales, rama, commit y cambios sin commit);
+  - lo que **no está en git** y no llegaría con un `git clone` (`vendor`, `public/build`, `storage/app`...);
+  - composer y `package.json`;
+  - del `.env`, **solo los nombres** de las variables que apuntan a este servidor (IPs propias, localhost, hostname o rutas locales), nunca sus valores.
+- **Bases de datos**:
+  - PostgreSQL con versión principal, direcciones de `listen_addresses` **configuradas que no están escuchando** (el caso de asterisk, cuando PostgreSQL arranca antes que WireGuard), reglas remotas de `pg_hba`, réplicas y ajustes WAL.
+  - MySQL/MariaDB a través de `debian.cnf`.
+  - Redis con rol, réplicas, bind, si tiene contraseña (sí/no), persistencia y claves por BD.
+- **Crons**: el contenido de `/etc/cron.d` y de los crontabs de usuario, con los secretos enmascarados (`-p`, `--password`, `PGPASSWORD=`, credenciales en URL...). También se detecta el scheduler de Laravel.
+- **Runtime**: extensiones de PHP por versión, Node, npm y paquetes globales, Composer, versión de Caddy, fuentes apt y **paquetes apt instalados a mano**. Se leen directamente de `dpkg`/`extended_states`, porque `apt-mark` y `npm ls` tardaban 1 s cada uno y el panel es monohilo.
+- **Red**: IPs, WireGuard (endpoints, allowed-ips y antigüedad del handshake, sin claves), firewall (política de INPUT y puertos abiertos a cualquiera) y **ficheros de `/etc` que citan IPs de este servidor**.
+- **Caddy**: opciones globales, almacén y lista de certificados, y módulos no estándar (p. ej. `dns.providers.cloudflare`, que obliga a usar el mismo binario en el slave).
+- **Checklist en lenguaje llano** con lo que el asistente tendría que resolver: procesos arrancados a mano, puertos en todas las interfaces (y si el firewall los deja abiertos), servicios fallidos, unidades y programas de supervisor que hay que copiar, sitios del Caddyfile fuera del panel, `.env` que dependen del servidor, cambios sin commit, `listen` de PostgreSQL sin aplicar, Redis sin réplica, crons.
+
+### Arreglado
+- MySQL aparecía sin bases de datos, porque no se usaba `debian.cnf`.
+- El puerto del panel (8445) se atribuía al proceso `ss`: el hijo que lanza el panel hereda sus sockets. Ahora se busca el dueño real.
+- Los comodines IPv4 e IPv6 del mismo puerto salían duplicados.
+
 ## [1.0.226] — 2026-09-29 — Hotfix de 1.0.225: el reparador de Caddy fallaba al arrancar
 
 - **`Undefined constant "MuseDockPanel\Services\apps"` en `SystemService.php:2269`** (visto en obelix). En tres líneas de `ensureCaddyHttpServerReady()` se habían perdido las comillas de las rutas (`apps/http/servers/srv0` y `…/srv0/listen`) al generar el código de 1.0.225. `php -l` no lo detectaba, porque sin comillas es PHP sintácticamente válido (constantes y divisiones), así que el fallo solo aparecía al ejecutarse. Con el prefijo `-` de 1.0.225 Caddy ya no se caía, pero el reparador no completaba y `srv0` no quedaba escuchando en `:443`. Corregido y comprobado **ejecutando** la función contra un Caddy real, no solo con `php -l`. Además, un escaneo por *tokens* de todos los ficheros tocados en 1.0.224–1.0.225 confirma que no queda ninguna otra cadena sin comillas: sobre la 1.0.225 publicada detecta exactamente estas tres líneas.

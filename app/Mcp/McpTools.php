@@ -101,8 +101,11 @@ final class McpTools
             ],
             'clone_inventory' => [
                 'title' => 'Inventario para clonar el servidor',
-                'description' => 'Inventario de todo lo que habría que clonar para montar un slave EXACTO de este servidor, marcando qué gestiona el panel y qué NO (sitios del Caddyfile fuera del panel, unidades systemd propias, Redis, procesos Node/PM2, Docker, bases de datos, crons, puertos en escucha, versiones de PHP). Solo lectura.',
-                'inputSchema' => $obj(),
+                'description' => 'Inventario de todo lo que habría que clonar para montar un slave EXACTO de este servidor, sobre todo lo que el panel NO gestiona. Incluye un "checklist" en lenguaje llano. Secciones: sites (Caddyfile con root/reverse_proxy), processes (puertos y procesos de apps con QUIÉN los arranca: supervisor/systemd/pm2/cron/manual), services (unidades propias, drop-ins, supervisor, servicios en marcha/fallidos), apps (proyectos: git, lo que no está en git, variables del .env que dependen del servidor —solo nombres—, composer/package.json), databases (PostgreSQL con deriva listen y pg_hba, MySQL, Redis), cron (contenido enmascarado), runtime (PHP+extensiones por versión, Node, apt manual), network (WireGuard, firewall, ficheros de /etc que citan IPs locales), caddy (opciones globales, certificados). Para comparar dos servidores pide la misma sección en ambos. Solo lectura; nunca devuelve valores de .env ni secretos.',
+                'inputSchema' => $obj([
+                    'section' => ['type' => 'string', 'enum' => array_merge(['all'], McpInventory::SECTIONS),
+                        'description' => 'Sección a devolver (por defecto all). Útil si la salida completa es grande.'],
+                ]),
             ],
         ];
     }
@@ -207,7 +210,7 @@ final class McpTools
             'mail_domain'      => self::mailDomain((string)($args['domain'] ?? '')),
             'tls_check'        => self::tlsCheck((string)($args['host'] ?? ''), (string)($args['target'] ?? 'local'), (int)($args['port'] ?? 443)),
             'caddy_hosts'      => self::caddyHosts(),
-            'clone_inventory'  => self::cloneInventory(),
+            'clone_inventory'  => McpInventory::build((string)($args['section'] ?? 'all')),
             default            => McpMailTools::has($name)
                 ? McpMailTools::run($name, $args)
                 : throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
@@ -471,165 +474,5 @@ final class McpTools
             $by[$name] = ['listen' => $srv['listen'] ?? [], 'routes' => count($srv['routes'] ?? []), 'hosts' => array_keys($hosts)];
         }
         return ['total_hosts' => count($all), 'servers' => $by];
-    }
-
-    private static function cloneInventory(): array
-    {
-        // Dominios que SÍ gestiona el panel (para marcar lo que queda fuera).
-        $managed = [];
-        foreach (Database::fetchAll("SELECT domain FROM hosting_accounts") as $r) {
-            $managed[strtolower($r['domain'])] = true;
-            $managed['www.' . strtolower($r['domain'])] = true;
-        }
-        try {
-            foreach (Database::fetchAll("SELECT domain FROM hosting_domain_aliases") as $r) {
-                $managed[strtolower((string)$r['domain'])] = true;
-            }
-        } catch (\Throwable) {
-        }
-
-        // Sitios del Caddyfile (bloques de primer nivel) y cuáles NO son del panel.
-        $caddyfileSites = [];
-        $cf = @file('/etc/caddy/Caddyfile', FILE_IGNORE_NEW_LINES) ?: [];
-        $depth = 0;
-        foreach ($cf as $line) {
-            $t = trim($line);
-            if ($t === '' || str_starts_with($t, '#')) {
-                continue;
-            }
-            if ($depth === 0 && str_ends_with($t, '{') && !str_starts_with($t, '{') && !str_starts_with($t, '(')) {
-                $labels = array_map('trim', explode(',', rtrim(substr($t, 0, -1))));
-                foreach ($labels as $label) {
-                    $h = strtolower(preg_replace('#^https?://#', '', preg_replace('/:\d+$/', '', $label)));
-                    $caddyfileSites[] = ['label' => $label, 'managed_by_panel' => isset($managed[$h])];
-                }
-            }
-            $depth += substr_count($t, '{') - substr_count($t, '}');
-            $depth = max(0, $depth);
-        }
-
-        // Hosts en ejecución en Caddy que no son hostings del panel.
-        $runtimeUnmanaged = [];
-        foreach (self::caddyServers() as $srv) {
-            foreach (($srv['routes'] ?? []) as $route) {
-                foreach (($route['match'] ?? []) as $m) {
-                    foreach (($m['host'] ?? []) as $h) {
-                        $hl = strtolower($h);
-                        if (!isset($managed[$hl]) && !filter_var($hl, FILTER_VALIDATE_IP) && $hl !== 'localhost') {
-                            $runtimeUnmanaged[$hl] = true;
-                        }
-                    }
-                }
-            }
-        }
-        ksort($runtimeUnmanaged);
-
-        // Unidades systemd propias (definidas en /etc/systemd/system, no del sistema).
-        $units = [];
-        foreach (glob('/etc/systemd/system/*.service') ?: [] as $f) {
-            if (is_link($f)) {
-                continue;
-            }
-            $name = basename($f);
-            $body = (string)@file_get_contents($f);
-            preg_match('/^ExecStart=(.*)$/m', $body, $ex);
-            preg_match('/^WorkingDirectory=(.*)$/m', $body, $wd);
-            preg_match('/^User=(.*)$/m', $body, $us);
-            $units[] = [
-                'unit' => $name,
-                'panel_internal' => str_starts_with($name, 'musedock-'),
-                'active' => self::sh('systemctl is-active ' . escapeshellarg($name)),
-                'enabled' => self::sh('systemctl is-enabled ' . escapeshellarg($name)),
-                'exec' => isset($ex[1]) ? mb_substr(trim($ex[1]), 0, 200) : null,
-                'workdir' => $wd[1] ?? null,
-                'user' => $us[1] ?? null,
-            ];
-        }
-
-        // Procesos Node en ejecución (excepto VS Code / extensiones) con su directorio.
-        $node = [];
-        foreach (preg_split('/\n/', self::sh("ps -eo pid=,user=,args= | grep -E '(^|/| )(node|nodejs|pm2|bun|deno)( |$)' | grep -v -E 'vscode-server|cursor-server|grep'")) ?: [] as $l) {
-            if (!preg_match('/^\s*(\d+)\s+(\S+)\s+(.*)$/', $l, $m)) {
-                continue;
-            }
-            $node[] = ['pid' => (int)$m[1], 'user' => $m[2], 'cmd' => mb_substr($m[3], 0, 200), 'cwd' => @readlink("/proc/{$m[1]}/cwd") ?: null];
-        }
-
-        // Redis.
-        $redis = null;
-        if (self::sh('command -v redis-server') !== '') {
-            $redis = [
-                'installed' => true,
-                'active' => self::sh('systemctl is-active redis-server || systemctl is-active redis'),
-                'version' => self::sh('redis-server --version | grep -oE "v=[0-9.]+"'),
-                'keyspace' => self::sh('redis-cli INFO keyspace | grep -E "^db"'),
-                'persistence' => self::sh('redis-cli CONFIG GET dir | tail -1'),
-            ];
-        }
-
-        // Docker.
-        $docker = null;
-        if (self::sh('command -v docker') !== '') {
-            $docker = ['installed' => true, 'containers' => array_filter(explode("\n", self::sh('docker ps --format "{{.Names}} | {{.Image}} | {{.Status}}"')))];
-        }
-
-        // Bases de datos.
-        $pg = [];
-        foreach (array_filter(explode("\n", self::sh('pg_lsclusters --no-header'))) as $l) {
-            $c = preg_split('/\s+/', trim($l));
-            if (count($c) < 4) {
-                continue;
-            }
-            $dbs = self::sh('runuser -u postgres -- psql -p ' . (int)$c[2] . ' -Atc "SELECT datname FROM pg_database WHERE NOT datistemplate AND datname <> \'postgres\'"');
-            $pg[] = ['cluster' => "{$c[0]}/{$c[1]}", 'port' => (int)$c[2], 'status' => $c[3], 'databases' => array_values(array_filter(explode("\n", $dbs)))];
-        }
-        $mysql = null;
-        if (self::sh('command -v mysql') !== '') {
-            $mysql = array_values(array_filter(explode("\n", self::sh('mysql -N -e "SHOW DATABASES" | grep -vE "^(information_schema|performance_schema|mysql|sys)$"'))));
-        }
-
-        // Crons que no son del panel.
-        $crons = [];
-        foreach (glob('/etc/cron.d/*') ?: [] as $f) {
-            $n = basename($f);
-            if (!str_starts_with($n, 'musedock') && !in_array($n, ['e2scrub_all', 'php', 'sysstat', 'certbot', '.placeholder'], true)) {
-                $crons[] = '/etc/cron.d/' . $n;
-            }
-        }
-        $userCrontabs = array_map('basename', glob('/var/spool/cron/crontabs/*') ?: []);
-
-        // Puertos en escucha.
-        $ports = [];
-        foreach (array_filter(explode("\n", self::sh('ss -ltnpH'))) as $l) {
-            $c = preg_split('/\s+/', trim($l));
-            $local = $c[3] ?? '';
-            preg_match('/users:\(\("([^"]+)"/', $l, $pm);
-            $ports[] = ['listen' => $local, 'process' => $pm[1] ?? null];
-        }
-
-        return [
-            'summary' => [
-                'panel_hostings' => count(Database::fetchAll("SELECT id FROM hosting_accounts")),
-                'caddyfile_sites_not_in_panel' => count(array_filter($caddyfileSites, static fn($s) => !$s['managed_by_panel'])),
-                'custom_systemd_units' => count(array_filter($units, static fn($u) => !$u['panel_internal'])),
-                'node_processes' => count($node),
-                'redis' => (bool)$redis,
-                'docker' => (bool)$docker,
-            ],
-            'warning' => 'La sincronización del panel solo replica lo que el panel gestiona. Todo lo marcado como NO gestionado (managed_by_panel=false, unidades systemd propias, Node, Redis, Docker, crons) necesita un paso de clonación específico.',
-            'os' => self::sh('. /etc/os-release && echo "$PRETTY_NAME"'),
-            'php_versions' => array_map(static fn($d) => basename(dirname($d)), glob('/etc/php/*/fpm') ?: []),
-            'caddyfile_sites' => $caddyfileSites,
-            'caddy_runtime_hosts_not_in_panel' => array_keys($runtimeUnmanaged),
-            'systemd_units' => $units,
-            'node_processes' => $node,
-            'redis' => $redis,
-            'docker' => $docker,
-            'postgresql' => $pg,
-            'mysql_databases' => $mysql,
-            'cron_files_not_panel' => $crons,
-            'user_crontabs' => $userCrontabs,
-            'listening_ports' => $ports,
-        ];
     }
 }

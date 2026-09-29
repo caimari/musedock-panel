@@ -20,6 +20,35 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.227',
+                'date' => '2026-09-29',
+                'badge' => 'info',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '**MCP `clone_inventory` rehecho para preparar slaves exactos:** dice QUIEN arranca cada proceso (supervisor, systemd, PM2, cron o "a mano", que no sobrevive a un reinicio), lee los programas de supervisor y los drop-ins de systemd, localiza las apps propias (git, lo que no esta en git como `vendor` o `public/build`, variables del `.env` que apuntan a este servidor, solo nombres) y muestra el contenido de los crons (enmascarado)',
+                            '**Bases de datos:** PostgreSQL con version, `listen_addresses` configurado frente a lo que escucha de verdad (detecta el caso "arranco antes que la VPN"), reglas remotas de `pg_hba` y replicas; MySQL por `debian.cnf`; Redis con rol, replicas, bind y persistencia',
+                            '**Runtime y red:** extensiones de PHP por version, Node/npm globales, paquetes apt instalados a mano, modulos no estandar de Caddy y sus certificados, WireGuard (sin claves), firewall y ficheros de `/etc` que citan IPs de este servidor',
+                            'Incluye un **checklist en lenguaje llano** (procesos arrancados a mano, puertos abiertos a todas las interfaces, servicios fallidos, .env que dependen del servidor...) y el argumento `section` para pedir una sola parte y comparar dos servidores',
+                        ],
+                        'en' => [
+                            '**MCP `clone_inventory` rebuilt to prepare exact slaves:** it tells WHO starts each process (supervisor, systemd, PM2, cron or "by hand", which does not survive a reboot), reads supervisor programs and systemd drop-ins, finds custom apps (git, what is not in git such as `vendor` or `public/build`, `.env` variables pointing at this server, names only) and shows cron contents (masked)',
+                            '**Databases:** PostgreSQL with version, configured `listen_addresses` vs what it really listens on (catches the "started before the VPN" case), remote `pg_hba` rules and replicas; MySQL via `debian.cnf`; Redis with role, replicas, bind and persistence',
+                            '**Runtime and network:** PHP extensions per version, Node/global npm, manually installed apt packages, non-standard Caddy modules and certificates, WireGuard (no keys), firewall and `/etc` files that mention this server\'s IPs',
+                            'Includes a **plain-language checklist** (processes started by hand, ports bound to all interfaces, failed services, server-dependent .env files...) and a `section` argument to request a single part and compare two servers',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'El inventario mostraba MySQL sin bases de datos (no usaba `debian.cnf`), atribuia el puerto del panel al proceso `ss` y contaba las unidades `snap.*` como servicios propios',
+                        ],
+                        'en' => [
+                            'The inventory showed MySQL with no databases (it did not use `debian.cnf`), attributed the panel port to the `ss` process and counted `snap.*` units as custom services',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.226',
                 'date' => '2026-09-29',
                 'badge' => 'danger',
