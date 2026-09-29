@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.228] — 2026-09-29 — Correcciones del inventario MCP tras probarlo en asterisk
+
+### Arreglado
+- **La vista completa (`clone_inventory` sin `section`) se truncaba a 60 KB** y se perdían `network` y `caddy`. Ahora, en esa vista, la lista de paquetes apt y las extensiones de PHP salen resumidas en un recuento; completas con `section=runtime`. Los workers idénticos (Horizon, Octane...) se agrupan en una sola fila con `count` y `pids`.
+- **El puerto de Octane salía con el programa de supervisor vacío.** El servidor swoole que abre el puerto no hereda el entorno de supervisor. Ahora se sube por los procesos padre hasta encontrarlo; el campo `via_parent_pid` indica de qué proceso salió el dato.
+- **El checklist decía «10 variables» del `.env` pero solo nombraba 8.** Ahora las nombra todas.
+
 ## [1.0.227] — 2026-09-29 — MCP: inventario completo para clonar un servidor en un slave exacto
 
 ### Mejorado

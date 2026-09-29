@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.228',
+                'date' => '2026-09-29',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '**Inventario MCP completo truncado a 60 KB** (se perdian las secciones de red y Caddy): en la vista completa, los paquetes apt y las extensiones de PHP se resumen, y los workers identicos (Horizon, Octane) se agrupan en una fila',
+                            '**El puerto de Octane salia sin programa de supervisor:** ahora se busca en los procesos padre (`via_parent_pid`)',
+                            'El checklist nombra todas las variables del `.env` que dependen del servidor, no solo las 8 primeras',
+                        ],
+                        'en' => [
+                            '**Full MCP inventory truncated at 60 KB** (network and Caddy sections were lost): in the full view, apt packages and PHP extensions are summarised and identical workers (Horizon, Octane) are grouped in one row',
+                            '**The Octane port showed no supervisor program:** it is now looked up in the parent processes (`via_parent_pid`)',
+                            'The checklist names every server-dependent `.env` variable, not just the first 8',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.227',
                 'date' => '2026-09-29',
                 'badge' => 'info',

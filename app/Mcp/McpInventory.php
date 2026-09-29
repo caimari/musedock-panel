@@ -60,10 +60,22 @@ final class McpInventory
             }
         }
 
+        $checklist = self::checklist($data);
+
+        // En la vista completa, las listas largas se resumen para no pasar del límite de
+        // salida (60 KB) y perder las últimas secciones; completas en su propia sección.
+        if ($section === 'all' && isset($data['runtime']['apt_manual'])) {
+            $data['runtime']['apt_manual'] = ['count' => count($data['runtime']['apt_manual']),
+                'note' => 'Lista completa con section=runtime.'];
+            foreach (($data['runtime']['php'] ?? []) as $v => $info) {
+                $data['runtime']['php'][$v]['extensions'] = count($info['extensions'] ?? []) . ' extensiones (lista con section=runtime)';
+            }
+        }
+
         return [
             'host' => gethostname(),
             'section' => $section,
-            'checklist' => self::checklist($data),
+            'checklist' => $checklist,
             'note' => 'Solo lectura. "checklist" = lo que el asistente de slave tendría que resolver a mano o con un paso específico. '
                 . 'Para comparar dos servidores, pide la misma sección en ambos. Secciones: ' . implode(', ', self::SECTIONS) . '.',
         ] + $data;
@@ -164,8 +176,11 @@ final class McpInventory
     private static function launcher(int $pid): array
     {
         // Variables que supervisor y PM2 inyectan a sus hijos (solo leemos esas).
-        $env = (string)@file_get_contents("/proc/{$pid}/environ");
-        if ($env !== '') {
+        // Se sube por los padres: hay procesos (p. ej. el servidor swoole que lanza
+        // `artisan octane:start`) que no heredan el entorno, pero su padre sí lo tiene.
+        $p = $pid;
+        for ($i = 0; $i < 8 && $p > 1; $i++) {
+            $env = (string)@file_get_contents("/proc/{$p}/environ");
             $vars = [];
             foreach (explode("\0", $env) as $kv) {
                 [$k, $v] = array_pad(explode('=', $kv, 2), 2, '');
@@ -173,12 +188,22 @@ final class McpInventory
                     $vars[$k] = $v;
                 }
             }
+            $via = $p !== $pid ? ['via_parent_pid' => $p] : [];
             if (!empty($vars['SUPERVISOR_PROCESS_NAME'])) {
-                return ['type' => 'supervisor', 'name' => $vars['SUPERVISOR_GROUP_NAME'] ?? $vars['SUPERVISOR_PROCESS_NAME']];
+                return ['type' => 'supervisor', 'name' => $vars['SUPERVISOR_GROUP_NAME'] ?? $vars['SUPERVISOR_PROCESS_NAME']] + $via;
             }
             if (isset($vars['pm_id']) || isset($vars['PM2_HOME'])) {
-                return ['type' => 'pm2', 'name' => $vars['name'] ?? null, 'pm2_home' => $vars['PM2_HOME'] ?? null];
+                return ['type' => 'pm2', 'name' => $vars['name'] ?? null, 'pm2_home' => $vars['PM2_HOME'] ?? null] + $via;
             }
+            $stat = (string)@file_get_contents("/proc/{$p}/stat");
+            // Campo 4 de stat = ppid (el nombre del proceso va entre paréntesis y puede tener espacios).
+            $after = substr($stat, (int)strrpos($stat, ')') + 2);
+            $next = (int)(explode(' ', $after)[1] ?? 0);
+            $comm = trim((string)@file_get_contents("/proc/{$next}/comm"));
+            if ($next <= 1 || in_array($comm, ['supervisord', 'systemd', 'cron', 'sshd', 'containerd-shim'], true)) {
+                break;
+            }
+            $p = $next;
         }
         $cg = (string)@file_get_contents("/proc/{$pid}/cgroup");
         if (preg_match('#/docker[-/]([0-9a-f]{12})#', $cg, $m)) {
@@ -375,10 +400,20 @@ final class McpInventory
                 continue;
             }
             $info = self::proc($pid);
-            if ($info) {
-                $apps[] = $info;
+            if (!$info) {
+                continue;
             }
+            // Workers idénticos (Horizon, Octane...) en una sola fila con su recuento.
+            $key = json_encode([$info['launcher'], $info['cmd'], $info['cwd'], $info['user']]);
+            if (isset($apps[$key])) {
+                $apps[$key]['count']++;
+                $apps[$key]['pids'][] = $pid;
+                continue;
+            }
+            $apps[$key] = ['count' => 1, 'pids' => [$pid]] + $info;
+            unset($apps[$key]['pid']);
         }
+        $apps = array_values($apps);
         $ports = self::listening();
         return [
             'app_processes' => $apps,
@@ -1035,10 +1070,11 @@ final class McpInventory
     {
         $c = [];
         foreach (($d['processes']['app_processes'] ?? []) as $p) {
+            $pids = implode(',', array_slice($p['pids'] ?? [], 0, 5));
             if (($p['launcher']['type'] ?? '') === 'manual') {
-                $c[] = "Proceso arrancado A MANO (pid {$p['pid']}, {$p['comm']}, {$p['cwd']}): no lo arranca nadie al reiniciar; en el slave habría que ponerlo en supervisor/systemd.";
+                $c[] = "Proceso arrancado A MANO (pid {$pids}, {$p['comm']}, {$p['cwd']}): no lo arranca nadie al reiniciar; en el slave habría que ponerlo en supervisor/systemd.";
             } elseif (($p['launcher']['type'] ?? '') === 'unknown') {
-                $c[] = "Proceso sin lanzador identificado (pid {$p['pid']}, {$p['comm']}, {$p['cwd']}): revisar cómo se arranca.";
+                $c[] = "Proceso sin lanzador identificado (pid {$pids}, {$p['comm']}, {$p['cwd']}): revisar cómo se arranca.";
             }
         }
         $fw = null;
@@ -1074,7 +1110,7 @@ final class McpInventory
         foreach (($d['apps']['apps'] ?? []) as $a) {
             if (!empty($a['env']['server_dependent'])) {
                 $c[] = "{$a['path']}/.env tiene " . count($a['env']['server_dependent']) . ' variables que apuntan a este servidor ('
-                    . implode(', ', array_map(static fn($x) => $x['key'], array_slice($a['env']['server_dependent'], 0, 8))) . ').';
+                    . implode(', ', array_map(static fn($x) => $x['key'], $a['env']['server_dependent'])) . ').';
             }
             if (!empty($a['git']['uncommitted_changes'])) {
                 $c[] = "{$a['path']}: {$a['git']['uncommitted_changes']} cambios sin commit (un git clone no los traería).";
