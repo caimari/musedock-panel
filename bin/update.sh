@@ -239,8 +239,11 @@ install_caddy_runtime_repair_override() {
 # end-to-end con revert, pero reducir la superficie (arranque, no reload) es la
 # defensa principal. El reload nativo de Caddy (caddy reload desde disco) sigue
 # intacto — solo dejamos de encadenarle el reparador del panel.
-ExecStartPost=/bin/sleep 5
-ExecStartPost=${PHP_BIN} ${PANEL_DIR}/cli/repair-caddy-routes.php
+# Prefijo "-": si el reparador falla, systemd NO da por fallido el arranque de
+# Caddy. Sin él, en 1.0.224 un fallo del reparador hacía que systemd matara Caddy
+# (obelix, 2026-09-29). Un reparador nunca debe poder tumbar lo que repara.
+ExecStartPost=-/bin/sleep 5
+ExecStartPost=-${PHP_BIN} ${PANEL_DIR}/cli/repair-caddy-routes.php
 OVERRIDEEOF
     chmod 644 /etc/systemd/system/caddy.service.d/zz-musedock-panel-repair.conf
     systemctl daemon-reload 2>/dev/null || true

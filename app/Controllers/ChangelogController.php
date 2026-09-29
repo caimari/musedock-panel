@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.225',
+                'date' => '2026-09-29',
+                'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '**CRITICO — el panel borraba configuracion de Caddy:** en la API de Caddy, PATCH sustituye el objeto entero (no fusiona). `PATCH srv0 {listen}` dejaba srv0 sin rutas, `PATCH servers` borraba los demas servers y `PATCH apps` todas las apps. Fue la causa real del incidente de agosto y de la caida de Caddy en obelix con 1.0.224. Ahora el panel escribe solo la hoja exacta y crea lo que falta sin tocar lo de al lado (10 PATCH peligrosos eliminados, probado contra un Caddy real)',
+                            '**El reparador de Caddy ya no puede tumbar Caddy:** si falla tras tocar la configuracion y se perdieron webs, revierte a la foto inicial; y en systemd un fallo del reparador ya no marca Caddy como fallido',
+                        ],
+                        'en' => [
+                            '**CRITICAL — the panel was wiping Caddy config:** in the Caddy API, PATCH replaces the whole object (it does not merge). `PATCH srv0 {listen}` left srv0 with no routes, `PATCH servers` wiped the other servers and `PATCH apps` every app. This was the real cause of the August incident and of Caddy going down on obelix with 1.0.224. The panel now writes only the exact leaf and creates what is missing without touching siblings (10 dangerous PATCHes removed, tested against a real Caddy)',
+                            '**The Caddy repair hook can no longer take Caddy down:** if it fails after touching the config and sites were lost, it reverts to the initial snapshot; and a repair failure no longer marks Caddy as failed in systemd',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.224',
                 'date' => '2026-09-29',
                 'badge' => 'success',

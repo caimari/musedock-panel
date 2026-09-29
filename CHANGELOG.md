@@ -2,6 +2,34 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.225] — 2026-09-29 — CRÍTICO: el panel borraba configuración de Caddy con PATCH (causa real del incidente de agosto)
+
+**Actualiza todos los nodos.** Con 1.0.224, obelix se quedó sin Caddy al arrancar: el reparador borró todas las rutas de `srv0`, abortó, y systemd mató Caddy.
+
+### Causa real: `PATCH` en Caddy SUSTITUYE, no fusiona
+
+Comprobado contra una instancia real de Caddy:
+
+| Llamada del panel | Efecto real |
+|---|---|
+| `PATCH srv0 {"listen":[…]}` | `srv0` se queda **sin rutas** (todas las webs fuera) |
+| `PATCH servers {"srv_panel":{…}}` | **se borran todos los demás servers** |
+| `PATCH tls/automation {"policies":[…]}` | se pierde el resto de ajustes TLS |
+| `PATCH apps {"tls":{…}}` | se borran **todas las apps** |
+| `GET` de una ruta inexistente | responde `200` con cuerpo `null`, no `404` |
+
+- **Corrige lo que creíamos en agosto.** El incidente del 6 de agosto no fue un «null transitorio» tras parchear el `listen`: **el propio `PATCH srv0 {listen}` borraba las rutas**. El comentario del código lo decía («routes vacío tras parchear srv0») sin entenderlo. La protección añadida entonces (no vaciar si había rutas antes) evitó el borrado silencioso, pero dejó el reparador abortando sin revertir, y con `ExecStartPost` systemd tumbaba Caddy.
+- **Solo se disparaba en nodos donde el `listen` de `srv0` no incluía ya `:443`** (obelix). En mortadelo y asterisk no se llegaba a ejecutar.
+- Las comprobaciones de «si es 404, créalo» nunca se cumplían, porque Caddy no devuelve 404.
+
+### Arreglado
+
+- **Escritura segura en la API de Caddy** (`SystemService`): nuevos `caddySetLeaf()`, `caddyCreatePath()` y `caddyPathExists()`. Se escribe **solo la hoja exacta**; si no existe, se crea con `POST` colgándola del antepasado existente más profundo, sin tocar a sus hermanas; y si ya tiene el mismo valor, no se escribe. **Se eliminan los 10 `PATCH` sobre objetos contenedores**: el `listen` de `srv0`, la cadena de creación de `srv0` (servers/http/apps), la creación y normalización del server del panel, y las políticas TLS (ahora solo `tls/automation/policies`).
+- **El reparador ya no puede dejar el servidor peor ni tumbar Caddy**:
+  - si falla la preparación de `srv0` después de haber tocado Caddy y se perdieron hosts, **revierte a la foto inicial** antes de salir (antes salía con `exit(1)` sin revertir);
+  - el drop-in de systemd usa `ExecStartPost=-…`: un fallo del reparador ya no marca el arranque de Caddy como fallido.
+- Probado contra un Caddy real: el `listen` cambia sin perder rutas, crear el server del panel conserva los demás, las políticas TLS no pierden otros ajustes, y si falta la app TLS se crea sin tocar `http`.
+
 ## [1.0.224] — 2026-09-29 — Servidor MCP (fase 1), Mail general 29× más rápida, fixes de correo
 
 ### Añadido: servidor MCP (Model Context Protocol), fase 1 — solo lectura

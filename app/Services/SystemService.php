@@ -992,103 +992,110 @@ CONF;
         return $ok;
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Escritura SEGURA en la API admin de Caddy (1.0.225).
+    //
+    // Comprobado contra un Caddy real:
+    //  - PATCH SUSTITUYE el objeto de la ruta, NO fusiona. PATCH srv0 {listen:[…]}
+    //    dejaba srv0 sin rutas (todas las webs fuera); PATCH servers {x:…} borraba
+    //    todos los demás servers; PATCH tls/automation {policies} borraba el resto
+    //    de ajustes TLS; PATCH apps {tls:…} borraba TODAS las apps. Esta fue la causa
+    //    real del incidente de agosto (no un "null transitorio") y de la caída de
+    //    Caddy en obelix con 1.0.224.
+    //  - GET de una ruta inexistente devuelve 200 con cuerpo "null", no 404.
+    //  - POST sobre una clave inexistente la crea sin tocar a sus hermanas.
+    //  - PUT sobre una clave existente da 409.
+    // Regla: escribir SOLO la hoja exacta; si no existe, crearla con POST colgando
+    // del antepasado existente más profundo. Nunca PATCH sobre un objeto contenedor.
+    // ─────────────────────────────────────────────────────────────────────
+
+    /** @return array{0:int,1:string} [código HTTP, cuerpo] */
+    private static function caddyRequest(string $method, string $url, mixed $body = null, int $timeout = 10): array
+    {
+        $ch = curl_init($url);
+        $opts = [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => $timeout];
+        if ($body !== null) {
+            $opts[CURLOPT_POSTFIELDS] = json_encode($body);
+            $opts[CURLOPT_HTTPHEADER] = ['Content-Type: application/json'];
+        }
+        curl_setopt_array($ch, $opts);
+        $resp = (string)curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        return [$code, $resp];
+    }
+
+    /** ¿Existe la ruta? (Caddy devuelve 200 + "null" para las que no existen.) */
+    private static function caddyPathExists(string $caddyApi, string $path): bool
+    {
+        [$code, $body] = self::caddyRequest('GET', rtrim("{$caddyApi}/config/" . trim($path, '/'), '/'));
+        $b = trim($body);
+        return $code >= 200 && $code < 300 && $b !== '' && $b !== 'null';
+    }
+
+    /**
+     * Fija el valor de UNA hoja sin tocar nada más. Si ya tiene ese valor, no
+     * escribe. Si existe, PATCH de la hoja; si no, la crea (caddyCreatePath).
+     * @return array{0:bool,1:string} [ok, cuerpo de la respuesta]
+     */
+    private static function caddySetLeaf(string $caddyApi, string $path, mixed $value): array
+    {
+        $path = trim($path, '/');
+        [$code, $body] = self::caddyRequest('GET', "{$caddyApi}/config/{$path}");
+        $b = trim($body);
+        if ($code >= 200 && $code < 300 && $b !== '' && $b !== 'null') {
+            if (json_encode(json_decode($b, true)) === json_encode($value)) {
+                return [true, 'unchanged'];
+            }
+            [$code, $resp] = self::caddyRequest('PATCH', "{$caddyApi}/config/{$path}", $value);
+            return [$code >= 200 && $code < 300, $resp];
+        }
+        return self::caddyCreatePath($caddyApi, $path, $value);
+    }
+
+    /**
+     * Crea $path con $value colgándolo del antepasado existente más profundo, con
+     * POST sobre la primera clave que falta (POST sobre una clave inexistente la
+     * crea sin tocar a sus hermanas).
+     * @return array{0:bool,1:string}
+     */
+    private static function caddyCreatePath(string $caddyApi, string $path, mixed $value): array
+    {
+        $segs = explode('/', trim($path, '/'));
+        for ($i = count($segs) - 1; $i >= 0; $i--) {
+            $anc = implode('/', array_slice($segs, 0, $i));
+            if ($i > 0 && !self::caddyPathExists($caddyApi, $anc)) {
+                continue;
+            }
+            $nested = $value;
+            for ($j = count($segs) - 1; $j > $i; $j--) {
+                $nested = [$segs[$j] => $nested];
+            }
+            [$code, $resp] = self::caddyRequest('POST', "{$caddyApi}/config/" . ($anc === '' ? '' : $anc . '/') . $segs[$i], $nested);
+            return [$code >= 200 && $code < 300, $resp];
+        }
+        return [false, 'no existing ancestor'];
+    }
+
     private static function patchTlsPolicies(string $caddyApi, array $policies): void
     {
-        // Some Caddy states do not have apps.tls.automation yet.
-        // Seed the path so PATCH below does not fail with "invalid traversal path".
-        $ensureTlsPath = static function () use ($caddyApi): void {
-            $ch = curl_init("{$caddyApi}/config/apps/tls/automation");
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 10,
-            ]);
-            curl_exec($ch);
-            $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            if ($code >= 200 && $code < 300) {
-                return;
-            }
-
-            $ch = curl_init("{$caddyApi}/config/apps");
-            curl_setopt_array($ch, [
-                CURLOPT_CUSTOMREQUEST => 'PATCH',
-                CURLOPT_POSTFIELDS => json_encode(['tls' => ['automation' => ['policies' => []]]]),
-                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 10,
-            ]);
-            curl_exec($ch);
-            curl_close($ch);
-        };
-
-        $ensureTlsPath();
-
-        // IDEMPOTENCIA (incidente TLS 2026-09-14): si las políticas actuales ya son
-        // equivalentes a las nuevas, NO tocar nada. El reparador corría tras CADA
-        // recarga de Caddy y hacía DELETE + rebuild de las políticas cada vez; un
-        // rebuild con inputs transitoriamente incompletos (proveedor DNS/token CF no
-        // detectado en ese instante) dejaba algún host sin política aplicable →
-        // "no peer certificate". No reescribir cuando no cambia elimina el caso común.
-        $curRaw = @file_get_contents("{$caddyApi}/config/apps/tls/automation/policies");
-        $curPolicies = json_decode((string)$curRaw, true);
-        if (is_array($curPolicies) && json_encode($curPolicies) === json_encode($policies)) {
+        // Solo la hoja apps/tls/automation/policies. Antes: PATCH sobre
+        // tls/automation (borraba el resto de ajustes TLS) y, si faltaba, PATCH
+        // sobre /apps (¡borraba todas las apps, http incluida!).
+        // caddySetLeaf no escribe si ya coinciden (idempotencia del incidente
+        // TLS 2026-09-14) y el reemplazo de la hoja es atómico (sin ventana vacía).
+        [$ok, $resp] = self::caddySetLeaf($caddyApi, 'apps/tls/automation/policies', $policies);
+        if ($ok) {
             return;
-        }
-
-        // Reemplazo ATÓMICO: un solo PATCH del objeto automation con la lista completa
-        // reemplaza el array de políticas de golpe. Se ELIMINA el DELETE previo, que
-        // creaba una ventana en la que NO existía ninguna política y un handshake en
-        // ese instante fallaba con "no peer certificate".
-        $ch = curl_init("{$caddyApi}/config/apps/tls/automation");
-        curl_setopt_array($ch, [
-            CURLOPT_CUSTOMREQUEST => 'PATCH',
-            CURLOPT_POSTFIELDS => json_encode(['policies' => $policies]),
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 10,
-        ]);
-        $resp = (string) curl_exec($ch);
-        $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if (($httpCode < 200 || $httpCode >= 300) && str_contains(strtolower($resp), 'invalid traversal path')) {
-            // Retry once after recreating tls.automation path
-            $ensureTlsPath();
-            $ch = curl_init("{$caddyApi}/config/apps/tls/automation");
-            curl_setopt_array($ch, [
-                CURLOPT_CUSTOMREQUEST => 'PATCH',
-                CURLOPT_POSTFIELDS => json_encode(['policies' => $policies]),
-                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 10,
-            ]);
-            $resp = (string) curl_exec($ch);
-            $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
         }
 
         // Some nodes run a Caddy build without cloudflare DNS provider.
         // If that happens, retry with a degraded HTTP-only policy set so TLS automation
         // still works for direct (non-wildcard) domains and panel hostnames.
-        if ($httpCode >= 200 && $httpCode < 300) {
-            return;
-        }
-
         if (!str_contains(strtolower($resp), 'dns.providers.cloudflare')) {
             return;
         }
-
-        $fallbackPolicies = self::degradePoliciesWithoutDnsProvider($policies);
-        $ch = curl_init("{$caddyApi}/config/apps/tls/automation");
-        curl_setopt_array($ch, [
-            CURLOPT_CUSTOMREQUEST => 'PATCH',
-            CURLOPT_POSTFIELDS => json_encode(['policies' => $fallbackPolicies]),
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 10,
-        ]);
-        curl_exec($ch);
-        curl_close($ch);
+        self::caddySetLeaf($caddyApi, 'apps/tls/automation/policies', self::degradePoliciesWithoutDnsProvider($policies));
     }
 
     private static function degradePoliciesWithoutDnsProvider(array $policies): array
@@ -1664,49 +1671,35 @@ CONF;
         $serverUrl = "{$caddyApi}/config/apps/http/servers/{$serverName}";
         $panelListen = ':' . self::getPanelPublicPort();
 
-        // Ensure server object exists.
-        $ch = curl_init($serverUrl);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 8,
-        ]);
-        $serverRaw = curl_exec($ch);
-        $serverCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($serverCode === 404) {
+        // Ensure server object exists. (Caddy devuelve 200 + "null" si no existe,
+        // no 404: la comprobación antigua por 404 nunca se cumplía.) Se crea SOLO
+        // esta clave; antes era PATCH sobre /servers, que BORRABA todos los demás
+        // servers (srv0 con todas las webs incluido).
+        $serverPath = "apps/http/servers/{$serverName}";
+        $serverRaw = null;
+        if (!self::caddyPathExists($caddyApi, $serverPath)) {
             $initialServer = [
-                'listen' => [$panelListen],
-                'automatic_https' => ['disable_redirects' => true],
-                'tls_connection_policies' => [[]],
-                'routes' => [],
+                "listen" => [$panelListen],
+                "automatic_https" => ["disable_redirects" => true],
+                "tls_connection_policies" => [[]],
+                "routes" => [],
             ];
-            $ch = curl_init("{$caddyApi}/config/apps/http/servers");
-            curl_setopt_array($ch, [
-                CURLOPT_CUSTOMREQUEST => 'PATCH',
-                CURLOPT_POSTFIELDS => json_encode([$serverName => $initialServer]),
-                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 8,
-            ]);
-            curl_exec($ch);
-            $createCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            if (!($createCode >= 200 && $createCode < 300)) {
+            [$created] = self::caddyCreatePath($caddyApi, $serverPath, $initialServer);
+            if (!$created) {
                 return false;
             }
-        } elseif (!($serverCode >= 200 && $serverCode < 300)) {
-            return false;
+        } else {
+            [, $serverRaw] = self::caddyRequest("GET", $serverUrl, null, 8);
         }
 
         // Normalize critical server fields but keep existing routes untouched.
         $decodedServer = json_decode((string)$serverRaw, true);
         $existingListen = [];
         if (is_array($decodedServer)) {
-            $listen = $decodedServer['listen'] ?? null;
+            $listen = $decodedServer["listen"] ?? null;
             if (is_array($listen) && array_is_list($listen)) {
                 foreach ($listen as $entry) {
-                    if (is_string($entry) && $entry !== '') {
+                    if (is_string($entry) && $entry !== "") {
                         $existingListen[] = $entry;
                     }
                 }
@@ -1717,24 +1710,16 @@ CONF;
         }
         $existingListen = array_values(array_unique($existingListen));
 
-        $patch = [
-            'listen' => $existingListen,
-            'automatic_https' => ['disable_redirects' => true],
-            'tls_connection_policies' => [[]],
-        ];
-        $ch = curl_init($serverUrl);
-        curl_setopt_array($ch, [
-            CURLOPT_CUSTOMREQUEST => 'PATCH',
-            CURLOPT_POSTFIELDS => json_encode($patch),
-            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 8,
-        ]);
-        curl_exec($ch);
-        $patchCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-        if (!($patchCode >= 200 && $patchCode < 300)) {
-            return false;
+        // Hoja a hoja (antes: PATCH del objeto server entero → borraba sus rutas).
+        foreach ([
+            "listen" => $existingListen,
+            "automatic_https/disable_redirects" => true,
+            "tls_connection_policies" => [[]],
+        ] as $leaf => $value) {
+            [$ok] = self::caddySetLeaf($caddyApi, "{$serverPath}/{$leaf}", $value);
+            if (!$ok) {
+                return false;
+            }
         }
 
         // Ensure routes key exists and is a list.
@@ -2277,82 +2262,15 @@ CONF;
 
         $serverUrl = "{$caddyApi}/config/apps/http/servers/srv0";
 
-        // Check if srv0 exists
-        $ch = curl_init($serverUrl);
-        curl_setopt_array($ch, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => 8,
-        ]);
-        curl_exec($ch);
-        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
-
-        if ($httpCode === 404) {
-            $initialServer = ['listen' => $requiredListen, 'routes' => []];
-
-            // Create srv0 directly
-            $ch = curl_init($serverUrl);
-            curl_setopt_array($ch, [
-                CURLOPT_CUSTOMREQUEST => 'POST',
-                CURLOPT_POSTFIELDS => json_encode($initialServer),
-                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT => 8,
-            ]);
-            curl_exec($ch);
-            $createCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-
-            if (!($createCode >= 200 && $createCode < 300)) {
-                // Fallback: patch into servers map
-                $ch = curl_init("{$caddyApi}/config/apps/http/servers");
-                curl_setopt_array($ch, [
-                    CURLOPT_CUSTOMREQUEST => 'PATCH',
-                    CURLOPT_POSTFIELDS => json_encode(['srv0' => $initialServer]),
-                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_TIMEOUT => 8,
-                ]);
-                curl_exec($ch);
-                $patchCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
-
-                if (!($patchCode >= 200 && $patchCode < 300)) {
-                    // Last fallback: create whole http app with srv0
-                    $ch = curl_init("{$caddyApi}/config/apps/http");
-                    curl_setopt_array($ch, [
-                        CURLOPT_CUSTOMREQUEST => 'PATCH',
-                        CURLOPT_POSTFIELDS => json_encode(['servers' => ['srv0' => $initialServer]]),
-                        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                        CURLOPT_RETURNTRANSFER => true,
-                        CURLOPT_TIMEOUT => 8,
-                    ]);
-                    curl_exec($ch);
-                    $httpPatchCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                    curl_close($ch);
-
-                    if (!($httpPatchCode >= 200 && $httpPatchCode < 300)) {
-                        // Final fallback: patch parent apps object (some builds reject /apps/http when key is missing)
-                        $ch = curl_init("{$caddyApi}/config/apps");
-                        curl_setopt_array($ch, [
-                            CURLOPT_CUSTOMREQUEST => 'PATCH',
-                            CURLOPT_POSTFIELDS => json_encode(['http' => ['servers' => ['srv0' => $initialServer]]]),
-                            CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                            CURLOPT_RETURNTRANSFER => true,
-                            CURLOPT_TIMEOUT => 8,
-                        ]);
-                        curl_exec($ch);
-                        $appsPatchCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                        curl_close($ch);
-
-                        if (!($appsPatchCode >= 200 && $appsPatchCode < 300)) {
-                            return false;
-                        }
-                    }
-                }
+        // Check if srv0 exists. (Caddy devuelve 200 + "null" si no existe, no 404.)
+        // Si falta, se crea SOLO srv0 colgándolo del antepasado existente (POST).
+        // Antes había una cadena de PATCH sobre /servers, /apps/http y /apps que, al
+        // sustituir el objeto entero, podía borrar los demás servers o TODAS las apps.
+        if (!self::caddyPathExists($caddyApi, apps/http/servers/srv0)) {
+            [$created] = self::caddyCreatePath($caddyApi, apps/http/servers/srv0, [listen => $requiredListen, routes => []]);
+            if (!$created) {
+                return false;
             }
-        } elseif (!($httpCode >= 200 && $httpCode < 300)) {
-            return false;
         }
 
         // WITNESS (anti-TOCTOU, incidente 2026-08-06): cuántas rutas tiene srv0 ANTES
@@ -2413,38 +2331,13 @@ CONF;
             }
         }
         if ($listenCode < 200 || $listenCode >= 300 || $needsListenUpdate) {
-            if ($listenCode === 404) {
-                // listen key missing: create it
-                $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0/listen");
-                curl_setopt_array($ch, [
-                    CURLOPT_CUSTOMREQUEST => 'PUT',
-                    CURLOPT_POSTFIELDS => json_encode($listen),
-                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_TIMEOUT => 8,
-                ]);
-                curl_exec($ch);
-                $putCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
-                if (!($putCode >= 200 && $putCode < 300)) {
-                    return false;
-                }
-            } else {
-                // listen key already exists: update parent object (PUT /listen returns 409 on some Caddy builds)
-                $ch = curl_init("{$caddyApi}/config/apps/http/servers/srv0");
-                curl_setopt_array($ch, [
-                    CURLOPT_CUSTOMREQUEST => 'PATCH',
-                    CURLOPT_POSTFIELDS => json_encode(['listen' => $listen]),
-                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                    CURLOPT_RETURNTRANSFER => true,
-                    CURLOPT_TIMEOUT => 8,
-                ]);
-                curl_exec($ch);
-                $patchCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                curl_close($ch);
-                if (!($patchCode >= 200 && $patchCode < 300)) {
-                    return false;
-                }
+            // SOLO la hoja listen. Antes, si ya existía, se hacía PATCH sobre srv0
+            // entero con {listen:[…]}: Caddy SUSTITUYE el objeto, así que srv0 se
+            // quedaba SIN RUTAS (todas las webs fuera). Causa real del incidente de
+            // agosto y de la caída de Caddy en obelix con 1.0.224.
+            [$listenOk] = self::caddySetLeaf($caddyApi, apps/http/servers/srv0/listen, $listen);
+            if (!$listenOk) {
+                return false;
             }
         }
 

@@ -104,6 +104,62 @@ if ($guardArmed) {
         . count($certServedBefore) . " con certificado, antes de reparar.\n";
 }
 
+// Revert reutilizable: POST /load del snapshot previo + alerta + log + salida != 0.
+// POST /load es una recarga INTERNA de Caddy (no systemd), no re-dispara el hook.
+$revertNow = function (string $summary) use ($caddyApi, $configSnapshotBefore, $hostsBefore): void {
+    fwrite(STDERR, "[repair-caddy] CRITICAL: {$summary} Revirtiendo a la config previa (POST /load).\n");
+    $ch = curl_init("{$caddyApi}/load");
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => $configSnapshotBefore,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 15,
+    ]);
+    $revertResp = curl_exec($ch);
+    $revertCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    $reverted = $revertCode >= 200 && $revertCode < 300;
+    if ($reverted) {
+        fwrite(STDERR, "[repair-caddy] OK: config revertida; los " . count($hostsBefore) . " host(s) previos siguen servidos.\n");
+    } else {
+        fwrite(STDERR, "[repair-caddy] ERROR: fallo al revertir (HTTP {$revertCode}). {$revertResp}\n");
+    }
+    try {
+        \MuseDockPanel\Services\LogService::log('caddy.repair', $reverted ? 'reverted' : 'revert_failed',
+            $summary . ' ' . ($reverted ? 'Revertido automaticamente a la config previa.' : 'NO se pudo revertir — requiere intervencion manual.'));
+    } catch (\Throwable $e) {
+        // logging best-effort
+    }
+    try {
+        \MuseDockPanel\Services\NotificationService::send(
+            '[MuseDock] Caddy: reparacion revertida para no romper TLS/web',
+            $summary . "\n\n" . ($reverted
+                ? "Se revirtio automaticamente a la configuracion previa; el servicio sigue en pie.\n"
+                : "El intento de revertir FALLO (HTTP {$revertCode}). Ejecuta 'systemctl reload caddy' para recargar el Caddyfile de disco.\n") .
+            "\nFecha: " . date('Y-m-d H:i:s')
+        );
+    } catch (\Throwable $e) {
+        // alert best-effort
+    }
+    exit($reverted ? 1 : 2);
+};
+
+// Salida por error SIN dejar el servidor peor: si el fallo llegó después de haber
+// modificado Caddy y se han perdido hosts, se revierte a la foto inicial.
+// (1.0.224: al fallar la preparación de srv0 se salía con exit(1) ANTES de la
+// reversión: obelix se quedó sin webs y, vía ExecStartPost, sin Caddy.)
+$bailOut = function (string $msg) use ($guardArmed, $hostsBefore, $capturedHosts, $caddyApi, $revertNow): void {
+    fwrite(STDERR, "[repair-caddy] ERROR: {$msg}\n");
+    if ($guardArmed) {
+        $lost = array_values(array_diff($hostsBefore, $capturedHosts($caddyApi)));
+        if ($lost) {
+            $revertNow("{$msg} Se habian perdido host(s): " . implode(", ", $lost) . ".");
+        }
+    }
+    exit(1);
+};
+
 $repairWebmailRoute = static function (): void {
     try {
         $result = \MuseDockPanel\Services\WebmailService::repairConfiguredRoute();
@@ -129,8 +185,7 @@ if ($staticPanelTls) {
 }
 
 if (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi, true)) {
-    fwrite(STDERR, "[repair-caddy] ERROR: no se pudo preparar srv0/listeners.\n");
-    exit(1);
+    $bailOut("no se pudo preparar srv0/listeners.");
 }
 
 // Post-check: do not report success if Caddy still returns malformed listen/routes payloads.
@@ -139,8 +194,7 @@ $routesRaw = @file_get_contents("{$caddyApi}/config/apps/http/servers/srv0/route
 $listen = json_decode((string)$listenRaw, true);
 $routes = json_decode((string)$routesRaw, true);
 if (!is_array($listen) || !array_is_list($listen) || !is_array($routes) || !array_is_list($routes)) {
-    fwrite(STDERR, "[repair-caddy] ERROR: srv0 incompleto (listen=" . trim((string)$listenRaw) . ", routes=" . trim((string)$routesRaw) . ").\n");
-    exit(1);
+    $bailOut("srv0 incompleto (listen=" . trim((string)$listenRaw) . ", routes=" . trim((string)$routesRaw) . ").");
 }
 
 echo "[repair-caddy] OK: srv0/listeners activos.\n";
@@ -206,46 +260,6 @@ if (!empty($result['skipped'])) {
 
 $repairWebmailRoute();
 
-// Revert reutilizable: POST /load del snapshot previo + alerta + log + salida != 0.
-// POST /load es una recarga INTERNA de Caddy (no systemd), no re-dispara el hook.
-$revertNow = function (string $summary) use ($caddyApi, $configSnapshotBefore, $hostsBefore): void {
-    fwrite(STDERR, "[repair-caddy] CRITICAL: {$summary} Revirtiendo a la config previa (POST /load).\n");
-    $ch = curl_init("{$caddyApi}/load");
-    curl_setopt_array($ch, [
-        CURLOPT_POST => true,
-        CURLOPT_POSTFIELDS => $configSnapshotBefore,
-        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 15,
-    ]);
-    $revertResp = curl_exec($ch);
-    $revertCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    $reverted = $revertCode >= 200 && $revertCode < 300;
-    if ($reverted) {
-        fwrite(STDERR, "[repair-caddy] OK: config revertida; los " . count($hostsBefore) . " host(s) previos siguen servidos.\n");
-    } else {
-        fwrite(STDERR, "[repair-caddy] ERROR: fallo al revertir (HTTP {$revertCode}). {$revertResp}\n");
-    }
-    try {
-        \MuseDockPanel\Services\LogService::log('caddy.repair', $reverted ? 'reverted' : 'revert_failed',
-            $summary . ' ' . ($reverted ? 'Revertido automaticamente a la config previa.' : 'NO se pudo revertir — requiere intervencion manual.'));
-    } catch (\Throwable $e) {
-        // logging best-effort
-    }
-    try {
-        \MuseDockPanel\Services\NotificationService::send(
-            '[MuseDock] Caddy: reparacion revertida para no romper TLS/web',
-            $summary . "\n\n" . ($reverted
-                ? "Se revirtio automaticamente a la configuracion previa; el servicio sigue en pie.\n"
-                : "El intento de revertir FALLO (HTTP {$revertCode}). Ejecuta 'systemctl reload caddy' para recargar el Caddyfile de disco.\n") .
-            "\nFecha: " . date('Y-m-d H:i:s')
-        );
-    } catch (\Throwable $e) {
-        // alert best-effort
-    }
-    exit($reverted ? 1 : 2);
-};
 
 // ── SAFETY GUARD post-check (ver cabecera + incidente TLS 2026-09-14) ──
 if ($guardArmed) {
