@@ -2266,8 +2266,8 @@ CONF;
         // Si falta, se crea SOLO srv0 colgándolo del antepasado existente (POST).
         // Antes había una cadena de PATCH sobre /servers, /apps/http y /apps que, al
         // sustituir el objeto entero, podía borrar los demás servers o TODAS las apps.
-        if (!self::caddyPathExists($caddyApi, apps/http/servers/srv0)) {
-            [$created] = self::caddyCreatePath($caddyApi, apps/http/servers/srv0, [listen => $requiredListen, routes => []]);
+        if (!self::caddyPathExists($caddyApi, 'apps/http/servers/srv0')) {
+            [$created] = self::caddyCreatePath($caddyApi, 'apps/http/servers/srv0', ['listen' => $requiredListen, 'routes' => []]);
             if (!$created) {
                 return false;
             }
@@ -2335,7 +2335,7 @@ CONF;
             // entero con {listen:[…]}: Caddy SUSTITUYE el objeto, así que srv0 se
             // quedaba SIN RUTAS (todas las webs fuera). Causa real del incidente de
             // agosto y de la caída de Caddy en obelix con 1.0.224.
-            [$listenOk] = self::caddySetLeaf($caddyApi, apps/http/servers/srv0/listen, $listen);
+            [$listenOk] = self::caddySetLeaf($caddyApi, 'apps/http/servers/srv0/listen', $listen);
             if (!$listenOk) {
                 return false;
             }

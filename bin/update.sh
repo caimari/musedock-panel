@@ -242,8 +242,11 @@ install_caddy_runtime_repair_override() {
 # Prefijo "-": si el reparador falla, systemd NO da por fallido el arranque de
 # Caddy. Sin él, en 1.0.224 un fallo del reparador hacía que systemd matara Caddy
 # (obelix, 2026-09-29). Un reparador nunca debe poder tumbar lo que repara.
+# Prefijo "+": el reparador se ejecuta como root. Sin él heredaba User=caddy del
+# servicio y no podía leer /opt/musedock-panel/.env (root, 600): arrancaba sin
+# credenciales de la BD ni ajustes (aviso "Permission denied" en Env.php).
 ExecStartPost=-/bin/sleep 5
-ExecStartPost=-${PHP_BIN} ${PANEL_DIR}/cli/repair-caddy-routes.php
+ExecStartPost=-+${PHP_BIN} ${PANEL_DIR}/cli/repair-caddy-routes.php
 OVERRIDEEOF
     chmod 644 /etc/systemd/system/caddy.service.d/zz-musedock-panel-repair.conf
     systemctl daemon-reload 2>/dev/null || true

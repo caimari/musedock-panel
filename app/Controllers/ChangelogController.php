@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.226',
+                'date' => '2026-09-29',
+                'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '**Hotfix 1.0.225 — el reparador de Caddy fallaba al arrancar** (`Undefined constant "apps"`): en tres lineas se habian perdido las comillas de las rutas de Caddy al generar el codigo. `php -l` no lo detecta porque es PHP valido; solo falla al ejecutarse. Corregido y probado ejecutandolo contra un Caddy real',
+                            '**El reparador se ejecutaba como usuario caddy** y no podia leer el `.env` del panel. El drop-in usa ahora `ExecStartPost=-+…`: el reparador corre como root y un fallo sigue sin tumbar Caddy',
+                        ],
+                        'en' => [
+                            '**Hotfix 1.0.225 — the Caddy repair hook failed on startup** (`Undefined constant "apps"`): quotes around Caddy paths were lost in three lines when the code was generated. `php -l` cannot catch it because it is valid PHP; it only fails at runtime. Fixed and tested by running it against a real Caddy',
+                            '**The repair hook ran as the caddy user** and could not read the panel `.env`. The drop-in now uses `ExecStartPost=-+…`: the hook runs as root and a failure still cannot take Caddy down',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.225',
                 'date' => '2026-09-29',
                 'badge' => 'danger',

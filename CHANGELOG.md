@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.226] — 2026-09-29 — Hotfix de 1.0.225: el reparador de Caddy fallaba al arrancar
+
+- **`Undefined constant "MuseDockPanel\Services\apps"` en `SystemService.php:2269`** (visto en obelix). En tres líneas de `ensureCaddyHttpServerReady()` se habían perdido las comillas de las rutas (`apps/http/servers/srv0` y `…/srv0/listen`) al generar el código de 1.0.225. `php -l` no lo detectaba, porque sin comillas es PHP sintácticamente válido (constantes y divisiones), así que el fallo solo aparecía al ejecutarse. Con el prefijo `-` de 1.0.225 Caddy ya no se caía, pero el reparador no completaba y `srv0` no quedaba escuchando en `:443`. Corregido y comprobado **ejecutando** la función contra un Caddy real, no solo con `php -l`. Además, un escaneo por *tokens* de todos los ficheros tocados en 1.0.224–1.0.225 confirma que no queda ninguna otra cadena sin comillas: sobre la 1.0.225 publicada detecta exactamente estas tres líneas.
+- **El reparador se ejecutaba como usuario `caddy`**: `ExecStartPost` hereda `User=caddy` del servicio, así que no podía leer `/opt/musedock-panel/.env` (root, 600) y arrancaba sin credenciales de la BD ni ajustes (aviso `Permission denied` en `Env.php`). El drop-in pasa a `ExecStartPost=-+…`: el `+` ejecuta solo esa orden como root y el `-` sigue impidiendo que un fallo del reparador tumbe Caddy.
+
 ## [1.0.225] — 2026-09-29 — CRÍTICO: el panel borraba configuración de Caddy con PATCH (causa real del incidente de agosto)
 
 **Actualiza todos los nodos.** Con 1.0.224, obelix se quedó sin Caddy al arrancar: el reparador borró todas las rutas de `srv0`, abortó, y systemd mató Caddy.
