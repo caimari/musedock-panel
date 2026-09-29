@@ -905,7 +905,9 @@ final class McpInventory
             'npm' => $npmVersion,
             'npm_global' => array_values(array_unique($npmGlobal)),
             'pm2' => self::sh('command -v pm2 >/dev/null && pm2 -v') ?: null,
-            'composer' => self::sh('composer --version --no-ansi 2>/dev/null | head -1') ?: null,
+            // Como root, Composer pregunta «Continue as root?» y se queda esperando: sin
+            // COMPOSER_ALLOW_SUPERUSER y sin stdin no devolvía nada.
+            'composer' => self::sh('COMPOSER_ALLOW_SUPERUSER=1 composer --version --no-ansi </dev/null 2>/dev/null | head -1') ?: null,
             'caddy' => self::sh('caddy version') ?: null,
             'apt_sources' => $sources,
             // Paquetes instalados a mano: la forma más fiable de comparar dos servidores.

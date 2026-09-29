@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.229',
+                'date' => '2026-09-29',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            'El inventario MCP no mostraba la version de Composer: como root, Composer se paraba a preguntar si continuar y la consulta volvia vacia',
+                        ],
+                        'en' => [
+                            'The MCP inventory did not show the Composer version: as root, Composer stopped to ask whether to continue and the query came back empty',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.228',
                 'date' => '2026-09-29',
                 'badge' => 'info',

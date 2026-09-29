@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.229] — 2026-09-29 — Inventario MCP: versión de Composer
+
+### Arreglado
+- **`clone_inventory` no mostraba la versión de Composer.** Ejecutado como root, Composer se para a preguntar «Continue as root?» y la consulta volvía vacía. Ahora se lanza con `COMPOSER_ALLOW_SUPERUSER=1` y sin entrada estándar.
+
 ## [1.0.228] — 2026-09-29 — Correcciones del inventario MCP tras probarlo en asterisk
 
 ### Arreglado
