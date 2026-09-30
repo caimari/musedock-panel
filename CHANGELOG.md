@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.248] — 2026-09-30 — "Igualar módulos" de Caddy funciona en un Ubuntu 22.04 recién instalado
+
+### Arreglado
+- **La compilación de módulos DNS de Caddy fallaba con "No se pudo instalar/encontrar xcaddy"** en nodos con Ubuntu 22.04 (visto en Filemon). El Go que trae apt es el 1.18, demasiado viejo para instalar xcaddy y para compilar Caddy 2.10 o posterior. Ahora, si Go falta o es anterior a 1.21, el panel instala el Go oficial de go.dev en `/usr/local/go`. El Go de apt no se toca. La compilación usa `GOTOOLCHAIN=auto`, así que Go descarga solo la versión que pida Caddy. Si `go install xcaddy` falla, se descarga el binario publicado de xcaddy en GitHub. Las variables `HOME`/`GOPATH` se fijan explícitamente, porque la compilación corre en segundo plano y fuera del entorno del servicio.
+
 ## [1.0.247] — 2026-09-30 — config_mirror no copia un pool de PHP que chocaría con otro del slave
 
 ### Arreglado

@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.248',
+                'date' => '2026-09-30',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['"Igualar modulos" de Caddy fallaba en Ubuntu 22.04 ("No se pudo instalar/encontrar xcaddy"): el Go de apt (1.18) es demasiado viejo. Ahora instala el Go oficial en /usr/local/go si falta o es anterior a 1.21, compila con GOTOOLCHAIN=auto y, si hace falta, descarga el binario de xcaddy de GitHub'],
+                        'en' => ['Caddy "Match modules" failed on Ubuntu 22.04 ("could not install/find xcaddy"): apt Go (1.18) is too old. It now installs official Go in /usr/local/go when missing or older than 1.21, builds with GOTOOLCHAIN=auto and, if needed, downloads the xcaddy binary from GitHub'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.247',
                 'date' => '2026-09-30',
                 'badge' => 'info',

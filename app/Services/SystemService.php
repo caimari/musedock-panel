@@ -794,7 +794,7 @@ CONF;
             return ['ok' => false, 'error' => (string)($prep['error'] ?? 'No se pudo preparar xcaddy'), 'output' => (string)($prep['output'] ?? '')];
         }
         $xcaddy = (string)$prep['xcaddy'];
-        $envPrefix = 'PATH=/usr/local/go/bin:/root/go/bin:/usr/local/bin:/usr/bin:/bin ';
+        $envPrefix = self::XCADDY_ENV;
 
         $versionRaw = trim((string)shell_exec(escapeshellarg($caddyPath) . ' version 2>/dev/null'));
         $caddyVersion = '';
@@ -904,29 +904,67 @@ CONF;
         ];
     }
 
+    /**
+     * Go + xcaddy para compilar Caddy. El Go de apt en Ubuntu 22.04 es 1.18:
+     * demasiado viejo para xcaddy y para Caddy 2.10+. Con Go >= 1.21 basta,
+     * porque GOTOOLCHAIN=auto descarga solo la versión que pida Caddy.
+     */
+    private const XCADDY_ENV = 'PATH=/usr/local/go/bin:/root/go/bin:/usr/local/bin:/usr/bin:/bin HOME=/root GOPATH=/root/go GOTOOLCHAIN=auto ';
+
     private static function ensureXcaddyToolchain(): array
     {
-        $envPrefix = 'PATH=/usr/local/go/bin:/root/go/bin:/usr/local/bin:/usr/bin:/bin ';
-        $go = trim((string)shell_exec($envPrefix . 'command -v go 2>/dev/null'));
+        $envPrefix = self::XCADDY_ENV;
         $out = '';
-        if ($go === '') {
-            $out .= (string)shell_exec('DEBIAN_FRONTEND=noninteractive apt-get update -qq 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq golang-go 2>&1');
-            $go = trim((string)shell_exec($envPrefix . 'command -v go 2>/dev/null'));
+        $arch = match (php_uname('m')) {
+            'x86_64', 'amd64' => 'amd64',
+            'aarch64', 'arm64' => 'arm64',
+            default => '',
+        };
+
+        $go = trim((string)shell_exec($envPrefix . 'command -v go 2>/dev/null'));
+        $goVer = $go !== '' && preg_match('/go(\d+)\.(\d+)/', (string)shell_exec($envPrefix . 'go version 2>/dev/null'), $gm)
+            ? [(int)$gm[1], (int)$gm[2]] : [0, 0];
+        if ($goVer[0] < 1 || ($goVer[0] === 1 && $goVer[1] < 21)) {
+            if ($arch === '') {
+                return ['ok' => false, 'error' => 'Arquitectura no soportada para instalar Go: ' . php_uname('m')];
+            }
+            $latest = trim((string)shell_exec("curl -fsSL -m 20 'https://go.dev/VERSION?m=text' 2>/dev/null | head -1"));
+            if (!preg_match('/^go\d+\.\d+(\.\d+)?$/', $latest)) {
+                return ['ok' => false, 'error' => 'No se pudo consultar la última versión de Go en go.dev', 'output' => $latest];
+            }
+            // Solo se sustituye /usr/local/go (instalación oficial); el Go de apt no se toca.
+            $tmp = '/tmp/musedock-' . $latest . '.tar.gz';
+            $out .= (string)shell_exec(sprintf(
+                'curl -fsSL -m 300 -o %1$s %2$s 2>&1 && rm -rf /usr/local/go.new && mkdir -p /usr/local/go.new'
+                . ' && tar -xzf %1$s -C /usr/local/go.new --strip-components=1 2>&1'
+                . ' && rm -rf /usr/local/go && mv /usr/local/go.new /usr/local/go; rm -f %1$s',
+                escapeshellarg($tmp),
+                escapeshellarg("https://go.dev/dl/{$latest}.linux-{$arch}.tar.gz")
+            ));
+            $go = is_executable('/usr/local/go/bin/go') ? '/usr/local/go/bin/go' : '';
             if ($go === '') {
-                return ['ok' => false, 'error' => 'No se pudo instalar/encontrar Go', 'output' => self::trimCommandOutput($out)];
+                return ['ok' => false, 'error' => "No se pudo instalar Go ({$latest})", 'output' => self::trimCommandOutput($out)];
             }
         }
 
         $xcaddy = trim((string)shell_exec($envPrefix . 'command -v xcaddy 2>/dev/null'));
         if ($xcaddy === '') {
             $out .= (string)shell_exec($envPrefix . 'go install github.com/caddyserver/xcaddy/cmd/xcaddy@latest 2>&1');
-            $xcaddy = trim((string)shell_exec($envPrefix . 'command -v xcaddy 2>/dev/null'));
-            if ($xcaddy === '' && is_file('/root/go/bin/xcaddy')) {
-                $xcaddy = '/root/go/bin/xcaddy';
+            $xcaddy = is_executable('/root/go/bin/xcaddy') ? '/root/go/bin/xcaddy' : '';
+        }
+        if ($xcaddy === '' && $arch !== '') {
+            // Plan B: binario publicado en GitHub.
+            $tag = trim((string)shell_exec("curl -fsSI -m 20 https://github.com/caddyserver/xcaddy/releases/latest 2>/dev/null | grep -i '^location:' | sed 's#.*/tag/v##' | tr -d '\\r'"));
+            if (preg_match('/^\d+\.\d+\.\d+$/', $tag)) {
+                $out .= (string)shell_exec(sprintf(
+                    'curl -fsSL -m 120 %s 2>&1 | tar -xz -C /usr/local/bin xcaddy 2>&1 && chmod 0755 /usr/local/bin/xcaddy',
+                    escapeshellarg("https://github.com/caddyserver/xcaddy/releases/download/v{$tag}/xcaddy_{$tag}_linux_{$arch}.tar.gz")
+                ));
+                $xcaddy = is_executable('/usr/local/bin/xcaddy') ? '/usr/local/bin/xcaddy' : '';
             }
-            if ($xcaddy === '') {
-                return ['ok' => false, 'error' => 'No se pudo instalar/encontrar xcaddy', 'output' => self::trimCommandOutput($out)];
-            }
+        }
+        if ($xcaddy === '') {
+            return ['ok' => false, 'error' => 'No se pudo instalar/encontrar xcaddy', 'output' => self::trimCommandOutput($out)];
         }
 
         return ['ok' => true, 'go' => $go, 'xcaddy' => $xcaddy, 'output' => self::trimCommandOutput($out)];
