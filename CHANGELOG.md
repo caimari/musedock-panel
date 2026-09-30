@@ -2,6 +2,24 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.238] — 2026-09-30 — MCP: sincronización de ficheros entre nodos
+
+### Añadido
+- **`filesync_configure`** (MCP, escritura, en el master): activa la copia de `/var/www/vhosts` a los nodos web del cluster, lo mismo que desde Ajustes → Cluster → Ficheros. Pasos:
+  1. clave SSH de root del master (se crea si falta);
+  2. se instala en cada nodo por la API del cluster;
+  3. **se comprueba el SSH antes de cambiar nada**;
+  4. se instala lsyncd si hace falta;
+  5. se guarda la configuración y se arranca.
+
+  Detalles:
+  - en modo `lsyncd`, cada cambio llega al nodo a los ~15 s; también hay modo `periodic`;
+  - es un **espejo**: la primera pasada borra en el nodo lo que no exista en el master, salvo exclusiones, y el plan lo avisa;
+  - las opciones `mirror_git` y `mirror_node_modules` (activadas por defecto) copian también `.git` y `node_modules`, que el panel excluye por defecto, para que un slave sea un clon exacto de apps como muserelay;
+  - los logs, las sesiones y las cachés siguen excluidos.
+- **`filesync_status`** (MCP, lectura): si la copia está activa, el modo, los nodos destino, las exclusiones efectivas y el estado de lsyncd (salud, problemas y últimas líneas de su log).
+- Las instrucciones del MCP explican el orden: emparejar → `cluster_sync_hostings` → `filesync_configure`, con la norma de que ninguna herramienta borra datos por decisión propia.
+
 ## [1.0.237] — 2026-09-30 — Sincronizar hostings: el slave ya no crea rutas de Caddy que el master no tiene
 
 ### Arreglado

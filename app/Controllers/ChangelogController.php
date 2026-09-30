@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.238',
+                'date' => '2026-09-30',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '**MCP `filesync_configure`:** activa la copia de ficheros de los hostings a los nodos (clave SSH, prueba de conexion antes de cambiar nada, lsyncd). Con lsyncd cada cambio llega a los ~15 s, en espejo; opcion de copiar tambien `.git` y `node_modules` para clones exactos',
+                            '**MCP `filesync_status`:** estado de la copia de ficheros (modo, destinos, exclusiones, salud de lsyncd y su log)',
+                        ],
+                        'en' => [
+                            '**MCP `filesync_configure`:** enables copying hosting files to the nodes (SSH key, connection test before changing anything, lsyncd). With lsyncd each change arrives in ~15 s, as a mirror; option to also copy `.git` and `node_modules` for exact clones',
+                            '**MCP `filesync_status`:** file copy status (mode, targets, excludes, lsyncd health and log)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.237',
                 'date' => '2026-09-30',
                 'badge' => 'info',

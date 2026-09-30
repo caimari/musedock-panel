@@ -119,6 +119,24 @@ final class McpClusterTools
                     'apply' => $apply,
                 ], ['target_node']),
             ],
+            'filesync_status' => [
+                'write' => false,
+                'title' => 'Estado de la sincronización de ficheros',
+                'description' => 'En el MASTER: si está activa la copia de ficheros de /var/www/vhosts a los nodos, en qué modo (lsyncd = casi al instante; periodic = cada N minutos), a qué nodos, qué se excluye, y el estado de lsyncd (en marcha, salud, problemas y últimas líneas de su log). Solo lectura.',
+                'inputSchema' => $o([]),
+            ],
+            'filesync_configure' => [
+                'write' => true, 'destructive' => true,
+                'title' => 'Activar la sincronización de ficheros',
+                'description' => 'En el MASTER: activa la copia de /var/www/vhosts a los nodos web del cluster (no standby). Pasos: clave SSH de root del master (la crea si falta), la instala en cada nodo por la API del cluster, comprueba el SSH, instala lsyncd si hace falta, guarda la configuración y lo arranca. lsyncd copia cada cambio a los ~15 s y es un ESPEJO: al arrancar hace una pasada completa y borra en el nodo lo que no exista en el master (salvo exclusiones). Para un slave clon exacto, mirror_git y mirror_node_modules copian también .git y node_modules. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o([
+                    'mode' => ['type' => 'string', 'enum' => ['lsyncd', 'periodic'], 'description' => 'lsyncd (por defecto, casi al instante) o periodic (rsync cada interval_minutes)'],
+                    'interval_minutes' => ['type' => 'integer', 'description' => 'Solo periodic (por defecto 10)'],
+                    'mirror_git' => ['type' => 'boolean', 'description' => 'Copiar también las carpetas .git (por defecto true)'],
+                    'mirror_node_modules' => ['type' => 'boolean', 'description' => 'Copiar también node_modules (por defecto true)'],
+                    'apply' => $apply,
+                ]),
+            ],
             'cluster_node_services' => [
                 'write' => true,
                 'title' => 'Servicios de un nodo',
@@ -150,6 +168,8 @@ final class McpClusterTools
             'cluster_pair_approve'  => self::pairApprove($args),
             'cluster_queue'         => self::queue($args),
             'cluster_sync_hostings' => self::syncHostings($args),
+            'filesync_status'       => self::filesyncStatus(),
+            'filesync_configure'    => self::filesyncConfigure($args),
             default                 => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
         };
     }
@@ -676,6 +696,138 @@ final class McpClusterTools
         $r = ClusterService::enqueueFullHostingSync((int)$node['id'], $domain);
         LogService::log('mcp.cluster', 'sync-hostings', "Encolados {$r['hostings']} hostings + {$r['redirects']} redirects al nodo {$node['name']}");
         return ['applied' => true, 'enqueued' => $r, 'next' => 'El cluster-worker los procesa cada minuto: sigue el resultado con cluster_queue.'];
+    }
+
+    // ── Sincronización de ficheros ───────────────────────────────────────
+
+    /** Nodos a los que lsyncd copia (mismo criterio que FileSyncService::generateLsyncdConfig). */
+    private static function filesyncTargets(): array
+    {
+        $out = [];
+        foreach (ClusterService::getWebNodes() as $n) {
+            if (empty($n['standby'])) {
+                $out[] = ['id' => (int)$n['id'], 'name' => $n['name'],
+                    'host' => \MuseDockPanel\Services\FileSyncService::extractHostFromUrl((string)$n['api_url'])];
+            }
+        }
+        return $out;
+    }
+
+    private static function filesyncStatus(): array
+    {
+        $cfg = \MuseDockPanel\Services\FileSyncService::getConfig();
+        $st = \MuseDockPanel\Services\FileSyncService::getLsyncdStatus();
+        $log = array_slice(explode("\n", (string)($st['log_tail'] ?? $st['logTail'] ?? '')), -10);
+        return [
+            'enabled' => $cfg['enabled'],
+            'mode' => $cfg['sync_mode'],
+            'method' => $cfg['method'],
+            'interval_minutes' => $cfg['interval_minutes'],
+            'ssh_key_path' => $cfg['ssh_key_path'],
+            'targets' => self::filesyncTargets(),
+            'excludes' => array_values(array_unique(array_merge(
+                \MuseDockPanel\Services\FileSyncService::getLsyncdDefaultExcludes(),
+                \MuseDockPanel\Services\FileSyncService::parseExcludePatterns((string)$cfg['exclude_patterns'])))),
+            'lsyncd' => [
+                'installed' => $st['installed'] ?? false,
+                'running' => $st['running'] ?? false,
+                'enabled' => $st['enabled'] ?? false,
+                'health' => $st['health'] ?? null,
+                'issues' => $st['issues'] ?? [],
+                'log_tail' => array_values(array_filter($log)),
+            ],
+        ];
+    }
+
+    private static function filesyncConfigure(array $args): array
+    {
+        if (self::role() !== 'master') {
+            throw new \RuntimeException('filesync_configure se ejecuta en el MASTER del cluster.');
+        }
+        $targets = self::filesyncTargets();
+        if (!$targets) {
+            throw new \RuntimeException('No hay nodos web activos (no standby) a los que copiar ficheros.');
+        }
+        $mode = ($args['mode'] ?? 'lsyncd') === 'periodic' ? 'periodic' : 'lsyncd';
+        $interval = max(1, (int)($args['interval_minutes'] ?? 10));
+        $mirrorGit = !array_key_exists('mirror_git', $args) || !empty($args['mirror_git']);
+        $mirrorNm = !array_key_exists('mirror_node_modules', $args) || !empty($args['mirror_node_modules']);
+        $cfg = \MuseDockPanel\Services\FileSyncService::getConfig();
+        $keyPath = (string)$cfg['ssh_key_path'];
+
+        $drop = array_filter([$mirrorGit ? '.git' : null, $mirrorNm ? 'node_modules' : null]);
+        $lsyncdEx = array_values(array_diff(\MuseDockPanel\Services\FileSyncService::getLsyncdDefaultExcludes(), $drop));
+        $rsyncEx = array_values(array_diff(\MuseDockPanel\Services\FileSyncService::getRsyncDefaultExcludes(), $drop));
+        $userEx = \MuseDockPanel\Services\FileSyncService::parseExcludePatterns((string)$cfg['exclude_patterns']);
+        $userEx = array_values(array_diff($userEx, $drop));
+
+        $plan = [
+            'mode' => $mode === 'lsyncd' ? 'lsyncd: cada cambio se copia a los ~15 s' : "periodic: rsync cada {$interval} min",
+            'source' => '/var/www/vhosts/ (todos los hostings de este master)',
+            'targets' => array_map(static fn($t) => "{$t['name']} (root@{$t['host']}:/var/www/vhosts/)", $targets),
+            'steps' => [
+                "clave SSH de root de este servidor en {$keyPath} (se crea si no existe)",
+                'se instala su clave pública en /root/.ssh/authorized_keys de cada nodo (por la API del cluster): este master tendrá SSH de root en ellos, como en cualquier cluster del panel',
+                'se comprueba el SSH a cada nodo; si alguno falla, se para aquí',
+                $mode === 'lsyncd' ? 'se instala lsyncd si falta, se genera /etc/lsyncd/lsyncd.conf.lua y se arranca' : 'el filesync-worker hará la copia periódica',
+            ],
+            'mirror' => 'ESPEJO: la primera pasada copia todo y BORRA en el nodo lo que no exista aquí (salvo exclusiones). Después, cada cambio o borrado se replica.',
+            'excludes' => array_values(array_unique(array_merge($mode === 'lsyncd' ? $lsyncdEx : $rsyncEx, $userEx))),
+            'mirror_git' => $mirrorGit,
+            'mirror_node_modules' => $mirrorNm,
+        ];
+        if (empty($args['apply'])) {
+            return ['applied' => false, 'plan' => $plan, 'next' => 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.'];
+        }
+
+        $steps = [];
+        $key = \MuseDockPanel\Services\FileSyncService::generateSshKey($keyPath);
+        if (empty($key['ok']) || empty($key['public_key'])) {
+            throw new \RuntimeException('No se pudo preparar la clave SSH: ' . ($key['error'] ?? '?'));
+        }
+        $steps[] = !empty($key['exists']) ? "clave SSH existente ({$keyPath})" : "clave SSH creada ({$keyPath})";
+
+        foreach ($targets as $t) {
+            $r = ClusterService::callNode($t['id'], 'POST', 'api/cluster/action',
+                ['action' => 'install-ssh-key', 'payload' => ['public_key' => $key['public_key']]]);
+            if (empty($r['ok']) || empty($r['data']['ok'])) {
+                throw new \RuntimeException("No se pudo instalar la clave en {$t['name']}: " . ($r['data']['error'] ?? $r['error'] ?? '?') . '. No se ha cambiado la configuración.');
+            }
+            $ssh = \MuseDockPanel\Services\FileSyncService::testSshConnection($t['host'], (int)$cfg['ssh_port'], $keyPath, 'root');
+            if (empty($ssh['ok'])) {
+                throw new \RuntimeException("La clave está instalada en {$t['name']}, pero el SSH a {$t['host']} falla: " . ($ssh['error'] ?? '?')
+                    . '. Revisa que el puerto 22 del nodo admita este servidor (por la VPN). No se ha cambiado la configuración.');
+            }
+            $steps[] = "{$t['name']}: clave instalada y SSH comprobado";
+        }
+
+        if ($mode === 'lsyncd' && !\MuseDockPanel\Services\FileSyncService::isLsyncdInstalled()) {
+            $inst = \MuseDockPanel\Services\FileSyncService::installLsyncd();
+            if (empty($inst['ok'])) {
+                throw new \RuntimeException('No se pudo instalar lsyncd.');
+            }
+            $steps[] = 'lsyncd instalado';
+        }
+
+        \MuseDockPanel\Services\FileSyncService::saveConfig([
+            'filesync_enabled' => '1',
+            'filesync_sync_mode' => $mode,
+            'filesync_method' => 'ssh',
+            'filesync_ssh_user' => 'root',
+            'filesync_ssh_key_path' => $keyPath,
+            'filesync_interval' => (string)$interval,
+            'filesync_lsyncd_default_excludes' => implode("\n", $lsyncdEx),
+            'filesync_rsync_default_excludes' => implode("\n", $rsyncEx),
+            'filesync_exclude' => implode(',', $userEx),
+        ]);
+        $steps[] = 'configuración guardada';
+
+        if ($mode === 'lsyncd') {
+            $start = \MuseDockPanel\Services\FileSyncService::startLsyncd();
+            $steps[] = !empty($start['ok']) ? 'lsyncd arrancado (hace ahora la primera pasada completa)' : 'lsyncd NO arrancó: ' . trim((string)($start['output'] ?? $start['error'] ?? ''));
+        }
+        LogService::log('mcp.filesync', 'configure', "Sincronización de ficheros {$mode} hacia " . implode(', ', array_column($targets, 'name')));
+        return ['applied' => true, 'steps' => $steps, 'next' => 'Sigue la primera pasada con filesync_status.'];
     }
 
     // ── cluster_node_services ────────────────────────────────────────────

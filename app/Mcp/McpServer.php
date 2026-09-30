@@ -61,7 +61,10 @@ final class McpServer
                             . 'servidor de relevo con IPs públicas y modo; cluster_node_services fija si un nodo es web, mail o ambos. '
                             . 'Mismo protocolo que el correo: primero sin apply, enseñar el plan y pedir confirmación. '
                             . 'Unir dos paneles (sin secretos en el chat): en el master cluster_pairing_open → en el slave cluster_pair_request '
-                            . '(devuelve un código) → en el master cluster_pair_approve con ese código, tras confirmar con el usuario que coincide.',
+                            . '(devuelve un código) → en el master cluster_pair_approve con ese código, tras confirmar con el usuario que coincide. '
+                            . 'Después: cluster_sync_hostings (registra/adopta los hostings en el slave; nunca borra) y filesync_configure '
+                            . '(copia de ficheros a los ~15 s con lsyncd, en espejo); cluster_queue y filesync_status para seguirlos. '
+                            . 'Norma: estas herramientas crean, actualizan y sincronizan; ninguna borra datos por decisión propia.',
                     ]);
 
                 case 'ping':
