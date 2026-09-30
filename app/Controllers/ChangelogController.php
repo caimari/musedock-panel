@@ -20,6 +20,27 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.240',
+                'date' => '2026-09-30',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '**MCP `cluster_drift` (vigilante de diferencias):** compara el master con cada nodo (supervisor, systemd propios, cron, webs del Caddyfile, PHP y extensiones, Node, paquetes relevantes, hostings) y dice en llano que falta o es distinto. Generico para cualquier pareja master/slave',
+                            'Accion de cluster `clone-inventory`: el master obtiene el inventario completo del nodo por la API del cluster',
+                        ],
+                        'en' => [
+                            '**MCP `cluster_drift` (drift watcher):** compares the master with each node (supervisor, custom systemd units, cron, Caddyfile sites, PHP and extensions, Node, relevant packages, hostings) and explains in plain words what is missing or different. Generic for any master/slave pair',
+                            'Cluster action `clone-inventory`: the master gets the full node inventory through the cluster API',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => ['El inventario reconoce las tareas cron desactivadas a proposito en un slave (`#MUSEDOCK-OFF#`, `.disabled`)'],
+                        'en' => ['The inventory recognises cron tasks intentionally disabled on a slave (`#MUSEDOCK-OFF#`, `.disabled`)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.238',
                 'date' => '2026-09-30',
                 'badge' => 'success',

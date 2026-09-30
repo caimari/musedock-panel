@@ -29,7 +29,8 @@ final class McpInventory
     private static ?array $managed = null;
     private static ?array $localIps = null;
 
-    public static function build(string $section = 'all'): array
+    /** @param bool $compact en la vista 'all', resumir listas largas (para el MCP); false = completo (comparador). */
+    public static function build(string $section = 'all', bool $compact = true): array
     {
         $section = strtolower(trim($section)) ?: 'all';
         if ($section !== 'all' && !in_array($section, self::SECTIONS, true)) {
@@ -64,7 +65,7 @@ final class McpInventory
 
         // En la vista completa, las listas largas se resumen para no pasar del límite de
         // salida (60 KB) y perder las últimas secciones; completas en su propia sección.
-        if ($section === 'all' && isset($data['runtime']['apt_manual'])) {
+        if ($compact && $section === 'all' && isset($data['runtime']['apt_manual'])) {
             $data['runtime']['apt_manual'] = ['count' => count($data['runtime']['apt_manual']),
                 'note' => 'Lista completa con section=runtime.'];
             foreach (($data['runtime']['php'] ?? []) as $v => $info) {
@@ -835,16 +836,32 @@ final class McpInventory
         $skip = ['e2scrub_all', 'php', 'sysstat', 'certbot', '.placeholder', 'popularity-contest'];
         $entries = [];
         $files = [];
+        // Una línea "#MUSEDOCK-OFF# <cron>" es una tarea DESACTIVADA a propósito en un
+        // slave (se reactiva al promover): cuenta como entrada, con disabled=true, para
+        // que la comparación master↔slave no la dé por ausente.
+        $parse = static function (string $l): ?array {
+            $l = trim($l);
+            $disabled = false;
+            if (str_starts_with($l, '#MUSEDOCK-OFF#')) {
+                $l = trim(substr($l, strlen('#MUSEDOCK-OFF#')));
+                $disabled = true;
+            }
+            if ($l === '' || str_starts_with($l, '#') || preg_match('/^[A-Z_]+=/', $l)) {
+                return null;
+            }
+            return ['line' => $l, 'disabled' => $disabled];
+        };
         foreach (glob('/etc/cron.d/*') ?: [] as $f) {
             $n = basename($f);
             if (str_starts_with($n, 'musedock') || in_array($n, $skip, true)) {
                 continue;
             }
             $files[] = $f;
+            // Un fichero de cron.d apartado (.disabled) también es una tarea desactivada.
+            $fileOff = (bool)preg_match('/\.(disabled|musedock-off)$/', $n);
             foreach (@file($f, FILE_IGNORE_NEW_LINES) ?: [] as $l) {
-                $l = trim($l);
-                if ($l !== '' && !str_starts_with($l, '#') && !preg_match('/^[A-Z_]+=/', $l)) {
-                    $entries[] = ['source' => $f, 'line' => self::mask($l)];
+                if ($e = $parse($l)) {
+                    $entries[] = ['source' => $f, 'line' => self::mask($e['line']), 'disabled' => $e['disabled'] || $fileOff];
                 }
             }
         }
@@ -853,9 +870,8 @@ final class McpInventory
             $u = basename($f);
             $users[] = $u;
             foreach (@file($f, FILE_IGNORE_NEW_LINES) ?: [] as $l) {
-                $l = trim($l);
-                if ($l !== '' && !str_starts_with($l, '#') && !preg_match('/^[A-Z_]+=/', $l)) {
-                    $entries[] = ['source' => "crontab:{$u}", 'line' => self::mask($l)];
+                if ($e = $parse($l)) {
+                    $entries[] = ['source' => "crontab:{$u}", 'line' => self::mask($e['line']), 'disabled' => $e['disabled']];
                 }
             }
         }

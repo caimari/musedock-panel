@@ -119,6 +119,14 @@ final class McpClusterTools
                     'apply' => $apply,
                 ], ['target_node']),
             ],
+            'cluster_drift' => [
+                'write' => false,
+                'title' => 'Diferencias entre el master y sus nodos',
+                'description' => 'En el MASTER: compara este servidor con cada nodo (o con uno) en lo que importa para que un relevo funcione: programas de supervisor, unidades systemd propias, tareas cron, webs del Caddyfile fuera del panel, versiones y extensiones de PHP, Node/npm/Composer, paquetes relevantes y nº de hostings. Devuelve lo que falta o es distinto en el nodo (hay que arreglarlo) y lo que solo existe en el nodo (informativo). Que en un slave los programas estén con autostart=false o los crons desactivados es normal y no cuenta. Sirve para cualquier pareja master/slave. Solo lectura.',
+                'inputSchema' => $o([
+                    'target_node' => ['type' => 'string', 'description' => 'Opcional: id o nombre de un nodo (por defecto, todos)'],
+                ]),
+            ],
             'filesync_status' => [
                 'write' => false,
                 'title' => 'Estado de la sincronización de ficheros',
@@ -168,6 +176,7 @@ final class McpClusterTools
             'cluster_pair_approve'  => self::pairApprove($args),
             'cluster_queue'         => self::queue($args),
             'cluster_sync_hostings' => self::syncHostings($args),
+            'cluster_drift'         => self::drift($args),
             'filesync_status'       => self::filesyncStatus(),
             'filesync_configure'    => self::filesyncConfigure($args),
             default                 => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
@@ -696,6 +705,26 @@ final class McpClusterTools
         $r = ClusterService::enqueueFullHostingSync((int)$node['id'], $domain);
         LogService::log('mcp.cluster', 'sync-hostings', "Encolados {$r['hostings']} hostings + {$r['redirects']} redirects al nodo {$node['name']}");
         return ['applied' => true, 'enqueued' => $r, 'next' => 'El cluster-worker los procesa cada minuto: sigue el resultado con cluster_queue.'];
+    }
+
+    // ── Diferencias master ↔ nodos ───────────────────────────────────────
+
+    private static function drift(array $args): array
+    {
+        if (self::role() !== 'master') {
+            throw new \RuntimeException('cluster_drift se ejecuta en el MASTER del cluster.');
+        }
+        $ref = trim((string)($args['target_node'] ?? ''));
+        $nodes = $ref !== '' ? [self::findNode($ref)] : ClusterService::getNodes();
+        $out = [];
+        foreach ($nodes as $n) {
+            try {
+                $out[] = \MuseDockPanel\Services\ClusterDriftService::compareWithNode((int)$n['id']);
+            } catch (\Throwable $e) {
+                $out[] = ['node' => $n['name'], 'error' => $e->getMessage()];
+            }
+        }
+        return ['all_in_sync' => !array_filter($out, static fn($r) => empty($r['in_sync'])), 'nodes' => $out];
     }
 
     // ── Sincronización de ficheros ───────────────────────────────────────

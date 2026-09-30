@@ -548,6 +548,11 @@ class ClusterApiController
                 'notify-iface-down' => $this->handleNotifyIfaceDown($payload),
                 'notify-iface-up'   => $this->handleNotifyIfaceUp($payload),
                 'query-local-state' => $this->handleQueryLocalState(),
+                // Inventario de este nodo (solo lectura) para que el master compare
+                // (cluster_drift). No depende de que el MCP esté activado aquí.
+                'clone-inventory'  => ['ok' => true, 'inventory' => \MuseDockPanel\Mcp\McpInventory::build(
+                    in_array($payload['section'] ?? 'all', array_merge(['all'], \MuseDockPanel\Mcp\McpInventory::SECTIONS), true)
+                        ? (string)($payload['section'] ?? 'all') : 'all', false)],
                 'mcp-call'         => $this->handleMcpCall($payload),
 
                 // ── Remote backup operations ──────────────────

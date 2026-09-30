@@ -2,6 +2,24 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.240] — 2026-09-30 — Vigilante de diferencias entre el master y sus nodos
+
+### Añadido
+- **`cluster_drift`** (MCP, lectura, en el master): compara este servidor con cada nodo (o con uno) en lo que importa para que un relevo funcione:
+  - programas de supervisor (comando, usuario, carpeta, procesos);
+  - unidades systemd propias;
+  - tareas cron (crontabs y `/etc/cron.d`);
+  - webs del Caddyfile fuera del panel;
+  - versiones y extensiones de PHP;
+  - versión mayor de Node, Composer y paquetes relevantes (`php8.x-*`, nodejs, redis, postgresql, supervisor, imagemagick, ffmpeg, chromium…);
+  - número de hostings del panel.
+
+  Devuelve en llano **lo que falta o es distinto en el nodo** (hay que arreglarlo), **lo que solo existe en el nodo** (informativo) y **notas** (por ejemplo, paquetes npm globales, que suelen ser herramientas de administración). Es **genérico, para cualquier pareja master/slave**. Que en un slave los programas estén con `autostart=false` o los crons desactivados es lo normal y no cuenta como diferencia.
+- Nueva acción del cluster **`clone-inventory`** (autenticada, solo lectura): el master pide el inventario completo del nodo por la API del cluster, sin depender de que el nodo tenga el MCP activado y sin el límite de 60 KB de la salida MCP.
+
+### Mejorado
+- El inventario reconoce las tareas cron **desactivadas a propósito** en un slave (líneas `#MUSEDOCK-OFF#` y ficheros `.disabled` de `/etc/cron.d`) y las marca con `disabled: true` en vez de ignorarlas.
+
 ## [1.0.238] — 2026-09-30 — MCP: sincronización de ficheros entre nodos
 
 ### Añadido
