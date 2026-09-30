@@ -20,6 +20,27 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.234',
+                'date' => '2026-09-30',
+                'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '**Dos paneles de un cluster se bloqueaban entre si y se marcaban como caidos:** el panel atendia las peticiones de una en una. Ahora arranca con 4 procesos (`PHP_CLI_SERVER_WORKERS=4`): una peticion lenta ya no bloquea las demas',
+                            '**El latido sobrescribia la IP del master:** el master se apuntaba a su slave como master, y en el slave la IP publica que vigila el failover se cambiaba por la de la VPN. Ahora el master no la toca y la publica no se sustituye; la de la VPN se guarda aparte para correo y BD',
+                            '**La cola del cluster se llenaba de operaciones fallidas cada minuto** cuando el slave no tenia los mismos hostings ("not found on slave"). Ahora se reenvia como mucho cada 30 minutos por nodo',
+                            '`replication_adopt` mostraba `[REDACTED]` en vez de decir de donde lee la contrasena',
+                        ],
+                        'en' => [
+                            '**Two cluster panels blocked each other and were marked as down:** the panel served one request at a time. It now starts with 4 workers (`PHP_CLI_SERVER_WORKERS=4`): a slow request no longer blocks the rest',
+                            '**The heartbeat overwrote the master IP:** the master recorded its slave as its master, and on the slave the public IP watched by failover was replaced by the VPN one. The master no longer touches it and a public IP is not replaced; the VPN IP is stored separately for mail and DB',
+                            '**The cluster queue filled up with failed operations every minute** when the slave lacked the same hostings ("not found on slave"). It is now re-sent at most every 30 minutes per node',
+                            '`replication_adopt` showed `[REDACTED]` instead of where it reads the password from',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.233',
                 'date' => '2026-09-30',
                 'badge' => 'danger',

@@ -15,6 +15,10 @@ StandardOutput=append:__PANEL_DIR__/storage/logs/panel.log
 StandardError=append:__PANEL_DIR__/storage/logs/panel-error.log
 
 Environment=HOME=/root
+# Varias peticiones a la vez: con un solo proceso, una petición lenta bloqueaba el
+# panel entero, y dos paneles de un cluster que se llamaban a la vez (dashboard ↔
+# latido) se esperaban mutuamente hasta el timeout y se marcaban como caídos.
+Environment=PHP_CLI_SERVER_WORKERS=4
 
 [Install]
 WantedBy=multi-user.target

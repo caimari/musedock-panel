@@ -2,6 +2,20 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.234] — 2026-09-30 — Cluster: paneles que se bloqueaban entre sí, IP del master y cola de fallidas
+
+Visto al emparejar asterisk (master) y obelix (slave): «nodo caído», panel muy lento y 48 operaciones fallidas en pocos minutos.
+
+### Arreglado
+- **Dos paneles de un cluster se bloqueaban entre sí y se marcaban como caídos.** El panel atendía las peticiones de una en una (`php -S` con un solo proceso). Cuando el dashboard del master consultaba al slave justo mientras el slave le enviaba su latido, **cada uno esperaba al otro** hasta el tiempo límite: consultas de 25 s, latidos perdidos y «nodo caído». Ahora el servicio arranca con `PHP_CLI_SERVER_WORKERS=4` y atiende 4 peticiones a la vez. Probado: con una petición lenta en marcha, otra rápida pasa de esperar 3,7 s a 0,01 s. `update.sh` regenera el servicio en cada actualización.
+- **El latido sobrescribía la «IP del master» con la IP equivocada.** Todo panel que recibía un latido guardaba la IP de quien lo enviaba como `cluster_master_ip`. Pasaban dos cosas:
+  - el master, al recibir los latidos de su slave, apuntaba al slave como «su master»;
+  - en el slave, la IP pública del master que había guardado el emparejamiento se cambiaba por la de la VPN. El failover compara esa IP con las **IPs públicas** de `failover_servers`, así que nunca habría detectado la caída.
+
+  Ahora un master no guarda nada al recibir latidos, y una IP pública ya configurada no se cambia por una privada. Además, cuando el master envía la configuración de failover, el slave toma como IP del master la del servidor **primario** de esa configuración. La IP de la VPN desde la que llegan los latidos se guarda aparte (`cluster_master_heartbeat_ip`). Esa es la que usan la réplica de correo y la base de datos de correo del slave, que van por la VPN. En los clusters existentes, que solo tenían la IP de la VPN, no cambia nada.
+- **La cola del cluster se llenaba de operaciones fallidas cada minuto.** Si el slave no tenía los mismos hostings que el master (por ejemplo, clonado por debajo del panel), cada latido detectaba la diferencia y encolaba una operación por hosting, que fallaba con «Hosting X not found on slave». Ahora ese reenvío se hace como mucho una vez cada 30 minutos por nodo.
+- `replication_adopt` mostraba `[REDACTED]` en el plan en lugar de decir de dónde se lee la contraseña: el filtro de secretos tapaba el campo por llamarse `password`.
+
 ## [1.0.233] — 2026-09-30 — MCP: las acciones con `apply=true` no se ejecutaban
 
 ### Arreglado

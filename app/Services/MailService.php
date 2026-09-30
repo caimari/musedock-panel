@@ -3789,8 +3789,9 @@ class MailService
         $dsyncConfigured = is_file($dsyncDropin);
         $dsyncPartner = Settings::get('mail_replication_partner', '');
 
-        // Who is the master (partner to replicate from)?
-        $masterIp = Settings::get('cluster_master_ip', '');
+        // Who is the master (partner to replicate from)? La réplica va por la VPN: la
+        // IP de la que llegan los latidos; cluster_master_ip puede ser la pública.
+        $masterIp = Settings::get('cluster_master_heartbeat_ip', '') ?: Settings::get('cluster_master_ip', '');
 
         // Is an install running right now? (background task started by the master)
         $installing = false; $installProgress = null;

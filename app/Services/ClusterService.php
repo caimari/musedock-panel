@@ -1298,9 +1298,17 @@ class ClusterService
                 'updated_at'   => date('Y-m-d H:i:s'),
             ], 'id = :id', ['id' => $nodeId]);
 
-            // If slave reported db_hash mismatch, push full DB associations
+            // If slave reported db_hash mismatch, push full DB associations — como
+            // mucho una vez cada 30 min por nodo. Si el slave no tiene los hostings
+            // (p. ej. clonado por debajo del panel), cada latido encolaba de nuevo una
+            // operación por hosting que fallaba ("not found on slave") y la cola se
+            // llenaba de fallidas cada minuto.
             if (!empty($remoteData['db_hash_mismatch'])) {
-                self::pushDbAssociationsToNode($nodeId);
+                $throttleKey = "cluster_dbpush_last_{$nodeId}";
+                if (time() - (int)\MuseDockPanel\Settings::get($throttleKey, '0') >= 1800) {
+                    \MuseDockPanel\Settings::set($throttleKey, (string)time());
+                    self::pushDbAssociationsToNode($nodeId);
+                }
             }
         } else {
             Database::update('cluster_nodes', [

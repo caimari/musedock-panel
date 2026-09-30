@@ -268,10 +268,21 @@ class ClusterApiController
         $envRole = Env::get('PANEL_ROLE', 'standalone');
         $effectiveRole = ($clusterRole !== '' && $clusterRole !== 'standalone') ? $clusterRole : $envRole;
 
-        // Record who is monitoring us (master tracking)
-        $callerIp = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? '';
-        if ($callerIp) {
-            Settings::set('cluster_master_ip', $callerIp);
+        // Record who is monitoring us (master tracking).
+        // - Un MASTER también recibe latidos (los de sus slaves): no debe apuntarse
+        //   a un slave como "su master".
+        // - cluster_master_ip es la IP que vigila el failover y se compara con las
+        //   IPs PÚBLICAS de failover_servers. Los latidos suelen llegar por la VPN
+        //   (10.10.70.x): no se sustituye una IP pública ya configurada (por el
+        //   emparejamiento o a mano) por la privada del latido.
+        $callerIp = trim(explode(',', (string)($_SERVER['HTTP_X_FORWARDED_FOR'] ?? $_SERVER['REMOTE_ADDR'] ?? ''))[0]);
+        if ($callerIp !== '' && $effectiveRole !== 'master') {
+            $currentMasterIp = Settings::get('cluster_master_ip', '');
+            $isPublic = static fn(string $ip) => filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
+            if ($currentMasterIp === '' || !$isPublic($currentMasterIp) || $isPublic($callerIp)) {
+                Settings::set('cluster_master_ip', $callerIp);
+            }
+            Settings::set('cluster_master_heartbeat_ip', $callerIp);
             Settings::set('cluster_master_last_heartbeat', date('Y-m-d H:i:s'));
         }
 
@@ -695,6 +706,18 @@ class ClusterApiController
         // Save servers list
         if ($servers !== null && is_array($servers)) {
             Settings::set('failover_servers', json_encode($servers));
+            // En un slave, la IP del master que vigila el failover es la del servidor
+            // PRIMARIO de esta configuración (pública), no la de la VPN de los latidos.
+            $role = Settings::get('cluster_role', '') ?: Env::get('PANEL_ROLE', 'standalone');
+            if ($role === 'slave') {
+                foreach ($servers as $srv) {
+                    if (($srv['role'] ?? '') === 'primary' && ($srv['enabled'] ?? true)
+                        && filter_var($srv['ip'] ?? '', FILTER_VALIDATE_IP)) {
+                        Settings::set('cluster_master_ip', (string)$srv['ip']);
+                        break;
+                    }
+                }
+            }
         }
 
         // Save Cloudflare accounts (force encrypted-at-rest for tokens).

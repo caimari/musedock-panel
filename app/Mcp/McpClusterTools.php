@@ -483,7 +483,8 @@ final class McpClusterTools
         }
 
         $plan = ['detected' => $detected, 'settings_to_write' => $settings,
-            'password' => $pass !== '' ? "se guardará cifrada (leída de {$passSource})" : 'no disponible',
+            // "password_status" y no "password": redact() taparía este texto informativo.
+            'password_status' => $pass !== '' ? "se guardará cifrada (leída de {$passSource})" : 'no disponible',
             'touches_data' => false, 'warnings' => $warnings];
         if (empty($args['apply'])) {
             return ['applied' => false, 'plan' => $plan, 'next' => 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.'];

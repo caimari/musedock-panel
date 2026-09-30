@@ -2120,7 +2120,8 @@ class ClusterController
                 echo json_encode(['ok' => false, 'error' => 'mail_db_source=master solo es válido en un nodo slave.']);
                 exit;
             }
-            $masterIp = trim($_POST['master_db_host'] ?? '') ?: Settings::get('cluster_master_ip', '');
+            // La BD del master se alcanza por la VPN (IP de los latidos), no por la pública.
+            $masterIp = trim($_POST['master_db_host'] ?? '') ?: (Settings::get('cluster_master_heartbeat_ip', '') ?: Settings::get('cluster_master_ip', ''));
             if (!filter_var($masterIp, FILTER_VALIDATE_IP)) {
                 echo json_encode(['ok' => false, 'error' => 'No se conoce la IP del master. La orquestación debe enviarla.']);
                 exit;
