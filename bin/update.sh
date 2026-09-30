@@ -738,30 +738,34 @@ repair_panel_tls_caddy() {
     done
     panel_site_labels="${panel_site_labels}, https://localhost:${panel_port}"
 
-    existing_sites=$(awk '
-        !past_global && /^[[:space:]]*\{[[:space:]]*$/ { in_global=1; next }
-        in_global && /^[[:space:]]*\}[[:space:]]*$/ { in_global=0; past_global=1; next }
-        in_global { next }
-        /^https?:\/\/:'"${panel_port}"'/ || /^https?:\/\/[^ ]*:'"${panel_port}"'/ || /^:'"${panel_port}"'/ {
-            in_panel=1
-            line=$0
-            opens=gsub(/\{/, "{", line)
-            line=$0
-            closes=gsub(/\}/, "}", line)
-            depth=opens-closes
-            if(depth<=0) depth=1
-            next
-        }
+    # Extrae del Caddyfile actual todo lo que NO se regenera: quita el bloque de
+    # opciones globales y el bloque del panel (:PUERTO), contando llaves de verdad.
+    # (La versión anterior cerraba las opciones globales en la PRIMERA "}" suelta:
+    # con un bloque anidado como `servers :8444 { ... }` dejaba una "}" colgando, y
+    # un bloque del panel con las etiquetas en varias líneas no se cerraba nunca.)
+    existing_sites=$(awk -v port="${panel_port}" '
+        function strip(s) { sub(/(^|[[:space:]])#.*/, "", s); return s }
+        function delta(s,   t, o, c) { s = strip(s); t = s; o = gsub(/[{]/, "", t); t = s; c = gsub(/[}]/, "", t); return o - c }
+        function is_panel_label(s) { return strip(s) ~ ("^[[:space:]]*(https?://)?[^[:space:],{]*:" port "([[:space:]]*[,{]|[[:space:]]*$)") }
+
+        # Opciones globales: un "{" solo en su línea antes de cualquier sitio.
+        !seen_site && !past_global && !in_global && /^[[:space:]]*[{][[:space:]]*$/ { in_global = 1; gdepth = 1; next }
+        in_global { gdepth += delta($0); if (gdepth <= 0) { in_global = 0; past_global = 1 } next }
+
+        # Bloque del panel (se regenera): etiquetas con :PUERTO en el nivel superior,
+        # quizá repartidas en varias líneas antes del "{".
+        !in_panel && tdepth == 0 && is_panel_label($0) { in_panel = 1; opened = 0; pdepth = 0 }
         in_panel {
-            line=$0
-            opens=gsub(/\{/, "{", line)
-            line=$0
-            closes=gsub(/\}/, "}", line)
-            depth += opens-closes
-            if(depth<=0) in_panel=0
+            pdepth += delta($0)
+            if (strip($0) ~ /[{]/) opened = 1
+            if (opened && pdepth <= 0) in_panel = 0
             next
         }
-        { print }
+
+        # Líneas en blanco iniciales fuera: el generador ya pone una de separación
+        # (si no, el Caddyfile crecía una línea en cada actualización).
+        !printed && /^[[:space:]]*$/ { next }
+        { printed = 1; if (strip($0) ~ /[^[:space:]]/) seen_site = 1; tdepth += delta($0); if (tdepth < 0) tdepth = 0; print }
     ' "$caddy_file" 2>/dev/null)
 
     backup_file="${caddy_file}.bak.$(date +%Y%m%d%H%M%S)"

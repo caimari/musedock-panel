@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.232] — 2026-09-30 — Panel en blanco con Chrome en servidores con webs en el 443
+
+### Arreglado
+- **El actualizador generaba un Caddyfile inválido y volvía a poner el anterior**: «subject does not qualify for certificate: '}'» en Filemon y «unrecognized directive: www.muserelay.com» en obelix. Lo introdujo la 1.0.231: al añadir `servers :8444 { protocols h1 h2 }` dentro de las opciones globales, estas pasaron a tener llaves anidadas, y el extractor de `update.sh` daba por terminado ese bloque en la **primera** `}` suelta. La `}` real quedaba colgando. Además, un bloque del panel con las etiquetas repartidas en varias líneas no se cerraba nunca. La validación como usuario `caddy` de la 1.0.231 impidió que se aplicara, así que no se rompió nada.
+  - El extractor se ha reescrito contando llaves de verdad en los dos bloques. Tiene en cuenta etiquetas en varias líneas, comentarios con llaves y cualquier etiqueta `:PUERTO` del nivel superior.
+  - Tampoco arrastra ya las líneas en blanco del principio (antes el Caddyfile crecía una línea en cada actualización).
+  - Probado con cuatro Caddyfiles (el de Filemon, el de obelix con muserelay, el formato antiguo con comentarios y un sitio `:8444`) y con el real de mortadelo: todos válidos según `caddy adapt`, sin perder ningún sitio, y dos pasadas seguidas dan exactamente el mismo fichero.
+- **El panel salía en blanco en Chrome en cuanto el servidor tenía webs en el 443** (visto en obelix al clonar muserelay). Las webs del 443 anuncian HTTP/3 (`alt-svc`), y Chrome reutilizaba esa conexión QUIC del 443 para pedir el panel del `:8444`. La petición llegaba al servidor del 443 diciendo «puerto 8444»; la ruta del dominio del panel solo contemplaba el puerto 443, así que no había nada que la atendiera y Caddy respondía vacío.
+- Ahora esa ruta (`panel-domain-https-route`) responde **421 Misdirected Request** a lo que llega al 443 con otro puerto. Ese es el mecanismo estándar de HTTP para decirle al navegador «esta conexión no es la correcta», y Chrome reintenta por una conexión nueva al 8444. Lo que llega con puerto 443 sigue redirigiéndose (308) al panel.
+- **No se sirve el panel por el 443**, a propósito: el 8444 está limitado por el firewall a IPs concretas, y el 443 está abierto a todo internet.
+- El reparador de Caddy sustituye automáticamente la ruta antigua por la nueva. Probado contra un Caddy real.
+
 ## [1.0.231] — 2026-09-30 — Unir dos paneles desde el MCP, sin secretos en el chat
 
 ### Añadido

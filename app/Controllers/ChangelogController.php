@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.232',
+                'date' => '2026-09-30',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '**Panel en blanco en Chrome en servidores con webs en el 443:** Chrome reutilizaba la conexion HTTP/3 del 443 para pedir el panel del 8444 y Caddy respondia vacio. Ahora responde 421 (Misdirected Request) y Chrome reintenta por el 8444. El panel NO se sirve por el 443, para no saltarse el firewall del 8444',
+                            '**El actualizador generaba un Caddyfile invalido y volvia a poner el anterior** (introducido en 1.0.231: las opciones globales con llaves anidadas se cortaban en la primera `}`). El extractor cuenta llaves de verdad; probado con cinco Caddyfiles reales, validos y estables',
+                        ],
+                        'en' => [
+                            '**Blank panel in Chrome on servers with sites on 443:** Chrome reused the 443 HTTP/3 connection to request the panel on 8444 and Caddy answered empty. It now answers 421 (Misdirected Request) and Chrome retries on 8444. The panel is NOT served on 443, so the 8444 firewall is not bypassed',
+                            '**The updater generated an invalid Caddyfile and restored the previous one** (introduced in 1.0.231: global options with nested braces were cut at the first `}`). The extractor now really counts braces; tested with five real Caddyfiles, valid and stable',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.231',
                 'date' => '2026-09-30',
                 'badge' => 'success',
