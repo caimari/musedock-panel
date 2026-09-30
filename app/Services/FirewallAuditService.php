@@ -247,6 +247,10 @@ final class FirewallAuditService
                         break;
                     }
                 }
+                // WireGuard del kernel escucha sin proceso de usuario.
+                if ($proc === '(desconocido)' && $proto === 'udp' && self::sh('wg show all listen-port 2>/dev/null | grep -wc ' . (int)$m[2]) > 0) {
+                    $proc = 'WireGuard';
+                }
                 $out[] = ['port' => (int)$m[2], 'proto' => $proto, 'process' => $proc, 'public_bind' => $public, 'v6' => $v6 || $addr === '*'];
             }
         }

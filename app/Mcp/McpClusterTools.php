@@ -822,6 +822,10 @@ final class McpClusterTools
         $wanted = array_intersect_key($args, $svc::ALLOWED);
         [$changes, $errors] = $svc::validate($wanted);
         $info = ['domain' => $acc['domain'], 'php_version' => $acc['php_version'], 'pool' => $svc::poolFile($acc), 'current' => $current];
+        if (!is_file($svc::poolFile($acc))) {
+            throw new \RuntimeException("La cuenta {$acc['domain']} no tiene pool propio de PHP-FPM (usuario {$acc['username']}, PHP {$acc['php_version']}): "
+                . 'probablemente la sirve el pool general (www.conf) u otro servicio. Sus límites no se pueden cambiar desde aquí.');
+        }
         if ($errors) {
             throw new \InvalidArgumentException(implode('; ', $errors));
         }

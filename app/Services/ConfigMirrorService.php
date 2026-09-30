@@ -508,7 +508,21 @@ final class ConfigMirrorService
             $actions[] = ['what' => 'Caddyfile', 'result' => 'omitido'];
             return;
         }
-        $actions[] = ['what' => 'Caddyfile', 'result' => 'actualizado (webs del master; se aplica al promover, sin recargar Caddy ahora)'];
+        // Qué líneas cambian (para revisarlo antes de aplicar): solo las de las webs.
+        // Sin secretos en la salida: hashes de basic_auth ($2a$…) y tokens largos.
+        $norm = static fn(string $s) => array_values(array_filter(array_map(
+            static fn($l) => preg_replace(['/\$2[aby]\$\S+/', '/\b[A-Za-z0-9_\-]{32,}\b/'], '***', trim($l)),
+            preg_split('/\r?\n/', $s)), static fn($l) => $l !== '' && !str_starts_with($l, '#')));
+        $mineSites = [];
+        foreach (self::caddyBlocks($mine) as $i => $b) {
+            if (!self::isPanelOrGlobal($b, $myPort, $i)) {
+                $mineSites[] = $b['text'];
+            }
+        }
+        [$was, $will] = [$norm(implode("\n", $mineSites)), $norm(implode("\n", $sites))];
+        $actions[] = ['what' => 'Caddyfile', 'result' => 'actualizado (webs del master; se aplica al promover, sin recargar Caddy ahora)',
+            'lines_added' => array_slice(array_values(array_diff($will, $was)), 0, 30),
+            'lines_removed' => array_slice(array_values(array_diff($was, $will)), 0, 30)];
         if ($apply) {
             self::backup($path);
             file_put_contents($path, $candidate);

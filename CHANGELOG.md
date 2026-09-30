@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.242] — 2026-09-30 — Ajustes tras probar en asterisk y obelix
+
+### Mejorado
+- **`config_mirror` enseña qué cambiaría del Caddyfile** antes de aplicar: líneas que se añaden y que se quitan en las webs (máximo 30 de cada), con los hashes de `basic_auth` y los tokens largos ocultos. En obelix la simulación marcaba el Caddyfile como «actualizado» sin poder ver por qué.
+- **`firewall_audit`**: el puerto de WireGuard del kernel (que no tiene proceso de usuario) aparece como «WireGuard» en vez de «(desconocido)».
+
+### Arreglado
+- **`hosting_php_settings` devolvía valores vacíos** para cuentas sin pool propio (muserelay.com usa el pool general `www.conf`). Ahora lo dice claramente en lugar de mostrar un pool inexistente.
+
 ## [1.0.241] — 2026-09-30 — El slave copia la configuración del sistema del master + límites de PHP por MCP
 
 ### Añadido

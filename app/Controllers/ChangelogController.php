@@ -20,6 +20,27 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.242',
+                'date' => '2026-09-30',
+                'badge' => 'info',
+                'changes' => [
+                    'improved' => [
+                        'es' => [
+                            '`config_mirror` muestra que lineas del Caddyfile se anadirian y quitarian antes de aplicar (sin secretos)',
+                            '`firewall_audit` identifica el puerto de WireGuard del kernel',
+                        ],
+                        'en' => [
+                            '`config_mirror` shows which Caddyfile lines would be added and removed before applying (no secrets)',
+                            '`firewall_audit` identifies the kernel WireGuard port',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => ['`hosting_php_settings` devolvia valores vacios en cuentas sin pool propio (como muserelay.com, que usa www.conf); ahora lo explica'],
+                        'en' => ['`hosting_php_settings` returned empty values for accounts without their own pool (like muserelay.com, which uses www.conf); it now explains it'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.241',
                 'date' => '2026-09-30',
                 'badge' => 'success',
