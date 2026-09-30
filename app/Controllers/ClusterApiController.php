@@ -21,6 +21,8 @@ class ClusterApiController
         // CardDAV DB credentials + encryption key sent to the slave when preparing
         // its DAV replica (carddav_setup_replica).
         'enc_key',
+        // Emparejamiento (pair-accept): token del master y nonce.
+        'master_token', 'nonce',
     ];
 
     /** Return a copy of $payload with secret values masked, recursively. */
@@ -406,6 +408,10 @@ class ClusterApiController
                 'promote'          => ClusterService::promoteToMaster(),
                 'demote'           => ClusterService::demoteToSlave($payload['new_master_ip'] ?? ''),
                 'test-connection'  => ['ok' => true, 'message' => 'Connection successful'],
+                // Emparejamiento: el master que aprobó nuestra solicitud nos envía su
+                // token. Solo vale si ESTE servidor tiene una solicitud en curso hacia
+                // ese master y el nonce coincide (ver ClusterPairingService).
+                'pair-accept'      => \MuseDockPanel\Services\ClusterPairingService::acceptPairing($payload),
                 // Witness probe: does THIS node reach $ip? Used by the failover
                 // quorum guard to distinguish a dead master from a network
                 // partition before auto-promoting (anti split-brain).

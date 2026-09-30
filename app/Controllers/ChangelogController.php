@@ -20,6 +20,33 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.231',
+                'date' => '2026-09-30',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '**Unir dos paneles desde el MCP sin secretos en el chat:** `cluster_pairing_open` en el master (ventana de 30 min), `cluster_pair_request` en el slave (devuelve un codigo) y `cluster_pair_approve` en el master con ese codigo. Los tokens viajan por TLS de panel a panel',
+                            'El endpoint publico `/api/pair/request` responde 404 con la ventana cerrada, limita solicitudes por IP y no da acceso a nada sin la aprobacion en el master',
+                        ],
+                        'en' => [
+                            '**Join two panels from the MCP with no secrets in the chat:** `cluster_pairing_open` on the master (30 min window), `cluster_pair_request` on the slave (returns a code) and `cluster_pair_approve` on the master with that code. Tokens travel over TLS panel to panel',
+                            'The public `/api/pair/request` endpoint returns 404 while the window is closed, rate-limits by IP and grants nothing without approval on the master',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            '**El actualizador rechazaba un Caddyfile valido** ("no PEM block found"): validaba como root con la CA interna de root, que en Filemon estaba danada. Ahora valida como el usuario caddy y con su almacen, igual que el servicio',
+                            '**Panel en blanco en el navegador:** el puerto del panel ya no ofrece HTTP/3, que tras cambios en caliente de Caddy podia devolver respuestas vacias. Las webs del 443 no cambian',
+                        ],
+                        'en' => [
+                            '**The updater rejected a valid Caddyfile** ("no PEM block found"): it validated as root with root\'s internal CA, which was corrupted on Filemon. It now validates as the caddy user with its own storage, like the service',
+                            '**Blank panel page in the browser:** the panel port no longer offers HTTP/3, which could return empty responses after live Caddy config changes. Sites on 443 are unchanged',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.230',
                 'date' => '2026-09-30',
                 'badge' => 'success',

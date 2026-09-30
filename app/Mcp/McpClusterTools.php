@@ -65,6 +65,41 @@ final class McpClusterTools
                     'apply' => $apply,
                 ]),
             ],
+            'cluster_pairing_open' => [
+                'write' => true,
+                'title' => 'Abrir emparejamiento (en el master)',
+                'description' => 'PASO 1 para unir dos paneles sin pasar secretos por el chat. En el futuro MASTER: abre durante 30 minutos la recepción de solicitudes de emparejamiento. Después, en el futuro slave, cluster_pair_request. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o(['apply' => $apply]),
+            ],
+            'cluster_pair_request' => [
+                'write' => true,
+                'title' => 'Pedir unirse a un master (en el slave)',
+                'description' => 'PASO 2. En el futuro SLAVE: envía al master una solicitud de emparejamiento con el token de cluster de este panel (viaja por TLS de panel a panel, nunca por el chat) y devuelve un CÓDIGO corto. Ese código se confirma en el master con cluster_pair_approve. El master debe tener abierta la ventana (cluster_pairing_open) y su 8444 debe admitir la IP de este servidor. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o([
+                    'master_url' => ['type' => 'string', 'description' => 'URL pública del panel master, p. ej. https://master.dominio.com:8444 (certificado válido)'],
+                    'name' => ['type' => 'string', 'description' => 'Nombre con el que aparecerá este nodo (por defecto, el hostname)'],
+                    'self_url' => ['type' => 'string', 'description' => 'URL por la que el master llegará a ESTE panel (por defecto la de su hostname de panel)'],
+                    'services' => ['type' => 'array', 'items' => ['type' => 'string', 'enum' => ['web', 'mail']], 'description' => 'Por defecto ["web"]'],
+                    'apply' => $apply,
+                ], ['master_url']),
+            ],
+            'cluster_pair_pending' => [
+                'write' => false,
+                'title' => 'Solicitudes de emparejamiento pendientes',
+                'description' => 'En el MASTER: muestra si la ventana de emparejamiento está abierta y las solicitudes recibidas (código, nombre, URL, IP de origen, servicios). No muestra tokens. Solo lectura.',
+                'inputSchema' => $o([]),
+            ],
+            'cluster_pair_approve' => [
+                'write' => true, 'destructive' => true,
+                'title' => 'Aprobar emparejamiento (en el master)',
+                'description' => 'PASO 3. En el MASTER: aprueba la solicitud con ese código. Comprueba que llega a la API del slave con su token, lo registra como nodo y le envía el token del master; el slave queda con rol slave y este panel con rol master. Comprueba antes con el usuario que el código coincide con el que vio en el slave. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o([
+                    'code' => ['type' => 'string', 'description' => 'Código XXXX-XXXX que devolvió cluster_pair_request en el slave'],
+                    'master_url' => ['type' => 'string', 'description' => 'URL de ESTE panel con el MISMO host que usó el slave en su master_url (por defecto la del hostname del panel)'],
+                    'master_public_ip' => ['type' => 'string', 'description' => 'IP pública de este servidor (la que vigilará el failover del slave)'],
+                    'apply' => $apply,
+                ], ['code']),
+            ],
             'cluster_node_services' => [
                 'write' => true,
                 'title' => 'Servicios de un nodo',
@@ -90,6 +125,10 @@ final class McpClusterTools
             'failover_configure'    => self::configure($args),
             'replication_adopt'     => self::adopt($args),
             'cluster_node_services' => self::nodeServices($args),
+            'cluster_pairing_open'  => self::pairingOpen($args),
+            'cluster_pair_request'  => self::pairRequest($args),
+            'cluster_pair_pending'  => self::pairPending(),
+            'cluster_pair_approve'  => self::pairApprove($args),
             default                 => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
         };
     }
@@ -461,6 +500,110 @@ final class McpClusterTools
         }
         LogService::log('mcp.replication', 'adopt', "Réplica PG adoptada: rol {$role}, usuario {$user}, otro extremo " . implode(',', $peers));
         return ['applied' => true, 'plan' => $plan];
+    }
+
+    // ── Emparejamiento ───────────────────────────────────────────────────
+
+    private static function pairingOpen(array $args): array
+    {
+        $role = self::role();
+        $nodes = ClusterService::getNodes();
+        if ($role === 'slave') {
+            throw new \RuntimeException('Este panel es slave: el emparejamiento se abre en el master.');
+        }
+        $plan = [
+            'this_panel_becomes' => 'master (al aprobar la primera solicitud)',
+            'window_minutes' => 30,
+            'master_url_for_slave' => \MuseDockPanel\Services\ClusterPairingService::localPanelUrl() ?: '(panel_hostname sin configurar: usa la URL pública del 8444)',
+            'current_nodes' => array_map(static fn($n) => $n['name'], $nodes),
+            'note' => 'Mientras está abierta, /api/pair/request acepta solicitudes (limitadas por IP). Nadie se une sin cluster_pair_approve.',
+        ];
+        if (empty($args['apply'])) {
+            return ['applied' => false, 'plan' => $plan, 'next' => 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.'];
+        }
+        $r = \MuseDockPanel\Services\ClusterPairingService::openWindow();
+        return ['applied' => true, 'open_until' => $r['open_until'], 'master_url' => $r['master_url'],
+            'next' => 'En el futuro slave: cluster_pair_request con master_url=' . ($r['master_url'] ?: '<URL pública del 8444 de este panel>') . '.'];
+    }
+
+    private static function pairRequest(array $args): array
+    {
+        $masterUrl = rtrim(trim((string)($args['master_url'] ?? '')), '/');
+        if (!filter_var($masterUrl, FILTER_VALIDATE_URL) || !str_starts_with($masterUrl, 'https://')) {
+            throw new \InvalidArgumentException('master_url debe ser una URL https:// del panel master.');
+        }
+        if (self::role() === 'master' && ClusterService::getNodes()) {
+            throw new \RuntimeException('Este panel ya es master con nodos: no puede unirse como slave.');
+        }
+        $name = trim((string)($args['name'] ?? '')) ?: (string)gethostname();
+        if (!preg_match('/^[A-Za-z0-9._-]{1,64}$/', $name)) {
+            throw new \InvalidArgumentException('name: solo letras, números, punto, guion y guion bajo (máx. 64).');
+        }
+        $selfUrl = rtrim(trim((string)($args['self_url'] ?? '')), '/') ?: \MuseDockPanel\Services\ClusterPairingService::localPanelUrl();
+        if (!filter_var($selfUrl, FILTER_VALIDATE_URL) || !str_starts_with($selfUrl, 'https://')) {
+            throw new \InvalidArgumentException('No se conoce la URL de este panel (panel_hostname): indica self_url.');
+        }
+        $services = array_values(array_unique(array_intersect((array)($args['services'] ?? ['web']), ['web', 'mail']))) ?: ['web'];
+        $plan = [
+            'send_to' => $masterUrl . '/api/pair/request',
+            'name' => $name,
+            'self_url' => $selfUrl,
+            'services' => $services,
+            'sends' => 'nombre, URL, servicios y el token de cluster de este panel (por TLS, panel a panel; no se muestra aquí)',
+            'after' => 'el master aprueba el código con cluster_pair_approve; entonces este panel pasa a rol slave',
+        ];
+        if (empty($args['apply'])) {
+            return ['applied' => false, 'plan' => $plan, 'next' => 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.'];
+        }
+        $r = \MuseDockPanel\Services\ClusterPairingService::requestPairing($masterUrl, $name, $selfUrl, $services);
+        return ['applied' => true, 'code' => $r['code'], 'expires' => $r['expires'],
+            'next' => "Enseña el código {$r['code']} al usuario y apruébalo en el master con cluster_pair_approve (comprobando que coincide)."];
+    }
+
+    private static function pairPending(): array
+    {
+        $until = \MuseDockPanel\Services\ClusterPairingService::windowOpenUntil();
+        return [
+            'window_open' => $until > time(),
+            'open_until' => $until > time() ? date('Y-m-d H:i:s', $until) : null,
+            'pending' => \MuseDockPanel\Services\ClusterPairingService::listPending(),
+        ];
+    }
+
+    private static function pairApprove(array $args): array
+    {
+        if (self::role() === 'slave') {
+            throw new \RuntimeException('Este panel es slave: las solicitudes se aprueban en el master.');
+        }
+        $code = strtoupper(trim((string)($args['code'] ?? '')));
+        $p = \MuseDockPanel\Services\ClusterPairingService::findPending($code);
+        if (!$p) {
+            throw new \RuntimeException('No hay ninguna solicitud pendiente con ese código (o ha caducado). Mira cluster_pair_pending.');
+        }
+        $masterUrl = rtrim(trim((string)($args['master_url'] ?? '')), '/') ?: \MuseDockPanel\Services\ClusterPairingService::localPanelUrl();
+        if (!filter_var($masterUrl, FILTER_VALIDATE_URL)) {
+            throw new \InvalidArgumentException('Indica master_url (la URL de este panel con el mismo host que usó el slave).');
+        }
+        $pubIp = trim((string)($args['master_public_ip'] ?? ''));
+        if ($pubIp !== '' && !filter_var($pubIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            throw new \InvalidArgumentException('master_public_ip debe ser una IP pública.');
+        }
+        $plan = [
+            'request' => ['code' => $p['code'], 'name' => $p['name'], 'api_url' => $p['api_url'], 'from_ip' => $p['from_ip'], 'services' => $p['services']],
+            'steps' => [
+                "probar la API de {$p['api_url']} con el token que envió",
+                "registrar {$p['name']} como nodo del cluster (servicios: " . implode(',', $p['services']) . ')',
+                "enviarle el token de este panel; el slave comprueba el nonce y se registra como slave de {$masterUrl}",
+                'este panel pasa a rol master (si no lo era)',
+            ],
+            'master_public_ip' => $pubIp ?: '(sin indicar: el slave no sabrá qué IP vigilar para el failover hasta configurarlo)',
+        ];
+        if (empty($args['apply'])) {
+            return ['applied' => false, 'plan' => $plan,
+                'next' => 'Confirma con el usuario que el código coincide con el que vio en el slave y repite con apply=true.'];
+        }
+        $r = \MuseDockPanel\Services\ClusterPairingService::approve($code, $masterUrl, $pubIp);
+        return ['applied' => true, 'node_id' => $r['node_id'], 'steps' => $r['steps']];
     }
 
     // ── cluster_node_services ────────────────────────────────────────────

@@ -59,7 +59,9 @@ final class McpServer
                             . 'Cluster y failover: failover_preflight (lectura) dice en llano qué falta para que un relevo funcione; ejecútalo en el master Y en el slave. '
                             . 'replication_adopt registra una réplica de PostgreSQL que ya funciona (no toca datos); failover_configure (en el master) define primario, '
                             . 'servidor de relevo con IPs públicas y modo; cluster_node_services fija si un nodo es web, mail o ambos. '
-                            . 'Mismo protocolo que el correo: primero sin apply, enseñar el plan y pedir confirmación.',
+                            . 'Mismo protocolo que el correo: primero sin apply, enseñar el plan y pedir confirmación. '
+                            . 'Unir dos paneles (sin secretos en el chat): en el master cluster_pairing_open → en el slave cluster_pair_request '
+                            . '(devuelve un código) → en el master cluster_pair_approve con ese código, tras confirmar con el usuario que coincide.',
                     ]);
 
                 case 'ping':

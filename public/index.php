@@ -213,6 +213,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 
 // MCP server (Model Context Protocol). Apagado por defecto; autenticación propia
 // por token Bearer dentro del controlador (no pasa por ApiAuthMiddleware).
+// Emparejamiento de nodos: público, pero solo responde con la ventana abierta en el
+// master (404 si no) y unirse exige aprobar el código en el master.
+\MuseDockPanel\Router::post('/api/pair/request', 'ClusterPairController@request');
 \MuseDockPanel\Router::post('/api/mcp', 'McpController@handle');
 \MuseDockPanel\Router::get('/api/mcp', 'McpController@handle');
 

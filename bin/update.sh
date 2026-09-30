@@ -767,10 +767,16 @@ repair_panel_tls_caddy() {
     backup_file="${caddy_file}.bak.$(date +%Y%m%d%H%M%S)"
     cp "$caddy_file" "$backup_file" 2>/dev/null || true
 
+    # El puerto del panel sin HTTP/3: tras cambios de configuración en caliente, el
+    # oyente QUIC podía quedarse con rutas viejas y el navegador (que prefiere h3)
+    # recibía respuestas vacías (página en blanco) mientras h1/h2 funcionaban.
     cat > "$caddy_file" << CADDYEOF
 {
     auto_https disable_redirects
     admin localhost:2019
+    servers :${panel_port} {
+        protocols h1 h2
+    }
 }
 
 ${panel_site_labels} {
@@ -787,13 +793,24 @@ CADDYEOF
         echo "$existing_sites" >> "$caddy_file"
     fi
 
-    if caddy validate --config "$caddy_file" >/dev/null 2>&1; then
+    # Validar como el usuario caddy y con SU almacén (el mismo que usa el servicio):
+    # como root, `caddy validate` usa /root/.local/share/caddy, cuya CA interna puede
+    # estar dañada o no existir, y rechazaba un Caddyfile correcto ("no PEM block found").
+    caddy_validate() {
+        if id caddy >/dev/null 2>&1 && [ -d /var/lib/caddy ]; then
+            runuser -u caddy -- env HOME=/var/lib/caddy caddy validate --config "$1"
+        else
+            caddy validate --config "$1"
+        fi
+    }
+
+    if caddy_validate "$caddy_file" >/dev/null 2>&1; then
         systemctl daemon-reload 2>/dev/null || true
         systemctl restart caddy 2>/dev/null || true
         ok "Panel TLS Caddy block repaired for https://${server_ip}:${panel_port}"
     else
         warn "Generated Caddyfile failed validation; restoring previous file"
-        caddy validate --config "$caddy_file" 2>&1 | sed 's/^/    /' || true
+        caddy_validate "$caddy_file" 2>&1 | sed 's/^/    /' || true
         cp "$backup_file" "$caddy_file" 2>/dev/null || true
     fi
 }

@@ -2,6 +2,29 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.231] — 2026-09-30 — Unir dos paneles desde el MCP, sin secretos en el chat
+
+### Añadido
+- **Emparejamiento de paneles por MCP**, como vincular un dispositivo: ningún token pasa por el chat ni por el usuario.
+  1. En el master, `cluster_pairing_open` abre durante **30 minutos** la recepción de solicitudes.
+  2. En el futuro slave, `cluster_pair_request` envía al master, **por TLS y de panel a panel**, su token de cluster, y devuelve un **código** `XXXX-XXXX`.
+  3. En el master, `cluster_pair_approve` con ese código:
+     - comprueba que llega a la API del slave con su token;
+     - lo registra como nodo;
+     - le envía el token del master junto con un nonce que solo conocen los dos.
+
+     El slave comprueba el nonce, y además que le responde el mismo master al que se lo pidió; entonces se registra como slave. `cluster_pair_pending` muestra las solicitudes, sin tokens.
+- **Protecciones del endpoint público `POST /api/pair/request`**, el único sin token:
+  - responde **404** mientras la ventana está cerrada;
+  - admite como mucho 5 solicitudes cada 10 minutos por IP (la real, no la de Caddy) y 5 pendientes;
+  - sigue sujeto a `ALLOWED_IPS`;
+  - **recibir una solicitud no da acceso a nada**: unirse exige aprobarla en el master con acceso de escritura.
+- El token del master y el nonce nunca se escriben en `panel_log`, que se replica.
+
+### Arreglado
+- **Panel en blanco en el navegador (visto en obelix).** El navegador entra al 8444 por HTTP/3 (QUIC). Tras cambios de configuración de Caddy en caliente, el oyente QUIC podía quedarse con rutas viejas y devolver respuestas vacías, mientras HTTP/1.1 y HTTP/2 funcionaban. Ahora el Caddyfile generado declara `servers :8444 { protocols h1 h2 }`: el puerto del panel ya no ofrece HTTP/3 y el navegador usa HTTP/2. Las webs del 443 no cambian.
+- **`update.sh` rechazaba un Caddyfile correcto y volvía a poner el anterior** («no PEM block found», visto en Filemon). Validaba con `caddy validate` como **root**, que usa la CA interna de root (`/root/.local/share/caddy/pki`), y en Filemon esa CA estaba dañada: ficheros con su tamaño normal pero llenos de ceros. El Caddy real funciona como el usuario `caddy`, con su propio almacén. Ahora la validación se hace como el usuario `caddy` y con su almacén, igual que el servicio; si ese usuario no existe, sigue validando como root.
+
 ## [1.0.230] — 2026-09-30 — NOVEDAD: el MCP ya gestiona cluster y failover (+ 3 fallos críticos del relevo corregidos)
 
 **Primer paso hacia montar un slave completo desde Claude, ChatGPT o VS Code.** El MCP deja de ser solo de consulta en la parte de cluster: ya puede diagnosticar un relevo, registrar una réplica existente, configurar el failover y asignar servicios a los nodos. Todo con el mismo protocolo que el correo: primero el plan, y solo se aplica con tu confirmación y con «Permitir acciones que modifican» activado.
