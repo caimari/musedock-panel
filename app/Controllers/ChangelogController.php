@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.245',
+                'date' => '2026-09-30',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '**Carpetas extra en la copia de ficheros (MCP `filesync_extra_paths`):** copiar con lsyncd apps que viven fuera de /var/www (p. ej. /opt/app) solo a los nodos elegidos; solo /opt, /srv o /home y nunca el propio panel',
+                            '**`config_mirror` copia los servicios systemd propios del master:** parados y deshabilitados en el slave, verificados, y habilitados al promover',
+                        ],
+                        'en' => [
+                            '**Extra folders in file sync (MCP `filesync_extra_paths`):** copy with lsyncd apps living outside /var/www (e.g. /opt/app) only to the chosen nodes; only /opt, /srv or /home and never the panel itself',
+                            '**`config_mirror` copies the master custom systemd services:** stopped and disabled on the slave, verified, and enabled on promotion',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.244',
                 'date' => '2026-09-30',
                 'badge' => 'info',

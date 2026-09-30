@@ -183,6 +183,16 @@ final class McpClusterTools
                     'apply' => $apply,
                 ]),
             ],
+            'filesync_extra_paths' => [
+                'write' => true, 'destructive' => true,
+                'title' => 'Carpetas extra en la copia de ficheros',
+                'description' => 'En el MASTER: además de /var/www/vhosts, copiar con lsyncd carpetas de apps que viven fuera de los hostings (p. ej. /opt/miapp) SOLO a los nodos que se indiquen (normalmente el de relevo). Solo carpetas existentes bajo /opt, /srv o /home; nunca /opt/musedock-panel. Es ESPEJO: en el nodo destino se borra lo que no exista aquí dentro de esas carpetas. Sin argumentos muestra la configuración actual. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o([
+                    'paths' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Lista completa de carpetas (sustituye a la anterior)'],
+                    'target_nodes' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Ids o nombres de los nodos que las reciben'],
+                    'apply' => $apply,
+                ]),
+            ],
             'cluster_node_services' => [
                 'write' => true,
                 'title' => 'Servicios de un nodo',
@@ -221,6 +231,7 @@ final class McpClusterTools
             'firewall_trusted_sources' => self::trustedSources($args),
             'filesync_status'       => self::filesyncStatus(),
             'filesync_configure'    => self::filesyncConfigure($args),
+            'filesync_extra_paths'  => self::filesyncExtraPaths($args),
             default                 => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
         };
     }
@@ -912,6 +923,50 @@ final class McpClusterTools
                 'log_tail' => array_values(array_filter($log)),
             ],
         ];
+    }
+
+    private static function filesyncExtraPaths(array $args): array
+    {
+        $fs = \MuseDockPanel\Services\FileSyncService::class;
+        $curPaths = $fs::extraPaths();
+        $curNodes = array_map('intval', $fs::parseExcludePatterns(Settings::get('filesync_extra_nodes', '')));
+        $nodeName = static function (int $id): string {
+            $n = ClusterService::getNode($id);
+            return $n ? (string)$n['name'] : "#{$id}";
+        };
+        $info = ['paths' => $curPaths, 'target_nodes' => array_map($nodeName, $curNodes)];
+        if (!array_key_exists('paths', $args) && !array_key_exists('target_nodes', $args)) {
+            return $info;
+        }
+        if (self::role() !== 'master') {
+            throw new \RuntimeException('filesync_extra_paths se configura en el MASTER.');
+        }
+        $raw = implode("\n", (array)($args['paths'] ?? $curPaths));
+        $paths = $fs::extraPaths($raw);
+        $rejected = array_values(array_diff(array_map(static fn($p) => rtrim((string)$p, '/'), (array)($args['paths'] ?? [])), $paths));
+        $nodes = array_key_exists('target_nodes', $args)
+            ? array_map(static fn($r) => (int)self::findNode((string)$r)['id'], (array)$args['target_nodes'])
+            : $curNodes;
+        $sizes = [];
+        foreach ($paths as $p) {
+            $sizes[$p] = self::sh('du -sh ' . escapeshellarg($p) . " | cut -f1", 20) ?: '?';
+        }
+        $plan = [
+            'paths' => $sizes,
+            // No válidas: fuera de /opt, /srv o /home, inexistentes o el propio panel.
+            'rejected' => $rejected,
+            'target_nodes' => array_map($nodeName, $nodes),
+            'mirror' => 'ESPEJO: en esos nodos, dentro de estas carpetas, se borra lo que no exista aquí. La primera pasada copia todo.',
+            'then' => 'se regenera la configuración de lsyncd y se reinicia',
+        ];
+        if (empty($args['apply'])) {
+            return ['applied' => false, 'plan' => $plan, 'next' => 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.'];
+        }
+        Settings::set('filesync_extra_paths', implode("\n", $paths));
+        Settings::set('filesync_extra_nodes', implode(',', $nodes));
+        $r = $fs::reloadLsyncd();
+        LogService::log('mcp.filesync', 'extra-paths', 'Carpetas extra: ' . implode(', ', $paths) . ' → nodos ' . implode(',', $nodes));
+        return ['applied' => true, 'plan' => $plan, 'lsyncd_running' => !empty($r['ok'])];
     }
 
     private static function filesyncConfigure(array $args): array

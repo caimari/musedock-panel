@@ -35,6 +35,8 @@ final class ConfigMirrorService
     private const BLOCK_END = '# <<< musedock-mirror <<<';
     private const BACKUP_DIR = '/var/backups/musedock-mirror';
     private const CRON_SKIP = ['e2scrub_all', 'php', 'sysstat', 'certbot', '.placeholder', 'popularity-contest'];
+    /** Unidades que cada nodo tiene por sí mismo (del panel) y no se copian. */
+    private const UNIT_SKIP = ['musedock-panel.service', 'musedock-stale-master-check.service'];
 
     // ── MASTER: exportar ─────────────────────────────────────────────────
 
@@ -61,6 +63,17 @@ final class ConfigMirrorService
         foreach (glob('/etc/php/*/fpm/pool.d/*.conf') ?: [] as $f) {
             $pools[basename(dirname(dirname(dirname($f)))) . '/' . basename($f)] = (string)@file_get_contents($f);
         }
+        // Servicios systemd propios (apps fuera del panel: /opt/<app>...), con si están
+        // habilitados en el master. No los del propio panel ni los de snap.
+        $units = [];
+        foreach (glob('/etc/systemd/system/*.service') ?: [] as $f) {
+            $n = basename($f);
+            if (is_link($f) || in_array($n, self::UNIT_SKIP, true) || str_starts_with($n, 'snap.')) {
+                continue;
+            }
+            $units[$n] = ['content' => (string)@file_get_contents($f),
+                'enabled' => trim((string)shell_exec('systemctl is-enabled ' . escapeshellarg($n) . ' 2>/dev/null')) === 'enabled'];
+        }
         return [
             'ok' => true,
             'panel_port' => (int)(Settings::get('panel_port', '8444') ?: 8444),
@@ -69,6 +82,7 @@ final class ConfigMirrorService
             'cron_d' => $cronD,
             'caddyfile' => (string)@file_get_contents('/etc/caddy/Caddyfile'),
             'fpm_pools' => $pools,
+            'systemd' => $units,
         ];
     }
 
@@ -81,8 +95,9 @@ final class ConfigMirrorService
 
     private static function state(): array
     {
+        $defaults = ['supervisor' => [], 'cron_d' => [], 'crontabs' => [], 'systemd' => [], 'caddy_pending' => false];
         $s = json_decode(Settings::get('cluster_config_mirror_state', '{}'), true);
-        return is_array($s) ? $s + ['supervisor' => [], 'cron_d' => [], 'crontabs' => [], 'caddy_pending' => false] : ['supervisor' => [], 'cron_d' => [], 'crontabs' => [], 'caddy_pending' => false];
+        return is_array($s) ? $s + $defaults : $defaults;
     }
 
     private static function saveState(array $s): void
@@ -139,6 +154,7 @@ final class ConfigMirrorService
         self::mirrorCrontabs((array)$cfg['crontabs'], $state, $apply, $actions, $issues);
         self::mirrorCaddyfile((string)$cfg['caddyfile'], (int)$cfg['panel_port'], $state, $apply, $actions, $issues);
         self::mirrorPools((array)$cfg['fpm_pools'], $apply, $actions, $issues);
+        self::mirrorSystemd((array)($cfg['systemd'] ?? []), $state, $apply, $actions, $issues);
 
         if ($apply) {
             self::saveState($state);
@@ -577,6 +593,86 @@ final class ConfigMirrorService
         }
     }
 
+    // ── Servicios systemd propios ──
+
+    private static function unitProblems(string $content): array
+    {
+        $p = [];
+        if (preg_match('/^\s*ExecStart\s*=\s*[-@+!:]*(\S+)/m', $content, $m)) {
+            $bin = $m[1];
+            if (str_starts_with($bin, '/') ? !is_executable($bin) : trim((string)shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null')) === '') {
+                $p[] = "no existe el ejecutable {$bin}";
+            }
+        } else {
+            $p[] = 'sin ExecStart';
+        }
+        if (preg_match('/^\s*WorkingDirectory\s*=\s*-?(\S+)/m', $content, $m) && !is_dir($m[1])) {
+            $p[] = "no existe la carpeta {$m[1]}";
+        }
+        if (preg_match('/^\s*User\s*=\s*(\S+)/m', $content, $m) && function_exists('posix_getpwnam') && !posix_getpwnam($m[1])) {
+            $p[] = "no existe el usuario {$m[1]}";
+        }
+        return $p;
+    }
+
+    private static function mirrorSystemd(array $units, array &$state, bool $apply, array &$actions, array &$issues): void
+    {
+        $state['systemd'] = $state['systemd'] ?? [];
+        $reload = false;
+        foreach ($units as $name => $u) {
+            if (!preg_match('/^[A-Za-z0-9_.@-]+\.service$/', (string)$name) || in_array($name, self::UNIT_SKIP, true)) {
+                continue;
+            }
+            $path = "/etc/systemd/system/{$name}";
+            $content = (string)($u['content'] ?? '');
+            $current = is_file($path) ? (string)file_get_contents($path) : null;
+            // Una unidad propia del slave con el mismo nombre (no copiada antes) no se toca.
+            if ($current !== null && !isset($state['systemd'][$name]) && self::normSup($current) !== self::normSup($content)) {
+                $issues[] = "systemd {$name}: el slave tiene su propia versión, distinta de la del master; no se toca.";
+                $actions[] = ['what' => "systemd/{$name}", 'result' => 'omitido'];
+                continue;
+            }
+            $problems = self::unitProblems($content);
+            if ($problems) {
+                $issues[] = "systemd {$name}: " . implode('; ', $problems) . ' (¿faltan sus ficheros? se reintentará)';
+                $actions[] = ['what' => "systemd/{$name}", 'result' => 'omitido'];
+                continue;
+            }
+            $state['systemd'][$name] = !empty($u['enabled']);
+            if ($current !== null && self::normSup($current) === self::normSup($content)) {
+                $actions[] = ['what' => "systemd/{$name}", 'result' => 'igual'];
+                continue;
+            }
+            $actions[] = ['what' => "systemd/{$name}", 'result' => ($current === null ? 'nuevo' : 'actualizado') . ' (parado y deshabilitado hasta el relevo)'];
+            if ($apply) {
+                self::backup($path);
+                file_put_contents($path, $content);
+                @chmod($path, 0644);
+                $reload = true;
+            }
+        }
+        foreach (array_keys($state['systemd']) as $name) {
+            if (!array_key_exists($name, $units) && is_file("/etc/systemd/system/{$name}")) {
+                $actions[] = ['what' => "systemd/{$name}", 'result' => 'ya no está en el master: se para y se aparta (.removed-by-mirror)'];
+                if ($apply) {
+                    shell_exec('systemctl disable --now ' . escapeshellarg($name) . ' >/dev/null 2>&1');
+                    @rename("/etc/systemd/system/{$name}", "/etc/systemd/system/{$name}.removed-by-mirror");
+                    unset($state['systemd'][$name]);
+                    $reload = true;
+                }
+            }
+        }
+        if ($apply && $reload) {
+            shell_exec('systemctl daemon-reload 2>&1');
+        }
+        if ($apply) {
+            // En un slave, lo copiado está siempre parado y deshabilitado.
+            foreach (array_keys($state['systemd']) as $name) {
+                shell_exec('systemctl disable --now ' . escapeshellarg($name) . ' >/dev/null 2>&1');
+            }
+        }
+    }
+
     // ── Relevo: encender / apagar lo copiado ─────────────────────────────
 
     /** Al PROMOVER: enciende lo copiado del master (antes de los scripts promote.d). */
@@ -621,6 +717,12 @@ final class ConfigMirrorService
             self::installCrontab((string)$user, rtrim(implode("\n", $outside)) . "\n" . self::BLOCK_BEGIN . "\n" . implode("\n", $on) . "\n" . self::BLOCK_END . "\n");
             $done[] = "crontab:{$user}: tareas copiadas activadas";
         }
+        foreach ($state['systemd'] as $name => $enabledOnMaster) {
+            if ($enabledOnMaster && is_file("/etc/systemd/system/{$name}")) {
+                shell_exec('systemctl enable --now ' . escapeshellarg((string)$name) . ' >/dev/null 2>&1');
+                $done[] = "systemd/{$name}: habilitado y arrancado";
+            }
+        }
         if (!empty($state['caddy_pending'])) {
             shell_exec('systemctl restart caddy 2>&1'); // el reparador repone las rutas del panel
             $state['caddy_pending'] = false;
@@ -655,6 +757,10 @@ final class ConfigMirrorService
                 rename("/etc/cron.d/{$name}", "/etc/cron.d/{$name}.musedock-off");
                 $done[] = "cron.d/{$name}: desactivado";
             }
+        }
+        foreach (array_keys($state['systemd']) as $name) {
+            shell_exec('systemctl disable --now ' . escapeshellarg((string)$name) . ' >/dev/null 2>&1');
+            $done[] = "systemd/{$name}: parado y deshabilitado";
         }
         foreach (array_keys($state['crontabs']) as $user) {
             [$outside, $inside] = self::splitBlock(self::readCrontab((string)$user));

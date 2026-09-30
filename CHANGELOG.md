@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.245] — 2026-09-30 — Apps fuera de /var/www: carpetas extra en la copia de ficheros y servicios systemd en config_mirror
+
+### Añadido
+- **Carpetas extra en la copia de ficheros (`filesync_extra_paths`, MCP, en el master).** Además de `/var/www/vhosts`, lsyncd copia carpetas de apps que viven fuera de los hostings (por ejemplo `/opt/musemind-trading`, `/opt/musedock-portal`, `/opt/musedock-license` en mortadelo).
+  - Solo van a los **nodos elegidos** (normalmente el de relevo), porque la copia es en espejo y otro nodo podría tener sus propias cosas en esas rutas.
+  - Solo se admiten carpetas existentes bajo `/opt`, `/srv` o `/home`, y **nunca** `/opt/musedock-panel` (cada nodo tiene su panel).
+  - El plan muestra el tamaño de cada carpeta y las rechazadas.
+- **`config_mirror` copia también los servicios systemd propios del master** (`/etc/systemd/system/*.service` que no sean del panel ni de snap).
+  - En el slave quedan **parados y deshabilitados**.
+  - Se verifica que existan el ejecutable de `ExecStart`, la carpeta de trabajo y el usuario; si aún no están (por ejemplo, porque la copia de `/opt` no ha llegado), se omiten y se reintenta cada 5 minutos.
+  - **Al promover** se habilitan y arrancan los que estaban habilitados en el master; al degradar o aislar se paran.
+  - No se toca una unidad propia del slave con el mismo nombre, y lo que el master deja de tener se aparta (`.removed-by-mirror`).
+
 ## [1.0.244] — 2026-09-30 — Botón «Entendido» en el aviso del firewall
 
 ### Añadido

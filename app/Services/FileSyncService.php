@@ -1792,6 +1792,26 @@ class FileSyncService
         '*.tmp.*',
     ];
 
+    /**
+     * Carpetas extra que lsyncd copia además de /var/www/vhosts (setting
+     * filesync_extra_paths): apps que viven fuera de los hostings. Solo carpetas
+     * existentes bajo /opt, /srv o /home; nunca el propio panel (cada nodo tiene el
+     * suyo) ni rutas del sistema.
+     */
+    public static function extraPaths(?string $raw = null): array
+    {
+        $out = [];
+        foreach (self::parseExcludePatterns($raw ?? Settings::get('filesync_extra_paths', '')) as $p) {
+            $real = realpath(rtrim($p, '/'));
+            if ($real === false || !is_dir($real) || !preg_match('#^/(opt|srv|home)/[^/]#', $real)
+                || str_starts_with($real . '/', '/opt/musedock-panel/')) {
+                continue;
+            }
+            $out[$real] = true;
+        }
+        return array_keys($out);
+    }
+
     public static function generateLsyncdConfig(): array
     {
         $config = self::getConfig();
@@ -1818,15 +1838,22 @@ class FileSyncService
         $lua .= "    insist     = true,\n";
         $lua .= "}\n\n";
 
+        // /var/www/vhosts + carpetas extra (apps fuera de los hostings, p. ej. /opt/<app>).
+        // Las extra solo van a los nodos elegidos (filesync_extra_nodes): la copia es en
+        // espejo (borra en destino) y otro nodo podría tener sus propias cosas ahí.
+        $extra = self::extraPaths();
+        $extraNodes = array_map('intval', self::parseExcludePatterns(Settings::get('filesync_extra_nodes', '')));
         foreach ($nodes as $node) {
+          $sources = in_array((int)$node['id'], $extraNodes, true) ? array_merge(['/var/www/vhosts'], $extra) : ['/var/www/vhosts'];
+          foreach ($sources as $src) {
             $host = self::extractHostFromUrl($node['api_url']);
             $nodeName = preg_replace('/[^a-zA-Z0-9_]/', '_', $node['name'] ?? 'node');
 
-            $lua .= "-- Node: {$node['name']} ({$host})\n";
+            $lua .= "-- Node: {$node['name']} ({$host}) — {$src}\n";
             $lua .= "sync {\n";
             $lua .= "    default.rsync,\n";
-            $lua .= "    source = \"/var/www/vhosts/\",\n";
-            $lua .= "    target = \"{$user}@{$host}:/var/www/vhosts/\",\n";
+            $lua .= "    source = \"{$src}/\",\n";
+            $lua .= "    target = \"{$user}@{$host}:{$src}/\",\n";
             $lua .= "    delay  = 15,\n";
             $lua .= "    delete = true,\n";
 
@@ -1853,6 +1880,7 @@ class FileSyncService
             }
             $lua .= "    },\n";
             $lua .= "}\n\n";
+          }
         }
 
         @mkdir('/etc/lsyncd', 0755, true);
