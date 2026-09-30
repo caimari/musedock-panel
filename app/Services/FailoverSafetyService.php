@@ -208,6 +208,41 @@ class FailoverSafetyService
     }
 
     /**
+     * Promueve Redis si es réplica (REPLICAOF NO ONE) y lo persiste con CONFIG
+     * REWRITE, que quita la línea replicaof de redis.conf: si no, el siguiente
+     * reinicio lo volvería a convertir en réplica del master caído. Si Redis no
+     * está instalado o ya es master, no hace nada. La contraseña (requirepass) se
+     * lee de redis.conf y se pasa por entorno, nunca en la línea de comandos.
+     */
+    public static function promoteRedis(bool $dryRun = false): array
+    {
+        if (trim((string)shell_exec('command -v redis-cli 2>/dev/null')) === '') {
+            return ['ok' => true, 'skipped' => 'Redis no instalado'];
+        }
+        $pass = '';
+        foreach (@file('/etc/redis/redis.conf', FILE_IGNORE_NEW_LINES) ?: [] as $l) {
+            if (preg_match('/^\s*requirepass\s+(\S+)/', $l, $m)) {
+                $pass = trim($m[1], '"\'');
+            }
+        }
+        $cli = ($pass !== '' ? 'REDISCLI_AUTH=' . escapeshellarg($pass) . ' ' : '') . 'timeout 10 redis-cli --no-auth-warning ';
+        $info = (string)shell_exec($cli . 'INFO replication 2>/dev/null');
+        if (!preg_match('/^role:(\w+)/m', $info, $m)) {
+            return ['ok' => false, 'error' => 'Redis no responde (¿caído o contraseña distinta?)'];
+        }
+        if ($m[1] !== 'slave') {
+            return ['ok' => true, 'skipped' => 'Redis ya es master'];
+        }
+        if ($dryRun) {
+            return ['ok' => true, 'dry_run' => true, 'message' => 'REPLICAOF NO ONE + CONFIG REWRITE'];
+        }
+        $r1 = trim((string)shell_exec($cli . 'REPLICAOF NO ONE 2>&1'));
+        $r2 = trim((string)shell_exec($cli . 'CONFIG REWRITE 2>&1'));
+        $ok = $r1 === 'OK';
+        return ['ok' => $ok, 'message' => $ok ? 'Redis promovido a master' . ($r2 === 'OK' ? ' y persistido' : " (CONFIG REWRITE: {$r2})") : "REPLICAOF NO ONE: {$r1}"];
+    }
+
+    /**
      * Promote MySQL/MariaDB AND persist it: the legacy path only ran STOP SLAVE +
      * SET GLOBAL read_only=0, leaving read_only=1 in my.cnf — so the next restart
      * silently turned the new master read-only again.

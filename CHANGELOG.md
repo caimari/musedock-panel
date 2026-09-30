@@ -2,7 +2,53 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [1.0.229] — 2026-09-29 — Inventario MCP: versión de Composer
+## [1.0.230] — 2026-09-30 — NOVEDAD: el MCP ya gestiona cluster y failover (+ 3 fallos críticos del relevo corregidos)
+
+**Primer paso hacia montar un slave completo desde Claude, ChatGPT o VS Code.** El MCP deja de ser solo de consulta en la parte de cluster: ya puede diagnosticar un relevo, registrar una réplica existente, configurar el failover y asignar servicios a los nodos. Todo con el mismo protocolo que el correo: primero el plan, y solo se aplica con tu confirmación y con «Permitir acciones que modifican» activado.
+
+### Añadido: herramientas MCP de cluster y failover (`app/Mcp/McpClusterTools.php`)
+- **`failover_preflight`** (lectura) dice en lenguaje llano **qué falta para que un relevo funcione**. Revisa:
+  - rol del servidor, nodos y testigos disponibles (anti split-brain);
+  - servidores de failover y modo;
+  - cuentas de Cloudflare con sus zonas (sin tokens);
+  - estado de las réplicas de PostgreSQL y de Redis;
+  - **simulación** de qué se promovería;
+  - salud de los servidores vigilados.
+
+  Se ejecuta en el master **y** en el slave.
+- **`replication_adopt`** registra en el panel una réplica de PostgreSQL que **ya funciona**, montada a mano, **sin tocar datos ni reiniciar nada**:
+  - detecta el rol, el usuario de réplica y el otro extremo;
+  - guarda la contraseña **cifrada**, leída de `~postgres/.pgpass` o de un fichero bajo `/root/`, sin devolverla nunca;
+  - sin esto, promover y degradar no saben con qué credenciales trabajar.
+- **`failover_configure`** (en el master) define este servidor como primario y un nodo como servidor de relevo, con sus **IPs públicas**, y el modo `manual`/`semiauto`/`auto`. Luego lo propaga a los slaves. Antes de aplicar:
+  - valida que las IPs sean públicas y que la primaria sea de este servidor;
+  - avisa si no hay testigo;
+  - pide `replace=true` para sustituir una configuración existente.
+- **`cluster_node_services`** (en el master) indica si un nodo es web, mail o ambos.
+
+### Añadido: Redis en el relevo
+- **Al promover un slave, Redis también se promueve.** Si Redis era réplica del master, pasa a principal (`REPLICAOF NO ONE`) y se **persiste** con `CONFIG REWRITE`: si no, el siguiente reinicio lo volvería a hacer réplica del master caído. La contraseña se lee de `redis.conf` y va por el entorno, nunca en la línea de comandos.
+
+### Añadido: scripts de relevo (hooks)
+- **El panel ejecuta los scripts que root deje en `/etc/musedock/hooks/promote.d/` al promover y en `demote.d/` al degradar.** Sirven para lo que el panel no gestiona: mover una IP flotante, arrancar programas de supervisor, activar crons o republicar en Caddy los dominios de una app. Funcionan como `run-parts` y `cron.d`:
+  - solo se ejecutan ficheros de **root**, ejecutables y **sin permiso de escritura para grupo ni otros**, en directorios que cumplan lo mismo;
+  - se ejecutan en orden alfabético, con un **límite de 120 s** cada uno;
+  - reciben `MUSEDOCK_EVENT` y, según el caso, `MUSEDOCK_OLD_MASTER_IP` o `MUSEDOCK_NEW_MASTER_IP`;
+  - al promover van **después** de promover PostgreSQL y Redis, para que las apps arranquen ya con escritura;
+  - un fallo se informa, pero no deshace el relevo;
+  - su salida no se escribe en `panel_log`, que se replica: allí solo va el código de salida.
+- `failover_preflight` lista los scripts y avisa de los que **no** se ejecutarían, y por qué.
+
+### Arreglado (fallos que habrían hecho fallar un relevo real)
+- **Un slave con varias IPs podía no promoverse nunca.** La elección comparaba solo la **primera** IP de `hostname -I` con las de `failover_servers`. En un servidor con IP pública y de red local en la misma interfaz (obelix), si salía primero la local, perdía siempre la elección. Ahora se compara con todas las IPs del servidor.
+- **Configurar el failover en el master podía borrar la cuenta de Cloudflare del slave.** Al propagar la configuración, el master enviaba su lista de cuentas de Cloudflare y el slave la **sustituía**. Si el master no tenía ninguna (asterisk), el slave se quedaba sin token y, en un relevo, no habría podido cambiar el DNS. Ahora una lista vacía del master no borra las cuentas propias del slave.
+- **Degradar un servidor a slave intentaba reconstruir también la base de datos del panel.**
+  - **PostgreSQL:** `demoteToSlave` recorría todos los clusters de PostgreSQL, incluido el del panel. Entre asterisk (16) y obelix (14) solo lo evitaba una comprobación de versión; con la misma versión, habría borrado la base del panel para copiar la del otro nodo. Ahora el cluster del panel se omite siempre.
+  - **MySQL:** se intentaba reconstruir aunque nunca hubiera estado en réplica. Ahora se omite si no forma parte de la réplica.
+
+### Inventario MCP
+- **Un PostgreSQL en réplica salía sin detalles en `clone_inventory`.** Su estado es `online,recovery` y el detector solo inspeccionaba los clusters `online`.
+- En cada cluster se listan los **slots de réplica**. En una réplica se muestra además a quién sigue (estado, host, puerto y slot) y el **retraso de aplicación** en segundos.
 
 ### Arreglado
 - **`clone_inventory` no mostraba la versión de Composer.** Ejecutado como root, Composer se para a preguntar «Continue as root?» y la consulta volvía vacía. Ahora se lanza con `COMPOSER_ALLOW_SUPERUSER=1` y sin entrada estándar.

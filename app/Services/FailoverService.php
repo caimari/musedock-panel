@@ -229,6 +229,11 @@ class FailoverService
      */
     public static function shouldPromote(string $myIp, array $downIps): bool
     {
+        // Los llamantes pasan la PRIMERA IP de `hostname -I`; en un servidor con
+        // varias IPs (p. ej. pública + LAN en la misma interfaz) puede no ser la
+        // configurada en failover_servers y el nodo no se promovería nunca. Se
+        // compara también con todas las IPs locales.
+        $localIps = array_filter(preg_split('/\s+/', trim((string)shell_exec('hostname -I 2>/dev/null'))) ?: []);
         $candidates = self::getFailoverServersByPriority();
 
         foreach ($candidates as $srv) {
@@ -239,7 +244,7 @@ class FailoverService
             if (in_array($srvIp, $downIps, true)) continue;
 
             // First alive server in priority order: is it me?
-            return $srvIp === $myIp;
+            return $srvIp === $myIp || in_array($srvIp, $localIps, true);
         }
 
         // No candidates alive — shouldn't happen but don't promote

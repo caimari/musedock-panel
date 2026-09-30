@@ -729,7 +729,8 @@ final class McpInventory
             $port = (int)$c[2];
             $q = static fn(string $sql, int $t = 5) => self::sh('runuser -u postgres -- psql -p ' . $port . ' -XAtc ' . escapeshellarg($sql), $t);
             $cl = ['cluster' => "{$c[0]}/{$c[1]}", 'major' => (int)$c[0], 'port' => $port, 'status' => $c[3]];
-            if ($c[3] === 'online') {
+            // "online,recovery" = réplica en marcha: también se inspecciona.
+            if (str_starts_with($c[3], 'online')) {
                 $cl['databases'] = self::lines($q("SELECT datname FROM pg_database WHERE NOT datistemplate AND datname <> 'postgres' ORDER BY 1"));
                 $cl['in_recovery'] = $q('SELECT pg_is_in_recovery()') === 't';
                 $cl['settings'] = [];
@@ -755,6 +756,14 @@ final class McpInventory
                 $cl['listen_missing'] = $missing;
                 $cl['hba_remote_rules'] = self::lines($q("SELECT type||' '||array_to_string(database,',')||' '||array_to_string(user_name,',')||' '||coalesce(address,'')||coalesce('/'||netmask,'')||' '||auth_method FROM pg_hba_file_rules WHERE type <> 'local' AND coalesce(address,'') NOT IN ('127.0.0.1','::1') ORDER BY line_number"));
                 $cl['replicas'] = self::lines($q("SELECT coalesce(client_addr::text,'local')||' '||state||' '||coalesce(sync_state,'') FROM pg_stat_replication"));
+                $cl['slots'] = self::lines($q("SELECT slot_name||' '||slot_type||' active='||active FROM pg_replication_slots"));
+                if ($cl['in_recovery']) {
+                    // En la réplica: a quién sigue, estado y retraso de aplicación.
+                    $cl['upstream'] = [
+                        'receiver' => $q("SELECT status||' '||coalesce(sender_host,'')||':'||coalesce(sender_port::text,'')||' slot='||coalesce(slot_name,'') FROM pg_stat_wal_receiver") ?: null,
+                        'replay_lag_s' => ($lag = $q("SELECT round(extract(epoch FROM now() - pg_last_xact_replay_timestamp())::numeric, 1)")) !== '' ? (float)$lag : null,
+                    ];
+                }
             }
             $pg[] = $cl;
         }

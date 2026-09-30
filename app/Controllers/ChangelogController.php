@@ -20,6 +20,45 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.230',
+                'date' => '2026-09-30',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '**NOVEDAD — el MCP gestiona cluster y failover:** primer paso para montar un slave completo desde Claude, ChatGPT o VS Code. Mismo protocolo que el correo: plan primero y se aplica solo con tu confirmacion',
+                            '**`failover_preflight`** (lectura): dice en llano que falta para que un relevo funcione (nodos y testigos, servidores de failover, Cloudflare, replicas de PostgreSQL y Redis, simulacion de la promocion)',
+                            '**`replication_adopt`**: registra en el panel una replica de PostgreSQL que ya funciona, sin tocar datos; la contrasena de replica se guarda cifrada y nunca se devuelve',
+                            '**`failover_configure`**: define primario y servidor de relevo con IPs publicas y el modo (manual, semiauto, auto) y lo propaga a los slaves. **`cluster_node_services`**: nodo web, mail o ambos',
+                            '**Redis en el relevo:** al promover un slave, Redis pasa de replica a principal y queda guardado para que un reinicio no lo revierta',
+                            '**Scripts de relevo:** el panel ejecuta los scripts de root de `/etc/musedock/hooks/promote.d` al promover y `demote.d` al degradar (IP flotante, supervisor, crons...). Solo ficheros de root sin escritura para otros, 120 s maximo cada uno, y `failover_preflight` avisa de los que no se ejecutarian',
+                        ],
+                        'en' => [
+                            '**NEW — the MCP manages cluster and failover:** first step towards building a full slave from Claude, ChatGPT or VS Code. Same protocol as mail: plan first, applied only after your confirmation',
+                            '**`failover_preflight`** (read-only): explains in plain words what is missing for a failover to work (nodes and witnesses, failover servers, Cloudflare, PostgreSQL and Redis replicas, promotion simulation)',
+                            '**`replication_adopt`**: registers an already running PostgreSQL replica in the panel without touching data; the replication password is stored encrypted and never returned',
+                            '**`failover_configure`**: sets primary and failover server with public IPs and the mode (manual, semiauto, auto) and pushes it to slaves. **`cluster_node_services`**: node is web, mail or both',
+                            '**Redis in failover:** when a slave is promoted, Redis goes from replica to primary and it is persisted so a restart does not revert it',
+                            '**Failover hooks:** the panel runs root scripts from `/etc/musedock/hooks/promote.d` on promotion and `demote.d` on demotion (floating IP, supervisor, crons...). Only root-owned files not writable by others, 120 s max each, and `failover_preflight` flags any that would not run',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            '**Un slave con varias IPs podia no promoverse nunca:** la eleccion solo miraba la primera IP de `hostname -I`. Ahora compara todas',
+                            '**Configurar el failover en el master podia borrar la cuenta de Cloudflare del slave** (el master enviaba su lista vacia). Sin ese token, el slave no habria podido cambiar el DNS en un relevo',
+                            '**Degradar a slave ya no toca la base de datos del panel** ni MySQL si nunca estuvo en replica. Antes lo intentaba y solo lo frenaba una comprobacion de version',
+                            'El inventario MCP muestra los detalles de un PostgreSQL en replica (`online,recovery`), sus slots, a quien sigue y su retraso',
+                        ],
+                        'en' => [
+                            '**A slave with several IPs could never promote:** the election only looked at the first IP from `hostname -I`. It now compares all of them',
+                            '**Configuring failover on the master could wipe the slave\'s Cloudflare account** (the master pushed its empty list). Without that token the slave could not have switched DNS in a failover',
+                            '**Demoting to slave no longer touches the panel database**, nor MySQL if it was never replicated. It used to try, stopped only by a version check',
+                            'The MCP inventory shows a PostgreSQL replica (`online,recovery`) with its slots, upstream and lag',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.229',
                 'date' => '2026-09-29',
                 'badge' => 'info',

@@ -55,7 +55,11 @@ final class McpServer
                             . 'antes de repetir la llamada con apply=true. Nunca pidas, escribas ni muestres contraseñas en la conversación: '
                             . 'si no se indica una, el panel la genera y el usuario la ve en Ajustes → MCP → Credenciales pendientes. '
                             . 'Tras mail_dns_publish, verifica con mail_domain_verify al cabo de unos minutos. '
-                            . 'Flujo típico de "dominio solo de correo": mail_domain_create → mail_dns_publish → mail_mailbox_create / mail_alias_create → mail_domain_verify.',
+                            . 'Flujo típico de "dominio solo de correo": mail_domain_create → mail_dns_publish → mail_mailbox_create / mail_alias_create → mail_domain_verify. '
+                            . 'Cluster y failover: failover_preflight (lectura) dice en llano qué falta para que un relevo funcione; ejecútalo en el master Y en el slave. '
+                            . 'replication_adopt registra una réplica de PostgreSQL que ya funciona (no toca datos); failover_configure (en el master) define primario, '
+                            . 'servidor de relevo con IPs públicas y modo; cluster_node_services fija si un nodo es web, mail o ambos. '
+                            . 'Mismo protocolo que el correo: primero sin apply, enseñar el plan y pedir confirmación.',
                     ]);
 
                 case 'ping':

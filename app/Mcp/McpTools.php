@@ -110,10 +110,10 @@ final class McpTools
         ];
     }
 
-    /** Todas las herramientas: las de lectura de arriba + el paquete de correo. */
+    /** Todas las herramientas: las de lectura de arriba + correo + cluster/failover. */
     public static function all(): array
     {
-        return self::definitions() + McpMailTools::definitions();
+        return self::definitions() + McpMailTools::definitions() + McpClusterTools::definitions();
     }
 
     /** Formato tools/list de MCP. */
@@ -211,9 +211,11 @@ final class McpTools
             'tls_check'        => self::tlsCheck((string)($args['host'] ?? ''), (string)($args['target'] ?? 'local'), (int)($args['port'] ?? 443)),
             'caddy_hosts'      => self::caddyHosts(),
             'clone_inventory'  => McpInventory::build((string)($args['section'] ?? 'all')),
-            default            => McpMailTools::has($name)
-                ? McpMailTools::run($name, $args)
-                : throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
+            default            => match (true) {
+                McpMailTools::has($name)    => McpMailTools::run($name, $args),
+                McpClusterTools::has($name) => McpClusterTools::run($name, $args),
+                default                     => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
+            },
         };
     }
 

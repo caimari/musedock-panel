@@ -2024,6 +2024,18 @@ class ClusterService
             $errors[] = 'MySQL promote: ' . $e->getMessage();
         }
 
+        // Redis: si este nodo lo replicaba del master, pasa a ser el principal
+        // (colas, sesiones y caché de las apps siguen funcionando con escritura).
+        try {
+            $redisResult = FailoverSafetyService::promoteRedis();
+            $results['redis_promote'] = $redisResult;
+            if (empty($redisResult['ok'])) {
+                $errors[] = 'Redis promote: ' . ($redisResult['error'] ?? $redisResult['message'] ?? 'fallo');
+            }
+        } catch (\Throwable $e) {
+            $errors[] = 'Redis promote: ' . $e->getMessage();
+        }
+
         // This node is now the source of truth: it must NOT keep receiving files
         // from anyone, and it must not be a push target. Stop the local pusher if
         // this node was previously a slave.
@@ -2062,6 +2074,21 @@ class ClusterService
         try {
             Database::update('servers', ['role' => 'master'], 'is_local = true');
         } catch (\Throwable) {}
+
+        // Scripts de relevo del administrador (/etc/musedock/hooks/promote.d): lo que
+        // el panel no gestiona (IP flotante, supervisor, crons, dominios de apps).
+        // Van DESPUÉS de promover PostgreSQL/Redis, para que las apps arranquen ya
+        // con escritura. Un fallo se informa, pero no deshace la promoción.
+        try {
+            $results['hooks'] = RoleHookService::run('promote', ['MUSEDOCK_OLD_MASTER_IP' => $oldMasterIp]);
+            foreach ($results['hooks'] as $h) {
+                if (empty($h['ok'])) {
+                    $errors[] = "Hook promote {$h['file']}: " . ($h['skipped'] ?? ('exit ' . ($h['exit_code'] ?? '?')));
+                }
+            }
+        } catch (\Throwable $e) {
+            $errors[] = 'Hooks promote: ' . $e->getMessage();
+        }
 
         // Open public ports (80/443) so this server can serve web traffic
         try {
@@ -2143,7 +2170,17 @@ class ClusterService
         try {
             $pgUser = Settings::get('repl_pg_user', Settings::get('repl_panel_slave_ip', '') !== '' ? 'repl_panel' : 'replicator');
             $pgPass = ReplicationService::decryptPassword(Settings::get('repl_pg_password', Settings::get('repl_pg_pass', '')));
-            foreach (PgClusterService::listClusters() as $cluster) {
+            // La BD del PANEL nunca se reconstruye desde otro nodo: no va por réplica
+            // física (cada panel tiene la suya, a veces de otra versión mayor) y un
+            // rewind/basebackup sobre ella dejaría este panel sin su base de datos.
+            $panelDbPort = (int)\MuseDockPanel\Env::int('DB_PORT', 5432);
+            $allClusters = PgClusterService::listClusters();
+            foreach ($allClusters as $cluster) {
+                if ($cluster['cluster'] === 'panel'
+                    || (count($allClusters) > 1 && (int)$cluster['port'] === $panelDbPort)) {
+                    $results['pg_demote'][$cluster['key']] = ['ok' => true, 'skipped' => 'BD del panel: no se reconstruye'];
+                    continue;
+                }
                 $srcPort = (int)$cluster['port']; // same cluster identity on the new master
                 // Try incremental rewind first.
                 $r = ReplicationService::rewindPgClusterFrom($cluster, $newMasterIp, $srcPort, $pgUser, $pgPass);
@@ -2160,26 +2197,32 @@ class ClusterService
             $errors[] = 'PG demote: ' . $e->getMessage();
         }
 
-        // Reconfigure MySQL as slave
-        try {
-            $mysqlUser = Settings::get('repl_mysql_user', 'repl_user');
-            $mysqlPass = ReplicationService::decryptPassword(Settings::get('repl_mysql_pass', ''));
-            $mysqlPort = (int)Settings::get('repl_mysql_port', '3306');
+        // Reconfigure MySQL as slave — solo si MySQL forma parte de la réplica. Si
+        // nunca se configuró (repl_mysql_role = standalone), el "rebuild" con seed
+        // haría un dump+import contra un master sin réplica y fallaría (o peor).
+        if (Settings::get('repl_mysql_role', 'standalone') === 'standalone') {
+            $results['mysql_demote'] = ['ok' => true, 'skipped' => 'MySQL no está en réplica'];
+        } else {
+            try {
+                $mysqlUser = Settings::get('repl_mysql_user', 'repl_user');
+                $mysqlPass = ReplicationService::decryptPassword(Settings::get('repl_mysql_pass', ''));
+                $mysqlPort = (int)Settings::get('repl_mysql_port', '3306');
 
-            // MySQL/MariaDB has no pg_rewind: a former master that took writes
-            // during the outage has diverged from the new master. Doing a plain
-            // CHANGE MASTER over its existing datadir would apply the new
-            // master's binlog on top of divergent rows → silent corruption.
-            // seed=true forces a FULL rebuild from the new master (dump+import),
-            // discarding the divergent local data — the MySQL equivalent of the
-            // PG rewind/basebackup path. This is the only safe way to demote.
-            $result = ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass, true);
-            $results['mysql_demote'] = $result;
-            if (!$result['ok']) {
-                $errors[] = 'MySQL demote: ' . ($result['error'] ?? 'Unknown error');
+                // MySQL/MariaDB has no pg_rewind: a former master that took writes
+                // during the outage has diverged from the new master. Doing a plain
+                // CHANGE MASTER over its existing datadir would apply the new
+                // master's binlog on top of divergent rows → silent corruption.
+                // seed=true forces a FULL rebuild from the new master (dump+import),
+                // discarding the divergent local data — the MySQL equivalent of the
+                // PG rewind/basebackup path. This is the only safe way to demote.
+                $result = ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass, true);
+                $results['mysql_demote'] = $result;
+                if (!$result['ok']) {
+                    $errors[] = 'MySQL demote: ' . ($result['error'] ?? 'Unknown error');
+                }
+            } catch (\Throwable $e) {
+                $errors[] = 'MySQL demote: ' . $e->getMessage();
             }
-        } catch (\Throwable $e) {
-            $errors[] = 'MySQL demote: ' . $e->getMessage();
         }
 
         // Update env and settings — all three role indicators must be consistent
@@ -2206,6 +2249,19 @@ class ClusterService
             'Failover: Master degradado a Slave',
             "El servidor ha sido degradado a Slave. Nuevo master: {$newMasterIp}. Puertos HTTP/HTTPS cerrados."
         );
+
+        // Scripts de relevo del administrador (/etc/musedock/hooks/demote.d): parar
+        // lo que solo debe correr en el master, soltar la IP flotante, etc.
+        try {
+            $results['hooks'] = RoleHookService::run('demote', ['MUSEDOCK_NEW_MASTER_IP' => $newMasterIp]);
+            foreach ($results['hooks'] as $h) {
+                if (empty($h['ok'])) {
+                    $errors[] = "Hook demote {$h['file']}: " . ($h['skipped'] ?? ('exit ' . ($h['exit_code'] ?? '?')));
+                }
+            }
+        } catch (\Throwable $e) {
+            $errors[] = 'Hooks demote: ' . $e->getMessage();
+        }
 
         // Tell all other nodes to reconfigure replication to point to the (restored) master
         self::broadcastReconfigureReplication($newMasterIp);

@@ -692,6 +692,13 @@ class ClusterApiController
         }
 
         // Save Cloudflare accounts (force encrypted-at-rest for tokens).
+        // Una lista VACÍA del master no borra las cuentas propias del slave: es el
+        // slave quien cambia el DNS en un relevo, y puede tener su propia cuenta
+        // (p. ej. un token limitado a sus zonas) aunque el master no tenga ninguna.
+        if (is_array($cfAccounts) && $cfAccounts === []
+            && (json_decode(Settings::get('failover_cf_accounts', '[]'), true) ?: []) !== []) {
+            $cfAccounts = null;
+        }
         if ($cfAccounts !== null && is_array($cfAccounts)) {
             foreach ($cfAccounts as &$acct) {
                 $tokenRaw = trim((string)($acct['token'] ?? ''));
