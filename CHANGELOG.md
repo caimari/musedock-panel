@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.237] — 2026-09-30 — Sincronizar hostings: el slave ya no crea rutas de Caddy que el master no tiene
+
+### Arreglado
+- **Al sincronizar, el slave podía crear rutas de Caddy para dominios que el master NO sirve** (visto con vocal9.com/vocal9.es en obelix). El panel de asterisk conservaba el identificador de una ruta antigua (`caddy_route_id`) de un hosting con el pool de PHP desactivado. La adopción de la 1.0.235 se fiaba de ese dato, y además la sincronización de dominios alias reconstruía la ruta del hosting en cualquier caso (`rebuildCaddyRouteWithAliases`).
+  - Ahora el master envía si **de verdad** sirve el dominio en ese momento (`caddy_served`, comprobado en la configuración viva de Caddy).
+  - El slave solo crea o reconstruye rutas si el master lo sirve, y solo si en el slave no lo sirve ya algo que no es del panel (por ejemplo, un bloque fijo del Caddyfile de un slave clonado, como muserelay en obelix); si la ruta es del panel, sí se reconstruye.
+  - Los alias se registran igual en la BD del slave.
+  - Con un master de versión anterior se mantiene el comportamiento antiguo.
+
 ## [1.0.236] — 2026-09-30 — MCP: sincronizar hostings y ver la cola del cluster
 
 ### Añadido

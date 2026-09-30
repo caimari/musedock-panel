@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.237',
+                'date' => '2026-09-30',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['**Al sincronizar, el slave podia crear rutas de Caddy para dominios que el master no sirve** (dato viejo `caddy_route_id` y reconstruccion de rutas al sincronizar alias). Ahora el master indica si de verdad sirve el dominio y el slave solo toca Caddy en ese caso, sin duplicar lo que ya sirve un bloque fijo del Caddyfile'],
+                        'en' => ['**When syncing, the slave could create Caddy routes for domains the master does not serve** (stale `caddy_route_id` and route rebuild on alias sync). The master now says whether it really serves the domain and the slave only touches Caddy in that case, without duplicating what a static Caddyfile block already serves'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.236',
                 'date' => '2026-09-30',
                 'badge' => 'success',

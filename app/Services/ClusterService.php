@@ -1358,6 +1358,10 @@ class ClusterService
                     'shell' => $acc['shell'] ?? '/usr/sbin/nologin',
                     'system_uid' => $acc['system_uid'] ?? null,
                     'caddy_route_id' => $acc['caddy_route_id'] ?? null,
+                    // Si el master sirve DE VERDAD el dominio ahora mismo (caddy_route_id
+                    // puede ser un dato viejo: p. ej. un hosting con el pool desactivado
+                    // cuya ruta ya no existe). El slave que adopta solo crea ruta si true.
+                    'caddy_served' => self::caddyServesHost((string)$acc['domain']),
                     'customer_id' => $acc['customer_id'] ?? null,
                     'disk_quota_mb' => $acc['disk_quota_mb'] ?? 1024,
                     'description' => $acc['description'] ?? '',
@@ -1375,6 +1379,7 @@ class ClusterService
                         'username'    => $acc['username'],
                         'document_root' => $acc['document_root'],
                         'php_version' => $acc['php_version'] ?? '8.3',
+                        'caddy_served' => self::caddyServesHost((string)$acc['domain']),
                     ],
                 ], 6); // Lower priority than create_hosting (5) — runs after
             }
@@ -1434,6 +1439,23 @@ class ClusterService
         }
 
         return ['hostings' => $count, 'redirects' => $sr];
+    }
+
+    /** ¿Existe en Caddy una ruta con ese @id? */
+    private static function caddyRouteIdExists(string $routeId): bool
+    {
+        if (!preg_match('/^[A-Za-z0-9._-]+$/', $routeId)) {
+            return false;
+        }
+        $ctx = stream_context_create(['http' => ['timeout' => 4, 'ignore_errors' => true]]);
+        $body = @file_get_contents('http://localhost:2019/id/' . $routeId, false, $ctx);
+        $code = 0;
+        foreach ($http_response_header ?? [] as $h) {
+            if (preg_match('#^HTTP/\S+\s+(\d{3})#', $h, $m)) {
+                $code = (int)$m[1];
+            }
+        }
+        return $code >= 200 && $code < 300 && trim((string)$body) !== '' && trim((string)$body) !== 'null';
     }
 
     /** ¿Algún servidor HTTP de Caddy de este nodo ya tiene una ruta para $host? */
@@ -1625,12 +1647,17 @@ class ClusterService
                     if ($adopt) {
                         $result = ['success' => true, 'uid' => (int)$existingUid, 'caddy_route_id' => $hostingData['caddy_route_id'] ?? null];
                         $served = self::caddyServesHost($domain);
-                        if (!$served && !empty($hostingData['caddy_route_id'])) {
+                        // ¿Lo sirve el master? caddy_served (masters ≥ 1.0.237) es el dato
+                        // real; en masters anteriores se usa caddy_route_id como aproximación.
+                        $masterServes = array_key_exists('caddy_served', $hostingData)
+                            ? !empty($hostingData['caddy_served'])
+                            : !empty($hostingData['caddy_route_id']);
+                        if (!$served && $masterServes) {
                             // El master lo sirve y aquí nadie lo sirve: se añade su ruta.
                             $result['caddy_route_id'] = SystemService::addCaddyRoute($domain, $documentRoot, $username, $phpVersion) ?: null;
                         }
                         LogService::log('cluster.sync', $domain, "Hosting adoptado: usuario {$username} (uid {$existingUid}) y {$homeDir} ya existían; solo se registra en el panel"
-                            . ($served ? ' (Caddy ya servía el dominio)' : (empty($hostingData['caddy_route_id']) ? ' (sin ruta de Caddy, como en el master)' : ' (se añade su ruta de Caddy)')));
+                            . ($served ? ' (Caddy ya servía el dominio)' : ($masterServes ? ' (se añade su ruta de Caddy)' : ' (sin ruta de Caddy, como en el master)')));
                     } else {
                         // Create system account (user, dirs, PHP-FPM, Caddy)
                         $result = SystemService::createAccount($username, $domain, $homeDir, $documentRoot, $phpVersion, $password, $shell, $forceUid);
@@ -2020,7 +2047,19 @@ class ClusterService
                     if (!$account) {
                         return ['ok' => false, 'message' => "Hosting {$mainDomain} not found on slave"];
                     }
-                    DomainAliasService::importFromMaster((int)$account['id'], $account, $aliases);
+                    // ¿Tocar Caddy? Solo si el master sirve el dominio (caddy_served, desde
+                    // 1.0.237; antes siempre) y aquí no lo sirve otra cosa que no sea la
+                    // ruta del propio panel (p. ej. un bloque fijo del Caddyfile de un
+                    // slave clonado): si no, se registrarían bien los alias pero se
+                    // crearía una ruta que el master no tiene o que duplica la existente.
+                    $touchCaddy = true;
+                    if (array_key_exists('caddy_served', $hostingData)) {
+                        $panelRouteHere = !empty($account['caddy_route_id'])
+                            && self::caddyRouteIdExists((string)$account['caddy_route_id']);
+                        $touchCaddy = !empty($hostingData['caddy_served'])
+                            && ($panelRouteHere || !self::caddyServesHost($mainDomain));
+                    }
+                    DomainAliasService::importFromMaster((int)$account['id'], $account, $aliases, $touchCaddy);
                     LogService::log('cluster.sync', $mainDomain, "Domain aliases synced from master: " . count($aliases) . " entries");
                     return ['ok' => true, 'message' => "Aliases synced for {$mainDomain}"];
 

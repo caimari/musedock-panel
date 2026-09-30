@@ -241,7 +241,12 @@ class DomainAliasService
      * Import aliases/redirects from master (used in Sync Todo).
      * Syncs the full list: adds missing, removes stale.
      */
-    public static function importFromMaster(int $accountId, array $account, array $aliasData): void
+    /**
+     * @param bool $touchCaddy false = solo registra los alias en la BD, sin crear ni
+     *   reconstruir rutas de Caddy (el master no sirve el dominio, o en este nodo lo
+     *   sirve algo que no es del panel, p. ej. un bloque fijo del Caddyfile).
+     */
+    public static function importFromMaster(int $accountId, array $account, array $aliasData, bool $touchCaddy = true): void
     {
         $existing = self::getAll($accountId);
         $existingDomains = array_column($existing, 'domain');
@@ -266,12 +271,12 @@ class DomainAliasService
                         'preserve_path'      => (bool)($a['preserve_path'] ?? true),
                     ]);
                 } elseif ($a['type'] === 'redirect') {
-                    $caddyRouteId = SystemService::addCaddyRedirectRoute(
+                    $caddyRouteId = $touchCaddy ? SystemService::addCaddyRedirectRoute(
                         $a['domain'],
                         $account['domain'],
                         (int)($a['redirect_code'] ?? 301),
                         (bool)($a['preserve_path'] ?? true)
-                    );
+                    ) : null;
                     Database::insert('hosting_domain_aliases', [
                         'hosting_account_id' => $accountId,
                         'domain'             => $a['domain'],
@@ -285,6 +290,8 @@ class DomainAliasService
         }
 
         // Rebuild Caddy hosting route with current aliases
-        self::rebuildCaddyRoute($account);
+        if ($touchCaddy) {
+            self::rebuildCaddyRoute($account);
+        }
     }
 }
