@@ -134,9 +134,20 @@
 <div class="row mb-3">
     <div class="col-12">
         <div class="card <?= $fwCrit ? 'border-danger' : 'border-warning' ?>">
-            <div class="card-header <?= $fwCrit ? 'bg-danger text-white' : 'bg-warning text-dark' ?> py-2">
-                <i class="bi bi-shield-exclamation me-2"></i>Firewall: <?= View::e((string)($firewallAudit['summary'] ?? '')) ?>
-                <small class="ms-2 fw-normal <?= $fwCrit ? 'text-white' : 'text-dark' ?>">(revisado <?= View::e((string)($firewallAudit['at'] ?? '')) ?>)</small>
+            <div class="card-header <?= $fwCrit ? 'bg-danger text-white' : 'bg-warning text-dark' ?> py-2 d-flex justify-content-between align-items-center">
+                <span>
+                    <i class="bi bi-shield-exclamation me-2"></i>Firewall: <?= View::e((string)($firewallAudit['summary'] ?? '')) ?>
+                    <small class="ms-2 fw-normal <?= $fwCrit ? 'text-white' : 'text-dark' ?>">(revisado <?= View::e((string)($firewallAudit['at'] ?? '')) ?>)</small>
+                </span>
+                <?php if (!$fwCrit): ?>
+                <form method="POST" action="/settings/dismiss-alert" class="m-0">
+                    <?= View::csrf() ?>
+                    <input type="hidden" name="alert" value="firewall_audit">
+                    <button type="submit" class="btn btn-sm btn-outline-dark py-0" title="Ocultar estos avisos hasta que cambie algo">
+                        <i class="bi bi-check2 me-1"></i>Entendido
+                    </button>
+                </form>
+                <?php endif; ?>
             </div>
             <div class="card-body py-2">
                 <ul class="mb-1 small">

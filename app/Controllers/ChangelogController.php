@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.244',
+                'date' => '2026-09-30',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['**Boton "Entendido" en el aviso del firewall del dashboard** (solo avisos, no criticos): se oculta hasta que aparezca un problema distinto'],
+                        'en' => ['**"Got it" button on the dashboard firewall alert** (warnings only, not critical): hidden until a different issue appears'],
+                    ],
+                    'improved' => [
+                        'es' => ['El aviso de reglas de iptables repetidas explica las causas posibles sin dar una por hecha'],
+                        'en' => ['The repeated iptables rules warning lists the possible causes without assuming one'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.243',
                 'date' => '2026-09-30',
                 'badge' => 'danger',

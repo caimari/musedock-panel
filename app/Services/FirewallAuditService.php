@@ -134,7 +134,7 @@ final class FirewallAuditService
             $raw = self::lines(self::sh('iptables -S 2>/dev/null'));
             $dups = array_filter(array_count_values(array_filter($raw, static fn($l) => str_starts_with($l, '-A '))), static fn($c) => $c > 1);
             $findings[] = $dups
-                ? ['level' => 'warning', 'text' => 'Hay ' . count($dups) . ' reglas de iptables DUPLICADAS (p. ej. «' . array_key_first($dups) . '»): probablemente ufw y netfilter-persistent cargan las mismas reglas al arrancar. No es un agujero, pero conviene que solo las cargue uno de los dos.']
+                ? ['level' => 'warning', 'text' => 'Hay ' . count($dups) . ' regla(s) de iptables REPETIDA(S) (p. ej. «' . array_key_first($dups) . '»). No es un agujero: suele pasar al añadir la misma regla dos veces o al cargarlas dos veces al arrancar (ufw y netfilter-persistent). Conviene quitar la copia sobrante.']
                 : ['level' => 'info', 'text' => 'ufw está activo junto a reglas iptables propias; no hay reglas duplicadas y el resultado ya está simulado arriba.'];
         }
 

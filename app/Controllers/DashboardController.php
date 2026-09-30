@@ -114,7 +114,18 @@ class DashboardController
             // Silent replication drift (dead sync-queue items that never self-heal).
             'syncDrift' => ($clusterRole === 'master') ? ClusterService::getSyncDriftSummary() : ['has_drift' => false],
             // Última auditoría del firewall (la refresca el cluster-worker cada 15 min).
-            'firewallAudit' => json_decode(Settings::get('firewall_audit_last', 'null'), true),
+            'firewallAudit' => (static function () {
+                $fw = json_decode(Settings::get('firewall_audit_last', 'null'), true);
+                if (!is_array($fw)) {
+                    return null;
+                }
+                // Avisos (no críticos) ya vistos con "Entendido" y sin cambios: no se muestran.
+                if ((int)($fw['critical'] ?? 0) === 0
+                    && Settings::get('firewall_audit_ack', '') === self::firewallAuditHash($fw)) {
+                    return null;
+                }
+                return $fw;
+            })(),
         ]);
     }
 
@@ -446,6 +457,22 @@ class DashboardController
         if (in_array($alert, $allowed, true)) {
             Settings::set("dismiss_{$alert}", '1');
         }
+        // Avisos del firewall: se da por visto EL CONJUNTO ACTUAL de avisos (huella).
+        // Si cambia (aparece otro problema), el aviso vuelve. Los críticos no se cierran.
+        if ($alert === 'firewall_audit') {
+            $fw = json_decode(Settings::get('firewall_audit_last', 'null'), true);
+            if (is_array($fw) && (int)($fw['critical'] ?? 0) === 0) {
+                Settings::set('firewall_audit_ack', self::firewallAuditHash($fw));
+            }
+        }
         Router::redirect('/');
+    }
+
+    /** Huella de los avisos del firewall (para "Entendido"). */
+    public static function firewallAuditHash(array $fw): string
+    {
+        $top = (array)($fw['top'] ?? []);
+        sort($top);
+        return md5(json_encode($top));
     }
 }

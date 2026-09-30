@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.244] — 2026-09-30 — Botón «Entendido» en el aviso del firewall
+
+### Añadido
+- **El aviso del firewall del dashboard se puede cerrar con «Entendido»** cuando solo hay avisos (amarillo). Se da por visto el conjunto actual de avisos: si luego aparece un problema distinto, el aviso vuelve. Los **críticos (rojo) no se pueden cerrar**.
+
+### Mejorado
+- El aviso de reglas de iptables repetidas ya no da por hecho que las carguen ufw y netfilter-persistent: en Filemon no está netfilter-persistent y la repetición venía de haber añadido dos veces la misma regla a ufw.
+
 ## [1.0.243] — 2026-09-30 — Panel inaccesible con 421 en servidores donde el 443 y el 8444 comparten servidor de Caddy
 
 ### Arreglado
