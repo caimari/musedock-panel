@@ -119,6 +119,20 @@ use MuseDockPanel\Services\FileSyncService;
 use MuseDockPanel\Services\LogService;
 use MuseDockPanel\Settings;
 
+// ─── Step 0: ¿Soy un master caducado? ─────────────────────────
+// Si este nodo vuelve (caída, reinicio del proveedor) creyéndose master y otro
+// nodo se promovió mientras tanto, se aísla antes de seguir empujando cambios.
+if (Settings::get('cluster_role', 'standalone') === 'master') {
+    try {
+        $stale = \MuseDockPanel\Services\FailoverSafetyService::checkStaleMaster();
+        if (!empty($stale['stale']) && empty($stale['skipped'])) {
+            logMsg('*** MASTER CADUCADO: ' . ($stale['reason'] ?? '') . ' — aislado (BD de datos en solo lectura, hooks demote) ***');
+        }
+    } catch (\Throwable $e) {
+        logMsg('Stale-master check error: ' . $e->getMessage());
+    }
+}
+
 // ─── Step 1: Process pending queue items ──────────────────────
 logMsg("Processing queue...");
 try {
@@ -187,8 +201,10 @@ if ($myClusterRole === 'master') {
                     'payload' => [],
                 ]);
 
-                if (($stateResp['ok'] ?? false) && !empty($stateResp['state'])) {
-                    $remoteState = $stateResp['state'];
+                // callNode devuelve el cuerpo en 'data' (antes se leía $stateResp['state'],
+                // que no existe, y la reconciliación nunca veía el estado del slave).
+                if (($stateResp['ok'] ?? false) && !empty($stateResp['data']['state'])) {
+                    $remoteState = $stateResp['data']['state'];
                     $dnsChanged = $remoteState['failover_dns_changed_locally'] ?? false;
                     $ifaceMode = $remoteState['failover_iface_mode'] ?? 'normal';
                     $remoteRole = $remoteState['cluster_role'] ?? 'slave';

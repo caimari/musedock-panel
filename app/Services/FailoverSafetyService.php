@@ -160,6 +160,95 @@ class FailoverSafetyService
         return ['ok' => true, 'steps' => $steps];
     }
 
+    /**
+     * ¿Soy un master "caducado"? Caso: este servidor era el master, se cayó (o lo
+     * reinició el proveedor), otro nodo se promovió mientras tanto y ahora vuelvo
+     * creyéndome master. Si sigo aceptando escrituras, los clientes con el DNS viejo
+     * en caché escriben aquí y el resto en el nuevo master: dos masters, datos que
+     * divergen. Se pregunta a cada nodo del cluster; si alguno es master y se
+     * promovió DESPUÉS que yo, me aíslo (fenceStaleMaster).
+     *
+     * Si no llego a ningún nodo no se decide nada (no se puede saber) y se reintenta
+     * en la siguiente pasada del cluster-worker.
+     */
+    public static function checkStaleMaster(bool $apply = true): array
+    {
+        $role = Settings::get('cluster_role', '') ?: \MuseDockPanel\Env::get('PANEL_ROLE', 'standalone');
+        if ($role !== 'master') {
+            return ['stale' => false, 'skipped' => "rol {$role}"];
+        }
+        if (Settings::get('cluster_fenced', '0') === '1') {
+            return ['stale' => true, 'skipped' => 'ya aislado'];
+        }
+        $mine = Settings::get('cluster_promoted_at', '');
+        $mineTs = $mine !== '' ? (int)strtotime($mine) : 0;
+        $asked = 0;
+        foreach (ClusterService::getNodes() as $n) {
+            $meta = json_decode((string)($n['metadata'] ?? '{}'), true) ?: [];
+            if (!empty($meta['witness'])) {
+                continue; // un testigo puede ser master de OTRO cluster
+            }
+            $r = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'query-local-state', 'payload' => []]);
+            $st = $r['data']['state'] ?? null;
+            if (empty($r['ok']) || !is_array($st)) {
+                continue;
+            }
+            $asked++;
+            $theirs = (string)($st['cluster_promoted_at'] ?? '');
+            if (($st['cluster_role'] ?? '') === 'master' && empty($st['cluster_fenced'])
+                && $theirs !== '' && (int)strtotime($theirs) > $mineTs) {
+                $reason = "El nodo {$n['name']} se promovió a master el {$theirs}"
+                    . ($mine !== '' ? ", después que este (promovido el {$mine})" : ' mientras este no respondía');
+                if (!$apply) {
+                    return ['stale' => true, 'winner' => $n['name'], 'reason' => $reason];
+                }
+                $host = (string)(parse_url((string)$n['api_url'], PHP_URL_HOST) ?: '');
+                return ['stale' => true, 'winner' => $n['name'], 'reason' => $reason] + self::fenceStaleMaster($reason, $host);
+            }
+        }
+        return ['stale' => false, 'nodes_asked' => $asked];
+    }
+
+    /**
+     * Aísla un master caducado SIN cortar el acceso al panel (a diferencia de
+     * fenceSelf, que para Caddy entero): las bases de datos de datos pasan a solo
+     * lectura (la del panel no, para poder seguir gestionándolo) y se ejecutan los
+     * scripts de relevo demote.d (parar la app, soltar la IP flotante...). El rol no
+     * se cambia: devolver este nodo como slave es una decisión (demoteToSlave).
+     */
+    public static function fenceStaleMaster(string $reason, string $newMasterHost = ''): array
+    {
+        $steps = [];
+        $panelPort = (int)\MuseDockPanel\Env::int('DB_PORT', 5432);
+        $all = PgClusterService::listClusters();
+        foreach ($all as $c) {
+            if ($c['cluster'] === 'panel' || (count($all) > 1 && (int)$c['port'] === $panelPort)) {
+                continue;
+            }
+            $p = (int)$c['port'];
+            shell_exec('runuser -u postgres -- psql -p ' . $p . ' -Xc ' . escapeshellarg('ALTER SYSTEM SET default_transaction_read_only = on') . ' 2>&1');
+            shell_exec('runuser -u postgres -- psql -p ' . $p . ' -Xc ' . escapeshellarg('SELECT pg_reload_conf()') . ' 2>&1');
+            $steps[] = "PostgreSQL {$c['key']} en solo lectura";
+        }
+        $hookEnv = ['MUSEDOCK_REASON' => 'stale-master'];
+        if (filter_var($newMasterHost, FILTER_VALIDATE_IP) || preg_match('/^[A-Za-z0-9.-]+$/', $newMasterHost)) {
+            $hookEnv['MUSEDOCK_NEW_MASTER_IP'] = $newMasterHost;
+        }
+        $hooks = RoleHookService::run('demote', $hookEnv);
+
+        Settings::set('cluster_fenced', '1');
+        Settings::set('cluster_fenced_at', date('Y-m-d H:i:s'));
+        Settings::set('cluster_fenced_reason', $reason);
+        LogService::log('cluster.failover', 'stale-master', 'Master caducado aislado: ' . $reason);
+        try {
+            NotificationService::send('Failover: este servidor se ha aislado (master caducado)',
+                "{$reason}.\n\nPara evitar dos masters, sus bases de datos de clientes están en solo lectura y se han ejecutado "
+                . "los scripts demote.d. El panel sigue accesible. Siguiente paso: devolverlo como slave del nuevo master.");
+        } catch (\Throwable) {
+        }
+        return ['fenced' => true, 'steps' => $steps, 'hooks' => $hooks];
+    }
+
     /** Undo fenceSelf once this node is legitimately a slave again. */
     public static function unfenceSelf(): array
     {

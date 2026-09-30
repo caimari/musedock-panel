@@ -130,7 +130,7 @@ try {
     $countersJson = Settings::get('failover_health_counters', '{}');
     $counters = json_decode($countersJson, true) ?: [];
 
-    $downThreshold = (int)($foConfig['failover_down_threshold'] ?: 3);
+    $downThreshold = (int)($foConfig['failover_down_threshold'] ?: 5);
     $upThreshold = (int)($foConfig['failover_up_threshold'] ?: 5);
 
     $stateChanged = false;

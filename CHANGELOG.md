@@ -2,6 +2,34 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.235] — 2026-09-30 — Failover seguro: el master que vuelve se aísla, margen de 5 min y el slave adopta los hostings
+
+### Añadido
+- **Un master que vuelve tras un relevo se aísla solo (anti split-brain).** Caso: el proveedor reinicia el master o este se cae más de lo que tolera el failover, el slave se promueve y, al volver, el antiguo master arranca **creyéndose master**. Los visitantes con el DNS viejo en caché escribirían en él y el resto en el nuevo master: dos masters y datos que divergen.
+  - Ahora el antiguo master pregunta a los nodos del cluster. Si alguno es master y **se promovió después que él**, se aísla:
+    - sus bases de datos de clientes pasan a **solo lectura** (la del panel no);
+    - se ejecutan los scripts de relevo `demote.d` (parar la app, soltar la IP flotante...);
+    - te avisa.
+  - **El panel sigue accesible**, a diferencia de `fenceSelf`, que para Caddy entero. El rol no se cambia solo: devolverlo como slave es un paso aparte (`demoteToSlave`), que además quita el aislamiento.
+  - Se comprueba **al arrancar el servidor, antes que Caddy y supervisor** (servicio `musedock-stale-master-check`, que instala `update.sh`, con prefijo `-` y límite de 90 s: nunca bloquea el arranque), y después **cada minuto** en el cluster-worker.
+  - Si no llega a ningún nodo, no decide nada y lo reintenta.
+  - Los nodos informan de su fecha de promoción (`cluster_promoted_at`) en `query-local-state`.
+- **El slave adopta los hostings que ya tiene en vez de crearlos.** Si al sincronizar un hosting el slave ya tiene el usuario del sistema **con el mismo UID** y su carpeta (un slave clonado con rsync, como obelix), solo lo registra en su panel:
+  - no crea usuario ni pool de PHP;
+  - no cambia el dueño de los ficheros;
+  - no toca Caddy si el dominio ya se sirve (solo añade la ruta si el master la tiene y en el slave nadie sirve el dominio).
+
+  Así «Sincronizar Todo» es seguro en un slave clonado, y el panel del slave muestra sus hostings.
+
+### Cambiado
+- **Margen del failover por defecto: 5 comprobaciones fallidas seguidas (~5 minutos), antes 3.** Un reinicio normal del proveedor (1–3 min) ya no provoca un relevo. Si en un servidor se había guardado otro valor, se respeta.
+
+### Arreglado
+- **La reconciliación del cluster-worker nunca veía el estado del slave.** Al reconectar un slave, leía `$stateResp['state']`, cuando `callNode` devuelve el cuerpo en `data`. No detectaba que un slave hubiera cambiado el DNS por su cuenta mientras el master estaba caído.
+
+### Nota para los scripts de relevo (`demote.d`)
+- Al arrancar, la comprobación de master caducado se ejecuta **antes** que supervisor. Un script `demote.d` que pare la app debe también impedir que supervisor la vuelva a arrancar (por ejemplo, `autostart=false` o parar supervisor), no solo `supervisorctl stop`.
+
 ## [1.0.234] — 2026-09-30 — Cluster: paneles que se bloqueaban entre sí, IP del master y cola de fallidas
 
 Visto al emparejar asterisk (master) y obelix (slave): «nodo caído», panel muy lento y 48 operaciones fallidas en pocos minutos.

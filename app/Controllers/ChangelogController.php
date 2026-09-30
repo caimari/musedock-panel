@@ -20,6 +20,31 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.235',
+                'date' => '2026-09-30',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '**Un master que vuelve tras un relevo se aisla solo (anti split-brain):** si otro nodo se promovio despues que el, sus BD de clientes pasan a solo lectura y se ejecutan los scripts demote.d; el panel sigue accesible. Se comprueba al arrancar (antes que Caddy y supervisor) y cada minuto',
+                            '**El slave adopta los hostings que ya tiene:** si existe el usuario con el mismo UID y su carpeta, solo los registra en su panel (sin crear usuario, pool, chown ni rutas duplicadas). "Sincronizar Todo" es seguro en un slave clonado',
+                        ],
+                        'en' => [
+                            '**A master returning after a failover fences itself (anti split-brain):** if another node was promoted later, its client DBs go read-only and demote.d scripts run; the panel stays reachable. Checked at boot (before Caddy and supervisor) and every minute',
+                            '**The slave adopts hostings it already has:** if the user with the same UID and its folder exist, it only registers them in its panel (no user, pool, chown or duplicate routes). "Sync All" is safe on a cloned slave',
+                        ],
+                    ],
+                    'improved' => [
+                        'es' => ['**Margen del failover por defecto: 5 fallos seguidos (~5 min), antes 3**, para que un reinicio normal del proveedor no provoque un relevo'],
+                        'en' => ['**Default failover margin: 5 consecutive failures (~5 min), was 3**, so a normal provider reboot does not trigger a failover'],
+                    ],
+                    'fixed' => [
+                        'es' => ['La reconciliacion del cluster-worker nunca veia el estado del slave (leia la respuesta en la clave equivocada)'],
+                        'en' => ['The cluster-worker reconciliation never saw the slave state (it read the response under the wrong key)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.234',
                 'date' => '2026-09-30',
                 'badge' => 'danger',

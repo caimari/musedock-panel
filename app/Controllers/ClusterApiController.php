@@ -1065,6 +1065,10 @@ class ClusterApiController
                 'failover_dns_changed_at'     => Settings::get('failover_dns_changed_at', ''),
                 'cluster_role'                => Settings::get('cluster_role', 'slave'),
                 'repl_role'                   => Settings::get('repl_role', 'slave'),
+                // Para que un master que vuelve detecte que otro se promovió después
+                // que él (FailoverSafetyService::checkStaleMaster).
+                'cluster_promoted_at'         => Settings::get('cluster_promoted_at', ''),
+                'cluster_fenced'              => Settings::get('cluster_fenced', '0') === '1',
             ],
         ];
     }

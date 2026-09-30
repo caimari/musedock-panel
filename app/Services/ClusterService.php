@@ -1324,6 +1324,24 @@ class ClusterService
      * Compute a hash of all DB associations (hosting_databases) for comparison.
      * Returns a short md5 hash of the sorted db_name→domain mapping.
      */
+    /** ¿Algún servidor HTTP de Caddy de este nodo ya tiene una ruta para $host? */
+    private static function caddyServesHost(string $host): bool
+    {
+        $host = strtolower($host);
+        $ctx = stream_context_create(['http' => ['timeout' => 4]]);
+        $servers = json_decode((string)@file_get_contents('http://localhost:2019/config/apps/http/servers', false, $ctx), true);
+        foreach (is_array($servers) ? $servers : [] as $srv) {
+            foreach (($srv['routes'] ?? []) as $route) {
+                foreach (($route['match'] ?? []) as $m) {
+                    if (in_array($host, array_map('strtolower', (array)($m['host'] ?? [])), true)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
     public static function computeDbAssociationsHash(): string
     {
         $rows = Database::fetchAll(
@@ -1480,10 +1498,31 @@ class ClusterService
                         return ['ok' => true, 'message' => "Hosting {$domain} exists — repaired: {$repairMsg}"];
                     }
 
-                    // Create system account (user, dirs, PHP-FPM, Caddy)
                     // Force same UID as master for consistency
                     $forceUid = isset($hostingData['system_uid']) ? (int)$hostingData['system_uid'] : null;
-                    $result = SystemService::createAccount($username, $domain, $homeDir, $documentRoot, $phpVersion, $password, $shell, $forceUid);
+
+                    // ADOPTAR en vez de crear: si el slave ya tiene el usuario del
+                    // sistema (con el MISMO uid que el master) y su carpeta —p. ej. un
+                    // slave clonado por debajo del panel con rsync—, solo se registra
+                    // el hosting en la BD del panel. createAccount() crearía un pool de
+                    // PHP propio, añadiría una ruta de Caddy duplicando la que ya sirve
+                    // el dominio y haría chown -R de toda la carpeta.
+                    $existingUid = trim((string)shell_exec(sprintf('id -u %s 2>/dev/null', escapeshellarg($username))));
+                    $adopt = $username !== '' && ctype_digit($existingUid) && is_dir($homeDir)
+                        && ($forceUid === null || (int)$existingUid === $forceUid);
+                    if ($adopt) {
+                        $result = ['success' => true, 'uid' => (int)$existingUid, 'caddy_route_id' => $hostingData['caddy_route_id'] ?? null];
+                        $served = self::caddyServesHost($domain);
+                        if (!$served && !empty($hostingData['caddy_route_id'])) {
+                            // El master lo sirve y aquí nadie lo sirve: se añade su ruta.
+                            $result['caddy_route_id'] = SystemService::addCaddyRoute($domain, $documentRoot, $username, $phpVersion) ?: null;
+                        }
+                        LogService::log('cluster.sync', $domain, "Hosting adoptado: usuario {$username} (uid {$existingUid}) y {$homeDir} ya existían; solo se registra en el panel"
+                            . ($served ? ' (Caddy ya servía el dominio)' : (empty($hostingData['caddy_route_id']) ? ' (sin ruta de Caddy, como en el master)' : ' (se añade su ruta de Caddy)')));
+                    } else {
+                        // Create system account (user, dirs, PHP-FPM, Caddy)
+                        $result = SystemService::createAccount($username, $domain, $homeDir, $documentRoot, $phpVersion, $password, $shell, $forceUid);
+                    }
 
                     if (!($result['success'] ?? false)) {
                         return ['ok' => false, 'message' => $result['error'] ?? 'System account creation failed'];
@@ -2257,6 +2296,20 @@ class ClusterService
             'Failover: Master degradado a Slave',
             "El servidor ha sido degradado a Slave. Nuevo master: {$newMasterIp}. Puertos HTTP/HTTPS cerrados."
         );
+
+        // Si este nodo estaba aislado como master caducado (fenceStaleMaster), ya es
+        // legítimamente slave: se quita la marca y el solo-lectura forzado (el de la
+        // réplica lo gestiona PostgreSQL por estar en recuperación).
+        if (Settings::get('cluster_fenced', '0') === '1') {
+            foreach (PgClusterService::listClusters() as $c) {
+                shell_exec('runuser -u postgres -- psql -p ' . (int)$c['port'] . ' -Xc '
+                    . escapeshellarg('ALTER SYSTEM RESET default_transaction_read_only') . ' 2>&1');
+                shell_exec('runuser -u postgres -- psql -p ' . (int)$c['port'] . ' -Xc '
+                    . escapeshellarg('SELECT pg_reload_conf()') . ' 2>&1');
+            }
+            Settings::set('cluster_fenced', '0');
+            $results['unfenced'] = true;
+        }
 
         // Scripts de relevo del administrador (/etc/musedock/hooks/demote.d): parar
         // lo que solo debe correr en el master, soltar la IP flotante, etc.

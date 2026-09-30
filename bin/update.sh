@@ -253,6 +253,34 @@ OVERRIDEEOF
     ok "Caddy runtime repair hook installed/updated"
 }
 
+# Comprobación de "master caducado" al arrancar, ANTES de Caddy y supervisor: si
+# este nodo vuelve creyéndose master y otro se promovió mientras tanto, se aísla
+# antes de servir (anti split-brain). Prefijo "-" y timeout: nunca bloquea el arranque.
+install_stale_master_check() {
+    if ! command -v systemctl >/dev/null 2>&1 || [ ! -f "${PANEL_DIR}/cli/check-stale-master.php" ]; then
+        return 0
+    fi
+    cat > /etc/systemd/system/musedock-stale-master-check.service << UNITEOF
+[Unit]
+Description=MuseDock: aislar un master caducado antes de servir (anti split-brain)
+Wants=network-online.target
+After=network-online.target postgresql.service wg-quick@wg0.service
+Before=caddy.service supervisor.service
+
+[Service]
+Type=oneshot
+ExecStart=-${PHP_BIN} ${PANEL_DIR}/cli/check-stale-master.php
+TimeoutStartSec=90
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
+    chmod 644 /etc/systemd/system/musedock-stale-master-check.service
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable musedock-stale-master-check.service >/dev/null 2>&1 || true
+    ok "Stale-master boot check installed"
+}
+
 ensure_database_ready() {
     local db_host db_port db_name db_user cluster_line pg_ver pg_cluster pg_status
 
@@ -643,6 +671,7 @@ fi
 
 install_caddy_backup_cron
 install_caddy_runtime_repair_override
+install_stale_master_check
 
 # Install audit log purge cron if missing
 if [ ! -f /etc/cron.d/musedock-audit-purge ]; then

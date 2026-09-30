@@ -2159,7 +2159,7 @@
                     <div class="col-md-3">
                         <label class="form-label small">Fallos para marcar DOWN</label>
                         <div class="input-group input-group-sm">
-                            <input type="number" name="failover_down_threshold" class="form-control form-control-sm" value="<?= (int)($fc['failover_down_threshold'] ?? 3) ?>" min="1" max="20">
+                            <input type="number" name="failover_down_threshold" class="form-control form-control-sm" value="<?= (int)($fc['failover_down_threshold'] ?? 5) ?>" min="1" max="20">
                             <span class="input-group-text">checks</span>
                         </div>
                         <div class="form-text" style="color:#94a3b8;">Ej: 3 = caído tras 3 minutos</div>

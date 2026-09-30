@@ -59,7 +59,9 @@ class FailoverService
 
         // Health check thresholds
         'failover_check_interval'   => '60',
-        'failover_down_threshold'   => '3',
+        // 5 comprobaciones seguidas (~5 min con el worker cada minuto): un reinicio
+        // normal del proveedor (1-3 min) no debe provocar un relevo.
+        'failover_down_threshold'   => '5',
         'failover_up_threshold'     => '5',
         'failover_check_timeout'    => '10',
         'failover_cooldown_minutes' => '15',  // min after failback before allowing re-failover
