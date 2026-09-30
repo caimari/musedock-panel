@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.246] — 2026-09-30 — config_mirror en slaves unidos por el método antiguo
+
+### Arreglado
+- **`config_mirror` no funcionaba en un slave unido por el método antiguo** («No hay ningún nodo master registrado», visto en Filemon). En esos clusters solo el master tiene registrado al slave; el slave conoce a su master únicamente por la IP de la que le llegan los latidos. Ahora, si no hay master registrado, el slave llama a esa IP (VPN) con su **propio token de cluster**, que el master ya acepta porque lo tiene guardado como el token de ese nodo. No hace falta volver a emparejar.
+
 ## [1.0.245] — 2026-09-30 — Apps fuera de /var/www: carpetas extra en la copia de ficheros y servicios systemd en config_mirror
 
 ### Añadido

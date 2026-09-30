@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.246',
+                'date' => '2026-09-30',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['`config_mirror` no funcionaba en slaves unidos por el metodo antiguo (sin el master registrado como nodo): ahora usa la IP de los latidos del master y el token propio del slave'],
+                        'en' => ['`config_mirror` did not work on slaves joined the old way (master not registered as a node): it now uses the master heartbeat IP and the slave own token'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.245',
                 'date' => '2026-09-30',
                 'badge' => 'success',

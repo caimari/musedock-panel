@@ -137,10 +137,23 @@ final class ConfigMirrorService
             return ['ok' => false, 'applied' => false, 'actions' => [], 'issues' => ['Este nodo está aislado: no se copia nada.']];
         }
         $master = self::masterNode();
-        if (!$master) {
-            return ['ok' => false, 'applied' => false, 'actions' => [], 'issues' => ['No hay ningún nodo master registrado en este slave.']];
+        if ($master) {
+            $r = ClusterService::callNode((int)$master['id'], 'POST', 'api/cluster/action', ['action' => 'export-system-config', 'payload' => []]);
+        } else {
+            // Slave unido por el método antiguo: no tiene al master registrado como nodo,
+            // pero el master sí tiene a este slave con SU token de cluster, así que la
+            // API del master acepta ese mismo token. Se usa la IP de la que llegan los
+            // latidos del master (VPN) y el puerto del panel.
+            $ip = Settings::get('cluster_master_heartbeat_ip', '') ?: Settings::get('cluster_master_ip', '');
+            $raw = Settings::get('cluster_local_token', '');
+            $token = $raw !== '' ? ReplicationService::decryptPassword($raw) : '';
+            if (!filter_var($ip, FILTER_VALIDATE_IP) || $token === '') {
+                return ['ok' => false, 'applied' => false, 'actions' => [], 'issues' => ['No hay master registrado ni se conoce su IP (latidos) o el token de este nodo.']];
+            }
+            $port = (int)(Settings::get('panel_port', '8444') ?: 8444);
+            $r = ClusterService::callNodeDirect("https://{$ip}:{$port}", $token, 'POST', 'api/cluster/action',
+                ['action' => 'export-system-config', 'payload' => []], 60);
         }
-        $r = ClusterService::callNode((int)$master['id'], 'POST', 'api/cluster/action', ['action' => 'export-system-config', 'payload' => []]);
         $cfg = $r['data'] ?? null;
         if (empty($r['ok']) || empty($cfg['ok'])) {
             return ['ok' => false, 'applied' => false, 'actions' => [], 'issues' => ['El master no devolvió su configuración: ' . ($cfg['error'] ?? $r['error'] ?? '?') . ' (¿panel del master anterior a 1.0.242?)']];
