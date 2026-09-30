@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.236] — 2026-09-30 — MCP: sincronizar hostings y ver la cola del cluster
+
+### Añadido
+- **`cluster_sync_hostings`** (MCP, escritura, en el master): lo mismo que el botón «Sincronizar Todo» de un nodo.
+  - Encola el alta de cada hosting (el slave lo crea o, desde la 1.0.235, lo **adopta** si ya tiene el usuario con el mismo UID y su carpeta), junto con sus alias/redirecciones y sus bases de datos registradas.
+  - Admite limitarlo a **un solo dominio**.
+  - **Nunca borra nada en el nodo.** Siguiendo la norma del MCP, las herramientas pueden crear, actualizar y sincronizar, pero no borrar.
+- **`cluster_queue`** (MCP, lectura): estado de la cola de operaciones hacia los nodos (pendientes, completadas, fallidas, canceladas) y las últimas operaciones con su nodo, acción, dominio, intentos y error. Para ver por qué algo no llega a un slave. No muestra el contenido de las operaciones.
+
+### Cambiado
+- La lógica de «Sincronizar Todo» pasa a `ClusterService::enqueueFullHostingSync()`, que usan el botón y el MCP: el mismo código por los dos caminos.
+
 ## [1.0.235] — 2026-09-30 — Failover seguro: el master que vuelve se aísla, margen de 5 min y el slave adopta los hostings
 
 ### Añadido

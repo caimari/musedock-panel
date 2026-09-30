@@ -1324,6 +1324,118 @@ class ClusterService
      * Compute a hash of all DB associations (hosting_databases) for comparison.
      * Returns a short md5 hash of the sorted db_name→domain mapping.
      */
+    /**
+     * "Sincronizar Todo" hacia un nodo: encola create_hosting (que en el slave
+     * crea o ADOPTA el hosting), sus alias/redirects y sus registros de BD, más los
+     * redirects standalone. No borra nada en el nodo. Las operaciones fallidas
+     * antiguas de ese nodo se marcan canceladas (esta sincronización las sustituye).
+     * La usan el botón del panel y la herramienta MCP cluster_sync_hostings.
+     *
+     * @return array{hostings:int, redirects:int}
+     */
+    public static function enqueueFullHostingSync(int $nodeId, ?string $onlyDomain = null): array
+    {
+        $accounts = Database::fetchAll("SELECT * FROM hosting_accounts WHERE status != 'deleted' ORDER BY id");
+        if ($onlyDomain !== null) {
+            $accounts = array_values(array_filter($accounts, static fn($a) => strcasecmp((string)$a['domain'], $onlyDomain) === 0));
+        }
+        $count = 0;
+
+        foreach ($accounts as $acc) {
+            // Get password hash from system for exact replication
+            $passwordHash = SystemService::getPasswordHash($acc['username']);
+
+            self::enqueue($nodeId, 'sync-hosting', [
+                'hosting_action' => 'create_hosting',
+                'hosting_data' => [
+                    'username' => $acc['username'],
+                    'domain' => $acc['domain'],
+                    'home_dir' => $acc['home_dir'],
+                    'document_root' => $acc['document_root'],
+                    'php_version' => $acc['php_version'] ?? '8.3',
+                    'password' => '',
+                    'password_hash' => $passwordHash,
+                    'shell' => $acc['shell'] ?? '/usr/sbin/nologin',
+                    'system_uid' => $acc['system_uid'] ?? null,
+                    'caddy_route_id' => $acc['caddy_route_id'] ?? null,
+                    'customer_id' => $acc['customer_id'] ?? null,
+                    'disk_quota_mb' => $acc['disk_quota_mb'] ?? 1024,
+                    'description' => $acc['description'] ?? '',
+                ],
+            ], 5);
+
+            // Also sync domain aliases & redirects for this account
+            $aliases = DomainAliasService::exportForSync((int)$acc['id']);
+            if (!empty($aliases)) {
+                self::enqueue($nodeId, 'sync-hosting', [
+                    'hosting_action' => 'sync_domain_aliases',
+                    'hosting_data' => [
+                        'main_domain' => $acc['domain'],
+                        'aliases'     => $aliases,
+                        'username'    => $acc['username'],
+                        'document_root' => $acc['document_root'],
+                        'php_version' => $acc['php_version'] ?? '8.3',
+                    ],
+                ], 6); // Lower priority than create_hosting (5) — runs after
+            }
+
+            // Also sync database registrations for this account
+            $databases = Database::fetchAll(
+                "SELECT db_name, db_user, db_type, created_at FROM hosting_databases WHERE account_id = :aid",
+                ['aid' => (int)$acc['id']]
+            );
+            if (!empty($databases)) {
+                self::enqueue($nodeId, 'sync-hosting', [
+                    'hosting_action' => 'sync_databases',
+                    'hosting_data' => [
+                        'main_domain' => $acc['domain'],
+                        'databases'   => $databases,
+                    ],
+                ], 7); // After aliases (6), after create_hosting (5)
+            }
+
+            $count++;
+        }
+
+        $sr = 0;
+        if ($onlyDomain === null) {
+            // Standalone redirects (domain → URL, NO hosting account). These are NOT
+            // covered by the per-hosting loop above (they have hosting_account_id =
+            // NULL), so before this they never reached a slave. Enqueue each one.
+            $standalone = Database::fetchAll(
+                "SELECT domain, target_url, redirect_code, preserve_path, customer_id
+                 FROM hosting_domain_aliases WHERE hosting_account_id IS NULL AND type = 'redirect'"
+            );
+            foreach ($standalone as $red) {
+                self::enqueue($nodeId, 'sync-hosting', [
+                    'hosting_action' => 'sync_standalone_redirect',
+                    'hosting_data'   => [
+                        'domain'        => $red['domain'],
+                        'target_url'    => $red['target_url'],
+                        'redirect_code' => (int)($red['redirect_code'] ?? 301),
+                        'preserve_path' => in_array((string)($red['preserve_path'] ?? 't'), ['t','1','true'], true),
+                        'customer_id'   => $red['customer_id'] ?? null,
+                    ],
+                ], 6);
+                $sr++;
+            }
+
+            // Supersede stale DEAD queue items for this node: a fresh full sync
+            // re-provisions everything, so old exhausted-retry 'failed' rows no longer
+            // reflect reality. Mark them cancelled so the dashboard drift banner
+            // clears once this sync completes (instead of showing ancient failures).
+            try {
+                Database::query(
+                    "UPDATE cluster_queue SET status = 'cancelled'
+                     WHERE node_id = :nid AND status = 'failed' AND attempts >= max_attempts",
+                    ['nid' => $nodeId]
+                );
+            } catch (\Throwable) {}
+        }
+
+        return ['hostings' => $count, 'redirects' => $sr];
+    }
+
     /** ¿Algún servidor HTTP de Caddy de este nodo ya tiene una ruta para $host? */
     private static function caddyServesHost(string $host): bool
     {

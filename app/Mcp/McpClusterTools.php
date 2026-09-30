@@ -100,6 +100,25 @@ final class McpClusterTools
                     'apply' => $apply,
                 ], ['code']),
             ],
+            'cluster_queue' => [
+                'write' => false,
+                'title' => 'Cola de sincronización del cluster',
+                'description' => 'En el MASTER: estado de la cola de operaciones hacia los nodos (pendientes, en curso, completadas, fallidas, canceladas) y las últimas operaciones con su nodo, acción, dominio, intentos y error. Sirve para ver por qué algo no llega a un slave. No muestra el contenido de las operaciones (puede llevar hashes). Solo lectura.',
+                'inputSchema' => $o([
+                    'status' => ['type' => 'string', 'enum' => ['all', 'pending', 'processing', 'completed', 'failed', 'cancelled'], 'description' => 'Filtrar por estado (por defecto all)'],
+                    'limit' => ['type' => 'integer', 'description' => 'Máximo de operaciones a listar (por defecto 30, máx. 200)'],
+                ]),
+            ],
+            'cluster_sync_hostings' => [
+                'write' => true,
+                'title' => 'Sincronizar hostings a un nodo',
+                'description' => 'En el MASTER: lo mismo que el botón "Sincronizar Todo". Encola hacia el nodo el alta de cada hosting (el slave lo crea, o lo ADOPTA si ya tiene el usuario con el mismo UID y su carpeta), sus alias/redirecciones y sus bases de datos registradas. NUNCA borra nada en el nodo. Opcional: solo un dominio. Luego se sigue con cluster_queue. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o([
+                    'target_node' => ['type' => 'string', 'description' => 'Id o nombre del nodo (list_nodes)'],
+                    'domain' => ['type' => 'string', 'description' => 'Opcional: sincronizar solo este hosting'],
+                    'apply' => $apply,
+                ], ['target_node']),
+            ],
             'cluster_node_services' => [
                 'write' => true,
                 'title' => 'Servicios de un nodo',
@@ -129,6 +148,8 @@ final class McpClusterTools
             'cluster_pair_request'  => self::pairRequest($args),
             'cluster_pair_pending'  => self::pairPending(),
             'cluster_pair_approve'  => self::pairApprove($args),
+            'cluster_queue'         => self::queue($args),
+            'cluster_sync_hostings' => self::syncHostings($args),
             default                 => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
         };
     }
@@ -605,6 +626,56 @@ final class McpClusterTools
         }
         $r = \MuseDockPanel\Services\ClusterPairingService::approve($code, $masterUrl, $pubIp);
         return ['applied' => true, 'node_id' => $r['node_id'], 'steps' => $r['steps']];
+    }
+
+    // ── Cola y sincronización ────────────────────────────────────────────
+
+    private static function queue(array $args): array
+    {
+        $status = (string)($args['status'] ?? 'all');
+        $limit = max(1, min(200, (int)($args['limit'] ?? 30)));
+        $where = in_array($status, ['pending', 'processing', 'completed', 'failed', 'cancelled'], true) ? 'WHERE q.status = :st' : '';
+        $params = $where ? ['st' => $status, 'lim' => $limit] : ['lim' => $limit];
+        $rows = \MuseDockPanel\Database::fetchAll(
+            "SELECT q.id, n.name AS node, q.action, q.payload->>'hosting_action' AS hosting_action,
+                    coalesce(q.payload->'hosting_data'->>'domain', q.payload->'hosting_data'->>'main_domain') AS domain,
+                    q.status, q.attempts, q.max_attempts, q.error_message, q.created_at, q.completed_at
+             FROM cluster_queue q LEFT JOIN cluster_nodes n ON n.id = q.node_id
+             {$where} ORDER BY q.created_at DESC, q.id DESC LIMIT :lim", $params);
+        $counts = [];
+        foreach (\MuseDockPanel\Database::fetchAll("SELECT status, COUNT(*) AS c FROM cluster_queue GROUP BY status") as $r) {
+            $counts[$r['status']] = (int)$r['c'];
+        }
+        return ['counts' => $counts, 'items' => $rows];
+    }
+
+    private static function syncHostings(array $args): array
+    {
+        if (self::role() !== 'master') {
+            throw new \RuntimeException('cluster_sync_hostings se ejecuta en el MASTER del cluster.');
+        }
+        $node = self::findNode(trim((string)($args['target_node'] ?? '')));
+        $domain = trim((string)($args['domain'] ?? '')) ?: null;
+        $accounts = \MuseDockPanel\Database::fetchAll("SELECT domain, username, system_uid FROM hosting_accounts WHERE status != 'deleted' ORDER BY id");
+        if ($domain !== null) {
+            $accounts = array_values(array_filter($accounts, static fn($a) => strcasecmp((string)$a['domain'], $domain) === 0));
+            if (!$accounts) {
+                throw new \InvalidArgumentException("No hay ningún hosting {$domain} en este master.");
+            }
+        }
+        $plan = [
+            'node' => $node['name'],
+            'hostings' => array_map(static fn($a) => "{$a['domain']} (usuario {$a['username']}, uid {$a['system_uid']})", $accounts),
+            'on_the_node' => 'crea cada hosting, o lo ADOPTA (solo registro en el panel) si ya existe el usuario con el mismo UID y su carpeta',
+            'also' => 'alias/redirecciones y bases de datos registradas de cada hosting' . ($domain === null ? '; redirecciones sin hosting; las operaciones fallidas antiguas de este nodo se marcan canceladas' : ''),
+            'deletes' => 'nada',
+        ];
+        if (empty($args['apply'])) {
+            return ['applied' => false, 'plan' => $plan, 'next' => 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.'];
+        }
+        $r = ClusterService::enqueueFullHostingSync((int)$node['id'], $domain);
+        LogService::log('mcp.cluster', 'sync-hostings', "Encolados {$r['hostings']} hostings + {$r['redirects']} redirects al nodo {$node['name']}");
+        return ['applied' => true, 'enqueued' => $r, 'next' => 'El cluster-worker los procesa cada minuto: sigue el resultado con cluster_queue.'];
     }
 
     // ── cluster_node_services ────────────────────────────────────────────

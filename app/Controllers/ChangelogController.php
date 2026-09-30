@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.236',
+                'date' => '2026-09-30',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '**MCP `cluster_sync_hostings`:** lo mismo que "Sincronizar Todo" (crea o adopta cada hosting en el slave, con alias y BD registradas), tambien para un solo dominio. Nunca borra nada en el nodo',
+                            '**MCP `cluster_queue`:** estado de la cola del cluster y ultimas operaciones con su error, para ver por que algo no llega a un slave',
+                        ],
+                        'en' => [
+                            '**MCP `cluster_sync_hostings`:** same as "Sync All" (creates or adopts each hosting on the slave, with aliases and registered DBs), also for a single domain. It never deletes anything on the node',
+                            '**MCP `cluster_queue`:** cluster queue status and latest operations with their error, to see why something does not reach a slave',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.235',
                 'date' => '2026-09-30',
                 'badge' => 'success',
