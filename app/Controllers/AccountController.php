@@ -726,7 +726,7 @@ class AccountController
             'open_basedir' => '',
         ];
 
-        $poolFile = "/etc/php/{$account['php_version']}/fpm/pool.d/{$account['username']}.conf";
+        $poolFile = \MuseDockPanel\Services\HostingPhpSettingsService::poolFile($account);
         if (file_exists($poolFile)) {
             $poolContent = file_get_contents($poolFile);
             if ($poolContent !== false) {
@@ -2351,7 +2351,7 @@ class AccountController
             return;
         }
 
-        $poolFile = "/etc/php/{$account['php_version']}/fpm/pool.d/{$account['username']}.conf";
+        $poolFile = \MuseDockPanel\Services\HostingPhpSettingsService::poolFile($account);
         if (!file_exists($poolFile)) {
             Flash::set('error', 'Pool FPM no encontrado.');
             Router::redirect('/accounts/' . $params['id'] . '/edit');
@@ -2436,98 +2436,17 @@ class AccountController
             return;
         }
 
-        $poolFile = "/etc/php/{$account['php_version']}/fpm/pool.d/{$account['username']}.conf";
-        if (!file_exists($poolFile)) {
-            Flash::set('error', 'No se encontró el archivo de pool FPM.');
-            Router::redirect('/accounts/' . $params['id'] . '/edit');
-            return;
-        }
-
-        $poolContent = file_get_contents($poolFile);
-        if ($poolContent === false) {
-            Flash::set('error', 'No se pudo leer el archivo de pool FPM.');
-            Router::redirect('/accounts/' . $params['id'] . '/edit');
-            return;
-        }
-
-        // Allowed settings with validation patterns
-        $allowedSettings = [
-            'memory_limit' => '/^\d+[MmGgKk]?$/',
-            'upload_max_filesize' => '/^\d+[MmGgKk]?$/',
-            'post_max_size' => '/^\d+[MmGgKk]?$/',
-            'max_execution_time' => '/^\d+$/',
-            'max_input_vars' => '/^\d+$/',
-        ];
-
+        // Misma lógica que la herramienta MCP hosting_php_settings.
         $changes = [];
-        foreach ($allowedSettings as $key => $pattern) {
-            $value = trim($_POST[$key] ?? '');
-            if (empty($value)) continue;
-
-            if (!preg_match($pattern, $value)) {
-                Flash::set('error', "Valor no válido para {$key}: {$value}");
-                Router::redirect('/accounts/' . $params['id'] . '/edit');
-                return;
-            }
-
-            $changes[$key] = $value;
+        foreach (array_keys(\MuseDockPanel\Services\HostingPhpSettingsService::ALLOWED) as $key) {
+            $changes[$key] = trim($_POST[$key] ?? '');
         }
-
-        if (empty($changes)) {
-            Flash::set('error', 'No se especificaron valores para actualizar.');
-            Router::redirect('/accounts/' . $params['id'] . '/edit');
-            return;
+        $result = \MuseDockPanel\Services\HostingPhpSettingsService::apply($account, $changes);
+        if (!$result['ok']) {
+            Flash::set('error', $result['error']);
+        } else {
+            Flash::set('success', 'Ajustes PHP actualizados y FPM recargado.');
         }
-
-        // Update or add each setting in the pool conf
-        foreach ($changes as $key => $value) {
-            // Try to replace existing php_admin_value[key] or php_value[key] line
-            $replaced = false;
-
-            // Replace php_admin_value[key] = ...
-            $pattern = '/^(php_admin_value\[' . preg_quote($key, '/') . '\])\s*=\s*.+$/m';
-            if (preg_match($pattern, $poolContent)) {
-                $poolContent = preg_replace($pattern, "php_admin_value[{$key}] = {$value}", $poolContent);
-                $replaced = true;
-            }
-
-            // Replace php_value[key] = ...
-            if (!$replaced) {
-                $pattern = '/^(php_value\[' . preg_quote($key, '/') . '\])\s*=\s*.+$/m';
-                if (preg_match($pattern, $poolContent)) {
-                    $poolContent = preg_replace($pattern, "php_value[{$key}] = {$value}", $poolContent);
-                    $replaced = true;
-                }
-            }
-
-            // If not found, add as php_admin_value before security.limit_extensions or at end
-            if (!$replaced) {
-                $newLine = "php_admin_value[{$key}] = {$value}";
-                if (strpos($poolContent, 'security.limit_extensions') !== false) {
-                    $poolContent = preg_replace(
-                        '/^(security\.limit_extensions\s*=)/m',
-                        $newLine . "\n\n$1",
-                        $poolContent
-                    );
-                } else {
-                    $poolContent = rtrim($poolContent) . "\n{$newLine}\n";
-                }
-            }
-        }
-
-        // Write the updated pool conf
-        if (file_put_contents($poolFile, $poolContent) === false) {
-            Flash::set('error', 'No se pudo escribir el archivo de pool FPM.');
-            Router::redirect('/accounts/' . $params['id'] . '/edit');
-            return;
-        }
-
-        // Restart PHP-FPM
-        shell_exec("systemctl reload php{$account['php_version']}-fpm 2>&1");
-
-        $changesLog = implode(', ', array_map(fn($k, $v) => "{$k}={$v}", array_keys($changes), array_values($changes)));
-        LogService::log('account.php_settings', $account['domain'], "PHP settings updated: {$changesLog}");
-        Flash::set('success', 'Ajustes PHP actualizados y FPM recargado.');
         Router::redirect('/accounts/' . $params['id'] . '/edit');
     }
 

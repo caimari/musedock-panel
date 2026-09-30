@@ -119,6 +119,44 @@ final class McpClusterTools
                     'apply' => $apply,
                 ], ['target_node']),
             ],
+            'hosting_php_settings' => [
+                'write' => true,
+                'title' => 'Límites de PHP de un hosting',
+                'description' => 'Consulta o cambia los límites de PHP del pool de una cuenta de hosting (memory_limit, upload_max_filesize, post_max_size, max_execution_time, max_input_vars), lo mismo que Cuentas → Editar → PHP. Sin valores, solo muestra los actuales. Comprueba la configuración de PHP-FPM antes de recargar y, si falla, lo deja como estaba. Solo en el master o en un servidor independiente. Requiere "Permitir acciones que modifican" para aplicar.',
+                'inputSchema' => $o([
+                    'domain' => ['type' => 'string', 'description' => 'Dominio principal de la cuenta de hosting'],
+                    'memory_limit' => ['type' => 'string', 'description' => 'p. ej. 256M'],
+                    'upload_max_filesize' => ['type' => 'string', 'description' => 'p. ej. 50M'],
+                    'post_max_size' => ['type' => 'string', 'description' => 'p. ej. 55M (algo más que upload_max_filesize)'],
+                    'max_execution_time' => ['type' => 'string', 'description' => 'segundos, p. ej. 300'],
+                    'max_input_vars' => ['type' => 'string', 'description' => 'p. ej. 3000'],
+                    'apply' => $apply,
+                ], ['domain']),
+            ],
+            'firewall_audit' => [
+                'write' => false,
+                'title' => 'Auditoría del firewall',
+                'description' => 'Revisa si el servidor está realmente protegido. No mira reglas sueltas: simula la llegada de una conexión nueva a cada puerto en escucha (TCP y UDP) desde una IP cualquiera de internet y desde cada origen autorizado, siguiendo las cadenas de iptables. Dice por puerto si está abierto a todo internet, solo a ciertas IPs o cerrado, y avisa de: servicios sensibles expuestos (bases de datos, Redis, panel, APIs), IPv6 sin proteger, reglas que aceptan todo, orígenes con acceso a todos los puertos que no son de confianza, puertos de Docker (no pasan por INPUT) y ufw mezclado con iptables propio. Con `node` se audita otro nodo. Solo lectura.',
+                'inputSchema' => $o([]),
+            ],
+            'firewall_trusted_sources' => [
+                'write' => true,
+                'title' => 'Orígenes de confianza del firewall',
+                'description' => 'Consulta o cambia la lista manual de IPs/rangos de confianza que usa firewall_audit (además de los nodos del cluster, ALLOWED_IPS y la VPN, que ya cuentan). Sirve para que una IP revisada y autorizada deje de avisar. NO cambia el firewall. Sin `sources`, solo muestra la lista. Requiere "Permitir acciones que modifican" para cambiarla.',
+                'inputSchema' => $o([
+                    'sources' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Lista completa de IPs o rangos CIDR (sustituye a la anterior)'],
+                    'apply' => $apply,
+                ]),
+            ],
+            'config_mirror' => [
+                'write' => true,
+                'title' => 'Copia de la configuración del sistema desde el master',
+                'description' => 'En un SLAVE: copia del master lo que vive fuera de /var/www y hace falta para un relevo: programas de supervisor, tareas cron (crontabs y /etc/cron.d), webs fijas del Caddyfile y pools de PHP-FPM. Lo adapta al papel de reserva (programas con autostart=false, crons desactivados) y lo verifica antes de aplicar (ejecutable/carpeta/usuario, sintaxis de cron, caddy validate, php-fpm -t); lo que no pasa se omite y se avisa. Nunca borra: lo que el master ya no tiene se aparta con .removed-by-mirror. Caddy no se recarga (el Caddyfile se aplica al promover). Al promover, el panel enciende lo copiado; al degradar, lo apaga. Sin apply: muestra qué haría y el estado. enable=true/false activa o desactiva la copia automática cada 5 minutos. Requiere "Permitir acciones que modifican" para aplicar.',
+                'inputSchema' => $o([
+                    'enable' => ['type' => 'boolean', 'description' => 'Activar (true) o desactivar (false) la copia automática cada 5 min'],
+                    'apply' => $apply,
+                ]),
+            ],
             'cluster_drift' => [
                 'write' => false,
                 'title' => 'Diferencias entre el master y sus nodos',
@@ -177,6 +215,10 @@ final class McpClusterTools
             'cluster_queue'         => self::queue($args),
             'cluster_sync_hostings' => self::syncHostings($args),
             'cluster_drift'         => self::drift($args),
+            'hosting_php_settings'  => self::hostingPhp($args),
+            'config_mirror'         => self::configMirror($args),
+            'firewall_audit'        => \MuseDockPanel\Services\FirewallAuditService::refreshStored(),
+            'firewall_trusted_sources' => self::trustedSources($args),
             'filesync_status'       => self::filesyncStatus(),
             'filesync_configure'    => self::filesyncConfigure($args),
             default                 => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
@@ -342,6 +384,14 @@ final class McpClusterTools
             }
             if (Settings::get('repl_pg_role', 'standalone') === 'standalone' && array_filter($pg, static fn($p) => $p['in_recovery'])) {
                 $issues[] = 'La réplica de PostgreSQL funciona pero el panel no la tiene registrada: replication_adopt.';
+            }
+            if (Settings::get('cluster_config_mirror', '0') !== '1') {
+                $issues[] = 'La copia de configuración del master (supervisor, cron, Caddyfile, pools PHP) no está activada: lo nuevo del master no llegaría. config_mirror con enable=true.';
+            } else {
+                $last = json_decode(Settings::get('cluster_config_mirror_last', 'null'), true);
+                if (!empty($last['issues'])) {
+                    $issues[] = 'La última copia de configuración del master tuvo avisos: ' . implode(' | ', array_slice($last['issues'], 0, 3));
+                }
             }
         }
         if ($role === 'master') {
@@ -705,6 +755,98 @@ final class McpClusterTools
         $r = ClusterService::enqueueFullHostingSync((int)$node['id'], $domain);
         LogService::log('mcp.cluster', 'sync-hostings', "Encolados {$r['hostings']} hostings + {$r['redirects']} redirects al nodo {$node['name']}");
         return ['applied' => true, 'enqueued' => $r, 'next' => 'El cluster-worker los procesa cada minuto: sigue el resultado con cluster_queue.'];
+    }
+
+    // ── Firewall: orígenes de confianza ──────────────────────────────────
+
+    private static function trustedSources(array $args): array
+    {
+        $manual = array_values(array_filter(array_map('trim', preg_split('/[\s,]+/', Settings::get('firewall_trusted_sources', '')) ?: [])));
+        $info = ['manual' => $manual, 'effective' => \MuseDockPanel\Services\FirewallAuditService::trustedSources()];
+        if (!array_key_exists('sources', $args)) {
+            return $info;
+        }
+        $new = [];
+        foreach ((array)$args['sources'] as $s) {
+            $s = trim((string)$s);
+            [$ip, $bits] = array_pad(explode('/', $s, 2), 2, null);
+            if (!filter_var($ip, FILTER_VALIDATE_IP) || ($bits !== null && (!ctype_digit($bits) || (int)$bits > 128))) {
+                throw new \InvalidArgumentException("No es una IP ni un rango CIDR válido: {$s}");
+            }
+            $new[] = $s;
+        }
+        $new = array_values(array_unique($new));
+        $plan = ['from' => $manual, 'to' => $new, 'note' => 'Solo cambia la lista que usa la auditoría para no avisar; el firewall no se toca.'];
+        if (empty($args['apply'])) {
+            return ['applied' => false, 'plan' => $plan, 'next' => 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.'];
+        }
+        Settings::set('firewall_trusted_sources', implode(',', $new));
+        \MuseDockPanel\Services\FirewallAuditService::refreshStored();
+        return ['applied' => true, 'plan' => $plan];
+    }
+
+    // ── Copia de la configuración del sistema ────────────────────────────
+
+    private static function configMirror(array $args): array
+    {
+        $svc = \MuseDockPanel\Services\ConfigMirrorService::class;
+        $status = [
+            'automatic_every_5_min' => \MuseDockPanel\Settings::get('cluster_config_mirror', '0') === '1',
+            'last_run' => json_decode(\MuseDockPanel\Settings::get('cluster_config_mirror_last', 'null'), true),
+        ];
+        if (empty($args['apply'])) {
+            $dry = $svc::run(false);
+            return ['applied' => false, 'status' => $status, 'would_do' => $dry['actions'], 'issues' => $dry['issues'],
+                'next' => 'Muestra al usuario lo que haría y, si lo confirma, repite con apply=true (y enable=true para dejarlo automático).'];
+        }
+        $r = $svc::run(true);
+        if (array_key_exists('enable', $args)) {
+            \MuseDockPanel\Settings::set('cluster_config_mirror', !empty($args['enable']) ? '1' : '0');
+            $status['automatic_every_5_min'] = !empty($args['enable']);
+        }
+        LogService::log('mcp.mirror', 'run', 'Copia de configuración del master ejecutada por MCP');
+        return ['applied' => true, 'status' => $status, 'done' => $r['actions'], 'issues' => $r['issues']];
+    }
+
+    // ── Límites de PHP de un hosting ─────────────────────────────────────
+
+    private static function hostingPhp(array $args): array
+    {
+        $domain = strtolower(trim((string)($args['domain'] ?? '')));
+        $acc = \MuseDockPanel\Database::fetchOne("SELECT * FROM hosting_accounts WHERE lower(domain) = :d AND status != 'deleted'", ['d' => $domain]);
+        if (!$acc) {
+            throw new \InvalidArgumentException("No hay ninguna cuenta de hosting con dominio {$domain} en este panel.");
+        }
+        $svc = \MuseDockPanel\Services\HostingPhpSettingsService::class;
+        $current = $svc::current($acc);
+        $wanted = array_intersect_key($args, $svc::ALLOWED);
+        [$changes, $errors] = $svc::validate($wanted);
+        $info = ['domain' => $acc['domain'], 'php_version' => $acc['php_version'], 'pool' => $svc::poolFile($acc), 'current' => $current];
+        if ($errors) {
+            throw new \InvalidArgumentException(implode('; ', $errors));
+        }
+        if (!$changes) {
+            return $info + ['note' => 'Sin cambios pedidos: estos son los valores actuales.'];
+        }
+        if (self::role() === 'slave') {
+            throw new \RuntimeException('Este servidor es slave: los límites de PHP se cambian en el master.');
+        }
+        $plan = $info + ['change' => array_map(static fn($k) => ['from' => $current[$k] ?? null, 'to' => $changes[$k]], array_combine(array_keys($changes), array_keys($changes))),
+            'then' => 'se comprueba la configuración de PHP-FPM y se recarga (sin cortar las visitas); si falla, se deja como estaba'];
+        if (!empty($changes['upload_max_filesize']) && empty($changes['post_max_size']) && !empty($current['post_max_size'])) {
+            $plan['warning'] = 'post_max_size debería ser algo mayor que upload_max_filesize (ahora es ' . $current['post_max_size'] . ').';
+        }
+        if (empty($args['apply'])) {
+            return ['applied' => false, 'plan' => $plan, 'next' => 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.'];
+        }
+        if (\MuseDockPanel\Settings::get('mcp_allow_write', '0') !== '1') {
+            throw new \RuntimeException('Las acciones que modifican están desactivadas en este servidor.');
+        }
+        $r = $svc::apply($acc, $changes);
+        if (!$r['ok']) {
+            throw new \RuntimeException($r['error']);
+        }
+        return ['applied' => true, 'before' => $r['before'], 'after' => $r['after']];
     }
 
     // ── Diferencias master ↔ nodos ───────────────────────────────────────

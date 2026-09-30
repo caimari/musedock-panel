@@ -64,6 +64,9 @@ final class McpServer
                             . '(devuelve un código) → en el master cluster_pair_approve con ese código, tras confirmar con el usuario que coincide. '
                             . 'Después: cluster_sync_hostings (registra/adopta los hostings en el slave; nunca borra) y filesync_configure '
                             . '(copia de ficheros a los ~15 s con lsyncd, en espejo); cluster_queue y filesync_status para seguirlos. '
+                            . 'En el slave, config_mirror copia del master supervisor, cron, Caddyfile y pools de PHP (apagados hasta el relevo). '
+                            . 'cluster_drift (en el master) dice qué es distinto entre master y nodos. hosting_php_settings cambia límites de PHP de un hosting. '
+                            . 'firewall_audit dice por cada puerto si está abierto a todo internet, solo a ciertas IPs o cerrado (simula el paquete, no se fía de reglas sueltas). '
                             . 'Norma: estas herramientas crean, actualizan y sincronizan; ninguna borra datos por decisión propia.',
                     ]);
 

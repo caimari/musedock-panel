@@ -2,6 +2,41 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.241] — 2026-09-30 — El slave copia la configuración del sistema del master + límites de PHP por MCP
+
+### Añadido
+- **Copia de la configuración del sistema del master a un slave (`config_mirror`, MCP, en el slave).** Genérica, para cualquier pareja master/slave. Lo que ya se replicaba (BD, Redis, ficheros de `/var/www/vhosts`, hostings) se completa con lo que vive fuera de esas carpetas y hace falta para un relevo:
+  - **Supervisor:** los programas se copian con `autostart=false`, recordando su valor original. Se verifica que existan el ejecutable, la carpeta y el usuario.
+  - **Cron:**
+    - las tareas de los crontabs van a un **bloque propio** (`# >>> musedock-mirror`), desactivadas con `#MUSEDOCK-OFF#` y **sin duplicar** lo que el slave ya tenga (activo o desactivado); lo demás del crontab del slave no se toca;
+    - los ficheros de `/etc/cron.d` se copian como `<nombre>.musedock-off`, que cron ignora;
+    - se valida la sintaxis.
+  - **Caddyfile:** se toman las webs del master y se conservan las opciones globales y el bloque del panel del slave. Se valida con `caddy validate` y **no se recarga Caddy**, porque un reload desde el Caddyfile quitaría las rutas del panel: se aplica al promover.
+  - **Pools de PHP-FPM:** solo de usuarios que existan en el slave. Se comprueban con `php-fpm -t` y, si fallan, vuelven a como estaban.
+
+  Lo que no pasa la verificación se omite y avisa (como mucho una notificación por hora). **Nunca borra**: lo que el master ya no tiene se aparta como `.removed-by-mirror`, y solo toca lo que copió él. Hay copias de seguridad en `/var/backups/musedock-mirror/`. Se ejecuta cada 5 minutos en el cluster-worker si está activada (`enable=true`); sin `apply`, muestra lo que haría. Nueva acción del cluster `export-system-config` en el master.
+- **Al promover, el panel enciende lo copiado:**
+  - supervisor, con su `autostart` original, y arranca los programas;
+  - las tareas cron;
+  - Caddy se reinicia si su Caddyfile cambió, y el reparador repone las rutas del panel.
+
+  Al degradar o al aislarse como master caducado, lo apaga. Siempre antes de los scripts `promote.d` y `demote.d`.
+- **`hosting_php_settings`** (MCP): consulta o cambia `memory_limit`, `upload_max_filesize`, `post_max_size`, `max_execution_time` y `max_input_vars` del pool de una cuenta, lo mismo que Cuentas → Editar → PHP. Comprueba PHP-FPM (`php-fpm -t`) antes de recargar y, si falla, lo deja como estaba (la web también, ahora con el mismo código).
+- `failover_preflight` avisa en un slave si la copia de configuración no está activada o si la última tuvo avisos.
+- **Auditoría del firewall (`firewall_audit`, MCP) y aviso en el dashboard.** No mira reglas sueltas (un `ACCEPT all` puede ser solo de `lo`/`wg0` o un agujero): **simula** la llegada de una conexión nueva a cada puerto en escucha (TCP y UDP), desde una IP cualquiera de internet y desde cada origen autorizado, siguiendo las cadenas propias de iptables. Indica por puerto: abierto a todo internet, solo desde ciertas IPs, o cerrado. Avisa de:
+  - servicios sensibles expuestos (PostgreSQL, MySQL, Redis, panel, API de Caddy o Docker…);
+  - **IPv6 sin proteger**;
+  - reglas que aceptan todo;
+  - orígenes con acceso a todos los puertos que no son de confianza;
+  - puertos de **Docker** (no pasan por INPUT, solo por DOCKER-USER);
+  - **ufw** activo mezclado con iptables propio.
+
+  Las reglas con condiciones que no se simulan (`limit`, `recent`…) cuentan como abiertas, lo que va del lado seguro. Son de confianza los nodos del cluster, los servidores de failover, `ALLOWED_IPS`, la VPN y la lista manual (**`firewall_trusted_sources`**, MCP, que solo cambia la lista y nunca el firewall). El cluster-worker la repite cada 15 minutos, y el **dashboard** muestra un aviso rojo (crítico) o amarillo (avisos) con los principales problemas. Con `node` se audita otro nodo.
+
+### Arreglado
+- **Los límites de PHP de algunas cuentas no se podían ver ni cambiar desde el panel.** El panel daba por hecho que el pool se llama `{usuario}.conf`, pero hay cuentas cuyo pool tiene otro nombre: por ejemplo, musedock.com usa `musedock.conf`. La pantalla de edición mostraba valores por defecto (2M) en vez de los reales (10M), y guardar daba «No se encontró el archivo de pool FPM». Ahora se busca el pool cuyo `user =` es el de la cuenta.
+- **`cluster_drift` daba una falsa diferencia de hostings** («master 2, nodo 3» entre asterisk y obelix). En el master contaba los hostings de la BD; en el nodo, los dominios del panel **incluidos los alias** (vocal9.es). Ahora compara el mismo indicador en los dos lados (hostings + alias).
+
 ## [1.0.240] — 2026-09-30 — Vigilante de diferencias entre el master y sus nodos
 
 ### Añadido

@@ -127,6 +127,30 @@
 </div>
 <?php endif; ?>
 
+<!-- Firewall exposure banner: servicio sensible abierto a todo internet, IPv6 sin
+     proteger, orígenes con acceso total no autorizados… (FirewallAuditService) -->
+<?php if (!empty($firewallAudit) && ((int)($firewallAudit['critical'] ?? 0) > 0 || (int)($firewallAudit['warnings'] ?? 0) > 0)): ?>
+<?php $fwCrit = (int)($firewallAudit['critical'] ?? 0) > 0; ?>
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card <?= $fwCrit ? 'border-danger' : 'border-warning' ?>">
+            <div class="card-header <?= $fwCrit ? 'bg-danger text-white' : 'bg-warning text-dark' ?> py-2">
+                <i class="bi bi-shield-exclamation me-2"></i>Firewall: <?= View::e((string)($firewallAudit['summary'] ?? '')) ?>
+                <small class="ms-2 opacity-75">(revisado <?= View::e((string)($firewallAudit['at'] ?? '')) ?>)</small>
+            </div>
+            <div class="card-body py-2">
+                <ul class="mb-1 small">
+                    <?php foreach (($firewallAudit['top'] ?? []) as $fwItem): ?>
+                        <li><?= View::e((string)$fwItem) ?></li>
+                    <?php endforeach; ?>
+                </ul>
+                <div class="small text-muted">Detalle completo con la herramienta MCP <code>firewall_audit</code>. Las IPs de confianza incluyen los nodos del cluster, ALLOWED_IPS y la VPN.</div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Replication Drift Alert Banner: dead sync-queue items that never self-heal -->
 <?php if (!empty($syncDrift['has_drift'])): ?>
 <div class="row mb-3">

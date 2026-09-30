@@ -133,6 +133,35 @@ if (Settings::get('cluster_role', 'standalone') === 'master') {
     }
 }
 
+// ─── Step 0b: Copia de la configuración del sistema del master (en un slave) ──
+// Cada 5 min, si está activada (MCP config_mirror): supervisor, cron, Caddyfile y
+// pools de PHP del master, adaptados al papel de reserva y verificados.
+if (Settings::get('cluster_role', 'standalone') === 'slave' && Settings::get('cluster_config_mirror', '0') === '1'
+    && time() - (int)Settings::get('cluster_config_mirror_run_at', '0') >= 300) {
+    Settings::set('cluster_config_mirror_run_at', (string)time());
+    try {
+        $mirror = \MuseDockPanel\Services\ConfigMirrorService::run(true);
+        $changed = array_filter($mirror['actions'] ?? [], static fn($a) => !in_array($a['result'], ['igual', 'omitido'], true));
+        logMsg('Config mirror: ' . count($changed) . ' cambios, ' . count($mirror['issues'] ?? []) . ' avisos');
+    } catch (\Throwable $e) {
+        logMsg('Config mirror error: ' . $e->getMessage());
+    }
+}
+
+// ─── Step 0c: Auditoría del firewall (cada 15 min, en cualquier rol) ──
+// Para el aviso del dashboard si algo sensible queda expuesto a internet.
+if (time() - (int)Settings::get('firewall_audit_run_at', '0') >= 900) {
+    Settings::set('firewall_audit_run_at', (string)time());
+    try {
+        $fwAudit = \MuseDockPanel\Services\FirewallAuditService::refreshStored();
+        if (!empty($fwAudit['ok']) && ($fwAudit['critical'] ?? 0) > 0) {
+            logMsg('Firewall: ' . $fwAudit['summary']);
+        }
+    } catch (\Throwable $e) {
+        logMsg('Firewall audit error: ' . $e->getMessage());
+    }
+}
+
 // ─── Step 1: Process pending queue items ──────────────────────
 logMsg("Processing queue...");
 try {

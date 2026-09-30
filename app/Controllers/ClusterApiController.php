@@ -548,6 +548,9 @@ class ClusterApiController
                 'notify-iface-down' => $this->handleNotifyIfaceDown($payload),
                 'notify-iface-up'   => $this->handleNotifyIfaceUp($payload),
                 'query-local-state' => $this->handleQueryLocalState(),
+                // Configuración del sistema (supervisor, cron, Caddyfile, pools PHP) que
+                // el slave copia y adapta (ConfigMirrorService). Solo lectura aquí.
+                'export-system-config' => \MuseDockPanel\Services\ConfigMirrorService::export(),
                 // Inventario de este nodo (solo lectura) para que el master compare
                 // (cluster_drift). No depende de que el MCP esté activado aquí.
                 'clone-inventory'  => ['ok' => true, 'inventory' => \MuseDockPanel\Mcp\McpInventory::build(

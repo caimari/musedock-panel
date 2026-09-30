@@ -230,6 +230,13 @@ class FailoverSafetyService
             shell_exec('runuser -u postgres -- psql -p ' . $p . ' -Xc ' . escapeshellarg('SELECT pg_reload_conf()') . ' 2>&1');
             $steps[] = "PostgreSQL {$c['key']} en solo lectura";
         }
+        try {
+            $mirrorOff = ConfigMirrorService::deactivate();
+            if ($mirrorOff) {
+                $steps[] = 'Configuración copiada del master apagada (' . count($mirrorOff) . ' elementos)';
+            }
+        } catch (\Throwable) {
+        }
         $hookEnv = ['MUSEDOCK_REASON' => 'stale-master'];
         if (filter_var($newMasterHost, FILTER_VALIDATE_IP) || preg_match('/^[A-Za-z0-9.-]+$/', $newMasterHost)) {
             $hookEnv['MUSEDOCK_NEW_MASTER_IP'] = $newMasterHost;

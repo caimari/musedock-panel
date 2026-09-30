@@ -113,6 +113,8 @@ class DashboardController
             'clusterRole' => $clusterRole,
             // Silent replication drift (dead sync-queue items that never self-heal).
             'syncDrift' => ($clusterRole === 'master') ? ClusterService::getSyncDriftSummary() : ['has_drift' => false],
+            // Última auditoría del firewall (la refresca el cluster-worker cada 15 min).
+            'firewallAudit' => json_decode(Settings::get('firewall_audit_last', 'null'), true),
         ]);
     }
 

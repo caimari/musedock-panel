@@ -1,7 +1,6 @@
 <?php
 namespace MuseDockPanel\Services;
 
-use MuseDockPanel\Database;
 use MuseDockPanel\Mcp\McpInventory;
 
 /**
@@ -45,13 +44,13 @@ final class ClusterDriftService
         $local = McpInventory::build('all', false);
         $remote = self::fetchNodeInventory($nodeId);
         $r = self::compare($local, $remote);
-        try {
-            $masterHostings = (int)(Database::fetchOne("SELECT COUNT(*) AS c FROM hosting_accounts WHERE status != 'deleted'")['c'] ?? 0);
-            $nodeHostings = (int)($remote['sites']['panel_hostings'] ?? -1);
-            if ($nodeHostings >= 0 && $nodeHostings !== $masterHostings) {
-                $r['missing_or_different'][] = "Hostings del panel: master {$masterHostings}, nodo {$nodeHostings} (usa cluster_sync_hostings).";
-            }
-        } catch (\Throwable) {
+        // Mismo indicador en los dos lados (el del inventario: dominios del panel,
+        // incluidos los alias). Antes se comparaba el nº de hostings de la BD del
+        // master con ese indicador del nodo, que cuenta también los alias.
+        $masterHostings = (int)($local['sites']['panel_hostings'] ?? -1);
+        $nodeHostings = (int)($remote['sites']['panel_hostings'] ?? -1);
+        if ($masterHostings >= 0 && $nodeHostings >= 0 && $nodeHostings !== $masterHostings) {
+            $r['missing_or_different'][] = "Dominios del panel (hostings + alias): master {$masterHostings}, nodo {$nodeHostings} (usa cluster_sync_hostings).";
         }
         $r['node'] = $node['name'];
         $r['in_sync'] = $r['missing_or_different'] === [];

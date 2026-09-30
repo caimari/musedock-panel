@@ -20,6 +20,37 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.241',
+                'date' => '2026-09-30',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            '**El slave copia la configuracion del sistema del master (MCP `config_mirror`):** programas de supervisor, tareas cron, webs fijas del Caddyfile y pools de PHP-FPM, adaptados al papel de reserva (apagados), verificados antes de aplicar y sin borrar nada. Cada 5 minutos si se activa. Generico para cualquier pareja master/slave',
+                            '**Al promover se enciende lo copiado y al degradar se apaga** (supervisor con su autostart original, crons y Caddy), antes de los scripts de relevo',
+                            '**MCP `hosting_php_settings`:** consultar o cambiar los limites de PHP de un hosting, comprobando PHP-FPM antes de recargar',
+                            '**Auditoria del firewall (MCP `firewall_audit`) y aviso en el dashboard:** simula una conexion desde internet a cada puerto en escucha y dice si esta abierto a todos, solo a ciertas IPs o cerrado; avisa de servicios sensibles expuestos, IPv6 sin proteger, reglas que aceptan todo, IPs con acceso total no autorizadas, Docker y ufw. Se revisa cada 15 minutos',
+                        ],
+                        'en' => [
+                            '**The slave copies the master system config (MCP `config_mirror`):** supervisor programs, cron tasks, static Caddyfile sites and PHP-FPM pools, adapted to the standby role (off), verified before applying and never deleting anything. Every 5 minutes when enabled. Generic for any master/slave pair',
+                            '**On promotion the copied config is switched on and on demotion switched off** (supervisor with its original autostart, crons and Caddy), before the failover scripts',
+                            '**MCP `hosting_php_settings`:** view or change a hosting PHP limits, checking PHP-FPM before reloading',
+                            '**Firewall audit (MCP `firewall_audit`) and dashboard alert:** simulates a connection from the internet to each listening port and reports whether it is open to everyone, only to some IPs or closed; flags exposed sensitive services, unprotected IPv6, accept-all rules, untrusted IPs with full access, Docker and ufw. Checked every 15 minutes',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            '`cluster_drift` daba una falsa diferencia de hostings: en el master contaba hostings y en el nodo hostings + alias. Ahora compara lo mismo en los dos lados',
+                            '**Los limites de PHP de algunas cuentas no se podian ver ni cambiar** (el panel suponia que el pool se llama {usuario}.conf; musedock.com usa musedock.conf). Ahora se busca el pool por su usuario',
+                        ],
+                        'en' => [
+                            '`cluster_drift` reported a false hosting difference: it counted hostings on the master and hostings + aliases on the node. It now compares the same metric on both sides',
+                            '**Some accounts PHP limits could not be viewed or changed** (the panel assumed the pool is named {user}.conf; musedock.com uses musedock.conf). The pool is now found by its user',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.240',
                 'date' => '2026-09-30',
                 'badge' => 'success',

@@ -2273,6 +2273,14 @@ class ClusterService
             Database::update('servers', ['role' => 'master'], 'is_local = true');
         } catch (\Throwable) {}
 
+        // Lo copiado del master por ConfigMirrorService (supervisor, cron, Caddyfile)
+        // estaba apagado en este slave: se enciende con su configuración original.
+        try {
+            $results['config_mirror'] = ConfigMirrorService::activate();
+        } catch (\Throwable $e) {
+            $errors[] = 'Config mirror (activar): ' . $e->getMessage();
+        }
+
         // Scripts de relevo del administrador (/etc/musedock/hooks/promote.d): lo que
         // el panel no gestiona (IP flotante, supervisor, crons, dominios de apps).
         // Van DESPUÉS de promover PostgreSQL/Redis, para que las apps arranquen ya
@@ -2460,6 +2468,13 @@ class ClusterService
             }
             Settings::set('cluster_fenced', '0');
             $results['unfenced'] = true;
+        }
+
+        // Lo copiado del master se vuelve a apagar (programas parados, crons off).
+        try {
+            $results['config_mirror'] = ConfigMirrorService::deactivate();
+        } catch (\Throwable $e) {
+            $errors[] = 'Config mirror (desactivar): ' . $e->getMessage();
         }
 
         // Scripts de relevo del administrador (/etc/musedock/hooks/demote.d): parar
