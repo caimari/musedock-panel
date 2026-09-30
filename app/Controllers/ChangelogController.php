@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.233',
+                'date' => '2026-09-30',
+                'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '**Las herramientas MCP de escritura no se ejecutaban con `apply=true`** ("Nodo \'\' no encontrado"): la etiqueta de auditoria se usaba tambien para decidir si la llamada era local. Afectaba a todas, incluidas las de correo. No se aplicaba nada; ahora funcionan',
+                        ],
+                        'en' => [
+                            '**MCP write tools did not run with `apply=true`** ("Node \'\' not found"): the audit label was also used to decide whether the call was local. It affected all of them, mail tools included. Nothing was applied; they work now',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.232',
                 'date' => '2026-09-30',
                 'badge' => 'info',

@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.233] — 2026-09-30 — MCP: las acciones con `apply=true` no se ejecutaban
+
+### Arreglado
+- **Ninguna herramienta MCP de escritura se ejecutaba con `apply=true`**: respondían «Nodo '' no encontrado». La etiqueta de auditoría (`local`) recibía «, APPLY» y después se usaba esa misma etiqueta para decidir si la llamada era local. Al no ser ya exactamente `local`, se intentaba reenviar a un nodo vacío. Afectaba a todas las herramientas de escritura, también a las de correo de la 1.0.224, que nunca se habían llegado a aplicar en real. No se aplicaba nada: fallaba antes. Ahora la decisión local/remoto va aparte de la etiqueta de auditoría. Visto al emparejar asterisk y obelix por MCP.
+
 ## [1.0.232] — 2026-09-30 — Panel en blanco con Chrome en servidores con webs en el 443
 
 ### Arreglado

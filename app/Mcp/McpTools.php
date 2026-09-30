@@ -162,7 +162,8 @@ final class McpTools
     {
         $node = trim((string)($args['node'] ?? ''));
         unset($args['node']);
-        $where = $node !== '' && strtolower($node) !== 'local' ? "nodo {$node}" : 'local';
+        $isLocal = $node === '' || strtolower($node) === 'local';
+        $where = $isLocal ? 'local' : "nodo {$node}";
 
         // Candados de escritura (aplican a HTTP y a stdio por igual).
         if (self::isWrite($name)) {
@@ -170,22 +171,24 @@ final class McpTools
                 return self::result(['error' => 'Las acciones que modifican están desactivadas en este servidor. '
                     . 'Actívalas en Ajustes → MCP → "Permitir acciones que modifican".'], true);
             }
-            if ($where !== 'local') {
+            if (!$isLocal) {
                 return self::result(['error' => 'Las acciones que modifican solo se ejecutan en el panel al que estás conectado, no se reenvían a otros nodos.'], true);
-            }
-            if (!empty($args['apply'])) {
-                $where .= ', APPLY';
             }
         }
 
+        // La etiqueta de auditoría lleva "APPLY" cuando se ejecuta de verdad; la
+        // decisión local/remoto va aparte ($isLocal). Antes se comparaba $where con
+        // 'local' DESPUÉS de añadirle ", APPLY", y toda escritura con apply=true se
+        // intentaba reenviar a un nodo vacío ("Nodo '' no encontrado").
+        $auditWhere = $where . (self::isWrite($name) && !empty($args['apply']) ? ', APPLY' : '');
         try {
-            \MuseDockPanel\Services\LogService::log('mcp.call', $name, "via {$via}, {$where}");
+            \MuseDockPanel\Services\LogService::log('mcp.call', $name, "via {$via}, {$auditWhere}");
         } catch (\Throwable) {
             // auditoría best-effort
         }
 
         try {
-            if ($where === 'local') {
+            if ($isLocal) {
                 $data = self::runLocal($name, $args);
             } else {
                 $data = self::runOnNode($node, $name, $args);
