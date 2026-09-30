@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.243',
+                'date' => '2026-09-30',
+                'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => [
+                            '**El panel respondia 421 en servidores donde el 443 y el 8444 comparten servidor de Caddy** (Filemon; introducido en 1.0.232): la ruta del 443 atrapaba las peticiones al panel. Ahora solo actua sobre lo que llega de verdad por el 443 (puerto local), y `https://dominio/` sin puerto vuelve a redirigir al panel',
+                            'El aviso "ufw activo junto a iptables" solo sale si hay reglas duplicadas; si no, es informativo y no aparece en el dashboard',
+                            'Aviso del firewall en el dashboard: texto legible (antes gris sobre amarillo)',
+                        ],
+                        'en' => [
+                            '**The panel answered 421 on servers where 443 and 8444 share a Caddy server** (Filemon; introduced in 1.0.232): the 443 route caught panel requests. It now only applies to what really arrives on 443 (local port), and `https://domain/` without a port redirects to the panel again',
+                            'The "ufw active alongside iptables" warning only shows when there are duplicated rules; otherwise it is informational and not shown on the dashboard',
+                            'Firewall alert on the dashboard: readable text (was grey on yellow)',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.242',
                 'date' => '2026-09-30',
                 'badge' => 'info',

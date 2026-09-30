@@ -127,8 +127,15 @@ final class FirewallAuditService
         }
 
         // ── ufw / nftables ──
+        // ufw junto a reglas propias no es inseguro en sí (el resultado ya se simula
+        // arriba). Lo que sí es un problema es que al arrancar se carguen dos veces
+        // (ufw + netfilter-persistent con ufw ya incluido): reglas DUPLICADAS.
         if (stripos($ufw, 'active') !== false && stripos($ufw, 'inactive') === false) {
-            $findings[] = ['level' => 'warning', 'text' => 'ufw está ACTIVO junto a reglas iptables propias: mezclar los dos puede dejar reglas que no hacen lo que parece.'];
+            $raw = self::lines(self::sh('iptables -S 2>/dev/null'));
+            $dups = array_filter(array_count_values(array_filter($raw, static fn($l) => str_starts_with($l, '-A '))), static fn($c) => $c > 1);
+            $findings[] = $dups
+                ? ['level' => 'warning', 'text' => 'Hay ' . count($dups) . ' reglas de iptables DUPLICADAS (p. ej. «' . array_key_first($dups) . '»): probablemente ufw y netfilter-persistent cargan las mismas reglas al arrancar. No es un agujero, pero conviene que solo las cargue uno de los dos.']
+                : ['level' => 'info', 'text' => 'ufw está activo junto a reglas iptables propias; no hay reglas duplicadas y el resultado ya está simulado arriba.'];
         }
 
         $crit = count(array_filter($findings, static fn($f) => $f['level'] === 'critical'));

@@ -136,7 +136,7 @@
         <div class="card <?= $fwCrit ? 'border-danger' : 'border-warning' ?>">
             <div class="card-header <?= $fwCrit ? 'bg-danger text-white' : 'bg-warning text-dark' ?> py-2">
                 <i class="bi bi-shield-exclamation me-2"></i>Firewall: <?= View::e((string)($firewallAudit['summary'] ?? '')) ?>
-                <small class="ms-2 opacity-75">(revisado <?= View::e((string)($firewallAudit['at'] ?? '')) ?>)</small>
+                <small class="ms-2 fw-normal <?= $fwCrit ? 'text-white' : 'text-dark' ?>">(revisado <?= View::e((string)($firewallAudit['at'] ?? '')) ?>)</small>
             </div>
             <div class="card-body py-2">
                 <ul class="mb-1 small">
@@ -144,7 +144,7 @@
                         <li><?= View::e((string)$fwItem) ?></li>
                     <?php endforeach; ?>
                 </ul>
-                <div class="small text-muted">Detalle completo con la herramienta MCP <code>firewall_audit</code>. Las IPs de confianza incluyen los nodos del cluster, ALLOWED_IPS y la VPN.</div>
+                <div class="small" style="color:#cbd5e1">Detalle completo con la herramienta MCP <code>firewall_audit</code>. Las IPs de confianza incluyen los nodos del cluster, ALLOWED_IPS y la VPN.</div>
             </div>
         </div>
     </div>

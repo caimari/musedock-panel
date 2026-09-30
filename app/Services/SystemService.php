@@ -2101,16 +2101,22 @@ CONF;
         //    había ruta, Caddy respondía vacío y el panel salía en blanco. Con 421 el
         //    navegador reintenta por una conexión nueva al puerto correcto. NO se
         //    sirve el panel por el 443: se saltaría el firewall que protege el 8444.
+        // La ruta solo se aplica a lo que llega de verdad por el 443 (puerto LOCAL de
+        // la conexión): en servidores donde el 443 y el panel comparten el mismo
+        // servidor de Caddy, sin esto atrapaba también las peticiones al panel y
+        // respondía 421 (visto en Filemon). Dentro: el puerto de la cabecera Host
+        // puede venir vacío (https://dominio/ sin puerto) → también es el 443.
         return [
             '@id' => self::PANEL_DOMAIN_HTTPS_ROUTE_ID,
             'match' => [[
                 'host' => [$hostname],
+                'expression' => '{http.request.local.port} == 443',
             ]],
             'handle' => [[
                 'handler' => 'subroute',
                 'routes' => [
                     [
-                        'match' => [['expression' => '{http.request.port} == 443']],
+                        'match' => [['expression' => "{http.request.port} == 443 || {http.request.port} == ''"]],
                         'handle' => [[
                             'handler' => 'static_response',
                             'status_code' => 308,
@@ -2149,15 +2155,14 @@ CONF;
             return false;
         }
 
-        // Formato actual: match solo por host + subroute (308 si :443, 421 si no).
-        // Las rutas antiguas (expression en el match y 308 directo) no coinciden y
-        // se sustituyen por la nueva.
-        if (isset($match['expression'])) {
+        // Se compara match y handle con la ruta esperada: las versiones anteriores
+        // (308 directo; o, en 1.0.232–1.0.242, sin exigir el puerto local 443) no
+        // coinciden y se sustituyen. Caddy devuelve el JSON con las claves en orden
+        // alfabético: se normalizan las dos antes de comparar.
+        $expected = self::buildPanelDomainHttpsRoute($hostname, $panelPublicPort);
+        if (trim((string)($match['expression'] ?? '')) !== $expected['match'][0]['expression']) {
             return false;
         }
-        // Se compara con la ruta esperada. Caddy devuelve el JSON con las claves en
-        // orden alfabético: se normalizan las dos antes de comparar.
-        $expected = self::buildPanelDomainHttpsRoute($hostname, $panelPublicPort);
         $canon = static function ($v) use (&$canon) {
             if (!is_array($v)) {
                 return $v;

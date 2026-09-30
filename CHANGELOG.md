@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.243] — 2026-09-30 — Panel inaccesible con 421 en servidores donde el 443 y el 8444 comparten servidor de Caddy
+
+### Arreglado
+- **El panel respondía 421 en Filemon** (y en cualquier servidor donde el 443 y el puerto del panel comparten el mismo servidor de Caddy). Lo introdujo la 1.0.232: la ruta del dominio del panel en el 443 (`panel-domain-https-route`) solo miraba el dominio y, si estaba delante de la ruta del panel, **atrapaba también las peticiones al 8444** y respondía 421.
+  - Ahora solo se aplica a lo que llega **de verdad por el 443**: comprueba el puerto local de la conexión (`{http.request.local.port} == 443`), no el que dice la cabecera `Host`. Da igual el orden de las rutas.
+  - **`https://dominio-del-panel/` sin puerto daba 421 en vez de redirigir al panel** (el puerto de la cabecera llega vacío). Ahora un puerto vacío cuenta como 443 y redirige (308).
+  - Probado contra un Caddy real con el 443 y el 8444 en el mismo servidor y la ruta del 443 delante: 443 sin puerto → 308; 443 con `:8444` (HTTP/3 de Chrome) → 421; 8444 → panel. El reparador sustituye solo las rutas de las versiones anteriores.
+- **El dashboard mostraba en todos los nodos el aviso «ufw está ACTIVO junto a reglas iptables propias».** No es un problema en sí, porque la auditoría ya simula el resultado final de las reglas. Ahora solo es un aviso si hay **reglas duplicadas** (ufw y netfilter-persistent cargando lo mismo al arrancar); si no, es una nota informativa que no sale en el dashboard.
+- **Aviso del firewall en el dashboard:** la fecha de revisión y el texto de ayuda eran grises sobre amarillo y apenas se leían; ahora el texto es oscuro (o blanco en el aviso rojo).
+
 ## [1.0.242] — 2026-09-30 — Ajustes tras probar en asterisk y obelix
 
 ### Mejorado
