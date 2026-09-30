@@ -584,6 +584,29 @@ final class ConfigMirrorService
                 $actions[] = ['what' => "php-fpm {$ver}/{$file}", 'result' => 'igual'];
                 continue;
             }
+            // Otro pool del slave (con otro nombre de fichero) con el mismo [nombre] o el
+            // mismo socket: copiarlo dejaría a PHP-FPM sin poder arrancar (php-fpm -t no
+            // lo detecta). Pasa cuando el panel del slave creó su propio pool al
+            // sincronizar el hosting.
+            $poolName = preg_match('/^\s*\[([^\]]+)\]/m', (string)$content, $pn) ? trim($pn[1]) : '';
+            $listen = preg_match('/^\s*listen\s*=\s*(\S+)/m', (string)$content, $ln) ? trim($ln[1]) : '';
+            $clash = null;
+            foreach (glob("{$dir}/*.conf") ?: [] as $other) {
+                if (basename($other) === $file) {
+                    continue;
+                }
+                $oc = (string)@file_get_contents($other);
+                if (($poolName !== '' && preg_match('/^\s*\[' . preg_quote($poolName, '/') . '\]/m', $oc))
+                    || ($listen !== '' && preg_match('/^\s*listen\s*=\s*' . preg_quote($listen, '/') . '\s*$/m', $oc))) {
+                    $clash = basename($other);
+                    break;
+                }
+            }
+            if ($clash !== null) {
+                $issues[] = "php-fpm {$ver}/{$file}: el slave ya tiene {$clash} con el mismo pool o socket; no se copia para no romper PHP-FPM (revisa cuál debe quedar).";
+                $actions[] = ['what' => "php-fpm {$ver}/{$file}", 'result' => 'omitido'];
+                continue;
+            }
             $actions[] = ['what' => "php-fpm {$ver}/{$file}", 'result' => $current === null ? 'nuevo' : 'actualizado'];
             if ($apply) {
                 self::backup($path);

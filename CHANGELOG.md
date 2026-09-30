@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.247] — 2026-09-30 — config_mirror no copia un pool de PHP que chocaría con otro del slave
+
+### Arreglado
+- **`config_mirror` podía dejar PHP-FPM sin arrancar en el slave.** Si el slave ya tenía un pool para el mismo hosting con **otro nombre de fichero** (el panel del slave crea el suyo al sincronizar el hosting; por ejemplo `musedock.conf` en el master y otro nombre en Filemon), copiar el del master dejaba dos pools con el mismo `[nombre]` o el mismo socket. `php-fpm -t` no lo detecta, pero PHP-FPM no puede arrancar. Ahora ese pool **no se copia**: se avisa de con qué fichero choca, para decidir cuál debe quedar. Probado con los pools reales de mortadelo.
+
 ## [1.0.246] — 2026-09-30 — config_mirror en slaves unidos por el método antiguo
 
 ### Arreglado

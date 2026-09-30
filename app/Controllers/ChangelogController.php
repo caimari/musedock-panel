@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.247',
+                'date' => '2026-09-30',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['`config_mirror` ya no copia un pool de PHP que chocaria con otro pool del slave (mismo nombre o socket con otro fichero): PHP-FPM no habria podido arrancar'],
+                        'en' => ['`config_mirror` no longer copies a PHP pool that would clash with another slave pool (same name or socket in another file): PHP-FPM would not have started'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.246',
                 'date' => '2026-09-30',
                 'badge' => 'info',
