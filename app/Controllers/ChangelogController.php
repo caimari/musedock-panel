@@ -20,6 +20,19 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.253',
+                'date' => '2026-10-01',
+                'badge' => 'warning',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['**config_mirror ya no toca el Caddyfile en uso del slave.** Antes escribia ahi las webs del master y cualquier reinicio de Caddy las cargaba (en Filemon, sin el token de Cloudflare, Caddy no habria arrancado). Ahora se guardan validadas en /var/lib/musedock/Caddyfile.from-master y solo se ponen al promover, si validan con el entorno real de Caddy; si no, Caddy sigue con lo suyo',
+                            'Correccion automatica: en los slaves con copias anteriores, la siguiente pasada devuelve el Caddyfile en uso al propio del slave (panel actual + webs propias de antes de la primera copia), validado, con copia de seguridad y sin reiniciar Caddy'],
+                        'en' => ['**config_mirror no longer touches the slave live Caddyfile.** It used to write the master sites there and any Caddy restart loaded them (on Filemon, without the Cloudflare token, Caddy would not have started). They are now stored validated in /var/lib/musedock/Caddyfile.from-master and only applied on promotion, if they validate with the real Caddy environment; otherwise Caddy keeps its own config',
+                            'Self-repair: on slaves with earlier copies, the next run restores the live Caddyfile to the slave own one (current panel + own sites from before the first copy), validated, backed up and without restarting Caddy'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.252',
                 'date' => '2026-10-01',
                 'badge' => 'info',

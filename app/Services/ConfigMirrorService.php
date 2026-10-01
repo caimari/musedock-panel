@@ -23,8 +23,8 @@ use MuseDockPanel\Settings;
  *  - NUNCA borra: si el master deja de tener algo que se copió, se aparta con el
  *    sufijo .removed-by-mirror. Solo toca lo que copió él (estado en Settings):
  *    lo que sea propio del slave no se modifica.
- *  - Caddy NO se recarga (un reload desde el Caddyfile quitaría las rutas del
- *    panel): se escribe el Caddyfile validado y se aplica al promover (restart,
+ *  - Caddy NO se recarga y el Caddyfile en uso NO se toca: las webs del master se
+ *    guardan validadas en CADDY_STAGED y activate() las pone al promover (restart,
  *    que dispara el reparador de rutas).
  * Copias de seguridad en /var/backups/musedock-mirror/.
  */
@@ -499,37 +499,83 @@ final class ConfigMirrorService
         return (bool)preg_match('/:' . $panelPort . '\b/', $b['head']);
     }
 
-    private static function mirrorCaddyfile(string $masterFile, int $masterPanelPort, array &$state, bool $apply, array &$actions, array &$issues): void
+    /**
+     * Las webs del master NO van al Caddyfile en uso mientras el nodo es slave:
+     * cualquier reinicio de Caddy (reboot, bin/update.sh) lo cargaría, pediría
+     * certificados de dominios que no apuntan aquí y, si le falta un secreto
+     * ({env.…}), Caddy no arrancaría y caerían el panel y el correo del slave.
+     * Se guardan aparte (CADDY_STAGED) y activate() las pone al promover.
+     */
+    private const CADDY_LIVE = '/etc/caddy/Caddyfile';
+    private const CADDY_STAGED = '/var/lib/musedock/Caddyfile.from-master';
+
+    /** Bloques de webs (ni globales ni del panel) de un Caddyfile. */
+    private static function caddySites(string $file, int $panelPort): array
     {
-        $path = '/etc/caddy/Caddyfile';
-        if (!is_file($path) || $masterFile === '') {
-            return;
-        }
-        $mine = (string)file_get_contents($path);
-        $myPort = (int)(Settings::get('panel_port', '8444') ?: 8444);
-        $keep = [];
-        foreach (self::caddyBlocks($mine) as $i => $b) {
-            if (self::isPanelOrGlobal($b, $myPort, $i)) {
-                $keep[] = $b['text'];
-            }
-        }
         $sites = [];
-        foreach (self::caddyBlocks($masterFile) as $i => $b) {
-            if (!self::isPanelOrGlobal($b, $masterPanelPort, $i)) {
+        foreach (self::caddyBlocks($file) as $i => $b) {
+            if (!self::isPanelOrGlobal($b, $panelPort, $i)) {
                 $sites[] = $b['text'];
             }
         }
-        $candidate = implode("\n\n", array_merge($keep, $sites)) . "\n";
-        if (self::normSup($candidate) === self::normSup($mine)) {
-            $actions[] = ['what' => 'Caddyfile', 'result' => 'igual'];
+        return $sites;
+    }
+
+    /** Opciones globales + bloque del panel de un Caddyfile. */
+    private static function caddyKeep(string $file, int $panelPort): array
+    {
+        $keep = [];
+        foreach (self::caddyBlocks($file) as $i => $b) {
+            if (self::isPanelOrGlobal($b, $panelPort, $i)) {
+                $keep[] = $b['text'];
+            }
+        }
+        return $keep;
+    }
+
+    /**
+     * Hasta 1.0.252 la copia escribía las webs del master en el Caddyfile en uso.
+     * Lo devuelve a lo propio del slave: globales + panel actuales y las webs que
+     * tenía antes de la primera copia (la copia de seguridad más antigua).
+     */
+    private static function restoreOwnCaddyfile(array &$state, int $myPort, bool $apply, array &$actions, array &$issues): void
+    {
+        if (empty($state['caddy_pending']) || !empty($state['caddy_staged']) || !is_file(self::CADDY_LIVE)) {
             return;
         }
-        // Logs de Caddy (`output file …`) donde caddy no puede escribir en el slave:
-        // en el master la carpeta logs/ del hosting es de caddy, aquí la creó el panel
-        // a nombre del hosting (lsyncd excluye logs/, así que nadie la iguala).
-        // Para validar se apuntan a /tmp; al aplicar se dejan como en el master.
+        $live = (string)file_get_contents(self::CADDY_LIVE);
+        $backups = glob(self::BACKUP_DIR . '/etc_caddy_Caddyfile.*') ?: [];
+        sort($backups);
+        $ownSites = $backups ? self::caddySites((string)@file_get_contents($backups[0]), $myPort) : [];
+        $own = implode("\n\n", array_merge(self::caddyKeep($live, $myPort), $ownSites)) . "\n";
+        if (self::normSup($own) === self::normSup($live)) {
+            $state['caddy_staged'] = true;
+            return;
+        }
+        [$ok, $out] = self::caddyValidate($own, $ownSites, false);
+        if (!$ok) {
+            $issues[] = 'Caddyfile en uso: tiene las webs del master (versión anterior de la copia) y no se pudo reconstruir el propio del slave: '
+                . trim(implode(' ', array_slice($out, -2))) . '. Revísalo a mano: si Caddy se reinicia, cargará las webs del master.';
+            return;
+        }
+        $actions[] = ['what' => 'Caddyfile en uso', 'result' => 'se devuelve el propio del slave (panel + ' . count($ownSites) . ' webs propias); las del master quedan aparte hasta el relevo'];
+        if ($apply) {
+            self::backup(self::CADDY_LIVE);
+            file_put_contents(self::CADDY_LIVE, $own);
+            $state['caddy_staged'] = true;
+        }
+    }
+
+    /**
+     * caddy validate como el usuario caddy, con el entorno del servicio. Los
+     * `output file` donde caddy aún no puede escribir se apuntan a /tmp. Con
+     * $fillMissingEnv, las {env.X} que falten llevan un valor de relleno para
+     * validar el resto. Devuelve [ok, salida, variables que faltan].
+     */
+    private static function caddyValidate(string $content, array $sites, bool $fillMissingEnv): array
+    {
+        $toValidate = $content;
         $logFix = self::caddyLogPathsToFix($sites);
-        $toValidate = $candidate;
         if ($logFix) {
             $tmpLogs = sys_get_temp_dir() . '/mdcaddy-logs';
             @mkdir($tmpLogs, 0777, true);
@@ -553,18 +599,46 @@ final class ConfigMirrorService
         foreach (array_unique($em[1] ?? []) as $var) {
             if (($env[$var] ?? '') === '') {
                 $missingEnv[] = $var;
-                // Valor de relleno solo para validar el resto del fichero.
-                $env[$var] = str_repeat('x', 40);
+                if ($fillMissingEnv) {
+                    $env[$var] = str_repeat('x', 40);
+                }
             }
         }
         [$out, $rc] = self::runWithEnv($validate, $env);
         @unlink($tmp);
+        return [$rc === 0, $out, $missingEnv];
+    }
+
+    private static function mirrorCaddyfile(string $masterFile, int $masterPanelPort, array &$state, bool $apply, array &$actions, array &$issues): void
+    {
+        $path = self::CADDY_LIVE;
+        if (!is_file($path) || $masterFile === '') {
+            return;
+        }
+        $myPort = (int)(Settings::get('panel_port', '8444') ?: 8444);
+        self::restoreOwnCaddyfile($state, $myPort, $apply, $actions, $issues);
+        $mine = (string)file_get_contents($path);
+        $sites = self::caddySites($masterFile, $masterPanelPort);
+        $candidate = implode("\n\n", array_merge(self::caddyKeep($mine, $myPort), $sites)) . "\n";
+        $staged = is_file(self::CADDY_STAGED) ? (string)file_get_contents(self::CADDY_STAGED) : '';
+        if ($staged !== '' && self::normSup($candidate) === self::normSup($staged)) {
+            $actions[] = ['what' => 'Caddyfile', 'result' => 'igual'];
+            return;
+        }
+        // Logs de Caddy (`output file …`) donde caddy no puede escribir en el slave:
+        // en el master la carpeta logs/ del hosting es de caddy, aquí la creó el panel
+        // a nombre del hosting (lsyncd excluye logs/, así que nadie la iguala).
+        // Para validar se apuntan a /tmp; al aplicar se les da permiso a caddy.
+        $logFix = self::caddyLogPathsToFix($sites);
+        [$ok, $out, $missingEnv] = self::caddyValidate($candidate, $sites, true);
         foreach ($missingEnv as $var) {
-            $issues[] = "Caddy de este nodo no tiene {$var} en su entorno (/etc/default/caddy): el Caddyfile del master lo usa, así que tras un relevo esas webs no podrán renovar certificados. "
+            $issues[] = "Caddy de este nodo no tiene {$var} en su entorno (/etc/default/caddy) y las webs del master lo usan: si hubiera un relevo, "
+                . 'NO se pondrían esas webs (Caddy seguiría con su configuración propia) hasta que esté. '
                 . ($var === 'CLOUDFLARE_API_TOKEN'
                     ? 'Copia /etc/default/caddy del master (no hace falta reiniciar Caddy: se lee al promover), o desde el master en Cluster → Failover → Cuentas Cloudflare con "Actualizar token de Caddy" (ojo: usa la PRIMERA cuenta y reinicia Caddy en todos los nodos).'
                     : 'Hay que añadirlo a mano en /etc/default/caddy.');
         }
+        $rc = $ok ? 0 : 1;
         if ($rc !== 0) {
             $issues[] = 'Caddyfile: el resultado no pasa caddy validate; no se aplica: ' . trim(implode(' ', array_slice($out, -2)));
             $actions[] = ['what' => 'Caddyfile', 'result' => 'omitido'];
@@ -575,14 +649,9 @@ final class ConfigMirrorService
         $norm = static fn(string $s) => array_values(array_filter(array_map(
             static fn($l) => preg_replace(['/\$2[aby]\$\S+/', '/\b[A-Za-z0-9_\-]{32,}\b/'], '***', trim($l)),
             preg_split('/\r?\n/', $s)), static fn($l) => $l !== '' && !str_starts_with($l, '#')));
-        $mineSites = [];
-        foreach (self::caddyBlocks($mine) as $i => $b) {
-            if (!self::isPanelOrGlobal($b, $myPort, $i)) {
-                $mineSites[] = $b['text'];
-            }
-        }
-        [$was, $will] = [$norm(implode("\n", $mineSites)), $norm(implode("\n", $sites))];
-        $actions[] = ['what' => 'Caddyfile', 'result' => 'actualizado (webs del master; se aplica al promover, sin recargar Caddy ahora)',
+        $prevSites = $staged !== '' ? self::caddySites($staged, $myPort) : self::caddySites($mine, $myPort);
+        [$was, $will] = [$norm(implode("\n", $prevSites)), $norm(implode("\n", $sites))];
+        $actions[] = ['what' => 'Caddyfile', 'result' => 'guardado aparte (' . self::CADDY_STAGED . '); el Caddyfile en uso no se toca: se pone al promover',
             'lines_added' => array_slice(array_values(array_diff($will, $was)), 0, 30),
             'lines_removed' => array_slice(array_values(array_diff($was, $will)), 0, 30)];
         foreach ($logFix as $p => $how) {
@@ -608,10 +677,55 @@ final class ConfigMirrorService
                     return;
                 }
             }
-            self::backup($path);
-            file_put_contents($path, $candidate);
+            @mkdir(dirname(self::CADDY_STAGED), 0750, true);
+            file_put_contents(self::CADDY_STAGED, $candidate);
+            @chmod(self::CADDY_STAGED, 0600);
             $state['caddy_pending'] = true;
+            $state['caddy_staged'] = true;
         }
+    }
+
+    /**
+     * Al promover: pone las webs del master (guardadas aparte) en el Caddyfile en
+     * uso, solo si valida con el entorno REAL de Caddy (sin rellenos). Si no
+     * valida, Caddy sigue con lo que tenía: mejor sin esas webs que sin Caddy.
+     */
+    private static function activateCaddyfile(array &$done, bool $stagedMode): void
+    {
+        if (!is_file(self::CADDY_STAGED) || !is_file(self::CADDY_LIVE)) {
+            if (!$stagedMode && is_file(self::CADDY_LIVE)) {
+                shell_exec('systemctl restart caddy 2>&1'); // modo antiguo: ya estaba en uso
+                $done[] = 'Caddy reiniciado con el Caddyfile copiado';
+            }
+            return;
+        }
+        $myPort = (int)(Settings::get('panel_port', '8444') ?: 8444);
+        $live = (string)file_get_contents(self::CADDY_LIVE);
+        $sites = self::caddySites((string)file_get_contents(self::CADDY_STAGED), $myPort);
+        $candidate = implode("\n\n", array_merge(self::caddyKeep($live, $myPort), $sites)) . "\n";
+        foreach (array_keys(self::caddyLogPathsToFix($sites)) as $p) {
+            $dir = dirname($p);
+            if (!is_dir($dir)) {
+                @mkdir($dir, 0755, true);
+                @chown($dir, 'caddy');
+                @chgrp($dir, 'caddy');
+            } else {
+                exec('setfacl -m u:caddy:rwx -m d:u:caddy:rw ' . escapeshellarg($dir) . ' 2>&1');
+                if (is_file($p)) {
+                    exec('setfacl -m u:caddy:rw ' . escapeshellarg($p) . ' 2>&1');
+                }
+            }
+        }
+        [$ok, $out, $missing] = self::caddyValidate($candidate, $sites, false);
+        if (!$ok) {
+            $done[] = 'Caddyfile del master NO puesto (no valida' . ($missing ? '; falta ' . implode(', ', $missing) . ' en /etc/default/caddy' : '')
+                . '): Caddy sigue con su configuración. ' . trim(implode(' ', array_slice($out, -1)));
+            return;
+        }
+        self::backup(self::CADDY_LIVE);
+        file_put_contents(self::CADDY_LIVE, $candidate);
+        shell_exec('systemctl restart caddy 2>&1'); // el reparador repone las rutas del panel
+        $done[] = 'Caddy reiniciado con las webs del master';
     }
 
     /**
@@ -895,10 +1009,9 @@ final class ConfigMirrorService
             }
         }
         if (!empty($state['caddy_pending'])) {
-            shell_exec('systemctl restart caddy 2>&1'); // el reparador repone las rutas del panel
+            self::activateCaddyfile($done, !empty($state['caddy_staged']));
             $state['caddy_pending'] = false;
             self::saveState($state);
-            $done[] = 'Caddy reiniciado con el Caddyfile copiado';
         }
         return $done;
     }

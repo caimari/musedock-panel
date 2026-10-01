@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.253] — 2026-10-01 — config_mirror ya no toca el Caddyfile en uso del slave
+
+### Arreglado (importante)
+- **`config_mirror` escribía las webs del master en el `/etc/caddy/Caddyfile` en uso del slave.** Se aplicaban "al promover", pero cualquier reinicio de Caddy (reboot, `bin/update.sh`, un `systemctl restart`) ya cargaba ese fichero. En Filemon, esas webs usan `{env.CLOUDFLARE_API_TOKEN}`, que allí no existe: con un reinicio, Caddy no habría arrancado y habrían caído el panel, el correo y las webs del slave. En obelix, `update.sh` validó el fichero y reinició Caddy con las webs de asterisk.
+  - Ahora las webs del master se guardan validadas **aparte**, en `/var/lib/musedock/Caddyfile.from-master` (0600). El Caddyfile en uso del slave no se toca.
+  - **Al promover**, se combinan las opciones globales y el bloque del panel del nodo con esas webs. Se valida con el entorno **real** de Caddy, sin valores de relleno. Solo si pasa, se escribe y se reinicia Caddy. Si no pasa, Caddy sigue con su configuración y se avisa de qué falta: mejor sin esas webs que sin Caddy.
+  - **Corrección automática** en los slaves con copias anteriores: en la siguiente pasada de `config_mirror`, el Caddyfile en uso vuelve a ser el propio del slave. Se usan las opciones globales y el bloque del panel actuales, y las webs propias de antes de la primera copia (la copia de seguridad más antigua en `/var/backups/musedock-mirror/`). Antes de escribirlo se valida y se guarda copia de seguridad. No se reinicia Caddy.
+  - Si falta una variable `{env.…}`, el aviso explica que en un relevo esas webs **no** se pondrían hasta que esté.
+
 ## [1.0.252] — 2026-10-01 — cluster_drift compara el PHP por defecto
 
 ### Añadido
