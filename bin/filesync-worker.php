@@ -159,6 +159,12 @@ try {
             // Per-cluster detail is in $streamingStatus['pg_by_cluster'].
             $skipPgsql = $streamingStatus['pg'] ?? false;
             $skipMysql = $streamingStatus['mysql'] ?? false;
+            // Desde el master: si ESE nodo replica de aquí, nada de volcados hacia él
+            // (se restaurarían encima de la réplica).
+            $nodeRepl = \MuseDockPanel\Services\ReplicationService::nodeReplicatesFromHere($node);
+            if ($nodeRepl['pg'] || $nodeRepl['mysql']) {
+                $skipPgsql = $skipMysql = true;
+            }
 
             if ($skipPgsql && $skipMysql) {
                 $log("  DB dumps skipped — streaming replication active for both engines");

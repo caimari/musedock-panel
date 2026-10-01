@@ -2452,6 +2452,72 @@ class ReplicationService
      *     'any_active'    => bool,
      *   ]
      */
+    /**
+     * ¿Ese nodo es réplica de ESTE servidor (PostgreSQL y/o MariaDB)? Se mira
+     * desde el master: conexiones de replicación que vienen de las IPs del nodo.
+     * isStreamingActive() solo mira el rol local, así que en el master siempre
+     * decía "no" y los volcados de BBDD se seguían restaurando encima de una
+     * réplica (en MariaDB, como root, rompiendo la replicación).
+     *
+     * Es pegajoso: una vez visto, se recuerda (filesync_node_replica_{id}) para
+     * que un corte momentáneo de la réplica no reactive los volcados.
+     */
+    public static function nodeReplicatesFromHere(array $node): array
+    {
+        $id = (int)($node['id'] ?? 0);
+        $key = "filesync_node_replica_{$id}";
+        $known = json_decode(Settings::get($key, '{}'), true);
+        $known = is_array($known) ? $known : [];
+        $pg = !empty($known['pg']);
+        $mysql = !empty($known['mysql']);
+
+        $ips = [];
+        $host = (string)(parse_url((string)($node['api_url'] ?? ''), PHP_URL_HOST) ?: '');
+        if ($host !== '') {
+            $ips = filter_var($host, FILTER_VALIDATE_IP) ? [$host] : (gethostbynamel($host) ?: []);
+        }
+        foreach (['ip', 'vpn_ip', 'heartbeat_ip'] as $f) {
+            $v = (string)($node[$f] ?? '');
+            if (filter_var($v, FILTER_VALIDATE_IP)) {
+                $ips[] = $v;
+            }
+        }
+        $ips = array_values(array_unique($ips));
+        if (!$ips) {
+            return ['pg' => $pg, 'mysql' => $mysql];
+        }
+
+        if (!$pg) {
+            try {
+                foreach (PgClusterService::listClusters() as $c) {
+                    foreach (static::getPgMasterStatusForCluster($c) as $r) {
+                        if (in_array(preg_replace('#/\d+$#', '', (string)$r['client_addr']), $ips, true)) {
+                            $pg = true;
+                            break 2;
+                        }
+                    }
+                }
+            } catch (\Throwable) {}
+        }
+        if (!$mysql) {
+            try {
+                $pdo = static::getMysqlPdo();
+                foreach ($pdo ? $pdo->query('SHOW PROCESSLIST')->fetchAll(\PDO::FETCH_ASSOC) : [] as $p) {
+                    $from = preg_replace('/:\d+$/', '', (string)($p['Host'] ?? ''));
+                    if (str_starts_with((string)($p['Command'] ?? ''), 'Binlog Dump') && in_array($from, $ips, true)) {
+                        $mysql = true;
+                        break;
+                    }
+                }
+            } catch (\Throwable) {}
+        }
+
+        if ($pg !== !empty($known['pg']) || $mysql !== !empty($known['mysql'])) {
+            Settings::set($key, json_encode(['pg' => $pg, 'mysql' => $mysql, 'since' => date('Y-m-d H:i:s')]));
+        }
+        return ['pg' => $pg, 'mysql' => $mysql];
+    }
+
     public static function isStreamingActive(): array
     {
         $pgByCluster = [];

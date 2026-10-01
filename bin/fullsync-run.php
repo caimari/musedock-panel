@@ -78,6 +78,11 @@ try {
     $sslEnabled = Settings::get('filesync_ssl_certs', '0') === '1';
     $dbDumpsEnabled = $fsConfig['db_dumps'] ?? false;
     $streamingStatus = ReplicationService::isStreamingActive();
+    // Desde el master: si ESE nodo replica de aquí, no se le restauran volcados encima.
+    $nodeRepl = ReplicationService::nodeReplicatesFromHere($node);
+    if ($nodeRepl['pg'] || $nodeRepl['mysql']) {
+        $streamingStatus['any_active'] = true;
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // STEP 1: Sync Hostings (API — always runs)

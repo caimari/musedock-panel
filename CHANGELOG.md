@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.255] — 2026-10-01 — No se envían volcados de BBDD a un nodo que ya es réplica
+
+### Arreglado (importante)
+- **El master seguía enviando y restaurando volcados de las bases de datos en un slave que ya replicaba de él.** La comprobación (`isStreamingActive()`) solo miraba el rol del propio servidor, y en el master siempre respondía "no hay réplica". Con "Volcados de BBDD" activado en Archivos, cada pocos minutos se restauraban volcados encima de la réplica. En MariaDB eso se hace como root, lo que rompe la replicación. Visto en mortadelo → Filemon, justo antes de convertir Filemon en réplica.
+  - Nuevo `ReplicationService::nodeReplicatesFromHere($node)`: desde el master, mira si hay conexiones de replicación que vienen de las IPs del nodo. En PostgreSQL usa `pg_stat_replication` de cada instancia; en MariaDB, los hilos `Binlog Dump` de `SHOW PROCESSLIST`.
+  - Es **persistente**: en cuanto lo detecta, lo guarda en `filesync_node_replica_{id}`, para que un corte momentáneo de la réplica no vuelva a activar los volcados. También se puede marcar a mano antes de montar la réplica.
+  - Se aplica en los tres sitios que envían volcados: `filesync-worker` (el periódico), la sincronización completa y `syncAllToNode`. Los demás nodos (p. ej. Nitro) siguen recibiéndolos como antes.
+
 ## [1.0.254] — 2026-10-01 — La ruta del certificado de correo sobrevive a los reinicios de Caddy
 
 ### Arreglado

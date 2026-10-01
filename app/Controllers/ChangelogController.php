@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.255',
+                'date' => '2026-10-01',
+                'badge' => 'warning',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['**El master seguia enviando y restaurando volcados de BBDD en un slave que ya replicaba de el** (la comprobacion solo miraba el rol local; en MariaDB se restauraba como root y rompia la replicacion). Ahora el master detecta por nodo las conexiones de replicacion que vienen de sus IPs (pg_stat_replication y Binlog Dump), lo recuerda (filesync_node_replica_{id}) y deja de enviarle volcados; los demas nodos siguen igual'],
+                        'en' => ['**The master kept sending and restoring DB dumps onto a slave that was already replicating from it** (the check only looked at the local role; MariaDB restores ran as root and broke replication). The master now detects per node the replication connections coming from its IPs (pg_stat_replication and Binlog Dump), remembers it (filesync_node_replica_{id}) and stops sending it dumps; other nodes are unchanged'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.254',
                 'date' => '2026-10-01',
                 'badge' => 'info',

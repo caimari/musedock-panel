@@ -656,7 +656,8 @@ class FileSyncService
         $dbResult = null;
         if ($config['db_dumps']) {
             $streamingStatus = ReplicationService::isStreamingActive();
-            if (!$streamingStatus['any_active']) {
+            $nodeRepl = ReplicationService::nodeReplicatesFromHere($node);
+            if (!$streamingStatus['any_active'] && !$nodeRepl['pg'] && !$nodeRepl['mysql']) {
                 if ($progressFile) {
                     self::writeProgress($progressFile, [
                         'status' => 'running', 'total' => $total, 'current' => $total,
