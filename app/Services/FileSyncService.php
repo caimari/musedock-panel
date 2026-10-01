@@ -1880,7 +1880,13 @@ class FileSyncService
                 $lua .= "    },\n";
             }
 
-            $sshRsh = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o BatchMode=yes -o PasswordAuthentication=no -o PreferredAuthentications=publickey -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0 -p {$port} -i {$keyPath}";
+            // ControlMaster: lsyncd lanza un rsync (y un ssh) por tanda de cambios y
+            // carpeta, cada `delay` s: sin reutilizar la conexión eran ~13 logins de
+            // root por minuto en el nodo (Filemon, 2026-10-01), cada uno con su
+            // sesión de systemd y su línea en auth.log.
+            $sshRsh = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o BatchMode=yes -o PasswordAuthentication=no -o PreferredAuthentications=publickey -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0"
+                . " -o ControlMaster=auto -o ControlPath=/run/musedock-lsyncd-%C -o ControlPersist=600 -o ServerAliveInterval=30"
+                . " -p {$port} -i {$keyPath}";
 
             $lua .= "    rsync = {\n";
             $lua .= "        binary   = \"/opt/musedock-panel/bin/rsync-nice\",\n";

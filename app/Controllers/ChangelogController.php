@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.258',
+                'date' => '2026-10-01',
+                'badge' => 'info',
+                'changes' => [
+                    'improved' => [
+                        'es' => ['lsyncd reutiliza la conexion SSH con cada nodo (ControlMaster): antes abria una por tanda y carpeta (~13 logins de root por minuto en el nodo). Se aplica al regenerar la configuracion de lsyncd'],
+                        'en' => ['lsyncd reuses the SSH connection to each node (ControlMaster): it used to open one per batch and folder (~13 root logins per minute on the node). Applied when the lsyncd config is regenerated'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.257',
                 'date' => '2026-10-01',
                 'badge' => 'info',

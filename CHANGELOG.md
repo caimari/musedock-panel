@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.258] — 2026-10-01 — lsyncd reutiliza la conexión SSH con cada nodo
+
+### Mejorado
+- **lsyncd abría una conexión SSH nueva por cada tanda de cambios y carpeta**, cada 15 s. En Filemon eso eran unos 13 logins de root por minuto: 327 en 25 minutos, cada uno con su sesión de systemd y su línea en `auth.log`. Ahora el `rsh` de lsyncd usa `ControlMaster=auto` con `ControlPersist=600` (socket en `/run/musedock-lsyncd-%C`): una sola conexión por nodo, que se reutiliza. Se aplica al regenerar la configuración de lsyncd (Archivos → guardar, `filesync_configure` o `filesync_extra_paths`).
+
 ## [1.0.257] — 2026-10-01 — replication_adopt también registra MariaDB, y cluster_drift entiende las webs guardadas para el relevo
 
 ### Añadido
