@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.256',
+                'date' => '2026-10-01',
+                'badge' => 'warning',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['**Copiar certificados a un nodo le borraba las rutas de Caddy.** Tras cada copia se ejecutaba por SSH `systemctl reload caddy` (recarga desde el Caddyfile) y, en nodos sin --resume, se perdian la ruta del panel por nombre, la del certificado de correo y las de hostings. Ahora se recarga la configuracion en marcha (GET /config/ → POST /load con must-revalidate): Caddy relee los certificados sin perder rutas'],
+                        'en' => ['**Copying certificates to a node wiped its Caddy routes.** After each copy `systemctl reload caddy` ran over SSH (reload from the Caddyfile) and, on nodes without --resume, the panel name route, the mail certificate route and hosting routes were lost. The running config is now reloaded instead (GET /config/ → POST /load with must-revalidate): Caddy rereads certificates without losing routes'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.255',
                 'date' => '2026-10-01',
                 'badge' => 'warning',

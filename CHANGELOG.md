@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.256] — 2026-10-01 — Copiar certificados a un nodo ya no le borra las rutas de Caddy
+
+### Arreglado (importante)
+- **Cada vez que el master copiaba los certificados a un nodo (unos 20 min), le quitaba a Caddy las rutas puestas por la API.** Tras copiarlos ejecutaba por SSH `systemctl reload caddy`, que recarga desde el Caddyfile. En los nodos que no arrancan Caddy con `--resume` se perdían la ruta del panel por su nombre, la del certificado del correo y las de los hostings. Visto en Filemon: el panel dejó de responder por `filemon.musedock.com:8444` (error TLS) y Caddy dejó de escuchar en el 443.
+  - Ahora vuelve a cargar **la configuración que ya está en marcha**: `GET /config/` y después `POST /load` con `Cache-Control: must-revalidate`, para que Caddy no la ignore por ser idéntica. Caddy relee los certificados de su almacén y no pierde ninguna ruta.
+
 ## [1.0.255] — 2026-10-01 — No se envían volcados de BBDD a un nodo que ya es réplica
 
 ### Arreglado (importante)

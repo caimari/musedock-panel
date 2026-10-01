@@ -861,7 +861,14 @@ class FileSyncService
     }
 
     /**
-     * Reload Caddy on a remote server via SSH.
+     * Recarga Caddy en el nodo por SSH para que lea los certificados copiados.
+     *
+     * NO con `systemctl reload caddy`: eso recarga desde el Caddyfile y borra las
+     * rutas puestas por la API (dominio del panel, certificado del correo,
+     * hostings) en los nodos sin --resume, cada vez que se copiaban certificados
+     * (Filemon, 2026-10-01). Se vuelve a cargar la config QUE YA ESTÁ en marcha
+     * (GET /config/ → POST /load con must-revalidate, para que no la salte por ser
+     * idéntica): Caddy relee los certificados de su almacén y no pierde nada.
      */
     private static function reloadRemoteCaddy(string $host, array $config): array
     {
@@ -869,13 +876,17 @@ class FileSyncService
         $keyPath = $config['ssh_key_path'] ?? '/root/.ssh/id_ed25519';
         $user = $config['ssh_user'] ?? 'root';
 
+        $remote = 'f=$(mktemp) && curl -sf -o "$f" http://localhost:2019/config/ && [ -s "$f" ] '
+            . '&& curl -sf -X POST -H "Content-Type: application/json" -H "Cache-Control: must-revalidate" '
+            . '--data-binary @"$f" http://localhost:2019/load; rc=$?; rm -f "$f"; '
+            . '[ $rc -eq 0 ] && echo reloaded-running-config || echo "caddy load failed rc=$rc"';
         $sshCmd = sprintf(
             'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d -i %s %s@%s %s 2>&1',
             $port,
             escapeshellarg($keyPath),
             escapeshellarg($user),
             escapeshellarg($host),
-            escapeshellarg('systemctl reload caddy 2>&1 || caddy reload --config /etc/caddy/Caddyfile 2>&1')
+            escapeshellarg($remote)
         );
 
         $output = trim((string)shell_exec($sshCmd));
