@@ -136,7 +136,18 @@ final class ClusterDriftService
             return $o;
         };
         [$mw, $sw] = [$sites($m), $sites($s)];
-        foreach (array_diff_key($mw, $sw) as $l => $_) {
+        // Webs del master guardadas aparte en el slave (config_mirror): se ponen al promover.
+        $staged = [];
+        foreach (($s['sites']['caddyfile_staged_sites'] ?? []) as $site) {
+            foreach (($site['labels'] ?? []) as $l) {
+                $staged[strtolower((string)$l)] = true;
+            }
+        }
+        $stagedOk = array_intersect_key(array_diff_key($mw, $sw), $staged);
+        if ($stagedOk) {
+            $notes[] = 'Caddyfile: ' . count($stagedOk) . ' webs del master guardadas aparte en el nodo (se ponen al promover).';
+        }
+        foreach (array_diff_key($mw, $sw, $staged) as $l => $_) {
             $diff[] = "Caddyfile: falta la web '{$l}' en el nodo.";
         }
         foreach (array_diff_key($sw, $mw) as $l => $_) {

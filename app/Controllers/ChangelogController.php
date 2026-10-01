@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.257',
+                'date' => '2026-10-01',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['`replication_adopt` registra tambien la replica de MariaDB/MySQL (repl_mysql_role, IP, puerto, usuario y contraseña cifrada en el slave; master si hay hilos Binlog Dump)'],
+                        'en' => ['`replication_adopt` also registers the MariaDB/MySQL replica (repl_mysql_role, IP, port, user and encrypted password on the slave; master when Binlog Dump threads exist)'],
+                    ],
+                    'fixed' => [
+                        'es' => ['`cluster_drift` ya no da por "falta la web" las webs del master guardadas aparte por config_mirror para el relevo'],
+                        'en' => ['`cluster_drift` no longer reports as missing the master sites stored aside by config_mirror for failover'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.256',
                 'date' => '2026-10-01',
                 'badge' => 'warning',

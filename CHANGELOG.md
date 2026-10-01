@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.257] — 2026-10-01 — replication_adopt también registra MariaDB, y cluster_drift entiende las webs guardadas para el relevo
+
+### Añadido
+- **`replication_adopt` registra también la réplica de MariaDB/MySQL** con las mismas claves que el asistente de Replicación del panel. En el slave, `repl_mysql_role=slave`, la IP, el puerto y el usuario se leen de `SHOW SLAVE STATUS`; la contraseña se guarda cifrada si es la misma que la de PostgreSQL. En el master, `repl_mysql_role=master` si hay hilos `Binlog Dump`. Avisa si MariaDB y PostgreSQL tienen roles distintos.
+
+### Arreglado
+- **`cluster_drift` decía "falta la web X en el nodo"** para las webs del master que `config_mirror` guarda aparte desde la 1.0.253 (`/var/lib/musedock/Caddyfile.from-master`). El inventario del nodo ahora informa de esas webs (`caddyfile_staged_sites`), y `cluster_drift` las cuenta como presentes, con una nota de que se ponen al promover.
+
 ## [1.0.256] — 2026-10-01 — Copiar certificados a un nodo ya no le borra las rutas de Caddy
 
 ### Arreglado (importante)

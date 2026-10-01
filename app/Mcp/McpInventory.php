@@ -368,9 +368,28 @@ final class McpInventory
         }
         ksort($runtimeUnmanaged);
 
+        // En un slave con config_mirror (1.0.253+), las webs del master no van al
+        // Caddyfile en uso: se guardan aparte y se ponen al promover.
+        $staged = [];
+        $depth = 0;
+        foreach (@file('/var/lib/musedock/Caddyfile.from-master', FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+            $t = trim($line);
+            if ($t === '' || str_starts_with($t, '#')) {
+                continue;
+            }
+            if ($depth === 0 && str_ends_with($t, '{') && !str_starts_with($t, '{') && !str_starts_with($t, '(')) {
+                $labels = array_values(array_filter(array_map('trim', explode(',', rtrim(substr($t, 0, -1))))));
+                if (!preg_grep('/:8444$/', $labels)) {
+                    $staged[] = ['labels' => $labels];
+                }
+            }
+            $depth = max(0, $depth + substr_count($t, '{') - substr_count($t, '}'));
+        }
+
         return [
             'panel_hostings' => count(array_unique(array_map(static fn($d) => preg_replace('/^www\./', '', $d), array_keys($managed)))),
             'caddyfile_sites' => array_values(array_filter($sites, static fn($s) => $s['kind'] !== 'panel')),
+            'caddyfile_staged_sites' => $staged,
             'caddy_runtime_hosts_not_in_panel' => array_keys($runtimeUnmanaged),
         ];
     }

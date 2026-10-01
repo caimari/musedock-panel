@@ -58,8 +58,8 @@ final class McpClusterTools
             ],
             'replication_adopt' => [
                 'write' => true,
-                'title' => 'Adoptar una réplica de PostgreSQL existente',
-                'description' => 'Registra en el panel una réplica en streaming de PostgreSQL que YA funciona (montada a mano), sin tocar datos ni reiniciar nada. Detecta el rol (master si tiene réplicas conectadas, slave si está en recuperación), el usuario de réplica y el otro extremo. La contraseña del usuario de réplica se lee de ~postgres/.pgpass (slave) o de password_file (master), se guarda cifrada y nunca se devuelve. Necesario para que promover/degradar funcionen. Requiere "Permitir acciones que modifican".',
+                'title' => 'Adoptar una réplica existente (PostgreSQL y MariaDB/MySQL)',
+                'description' => 'Registra en el panel una réplica en streaming de PostgreSQL que YA funciona (montada a mano), sin tocar datos ni reiniciar nada. Detecta el rol (master si tiene réplicas conectadas, slave si está en recuperación), el usuario de réplica y el otro extremo. La contraseña del usuario de réplica se lee de ~postgres/.pgpass (slave) o de password_file (master), se guarda cifrada y nunca se devuelve. También registra la réplica de MariaDB/MySQL si la hay (SHOW SLAVE STATUS en el slave, hilos Binlog Dump en el master). Necesario para que promover/degradar funcionen. Requiere "Permitir acciones que modifican".',
                 'inputSchema' => $o([
                     'password_file' => ['type' => 'string', 'description' => 'Opcional. Fichero con la contraseña del usuario de réplica (p. ej. /root/pg-replicador.pass). Solo rutas bajo /root/ o /var/lib/postgresql/.'],
                     'apply' => $apply,
@@ -583,7 +583,37 @@ final class McpClusterTools
             $settings['repl_remote_ip'] = $peers[0];
             $settings['repl_pg_remote_ip'] = $peers[0];
         }
+        // MariaDB/MySQL: mismas claves que el asistente de Replicación del panel.
+        $mysql = null;
+        try {
+            $ss = ReplicationService::getMysqlSlaveStatus();
+            if ($ss && ($ss['Slave_IO_Running'] ?? $ss['Replica_IO_Running'] ?? '') === 'Yes'
+                && ($ss['Slave_SQL_Running'] ?? $ss['Replica_SQL_Running'] ?? '') === 'Yes') {
+                $mysql = ['role' => 'slave', 'peer' => (string)($ss['Master_Host'] ?? $ss['Source_Host'] ?? ''),
+                    'port' => (int)($ss['Master_Port'] ?? $ss['Source_Port'] ?? 3306), 'user' => (string)($ss['Master_User'] ?? $ss['Source_User'] ?? '')];
+                $settings['repl_mysql_role'] = 'slave';
+                $settings['repl_mysql_remote_ip'] = $mysql['peer'];
+                $settings['repl_mysql_port'] = (string)$mysql['port'];
+                $settings['repl_mysql_user'] = $mysql['user'];
+            } else {
+                $pdo = ReplicationService::getMysqlPdo();
+                foreach ($pdo ? $pdo->query('SHOW PROCESSLIST')->fetchAll(\PDO::FETCH_ASSOC) : [] as $p) {
+                    if (str_starts_with((string)($p['Command'] ?? ''), 'Binlog Dump')) {
+                        $mysql = ['role' => 'master', 'peer' => preg_replace('/:\d+$/', '', (string)($p['Host'] ?? '')), 'user' => (string)($p['User'] ?? '')];
+                        $settings['repl_mysql_role'] = 'master';
+                        break;
+                    }
+                }
+            }
+        } catch (\Throwable) {
+        }
+        if ($mysql !== null) {
+            $detected[] = ['engine' => 'mariadb/mysql'] + $mysql;
+        }
         $warnings = [];
+        if ($mysql !== null && $mysql['role'] !== $role) {
+            $warnings[] = "MariaDB/MySQL es {$mysql['role']} y PostgreSQL {$role}: revisa que sea lo esperado.";
+        }
         if ($pass === '') {
             $warnings[] = $role === 'master'
                 ? 'Sin contraseña del usuario de réplica: indica password_file. La necesitará este servidor si algún día tiene que volver como slave (pg_rewind).'
@@ -605,6 +635,10 @@ final class McpClusterTools
         }
         if ($pass !== '') {
             Settings::set('repl_pg_password', ReplicationService::encryptPassword($pass));
+            // Mismo usuario y contraseña en MariaDB (como en el montaje habitual del panel).
+            if (($settings['repl_mysql_role'] ?? '') === 'slave' && ($settings['repl_mysql_user'] ?? '') === $user) {
+                Settings::set('repl_mysql_pass', ReplicationService::encryptPassword($pass));
+            }
         }
         try {
             \MuseDockPanel\Database::update('servers', ['role' => $role], 'is_local = true');
