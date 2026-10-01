@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.254',
+                'date' => '2026-10-01',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Tras reiniciar Caddy, el hostname de correo desaparecia de Caddy (ruta por API sin --resume) y su certificado dejaba de renovarse; ademas un segundo intento fallaba con "duplicate ID". Ahora la ruta se anade de forma idempotente y el reparador de arranque de Caddy la repone en los nodos de correo'],
+                        'en' => ['After a Caddy restart the mail hostname vanished from Caddy (API route without --resume) and its certificate stopped renewing; a second attempt also failed with "duplicate ID". The route is now added idempotently and the Caddy startup repair restores it on mail nodes'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.253',
                 'date' => '2026-10-01',
                 'badge' => 'warning',

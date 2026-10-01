@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.254] — 2026-10-01 — La ruta del certificado de correo sobrevive a los reinicios de Caddy
+
+### Arreglado
+- **Tras reiniciar Caddy, el hostname de correo (`mail.…`) desaparecía de Caddy y su certificado dejaba de renovarse.** La ruta se añade por la API de Caddy, así que se pierde al reiniciar Caddy sin `--resume`, y el reparador de arranque no la reponía. Además, `ensureMailCertViaCaddy` no comprobaba si la ruta ya existía: en una segunda pasada Caddy rechazaba el POST con "duplicate ID" y `repair-mail-cert-sync` fallaba. Visto en Filemon con la actualización: `update.sh` repara el certificado de correo y después reinicia Caddy.
+  - Nuevo `MailService::ensureMailCertRoute()`, idempotente: consulta `/id/mail-cert-…` antes de añadirla y, si Caddy la rechaza, devuelve el error real.
+  - `cli/repair-caddy-routes.php`, que se ejecuta en cada arranque de Caddy, la repone en los nodos de correo, igual que la del webmail.
+
 ## [1.0.253] — 2026-10-01 — config_mirror ya no toca el Caddyfile en uso del slave
 
 ### Arreglado (importante)

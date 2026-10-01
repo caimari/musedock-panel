@@ -260,6 +260,26 @@ if (!empty($result['skipped'])) {
 
 $repairWebmailRoute();
 
+// Ruta del hostname de correo (para que Caddy renueve su certificado): se pierde
+// al reiniciar Caddy sin --resume, igual que las demás rutas por API.
+if (is_file('/etc/postfix/main.cf') && is_file('/etc/dovecot/dovecot.conf')) {
+    $mailHost = trim((string)(\MuseDockPanel\Settings::get('mail_local_hostname', '')
+        ?: \MuseDockPanel\Settings::get('mail_hostname', '')
+        ?: \MuseDockPanel\Settings::get('mail_setup_hostname', '')));
+    if ($mailHost !== '') {
+        try {
+            $r = \MuseDockPanel\Services\MailService::ensureMailCertRoute($mailHost);
+            if (!empty($r['added'])) {
+                echo "[repair-caddy] OK: ruta del certificado de correo ({$mailHost}) repuesta.\n";
+            } elseif (empty($r['ok'])) {
+                fwrite(STDERR, "[repair-caddy] WARNING mail-cert: " . ($r['error'] ?? 'error desconocido') . "\n");
+            }
+        } catch (\Throwable $e) {
+            fwrite(STDERR, "[repair-caddy] WARNING mail-cert: " . $e->getMessage() . "\n");
+        }
+    }
+}
+
 
 // ── SAFETY GUARD post-check (ver cabecera + incidente TLS 2026-09-14) ──
 if ($guardArmed) {

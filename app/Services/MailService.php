@@ -4261,6 +4261,31 @@ class MailService
      *
      * Returns ['ok'=>bool, 'cert'=>path, 'key'=>path, 'issuer'=>..., 'error'=>...].
      */
+    /**
+     * Ruta mínima del hostname de correo en Caddy, para que Caddy tenga y renueve
+     * su certificado. Las rutas por API se pierden al reiniciar Caddy sin --resume,
+     * así que el reparador de arranque (cli/repair-caddy-routes.php) la repone.
+     * Idempotente: si ya está, no la vuelve a añadir (Caddy rechazaría el POST con
+     * "duplicate ID").
+     */
+    public static function ensureMailCertRoute(string $hostname): array
+    {
+        $routeId = 'mail-cert-' . preg_replace('/[^a-z0-9]/', '', strtolower($hostname));
+        if (self::caddyApiRequest('GET', '/id/' . $routeId)['ok']) {
+            return ['ok' => true, 'added' => false];
+        }
+        $route = [
+            '@id'   => $routeId,
+            'match' => [['host' => [$hostname]]],
+            'handle'=> [['handler' => 'static_response', 'status_code' => 200, 'body' => 'mail']],
+        ];
+        $add = self::caddyApiRequest('POST', '/config/apps/http/servers/srv0/routes', $route);
+        if (!$add['ok']) {
+            return ['ok' => false, 'error' => "Caddy no aceptó la ruta de {$hostname} (HTTP {$add['code']}): " . substr(trim($add['body']), 0, 200)];
+        }
+        return ['ok' => true, 'added' => true];
+    }
+
     public static function ensureMailCertViaCaddy(string $hostname, int $waitSeconds = 60): array
     {
         $caddyApi = 'http://localhost:2019';
@@ -4273,12 +4298,10 @@ class MailService
 
         // 1. Register a minimal route for the mail hostname so Caddy provisions a
         //    certificate for it (served content is irrelevant — a 200 is enough).
-        $route = [
-            '@id'   => 'mail-cert-' . preg_replace('/[^a-z0-9]/', '', strtolower($hostname)),
-            'match' => [['host' => [$hostname]]],
-            'handle'=> [['handler' => 'static_response', 'status_code' => 200, 'body' => 'mail']],
-        ];
-        self::caddyApiRequest('POST', '/config/apps/http/servers/srv0/routes', $route);
+        $routeRes = self::ensureMailCertRoute($hostname);
+        if (!$routeRes['ok']) {
+            return $routeRes;
+        }
 
         // Make sure the panel's TLS catch-all covers this host (idempotent).
         try {
