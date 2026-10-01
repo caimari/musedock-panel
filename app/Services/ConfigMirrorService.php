@@ -544,8 +544,27 @@ final class ConfigMirrorService
         $validate = self::userExists('caddy') && is_dir('/var/lib/caddy')
             ? 'runuser -u caddy -- env HOME=/var/lib/caddy caddy validate --adapter caddyfile --config ' . escapeshellarg($tmp) . ' 2>&1'
             : 'caddy validate --adapter caddyfile --config ' . escapeshellarg($tmp) . ' 2>&1';
-        exec($validate, $out, $rc);
+        // Con el entorno del servicio caddy ({env.CLOUDFLARE_API_TOKEN}…), como al
+        // arrancar de verdad. Por el entorno del proceso, no por la línea de
+        // órdenes: así el token no aparece en `ps`.
+        $env = self::caddyServiceEnv();
+        $missingEnv = [];
+        preg_match_all('/\{env\.([A-Za-z_][A-Za-z0-9_]*)\}/', implode("\n", $sites), $em);
+        foreach (array_unique($em[1] ?? []) as $var) {
+            if (($env[$var] ?? '') === '') {
+                $missingEnv[] = $var;
+                // Valor de relleno solo para validar el resto del fichero.
+                $env[$var] = str_repeat('x', 40);
+            }
+        }
+        [$out, $rc] = self::runWithEnv($validate, $env);
         @unlink($tmp);
+        foreach ($missingEnv as $var) {
+            $issues[] = "Caddy de este nodo no tiene {$var} en su entorno (/etc/default/caddy): el Caddyfile del master lo usa, así que tras un relevo esas webs no podrán renovar certificados. "
+                . ($var === 'CLOUDFLARE_API_TOKEN'
+                    ? 'Se propaga desde el master: Cloudflare DNS → sincronizar cuentas con "Actualizar token de Caddy".'
+                    : 'Hay que añadirlo a mano en /etc/default/caddy.');
+        }
         if ($rc !== 0) {
             $issues[] = 'Caddyfile: el resultado no pasa caddy validate; no se aplica: ' . trim(implode(' ', array_slice($out, -2)));
             $actions[] = ['what' => 'Caddyfile', 'result' => 'omitido'];
@@ -618,6 +637,45 @@ final class ConfigMirrorService
             }
         }
         return $fix;
+    }
+
+    /** Entorno con el que systemd arranca caddy (EnvironmentFile= y Environment=). */
+    private static function caddyServiceEnv(): array
+    {
+        $env = [];
+        $files = trim((string)shell_exec('systemctl show caddy -p EnvironmentFiles --value 2>/dev/null'));
+        foreach (preg_split('/\R/', $files) ?: [] as $line) {
+            $f = preg_replace('/\s*\(ignore_errors=\w+\)\s*$/', '', trim($line));
+            if ($f === '' || !is_file($f)) {
+                continue;
+            }
+            foreach (preg_split('/\R/', (string)@file_get_contents($f)) ?: [] as $l) {
+                if (preg_match('/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/', $l, $m)) {
+                    $env[$m[1]] = trim(trim($m[2]), "\"'");
+                }
+            }
+        }
+        $inline = trim((string)shell_exec('systemctl show caddy -p Environment --value 2>/dev/null'));
+        foreach (preg_split('/\s+/', $inline) ?: [] as $kv) {
+            if (preg_match('/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/', $kv, $m)) {
+                $env[$m[1]] = $m[2];
+            }
+        }
+        return $env;
+    }
+
+    /** Ejecuta un comando añadiendo variables al entorno. Devuelve [líneas, código]. */
+    private static function runWithEnv(string $cmd, array $extra): array
+    {
+        $env = array_merge(['PATH' => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'], getenv(), $extra);
+        $p = proc_open($cmd, [1 => ['pipe', 'w']], $pipes, null, $env);
+        if (!is_resource($p)) {
+            return [['no se pudo ejecutar caddy validate'], 1];
+        }
+        $outStr = (string)stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        $rc = proc_close($p);
+        return [preg_split('/\R/', trim($outStr)) ?: [], $rc];
     }
 
     private static function caddyCanWrite(string $file): bool

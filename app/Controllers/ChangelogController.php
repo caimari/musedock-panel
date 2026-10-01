@@ -20,6 +20,19 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.250',
+                'date' => '2026-10-01',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['`config_mirror` rechazaba el Caddyfile con "API token \'\' appears invalid": caddy validate se lanzaba sin el entorno del servicio caddy. Ahora carga EnvironmentFile/Environment de caddy (por el entorno del proceso, el token no sale en ps)',
+                            'Si el Caddyfile usa una variable {env.…} que el Caddy del slave no tiene, valida el resto y avisa de que tras un relevo esas webs no renovarian certificados'],
+                        'en' => ['`config_mirror` rejected the Caddyfile with "API token \'\' appears invalid": caddy validate ran without the caddy service environment. It now loads caddy EnvironmentFile/Environment (through the process environment, the token never shows in ps)',
+                            'If the Caddyfile uses an {env.…} variable the slave Caddy lacks, it validates the rest and warns that after failover those sites could not renew certificates'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.249',
                 'date' => '2026-10-01',
                 'badge' => 'info',

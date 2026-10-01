@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.250] — 2026-10-01 — config_mirror valida el Caddyfile con el entorno real de Caddy
+
+### Arreglado
+- **`config_mirror` rechazaba el Caddyfile del master con "API token '' appears invalid".** `caddy validate` se lanzaba sin el entorno del servicio caddy, así que `{env.CLOUDFLARE_API_TOKEN}` llegaba vacío aunque el nodo tuviera el token en `/etc/default/caddy`. Ahora la validación carga las variables que systemd da a Caddy (`EnvironmentFile=` y `Environment=`). Se pasan por el entorno del proceso, no por la línea de órdenes, para que el token no aparezca en `ps`.
+- Si el Caddyfile usa una variable `{env.…}` que el Caddy del slave no tiene, se valida el resto con un valor de relleno y se avisa: tras un relevo, esas webs no podrían renovar certificados. Para `CLOUDFLARE_API_TOKEN`, el aviso indica cómo propagarlo desde el master.
+
 ## [1.0.249] — 2026-10-01 — config_mirror copia el Caddyfile aunque las webs escriban logs en su carpeta
 
 ### Arreglado
