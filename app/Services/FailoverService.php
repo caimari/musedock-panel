@@ -29,6 +29,10 @@ class FailoverService
     public const STATE_EMERGENCY    = 'emergency';     // Everything down, backup active (caddy-l4)
 
     // ─── Server roles ────────────────────────────────────────
+    /** Diarios de registros DNS movidos (la vuelta solo devuelve lo anotado). */
+    public const DNS_JOURNAL        = 'failover_dns_journal';
+    public const DNS_JOURNAL_BACKUP = 'failover_dns_journal_backup';
+
     public const ROLE_PRIMARY  = 'primary';
     public const ROLE_FAILOVER = 'failover';
     public const ROLE_BACKUP   = 'backup';
@@ -465,7 +469,7 @@ class FailoverService
                 foreach ($sourceIps as $srcIp) {
                     foreach ($accounts as $acct) {
                         foreach ($acct['zones'] ?? [] as $zone) {
-                            $r = CloudflareService::batchUpdateIp($acct['token'], $zone['id'], $srcIp, $backupIp, $ttl);
+                            $r = CloudflareService::batchUpdateIp($acct['token'], $zone['id'], $srcIp, $backupIp, $ttl, self::DNS_JOURNAL_BACKUP);
                             if ($r['updated'] > 0) {
                                 $actions[] = "DNS {$srcIp}→{$backupIp}: zone {$zone['name']} — {$r['updated']} records";
                             }
@@ -807,7 +811,12 @@ class FailoverService
         $accounts = CloudflareService::getConfiguredAccounts();
         $ttl = (int)($c['failover_ttl_normal'] ?: 300);
 
-        // For each primary server, find what its failover IP was and revert
+        if (!CloudflareService::journal(self::DNS_JOURNAL) && !CloudflareService::journal(self::DNS_JOURNAL_BACKUP)) {
+            $log[] = 'Sin diario de DNS movidos en este panel: no se devuelve ningún DNS a ciegas. '
+                . 'Haz la vuelta desde el panel que hizo el relevo, o revisa los registros con failover_dns_plan.';
+        }
+
+        // Solo se devuelve lo que anotó el relevo (diario), no todo lo que apunte a la IP de relevo
         foreach ($servers as $srv) {
             if ($srv['role'] !== self::ROLE_PRIMARY) continue;
             $failoverSrv = self::getServer($srv['failover_to'] ?? '');
@@ -815,7 +824,7 @@ class FailoverService
 
             foreach ($accounts as $acct) {
                 foreach ($acct['zones'] ?? [] as $zone) {
-                    $r = CloudflareService::batchUpdateIp($acct['token'], $zone['id'], $failoverSrv['ip'], $srv['ip'], $ttl);
+                    $r = CloudflareService::revertJournal(self::DNS_JOURNAL, $acct['token'], $zone['id'], $failoverSrv['ip'], $ttl);
                     if ($r['updated'] > 0) $log[] = "DNS restore {$failoverSrv['name']}→{$srv['name']}: {$r['updated']} records";
                 }
             }
@@ -828,7 +837,7 @@ class FailoverService
             if ($firstPrimary) {
                 foreach ($accounts as $acct) {
                     foreach ($acct['zones'] ?? [] as $zone) {
-                        $r = CloudflareService::batchUpdateIp($acct['token'], $zone['id'], $backupIp, $firstPrimary['ip'], $ttl);
+                        $r = CloudflareService::revertJournal(self::DNS_JOURNAL_BACKUP, $acct['token'], $zone['id'], $backupIp, $ttl);
                         if ($r['updated'] > 0) $log[] = "DNS restore backup→{$firstPrimary['name']}: {$r['updated']} records";
                     }
                 }
@@ -860,7 +869,7 @@ class FailoverService
 
             foreach ($accounts as $acct) {
                 foreach ($acct['zones'] ?? [] as $zone) {
-                    $r = CloudflareService::batchUpdateIp($acct['token'], $zone['id'], $srv['ip'], $failoverSrv['ip'], $ttl);
+                    $r = CloudflareService::batchUpdateIp($acct['token'], $zone['id'], $srv['ip'], $failoverSrv['ip'], $ttl, self::DNS_JOURNAL);
                     $log[] = "DNS {$srv['name']}→{$failoverSrv['name']}: zone {$zone['name']} — {$r['updated']} updated, {$r['failed']} failed";
                 }
             }
@@ -886,7 +895,7 @@ class FailoverService
 
             foreach ($accounts as $acct) {
                 foreach ($acct['zones'] ?? [] as $zone) {
-                    $r = CloudflareService::batchUpdateIp($acct['token'], $zone['id'], $srv['ip'], $failoverSrv['ip'], $ttl);
+                    $r = CloudflareService::batchUpdateIp($acct['token'], $zone['id'], $srv['ip'], $failoverSrv['ip'], $ttl, self::DNS_JOURNAL);
                     $log[] = "DNS {$srv['name']}→{$failoverSrv['name']}: zone {$zone['name']} — {$r['updated']} updated";
                 }
             }
@@ -934,7 +943,7 @@ class FailoverService
         foreach ($allSourceIps as $srcIp) {
             foreach ($accounts as $acct) {
                 foreach ($acct['zones'] ?? [] as $zone) {
-                    $r = CloudflareService::batchUpdateIp($acct['token'], $zone['id'], $srcIp, $backupIp, $ttl);
+                    $r = CloudflareService::batchUpdateIp($acct['token'], $zone['id'], $srcIp, $backupIp, $ttl, self::DNS_JOURNAL_BACKUP);
                     if ($r['updated'] > 0) $log[] = "DNS {$srcIp}→backup: zone {$zone['name']} — {$r['updated']} records";
                 }
             }

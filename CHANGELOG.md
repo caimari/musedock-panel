@@ -2,6 +2,22 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.259] — 2026-10-01 — Cambio de DNS en un relevo: completo, y la vuelta solo devuelve lo que se movió
+
+### Arreglado (importante)
+- **La vuelta del relevo (failback) cambiaba a la IP del primario TODOS los registros que apuntaban a la IP del servidor de relevo.** Eso incluía los que siempre han sido suyos (p. ej. `filemon.musedock.com`) y cualquier otro servicio en esa IP. Ahora el relevo anota en un diario (`failover_dns_journal`, y `failover_dns_journal_backup` para la IP de reserva) cada registro que cambia: zona, id, IP de origen y de destino. La vuelta **solo devuelve lo anotado**, y solo si sigue apuntando donde lo dejó el relevo: si alguien lo cambió después a mano, no se toca. Sin diario no se devuelve nada a ciegas, y se avisa. Se aplica también al cambio por caída de la interfaz (dual WAN) y a su vuelta.
+- **El cambio de DNS solo procesaba los primeros 100 registros A de cada zona.** Ahora recorre todas las páginas (`CloudflareService::listRecordsAll`).
+- **Los registros que van por el proxy de Cloudflare recibían un TTL fijo**, que Cloudflare no admite para esos registros (solo "automático"). Ahora se les envía TTL automático, y la bajada de TTL previa al relevo se los salta.
+
+- **Reconstruir un antiguo master como slave copiaba también las cuentas de MariaDB del otro nodo.** El volcado con `--all-databases` incluía la base `mysql`, así que al importarlo se pisaban `root` y `debian-sys-maint` locales. El panel de ese nodo perdía el acceso a su propio MariaDB, porque `debian.cnf` ya no coincidía. Ahora solo se copian las bases de datos de las apps (las de sistema nunca). Las cuentas de las apps ya existen en los dos nodos, y las nuevas llegan por la propia réplica.
+- **`replication_adopt` en el master no guardaba el usuario ni la contraseña de replicación de MariaDB.** Al reconstruir ese nodo como slave (`demoteToSlave`), habría intentado conectar con el usuario por defecto. Ahora se guardan `repl_mysql_user` y `repl_mysql_port`, y la contraseña cifrada si es la misma que la de PostgreSQL.
+
+### Añadido
+- **MCP `failover_dns_plan`** (solo lectura): con las cuentas de Cloudflare del panel que hará el relevo, lista por zona los registros A que cambiarían, los dominios que se mueven con ellos por CNAME, los dominios de hostings que **no** se moverían (y por qué) y el diario de lo ya movido. En mortadelo → Filemon: 9 registros A, 177 nombres por CNAME, y solo `elbookdeamanda.com` fuera, porque su DNS no está en Cloudflare.
+
+### Arreglado
+- **La copia de certificados del master al nodo podía sustituir un certificado más nuevo por uno más viejo.** Pasaba cuando el nodo había renovado por su cuenta un dominio que también tiene el master (por ejemplo `mail.…`): rsync sobrescribía el fichero solo porque era distinto. Ahora se copia con `--update`. Los certificados propios del nodo (su hostname, sus IPs) nunca se han tocado, porque la copia no usa `--delete`.
+
 ## [1.0.258] — 2026-10-01 — lsyncd reutiliza la conexión SSH con cada nodo
 
 ### Mejorado

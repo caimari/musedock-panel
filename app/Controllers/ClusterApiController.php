@@ -970,7 +970,8 @@ class ClusterApiController
             foreach ($accounts as $acct) {
                 foreach ($acct['zones'] ?? [] as $zone) {
                     $r = \MuseDockPanel\Services\CloudflareService::batchUpdateIp(
-                        $acct['token'], $zone['id'], $srcIp, $backupIp, $ttl
+                        $acct['token'], $zone['id'], $srcIp, $backupIp, $ttl,
+                        \MuseDockPanel\Services\FailoverService::DNS_JOURNAL_BACKUP
                     );
                     if ($r['updated'] > 0) {
                         $actions[] = "DNS {$srcIp}→{$backupIp}: zone {$zone['name']} — {$r['updated']} records";
@@ -1011,8 +1012,9 @@ class ClusterApiController
         foreach ($possibleBackupIps as $backupIp) {
             foreach ($accounts as $acct) {
                 foreach ($acct['zones'] ?? [] as $zone) {
-                    $r = \MuseDockPanel\Services\CloudflareService::batchUpdateIp(
-                        $acct['token'], $zone['id'], $backupIp, $slaveIp, $ttl
+                    $r = \MuseDockPanel\Services\CloudflareService::revertJournal(
+                        \MuseDockPanel\Services\FailoverService::DNS_JOURNAL_BACKUP,
+                        $acct['token'], $zone['id'], $backupIp, $ttl
                     );
                     if ($r['updated'] > 0) {
                         $actions[] = "DNS {$backupIp}→{$slaveIp}: zone {$zone['name']} — {$r['updated']} records reverted";

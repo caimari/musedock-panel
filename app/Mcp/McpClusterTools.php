@@ -133,6 +133,12 @@ final class McpClusterTools
                     'apply' => $apply,
                 ], ['domain']),
             ],
+            'failover_dns_plan' => [
+                'write' => false,
+                'title' => 'Qué DNS cambiaría un relevo',
+                'description' => 'Solo lectura. Con las cuentas de Cloudflare de ESTE panel (las que usará al hacer el relevo), lista por zona los registros A que hoy apuntan a la IP del servidor primario y que el relevo cambiaría a la IP del de relevo, y las zonas con error (token sin permiso, zona no accesible). Ejecútalo en el nodo que hará el cambio (el de relevo). No cambia nada.',
+                'inputSchema' => $o([]),
+            ],
             'firewall_audit' => [
                 'write' => false,
                 'title' => 'Auditoría del firewall',
@@ -227,6 +233,7 @@ final class McpClusterTools
             'cluster_drift'         => self::drift($args),
             'hosting_php_settings'  => self::hostingPhp($args),
             'config_mirror'         => self::configMirror($args),
+            'failover_dns_plan'     => self::dnsPlan(),
             'firewall_audit'        => \MuseDockPanel\Services\FirewallAuditService::refreshStored(),
             'firewall_trusted_sources' => self::trustedSources($args),
             'filesync_status'       => self::filesyncStatus(),
@@ -234,6 +241,105 @@ final class McpClusterTools
             'filesync_extra_paths'  => self::filesyncExtraPaths($args),
             default                 => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
         };
+    }
+
+    // ── Plan de DNS de un relevo (solo lectura) ──────────────────────────
+
+    private static function dnsPlan(): array
+    {
+        $cf = \MuseDockPanel\Services\CloudflareService::class;
+        $fo = \MuseDockPanel\Services\FailoverService::class;
+        $accounts = $cf::getConfiguredAccounts();
+        $pairs = [];
+        foreach ($fo::getServers() as $srv) {
+            if (($srv['role'] ?? '') !== 'primary' || empty($srv['enabled'] ?? true)) {
+                continue;
+            }
+            $to = $fo::getServer((string)($srv['failover_to'] ?? ''));
+            if ($to) {
+                $pairs[] = ['from' => (string)$srv['ip'], 'from_name' => (string)$srv['name'], 'to' => (string)$to['ip'], 'to_name' => (string)$to['name']];
+            }
+        }
+        if (!$pairs) {
+            return ['ok' => false, 'error' => 'No hay servidor primario con servidor de relevo: failover_configure en el master.'];
+        }
+        if (!$accounts) {
+            return ['ok' => false, 'error' => 'Este panel no tiene cuentas de Cloudflare: no podría cambiar ningún DNS.'];
+        }
+        $out = [];
+        $errors = [];
+        $total = 0;
+        $moved = [];      // nombres cuyo A cambia
+        $cnames = [];     // nombre → destino, de todas las zonas
+        $zoneNames = [];
+        foreach ($accounts as $acct) {
+            foreach (($acct['zones'] ?? []) as $zone) {
+                $zoneNames[strtolower((string)$zone['name'])] = true;
+                $c = $cf::listRecordsAll((string)$acct['token'], (string)$zone['id'], ['type' => 'CNAME']);
+                foreach (($c['ok'] ? ($c['result'] ?? []) : []) as $x) {
+                    $cnames[strtolower((string)$x['name'])] = strtolower(rtrim((string)$x['content'], '.'));
+                }
+                foreach ($pairs as $p) {
+                    $r = $cf::listARecordsByIp((string)$acct['token'], (string)$zone['id'], $p['from']);
+                    if (!$r['ok']) {
+                        $errors[] = "{$zone['name']} ({$acct['name']}): " . ($r['error'] ?? 'error');
+                        continue;
+                    }
+                    $names = array_map(static fn($x) => $x['name'] . (!empty($x['proxied']) ? ' (proxy)' : ''), $r['result'] ?? []);
+                    foreach ($r['result'] ?? [] as $x) {
+                        $moved[strtolower((string)$x['name'])] = true;
+                    }
+                    if ($names) {
+                        $out[] = ['zone' => $zone['name'], 'account' => $acct['name'], 'records' => $names];
+                        $total += count($names);
+                    }
+                }
+            }
+        }
+        // Lo que va por CNAME a un nombre que cambia, también se mueve (aunque no se toque).
+        $follows = static function (string $n) use ($cnames, $moved): bool {
+            for ($i = 0; $i < 10 && isset($cnames[$n]); $i++) {
+                $n = $cnames[$n];
+                if (isset($moved[$n])) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        $viaCname = array_keys(array_filter($cnames, static fn($t, $n) => $follows($n), ARRAY_FILTER_USE_BOTH));
+        sort($viaCname);
+        // Dominios de los hostings de este panel que el relevo NO movería.
+        $notMoved = [];
+        foreach ($fo::getLocalDomains() as $d) {
+            $d = strtolower((string)$d);
+            foreach ([$d, "www.{$d}"] as $n) {
+                if (isset($moved[$n]) || $follows($n)) {
+                    continue 2;
+                }
+            }
+            $inZone = false;
+            $parts = explode('.', $d);
+            for ($i = 0; $i < count($parts) - 1; $i++) {
+                if (isset($zoneNames[implode('.', array_slice($parts, $i))])) {
+                    $inZone = true;
+                    break;
+                }
+            }
+            $notMoved[] = $d . ($inZone ? ' (su zona está en estas cuentas, pero no apunta al primario: ¿otro servidor o registro distinto?)' : ' (su zona NO está en las cuentas de Cloudflare de este panel)');
+        }
+        return [
+            'ok' => !$errors,
+            'switch' => array_map(static fn($p) => "{$p['from_name']} {$p['from']} → {$p['to_name']} {$p['to']}", $pairs),
+            'records_that_would_change' => $total,
+            'zones' => $out,
+            'moved_via_cname' => $viaCname,
+            'hosting_domains_not_moved' => $notMoved,
+            // Lo que un relevo ya movió desde ESTE panel y devolverá la vuelta (solo esto).
+            'journal_moved' => $cf::journal(\MuseDockPanel\Services\FailoverService::DNS_JOURNAL),
+            'journal_moved_backup' => $cf::journal(\MuseDockPanel\Services\FailoverService::DNS_JOURNAL_BACKUP),
+            'zone_errors' => $errors,
+            'note' => 'Cambian los registros A que apuntan exactamente a la IP del primario, en las zonas de las cuentas de ESTE panel; lo que va por CNAME a esos nombres se mueve con ellos. Un dominio cuya zona esté en otra cuenta de Cloudflare no cambiaría.',
+        ];
     }
 
     // ── Utilidades ───────────────────────────────────────────────────────
@@ -601,6 +707,9 @@ final class McpClusterTools
                     if (str_starts_with((string)($p['Command'] ?? ''), 'Binlog Dump')) {
                         $mysql = ['role' => 'master', 'peer' => preg_replace('/:\d+$/', '', (string)($p['Host'] ?? '')), 'user' => (string)($p['User'] ?? '')];
                         $settings['repl_mysql_role'] = 'master';
+                        // Los necesitará este nodo si un día vuelve como slave (demoteToSlave).
+                        $settings['repl_mysql_user'] = $mysql['user'];
+                        $settings['repl_mysql_port'] = '3306';
                         break;
                     }
                 }
@@ -636,7 +745,7 @@ final class McpClusterTools
         if ($pass !== '') {
             Settings::set('repl_pg_password', ReplicationService::encryptPassword($pass));
             // Mismo usuario y contraseña en MariaDB (como en el montaje habitual del panel).
-            if (($settings['repl_mysql_role'] ?? '') === 'slave' && ($settings['repl_mysql_user'] ?? '') === $user) {
+            if (($settings['repl_mysql_user'] ?? '') === $user && $user !== '') {
                 Settings::set('repl_mysql_pass', ReplicationService::encryptPassword($pass));
             }
         }

@@ -1693,9 +1693,28 @@ class ReplicationService
         $gtidFlag = $isMaria ? '--gtid' : '--set-gtid-purged=ON';
         $masterDataFlag = $isMaria ? '--master-data=1' : '--source-data=1';
         try {
+            // Solo las bases de datos de las apps, NUNCA las del sistema: con
+            // --all-databases se importaba también `mysql` (cuentas) del otro nodo y
+            // se pisaban root/debian-sys-maint locales; el panel de este nodo se
+            // quedaba sin acceso a su propio MariaDB (debian.cnf ya no coincidía).
+            // Las cuentas de las apps ya existen en los dos nodos y las nuevas llegan
+            // por la propia réplica (CREATE USER/GRANT van en el binlog).
+            $listCmd = escapeshellarg($cliBin) . ' --defaults-extra-file=' . escapeshellarg($cnf) . ' -N -e ' . escapeshellarg('SHOW DATABASES') . ' 2>&1';
+            $dbs = [];
+            foreach (preg_split('/\R/', trim((string)shell_exec($listCmd))) ?: [] as $db) {
+                $db = trim($db);
+                if ($db !== '' && preg_match('/^[A-Za-z0-9_$-]+$/', $db)
+                    && !in_array(strtolower($db), ['mysql', 'information_schema', 'performance_schema', 'sys'], true)) {
+                    $dbs[] = $db;
+                }
+            }
+            if (!$dbs) {
+                return ['ok' => false, 'error' => 'No se pudo listar las bases de datos del master (¿el usuario de réplica tiene SHOW DATABASES y SELECT?)'];
+            }
             $dumpCmd = escapeshellarg($dumpBin) . ' --defaults-extra-file=' . escapeshellarg($cnf)
                 . ' --single-transaction ' . $masterDataFlag . ' ' . $gtidFlag
-                . ' --routines --triggers --events --all-databases 2>' . escapeshellarg($dumpErr)
+                . ' --routines --triggers --events --databases ' . implode(' ', array_map('escapeshellarg', $dbs))
+                . ' 2>' . escapeshellarg($dumpErr)
                 . ' | gzip > ' . escapeshellarg($dumpFile);
             $out = []; $code = 0;
             exec($dumpCmd, $out, $code);
@@ -1723,7 +1742,7 @@ class ReplicationService
                 return ['ok' => false, 'error' => 'Import falló (code ' . $code2 . '): ' . trim((string)$impErr)
                     . ' — el datadir puede haber quedado a medias; reconstruye el slave por completo.'];
             }
-            return ['ok' => true, 'output' => 'Sembrado desde ' . $masterIp . ' (coordenada aplicada por el dump)'];
+            return ['ok' => true, 'output' => 'Sembrado desde ' . $masterIp . ' (' . count($dbs) . ' bases de datos de apps; las del sistema y las cuentas locales no se tocan; coordenada aplicada por el dump)'];
         } finally {
             // Always remove credentials + the full-data dump, success or failure. (M1)
             @unlink($cnf);

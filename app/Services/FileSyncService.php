@@ -819,7 +819,10 @@ class FileSyncService
             $user = $config['ssh_user'] ?? 'root';
             $bwLimit = (int)($config['bandwidth_limit'] ?? 0);
 
-            $cmd = 'rsync -avz --chown=caddy:caddy';
+            // --update: si el nodo ya renovó por su cuenta un certificado del mismo
+            // dominio (más nuevo), no se le pisa con el más viejo del master. Sin
+            // --delete: los certificados propios del nodo nunca se tocan.
+            $cmd = 'rsync -avz --update --chown=caddy:caddy';
             if ($bwLimit > 0) {
                 $cmd .= ' --bwlimit=' . $bwLimit;
             }

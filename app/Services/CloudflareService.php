@@ -212,11 +212,110 @@ class CloudflareService
     /**
      * Batch-update A records: change the IP of multiple records in a zone.
      */
-    public static function batchUpdateIp(string $token, string $zoneId, string $oldIp, string $newIp, int $ttl = 60): array
+    /**
+     * Todos los registros A de una zona que apuntan a una IP, paginando: con
+     * per_page=100 a secas, una zona con más de 100 registros en esa IP (p. ej.
+     * subdominios de tenants) se quedaba a medias en un relevo.
+     */
+    public static function listARecordsByIp(string $token, string $zoneId, string $ip): array
     {
-        $records = self::listRecords($token, $zoneId, ['type' => 'A', 'content' => $oldIp, 'per_page' => 100]);
+        return self::listRecordsAll($token, $zoneId, ['type' => 'A', 'content' => $ip]);
+    }
+
+    /** listRecords con todas las páginas. */
+    public static function listRecordsAll(string $token, string $zoneId, array $filters): array
+    {
+        $all = [];
+        for ($page = 1; $page <= 50; $page++) {
+            $resp = self::listRecords($token, $zoneId, array_merge($filters, ['per_page' => 100, 'page' => $page]));
+            if (!$resp['ok']) {
+                return $resp;
+            }
+            $rows = $resp['result'] ?? [];
+            $all = array_merge($all, $rows);
+            if (count($rows) < 100) {
+                break;
+            }
+        }
+        return ['ok' => true, 'result' => $all];
+    }
+
+    /** TTL válido para el registro: los que van por el proxy de Cloudflare solo admiten 1 (automático). */
+    private static function ttlFor(array $record, int $ttl): int
+    {
+        return !empty($record['proxied']) ? 1 : $ttl;
+    }
+
+    /**
+     * Diario de registros movidos por un relevo (Settings $journal): para que la
+     * vuelta devuelva SOLO lo que se movió. Antes, el failback cambiaba todo lo
+     * que apuntaba a la IP del servidor de relevo, incluidos sus propios
+     * registros de siempre (p. ej. filemon.musedock.com) y otros servicios en esa IP.
+     */
+    private static function journalAdd(string $journal, string $zoneId, array $record, string $from, string $to): void
+    {
+        $list = json_decode(Settings::get($journal, '[]'), true);
+        $list = is_array($list) ? $list : [];
+        $key = $zoneId . '/' . $record['id'];
+        $list[$key] = ['zone' => $zoneId, 'id' => (string)$record['id'], 'name' => (string)$record['name'],
+            'from' => $from, 'to' => $to, 'at' => date('Y-m-d H:i:s')];
+        Settings::set($journal, json_encode($list, JSON_UNESCAPED_SLASHES));
+    }
+
+    /** Lo anotado en el diario (para mostrarlo o revisarlo). */
+    public static function journal(string $journal): array
+    {
+        $list = json_decode(Settings::get($journal, '[]'), true);
+        return is_array($list) ? array_values($list) : [];
+    }
+
+    /**
+     * Devuelve a su IP original los registros anotados en el diario que hoy
+     * siguen apuntando a $currentIp. Lo que alguien haya cambiado después a mano
+     * no se toca. Sin diario no hace nada (no se devuelve a ciegas).
+     */
+    public static function revertJournal(string $journal, string $token, string $zoneId, string $currentIp, int $ttl = 300): array
+    {
+        $list = json_decode(Settings::get($journal, '[]'), true);
+        $list = is_array($list) ? $list : [];
+        $updated = 0;
+        $skipped = 0;
+        $failed = 0;
+        foreach ($list as $key => $e) {
+            if (($e['zone'] ?? '') !== $zoneId || ($e['to'] ?? '') !== $currentIp) {
+                continue;
+            }
+            $cur = self::apiRequest($token, 'GET', "/zones/{$zoneId}/dns_records/" . rawurlencode((string)$e['id']));
+            $rec = $cur['result'] ?? null;
+            if (!$cur['ok'] || !is_array($rec)) {
+                $failed++;
+                continue;
+            }
+            if (($rec['content'] ?? '') !== $currentIp) {
+                $skipped++;          // ya no apunta donde lo dejó el relevo: no se toca
+                unset($list[$key]);
+                continue;
+            }
+            $r = self::updateRecord($token, $zoneId, (string)$e['id'], [
+                'type' => 'A', 'name' => $rec['name'], 'content' => (string)$e['from'],
+                'ttl' => self::ttlFor($rec, $ttl), 'proxied' => $rec['proxied'] ?? false,
+            ]);
+            if ($r['ok']) {
+                $updated++;
+                unset($list[$key]);
+            } else {
+                $failed++;
+            }
+        }
+        Settings::set($journal, json_encode($list, JSON_UNESCAPED_SLASHES));
+        return ['ok' => $failed === 0, 'updated' => $updated, 'skipped' => $skipped, 'failed' => $failed];
+    }
+
+    public static function batchUpdateIp(string $token, string $zoneId, string $oldIp, string $newIp, int $ttl = 60, ?string $journal = null): array
+    {
+        $records = self::listARecordsByIp($token, $zoneId, $oldIp);
         if (!$records['ok']) {
-            return ['ok' => false, 'error' => $records['error'], 'updated' => 0, 'failed' => 0, 'details' => []];
+            return ['ok' => false, 'error' => $records['error'] ?? 'error', 'updated' => 0, 'failed' => 0, 'details' => []];
         }
 
         $updated = 0;
@@ -228,13 +327,16 @@ class CloudflareService
                 'type'    => 'A',
                 'name'    => $record['name'],
                 'content' => $newIp,
-                'ttl'     => $ttl,
+                'ttl'     => self::ttlFor($record, $ttl),
                 'proxied' => $record['proxied'] ?? false,
             ]);
 
             if ($result['ok']) {
                 $updated++;
                 $details[] = ['name' => $record['name'], 'ok' => true];
+                if ($journal !== null) {
+                    self::journalAdd($journal, $zoneId, $record, $oldIp, $newIp);
+                }
             } else {
                 $failed++;
                 $details[] = ['name' => $record['name'], 'ok' => false, 'error' => $result['error']];
@@ -254,11 +356,14 @@ class CloudflareService
      */
     public static function batchUpdateTtl(string $token, string $zoneId, string $ip, int $newTtl): array
     {
-        $records = self::listRecords($token, $zoneId, ['type' => 'A', 'content' => $ip, 'per_page' => 100]);
+        $records = self::listARecordsByIp($token, $zoneId, $ip);
         if (!$records['ok']) return $records;
 
         $updated = 0;
         foreach ($records['result'] ?? [] as $record) {
+            if (!empty($record['proxied'])) {
+                continue; // por el proxy el TTL es siempre automático
+            }
             if (($record['ttl'] ?? 0) !== $newTtl) {
                 self::updateRecord($token, $zoneId, $record['id'], [
                     'type'    => 'A',

@@ -20,6 +20,31 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.259',
+                'date' => '2026-10-01',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['**La vuelta del relevo (failback) cambiaba TODOS los registros que apuntaban a la IP del servidor de relevo**, incluidos los suyos de siempre. Ahora el relevo anota en un diario cada registro que mueve y la vuelta solo devuelve esos (si siguen donde los dejo); sin diario no devuelve nada a ciegas',
+                            'El cambio de DNS de un relevo solo procesaba los primeros 100 registros A por zona: ahora recorre todas las paginas',
+                            'Registros con proxy de Cloudflare: se les envia TTL automatico (el unico que admiten)',
+                            'Reconstruir un antiguo master como slave ya no copia las cuentas de MariaDB del otro nodo (antes --all-databases pisaba root/debian-sys-maint y el panel perdia el acceso a su MariaDB): solo bases de datos de apps',
+                            '`replication_adopt` en el master guarda tambien usuario, puerto y contraseña de replicacion de MariaDB (necesarios para reconstruirlo como slave)',
+                            'La copia de certificados del master al nodo ya no sustituye un certificado mas nuevo del nodo por uno mas viejo (rsync --update). Los certificados propios del nodo nunca se tocan (sin --delete)'],
+                        'en' => ['**Failback switched ALL records pointing to the failover server IP**, including its own long-standing ones. Failover now journals each record it moves and failback only reverts those (if still where failover left them); without a journal nothing is reverted blindly',
+                            'Failover DNS switch only processed the first 100 A records per zone: it now pages through all',
+                            'Cloudflare proxied records: automatic TTL is sent (the only one they accept)',
+                            'Rebuilding a former master as slave no longer copies the other node MariaDB accounts (--all-databases used to overwrite root/debian-sys-maint and the panel lost access to its MariaDB): app databases only',
+                            '`replication_adopt` on the master also stores MariaDB replication user, port and password (needed to rebuild it as slave)',
+                            'Certificate copy from master to node no longer replaces a newer node certificate with an older one (rsync --update). The node own certificates are never touched (no --delete)'],
+                    ],
+                    'added' => [
+                        'es' => ['MCP `failover_dns_plan` (solo lectura): que registros A cambiaria un relevo, que dominios se mueven con ellos por CNAME, que dominios de hostings NO se moverian y el diario de lo ya movido'],
+                        'en' => ['MCP `failover_dns_plan` (read-only): which A records a failover would change, which domains move with them via CNAME, which hosting domains would NOT move and the journal of what was already moved'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.258',
                 'date' => '2026-10-01',
                 'badge' => 'info',
