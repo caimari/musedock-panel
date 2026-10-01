@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.252',
+                'date' => '2026-10-01',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['`cluster_drift` avisa si el PHP por defecto del nodo es distinto del master (los crons con `php` correrian con otra version tras un relevo) y da el comando para igualarlo'],
+                        'en' => ['`cluster_drift` warns when the node default PHP differs from the master (crons calling `php` would run another version after failover) and gives the command to match it'],
+                    ],
+                    'fixed' => [
+                        'es' => ['`cluster_drift` distingue "Composer no instalado" de "instalado pero no arranca" (Composer 2.2.6 de Ubuntu con PHP 8.4 por defecto)',
+                            'El aviso de `config_mirror` sobre el token de Cloudflare apunta al menu correcto (Cluster → Failover → Cuentas Cloudflare), avisa de que usa la primera cuenta y reinicia Caddy en todos los nodos, y propone copiar /etc/default/caddy'],
+                        'en' => ['`cluster_drift` tells "Composer not installed" from "installed but fails to run" (Ubuntu Composer 2.2.6 with PHP 8.4 as default)',
+                            'The `config_mirror` Cloudflare token warning points to the right menu (Cluster → Failover → Cloudflare accounts), warns it uses the first account and restarts Caddy on every node, and suggests copying /etc/default/caddy'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.250',
                 'date' => '2026-10-01',
                 'badge' => 'info',

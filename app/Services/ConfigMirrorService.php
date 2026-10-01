@@ -562,7 +562,7 @@ final class ConfigMirrorService
         foreach ($missingEnv as $var) {
             $issues[] = "Caddy de este nodo no tiene {$var} en su entorno (/etc/default/caddy): el Caddyfile del master lo usa, así que tras un relevo esas webs no podrán renovar certificados. "
                 . ($var === 'CLOUDFLARE_API_TOKEN'
-                    ? 'Se propaga desde el master: Cloudflare DNS → sincronizar cuentas con "Actualizar token de Caddy".'
+                    ? 'Copia /etc/default/caddy del master (no hace falta reiniciar Caddy: se lee al promover), o desde el master en Cluster → Failover → Cuentas Cloudflare con "Actualizar token de Caddy" (ojo: usa la PRIMERA cuenta y reinicia Caddy en todos los nodos).'
                     : 'Hay que añadirlo a mano en /etc/default/caddy.');
         }
         if ($rc !== 0) {

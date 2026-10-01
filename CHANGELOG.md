@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.252] — 2026-10-01 — cluster_drift compara el PHP por defecto
+
+### Añadido
+- **`cluster_drift` avisa si el PHP por defecto del nodo es distinto del master.** Por ejemplo, mortadelo usa 8.3 y Filemon 8.4. Los crons y scripts que llaman a `php` a secas correrían con otra versión tras un relevo. El aviso incluye el comando para igualarlo (`update-alternatives --set php …`).
+
+### Arreglado
+- **`cluster_drift` decía "el nodo no tiene Composer" cuando sí estaba instalado pero no arrancaba.** Pasa, por ejemplo, con el Composer 2.2.6 de Ubuntu cuando el PHP por defecto es 8.4. Ahora distingue entre "no está instalado" e "instalado pero `composer --version` falla", y dice qué PHP por defecto tiene el nodo.
+- **El aviso de `config_mirror` sobre el token de Cloudflare indicaba un menú equivocado.** El sitio correcto es Cluster → Failover → Cuentas Cloudflare. Ahora además avisa de que ese botón usa la **primera** cuenta y reinicia Caddy en todos los nodos. Como alternativa, propone copiar `/etc/default/caddy` del master.
+
 ## [1.0.250] — 2026-10-01 — config_mirror valida el Caddyfile con el entorno real de Caddy
 
 ### Arreglado

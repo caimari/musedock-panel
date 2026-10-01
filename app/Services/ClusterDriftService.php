@@ -173,8 +173,18 @@ final class ClusterDriftService
         if ($npm) {
             $notes[] = 'npm global (herramientas, no suele afectar a las apps): faltan en el nodo: ' . implode(', ', $npm) . '.';
         }
+        // `php` a secas (crons, scripts, Composer) usa la versión por defecto del
+        // sistema: si difiere, tras un relevo los mismos crons corren con otro PHP.
+        $mcli = (string)($m['runtime']['php_default_cli'] ?? '');
+        $scli = (string)($s['runtime']['php_default_cli'] ?? '');
+        if ($mcli !== '' && $scli !== '' && $mcli !== $scli) {
+            $diff[] = "PHP por defecto distinto (master {$mcli}, nodo {$scli}): los crons y scripts que llaman a `php` correrían con otra versión tras un relevo. "
+                . "En el nodo: update-alternatives --set php /usr/bin/php{$mcli}";
+        }
         if (!empty($m['runtime']['composer']) && empty($s['runtime']['composer'])) {
-            $diff[] = 'Composer: el nodo no lo tiene.';
+            $diff[] = in_array('composer', (array)($s['runtime']['apt_manual'] ?? []), true)
+                ? "Composer: está instalado en el nodo pero `composer --version` falla (PHP por defecto del nodo: " . ($scli ?: '?') . ')'
+                : 'Composer: el nodo no lo tiene.';
         }
         $checked[] = 'Node/npm/Composer';
 
