@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.249',
+                'date' => '2026-10-01',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['`config_mirror` ya copia el Caddyfile aunque una web escriba su log en la carpeta logs/ del hosting (en el slave caddy no podia escribir y caddy validate fallaba): valida con esos logs en /tmp y, al aplicar, da permiso de escritura a caddy (ACL, sin cambiar el dueño)'],
+                        'en' => ['`config_mirror` now copies the Caddyfile even when a site logs into the hosting logs/ folder (on the slave caddy could not write and caddy validate failed): it validates with those logs in /tmp and, on apply, grants caddy write access (ACL, owner unchanged)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.248',
                 'date' => '2026-09-30',
                 'badge' => 'info',

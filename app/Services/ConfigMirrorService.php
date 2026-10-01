@@ -524,8 +524,22 @@ final class ConfigMirrorService
             $actions[] = ['what' => 'Caddyfile', 'result' => 'igual'];
             return;
         }
+        // Logs de Caddy (`output file …`) donde caddy no puede escribir en el slave:
+        // en el master la carpeta logs/ del hosting es de caddy, aquí la creó el panel
+        // a nombre del hosting (lsyncd excluye logs/, así que nadie la iguala).
+        // Para validar se apuntan a /tmp; al aplicar se dejan como en el master.
+        $logFix = self::caddyLogPathsToFix($sites);
+        $toValidate = $candidate;
+        if ($logFix) {
+            $tmpLogs = sys_get_temp_dir() . '/mdcaddy-logs';
+            @mkdir($tmpLogs, 0777, true);
+            @chmod($tmpLogs, 0777);
+            foreach (array_keys($logFix) as $n => $p) {
+                $toValidate = preg_replace('/(\boutput\s+file\s+)' . preg_quote($p, '/') . '(?=\s|$)/m', '${1}' . "{$tmpLogs}/log{$n}.log", $toValidate);
+            }
+        }
         $tmp = tempnam(sys_get_temp_dir(), 'mdcaddy');
-        file_put_contents($tmp, $candidate);
+        file_put_contents($tmp, $toValidate);
         @chmod($tmp, 0644);
         $validate = self::userExists('caddy') && is_dir('/var/lib/caddy')
             ? 'runuser -u caddy -- env HOME=/var/lib/caddy caddy validate --adapter caddyfile --config ' . escapeshellarg($tmp) . ' 2>&1'
@@ -552,11 +566,74 @@ final class ConfigMirrorService
         $actions[] = ['what' => 'Caddyfile', 'result' => 'actualizado (webs del master; se aplica al promover, sin recargar Caddy ahora)',
             'lines_added' => array_slice(array_values(array_diff($will, $was)), 0, 30),
             'lines_removed' => array_slice(array_values(array_diff($was, $will)), 0, 30)];
+        foreach ($logFix as $p => $how) {
+            $actions[] = ['what' => "log de Caddy {$p}", 'result' => $how];
+        }
         if ($apply) {
+            foreach ($logFix as $p => $how) {
+                $dir = dirname($p);
+                if (!is_dir($dir)) {
+                    @mkdir($dir, 0755, true);
+                    @chown($dir, 'caddy');
+                    @chgrp($dir, 'caddy');
+                } else {
+                    // Permiso añadido (ACL): el dueño de la carpeta no cambia.
+                    exec('setfacl -m u:caddy:rwx -m d:u:caddy:rw ' . escapeshellarg($dir) . ' 2>&1', $o, $rc);
+                    if (is_file($p)) {
+                        exec('setfacl -m u:caddy:rw ' . escapeshellarg($p) . ' 2>&1', $o, $rc);
+                    }
+                }
+                if (!self::caddyCanWrite($p)) {
+                    $issues[] = "Caddyfile: caddy sigue sin poder escribir {$p}; no se aplica.";
+                    $actions[] = ['what' => 'Caddyfile', 'result' => 'omitido'];
+                    return;
+                }
+            }
             self::backup($path);
             file_put_contents($path, $candidate);
             $state['caddy_pending'] = true;
         }
+    }
+
+    /**
+     * Rutas `output file` de las webs del master donde caddy no puede escribir
+     * aquí. Solo las que se pueden igualar sin riesgo: carpeta logs/ de un
+     * hosting o /var/log/caddy. Devuelve [ruta => qué se hará].
+     */
+    private static function caddyLogPathsToFix(array $sites): array
+    {
+        if (!self::userExists('caddy')) {
+            return [];
+        }
+        preg_match_all('/\boutput\s+file\s+(\S+)/', implode("\n", $sites), $m);
+        $fix = [];
+        foreach (array_unique($m[1] ?? []) as $p) {
+            if (!preg_match('#^(/var/www/vhosts/[A-Za-z0-9._-]+/logs|/var/log/caddy)/[A-Za-z0-9._-]+$#', $p) || str_contains($p, '..')) {
+                continue;
+            }
+            if (!self::caddyCanWrite($p)) {
+                $fix[$p] = is_dir(dirname($p))
+                    ? 'se da permiso de escritura a caddy (ACL; el dueño no cambia)'
+                    : 'se crea la carpeta, de caddy:caddy';
+            }
+        }
+        return $fix;
+    }
+
+    private static function caddyCanWrite(string $file): bool
+    {
+        // La carpeta también: Caddy rota el log creando ficheros nuevos en ella.
+        $targets = is_file($file) ? [$file, dirname($file)] : [dirname($file)];
+        foreach ($targets as $t) {
+            if (!file_exists($t)) {
+                return false;
+            }
+            exec('runuser -u caddy -- test -w ' . escapeshellarg($t) . ' 2>/dev/null', $o, $rc);
+            if ($rc !== 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     // ── Pools de PHP-FPM ──

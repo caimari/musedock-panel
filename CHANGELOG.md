@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.249] — 2026-10-01 — config_mirror copia el Caddyfile aunque las webs escriban logs en su carpeta
+
+### Arreglado
+- **`config_mirror` no podía copiar el Caddyfile cuando una web escribe su log en la carpeta `logs/` del hosting.** En el slave, esa carpeta la crea el panel a nombre del hosting, y lsyncd no la copia. Caddy no puede escribir en ella y `caddy validate` falla con "permission denied" (visto en Filemon con musedock.com). Ahora, para la validación, esos logs se apuntan a `/tmp`. Al aplicar, se da permiso de escritura a `caddy` con ACL sobre esa carpeta, sin cambiar el dueño. Si la carpeta no existe, se crea a nombre de `caddy`. Solo se toca `/var/www/vhosts/<hosting>/logs/` y `/var/log/caddy/`.
+
 ## [1.0.248] — 2026-09-30 — "Igualar módulos" de Caddy funciona en un Ubuntu 22.04 recién instalado
 
 ### Arreglado
