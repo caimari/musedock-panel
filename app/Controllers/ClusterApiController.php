@@ -23,6 +23,9 @@ class ClusterApiController
         'enc_key',
         // Emparejamiento (pair-accept): token del master y nonce.
         'master_token', 'nonce',
+        // Avisos (set-notify-config): contraseña SMTP y token de Telegram en claro
+        // por el canal autenticado; el nodo los vuelve a cifrar con su clave.
+        'smtp_pass', 'telegram_token',
     ];
 
     /** Return a copy of $payload with secret values masked, recursively. */
@@ -551,6 +554,8 @@ class ClusterApiController
                 // Configuración del sistema (supervisor, cron, Caddyfile, pools PHP) que
                 // el slave copia y adapta (ConfigMirrorService). Solo lectura aquí.
                 'export-system-config' => \MuseDockPanel\Services\ConfigMirrorService::export(),
+                // Avisos del master copiados a este nodo (notify_configure copy_to_nodes).
+                'set-notify-config' => \MuseDockPanel\Services\NotificationService::importConfig($payload),
                 // Inventario de este nodo (solo lectura) para que el master compare
                 // (cluster_drift). No depende de que el MCP esté activado aquí.
                 'clone-inventory'  => ['ok' => true, 'inventory' => \MuseDockPanel\Mcp\McpInventory::build(

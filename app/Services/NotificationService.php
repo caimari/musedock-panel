@@ -29,6 +29,49 @@ class NotificationService
      * True when email notifications are configured from Settings > Notifications.
      * This checks channel config only (not monitor channel toggles).
      */
+    /** Claves de avisos que se copian del master a sus nodos. */
+    private const SHARED_KEYS = [
+        'notify_email_method', 'notify_email_to', 'notify_smtp_host', 'notify_smtp_port', 'notify_smtp_user',
+        'notify_smtp_from', 'notify_smtp_from_name', 'notify_smtp_encryption', 'notify_telegram_chat_id',
+        'monitor_notify_email', 'monitor_notify_telegram',
+    ];
+
+    /**
+     * Configuración de avisos para enviar a un nodo. Los secretos van en claro
+     * (por el canal autenticado del cluster): cada panel cifra con SU clave
+     * (derivada de su DB_PASS), así que el valor cifrado no sirve en otro nodo.
+     */
+    public static function exportConfig(): array
+    {
+        $out = [];
+        foreach (self::SHARED_KEYS as $k) {
+            $out[$k] = Settings::get($k, '');
+        }
+        $out['smtp_pass'] = ReplicationService::decryptPassword(Settings::get('notify_smtp_pass', ''));
+        $out['telegram_token'] = ReplicationService::decryptPassword(Settings::get('notify_telegram_token', ''));
+        return $out;
+    }
+
+    /** Acción de cluster set-notify-config (en el nodo). */
+    public static function importConfig(array $p): array
+    {
+        $n = 0;
+        foreach (self::SHARED_KEYS as $k) {
+            if (array_key_exists($k, $p)) {
+                Settings::set($k, (string)$p[$k]);
+                $n++;
+            }
+        }
+        if (($p['smtp_pass'] ?? '') !== '') {
+            Settings::set('notify_smtp_pass', ReplicationService::encryptPassword((string)$p['smtp_pass']));
+        }
+        if (($p['telegram_token'] ?? '') !== '') {
+            Settings::set('notify_telegram_token', ReplicationService::encryptPassword((string)$p['telegram_token']));
+        }
+        LogService::log('cluster.notify', 'import', "Configuración de avisos recibida del master ({$n} ajustes)");
+        return ['ok' => true, 'imported' => $n, 'email_ready' => self::isEmailConfigured()];
+    }
+
     public static function isEmailConfigured(): bool
     {
         $to = self::getRecipientEmail();

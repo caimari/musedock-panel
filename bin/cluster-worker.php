@@ -162,6 +162,21 @@ if (time() - (int)Settings::get('firewall_audit_run_at', '0') >= 900) {
     }
 }
 
+// ─── Step 0d: Salud de las réplicas (cada 5 min, en cualquier rol) ──
+// Slot perdido o a punto, réplica de PG sin recibir, MariaDB parada, Redis
+// desenganchado: se avisa (y se avisa de nuevo cuando se arregla).
+if (time() - (int)Settings::get('replication_health_run_at', '0') >= 300) {
+    Settings::set('replication_health_run_at', (string)time());
+    try {
+        $rh = \MuseDockPanel\Services\ReplicationHealthService::checkAndNotify();
+        if (!empty($rh['issues'])) {
+            logMsg('Réplica: ' . count($rh['issues']) . ' problema(s): ' . implode(' | ', $rh['issues']));
+        }
+    } catch (\Throwable $e) {
+        logMsg('Replication health error: ' . $e->getMessage());
+    }
+}
+
 // ─── Step 1: Process pending queue items ──────────────────────
 logMsg("Processing queue...");
 try {

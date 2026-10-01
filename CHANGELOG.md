@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.260] — 2026-10-01 — Avisos cuando se rompe una réplica, y avisos configurables por MCP
+
+### Añadido
+- **Vigilancia de réplicas con aviso** (`ReplicationHealthService`, cada 5 min en `cluster-worker`, en cualquier rol). Hasta ahora una réplica rota pasaba en silencio hasta el día del relevo. Avisa por los canales del panel de:
+  - un slot de PostgreSQL **perdido** (se superó `max_slot_wal_keep_size`: hay que recopiar la réplica), a punto de perderse, o más de 10 min sin réplica conectada (no cuentan los slots que nunca se han usado);
+  - una réplica de PostgreSQL que no recibe del master;
+  - la réplica de MariaDB/MySQL parada (con su error) o más de 15 min por detrás;
+  - Redis réplica con el enlace caído.
+  Avisa una vez por problema, lo repite cada 6 h si sigue y avisa cuando se arregla.
+- **MCP `notify_status`** (solo lectura): por dónde avisa el panel (correo y/o Telegram, servidor, remitente y destinatario, nunca secretos), si los avisos están activados y el último resultado de la vigilancia de réplicas.
+- **MCP `notify_configure`**: configura y activa el correo (SMTP) y/o Telegram. La contraseña y el token se leen de un fichero bajo `/root/`, nunca del chat, y se guardan cifrados. `enable_email` y `enable_telegram` activan lo ya configurado. Con `copy_to_nodes`, el master copia su configuración de avisos a todos sus nodos por el canal autenticado del cluster (acción `set-notify-config`): cada nodo vuelve a cifrar los secretos con su propia clave, y en el log se enmascaran. `test=true` envía una prueba.
+- `failover_preflight` avisa si el panel no puede avisar de nada y de los problemas de réplica que haya en ese momento.
+
 ## [1.0.259] — 2026-10-01 — Cambio de DNS en un relevo: completo, y la vuelta solo devuelve lo que se movió
 
 ### Arreglado (importante)

@@ -133,6 +133,34 @@ final class McpClusterTools
                     'apply' => $apply,
                 ], ['domain']),
             ],
+            'notify_status' => [
+                'write' => false,
+                'title' => 'Avisos del panel: cómo y a quién',
+                'description' => 'Solo lectura. Dice si este panel puede enviar avisos (correo y/o Telegram), por dónde (servidor SMTP, remitente, destinatario; nunca contraseñas ni tokens), si los avisos del monitor están activados y el último resultado de la vigilancia de réplicas. Con `node` se consulta otro nodo.',
+                'inputSchema' => $o([]),
+            ],
+            'notify_configure' => [
+                'write' => true,
+                'title' => 'Configurar los avisos del panel',
+                'description' => 'Configura el correo (SMTP) y/o Telegram por los que este panel envía avisos, y los activa. Los secretos NUNCA pasan por la conversación: la contraseña SMTP y el token de Telegram se leen de un fichero de este servidor (solo bajo /root/) que el usuario crea con `read -rs`; se guardan cifrados. Sin apply devuelve el plan; con test=true envía un aviso de prueba tras aplicar. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o([
+                    'email_to' => ['type' => 'string', 'description' => 'Destinatario de los avisos'],
+                    'smtp_host' => ['type' => 'string'],
+                    'smtp_port' => ['type' => 'integer', 'description' => '587 (STARTTLS) o 465 (SSL)'],
+                    'smtp_encryption' => ['type' => 'string', 'enum' => ['tls', 'ssl', 'none']],
+                    'smtp_user' => ['type' => 'string'],
+                    'smtp_from' => ['type' => 'string', 'description' => 'Remitente (por defecto smtp_user)'],
+                    'smtp_from_name' => ['type' => 'string'],
+                    'smtp_pass_file' => ['type' => 'string', 'description' => 'Fichero bajo /root/ con la contraseña SMTP (una línea)'],
+                    'telegram_token_file' => ['type' => 'string', 'description' => 'Fichero bajo /root/ con el token del bot de Telegram'],
+                    'telegram_chat_id' => ['type' => 'string'],
+                    'enable_email' => ['type' => 'boolean', 'description' => 'Activar (true) o desactivar (false) los avisos por correo con lo ya configurado'],
+                    'enable_telegram' => ['type' => 'boolean', 'description' => 'Activar o desactivar los avisos por Telegram'],
+                    'copy_to_nodes' => ['type' => 'boolean', 'description' => 'En el master: copiar esta configuración de avisos (secretos incluidos, por el canal autenticado del cluster) a todos sus nodos'],
+                    'test' => ['type' => 'boolean', 'description' => 'Enviar un aviso de prueba tras aplicar'],
+                    'apply' => $apply,
+                ]),
+            ],
             'failover_dns_plan' => [
                 'write' => false,
                 'title' => 'Qué DNS cambiaría un relevo',
@@ -234,6 +262,8 @@ final class McpClusterTools
             'hosting_php_settings'  => self::hostingPhp($args),
             'config_mirror'         => self::configMirror($args),
             'failover_dns_plan'     => self::dnsPlan(),
+            'notify_status'         => self::notifyStatus(),
+            'notify_configure'      => self::notifyConfigure($args),
             'firewall_audit'        => \MuseDockPanel\Services\FirewallAuditService::refreshStored(),
             'firewall_trusted_sources' => self::trustedSources($args),
             'filesync_status'       => self::filesyncStatus(),
@@ -241,6 +271,146 @@ final class McpClusterTools
             'filesync_extra_paths'  => self::filesyncExtraPaths($args),
             default                 => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
         };
+    }
+
+    // ── Avisos ───────────────────────────────────────────────────────────
+
+    private static function notifyStatus(): array
+    {
+        $ns = \MuseDockPanel\Services\NotificationService::class;
+        $health = json_decode(Settings::get('replication_health_state', '{}'), true);
+        $emailOn = Settings::get('monitor_notify_email', '0') === '1';
+        $tgOn = Settings::get('monitor_notify_telegram', '0') === '1';
+        $emailReady = $ns::isEmailConfigured();
+        $tgReady = Settings::get('notify_telegram_token', '') !== '' && Settings::get('notify_telegram_chat_id', '') !== '';
+        $issues = [];
+        if (!($emailOn && $emailReady) && !($tgOn && $tgReady)) {
+            $issues[] = 'Este panel NO puede avisar de nada (ni correo ni Telegram activos y configurados).';
+        }
+        if ($emailOn && $emailReady && preg_match('/(^|\.)' . preg_quote((string)Settings::get('mail_hostname', '#'), '/') . '$/', (string)Settings::get('notify_smtp_host', ''))) {
+            $issues[] = 'El correo de avisos sale por el servidor de correo del propio cluster: si este cae, el aviso tampoco sale. Conviene Telegram o un SMTP externo además.';
+        }
+        return [
+            'email' => [
+                'active' => $emailOn, 'configured' => $emailReady,
+                'method' => Settings::get('notify_email_method', 'smtp'),
+                'to' => $ns::getRecipientEmail(),
+                'smtp_host' => Settings::get('notify_smtp_host', ''), 'smtp_port' => Settings::get('notify_smtp_port', ''),
+                'smtp_user' => Settings::get('notify_smtp_user', ''), 'smtp_from' => Settings::get('notify_smtp_from', ''),
+                'smtp_password_set' => Settings::get('notify_smtp_pass', '') !== '',
+            ],
+            'telegram' => ['active' => $tgOn, 'configured' => $tgReady, 'chat_id' => Settings::get('notify_telegram_chat_id', '')],
+            'replication_health' => is_array($health) ? ($health['last'] ?? null) : null,
+            'issues' => $issues,
+        ];
+    }
+
+    private static function notifyConfigure(array $args): array
+    {
+        $readSecret = static function (string $path): string {
+            $real = realpath($path) ?: '';
+            if ($real === '' || !is_file($real) || !str_starts_with($real, '/root/')) {
+                throw new \InvalidArgumentException("{$path}: tiene que ser un fichero existente bajo /root/.");
+            }
+            return trim((string)strtok((string)file_get_contents($real), "\n"));
+        };
+        $set = [];
+        $plan = [];
+        if (isset($args['email_to'])) {
+            if (!filter_var($args['email_to'], FILTER_VALIDATE_EMAIL)) {
+                throw new \InvalidArgumentException('email_to no es un correo válido.');
+            }
+            $set['notify_email_to'] = (string)$args['email_to'];
+        }
+        foreach (['smtp_host' => 'notify_smtp_host', 'smtp_user' => 'notify_smtp_user', 'smtp_from' => 'notify_smtp_from', 'smtp_from_name' => 'notify_smtp_from_name'] as $a => $k) {
+            if (isset($args[$a])) {
+                $set[$k] = trim((string)$args[$a]);
+            }
+        }
+        if (isset($args['smtp_port'])) {
+            $set['notify_smtp_port'] = (string)(int)$args['smtp_port'];
+        }
+        if (isset($args['smtp_encryption'])) {
+            $set['notify_smtp_encryption'] = (string)$args['smtp_encryption'];
+        }
+        $secretPlan = [];
+        if (!empty($args['smtp_pass_file'])) {
+            $p = $readSecret((string)$args['smtp_pass_file']);
+            if ($p === '') {
+                throw new \InvalidArgumentException('El fichero de la contraseña SMTP está vacío.');
+            }
+            $set['notify_smtp_pass'] = ReplicationService::encryptPassword($p);
+            $secretPlan[] = 'contraseña SMTP: se guardará cifrada (leída de ' . $args['smtp_pass_file'] . ')';
+        }
+        if (!empty($args['telegram_token_file'])) {
+            $t = $readSecret((string)$args['telegram_token_file']);
+            if (!preg_match('/^\d+:[A-Za-z0-9_-]{20,}$/', $t)) {
+                throw new \InvalidArgumentException('El fichero no contiene un token de bot de Telegram válido.');
+            }
+            $set['notify_telegram_token'] = ReplicationService::encryptPassword($t);
+            $secretPlan[] = 'token de Telegram: se guardará cifrado (leído de ' . $args['telegram_token_file'] . ')';
+        }
+        if (isset($args['telegram_chat_id'])) {
+            $set['notify_telegram_chat_id'] = trim((string)$args['telegram_chat_id']);
+        }
+        if (isset($set['notify_smtp_host'])) {
+            $set['notify_email_method'] = 'smtp';
+            $set['monitor_notify_email'] = '1';
+            if (!isset($set['notify_smtp_from']) && isset($set['notify_smtp_user']) && Settings::get('notify_smtp_from', '') === '') {
+                $set['notify_smtp_from'] = $set['notify_smtp_user'];
+            }
+        }
+        if (isset($set['notify_telegram_token']) || isset($set['notify_telegram_chat_id'])) {
+            $set['monitor_notify_telegram'] = '1';
+        }
+        if (array_key_exists('enable_email', $args)) {
+            $set['monitor_notify_email'] = !empty($args['enable_email']) ? '1' : '0';
+        }
+        if (array_key_exists('enable_telegram', $args)) {
+            $set['monitor_notify_telegram'] = !empty($args['enable_telegram']) ? '1' : '0';
+        }
+        $copy = !empty($args['copy_to_nodes']);
+        $nodes = $copy ? ClusterService::getNodes() : [];
+        if ($copy && self::role() !== 'master') {
+            throw new \RuntimeException('copy_to_nodes se usa en el MASTER del cluster.');
+        }
+        if (!$set && !$copy) {
+            throw new \InvalidArgumentException('No hay nada que configurar.');
+        }
+        foreach ($set as $k => $v) {
+            $plan[$k] = in_array($k, ['notify_smtp_pass', 'notify_telegram_token'], true) ? '(cifrado)' : $v;
+        }
+        if ($copy) {
+            $plan['copy_to_nodes'] = array_map(static fn($n) => (string)$n['name'], $nodes);
+        }
+        if (empty($args['apply'])) {
+            return ['applied' => false, 'plan' => $plan, 'secrets' => $secretPlan,
+                'next' => 'Muestra el plan al usuario y, si lo confirma, repite con apply=true (y test=true para enviar una prueba). Después el usuario puede borrar el fichero del secreto con shred -u.'];
+        }
+        foreach ($set as $k => $v) {
+            Settings::set($k, $v);
+        }
+        $copied = [];
+        foreach ($nodes as $n) {
+            $r = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action',
+                ['action' => 'set-notify-config', 'payload' => \MuseDockPanel\Services\NotificationService::exportConfig()]);
+            $copied[(string)$n['name']] = !empty($r['ok']) && !empty($r['data']['ok'])
+                ? 'copiada' . (!empty($r['data']['email_ready']) ? '' : ' (el nodo dice que el correo no queda listo)')
+                : 'ERROR: ' . ($r['data']['error'] ?? $r['error'] ?? '?') . ' (¿panel del nodo anterior a 1.0.260?)';
+        }
+        LogService::log('mcp.notify', 'configure', 'Avisos configurados: ' . implode(', ', array_keys($plan)));
+        if ($copied) {
+            $plan['copy_result'] = $copied;
+        }
+        $test = null;
+        if (!empty($args['test'])) {
+            $host = gethostname();
+            $test = [
+                'email' => Settings::get('monitor_notify_email', '0') === '1' ? \MuseDockPanel\Services\NotificationService::sendEmail("[{$host}] Prueba de avisos", "Aviso de prueba del panel de {$host}.") : null,
+                'telegram' => Settings::get('monitor_notify_telegram', '0') === '1' ? \MuseDockPanel\Services\NotificationService::sendTelegram("[{$host}] Prueba de avisos del panel") : null,
+            ];
+        }
+        return ['applied' => true, 'plan' => $plan, 'test_sent' => $test, 'status' => self::notifyStatus()];
     }
 
     // ── Plan de DNS de un relevo (solo lectura) ──────────────────────────
@@ -523,6 +693,16 @@ final class McpClusterTools
             if (Settings::get('repl_pg_role', 'standalone') === 'standalone' && array_filter($pg, static fn($p) => $p['replicas'])) {
                 $issues[] = 'Hay réplicas de PostgreSQL conectadas pero el panel no lo tiene registrado: replication_adopt.';
             }
+        }
+        // Sin canal de avisos, un fallo de réplica o del master pasa en silencio.
+        foreach (self::notifyStatus()['issues'] as $ni) {
+            $issues[] = $ni;
+        }
+        try {
+            foreach (\MuseDockPanel\Services\ReplicationHealthService::issues() as $ri) {
+                $issues[] = $ri;
+            }
+        } catch (\Throwable) {
         }
 
         return [

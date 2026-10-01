@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.260',
+                'date' => '2026-10-01',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['**Aviso cuando se rompe una replica** (cada 5 min): slot de PostgreSQL perdido o a punto, replica de PostgreSQL sin recibir, replica de MariaDB parada o muy atrasada, Redis desenganchado. Una vez por problema, repetido cada 6 h y aviso al arreglarse',
+                            'MCP `notify_status` (solo lectura) y `notify_configure` (correo SMTP y/o Telegram; secretos leidos de un fichero, nunca del chat; `copy_to_nodes` copia los avisos del master a sus nodos por el canal del cluster)',
+                            '`failover_preflight` avisa si el panel no puede avisar de nada y de los problemas de replica actuales'],
+                        'en' => ['**Alert when a replica breaks** (every 5 min): PostgreSQL slot lost or about to be, PostgreSQL replica not receiving, MariaDB replica stopped or far behind, Redis link down. Once per issue, repeated every 6 h and notified when fixed',
+                            'MCP `notify_status` (read-only) and `notify_configure` (SMTP email and/or Telegram; secrets read from a file, never from chat; `copy_to_nodes` copies the master alerts config to its nodes over the cluster channel)',
+                            '`failover_preflight` warns when the panel cannot alert at all and about current replication issues'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.259',
                 'date' => '2026-10-01',
                 'badge' => 'info',
