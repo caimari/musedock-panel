@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.270] — 2026-10-03 — Arreglo al mover la base del webmail
+
+### Arreglado
+- **`webmail-move-db.php` fallaba al restaurar** ("could not open input file … Permission denied"). La copia de la base es de root y `pg_restore` se ejecuta como `postgres`, así que no podía leerla. Ahora la lee por la entrada estándar. Volver a ejecutarlo es seguro: reutiliza el usuario y la base vacía que se crearon en el intento fallido.
+
 ## [1.0.269] — 2026-10-03 — Webmail en espejo en el nodo de relevo
 
 ### Añadido

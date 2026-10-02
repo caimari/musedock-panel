@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.270',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['webmail-move-db.php fallaba al restaurar (postgres no podia leer la copia de root); ahora la lee por la entrada estandar. Repetirlo es seguro'],
+                        'en' => ['webmail-move-db.php failed to restore (postgres could not read the root-owned dump); it now reads it from stdin. Safe to re-run'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.269',
                 'date' => '2026-10-03',
                 'badge' => 'info',

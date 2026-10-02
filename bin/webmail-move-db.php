@@ -40,7 +40,7 @@ if ((int)$fromPort === $toPort) {
     exit(0);
 }
 $pg = static fn(int $port, string $sql) => trim((string)shell_exec(
-    'runuser -u postgres -- psql -p ' . $port . ' -X -At -v ON_ERROR_STOP=1 -c ' . escapeshellarg($sql) . ' 2>&1'));
+    'cd /tmp && runuser -u postgres -- psql -p ' . $port . ' -X -At -v ON_ERROR_STOP=1 -c ' . escapeshellarg($sql) . ' 2>&1'));
 $q = static fn(string $s) => str_replace("'", "''", $s);
 
 $inRecovery = $pg($toPort, 'SELECT pg_is_in_recovery()');
@@ -50,7 +50,7 @@ if ($inRecovery !== 'f') {
 }
 $roleExists = $pg($toPort, "SELECT 1 FROM pg_roles WHERE rolname = '{$q($user)}'") === '1';
 $dbExists = $pg($toPort, "SELECT 1 FROM pg_database WHERE datname = '{$q($db)}'") === '1';
-$tables = $dbExists ? (int)trim((string)shell_exec('runuser -u postgres -- psql -p ' . $toPort . ' -X -At -d ' . escapeshellarg($db)
+$tables = $dbExists ? (int)trim((string)shell_exec('cd /tmp && runuser -u postgres -- psql -p ' . $toPort . ' -X -At -d ' . escapeshellarg($db)
     . " -c \"SELECT count(*) FROM information_schema.tables WHERE table_schema='public'\" 2>&1")) : 0;
 if ($dbExists && $tables > 0) {
     fwrite(STDERR, "Ya existe la base {$db} en el puerto {$toPort} con {$tables} tablas: no la piso. Revísala a mano.\n");
@@ -84,15 +84,17 @@ if (!$dbExists) {
 }
 $dump = '/var/backups/musedock/roundcube-' . date('Ymd_His') . '.dump';
 @mkdir(dirname($dump), 0750, true);
-$o = trim((string)shell_exec('runuser -u postgres -- pg_dump -p ' . (int)$fromPort . ' -Fc ' . escapeshellarg($db)
+$o = trim((string)shell_exec('cd /tmp && runuser -u postgres -- pg_dump -p ' . (int)$fromPort . ' -Fc ' . escapeshellarg($db)
     . ' > ' . escapeshellarg($dump) . ' 2>&1'));
 if (!is_file($dump) || filesize($dump) < 100) {
     fwrite(STDERR, "pg_dump falló: {$o}\n");
     exit(1);
 }
 chmod($dump, 0600);
-$o = trim((string)shell_exec('runuser -u postgres -- pg_restore -p ' . $toPort . ' -d ' . escapeshellarg($db)
-    . ' --no-owner --role=' . escapeshellarg($user) . ' ' . escapeshellarg($dump) . ' 2>&1'));
+// La copia es de root (0600): pg_restore (usuario postgres) la lee por la entrada
+// estándar, que abre root. cd /tmp evita el aviso "could not change directory".
+$o = trim((string)shell_exec('cd /tmp && runuser -u postgres -- pg_restore -p ' . $toPort . ' -d ' . escapeshellarg($db)
+    . ' --no-owner --role=' . escapeshellarg($user) . ' < ' . escapeshellarg($dump) . ' 2>&1'));
 if (stripos($o, 'error') !== false) {
     fwrite(STDERR, "pg_restore dio errores (la configuración NO se ha cambiado):\n{$o}\n");
     exit(1);
