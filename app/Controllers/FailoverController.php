@@ -125,13 +125,20 @@ class FailoverController
         // significa "conservar el token guardado" (cf_existing = su posición).
         $existing = $_POST['cf_existing'] ?? [];
         $stored = CloudflareService::getConfiguredAccounts();
+        $rejected = [];
 
         for ($i = 0; $i < count($names); $i++) {
             $name  = trim($names[$i] ?? '');
             $token = trim($tokens[$i] ?? '');
             $ex = (string)($existing[$i] ?? '');
-            if ($token === '' && $ex !== '' && ctype_digit($ex) && isset($stored[(int)$ex]['token'])) {
-                $token = (string)$stored[(int)$ex]['token'];
+            $prev = ($ex !== '' && ctype_digit($ex)) ? (string)($stored[(int)$ex]['token'] ?? '') : '';
+            if ($token === '' && $prev !== '') {
+                $token = $prev;
+            } elseif ($token !== '' && $prev !== '' && $token !== $prev && empty(CloudflareService::verifyToken($token)['ok'])) {
+                // Un token nuevo que Cloudflare no acepta (p. ej. una contraseña que el
+                // navegador rellenó solo) no sustituye al que había.
+                $rejected[] = $name;
+                $token = $prev;
             }
             if (!$name || !$token) continue;
 
@@ -176,6 +183,9 @@ class FailoverController
         LogService::log('failover.cloudflare', null, count($accounts) . ' CF accounts saved');
 
         $msg = count($accounts) . ' cuenta(s) Cloudflare guardada(s) y sincronizada(s) con slaves.';
+        if ($rejected) {
+            $msg .= ' AVISO: Cloudflare no aceptó el token nuevo de ' . implode(', ', $rejected) . '; se ha conservado el anterior.';
+        }
         if ($caddyTokenUpdated) {
             $msg .= ' Token propagado a Caddy en el master.';
         }

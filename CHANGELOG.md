@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.263] — 2026-10-02 — El navegador ya no puede colar una contraseña como token de Cloudflare
+
+### Arreglado
+- **Al guardar las cuentas de Cloudflare, el navegador podía rellenar un token con una contraseña guardada.** El campo era de tipo contraseña y vacío (desde la 1.0.262 la página ya no envía los tokens), así que Chrome lo rellenaba solo y se guardaba como token. Pasó con la cuenta Muse Layer LLC en mortadelo. Ahora el campo es de texto con el contenido oculto, sin autocompletado. Además, al guardar, **un token nuevo que Cloudflare no acepta no sustituye al anterior**: se conserva el que había y se avisa.
+
 ## [1.0.262] — 2026-10-02 — Correo y hosting del mismo dominio se reconocen, y /domains carga al momento
 
 ### Añadido

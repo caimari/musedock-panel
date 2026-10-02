@@ -1955,7 +1955,10 @@
                                 <label class="form-label small">API Token</label>
                                 <div class="input-group input-group-sm">
                                     <?php /* El token NO se envía a la página (antes iba en value=""): vacío = conservar el guardado. */ ?>
-                                    <input type="password" name="cf_token[]" class="form-control cf-token-input" value="" autocomplete="new-password"
+                                    <?php /* type=text con texto oculto por CSS: un type=password vacío lo rellena Chrome con contraseñas guardadas
+                                               y se guardaba como token (pasó con Muse Layer, 2026-10-02). */ ?>
+                                    <input type="text" name="cf_token[]" class="form-control cf-token-input" value="" autocomplete="off" spellcheck="false"
+                                           data-lpignore="true" data-1p-ignore style="-webkit-text-security:disc;text-security:disc;"
                                            placeholder="<?= !empty($acct['token']) ? '•••••••• guardado — déjalo vacío para conservarlo' : 'Token Cloudflare' ?>">
                                     <input type="hidden" name="cf_existing[]" value="<?= (int)$i ?>">
                                     <button type="button" class="btn btn-outline-info" onclick="foVerifyCfToken(this)">

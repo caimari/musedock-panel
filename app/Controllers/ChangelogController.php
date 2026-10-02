@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.263',
+                'date' => '2026-10-02',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Cuentas Cloudflare: el navegador podia rellenar el campo del token (vacio, tipo contraseña) con una contraseña guardada y se guardaba como token. Ahora el campo no se autocompleta y un token nuevo que Cloudflare no acepta no sustituye al anterior (se avisa)'],
+                        'en' => ['Cloudflare accounts: the browser could autofill the (empty, password-type) token field with a saved password, which was stored as the token. The field no longer autofills and a new token Cloudflare rejects does not replace the previous one (warning shown)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.262',
                 'date' => '2026-10-02',
                 'badge' => 'info',
