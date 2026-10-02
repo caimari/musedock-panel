@@ -159,53 +159,52 @@ class FailoverController
 
         CloudflareService::saveAccounts($accounts);
 
-        // Propagate first token to /etc/default/caddy for SSL certificates (DNS-01)
-        $caddyTokenUpdated = false;
-        $updateCaddyToken = !empty($_POST['update_caddy_token']) && !empty($accounts);
-        if ($updateCaddyToken) {
-            $firstToken = \MuseDockPanel\Services\ReplicationService::decryptPassword($accounts[0]['token']);
-            if ($firstToken && file_exists('/usr/local/bin/update-caddy-token.sh')) {
-                $escapedToken = escapeshellarg($firstToken);
-                $out = shell_exec("sudo /usr/local/bin/update-caddy-token.sh {$escapedToken} 2>&1");
-                $caddyTokenUpdated = str_contains($out ?? '', 'OK');
-                if ($caddyTokenUpdated) {
-                    // Record WHEN it happened. The checkbox itself is deliberately
-                    // not persisted (it is a one-shot action that restarts Caddy on
-                    // every node, not a preference), but the outcome is useful.
-                    \MuseDockPanel\Settings::set('failover_cf_token_propagated_at', date('Y-m-d H:i:s'));
-                    LogService::log('failover.cloudflare', null, 'Caddy CLOUDFLARE_API_TOKEN updated in /etc/default/caddy');
-                }
-            }
+        // Token de Caddy (CLOUDFLARE_API_TOKEN, certificados DNS-01): el de la cuenta
+        // que contiene la zona del panel, no "la primera". Se aplica SIEMPRE que haya
+        // cambiado, aquí y en cada slave (cada nodo compara con el suyo y solo reinicia
+        // Caddy si es distinto). La casilla ahora solo FUERZA reescribir y reiniciar.
+        $forceCaddyToken = !empty($_POST['update_caddy_token']) && !empty($accounts);
+        $caddyToken = CloudflareService::caddyTokenFor(CloudflareService::accountsForTransfer());
+        [$caddyTokenUpdated, $caddyLocalErr] = $caddyToken !== ''
+            ? CloudflareService::syncCaddyToken($caddyToken, $forceCaddyToken)
+            : [false, null];
+        if ($caddyTokenUpdated) {
+            \MuseDockPanel\Settings::set('failover_cf_token_propagated_at', date('Y-m-d H:i:s'));
+            LogService::log('failover.cloudflare', null, 'Caddy CLOUDFLARE_API_TOKEN updated in /etc/default/caddy');
         }
 
-        // Push config to slaves (include caddy token flag so slaves also update their /etc/default/caddy)
-        $pushResults = FailoverService::pushConfigToSlaves($updateCaddyToken);
+        $pushResults = FailoverService::pushConfigToSlaves($forceCaddyToken, $caddyToken !== '' ? $caddyToken : null);
+        $updateCaddyToken = $caddyToken !== '';
         LogService::log('failover.cloudflare', null, count($accounts) . ' CF accounts saved');
 
         $msg = count($accounts) . ' cuenta(s) Cloudflare guardada(s) y sincronizada(s) con slaves.';
         if ($rejected) {
             $msg .= ' AVISO: Cloudflare no aceptó el token nuevo de ' . implode(', ', $rejected) . '; se ha conservado el anterior.';
         }
-        if ($caddyTokenUpdated) {
-            $msg .= ' Token propagado a Caddy en el master.';
-        }
-
-        // Report per-slave token outcome honestly. Previously this claimed
-        // "propagated to master AND slaves" without checking, so a slave that
-        // silently wrote nothing (missing helper script, undecryptable token)
-        // still looked like a success — the exact symptom of "no llega al slave".
+        // Resultado del token de Caddy nodo a nodo, sin dar por bueno lo que no se comprobó
+        // (antes un nodo en cola o con error salía como "sincronizado").
         if ($updateCaddyToken) {
-            // pushConfigToSlaves() returns ['ok'=>bool, 'results'=>[...]].
-            $failed = [];
+            $done = []; $same = []; $failed = [];
+            $local = 'master';
+            if ($caddyTokenUpdated)  { $done[] = $local; }
+            elseif ($caddyLocalErr)  { $failed[] = "{$local} ({$caddyLocalErr})"; }
+            else                     { $same[] = $local; }
             foreach (($pushResults['results'] ?? []) as $r) {
-                if (!empty($r['ok']) && empty($r['caddy_token_updated'])) {
-                    $failed[] = ($r['node'] ?? '?') . (!empty($r['caddy_token_error']) ? ' (' . $r['caddy_token_error'] . ')' : '');
+                $n = (string)($r['node'] ?? '?');
+                if (empty($r['ok'])) {
+                    $failed[] = "{$n} (no responde; queda en cola y se aplicará al reconectar)";
+                } elseif (!empty($r['caddy_token_updated'])) {
+                    $done[] = $n;
+                } elseif (!empty($r['caddy_token_error'])) {
+                    $failed[] = "{$n} ({$r['caddy_token_error']})";
+                } else {
+                    $same[] = $n;
                 }
             }
-            if (!empty($failed)) {
-                Flash::set('error', 'El token NO se aplico en: ' . implode(' | ', $failed));
-            } else {
-                $msg .= ' Token aplicado tambien en todos los slaves.';
+            if ($done) { $msg .= ' Token de Caddy actualizado (Caddy reiniciado) en: ' . implode(', ', $done) . '.'; }
+            if ($same) { $msg .= ' Ya lo tenían bien: ' . implode(', ', $same) . '.'; }
+            if ($failed) {
+                Flash::set('error', 'Token de Caddy NO aplicado en: ' . implode(' | ', $failed));
             }
         }
 

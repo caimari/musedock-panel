@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.265] — 2026-10-02 — El token de Caddy se sincroniza solo desde el master
+
+### Arreglado
+- **Guardar las cuentas de Cloudflare en el master no dejaba bien el token de Caddy en todos los nodos.** Solo se tocaba si se marcaba la casilla, se usaba siempre "la primera cuenta" (con varias cuentas, como Muse Layer, podía ser la equivocada) y un nodo que no respondía o con panel antiguo salía como "sincronizado". Ahora:
+  - el token de Caddy es el de **la cuenta que contiene la zona del dominio del panel** (p. ej. musedock.com), lo elija el master y lo manda a los slaves;
+  - **al guardar, siempre**: cada nodo (master y slaves) compara su `CLOUDFLARE_API_TOKEN` con ese y **solo si es distinto** lo escribe y reinicia Caddy; antes comprueba con Cloudflare que el token está activo (nunca cambia uno que funciona por uno que no);
+  - la casilla pasa a ser **"Forzar token en Caddy"** (reescribir y reiniciar aunque ya esté bien);
+  - el mensaje dice nodo a nodo: actualizado, ya lo tenía, error (con el motivo), en cola o panel antiguo sin actualizar.
+
+### Añadido
+- **MCP `cloudflare_caddy_token_sync`** (en el master, plan/apply): lo mismo que Guardar, con el resultado por nodo.
+- **MCP `cloudflare_tokens`** dice si Caddy tiene el token de la cuenta con la zona del panel.
+
 ## [1.0.263] — 2026-10-02 — Tokens de Cloudflare: los nodos ya no los reciben estropeados, y el navegador no cuela contraseñas
 
 ### Arreglado (importante)

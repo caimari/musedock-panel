@@ -447,6 +447,62 @@ class CloudflareService
         return $out;
     }
 
+    /**
+     * Qué token debe usar Caddy (CLOUDFLARE_API_TOKEN) de entre unas cuentas con el
+     * token en claro: el de la cuenta que contiene la zona del dominio del panel
+     * (p. ej. musedock.com); si ninguna, la primera. Antes era siempre "la primera",
+     * y reordenar las cuentas podía dejar a Caddy con el token de otra cuenta.
+     */
+    public static function caddyTokenFor(array $accounts): string
+    {
+        $host = strtolower((string)Settings::get('panel_hostname', ''));
+        foreach ($accounts as $a) {
+            foreach (($a['zones'] ?? []) as $z) {
+                $zn = strtolower((string)($z['name'] ?? ''));
+                if ($zn !== '' && ($host === $zn || str_ends_with($host, '.' . $zn))) {
+                    return trim((string)($a['token'] ?? ''));
+                }
+            }
+        }
+        return trim((string)($accounts[0]['token'] ?? ''));
+    }
+
+    /** CLOUDFLARE_API_TOKEN que tiene ahora Caddy en este servidor ('' si ninguno). */
+    public static function currentCaddyToken(): string
+    {
+        foreach (@file('/etc/default/caddy', FILE_IGNORE_NEW_LINES) ?: [] as $l) {
+            if (preg_match('/^\s*CLOUDFLARE_API_TOKEN\s*=\s*"?([^"\s]+)/', $l, $m)) {
+                return $m[1];
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Pone $token en el Caddy de este servidor SOLO si es distinto del que tiene
+     * (el ayudante reinicia Caddy), o siempre con $force. Antes de reiniciar comprueba
+     * con Cloudflare que el token está activo: nunca cambia uno que funciona por uno
+     * que no. Devuelve [cambiado, error|null].
+     */
+    public static function syncCaddyToken(string $token, bool $force = false): array
+    {
+        if ($token === '' || !self::looksLikeApiToken($token)) {
+            return [false, 'no hay un token válido que poner'];
+        }
+        if (!$force && self::currentCaddyToken() === $token) {
+            return [false, null];
+        }
+        $v = self::verifyToken($token);
+        if (empty($v['ok']) || (($v['result']['status'] ?? '') !== 'active')) {
+            return [false, 'Cloudflare no da el token por activo; Caddy se queda con el que tenía'];
+        }
+        if (!file_exists('/usr/local/bin/update-caddy-token.sh')) {
+            return [false, 'falta /usr/local/bin/update-caddy-token.sh en este nodo'];
+        }
+        $out = trim((string)shell_exec('sudo -n /usr/local/bin/update-caddy-token.sh ' . escapeshellarg($token) . ' 2>&1'));
+        return str_contains($out, 'OK') ? [true, null] : [false, 'update-caddy-token.sh: ' . ($out !== '' ? $out : 'sin salida')];
+    }
+
     /** ¿Parece un token de API de Cloudflare (y no un texto cifrado)? */
     public static function looksLikeApiToken(string $t): bool
     {

@@ -1991,13 +1991,14 @@
                 <div class="form-check mt-2 mb-1">
                     <input class="form-check-input" type="checkbox" id="update_caddy_token" name="update_caddy_token" value="1">
                     <label class="form-check-label small" for="update_caddy_token">
-                        <strong>Propagar token a Caddy</strong> — Escribir el primer token en <code>/etc/default/caddy</code> para que Caddy pueda generar certificados SSL via DNS-01
+                        <strong>Forzar token en Caddy</strong> — reescribir <code>/etc/default/caddy</code> y reiniciar Caddy en todos los nodos aunque ya tengan el token bueno
                     </label>
                 </div>
-                <div class="small text-warning mb-2 ms-4">
-                    <i class="bi bi-exclamation-triangle me-1"></i>
-                    Es una <strong>acción puntual</strong>, no un ajuste: al marcarla se reinicia Caddy en el master y en todos los slaves.
-                    Por eso no se queda marcada — desmárcala salvo que quieras volver a propagar.
+                <div class="small text-muted mb-2 ms-4">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Sin marcar nada, al guardar cada nodo (master y slaves) compara su token de Caddy con el de la cuenta que contiene
+                    la zona del panel y <strong>solo si ha cambiado</strong> lo actualiza y reinicia Caddy (antes se comprueba con Cloudflare).
+                    El resultado por nodo aparece arriba tras guardar.
                     <?php
                     $cfTokenAt = \MuseDockPanel\Settings::get('failover_cf_token_propagated_at', '');
                     if ($cfTokenAt !== ''):
@@ -2022,8 +2023,8 @@
     if (!form) return;
 
     form.addEventListener('submit', function (e) {
-        const cb = document.getElementById('update_caddy_token');
-        if (!cb || !cb.checked) return;   // no restart -> normal submit
+        // Siempre por esta vía: aunque no se fuerce, guardar puede reiniciar Caddy
+        // si el token ha cambiado.
 
         e.preventDefault();
 

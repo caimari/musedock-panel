@@ -171,6 +171,15 @@ final class McpClusterTools
                 'description' => 'Solo lectura. Para cada token que usa este servidor (cuentas de Cloudflare del panel y CLOUDFLARE_API_TOKEN de Caddy en /etc/default/caddy): estado y caducidad según Cloudflare, id corto, a cuántas zonas llega y si puede leer DNS y reglas de Email Routing (lo prueba con lecturas). Nunca muestra el token. Sirve para reconocer cada token en el panel de Cloudflare (donde todos se llaman igual) y saber cuáles están en uso antes de limpiar.',
                 'inputSchema' => $o([]),
             ],
+            'cloudflare_caddy_token_sync' => [
+                'write' => true,
+                'title' => 'Poner el token bueno en Caddy de este nodo y de los slaves',
+                'description' => 'En el MASTER. Elige el token de Caddy (CLOUDFLARE_API_TOKEN, certificados DNS-01): el de la cuenta de Cloudflare del panel que contiene la zona del dominio del panel. Lo compara con el de Caddy aquí y en cada slave y SOLO donde sea distinto lo escribe y reinicia Caddy (antes comprueba con Cloudflare que está activo). force=true reescribe y reinicia en todos. Sin apply devuelve el plan (qué nodos cambiarían aquí; los slaves lo deciden ellos). Es lo mismo que pulsar Guardar en Cuentas Cloudflare. Nunca muestra el token. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o([
+                    'force' => ['type' => 'boolean', 'description' => 'Reescribir y reiniciar Caddy aunque ya tengan el token bueno'],
+                    'apply' => $apply,
+                ]),
+            ],
             'cloudflare_email_routing' => [
                 'write' => false,
                 'title' => 'Enrutamiento de correo de Cloudflare (Email Routing)',
@@ -353,6 +362,7 @@ final class McpClusterTools
             'monitor_configure'     => self::monitorConfigure($args),
             'cloudflare_email_routing' => self::cfEmailRouting($args),
             'cloudflare_tokens'     => self::cfTokens(),
+            'cloudflare_caddy_token_sync' => self::cfCaddyTokenSync($args),
             'dns_records'           => self::dnsRecords($args),
             'dns_record_set'        => self::dnsRecordSet($args),
             'notify_status'         => self::notifyStatus(),
@@ -571,9 +581,51 @@ final class McpClusterTools
             $seen[$h] = count($out);
             $out[] = $row;
         }
+        $want = CloudflareService::caddyTokenFor(CloudflareService::accountsForTransfer());
+        $have = CloudflareService::currentCaddyToken();
         return [
             'tokens' => $out,
+            'caddy_token' => $want === '' ? 'el panel no tiene cuentas con token'
+                : ($have === $want ? 'Caddy tiene el token de la cuenta con la zona del panel (correcto)'
+                : 'Caddy NO tiene el token de la cuenta con la zona del panel: arréglalo con cloudflare_caddy_token_sync (o Guardar en Cuentas Cloudflare del master)'),
             'note' => 'Para reconocerlos en Cloudflare (Mi perfil → Tokens de API, donde todos se llaman igual): por el número de zonas y los permisos. Un token que no aparezca aquí no lo usa ESTE servidor, pero puede usarlo otro (los nodos, el CMS MuseDock en sus ajustes de Cloudflare, otros proyectos): compruébalo antes de borrarlo.',
+        ];
+    }
+
+    private static function cfCaddyTokenSync(array $args): array
+    {
+        if (self::role() !== 'master') {
+            throw new \RuntimeException('Se usa en el MASTER: él elige el token y lo manda a los slaves.');
+        }
+        $token = CloudflareService::caddyTokenFor(CloudflareService::accountsForTransfer());
+        if ($token === '') {
+            throw new \RuntimeException('No hay cuentas de Cloudflare con token en este panel.');
+        }
+        $force = !empty($args['force']);
+        $short = static fn (string $t): string => $t === '' ? '(ninguno)' : substr(hash('sha256', $t), 0, 8);
+        $here = CloudflareService::currentCaddyToken();
+        $plan = [
+            'token_elegido' => 'huella ' . $short($token) . ' (cuenta con la zona de ' . Settings::get('panel_hostname', '?') . ')',
+            'este_nodo' => ($here === $token && !$force) ? 'ya lo tiene, no se toca' : 'se escribirá y se reiniciará Caddy (huella actual ' . $short($here) . ')',
+            'slaves' => 'cada uno compara y solo reinicia Caddy si es distinto' . ($force ? ' (forzado: todos)' : ''),
+        ];
+        if (empty($args['apply'])) {
+            return ['plan' => $plan, 'apply' => false];
+        }
+        [$changed, $err] = CloudflareService::syncCaddyToken($token, $force);
+        if ($changed) {
+            Settings::set('failover_cf_token_propagated_at', date('Y-m-d H:i:s'));
+        }
+        $push = FailoverService::pushConfigToSlaves($force, $token);
+        $nodes = [];
+        foreach (($push['results'] ?? []) as $r) {
+            $nodes[(string)($r['node'] ?? '?')] = empty($r['ok']) ? 'no responde: en cola'
+                : (!empty($r['caddy_token_updated']) ? 'actualizado, Caddy reiniciado'
+                : (!empty($r['caddy_token_error']) ? 'ERROR: ' . $r['caddy_token_error'] : 'ya lo tenía'));
+        }
+        return [
+            'este_nodo' => $changed ? 'actualizado, Caddy reiniciado' : ($err ? 'ERROR: ' . $err : 'ya lo tenía'),
+            'slaves' => $nodes,
         ];
     }
 

@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.265',
+                'date' => '2026-10-02',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['**Token de Caddy sincronizado desde el master**: al guardar las cuentas Cloudflare, cada nodo (master y slaves) compara su CLOUDFLARE_API_TOKEN con el de la cuenta que contiene la zona del panel (antes: siempre la primera cuenta) y solo si cambia lo escribe y reinicia Caddy, tras comprobar con Cloudflare que esta activo. La casilla pasa a "Forzar token en Caddy". Resultado por nodo: actualizado, ya lo tenia, error, en cola o panel antiguo'],
+                        'en' => ['**Caddy token synced from the master**: when saving Cloudflare accounts each node (master and slaves) compares its CLOUDFLARE_API_TOKEN with the token of the account holding the panel zone (previously: always the first account) and only if it differs writes it and restarts Caddy, after checking with Cloudflare that it is active. The checkbox becomes "Force token in Caddy". Per-node result: updated, already set, error, queued or outdated panel'],
+                    ],
+                    'added' => [
+                        'es' => ['MCP `cloudflare_caddy_token_sync` (master, plan/apply) y `cloudflare_tokens` indica si Caddy tiene el token correcto'],
+                        'en' => ['MCP `cloudflare_caddy_token_sync` (master, plan/apply) and `cloudflare_tokens` reports whether Caddy has the right token'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.263',
                 'date' => '2026-10-02',
                 'badge' => 'info',

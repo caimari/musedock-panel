@@ -1310,7 +1310,7 @@ class FailoverService
      * Called after any config save on the master.
      * If a slave is unreachable, the action is enqueued with 3 retries.
      */
-    public static function pushConfigToSlaves(bool $updateCaddyToken = false): array
+    public static function pushConfigToSlaves(bool $updateCaddyToken = false, ?string $caddyToken = null): array
     {
         $clusterRole = Settings::get('cluster_role', '');
         if ($clusterRole !== 'master') {
@@ -1352,6 +1352,12 @@ class FailoverService
             'remote_domains'    => Settings::get('failover_remote_domains', ''),
             'update_caddy_token' => $updateCaddyToken,
         ];
+        // Token que debe tener Caddy, elegido por el master (CloudflareService::caddyTokenFor).
+        // El slave lo compara con el suyo y solo reinicia Caddy si cambia, o siempre si
+        // update_caddy_token (forzar). Sin esto el slave no toca Caddy.
+        if ($caddyToken !== null && $caddyToken !== '') {
+            $payload['caddy_token'] = $caddyToken;
+        }
 
         // Push to all active cluster nodes
         $nodes = ClusterService::getActiveNodes();
@@ -1375,6 +1381,10 @@ class FailoverService
                     $slave = $response['data']['result'] ?? $response['data'] ?? [];
                     $tokenErr = (string)($slave['caddy_token_error'] ?? '');
                     $tokenOk  = !empty($slave['caddy_token_updated']);
+                    // Un slave con panel antiguo no entiende 'caddy_token': ni lo aplica ni da error.
+                    if ($caddyToken !== null && $tokenErr === '' && !$tokenOk && empty($slave['caddy_token_checked'])) {
+                        $tokenErr = 'su panel es antiguo y no sabe sincronizar el token; actualízalo (bin/update.sh) y vuelve a guardar';
+                    }
 
                     $results[] = [
                         'node'                => $node['name'],

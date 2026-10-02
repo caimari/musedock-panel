@@ -766,40 +766,34 @@ class ClusterApiController
         // reason back to the master instead.
         $caddyTokenUpdated = false;
         $caddyTokenError = '';
+        $caddyTokenChecked = false;
         $updateCaddyToken = !empty($payload['update_caddy_token']);
-        if ($updateCaddyToken) {
-            if (empty($cfAccounts) || !is_array($cfAccounts)) {
-                $caddyTokenError = 'El master no envio cuentas Cloudflare.';
+        $wantedToken = trim((string)($payload['caddy_token'] ?? ''));
+        if ($wantedToken !== '') {
+            // Master moderno: manda el token elegido; solo se reinicia Caddy si cambia
+            // (o si el master pide forzar). Verificado contra Cloudflare antes.
+            $caddyTokenChecked = true;
+            [$caddyTokenUpdated, $err] = \MuseDockPanel\Services\CloudflareService::syncCaddyToken($wantedToken, $updateCaddyToken);
+            $caddyTokenError = (string)($err ?? '');
+            if ($caddyTokenUpdated) {
+                LogService::log('failover.sync', 'caddy-token', 'Caddy CLOUDFLARE_API_TOKEN updated on slave from master sync');
+            }
+        } elseif ($updateCaddyToken) {
+            // Master antiguo: primer token de la lista.
+            $first = is_array($cfAccounts) ? ($cfAccounts[0] ?? []) : [];
+            $tokenRaw = (string)($first['token'] ?? '');
+            $token = $tokenRaw !== '' ? \MuseDockPanel\Services\ReplicationService::decryptPassword($tokenRaw) : '';
+            if ($token === '') { $token = trim($tokenRaw); }
+            if ($token === '') {
+                $caddyTokenError = 'El master no envió un token utilizable.';
             } else {
-                $firstAccount = $cfAccounts[0] ?? null;
-                if (!$firstAccount || empty($firstAccount['token'])) {
-                    $caddyTokenError = 'La primera cuenta Cloudflare no trae token.';
-                } else {
-                    $tokenRaw = (string)$firstAccount['token'];
-                    $token = \MuseDockPanel\Services\ReplicationService::decryptPassword($tokenRaw);
-                    if ($token === '') {
-                        // Compatibility: accept plain token from old payloads.
-                        $token = trim($tokenRaw);
-                    }
-                    if ($token === '') {
-                        $caddyTokenError = 'No se pudo descifrar el token (DB_PASS del slave distinto al del master).';
-                    } elseif (!file_exists('/usr/local/bin/update-caddy-token.sh')) {
-                        $caddyTokenError = 'Falta /usr/local/bin/update-caddy-token.sh en este nodo. '
-                                         . 'Escriba CLOUDFLARE_API_TOKEN en /etc/default/caddy manualmente o reinstale el panel.';
-                    } else {
-                        $out = trim((string)shell_exec('sudo -n /usr/local/bin/update-caddy-token.sh ' . escapeshellarg($token) . ' 2>&1'));
-                        $caddyTokenUpdated = str_contains($out, 'OK');
-                        if ($caddyTokenUpdated) {
-                            LogService::log('failover.sync', 'caddy-token', 'Caddy CLOUDFLARE_API_TOKEN updated on slave from master sync');
-                        } else {
-                            $caddyTokenError = 'update-caddy-token.sh no devolvio OK: ' . ($out !== '' ? $out : '(sin salida; revise sudoers)');
-                        }
-                    }
-                }
+                $caddyTokenChecked = true;
+                [$caddyTokenUpdated, $err] = \MuseDockPanel\Services\CloudflareService::syncCaddyToken($token, true);
+                $caddyTokenError = (string)($err ?? '');
             }
-            if ($caddyTokenError !== '') {
-                LogService::log('failover.sync', 'caddy-token-failed', $caddyTokenError);
-            }
+        }
+        if ($caddyTokenError !== '') {
+            LogService::log('failover.sync', 'caddy-token-failed', $caddyTokenError);
         }
 
         Settings::set('failover_config_synced_at', date('Y-m-d H:i:s'));
@@ -813,6 +807,7 @@ class ClusterApiController
             // Tell the master WHY the token did not land, so the UI can stop
             // claiming success while the slave silently wrote nothing.
             'caddy_token_error'   => $caddyTokenError,
+            'caddy_token_checked' => $caddyTokenChecked,
         ];
     }
 
