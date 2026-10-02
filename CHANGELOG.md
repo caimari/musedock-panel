@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.269] — 2026-10-03 — Webmail en espejo en el nodo de relevo
+
+### Añadido
+- **`mail-repair-local.php` dice cuándo cambia las tablas de OpenDKIM.** Antes respondía "ya estaba bien" aunque hubiera corregido el selector en `signing.table`/`key.table`.
+- **Webmail en espejo en el nodo de relevo.** Si el master cae, `webmail.ejemplo.com` pasa al slave, que ahora puede servirlo con los mismos usuarios, contactos y ajustes:
+  - `bin/webmail-move-db.php` (master, root): mueve la base de Roundcube del PostgreSQL del panel (puerto 5433, que no se replica) al principal (5432), que sí llega al slave. Copia con pg_dump/pg_restore, comprueba que el usuario de Roundcube entra y solo entonces cambia la configuración. La base antigua no se borra.
+  - `bin/webmail-node-config.php` (cada nodo, root): lo que cambia de un nodo a otro (la base del panel para cambiar contraseñas y Redis con su contraseña) va en `/etc/musedock/webmail-local.inc.php`, que no se copia. `config.inc.php`, que sí se copia, lo incluye. Con `--enable-route --host=…` activa el webmail en el panel del slave y crea su ruta en Caddy.
+  - Los ficheros (`/opt/musedock-webmail`) se copian al slave como carpeta extra de lsyncd.
+  - El instalador ya deja el fichero propio del nodo.
+
 ## [1.0.268] — 2026-10-02 — Correo verificado al recibir, cambios del MCP con aprobación, y Caddy con los tokens nuevos de Cloudflare
 
 ### Arreglado

@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.269',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Webmail en espejo en el nodo de relevo: bin/webmail-move-db.php mueve la base de Roundcube al PostgreSQL que se replica (sin borrar la antigua); bin/webmail-node-config.php separa lo propio de cada nodo (BD del panel, Redis) en /etc/musedock/webmail-local.inc.php y, en el slave, activa el webmail y su ruta de Caddy; el instalador ya lo hace'],
+                        'en' => ['Mirrored webmail on the failover node: bin/webmail-move-db.php moves the Roundcube database to the replicated PostgreSQL (old one kept); bin/webmail-node-config.php keeps node-specific settings (panel DB, Redis) in /etc/musedock/webmail-local.inc.php and, on the slave, enables webmail and its Caddy route; the installer does it too'],
+                    ],
+                    'fixed' => [
+                        'es' => ['mail-repair-local.php ahora dice cuando cambia las tablas de OpenDKIM (antes decia "ya estaba bien")'],
+                        'en' => ['mail-repair-local.php now reports OpenDKIM table changes (it used to say "already fine")'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.268',
                 'date' => '2026-10-02',
                 'badge' => 'info',

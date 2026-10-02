@@ -574,7 +574,9 @@ class MailService
             }
             chmod($file, 0600);
             shell_exec(sprintf('chown -R opendkim:opendkim %s 2>&1', escapeshellarg($dkimDir)));
-            self::updateDkimSigningTable($d['domain'], $sel);
+            if (self::updateDkimSigningTable($d['domain'], $sel)) {
+                $done[] = "tablas de OpenDKIM (selector {$sel})";
+            }
             shell_exec('systemctl reload opendkim 2>&1');
         }
 
@@ -3779,8 +3781,10 @@ class MailService
         return dirname(__DIR__, 2) . '/storage/mail-setup-' . preg_replace('/[^a-zA-Z0-9_-]/', '', $taskId) . '.json';
     }
 
-    private static function updateDkimSigningTable(string $domain, string $selector): void
+    /** Devuelve true si ha cambiado alguna de las dos tablas. */
+    private static function updateDkimSigningTable(string $domain, string $selector): bool
     {
+        $changed = false;
         // Sustituye las líneas de ESTE dominio (exactas: no las de otro dominio que lo
         // contenga) por las del selector actual. Antes solo añadía si el dominio no
         // estaba, así que un cambio de selector nunca llegaba a OpenDKIM.
@@ -3800,8 +3804,10 @@ class MailService
             $new = array_merge($kept, [$line]);
             if ($new !== array_values(array_filter($lines, static fn($l) => trim($l) !== ''))) {
                 file_put_contents($file, implode("\n", $new) . "\n");
+                $changed = true;
             }
         }
+        return $changed;
     }
 
     private static function removeDkimSigningTable(string $domain): void

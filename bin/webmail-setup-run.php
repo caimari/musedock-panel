@@ -321,6 +321,9 @@ try {
     webmail_run('chown -R www-data:www-data ' . escapeshellarg($dataDir), true);
     webmail_run('chgrp www-data ' . escapeshellarg($currentDir . '/config/config.inc.php'), true);
     webmail_run('chmod 640 ' . escapeshellarg($currentDir . '/config/config.inc.php'), true);
+    // Lo propio de cada nodo (BD del panel, Redis) en /etc/musedock/webmail-local.inc.php,
+    // para que el mismo config.inc.php copiado a un slave de relevo funcione allí.
+    webmail_run('php ' . escapeshellarg(dirname(__DIR__) . '/bin/webmail-node-config.php'), true);
     // Roundcube also needs writable temp/logs inside the tree; point them at the
     // www-data-owned data dir via config, but ensure the in-tree temp/logs (if used)
     // are group-writable by www-data as a safety net.
