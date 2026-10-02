@@ -25,8 +25,10 @@ class ChangelogController
                 'badge' => 'info',
                 'changes' => [
                     'fixed' => [
-                        'es' => ['Cuentas Cloudflare: el navegador podia rellenar el campo del token (vacio, tipo contraseña) con una contraseña guardada y se guardaba como token. Ahora el campo no se autocompleta y un token nuevo que Cloudflare no acepta no sustituye al anterior (se avisa)'],
-                        'en' => ['Cloudflare accounts: the browser could autofill the (empty, password-type) token field with a saved password, which was stored as the token. The field no longer autofills and a new token Cloudflare rejects does not replace the previous one (warning shown)'],
+                        'es' => ['**Los nodos slave guardaban los tokens de Cloudflare estropeados**: sin marcar "Actualizar token de Caddy" (o al pedir la configuracion) el master enviaba el token cifrado con su clave y el slave lo guardaba tal cual (Cloudflare: "Invalid request headers"). Ahora siempre viaja descifrado por el canal del cluster, el slave lo cifra con su clave y, si llega algo que no es un token, conserva el que tenia',
+                            'Cuentas Cloudflare: el navegador podia rellenar el campo del token (vacio, tipo contraseña) con una contraseña guardada y se guardaba como token. Ahora el campo no se autocompleta y un token nuevo que Cloudflare no acepta no sustituye al anterior (se avisa)'],
+                        'en' => ['**Slave nodes stored broken Cloudflare tokens**: without ticking "Update Caddy token" (or when pulling config) the master sent the token encrypted with its own key and the slave stored it as-is (Cloudflare: "Invalid request headers"). It now always travels decrypted over the cluster channel, the slave encrypts it with its own key and, if what arrives is not a token, keeps the previous one',
+                            'Cloudflare accounts: the browser could autofill the (empty, password-type) token field with a saved password, which was stored as the token. The field no longer autofills and a new token Cloudflare rejects does not replace the previous one (warning shown)'],
                     ],
                 ],
             ],

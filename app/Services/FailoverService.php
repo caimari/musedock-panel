@@ -1341,17 +1341,9 @@ class FailoverService
         // (we hold the key) and send the plaintext. The hop is protected by the
         // cluster's mutual-TLS channel and the payload is only sent to
         // authenticated nodes. Without that flag, ciphertext is kept as-is.
-        $cfAccountsForPush = $cfAccountsRaw;
-        if ($updateCaddyToken) {
-            foreach ($cfAccountsForPush as $i => $acc) {
-                if (empty($acc['token'])) continue;
-                $plain = ReplicationService::decryptPassword((string)$acc['token']);
-                if ($plain !== '') {
-                    $cfAccountsForPush[$i]['token'] = $plain;
-                }
-                // If it does not decrypt it is already plaintext (legacy) — leave it.
-            }
-        }
+        // Siempre descifrado: el slave no puede descifrar lo cifrado con la clave de
+        // este panel (ver CloudflareService::accountsForTransfer).
+        $cfAccountsForPush = CloudflareService::accountsForTransfer();
 
         $payload = [
             'config'            => $config,
@@ -1478,7 +1470,10 @@ class FailoverService
         }
 
         if (isset($response['cf_accounts']) && is_array($response['cf_accounts'])) {
-            Settings::set('failover_cf_accounts', json_encode($response['cf_accounts']));
+            $kept = CloudflareService::storeIncomingAccounts($response['cf_accounts']);
+            if ($kept) {
+                LogService::log('failover.sync', 'cf-kept', 'Token de Cloudflare recibido no válido; se conserva el local en: ' . implode(', ', $kept));
+            }
         }
 
         if (isset($response['remote_domains'])) {

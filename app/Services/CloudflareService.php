@@ -423,6 +423,70 @@ class CloudflareService
     /**
      * Save Cloudflare accounts configuration.
      */
+    /**
+     * Cuentas para enviar a otro nodo del cluster, con el token DESCIFRADO: cada
+     * panel cifra con su propia clave (sha256 de su DB_PASS), así que un token
+     * cifrado aquí no lo puede descifrar el slave. Antes solo se descifraba al
+     * marcar "Actualizar token de Caddy"; sin esa casilla el slave recibía el
+     * texto cifrado, lo guardaba como si fuera el token y quedaba inservible
+     * ("Invalid request headers", Filemon 2026-10-02). Viaja por el canal
+     * autenticado del cluster y el registro lo enmascara.
+     */
+    public static function accountsForTransfer(): array
+    {
+        $raw = json_decode(Settings::get('failover_cf_accounts', '[]'), true);
+        $out = [];
+        foreach (is_array($raw) ? $raw : [] as $acct) {
+            $t = (string)($acct['token'] ?? '');
+            if ($t !== '') {
+                $plain = ReplicationService::decryptPassword($t);
+                $acct['token'] = $plain !== '' ? $plain : $t;
+            }
+            $out[] = $acct;
+        }
+        return $out;
+    }
+
+    /** ¿Parece un token de API de Cloudflare (y no un texto cifrado)? */
+    public static function looksLikeApiToken(string $t): bool
+    {
+        return (bool)preg_match('/^[A-Za-z0-9_-]{30,}$/', $t);
+    }
+
+    /**
+     * Guarda las cuentas recibidas de otro nodo cifrando cada token con la clave
+     * LOCAL. Si lo recibido no tiene forma de token (p. ej. un texto cifrado por un
+     * master con una versión antigua), conserva el token que ya había aquí para esa
+     * cuenta en vez de estropearlo. Devuelve los nombres de las cuentas conservadas.
+     */
+    public static function storeIncomingAccounts(array $accounts): array
+    {
+        $current = [];
+        foreach (self::getConfiguredAccounts() as $a) {
+            $current[strtolower((string)($a['name'] ?? ''))] = (string)($a['token'] ?? '');
+        }
+        $kept = [];
+        foreach ($accounts as &$acct) {
+            $t = trim((string)($acct['token'] ?? ''));
+            if ($t === '') {
+                continue;
+            }
+            if (ReplicationService::decryptPassword($t) !== '') {
+                continue; // ya cifrado con la clave local
+            }
+            if (self::looksLikeApiToken($t)) {
+                $acct['token'] = ReplicationService::encryptPassword($t);
+                continue;
+            }
+            $prev = $current[strtolower((string)($acct['name'] ?? ''))] ?? '';
+            $acct['token'] = $prev !== '' ? ReplicationService::encryptPassword($prev) : '';
+            $kept[] = (string)($acct['name'] ?? '?');
+        }
+        unset($acct);
+        Settings::set('failover_cf_accounts', json_encode(array_values($accounts)));
+        return $kept;
+    }
+
     public static function saveAccounts(array $accounts): void
     {
         Settings::set('failover_cf_accounts', json_encode(self::normalizeAccountsEncrypted($accounts)));

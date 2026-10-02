@@ -26,6 +26,8 @@ class ClusterApiController
         // Avisos (set-notify-config): contraseña SMTP y token de Telegram en claro
         // por el canal autenticado; el nodo los vuelve a cifrar con su clave.
         'smtp_pass', 'smtp2_pass', 'telegram_token',
+        // Cuentas de Cloudflare (sync-failover-config): el token va descifrado.
+        'token',
     ];
 
     /** Return a copy of $payload with secret values masked, recursively. */
@@ -742,19 +744,12 @@ class ClusterApiController
             $cfAccounts = null;
         }
         if ($cfAccounts !== null && is_array($cfAccounts)) {
-            foreach ($cfAccounts as &$acct) {
-                $tokenRaw = trim((string)($acct['token'] ?? ''));
-                if ($tokenRaw === '') {
-                    continue;
-                }
-                // If token is plain (legacy/buggy payload), encrypt before storing.
-                $dec = \MuseDockPanel\Services\ReplicationService::decryptPassword($tokenRaw);
-                if ($dec === '') {
-                    $acct['token'] = \MuseDockPanel\Services\ReplicationService::encryptPassword($tokenRaw);
-                }
+            // Cifrado con la clave LOCAL; lo que no tenga forma de token (p. ej. el
+            // texto cifrado de un master antiguo) no pisa el token que ya había.
+            $kept = \MuseDockPanel\Services\CloudflareService::storeIncomingAccounts($cfAccounts);
+            if ($kept) {
+                LogService::log('failover.sync', 'cf-kept', 'Token de Cloudflare recibido no válido; se conserva el local en: ' . implode(', ', $kept));
             }
-            unset($acct);
-            Settings::set('failover_cf_accounts', json_encode($cfAccounts));
         }
 
         // Save remote domains
@@ -837,7 +832,8 @@ class ClusterApiController
         }
 
         $servers = json_decode(Settings::get('failover_servers', '[]'), true) ?: [];
-        $cfAccounts = json_decode(Settings::get('failover_cf_accounts', '[]'), true) ?: [];
+        // Descifrado: el nodo que pide la configuración no puede descifrar lo cifrado aquí.
+        $cfAccounts = \MuseDockPanel\Services\CloudflareService::accountsForTransfer();
         $remoteDomains = Settings::get('failover_remote_domains', '');
 
         return [

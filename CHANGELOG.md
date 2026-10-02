@@ -2,9 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [1.0.263] — 2026-10-02 — El navegador ya no puede colar una contraseña como token de Cloudflare
+## [1.0.263] — 2026-10-02 — Tokens de Cloudflare: los nodos ya no los reciben estropeados, y el navegador no cuela contraseñas
 
-### Arreglado
+### Arreglado (importante)
+- **Los nodos slave guardaban los tokens de Cloudflare estropeados.** Cada panel cifra los tokens con su propia clave (derivada de su `DB_PASS`). Al enviar la configuración de relevo, el master solo mandaba el token descifrado si se marcaba "Actualizar token de Caddy"; sin esa casilla, o cuando era el slave quien pedía la configuración, mandaba el **texto cifrado**. El slave lo guardaba como si fuera el token, y Cloudflare lo rechazaba ("Invalid request headers"; visto en Filemon). Así, el slave no habría podido cambiar los DNS en un relevo. Ahora:
+  - el master **siempre** envía los tokens descifrados (por el canal autenticado del cluster; enmascarados en el registro);
+  - el slave los cifra con **su** clave;
+  - si al slave le llega algo que no tiene forma de token (por ejemplo, de un master con versión antigua), **conserva el que tenía** en vez de estropearlo, y lo deja anotado.
+
 - **Al guardar las cuentas de Cloudflare, el navegador podía rellenar un token con una contraseña guardada.** El campo era de tipo contraseña y vacío (desde la 1.0.262 la página ya no envía los tokens), así que Chrome lo rellenaba solo y se guardaba como token. Pasó con la cuenta Muse Layer LLC en mortadelo. Ahora el campo es de texto con el contenido oculto, sin autocompletado. Además, al guardar, **un token nuevo que Cloudflare no acepta no sustituye al anterior**: se conserva el que había y se avisa.
 
 ## [1.0.262] — 2026-10-02 — Correo y hosting del mismo dominio se reconocen, y /domains carga al momento
