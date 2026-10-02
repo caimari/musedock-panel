@@ -121,10 +121,18 @@ class FailoverController
         $accounts = [];
         $names  = $_POST['cf_name'] ?? [];
         $tokens = $_POST['cf_token'] ?? [];
+        // La página ya no recibe los tokens: un campo vacío en una cuenta existente
+        // significa "conservar el token guardado" (cf_existing = su posición).
+        $existing = $_POST['cf_existing'] ?? [];
+        $stored = CloudflareService::getConfiguredAccounts();
 
         for ($i = 0; $i < count($names); $i++) {
             $name  = trim($names[$i] ?? '');
             $token = trim($tokens[$i] ?? '');
+            $ex = (string)($existing[$i] ?? '');
+            if ($token === '' && $ex !== '' && ctype_digit($ex) && isset($stored[(int)$ex]['token'])) {
+                $token = (string)$stored[(int)$ex]['token'];
+            }
             if (!$name || !$token) continue;
 
             $zones = [];
@@ -202,6 +210,10 @@ class FailoverController
     {
         header('Content-Type: application/json');
         $token = trim($_POST['token'] ?? '');
+        $ex = (string)($_POST['existing'] ?? '');
+        if ($token === '' && $ex !== '' && ctype_digit($ex)) {
+            $token = (string)(CloudflareService::getConfiguredAccounts()[(int)$ex]['token'] ?? '');
+        }
         if (!$token) { echo json_encode(['ok' => false, 'error' => 'Token vacío']); return; }
 
         $verify = CloudflareService::verifyToken($token);

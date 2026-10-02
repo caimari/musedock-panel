@@ -57,6 +57,9 @@ class CloudflareService
             CURLOPT_CUSTOMREQUEST  => $method,
             CURLOPT_TIMEOUT        => $timeout,
             CURLOPT_CONNECTTIMEOUT => 5,
+            // Siempre por IPv4: si el token tiene filtro de IPs, suele llevar solo las
+            // IPv4 de los servidores; por IPv6 Cloudflare lo rechazaría.
+            CURLOPT_IPRESOLVE      => CURL_IPRESOLVE_V4,
         ]);
 
         if ($method !== 'GET' && !empty($data)) {

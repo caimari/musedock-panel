@@ -94,6 +94,16 @@ final class McpTools
                     'port' => ['type' => 'integer', 'description' => 'Puerto (por defecto 443)'],
                 ], ['host']),
             ],
+            'domains_status' => [
+                'title' => 'Estado de todos los dominios (registro, DNS y uso)',
+                'description' => 'Todos los dominios de este servidor (hostings del panel, los que sirve Caddy por otras aplicaciones como el CMS, Caddyfile y correo), cada uno con: registro (activo, caducado, en redención, libre; fecha de caducidad y registrador, por RDAP), DNS (apunta aquí, a otro sitio o sin DNS) y dónde se usa. Avisa de dominios libres o en redención que siguen en uso, de los que caducan en menos de 30 días y de los registrados sin DNS. El registro se guarda 24 h (refresh=true para forzar). Solo lectura.',
+                'inputSchema' => $obj(['refresh' => ['type' => 'boolean', 'description' => 'Volver a consultar el registro aunque esté guardado']]),
+            ],
+            'caddy_domains' => [
+                'title' => 'Dominios de Caddy y de dónde vienen',
+                'description' => 'Todos los dominios que sirve Caddy en este servidor, clasificados: panel_hosting (hostings del panel: dominio, www, dominio extra, subdominio, alias y redirecciones), panel_system (dominio del panel, webmail, CardDAV, certificado del correo), caddyfile (escritos en /etc/caddy/Caddyfile) y external (añadidos por la API de Caddy por otra aplicación, p. ej. los tenants del CMS MuseDock con @id route_*). Avisa de rutas con el mismo @id repetidas. Solo lectura.',
+                'inputSchema' => $obj(),
+            ],
             'caddy_hosts' => [
                 'title' => 'Hosts servidos por Caddy',
                 'description' => 'Hosts que Caddy sirve ahora mismo (config en ejecución), agrupados por servidor HTTP.',
@@ -213,6 +223,8 @@ final class McpTools
             'mail_domain'      => self::mailDomain((string)($args['domain'] ?? '')),
             'tls_check'        => self::tlsCheck((string)($args['host'] ?? ''), (string)($args['target'] ?? 'local'), (int)($args['port'] ?? 443)),
             'caddy_hosts'      => self::caddyHosts(),
+            'caddy_domains'    => self::caddyDomains(),
+            'domains_status'   => \MuseDockPanel\Services\DomainStatusService::report(!empty($args['refresh'])),
             'clone_inventory'  => McpInventory::build((string)($args['section'] ?? 'all')),
             default            => match (true) {
                 McpMailTools::has($name)    => McpMailTools::run($name, $args),
@@ -464,6 +476,37 @@ final class McpTools
         $ctx = stream_context_create(['http' => ['timeout' => 4]]);
         $servers = json_decode((string)@file_get_contents("{$api}/config/apps/http/servers", false, $ctx), true);
         return is_array($servers) ? $servers : [];
+    }
+
+    private static function caddyDomains(): array
+    {
+        $r = \MuseDockPanel\Services\CaddyDomainsService::classify();
+        if (empty($r['ok'])) {
+            return $r;
+        }
+        $labels = [
+            'panel_hosting' => 'Hostings del panel',
+            'panel_system' => 'Propios del panel',
+            'caddyfile' => 'En el Caddyfile',
+            'external' => 'Fuera del panel (API de Caddy por otra aplicación)',
+        ];
+        $groups = [];
+        foreach ($r['domains'] as $d) {
+            $groups[$d['group']][] = ['host' => $d['host'], 'detail' => $d['detail']];
+        }
+        $summary = [];
+        foreach ($labels as $k => $label) {
+            $summary[$label] = count($groups[$k] ?? []);
+        }
+        $out = ['total' => count($r['domains']), 'summary' => $summary];
+        foreach ($labels as $k => $label) {
+            $out[$k] = $groups[$k] ?? [];
+        }
+        if (!empty($r['duplicate_route_ids'])) {
+            $out['warnings'] = array_map(static fn($id, $n) => "La ruta @id «{$id}» está repetida {$n} veces en la configuración de Caddy (solo cuenta la primera; las demás sobran).",
+                array_keys($r['duplicate_route_ids']), $r['duplicate_route_ids']);
+        }
+        return $out;
     }
 
     private static function caddyHosts(): array

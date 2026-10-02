@@ -1572,6 +1572,24 @@
             <br><small style="color:#94a3b8;">Última sincronización: <?= \MuseDockPanel\View::e($foSyncedAt) ?></small>
         <?php endif; ?>
     </div>
+    <?php // Cuentas de Cloudflare recibidas del master: solo lectura y sin tokens. ?>
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-cloud me-2"></i>Cuentas Cloudflare <span class="badge bg-secondary ms-1">copiadas del master</span></div>
+        <div class="card-body small">
+            <?php if (empty($cfAccounts)): ?>
+                <span class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Este nodo no tiene cuentas de Cloudflare: sin ellas no podría cambiar los DNS en un relevo.</span>
+            <?php else: ?>
+                <?php foreach ($cfAccounts as $acct): ?>
+                    <div class="mb-1"><strong><?= View::e($acct['name'] ?? '') ?></strong>
+                        <span class="text-muted">— <?= count($acct['zones'] ?? []) ?> zona(s)<?= empty($acct['token']) ? ' · <span class="text-danger">sin token</span>' : '' ?></span></div>
+                <?php endforeach; ?>
+            <?php endif; ?>
+            <div class="text-muted mt-2">
+                Para cambiar un token: en el <strong>master</strong>, Settings → Cluster → Failover → Cuentas Cloudflare. Al guardar se copia aquí;
+                marcando <strong>"Actualizar token de Caddy"</strong> se actualiza también el Caddy de este nodo (<code>/etc/default/caddy</code>).
+            </div>
+        </div>
+    </div>
     <?php endif; ?>
 
     <!-- ── Explicación del sistema ───────────────────────────── -->
@@ -1936,7 +1954,10 @@
                             <div class="col-md-5">
                                 <label class="form-label small">API Token</label>
                                 <div class="input-group input-group-sm">
-                                    <input type="password" name="cf_token[]" class="form-control cf-token-input" value="<?= View::e($acct['token'] ?? '') ?>">
+                                    <?php /* El token NO se envía a la página (antes iba en value=""): vacío = conservar el guardado. */ ?>
+                                    <input type="password" name="cf_token[]" class="form-control cf-token-input" value="" autocomplete="new-password"
+                                           placeholder="<?= !empty($acct['token']) ? '•••••••• guardado — déjalo vacío para conservarlo' : 'Token Cloudflare' ?>">
+                                    <input type="hidden" name="cf_existing[]" value="<?= (int)$i ?>">
                                     <button type="button" class="btn btn-outline-info" onclick="foVerifyCfToken(this)">
                                         <i class="bi bi-check-circle"></i>
                                     </button>
@@ -2549,7 +2570,7 @@ function foExecute(action, description) {
         const fd = new FormData();
         fd.append('action', action);
         fd.append('password', result.value);
-        fd.append('_token', document.querySelector('input[name="_token"]').value);
+        fd.append('_csrf_token', document.querySelector('input[name="_csrf_token"]')?.value || '');
 
         fetch('/settings/failover/execute', { method: 'POST', body: fd })
             .then(r => r.json())
@@ -2622,6 +2643,7 @@ function foAddCfAccount() {
             <div class="col-md-5"><label class="form-label small">API Token</label>
                 <div class="input-group input-group-sm">
                     <input type="text" name="cf_token[]" class="form-control cf-token-input" placeholder="Token Cloudflare">
+                    <input type="hidden" name="cf_existing[]" value="">
                     <button type="button" class="btn btn-outline-info" onclick="foVerifyCfToken(this)"><i class="bi bi-check-circle"></i></button>
                 </div></div>
             <div class="col-md-3"><span class="small text-muted cf-zone-info"></span></div>
@@ -2639,7 +2661,9 @@ function foVerifyCfToken(btn) {
 
     const fd = new FormData();
     fd.append('token', tokenInput.value);
-    fd.append('_token', document.querySelector('input[name="_token"]').value);
+    // Campo vacío en una cuenta ya guardada: el panel verifica con su token guardado.
+    fd.append('existing', row.querySelector('input[name="cf_existing[]"]')?.value || '');
+    fd.append('_csrf_token', document.querySelector('input[name="_csrf_token"]')?.value || '');
 
     fetch('/settings/failover/verify-cf-token', { method: 'POST', body: fd })
         .then(r => r.json())

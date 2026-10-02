@@ -167,10 +167,26 @@ class MailController
         $mailNodes = MailService::getMailNodes();
         $mailCreateAvailable = $this->hasMailBackendAvailable();
 
+        // Dominios que ya son webs del panel (principal, extra, alias/redirección),
+        // para avisar en el formulario y proponer su cliente.
+        $hostingMap = [];
+        $rows = Database::fetchAll(
+            "SELECT lower(h.domain) AS d, h.id, h.domain, h.customer_id, 'principal' AS kind FROM hosting_accounts h WHERE h.status != 'deleted'
+             UNION ALL
+             SELECT lower(hd.domain), h.id, h.domain, h.customer_id, 'dominio extra' FROM hosting_domains hd JOIN hosting_accounts h ON h.id = hd.account_id WHERE h.status != 'deleted'
+             UNION ALL
+             SELECT lower(da.domain), h.id, h.domain, h.customer_id, CASE WHEN da.type = 'redirect' THEN 'redirección' ELSE 'alias' END
+               FROM hosting_domain_aliases da JOIN hosting_accounts h ON h.id = da.hosting_account_id WHERE h.status != 'deleted'"
+        );
+        foreach ($rows as $r) {
+            $hostingMap[$r['d']] ??= ['id' => (int)$r['id'], 'domain' => $r['domain'], 'customer_id' => $r['customer_id'] !== null ? (int)$r['customer_id'] : null, 'kind' => $r['kind']];
+        }
+
         View::render('mail/domain-create', [
             'layout'    => 'main',
             'pageTitle' => 'Mail - New Domain',
             'customers' => $customers,
+            'hostingMap' => $hostingMap,
             'mailNodes' => $mailNodes,
             'mailCreateAvailable' => $mailCreateAvailable,
             'mailCreateBlockedReason' => $mailCreateAvailable
@@ -224,12 +240,21 @@ class MailController
             return;
         }
 
+        // Si el dominio ya es una web del panel, el correo aparecerá también en su
+        // ficha de hosting; sin cliente elegido, hereda el del hosting.
+        $hosting = MailService::hostingForDomain($domain);
+        if ($hosting && $customerId === null && !empty($hosting['customer_id'])) {
+            $customerId = (int)$hosting['customer_id'];
+        }
+
         try {
             $id = MailService::createDomain($domain, $customerId, $mailNodeId, [
                 'max_accounts' => $maxAccounts,
             ]);
-            LogService::log('mail.domain.create', $domain, "Mail domain created" . ($mailNodeId ? " on node #{$mailNodeId}" : ''));
-            Flash::set('success', "Dominio de mail {$domain} creado.");
+            LogService::log('mail.domain.create', $domain, "Mail domain created" . ($mailNodeId ? " on node #{$mailNodeId}" : '')
+                . ($hosting ? " (hosting {$hosting['domain']}, {$hosting['kind']})" : ''));
+            Flash::set('success', "Dominio de mail {$domain} creado."
+                . ($hosting ? " Este dominio también es una web del panel (hosting {$hosting['domain']}, {$hosting['kind']}): su correo se ve también en la ficha del hosting." : ''));
             Router::redirect('/mail/domains/' . $id);
         } catch (\Throwable $e) {
             Flash::set('error', 'Error: ' . $e->getMessage());

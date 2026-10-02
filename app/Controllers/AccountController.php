@@ -1806,8 +1806,12 @@ class AccountController
             return;
         }
 
-        SystemService::suspendAccount($account['username'], $account['fpm_socket'], $account['domain'], $account['php_version']);
+        $removeCaddy = ($_POST['remove_caddy'] ?? '0') === '1';
+        SystemService::suspendAccount($account['username'], $account['fpm_socket'], $account['domain'], $account['php_version'], $removeCaddy);
         Database::update('hosting_accounts', ['status' => 'suspended', 'updated_at' => date('Y-m-d H:i:s')], 'id = :id', ['id' => $params['id']]);
+        if ($removeCaddy) {
+            LogService::log('account.suspend', $account['domain'], 'Suspendido y quitado de Caddy (sin página de mantenimiento ni certificados); datos conservados');
+        }
 
         // Suspend mail domain if requested
         $suspendMail = ($_POST['suspend_mail'] ?? '0') === '1';

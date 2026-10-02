@@ -305,6 +305,7 @@ final class FirewallAuditService
                         break;
                     case '--match-set':
                         $r['set'] = ($tok[++$i] ?? '') . ' ' . ($tok[++$i] ?? '');
+                        $r['set_neg'] = $neg;
                         break;
                     case '-j': case '-g': $r['target'] = $tok[++$i] ?? ''; break;
                     case '-m':
@@ -361,6 +362,87 @@ final class FirewallAuditService
      * Veredicto para un paquete NUEVO. $pkt = [if, proto, port, src (null = IP cualquiera)].
      * @return array{verdict:string, by:?string, conditional?:bool}
      */
+    /** ¿Está la IP en la lista ipset? null si no se puede saber. */
+    private static function ipsetHas(string $set, string $ip): ?bool
+    {
+        static $cache = [];
+        if (!preg_match('/^[A-Za-z0-9_.:-]+$/', $set) || !filter_var($ip, FILTER_VALIDATE_IP)) {
+            return null;
+        }
+        $k = "{$set}|{$ip}";
+        if (!array_key_exists($k, $cache)) {
+            exec('ipset test ' . escapeshellarg($set) . ' ' . escapeshellarg($ip) . ' 2>&1', $o, $rc);
+            $txt = implode(' ', $o);
+            $cache[$k] = $rc === 0 ? true : (str_contains($txt, 'is NOT in set') ? false : null);
+        }
+        return $cache[$k];
+    }
+
+    /**
+     * ¿Qué puede hacer esta IP contra este servidor? Simula una conexión nueva desde
+     * ella a cada puerto en escucha (o al indicado) por la interfaz pública y, si es
+     * de la VPN, por wg0. Dice además si es un origen de confianza del panel y si
+     * fail2ban la tiene bloqueada. Solo lectura.
+     */
+    public static function checkSource(string $ip, ?int $onlyPort = null): array
+    {
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)) {
+            return ['ok' => false, 'error' => 'Indica una IPv4 válida.'];
+        }
+        $fw = self::parse(self::lines(self::sh('iptables -S 2>/dev/null')));
+        if (!$fw['policies']) {
+            return ['ok' => false, 'error' => 'No se pudo leer iptables (¿el panel no corre como root?).'];
+        }
+        $pubIf = self::sh("ip -4 route get 1.1.1.1 2>/dev/null | sed -n 's/.* dev \\([^ ]*\\).*/\\1/p' | head -1");
+        $routeIf = self::sh('ip -4 route get ' . escapeshellarg($ip) . " 2>/dev/null | sed -n 's/.* dev \\([^ ]*\\).*/\\1/p' | head -1");
+        $if = $routeIf !== '' ? $routeIf : $pubIf;
+        $seen = [];
+        $allowed = [];
+        $blocked = [];
+        foreach (self::listening() as $l) {
+            $key = "{$l['port']}/{$l['proto']}";
+            if (isset($seen[$key]) || ($onlyPort !== null && (int)$l['port'] !== $onlyPort)) {
+                continue;
+            }
+            $seen[$key] = true;
+            if (!$l['public_bind'] && $if === $pubIf) {
+                continue; // solo escucha en local/VPN: desde fuera no se llega
+            }
+            $v = self::evaluate($fw, 'INPUT', ['if' => $if, 'proto' => $l['proto'], 'port' => (int)$l['port'], 'src' => $ip]);
+            $line = "{$key} ({$l['process']})";
+            if ($v['verdict'] === 'ACCEPT') {
+                $allowed[] = $line . (!empty($v['conditional']) ? ' [con condiciones, p. ej. límite]' : '');
+            } else {
+                $blocked[] = $line . ($v['by'] ? " — {$v['by']}" : '');
+            }
+        }
+        $trusted = self::trustedSources();
+        $isTrusted = self::isTrusted($ip . '/32', $trusted);
+        $banned = [];
+        if (trim(self::sh('command -v fail2ban-client')) !== '') {
+            foreach (preg_split('/,\s*/', (string)preg_replace('/.*Jail list:\s*/s', '', self::sh('fail2ban-client status 2>/dev/null'))) ?: [] as $jail) {
+                $jail = trim($jail);
+                if ($jail !== '' && preg_match('/^[A-Za-z0-9_.-]+$/', $jail)
+                    && str_contains(' ' . self::sh('fail2ban-client status ' . escapeshellarg($jail) . " 2>/dev/null | grep -i 'Banned IP list'") . ' ', ' ' . $ip . ' ')) {
+                    $banned[] = $jail;
+                }
+            }
+        }
+        $summary = $banned ? "BLOQUEADA por fail2ban (" . implode(', ', $banned) . ')'
+            : ($allowed ? 'puede conectar a ' . count($allowed) . ' servicio(s)' : 'no puede conectar a ningún servicio');
+        return [
+            'ok' => true,
+            'ip' => $ip,
+            'arrives_by' => $if,
+            'summary' => $summary,
+            'trusted_by_panel' => $isTrusted,
+            'allowed' => $allowed,
+            'blocked' => $blocked,
+            'fail2ban_banned_in' => $banned,
+            'note' => 'Simula una conexión NUEVA desde esa IP con las reglas actuales de iptables (incluidas las listas ipset). No prueba la conexión real.',
+        ];
+    }
+
     public static function evaluate(array $fw, string $chain, array $pkt, int $depth = 0): array
     {
         if ($depth > 10) {
@@ -390,6 +472,13 @@ final class FirewallAuditService
                 // Lista ipset: para una IP cualquiera no se sabe; un ACCEPT por lista no
                 // abre a todo internet y un DROP por lista no cierra a todo internet.
                 continue;
+            }
+            if ($r['set'] !== null) {
+                // Con una IP concreta sí se sabe: se pregunta a ipset si está en la lista.
+                $inSet = self::ipsetHas(explode(' ', (string)$r['set'])[0], (string)$pkt['src']);
+                if ($inSet === null || $inSet === (bool)($r['set_neg'] ?? false)) {
+                    continue;
+                }
             }
             if (!self::portMatches($r['dports'], $pkt['port'])) {
                 continue;

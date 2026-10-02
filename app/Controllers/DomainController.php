@@ -56,6 +56,15 @@ class DomainController
         // Customers list for the add redirect form
         $customers = Database::fetchAll("SELECT id, name, email FROM customers ORDER BY name ASC");
 
+        // Dominios con correo en este panel (correo y hosting se unen por el nombre).
+        $mailDomains = [];
+        try {
+            foreach (Database::fetchAll("SELECT id, lower(domain) AS d, status FROM mail_domains") as $m) {
+                $mailDomains[$m['d']] = ['id' => (int)$m['id'], 'status' => $m['status']];
+            }
+        } catch (\Throwable) {
+        }
+
         View::render('domains/index', [
             'layout' => 'main',
             'pageTitle' => 'Domains',
@@ -64,6 +73,8 @@ class DomainController
             'aliasesAndRedirects' => $aliasesAndRedirects,
             'subdomainsByAccount' => $subdomainsByAccount,
             'customers' => $customers,
+            'dnsCache' => self::dnsCache(),
+            'mailDomains' => $mailDomains,
         ]);
     }
 
@@ -204,34 +215,61 @@ class DomainController
         Router::redirect('/domains');
     }
 
+    /**
+     * Comprueba el DNS (registro A) de un dominio y guarda el resultado, para que
+     * la página cargue al momento con el último estado conocido. Antes cada
+     * comprobación hacía además `curl ifconfig.me` para saber la IP propia: una
+     * petición externa por dominio y por visita.
+     */
     public function checkDns(): void
     {
-        $domain = trim($_POST['domain'] ?? '');
-        if (empty($domain)) {
+        $domain = strtolower(trim($_POST['domain'] ?? ''));
+        header('Content-Type: application/json');
+        if ($domain === '' || !preg_match('/^[a-z0-9.-]+$/', $domain)) {
             echo json_encode(['error' => 'No domain']);
             return;
         }
+        $entry = self::checkDnsNow($domain);
+        echo json_encode(['domain' => $domain] + $entry + ['server_ips' => self::serverIps()]);
+    }
 
-        $records = @dns_get_record($domain, DNS_A);
-        $serverIp = trim(shell_exec('curl -s ifconfig.me 2>/dev/null') ?: '');
-
-        $pointsHere = false;
-        $ips = [];
-        if ($records) {
-            foreach ($records as $r) {
-                $ips[] = $r['ip'] ?? '';
-                if (($r['ip'] ?? '') === $serverIp) {
-                    $pointsHere = true;
-                }
-            }
+    /** IPs de este servidor: las de sus interfaces + la pública guardada. */
+    private static function serverIps(): array
+    {
+        static $ips = null;
+        if ($ips !== null) {
+            return $ips;
         }
+        $ips = preg_split('/\s+/', trim((string)shell_exec('hostname -I 2>/dev/null'))) ?: [];
+        $pub = Settings::get('server_public_ip', '');
+        if ($pub !== '') {
+            $ips[] = $pub;
+        }
+        return $ips = array_values(array_unique(array_filter($ips, static fn($i) => filter_var($i, FILTER_VALIDATE_IP))));
+    }
 
-        header('Content-Type: application/json');
-        echo json_encode([
-            'domain' => $domain,
+    private static function checkDnsNow(string $domain): array
+    {
+        $records = @dns_get_record($domain, DNS_A) ?: [];
+        $ips = array_values(array_filter(array_map(static fn($r) => (string)($r['ip'] ?? ''), $records)));
+        $here = (bool)array_intersect($ips, self::serverIps());
+        $cf = !$here && $ips && (bool)array_filter($ips, static fn($ip) => (bool)preg_match('/^(104\.(1[6-9]|2[0-9]|3[01])\.|172\.(6[4-9]|7[01])\.|188\.114\.(9[6-9]|1[01][0-9]|12[0-7])\.|162\.15[89]\.|141\.101\.|108\.162\.|190\.93\.|197\.234\.|198\.41\.|173\.245\.|103\.(21|22|31)\.)/', $ip));
+        $entry = [
+            'status' => $here ? 'ok' : ($cf ? 'cloudflare' : ($ips ? 'elsewhere' : 'none')),
             'records' => $ips,
-            'server_ip' => $serverIp,
-            'points_here' => $pointsHere,
-        ]);
+            'points_here' => $here,
+            'checked_at' => time(),
+        ];
+        $cache = self::dnsCache();
+        $cache[$domain] = $entry;
+        Settings::set('domains_dns_cache', json_encode($cache, JSON_UNESCAPED_SLASHES));
+        return $entry;
+    }
+
+    /** Último estado de DNS guardado por dominio. */
+    public static function dnsCache(): array
+    {
+        $c = json_decode(Settings::get('domains_dns_cache', '{}'), true);
+        return is_array($c) ? $c : [];
     }
 }

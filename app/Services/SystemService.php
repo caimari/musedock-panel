@@ -3014,7 +3014,7 @@ CONF;
     /**
      * Suspend an account (stop FPM pool, replace Caddy route with maintenance page)
      */
-    public static function suspendAccount(string $username, string $fpmSocket, string $domain = '', string $phpVersion = ''): void
+    public static function suspendAccount(string $username, string $fpmSocket, string $domain = '', string $phpVersion = '', bool $removeFromCaddy = false): void
     {
         // Lock the user
         shell_exec(sprintf('usermod -L %s 2>&1', escapeshellarg($username)));
@@ -3039,8 +3039,15 @@ CONF;
         shell_exec(sprintf('mv %s %s.disabled 2>&1', escapeshellarg($poolFile), escapeshellarg($poolFile)));
         shell_exec(sprintf('systemctl reload php%s-fpm 2>&1', self::safePhpVersion($phpVersion)));
 
-        // Replace Caddy route with maintenance page
-        if ($domain) {
+        // Replace Caddy route with maintenance page — o, si se pide (dominio caducado o
+        // sin uso), quitarla: Caddy deja de servirlo y de pedir su certificado. No se
+        // borra nada; activateAccount() la vuelve a crear.
+        if ($domain && $removeFromCaddy) {
+            $ch = curl_init($config['caddy']['api_url'] . '/id/' . self::caddyRouteId($domain));
+            curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => 'DELETE', CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
+            curl_exec($ch);
+            curl_close($ch);
+        } elseif ($domain) {
             self::setCaddyMaintenanceRoute($username, $domain, $config['caddy']['api_url']);
         }
     }

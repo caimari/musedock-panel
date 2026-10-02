@@ -69,6 +69,12 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
                 <label class="form-check-label" for="mcp_allow_write">Permitir acciones que modifican
                     <span class="text-muted small">(crear dominios de correo, publicar DNS en Cloudflare, buzones, alias)</span></label>
             </div>
+            <div class="form-check form-switch m-0">
+                <input class="form-check-input" type="checkbox" role="switch" id="mcp_allow_dns" name="mcp_allow_dns" value="1"
+                       <?= !empty($allowDns) ? 'checked' : '' ?> <?= !$hasToken ? 'disabled' : '' ?>>
+                <label class="form-check-label" for="mcp_allow_dns">Permitir editar DNS en Cloudflare
+                    <span class="text-muted small">(crear y modificar registros A, AAAA, CNAME, TXT y MX con <code>dns_record_set</code>; <strong>nunca borra</strong>; requiere también la opción anterior)</span></label>
+            </div>
             <button class="btn btn-primary btn-sm" <?= !$hasToken ? 'disabled' : '' ?>><i class="bi bi-check2 me-1"></i>Guardar</button>
             <?php if (!$hasToken): ?>
                 <span class="small text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Genera primero un token.</span>

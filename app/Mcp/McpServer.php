@@ -47,6 +47,10 @@ final class McpServer
                             'version' => self::panelVersion(),
                         ],
                         'instructions' => 'Servidor MCP de MuseDock Panel (' . gethostname() . '). '
+                            . 'LO PRIMERO al conectar: llama a server_profile. Dice el rol de este servidor, con quién hace el relevo, las cuentas de Cloudflare '
+                            . 'y a qué nombre apuntan los dominios nuevos (dns_default_target' . (($t = McpClusterTools::dnsDefaultTarget()) !== '' ? ", aquí {$t}" : '') . '): '
+                            . 'un dominio nuevo se configura con CNAME de la raíz y www a ese nombre (dns_records → dns_record_set), con el proxy naranja de Cloudflare como opción a preguntar. '
+                            . 'Estado general: monitor_status, notify_status, failover_preflight, domains_status, caddy_domains. '
                             . 'Herramientas de lectura para consultar el estado del servidor, del cluster, servicios, correo, certificados y failover. '
                             . 'Usa list_nodes y el argumento `node` para consultar otros nodos del cluster desde el master. '
                             . 'clone_inventory detecta lo que habría que clonar para crear un slave exacto, incluido lo que el panel no gestiona. '

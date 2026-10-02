@@ -118,6 +118,7 @@ class McpController
             'pageTitle' => 'MCP',
             'enabled' => Settings::get('mcp_enabled', '0') === '1',
             'allowWrite' => Settings::get('mcp_allow_write', '0') === '1',
+            'allowDns' => Settings::get('mcp_allow_dns', '0') === '1',
             'pendingCredentials' => \MuseDockPanel\Mcp\McpMailTools::pendingCredentials(),
             'hasToken' => Settings::get('mcp_token_hash', '') !== '',
             'tokenCreatedAt' => Settings::get('mcp_token_created_at', ''),
@@ -140,10 +141,14 @@ class McpController
             exit;
         }
         $write = $enable && !empty($_POST['mcp_allow_write']);
+        // Editar DNS en Cloudflare es aparte y además exige "acciones que modifican".
+        $dns = $write && !empty($_POST['mcp_allow_dns']);
         Settings::set('mcp_enabled', $enable ? '1' : '0');
         Settings::set('mcp_allow_write', $write ? '1' : '0');
+        Settings::set('mcp_allow_dns', $dns ? '1' : '0');
         LogService::log('mcp.settings', $enable ? 'enabled' : 'disabled',
-            'Servidor MCP ' . ($enable ? 'activado' : 'desactivado') . '; acciones que modifican: ' . ($write ? 'PERMITIDAS' : 'no'));
+            'Servidor MCP ' . ($enable ? 'activado' : 'desactivado') . '; acciones que modifican: ' . ($write ? 'PERMITIDAS' : 'no')
+            . '; editar DNS: ' . ($dns ? 'PERMITIDO' : 'no'));
         Flash::set('success', 'Servidor MCP ' . ($enable ? 'activado' : 'desactivado')
             . ($enable ? ($write ? ' con acciones que modifican permitidas.' : ' en solo lectura.') : '.'));
         header('Location: /settings/mcp');
@@ -169,6 +174,7 @@ class McpController
             Settings::set('mcp_token_hint', '');
             Settings::set('mcp_enabled', '0');
             Settings::set('mcp_allow_write', '0');
+            Settings::set('mcp_allow_dns', '0');
             LogService::log('mcp.token', 'revoked', 'Token MCP revocado y servidor MCP desactivado');
             Flash::set('success', 'Token revocado. El servidor MCP queda desactivado.');
         } else {

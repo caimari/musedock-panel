@@ -73,6 +73,16 @@ final class McpMailTools
                     'apply' => $apply,
                 ], ['source', 'destination']),
             ],
+            'mail_domain_alias' => [
+                'write' => true,
+                'title' => 'Dominio alias (sinónimo) de otro dominio de correo',
+                'description' => 'Hace que un dominio sea sinónimo de otro: todo lo que llegue a X@alias se entrega en X@destino (mismos buzones y alias; se conserva el nombre de usuario). Da de alta el dominio alias en el correo del panel si no existe (con su DKIM, para cuando se publique su DNS) y crea su catch-all "@alias" → "@destino" (Postfix reescribe @otrodominio conservando el usuario). Se niega si el dominio alias ya tiene buzones propios (el catch-all les quitaría el correo). No toca el DNS: después, mail_dns_publish del dominio alias. Primero sin apply.',
+                'inputSchema' => $o([
+                    'alias_domain' => ['type' => 'string', 'description' => 'p. ej. screenart.info'],
+                    'target_domain' => ['type' => 'string', 'description' => 'Dominio de correo existente en el panel, p. ej. screenart.es'],
+                    'apply' => $apply,
+                ], ['alias_domain', 'target_domain']),
+            ],
             'mail_domain_verify' => [
                 'write' => false,
                 'title' => 'Verificar correo de un dominio',
@@ -94,12 +104,54 @@ final class McpMailTools
             'mail_dns_publish'    => self::dnsPublish($args),
             'mail_mailbox_create' => self::mailboxCreate($args),
             'mail_alias_create'   => self::aliasCreate($args),
+            'mail_domain_alias'   => self::domainAlias($args),
             'mail_domain_verify'  => self::domainVerify($args),
             default               => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
         };
     }
 
     // ── Guardas y utilidades ─────────────────────────────────────────────
+
+    private static function domainAlias(array $args): array
+    {
+        $alias = self::domainArg(['domain' => $args['alias_domain'] ?? '']);
+        $target = self::domainArg(['domain' => $args['target_domain'] ?? '']);
+        if ($alias === $target) {
+            throw new \InvalidArgumentException('El dominio alias y el de destino no pueden ser el mismo.');
+        }
+        $t = self::requireDomain($target);
+        self::guardWritable();
+        $a = MailService::getDomainByName($alias);
+        $plan = ['alias_domain' => $alias, 'target_domain' => $target, 'actions' => []];
+        if ($a) {
+            $boxes = (int)(\MuseDockPanel\Database::fetchOne("SELECT COUNT(*) AS n FROM mail_accounts WHERE mail_domain_id = :d", ['d' => (int)$a['id']])['n'] ?? 0);
+            if ($boxes > 0) {
+                throw new \RuntimeException("{$alias} ya tiene {$boxes} buzón(es) propio(s): un catch-all hacia {$target} les quitaría el correo. No se hace nada; revisa esos buzones antes.");
+            }
+            $cur = \MuseDockPanel\Database::fetchOne("SELECT destination FROM mail_aliases WHERE mail_domain_id = :d AND is_catchall = true AND is_active = true", ['d' => (int)$a['id']]);
+            if ($cur && strtolower((string)$cur['destination']) === '@' . $target) {
+                return ['status' => 'ya_existe', 'note' => "{$alias} ya es sinónimo de {$target}."] + $plan;
+            }
+            if ($cur) {
+                $plan['actions'][] = "Sustituir su catch-all actual (→ {$cur['destination']}) por → @{$target}";
+            }
+        } else {
+            $plan['actions'][] = "Dar de alta {$alias} en el correo del panel (con su clave DKIM; cliente: el de {$target})";
+        }
+        $plan['actions'][] = "Catch-all @{$alias} → @{$target}: X@{$alias} se entrega en X@{$target}";
+        $plan['actions'][] = 'Replicarlo a los nodos de correo (p. ej. Filemon)';
+        $plan['note'] = "Ojo: una dirección que no exista en {$target} se acepta y luego se devuelve con un rebote (el catch-all acepta cualquier nombre). El DNS no se toca: después, mail_dns_publish {$alias} (si el dominio recibe correo por el Email Routing de Cloudflare, lo detecta como conflicto).";
+        if (empty($args['apply'])) {
+            return ['status' => 'plan', 'apply' => false] + $plan;
+        }
+        if (!$a) {
+            $id = MailService::createDomain($alias, !empty($t['customer_id']) ? (int)$t['customer_id'] : null, null, ['max_accounts' => 0]);
+            $a = MailService::getDomain($id) ?? ['id' => $id];
+        }
+        MailService::createAlias((int)$a['id'], '@' . $alias, '@' . $target, true);
+        LogService::log('mail.domain.alias', $alias, "Dominio alias de {$target} (via MCP)");
+        return ['status' => 'hecho'] + $plan;
+    }
 
     private static function guardWritable(): void
     {
@@ -203,18 +255,24 @@ final class McpMailTools
             throw new \RuntimeException('No hay servidor de correo disponible (ni local configurado ni nodo de correo online).');
         }
 
+        $hosting = MailService::hostingForDomain($domain);
         $plan = ['domain' => $domain, 'actions' => [
             'Crear el dominio de correo en el panel (servidor de correo local)',
             'Generar su clave DKIM (selector "default") y cargarla en OpenDKIM',
             'Replicarlo a los nodos de correo del cluster (p. ej. Filemon)',
         ], 'next' => 'Después: mail_dns_publish para publicar MX/SPF/DKIM/DMARC en Cloudflare.'];
+        if ($hosting) {
+            $plan['hosting'] = "Este dominio ya es una web del panel ({$hosting['kind']} del hosting {$hosting['domain']}). "
+                . 'El hosting no se toca; el correo se verá también en la ficha de ese hosting'
+                . (!empty($hosting['customer_id']) ? ' y el dominio de correo hereda su cliente.' : '.');
+        }
 
         if (empty($args['apply'])) {
             return ['status' => 'plan', 'apply' => false] + $plan;
         }
 
-        $id = MailService::createDomain($domain, null, null, ['max_accounts' => 0]);
-        LogService::log('mail.domain.create', $domain, 'Mail domain created (via MCP)');
+        $id = MailService::createDomain($domain, !empty($hosting['customer_id']) ? (int)$hosting['customer_id'] : null, null, ['max_accounts' => 0]);
+        LogService::log('mail.domain.create', $domain, 'Mail domain created (via MCP)' . ($hosting ? " (hosting {$hosting['domain']}, {$hosting['kind']})" : ''));
         $row = MailService::getDomain($id) ?? [];
         return ['status' => 'creado', 'domain' => $domain, 'id' => $id,
             'dkim' => !empty($row['dkim_public_key']) ? 'generado (selector ' . ($row['dkim_selector'] ?? 'default') . ')' : 'NO generado (revisa mail_dkim_auto)',

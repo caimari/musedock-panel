@@ -33,7 +33,10 @@ class MailService
     {
         return Database::fetchAll("
             SELECT md.*, cn.name AS node_name, c.name AS customer_name,
-                   (SELECT COUNT(*) FROM mail_accounts WHERE mail_domain_id = md.id) AS account_count
+                   (SELECT COUNT(*) FROM mail_accounts WHERE mail_domain_id = md.id) AS account_count,
+                   -- ¿También es una web del panel? (correo y hosting se unen por el nombre)
+                   (SELECT h.id FROM hosting_accounts h WHERE lower(h.domain) = lower(md.domain) AND h.status != 'deleted' LIMIT 1) AS hosting_id,
+                   (SELECT h.domain FROM hosting_accounts h WHERE lower(h.domain) = lower(md.domain) AND h.status != 'deleted' LIMIT 1) AS hosting_domain
             FROM mail_domains md
             LEFT JOIN cluster_nodes cn ON cn.id = md.mail_node_id
             LEFT JOIN customers c ON c.id = md.customer_id
@@ -55,6 +58,50 @@ class MailService
     public static function getDomainByName(string $domain): ?array
     {
         return Database::fetchOne("SELECT * FROM mail_domains WHERE domain = :d", ['d' => $domain]);
+    }
+
+    /**
+     * ¿Este dominio es también una web de este panel? Correo y hosting no van
+     * enlazados por ningún campo, sino por el nombre del dominio: la ficha del
+     * hosting muestra el correo de su mismo dominio. Sirve para avisarlo al crear
+     * el dominio de correo y para heredar el cliente del hosting.
+     * Devuelve id, domain, username, customer_id y kind (principal | dominio extra |
+     * alias | redirección), o null.
+     */
+    public static function hostingForDomain(string $domain): ?array
+    {
+        $d = strtolower(trim($domain));
+        if ($d === '') {
+            return null;
+        }
+        $row = Database::fetchOne(
+            "SELECT id, domain, username, customer_id FROM hosting_accounts WHERE lower(domain) = :d AND status != 'deleted'",
+            ['d' => $d]
+        );
+        if ($row) {
+            return $row + ['kind' => 'principal'];
+        }
+        $row = Database::fetchOne(
+            "SELECT h.id, h.domain, h.username, h.customer_id FROM hosting_domains hd
+             JOIN hosting_accounts h ON h.id = hd.account_id
+             WHERE lower(hd.domain) = :d AND h.status != 'deleted'",
+            ['d' => $d]
+        );
+        if ($row) {
+            return $row + ['kind' => 'dominio extra'];
+        }
+        $row = Database::fetchOne(
+            "SELECT h.id, h.domain, h.username, h.customer_id, da.type FROM hosting_domain_aliases da
+             JOIN hosting_accounts h ON h.id = da.hosting_account_id
+             WHERE lower(da.domain) = :d AND h.status != 'deleted'",
+            ['d' => $d]
+        );
+        if ($row) {
+            $kind = ($row['type'] ?? '') === 'redirect' ? 'redirección' : 'alias';
+            unset($row['type']);
+            return $row + ['kind' => $kind];
+        }
+        return null;
     }
 
     public static function createDomain(string $domain, ?int $customerId, ?int $mailNodeId, array $extra = []): int

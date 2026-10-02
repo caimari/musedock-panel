@@ -9,6 +9,24 @@ if (empty($serverIp)) {
     if ($serverIp) \MuseDockPanel\Settings::set('server_public_ip', $serverIp);
 }
 
+// Celda de DNS con el ÚLTIMO estado guardado (la página no comprueba nada al
+// cargar, salvo los dominios que nunca se han comprobado) + icono para
+// comprobarlo ahora.
+function renderDnsCell(string $domain, array $cache): string {
+    $e = $cache[strtolower($domain)] ?? null;
+    $badge = renderDnsBadge($e
+        ? ['status' => $e['status'] ?? 'none', 'ips' => $e['records'] ?? []]
+        : ['status' => 'pending', 'ips' => []]);
+    $age = '';
+    if ($e && !empty($e['checked_at'])) {
+        $s = time() - (int)$e['checked_at'];
+        $age = $s < 90 ? 'ahora' : ($s < 5400 ? 'hace ' . round($s / 60) . ' min' : ($s < 172800 ? 'hace ' . round($s / 3600) . ' h' : 'hace ' . round($s / 86400) . ' d'));
+    }
+    return '<span class="dns-badge">' . $badge . '</span>'
+        . '<span class="dns-age text-muted ms-1" style="font-size:0.7rem;">' . View::e($age) . '</span>'
+        . '<button type="button" class="btn btn-link btn-sm p-0 ms-1 dns-refresh" title="Comprobar ahora" style="color:#64748b;font-size:0.75rem;vertical-align:baseline;"><i class="bi bi-arrow-clockwise"></i></button>';
+}
+
 // Helper: render DNS status badge
 function renderDnsBadge(array $dns): string {
     $status = $dns['status'];
@@ -39,7 +57,12 @@ function renderDnsBadge(array $dns): string {
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-globe2 me-2"></i>All Domains</span>
-        <small class="text-muted">Server IP: <code><?= View::e($serverIp) ?></code></small>
+        <span class="d-flex align-items-center gap-2">
+            <small class="text-muted">Server IP: <code><?= View::e($serverIp) ?></code></small>
+            <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" id="dns-refresh-all" title="Comprobar el DNS de todos los dominios ahora">
+                <i class="bi bi-arrow-clockwise me-1"></i>Comprobar DNS
+            </button>
+        </span>
     </div>
     <div class="card-body p-0">
         <?php if (empty($accountDomains)): ?>
@@ -66,8 +89,12 @@ function renderDnsBadge(array $dns): string {
                         <td class="ps-3">
                             <a href="/accounts/<?= $acc['id'] ?>" class="text-info text-decoration-none fw-semibold"><?= View::e($acc['domain']) ?></a>
                             <a href="https://<?= View::e($acc['domain']) ?>" target="_blank" class="ms-1" style="color:#64748b;font-size:0.75rem;" title="Open site"><i class="bi bi-box-arrow-up-right"></i></a>
+                            <?php $md = $mailDomains[strtolower($acc['domain'])] ?? null; ?>
+                            <?php if ($md): ?>
+                                <a href="/mail/domains/<?= (int)$md['id'] ?>" class="badge text-decoration-none ms-1" style="background:rgba(168,85,247,0.15);color:#c084fc;font-size:0.65rem;" title="Este dominio tiene correo en el panel (<?= View::e($md['status']) ?>)"><i class="bi bi-envelope me-1"></i>Correo</a>
+                            <?php endif; ?>
                         </td>
-                        <td class="dns-cell" data-domain="<?= View::e($acc['domain']) ?>"><?= renderDnsBadge($dns) ?></td>
+                        <td class="dns-cell" data-domain="<?= View::e($acc['domain']) ?>" data-cached="<?= isset($dnsCache[strtolower($acc['domain'])]) ? 1 : 0 ?>"><?= renderDnsCell($acc['domain'], $dnsCache) ?></td>
                         <td>
                             <a href="/accounts/<?= $acc['id'] ?>" class="text-decoration-none text-light">
                                 <code><?= View::e($acc['username']) ?></code>
@@ -96,7 +123,7 @@ function renderDnsBadge(array $dns): string {
                             </a>
                             <span class="badge bg-dark ms-1">alias</span>
                         </td>
-                        <td class="dns-cell" data-domain="<?= View::e($alias['domain']) ?>"><?= renderDnsBadge($aliasDns) ?></td>
+                        <td class="dns-cell" data-domain="<?= View::e($alias['domain']) ?>" data-cached="<?= isset($dnsCache[strtolower($alias['domain'])]) ? 1 : 0 ?>"><?= renderDnsCell($alias['domain'], $dnsCache) ?></td>
                         <td colspan="4"></td>
                     </tr>
                     <?php endforeach; ?>
@@ -117,7 +144,7 @@ function renderDnsBadge(array $dns): string {
                             <a href="https://<?= View::e($subDomain) ?>" target="_blank" class="ms-1" style="color:#64748b;font-size:0.75rem;" title="Open site"><i class="bi bi-box-arrow-up-right"></i></a>
                             <span class="badge ms-1" style="background: rgba(168,85,247,0.15); color: #a855f7; font-size:0.65rem;">subdomain</span>
                         </td>
-                        <td class="dns-cell" data-domain="<?= View::e($subDomain) ?>"><?= renderDnsBadge($subDns) ?></td>
+                        <td class="dns-cell" data-domain="<?= View::e($subDomain) ?>" data-cached="<?= isset($dnsCache[strtolower($subDomain)]) ? 1 : 0 ?>"><?= renderDnsCell($subDomain, $dnsCache) ?></td>
                         <td colspan="4"></td>
                     </tr>
                     <?php endforeach; ?>
@@ -175,7 +202,7 @@ function renderDnsBadge(array $dns): string {
                             </span>
                         <?php endif; ?>
                     </td>
-                    <td class="dns-cell" data-domain="<?= View::e($item['domain']) ?>"><?= renderDnsBadge($itemDns) ?></td>
+                    <td class="dns-cell" data-domain="<?= View::e($item['domain']) ?>" data-cached="<?= isset($dnsCache[strtolower($item['domain'])]) ? 1 : 0 ?>"><?= renderDnsCell($item['domain'], $dnsCache) ?></td>
                     <td>
                         <a href="/accounts/<?= $item['hosting_account_id'] ?>" class="text-decoration-none text-light">
                             <i class="bi bi-arrow-right me-1 text-muted"></i><?= View::e($item['account_domain'] ?? '') ?>
@@ -275,7 +302,7 @@ function renderDnsBadge(array $dns): string {
                             <?= $item['redirect_code'] ?>
                         </span>
                     </td>
-                    <td class="dns-cell" data-domain="<?= View::e($item['domain']) ?>"><?= renderDnsBadge($itemDns) ?></td>
+                    <td class="dns-cell" data-domain="<?= View::e($item['domain']) ?>" data-cached="<?= isset($dnsCache[strtolower($item['domain'])]) ? 1 : 0 ?>"><?= renderDnsCell($item['domain'], $dnsCache) ?></td>
                     <td>
                         <i class="bi bi-arrow-right me-1 text-muted"></i>
                         <a href="<?= View::e($item['target_url'] ?? '#') ?>" target="_blank" class="text-decoration-none text-light">
@@ -349,49 +376,65 @@ function confirmDeleteRedirect(id, domain) {
     });
 }
 
-// Lazy DNS check — load DNS status via AJAX after page renders
+// DNS: la página pinta el último estado guardado. Aquí solo se comprueban los
+// dominios que nunca se han comprobado; el resto, al pulsar el icono de la fila
+// o "Comprobar DNS". Uno detrás de otro, para no saturar.
 (function() {
-    var cells = document.querySelectorAll('.dns-cell[data-domain]');
-    var domains = [];
-    cells.forEach(function(c) { domains.push(c.dataset.domain); });
-
-    // Check DNS one by one (sequential to avoid flooding)
-    var i = 0;
-    function checkNext() {
-        if (i >= domains.length) return;
-        var domain = domains[i];
-        var cell = document.querySelectorAll('.dns-cell[data-domain="' + domain + '"]');
-
+    var csrf = document.querySelector('input[name=_csrf_token]')?.value || '';
+    var queue = [];
+    var running = false;
+    function cellsFor(domain) { return document.querySelectorAll('.dns-cell[data-domain="' + CSS.escape(domain) + '"]'); }
+    function esc(t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+    function badge(data) {
+        var ips = esc((data.records || []).join(', '));
+        switch (data.status) {
+            case 'ok': return '<span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;"><i class="bi bi-check-circle me-1"></i>OK — ' + ips + '</span>';
+            case 'cloudflare': return '<span class="badge" style="background:rgba(249,115,22,0.15);color:#f97316;"><i class="bi bi-cloud-fill me-1"></i>CF Proxy</span>';
+            case 'elsewhere': return '<span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;"><i class="bi bi-exclamation-triangle me-1"></i>' + ips + '</span><small class="text-muted d-block">Points elsewhere</small>';
+            default: return '<span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;"><i class="bi bi-x-circle me-1"></i>No DNS</span>';
+        }
+    }
+    function setLoading(domain) {
+        cellsFor(domain).forEach(function(c) {
+            var b = c.querySelector('.dns-refresh i'); if (b) b.className = 'spinner-border spinner-border-sm';
+        });
+    }
+    function render(domain, html, age) {
+        cellsFor(domain).forEach(function(c) {
+            var b = c.querySelector('.dns-badge'); if (b) b.innerHTML = html;
+            var a = c.querySelector('.dns-age'); if (a) a.textContent = age;
+            var i = c.querySelector('.dns-refresh i'); if (i) i.className = 'bi bi-arrow-clockwise';
+            c.dataset.cached = '1';
+        });
+    }
+    function next() {
+        if (!queue.length) { running = false; return; }
+        running = true;
+        var domain = queue.shift();
+        setLoading(domain);
         fetch('/domains/check-dns', {
             method: 'POST',
             headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-            body: 'domain=' + encodeURIComponent(domain) + '&_csrf_token=' + encodeURIComponent(document.querySelector('input[name=_csrf_token]')?.value || '')
+            body: 'domain=' + encodeURIComponent(domain) + '&_csrf_token=' + encodeURIComponent(csrf)
         })
         .then(function(r) { return r.json(); })
-        .then(function(data) {
-            var html = '';
-            var serverIp = '<?= View::e($serverIp) ?>';
-            if (data.points_here) {
-                html = '<span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;"><i class="bi bi-check-circle me-1"></i>OK — ' + (data.records||[]).join(', ') + '</span>';
-            } else if (data.records && data.records.length > 0) {
-                // Check if Cloudflare
-                var isCf = (data.records||[]).some(function(ip) { return ip.startsWith('104.') || ip.startsWith('172.67.') || ip.startsWith('188.114.'); });
-                if (isCf) {
-                    html = '<span class="badge" style="background:rgba(249,115,22,0.15);color:#f97316;"><i class="bi bi-cloud-fill me-1"></i>CF Proxy</span>';
-                } else {
-                    html = '<span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;"><i class="bi bi-exclamation-triangle me-1"></i>' + (data.records||[]).join(', ') + '</span><small class="text-muted d-block">Points elsewhere</small>';
-                }
-            } else {
-                html = '<span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;"><i class="bi bi-x-circle me-1"></i>No DNS</span>';
-            }
-            cell.forEach(function(c) { c.innerHTML = html; });
-        })
-        .catch(function() {
-            cell.forEach(function(c) { c.innerHTML = '<span class="badge" style="background:rgba(100,116,139,0.1);color:#64748b;">?</span>'; });
-        })
-        .finally(function() { i++; checkNext(); });
+        .then(function(data) { render(domain, data.error ? '<span class="badge" style="background:rgba(100,116,139,0.1);color:#64748b;">?</span>' : badge(data), 'ahora'); })
+        .catch(function() { render(domain, '<span class="badge" style="background:rgba(100,116,139,0.1);color:#64748b;">?</span>', ''); })
+        .finally(next);
     }
-    checkNext();
+    function enqueue(domain) {
+        if (queue.indexOf(domain) === -1) queue.push(domain);
+        if (!running) next();
+    }
+    // Al cargar: solo los que no tienen estado guardado.
+    document.querySelectorAll('.dns-cell[data-domain][data-cached="0"]').forEach(function(c) { enqueue(c.dataset.domain); });
+    document.querySelectorAll('.dns-cell .dns-refresh').forEach(function(btn) {
+        btn.addEventListener('click', function() { enqueue(btn.closest('.dns-cell').dataset.domain); });
+    });
+    var all = document.getElementById('dns-refresh-all');
+    if (all) all.addEventListener('click', function() {
+        document.querySelectorAll('.dns-cell[data-domain]').forEach(function(c) { enqueue(c.dataset.domain); });
+    });
 })();
 </script>
 

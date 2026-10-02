@@ -133,6 +133,76 @@ final class McpClusterTools
                     'apply' => $apply,
                 ], ['domain']),
             ],
+            'server_profile' => [
+                'write' => false,
+                'title' => 'Perfil de este servidor (léelo primero)',
+                'description' => 'Solo lectura. Todo lo que hay que saber de este servidor antes de actuar: nombre, rol en el cluster, IPs, a qué nombre apuntan por defecto los dominios nuevos (dns_default_target, como CNAME; el proxy de Cloudflare es opcional), con quién hace el relevo (primario/relevo y nodos del cluster), cuentas de Cloudflare, correo, avisos, monitorización y qué permite el MCP aquí. Llámala al conectar por primera vez.',
+                'inputSchema' => $o([]),
+            ],
+            'server_profile_set' => [
+                'write' => true,
+                'title' => 'Cambiar el destino por defecto de los dominios nuevos',
+                'description' => 'Fija dns_default_target: el nombre al que apuntan por CNAME los dominios nuevos de este servidor (p. ej. mortadelo.musedock.com). No cambia ningún DNS existente. Primero sin apply.',
+                'inputSchema' => $o(['dns_default_target' => ['type' => 'string'], 'apply' => $apply], ['dns_default_target']),
+            ],
+            'monitor_status' => [
+                'write' => false,
+                'title' => 'Estado de la monitorización',
+                'description' => 'Solo lectura. Si la monitorización está activa y funcionando (última lectura), últimos valores (CPU, RAM, disco, red…), umbrales de aviso, avisos de las últimas 24 h, problemas que siguen abiertos, errores recientes del recolector y si los avisos por correo/Telegram salen.',
+                'inputSchema' => $o([]),
+            ],
+            'monitor_configure' => [
+                'write' => true,
+                'title' => 'Activar o ajustar la monitorización',
+                'description' => 'Activa o desactiva la monitorización y ajusta sus umbrales de aviso (CPU, RAM y disco en %, temperatura de GPU) y cada cuántas horas se repite un aviso que sigue. Primero sin apply.',
+                'inputSchema' => $o([
+                    'enabled' => ['type' => 'boolean'],
+                    'cpu' => ['type' => 'integer', 'description' => '% de CPU que dispara aviso'],
+                    'ram' => ['type' => 'integer'],
+                    'disk' => ['type' => 'integer'],
+                    'gpu_temp' => ['type' => 'integer', 'description' => '°C'],
+                    'repeat_hours' => ['type' => 'integer', 'description' => 'Repetir un aviso que sigue cada N horas (por defecto 12)'],
+                    'apply' => $apply,
+                ]),
+            ],
+            'cloudflare_tokens' => [
+                'write' => false,
+                'title' => 'Qué tokens de Cloudflare usa este servidor y qué pueden hacer',
+                'description' => 'Solo lectura. Para cada token que usa este servidor (cuentas de Cloudflare del panel y CLOUDFLARE_API_TOKEN de Caddy en /etc/default/caddy): estado y caducidad según Cloudflare, id corto, a cuántas zonas llega y si puede leer DNS y reglas de Email Routing (lo prueba con lecturas). Nunca muestra el token. Sirve para reconocer cada token en el panel de Cloudflare (donde todos se llaman igual) y saber cuáles están en uso antes de limpiar.',
+                'inputSchema' => $o([]),
+            ],
+            'cloudflare_email_routing' => [
+                'write' => false,
+                'title' => 'Enrutamiento de correo de Cloudflare (Email Routing)',
+                'description' => 'Solo lectura. Por cada zona de las cuentas de Cloudflare del panel (o solo la de `domain`): si tiene Email Routing activado, sus reglas (dirección → reenvío a), el catch-all y a qué servidores apunta su MX. Dice además si el dominio ya existe como dominio de correo en este panel. Sirve para ver qué dominios reciben correo por Cloudflare antes de pasarlos al correo propio.',
+                'inputSchema' => $o([
+                    'domain' => ['type' => 'string', 'description' => 'Opcional: solo este dominio'],
+                    'only_enabled' => ['type' => 'boolean', 'description' => 'Solo los que tienen Email Routing activado (por defecto true)'],
+                ]),
+            ],
+            'dns_records' => [
+                'write' => false,
+                'title' => 'Registros DNS de un dominio (Cloudflare)',
+                'description' => 'Solo lectura. Lista los registros DNS de la zona de un dominio en las cuentas de Cloudflare de este panel (nombre, tipo, contenido, proxy, TTL). Si la zona no aparece, refresca la lista de zonas de las cuentas (por si se acaba de registrar o añadir).',
+                'inputSchema' => $o([
+                    'domain' => ['type' => 'string', 'description' => 'Dominio o subdominio (se busca su zona)'],
+                    'type' => ['type' => 'string', 'description' => 'Opcional: filtrar por tipo (A, CNAME, TXT, MX...)'],
+                ], ['domain']),
+            ],
+            'dns_record_set' => [
+                'write' => true,
+                'title' => 'Crear o modificar un registro DNS (Cloudflare)',
+                'description' => 'Crea un registro DNS o modifica el que ya existe con ese nombre y tipo, en la zona del dominio en las cuentas de Cloudflare de este panel. Tipos: A, AAAA, CNAME, TXT, MX. NUNCA borra: si para hacerlo habría que borrar otro registro (p. ej. un A donde quieres un CNAME), se niega y lo explica. TXT y MX admiten varios valores: si ya existe ese valor no hace nada, y si no, lo AÑADE sin tocar los demás. Primero sin apply (plan), mostrarlo y pedir confirmación. Requiere "Permitir acciones que modifican" y "Permitir editar DNS en Cloudflare" en Ajustes → MCP.',
+                'inputSchema' => $o([
+                    'name' => ['type' => 'string', 'description' => 'Nombre completo del registro: midominio.com (raíz), www.midominio.com, sub.midominio.com'],
+                    'type' => ['type' => 'string', 'enum' => ['A', 'AAAA', 'CNAME', 'TXT', 'MX']],
+                    'content' => ['type' => 'string', 'description' => 'IP, nombre de destino (CNAME/MX) o texto (TXT)'],
+                    'proxied' => ['type' => 'boolean', 'description' => 'Nube naranja (solo A, AAAA, CNAME). Por defecto: el valor actual o false'],
+                    'ttl' => ['type' => 'integer', 'description' => '1 = automático (por defecto)'],
+                    'priority' => ['type' => 'integer', 'description' => 'Prioridad (solo MX), por defecto 10'],
+                    'apply' => $apply,
+                ], ['name', 'type', 'content']),
+            ],
             'notify_status' => [
                 'write' => false,
                 'title' => 'Avisos del panel: cómo y a quién',
@@ -170,8 +240,17 @@ final class McpClusterTools
             'failover_dns_plan' => [
                 'write' => false,
                 'title' => 'Qué DNS cambiaría un relevo',
-                'description' => 'Solo lectura. Con las cuentas de Cloudflare de ESTE panel (las que usará al hacer el relevo), lista por zona los registros A que hoy apuntan a la IP del servidor primario y que el relevo cambiaría a la IP del de relevo, y las zonas con error (token sin permiso, zona no accesible). Ejecútalo en el nodo que hará el cambio (el de relevo). No cambia nada.',
+                'description' => 'Solo lectura. Con las cuentas de Cloudflare de ESTE panel, lista por zona los registros A que hoy apuntan a la IP del servidor primario y que un relevo cambiaría, lo que se mueve con ellos por CNAME, y qué NO se movería: dominios de hostings y TODO lo que sirve Caddy aquí (también lo añadido por otras aplicaciones, p. ej. tenants del CMS). Ejecútalo en el MASTER para ver todo lo que sirve (las cuentas de Cloudflare son las mismas en el nodo de relevo). No cambia nada.',
                 'inputSchema' => $o([]),
+            ],
+            'firewall_check_ip' => [
+                'write' => false,
+                'title' => '¿Qué puede hacer esta IP contra el servidor?',
+                'description' => 'Solo lectura, en tiempo real. Simula una conexión nueva desde una IP concreta a cada puerto en escucha (o al indicado) con las reglas actuales de iptables, incluidas las listas ipset: a qué servicios llegaría y cuáles le bloquean (y qué regla). Dice también si es un origen de confianza del panel y si fail2ban la tiene bloqueada. Con `node` se consulta otro nodo.',
+                'inputSchema' => $o([
+                    'ip' => ['type' => 'string', 'description' => 'IPv4 a comprobar'],
+                    'port' => ['type' => 'integer', 'description' => 'Opcional: solo este puerto'],
+                ], ['ip']),
             ],
             'firewall_audit' => [
                 'write' => false,
@@ -268,15 +347,415 @@ final class McpClusterTools
             'hosting_php_settings'  => self::hostingPhp($args),
             'config_mirror'         => self::configMirror($args),
             'failover_dns_plan'     => self::dnsPlan(),
+            'server_profile'        => self::serverProfile(),
+            'server_profile_set'    => self::serverProfileSet($args),
+            'monitor_status'        => self::monitorStatus(),
+            'monitor_configure'     => self::monitorConfigure($args),
+            'cloudflare_email_routing' => self::cfEmailRouting($args),
+            'cloudflare_tokens'     => self::cfTokens(),
+            'dns_records'           => self::dnsRecords($args),
+            'dns_record_set'        => self::dnsRecordSet($args),
             'notify_status'         => self::notifyStatus(),
             'notify_configure'      => self::notifyConfigure($args),
             'firewall_audit'        => \MuseDockPanel\Services\FirewallAuditService::refreshStored(),
+            'firewall_check_ip'     => \MuseDockPanel\Services\FirewallAuditService::checkSource((string)($args['ip'] ?? ''), isset($args['port']) ? (int)$args['port'] : null),
             'firewall_trusted_sources' => self::trustedSources($args),
             'filesync_status'       => self::filesyncStatus(),
             'filesync_configure'    => self::filesyncConfigure($args),
             'filesync_extra_paths'  => self::filesyncExtraPaths($args),
             default                 => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
         };
+    }
+
+    // ── Perfil del servidor ──────────────────────────────────────────────
+
+    /** Nombre al que apuntan por CNAME los dominios nuevos: el del panel, salvo que se fije otro. */
+    public static function dnsDefaultTarget(): string
+    {
+        return strtolower(trim(Settings::get('dns_default_target', '') ?: Settings::get('panel_hostname', '') ?: (gethostname() ?: '')));
+    }
+
+    private static function serverProfile(): array
+    {
+        $ips = array_values(array_filter(preg_split('/\s+/', trim((string)shell_exec('hostname -I 2>/dev/null'))) ?: []));
+        $servers = array_map(static fn($s) => ['name' => $s['name'] ?? '', 'ip' => $s['ip'] ?? '', 'role' => $s['role'] ?? ''], FailoverService::getServers());
+        $nodes = array_map(static fn($n) => ['id' => (int)$n['id'], 'name' => $n['name'], 'role' => $n['role'] ?? '', 'status' => $n['status'] ?? ''], ClusterService::getNodes());
+        $cf = array_map(static fn($a) => ['name' => $a['name'] ?? '', 'zones' => count($a['zones'] ?? [])], CloudflareService::getConfiguredAccounts());
+        $target = self::dnsDefaultTarget();
+        return [
+            'hostname' => gethostname(),
+            'panel' => Settings::get('panel_hostname', '') . ':' . (Settings::get('panel_port', '8444') ?: '8444'),
+            'cluster_role' => self::role(),
+            'ips' => $ips,
+            'new_domains' => [
+                'dns_default_target' => $target,
+                'how' => "Los dominios nuevos de este servidor apuntan por CNAME a {$target} (raíz y www). El proxy naranja de Cloudflare es OPCIONAL: pregúntalo (por defecto activado, como hace el CMS).",
+                'why_cname' => "Así un relevo solo tiene que mover el registro A de {$target}; los dominios que apuntan a él se mueven solos y no hay que cambiarlos uno a uno.",
+            ],
+            'failover' => [
+                'mode' => Settings::get('failover_mode', 'manual'),
+                'servers' => $servers,
+                'note' => 'El relevo cambia en Cloudflare los registros A de la IP del primario a la del de relevo (failover_dns_plan para ver qué movería).',
+            ],
+            'cluster_nodes' => $nodes,
+            'cloudflare_accounts' => $cf,
+            'mail' => ['hostname' => Settings::get('mail_hostname', ''), 'mode' => \MuseDockPanel\Services\MailService::getCurrentMailMode()],
+            'alerts' => self::notifyStatus()['issues'] ?: 'avisos configurados',
+            'monitoring_enabled' => Settings::get('monitor_enabled', '1') === '1',
+            'mcp_permissions' => [
+                'write' => Settings::get('mcp_allow_write', '0') === '1',
+                'dns_edit' => Settings::get('mcp_allow_dns', '0') === '1',
+                'never' => 'Ninguna herramienta borra datos ni registros DNS.',
+            ],
+            'start_here' => 'Para un dominio nuevo: dns_records (ver su zona) → dns_record_set (CNAME raíz y www a dns_default_target, proxy según el usuario) → comprobar la web. Para el estado general: monitor_status, notify_status, failover_preflight, domains_status.',
+        ];
+    }
+
+    private static function serverProfileSet(array $args): array
+    {
+        $t = strtolower(trim(rtrim((string)($args['dns_default_target'] ?? ''), '.')));
+        if (!preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/', $t)) {
+            throw new \InvalidArgumentException('Nombre no válido.');
+        }
+        $plan = ['dns_default_target' => ['antes' => self::dnsDefaultTarget(), 'después' => $t], 'note' => 'No cambia ningún DNS existente; solo el destino que se propone para los dominios nuevos.'];
+        if (empty($args['apply'])) {
+            return ['applied' => false, 'plan' => $plan];
+        }
+        Settings::set('dns_default_target', $t);
+        LogService::log('mcp.profile', 'dns_default_target', $t);
+        return ['applied' => true, 'plan' => $plan];
+    }
+
+    // ── Monitorización ───────────────────────────────────────────────────
+
+    private static function monitorStatus(): array
+    {
+        $host = gethostname() ?: 'localhost';
+        $db = \MuseDockPanel\Database::class;
+        $out = [
+            'enabled' => Settings::get('monitor_enabled', '1') === '1',
+            'thresholds' => [
+                'cpu_%' => (float)Settings::get('monitor_alert_cpu', '90'),
+                'ram_%' => (float)Settings::get('monitor_alert_ram', '90'),
+                'disk_%' => (float)Settings::get('monitor_alert_disk', '90'),
+                'gpu_temp_c' => (float)Settings::get('monitor_alert_gpu_temp', '85'),
+                'repeat_hours' => (int)Settings::get('monitor_alert_repeat_hours', '12'),
+            ],
+        ];
+        try {
+            $last = $db::fetchOne("SELECT max(ts) AS ts FROM monitor_metrics WHERE host = :h", ['h' => $host]);
+            $out['last_reading'] = $last['ts'] ?? null;
+            $out['collector_working'] = !empty($last['ts']) && (time() - strtotime((string)$last['ts'])) < 300;
+            $latest = [];
+            foreach ($db::fetchAll("SELECT DISTINCT ON (metric) metric, value, ts FROM monitor_metrics WHERE host = :h AND ts > NOW() - INTERVAL '15 minutes' ORDER BY metric, ts DESC", ['h' => $host]) as $r) {
+                $latest[$r['metric']] = round((float)$r['value'], 2);
+            }
+            ksort($latest);
+            $out['latest'] = $latest;
+            $out['alerts_24h'] = array_map(static fn($a) => ['at' => substr((string)$a['ts'], 0, 19), 'type' => $a['type'], 'message' => $a['message'],
+                    'details' => $a['details'] !== null ? mb_substr((string)$a['details'], 0, 600) : null],
+                $db::fetchAll("SELECT ts, type, message, details FROM monitor_alerts WHERE ts > NOW() - INTERVAL '24 hours' ORDER BY ts DESC LIMIT 20"));
+        } catch (\Throwable $e) {
+            $out['db_error'] = $e->getMessage();
+        }
+        $episodes = json_decode(Settings::get('monitor_alert_episodes', '{}'), true) ?: [];
+        $out['open_problems'] = array_values(array_map(static fn($k, $e) => explode('|', $k, 2)[1] . ' (desde el aviso de ' . date('Y-m-d H:i', (int)($e['last_sent'] ?? 0)) . ')',
+            array_keys(array_filter($episodes, static fn($e) => time() - (int)($e['last_seen'] ?? 0) < 600)),
+            array_filter($episodes, static fn($e) => time() - (int)($e['last_seen'] ?? 0) < 600)));
+        $log = PANEL_ROOT . '/storage/logs/monitor-collector.log';
+        $errors = [];
+        foreach (array_slice(@file($log, FILE_IGNORE_NEW_LINES) ?: [], -400) as $l) {
+            if (preg_match('/error|fail|exception/i', $l)) {
+                $errors[] = mb_substr($l, 0, 200);
+            }
+        }
+        $out['collector_errors_recent'] = array_slice($errors, -10);
+        $out['alert_delivery'] = self::notifyStatus()['issues'] ?: 'los avisos salen por los canales configurados (notify_status para el detalle)';
+        if (!$out['enabled']) {
+            $out['note'] = 'La monitorización está DESACTIVADA: no se recogen métricas ni se avisa de CPU/RAM/disco. monitor_configure con enabled=true para activarla.';
+        }
+        return $out;
+    }
+
+    private static function monitorConfigure(array $args): array
+    {
+        $map = ['cpu' => 'monitor_alert_cpu', 'ram' => 'monitor_alert_ram', 'disk' => 'monitor_alert_disk', 'gpu_temp' => 'monitor_alert_gpu_temp', 'repeat_hours' => 'monitor_alert_repeat_hours'];
+        $set = [];
+        if (array_key_exists('enabled', $args)) {
+            $set['monitor_enabled'] = !empty($args['enabled']) ? '1' : '0';
+        }
+        foreach ($map as $a => $k) {
+            if (isset($args[$a])) {
+                $v = (int)$args[$a];
+                if ($a !== 'repeat_hours' && $a !== 'gpu_temp' && ($v < 50 || $v > 100)) {
+                    throw new \InvalidArgumentException("{$a}: pon un porcentaje entre 50 y 100.");
+                }
+                $set[$k] = (string)max(1, $v);
+            }
+        }
+        if (!$set) {
+            throw new \InvalidArgumentException('No hay nada que cambiar.');
+        }
+        $plan = [];
+        foreach ($set as $k => $v) {
+            $plan[$k] = ['antes' => Settings::get($k, ''), 'después' => $v];
+        }
+        if (empty($args['apply'])) {
+            return ['applied' => false, 'plan' => $plan];
+        }
+        foreach ($set as $k => $v) {
+            Settings::set($k, $v);
+        }
+        LogService::log('mcp.monitor', 'configure', json_encode($set));
+        return ['applied' => true, 'plan' => $plan, 'note' => 'El recolector corre cada 30 s: en un minuto monitor_status mostrará lecturas nuevas.'];
+    }
+
+    // ── DNS en Cloudflare (crear y modificar; nunca borrar) ──────────────
+
+    private static function dnsZoneFor(string $name): array
+    {
+        $name = strtolower(trim(rtrim($name, '.')));
+        if ($name === '' || !preg_match('/^(\*\.)?[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/', $name)) {
+            throw new \InvalidArgumentException("Nombre de dominio no válido: {$name}");
+        }
+        $zone = CloudflareService::findZoneForDomain($name);
+        if (!$zone && CloudflareService::refreshZones()) {
+            $zone = CloudflareService::findZoneForDomain($name);
+        }
+        if (!$zone) {
+            throw new \RuntimeException("La zona de {$name} no está en ninguna cuenta de Cloudflare de este panel (Cluster → Failover → Cuentas Cloudflare). Si se acaba de añadir, puede tardar en aparecer.");
+        }
+        return $zone;
+    }
+
+    private static function cfTokens(): array
+    {
+        $list = [];
+        foreach (CloudflareService::getConfiguredAccounts() as $a) {
+            $list[] = ['used_by' => 'panel: cuenta "' . ($a['name'] ?? '?') . '"', 'token' => (string)($a['token'] ?? '')];
+        }
+        foreach (@file('/etc/default/caddy', FILE_IGNORE_NEW_LINES) ?: [] as $l) {
+            if (preg_match('/^\s*CLOUDFLARE_API_TOKEN\s*=\s*"?([^"\s]+)/', $l, $m)) {
+                $list[] = ['used_by' => 'Caddy (/etc/default/caddy): certificados por DNS-01', 'token' => $m[1]];
+            }
+        }
+        $out = [];
+        $seen = [];
+        foreach ($list as $t) {
+            if ($t['token'] === '') {
+                continue;
+            }
+            $h = hash('sha256', $t['token']);
+            if (isset($seen[$h])) {
+                $out[$seen[$h]]['used_by'] .= ' + ' . $t['used_by'];
+                continue;
+            }
+            $v = CloudflareService::apiRequest($t['token'], 'GET', '/user/tokens/verify');
+            $row = ['used_by' => $t['used_by']];
+            if (empty($v['ok'])) {
+                $row['status'] = 'NO VÁLIDO para Cloudflare: ' . ($v['error'] ?? '?');
+            } else {
+                $id = (string)($v['result']['id'] ?? '');
+                $row['status'] = (string)($v['result']['status'] ?? '?');
+                $row['id_short'] = $id !== '' ? substr($id, 0, 6) . '…' . substr($id, -4) : '?';
+                $row['expires'] = $v['result']['expires_on'] ?? 'no caduca';
+                $z = CloudflareService::listAllZones($t['token']);
+                $zones = ($z['ok'] ?? false) ? ($z['result'] ?? []) : [];
+                $row['zones'] = count($zones) . (count($zones) <= 4 ? ' (' . implode(', ', array_column($zones, 'name')) . ')' : '');
+                $first = $zones[0]['id'] ?? null;
+                if ($first) {
+                    $row['can_read_dns'] = !empty(CloudflareService::listRecords($t['token'], (string)$first, ['per_page' => 1])['ok']);
+                    $row['can_read_email_routing_rules'] = !empty(CloudflareService::apiRequest($t['token'], 'GET', "/zones/{$first}/email/routing/rules", ['per_page' => 1])['ok']);
+                }
+            }
+            $seen[$h] = count($out);
+            $out[] = $row;
+        }
+        return [
+            'tokens' => $out,
+            'note' => 'Para reconocerlos en Cloudflare (Mi perfil → Tokens de API, donde todos se llaman igual): por el número de zonas y los permisos. Un token que no aparezca aquí no lo usa ESTE servidor, pero puede usarlo otro (los nodos, el CMS MuseDock en sus ajustes de Cloudflare, otros proyectos): compruébalo antes de borrarlo.',
+        ];
+    }
+
+    private static function cfEmailRouting(array $args): array
+    {
+        $only = strtolower(trim((string)($args['domain'] ?? '')));
+        $onlyEnabled = !array_key_exists('only_enabled', $args) || !empty($args['only_enabled']);
+        $panelMail = [];
+        try {
+            foreach (\MuseDockPanel\Database::fetchAll("SELECT lower(domain) AS d FROM mail_domains") as $r) {
+                $panelMail[$r['d']] = true;
+            }
+        } catch (\Throwable) {
+        }
+        $out = [];
+        $errors = [];
+        $checked = 0;
+        foreach (CloudflareService::getConfiguredAccounts() as $acct) {
+            $token = (string)($acct['token'] ?? '');
+            foreach (($acct['zones'] ?? []) as $zone) {
+                $name = strtolower((string)$zone['name']);
+                if ($only !== '' && $name !== $only && !str_ends_with($only, '.' . $name)) {
+                    continue;
+                }
+                $checked++;
+                $set = CloudflareService::apiRequest($token, 'GET', "/zones/{$zone['id']}/email/routing");
+                if (empty($set['ok'])) {
+                    $errors[] = "{$name}: " . ($set['error'] ?? 'sin acceso') . ' (¿el token no tiene permiso de Email Routing?)';
+                    continue;
+                }
+                $enabled = !empty($set['result']['enabled']);
+                if ($onlyEnabled && !$enabled) {
+                    continue;
+                }
+                $rules = [];
+                $catchAll = null;
+                $rr = CloudflareService::apiRequest($token, 'GET', "/zones/{$zone['id']}/email/routing/rules", ['per_page' => 50]);
+                if (empty($rr['ok'])) {
+                    $errors[] = "{$name}: no se pudieron leer sus reglas: " . ($rr['error'] ?? 'sin acceso') . ' (¿el token no tiene permiso "Email Routing Rules: Read"?)';
+                }
+                foreach (($rr['ok'] ?? false) ? ($rr['result'] ?? []) : [] as $rule) {
+                    $to = [];
+                    foreach ((array)($rule['actions'] ?? []) as $a) {
+                        $to[] = ($a['type'] ?? '') === 'forward' ? implode(', ', (array)($a['value'] ?? [])) : ($a['type'] ?? '?');
+                    }
+                    $from = [];
+                    foreach ((array)($rule['matchers'] ?? []) as $m) {
+                        $from[] = ($m['type'] ?? '') === 'all' ? '*' : (string)($m['value'] ?? '');
+                    }
+                    $row = ['from' => implode(', ', $from), 'to' => implode(' | ', $to), 'enabled' => !empty($rule['enabled'])];
+                    if (in_array('*', $from, true)) {
+                        $catchAll = $row;
+                    } else {
+                        $rules[] = $row;
+                    }
+                }
+                $ca = CloudflareService::apiRequest($token, 'GET', "/zones/{$zone['id']}/email/routing/rules/catch_all");
+                if (($ca['ok'] ?? false) && !empty($ca['result'])) {
+                    $to = [];
+                    foreach ((array)($ca['result']['actions'] ?? []) as $a) {
+                        $to[] = ($a['type'] ?? '') === 'forward' ? implode(', ', (array)($a['value'] ?? [])) : ($a['type'] ?? '?');
+                    }
+                    $catchAll = ['from' => '*', 'to' => implode(' | ', $to), 'enabled' => !empty($ca['result']['enabled'])];
+                }
+                $mx = array_map(static fn($r) => ($r['priority'] ?? '') . ' ' . $r['content'],
+                    (CloudflareService::listRecords($token, (string)$zone['id'], ['type' => 'MX', 'name' => $name])['result'] ?? []));
+                $out[] = [
+                    'domain' => $name,
+                    'account' => $acct['name'] ?? '',
+                    'email_routing' => $enabled ? 'activado' : 'desactivado',
+                    'status' => $set['result']['status'] ?? null,
+                    'rules' => $rules,
+                    'catch_all' => $catchAll,
+                    'mx' => $mx,
+                    'in_panel_mail' => isset($panelMail[$name]),
+                ];
+            }
+        }
+        return ['zones_checked' => $checked, 'count' => count($out), 'domains' => $out, 'errors' => $errors,
+            'note' => 'Pasar uno al correo del panel: mail_domain_create → alias que reenvíen igual que sus reglas (mail_alias_create) → mail_dns_publish (cambia el MX: avisa del conflicto con Email Routing y por defecto NO lo toca).'];
+    }
+
+    private static function dnsRecords(array $args): array
+    {
+        $domain = strtolower(trim((string)($args['domain'] ?? '')));
+        $zone = self::dnsZoneFor($domain);
+        $filters = !empty($args['type']) ? ['type' => strtoupper((string)$args['type'])] : [];
+        $r = CloudflareService::listRecordsAll((string)$zone['token'], (string)$zone['zone_id'], $filters);
+        if (empty($r['ok'])) {
+            throw new \RuntimeException('Cloudflare no respondió: ' . ($r['error'] ?? 'error'));
+        }
+        $rows = array_map(static fn($x) => [
+            'name' => $x['name'], 'type' => $x['type'], 'content' => $x['content'],
+            'proxied' => (bool)($x['proxied'] ?? false), 'ttl' => (int)($x['ttl'] ?? 1),
+        ] + (isset($x['priority']) ? ['priority' => (int)$x['priority']] : []), $r['result'] ?? []);
+        usort($rows, static fn($a, $b) => [$a['name'], $a['type']] <=> [$b['name'], $b['type']]);
+        return ['zone' => $zone['zone'], 'account' => $zone['account'], 'count' => count($rows), 'records' => $rows];
+    }
+
+    private static function dnsRecordSet(array $args): array
+    {
+        $name = strtolower(trim(rtrim((string)($args['name'] ?? ''), '.')));
+        $type = strtoupper((string)($args['type'] ?? ''));
+        $content = trim((string)($args['content'] ?? ''));
+        if (!in_array($type, ['A', 'AAAA', 'CNAME', 'TXT', 'MX'], true)) {
+            throw new \InvalidArgumentException('Tipo no admitido. Solo A, AAAA, CNAME, TXT o MX.');
+        }
+        if ($content === ''
+            || ($type === 'A' && !filter_var($content, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4))
+            || ($type === 'AAAA' && !filter_var($content, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6))
+            || (in_array($type, ['CNAME', 'MX'], true) && !preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}\.?$/i', $content))) {
+            throw new \InvalidArgumentException("Contenido no válido para un registro {$type}: {$content}");
+        }
+        $zone = self::dnsZoneFor($name);
+        [$token, $zoneId] = [(string)$zone['token'], (string)$zone['zone_id']];
+
+        $same = CloudflareService::listRecordsAll($token, $zoneId, ['name' => $name, 'type' => $type]);
+        $any = CloudflareService::listRecordsAll($token, $zoneId, ['name' => $name]);
+        if (empty($same['ok']) || empty($any['ok'])) {
+            throw new \RuntimeException('Cloudflare no respondió al consultar los registros.');
+        }
+        $same = $same['result'] ?? [];
+        $others = array_values(array_filter($any['result'] ?? [], static fn($x) => $x['type'] !== $type && in_array($x['type'], ['A', 'AAAA', 'CNAME'], true)));
+        // Un CNAME no puede convivir con otros registros del mismo nombre, y viceversa:
+        // habría que borrar, y esta herramienta no borra.
+        if (($type === 'CNAME' && $others) || (in_array($type, ['A', 'AAAA'], true) && array_filter($others, static fn($x) => $x['type'] === 'CNAME'))) {
+            $list = implode(', ', array_map(static fn($x) => "{$x['type']} {$x['content']}", $others));
+            throw new \RuntimeException("{$name} ya tiene {$list}: para poner un {$type} habría que borrar ese registro y esta herramienta no borra. Hazlo en Cloudflare o elige otro nombre.");
+        }
+
+        $proxiable = in_array($type, ['A', 'AAAA', 'CNAME'], true);
+        $data = ['type' => $type, 'name' => $name, 'content' => rtrim($content, '.'), 'ttl' => max(1, (int)($args['ttl'] ?? 1))];
+        if ($type === 'MX') {
+            $data['priority'] = (int)($args['priority'] ?? 10);
+        }
+        $multi = in_array($type, ['TXT', 'MX'], true);
+        $plan = ['zone' => $zone['zone'], 'account' => $zone['account']];
+        $target = null;
+        if ($multi) {
+            foreach ($same as $x) {
+                if (trim((string)$x['content'], '"') === trim($data['content'], '"')) {
+                    return ['status' => 'ya_existe', 'record' => "{$type} {$name} → {$x['content']}", 'note' => 'No hace falta cambiar nada.'] + $plan;
+                }
+            }
+            $plan['action'] = "AÑADIR {$type} {$name} → {$data['content']}" . (count($same) ? ' (se conservan los otros ' . count($same) . " {$type} de ese nombre)" : '');
+        } elseif (count($same) > 1) {
+            throw new \RuntimeException("{$name} tiene " . count($same) . " registros {$type}: no sé cuál modificar sin borrar. Hazlo en Cloudflare.");
+        } elseif ($same) {
+            $target = $same[0];
+            $proxied = $proxiable ? (array_key_exists('proxied', $args) ? (bool)$args['proxied'] : (bool)($target['proxied'] ?? false)) : null;
+            if ($target['content'] === $data['content'] && (!$proxiable || (bool)($target['proxied'] ?? false) === $proxied)) {
+                return ['status' => 'ya_existe', 'record' => "{$type} {$name} → {$target['content']}" . ($proxiable && $proxied ? ' (proxy)' : ''), 'note' => 'No hace falta cambiar nada.'] + $plan;
+            }
+            $plan['action'] = "MODIFICAR {$type} {$name}: {$target['content']}" . ($proxiable && !empty($target['proxied']) ? ' (proxy)' : '')
+                . " → {$data['content']}" . ($proxiable && $proxied ? ' (proxy)' : '');
+        } else {
+            $proxied = $proxiable ? !empty($args['proxied']) : null;
+            $plan['action'] = "CREAR {$type} {$name} → {$data['content']}" . ($proxiable && $proxied ? ' (proxy)' : '');
+        }
+        if ($proxiable) {
+            $data['proxied'] = $proxied;
+            if ($proxied) {
+                $data['ttl'] = 1;
+            }
+        }
+        $dnsAllowed = Settings::get('mcp_allow_dns', '0') === '1';
+        if (empty($args['apply'])) {
+            return ['status' => 'plan', 'apply' => false] + $plan + ['next' => $dnsAllowed
+                ? 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.'
+                : 'Para aplicarlo hay que activar antes Ajustes → MCP → "Permitir editar DNS en Cloudflare".'];
+        }
+        if (!$dnsAllowed) {
+            throw new \RuntimeException('Editar DNS por MCP está desactivado en este panel: actívalo en Ajustes → MCP → "Permitir editar DNS en Cloudflare".');
+        }
+        $r = $target
+            ? CloudflareService::updateRecord($token, $zoneId, (string)$target['id'], $data)
+            : CloudflareService::createRecord($token, $zoneId, $data);
+        if (empty($r['ok'])) {
+            throw new \RuntimeException('Cloudflare rechazó el cambio: ' . ($r['error'] ?? 'error'));
+        }
+        LogService::log('mcp.dns', $name, $plan['action'] . " (zona {$zone['zone']})");
+        return ['status' => 'hecho'] + $plan;
     }
 
     // ── Avisos ───────────────────────────────────────────────────────────
@@ -530,6 +1009,35 @@ final class McpClusterTools
             }
             $notMoved[] = $d . ($inZone ? ' (su zona está en estas cuentas, pero no apunta al primario: ¿otro servidor o registro distinto?)' : ' (su zona NO está en las cuentas de Cloudflare de este panel)');
         }
+        // Todo lo que sirve Caddy aquí (hostings del panel, Caddyfile y lo añadido
+        // por otras aplicaciones, p. ej. los tenants del CMS), no solo los hostings.
+        // Ojo: en un slave, Caddy solo sirve lo suyo; para verlo todo, en el master.
+        $caddyNotMoved = [];
+        $caddyNoDns = [];
+        $caddy = \MuseDockPanel\Services\CaddyDomainsService::classify();
+        foreach (($caddy['domains'] ?? []) as $cd) {
+            $n = $cd['host'];
+            if (isset($moved[$n]) || $follows($n)) {
+                continue;
+            }
+            // Sin DNS no hay nada que mover (dominio caducado, sin www…): aparte, para
+            // no mezclarlo con lo que de verdad se quedaría atrás.
+            if (!str_starts_with($n, '*.') && !@dns_get_record($n, DNS_A) && !@dns_get_record($n, DNS_CNAME)) {
+                $caddyNoDns[] = "{$n} [{$cd['group']}]";
+                continue;
+            }
+            $parts = explode('.', ltrim($n, '*.'));
+            $inZone = false;
+            for ($i = 0; $i < count($parts) - 1; $i++) {
+                if (isset($zoneNames[implode('.', array_slice($parts, $i))])) {
+                    $inZone = true;
+                    break;
+                }
+            }
+            $caddyNotMoved[] = "{$n} [{$cd['group']}: {$cd['detail']}] — " . ($inZone
+                ? 'su zona está en estas cuentas, pero no apunta al primario (¿sin DNS, otro servidor o registro distinto?)'
+                : 'su zona NO está en las cuentas de Cloudflare de este panel');
+        }
         return [
             'ok' => !$errors,
             'switch' => array_map(static fn($p) => "{$p['from_name']} {$p['from']} → {$p['to_name']} {$p['to']}", $pairs),
@@ -537,6 +1045,9 @@ final class McpClusterTools
             'zones' => $out,
             'moved_via_cname' => $viaCname,
             'hosting_domains_not_moved' => $notMoved,
+            'caddy_domains_checked' => count($caddy['domains'] ?? []),
+            'caddy_domains_not_moved' => $caddyNotMoved,
+            'caddy_domains_without_dns' => $caddyNoDns,
             // Lo que un relevo ya movió desde ESTE panel y devolverá la vuelta (solo esto).
             'journal_moved' => $cf::journal(\MuseDockPanel\Services\FailoverService::DNS_JOURNAL),
             'journal_moved_backup' => $cf::journal(\MuseDockPanel\Services\FailoverService::DNS_JOURNAL_BACKUP),

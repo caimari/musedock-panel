@@ -2,6 +2,62 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.262] — 2026-10-02 — Correo y hosting del mismo dominio se reconocen, y /domains carga al momento
+
+### Añadido
+- **Al crear un dominio de correo, el panel detecta si ese dominio ya es una web del panel.** Lo comprueba como dominio principal de un hosting, como dominio extra, como alias y como redirección. Correo y hosting van unidos por el nombre del dominio: el hosting no se toca, y el correo aparece también en la ficha del hosting. Ahora se avisa en los dos sitios:
+  - **Formulario** (Mail → Dominios → Nuevo): mientras escribes el dominio, aviso con enlace al hosting y su cliente propuesto (si no has elegido otro).
+  - **MCP `mail_domain_create`**: el plan lo dice antes de aplicar.
+  Sin cliente elegido, el dominio de correo **hereda el cliente del hosting** (antes quedaba vacío).
+- **Mail → Dominios**: etiqueta **"Hosting"** con enlace a la ficha cuando el dominio también es una web.
+- **/domains**: etiqueta **"Correo"** junto a los dominios que tienen correo en el panel, con enlace a su dominio de correo.
+- **MCP `caddy_domains`** (solo lectura): todos los dominios que sirve Caddy y **de dónde vienen**:
+  - `panel_hosting`: hostings del panel, con su dominio, www, dominio extra, subdominio, alias y redirecciones;
+  - `panel_system`: dominio del panel, webmail, CardDAV y certificado del correo;
+  - `caddyfile`: escritos en `/etc/caddy/Caddyfile`;
+  - `external`: añadidos por la API de Caddy desde fuera del panel, por ejemplo los tenants del CMS MuseDock, que se reconocen por su @id `route_*`.
+  Recorre también las subrutas y **avisa de rutas con el mismo @id repetidas**. En mortadelo: 161 dominios (68 de hostings, 4 propios del panel, 2 del Caddyfile y 87 externos) y la ruta del certificado del correo repetida 10 veces, restos de antes de la 1.0.254.
+- **MCP `domains_status`** (solo lectura): el estado de **todos** los dominios del servidor en un sitio. Incluye hostings, los que sirve Caddy por otras aplicaciones (como el CMS), el Caddyfile y el correo. De cada uno da:
+  - **registro** por RDAP, consultado directamente al registro de su extensión según la lista oficial de IANA: activo, caducado, en redención o libre, con fecha de caducidad y registrador;
+  - **DNS**: apunta aquí, a otro sitio o no resuelve;
+  - **dónde se usa**.
+  Avisa de dominios libres o en redención que siguen en uso, de los que caducan en menos de 30 días y de los registrados sin DNS. El registro se guarda 24 h (`refresh=true` para forzar), con un máximo de 40 consultas por llamada. Las extensiones sin RDAP (como `.es`) se marcan como "desconocido", nunca como "libre".
+- **Editar DNS de Cloudflare por MCP, sin poder borrar nunca.**
+  - `dns_records` (solo lectura): lista los registros de la zona de un dominio. Si la zona no aparece, refresca las zonas de las cuentas, por si se acaba de registrar.
+  - `dns_record_set`: crea un registro A, AAAA, CNAME, TXT o MX, o modifica el que ya existe con ese nombre y tipo.
+  - **No hay ninguna herramienta para borrar.** Si un cambio exigiera borrar otro registro (por ejemplo, poner un CNAME donde hay un A), se niega y lo explica.
+  - TXT y MX se **añaden** sin tocar los demás valores; si ese valor ya existe, no hace nada.
+  - Primero devuelve el plan. Para aplicarlo hacen falta **dos interruptores**: "Permitir acciones que modifican" y el nuevo **"Permitir editar DNS en Cloudflare"** (Ajustes → MCP, apagado por defecto). El plan se puede ver sin ellos. Cada cambio queda en el registro del panel.
+- **MCP `server_profile`**: el "manual de bienvenida" de cada servidor. Da rol, IPs, con quién hace el relevo, nodos, cuentas de Cloudflare, correo, avisos, monitorización, permisos del MCP y **a qué nombre apuntan los dominios nuevos** (`dns_default_target`, por defecto el dominio del panel; en mortadelo, `mortadelo.musedock.com`). Explica que se usa CNAME de la raíz y de www, con el proxy de Cloudflare como opción, y por qué: un relevo solo mueve el registro A de ese nombre. `server_profile_set` cambia ese destino sin tocar ningún DNS existente.
+- **Instrucciones del MCP para un asistente que se conecta por primera vez**: lo primero es llamar a `server_profile`. Incluyen ya el destino por defecto de los dominios nuevos y qué herramientas usar para ver el estado general.
+- **MCP `monitor_status`** (solo lectura): si la monitorización está activa y leyendo, sus últimos valores (CPU, RAM, disco, red), umbrales, avisos de las últimas 24 h con su detalle, problemas abiertos, errores del recolector y si los avisos salen. **`monitor_configure`**: activarla o desactivarla y ajustar umbrales y la repetición de avisos.
+- **MCP `mail_domain_alias`: dominio de correo sinónimo de otro.** Todo lo que llega a X@alias se entrega en X@destino, con los mismos buzones y alias y conservando el nombre de usuario. Da de alta el dominio alias si no existe (con su DKIM y el cliente del destino) y crea su catch-all `@alias` → `@destino`: Postfix reescribe `@otrodominio` conservando el usuario (virtual(5)). Se niega si el dominio alias ya tiene buzones propios, porque el catch-all les quitaría el correo. No toca el DNS. Primero devuelve el plan.
+- **MCP `cloudflare_tokens`** (solo lectura): qué tokens de Cloudflare usa este servidor (cuentas del panel y el `CLOUDFLARE_API_TOKEN` de Caddy) y qué pueden hacer. Da su estado y caducidad según Cloudflare, un id corto, a cuántas zonas llega y si puede leer DNS y reglas de Email Routing. Nunca muestra el token. Sirve para reconocerlos en el panel de Cloudflare, donde todos se llaman igual, antes de editar o limpiar.
+- **MCP `cloudflare_email_routing`** (solo lectura): por cada zona de las cuentas de Cloudflare del panel, si tiene el enrutamiento de correo de Cloudflare (Email Routing) activado, sus reglas (dirección → reenvío), el catch-all, a qué apunta su MX y si ya existe como dominio de correo en el panel. Si el token no tiene permiso para leer las reglas, lo dice en vez de mostrar una lista vacía. Pensado para ver qué dominios reciben correo por Cloudflare antes de pasarlos al correo propio.
+- **MCP `firewall_check_ip`** (solo lectura, en tiempo real): qué puede hacer una IP concreta contra el servidor. Simula una conexión nueva desde ella a cada puerto en escucha con las reglas actuales (incluidas las listas ipset) y dice a qué servicios llegaría, cuáles le bloquean y qué regla lo hace, si es un origen de confianza del panel y si fail2ban la tiene bloqueada.
+- **Suspender un hosting puede quitarlo también de Caddy.** Nueva casilla en el diálogo de Suspend, pensada para un dominio caducado o sin uso: sin página de mantenimiento y sin pedir certificados. No se borra nada; al reactivar se restaura la ruta. Sin marcarla, se mantiene como antes, con la página de mantenimiento.
+- **`failover_dns_plan` revisa todo lo que sirve Caddy**, no solo los hostings. Así ve también los tenants del CMS y lo que añadan otras aplicaciones. Separa lo que de verdad se quedaría atrás (`caddy_domains_not_moved`) de lo que no tiene DNS (`caddy_domains_without_dns`: no hay nada que mover). Ejecutado en el master, que es donde Caddy lo sirve todo.
+
+### Mejorado
+- **/domains ya no comprueba el DNS de todos los dominios cada vez que se abre.** Antes lanzaba una comprobación por dominio (unas 37), una detrás de otra, y cada una hacía además `curl ifconfig.me` para averiguar la IP del propio servidor: decenas de peticiones a internet por visita. Ahora:
+  - la página carga al momento con el **último estado guardado** y su antigüedad ("hace 2 h");
+  - un **icono de recargar por dominio** y un botón **"Comprobar DNS"** para todos;
+  - al abrirla solo se comprueban los dominios que nunca se han comprobado;
+  - la IP propia sale de las interfaces del servidor y de la IP pública guardada, sin peticiones externas;
+  - la detección de "CF Proxy" usa los rangos de IP reales de Cloudflare, en vez de "empieza por 104.".
+
+### Arreglado (importante)
+- **Los botones de relevo del panel (Failover, Failback, Emergencia en Cluster → Failover) no hacían nada.** Su JavaScript buscaba el campo de seguridad con un nombre que no existe (`_token`, cuando el panel usa `_csrf_token`), daba un error y no llegaba a enviar la petición. Lo mismo le pasaba al botón de verificar el token de una cuenta de Cloudflare. Corregidos los dos.
+
+- **El aviso "Exposición pública inesperada" saltaba con puertos que el cortafuegos tiene cerrados.** Solo miraba en qué dirección escucha cada servicio, así que avisaba de MariaDB y Redis de la réplica (cerrados salvo para el otro nodo por la VPN) y de los puertos del correo en un servidor de correo. Ahora solo cuenta los puertos que la auditoría real del cortafuegos ve **abiertos a todo internet**, y en un servidor de correo da por buenos sus puertos (25, 110, 143, 465, 587, 993, 995 y 4190).
+- **La simulación del cortafuegos no entendía las listas de IPs (ipset) cuando se le daba una IP concreta**: las tomaba por coincidentes. Ahora pregunta a ipset si esa IP está en la lista.
+
+- **En un nodo slave, la pestaña Failover no enseñaba ninguna cuenta de Cloudflare**, y no se sabía si las tenía ni dónde se cambiaban. Ahora muestra, en solo lectura y sin tokens, las cuentas copiadas del master con sus zonas, y explica que se cambian en el master ("Actualizar token de Caddy" actualiza también el Caddy del nodo).
+
+### Seguridad
+- **La página "Cuentas Cloudflare" ya no envía los tokens al navegador.**
+- **El panel habla con la API de Cloudflare siempre por IPv4.** Si un token tiene filtro de IPs ("Client IP Address Filtering"), normalmente lleva solo las IPv4 de los servidores; por IPv6 Cloudflare rechazaría el token. Antes iban en el código de la página (en un campo de contraseña, pero legibles con "ver código fuente"). Ahora el campo sale vacío con "guardado — déjalo vacío para conservarlo": vacío conserva el token guardado y uno nuevo lo sustituye. El botón de verificar usa el token guardado si el campo está vacío.
+
 ## [1.0.261] — 2026-10-02 — Fin del bombardeo de avisos por disco lleno, y `node` por id
 
 ### Añadido

@@ -2406,6 +2406,11 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                             <a href="/mail/domains/<?= $d['id'] ?>" class="text-info text-decoration-none fw-semibold">
                                 <?= View::e($d['domain']) ?>
                             </a>
+                            <?php if (!empty($d['hosting_id'])): ?>
+                                <a href="/accounts/<?= (int)$d['hosting_id'] ?>" class="badge text-decoration-none ms-1" style="background:rgba(56,189,248,0.15);color:#38bdf8;" title="Este dominio también es una web del panel: ver su hosting">
+                                    <i class="bi bi-hdd-stack me-1"></i>Hosting
+                                </a>
+                            <?php endif; ?>
                         </td>
                         <td><?= View::e($d['customer_name'] ?? '-') ?></td>
                         <td>

@@ -1561,7 +1561,32 @@ function checkPublicExposureWatch(string $host): void
     $actual = array_map('intval', array_keys($listeners));
     sort($actual, SORT_NUMERIC);
     $expected = \MuseDockPanel\Services\SecurityService::getExpectedPublicPorts();
+    // En un servidor de correo sus puertos tienen que estar abiertos.
+    $isMail = Settings::get('mail_local_configured', '') === '1'
+        || (is_file('/etc/postfix/main.cf') && is_file('/etc/dovecot/dovecot.conf'));
+    if ($isMail) {
+        $expected = array_values(array_unique(array_merge($expected, [25, 110, 143, 465, 587, 993, 995, 4190])));
+    }
     $extra = array_values(array_diff($actual, $expected));
+    // Que un servicio escuche en 0.0.0.0 no lo expone si el cortafuegos no deja
+    // pasar: solo cuentan los puertos que la auditoría real (simulando el paquete
+    // por iptables) ve "abiertos a todo internet". Antes avisaba de MariaDB/Redis
+    // de la réplica, cerrados salvo para el otro nodo por la VPN.
+    $fwNote = 'sin auditoría del cortafuegos (se cuentan los binds)';
+    try {
+        $audit = \MuseDockPanel\Services\FirewallAuditService::audit();
+        if (!empty($audit['ok'])) {
+            $openToAll = [];
+            foreach ((array)($audit['ports'] ?? []) as $p) {
+                if (($p['proto'] ?? '') === 'tcp' && ($p['state'] ?? '') === 'abierto a todo internet') {
+                    $openToAll[] = (int)$p['port'];
+                }
+            }
+            $extra = array_values(array_intersect($extra, $openToAll));
+            $fwNote = 'solo puertos abiertos a todo internet según la auditoría del cortafuegos';
+        }
+    } catch (\Throwable) {
+    }
     sort($extra, SORT_NUMERIC);
 
     $hashInput = [
@@ -1585,7 +1610,7 @@ function checkPublicExposureWatch(string $host): void
             "Host: {$host}\n" .
             "Puertos esperados: " . (empty($expected) ? '(ninguno)' : implode(',', $expected)) . "\n" .
             "Puertos detectados publicos: " . (empty($actual) ? '(ninguno)' : implode(',', $actual)) . "\n" .
-            "Puertos inesperados: " . implode(',', $extra) . "\n" .
+            "Puertos inesperados: " . implode(',', $extra) . " ({$fwNote})\n" .
             "Firewall: {$snapshot['type']} / policy={$snapshot['policy']} / activo=" . ($snapshot['active'] ? 'si' : 'no') . "\n" .
             "Hora: " . gmdate('Y-m-d H:i:s') . " UTC\n\n" .
             "Detalle binds publicos:\n" . implode("\n", $bindLines);
