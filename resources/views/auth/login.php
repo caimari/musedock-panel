@@ -36,18 +36,7 @@
         <h3 class="text-center">MuseDock Panel</h3>
         <p class="text-center">Server Management</p>
 
-        <?php foreach (Flash::all() as $type => $msg): ?>
-            <?php
-                $flashStyle = match ($type) {
-                    'success' => 'background: rgba(34,197,94,0.15); border-color: rgba(34,197,94,0.3); color: #86efac;',
-                    'warning' => 'background: rgba(251,191,36,0.15); border-color: rgba(251,191,36,0.3); color: #fde68a;',
-                    default => 'background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.3); color: #fca5a5;',
-                };
-            ?>
-            <div class="alert py-2 px-3" style="font-size: 0.85rem; <?= $flashStyle ?>">
-                <?= View::e($msg) ?>
-            </div>
-        <?php endforeach; ?>
+        <?php include dirname(__DIR__) . '/partials/flash-toasts.php'; ?>
 
         <form method="POST" action="/login/submit">
                     <?= \MuseDockPanel\View::csrf() ?>

@@ -518,6 +518,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/mcp/save', 'McpController@save');
 \MuseDockPanel\Router::post('/settings/mcp/token', 'McpController@token');
 \MuseDockPanel\Router::post('/settings/mcp/credentials/clear', 'McpController@clearCredentials');
+\MuseDockPanel\Router::post('/settings/mcp/password-requests', 'McpController@passwordRequest');
+\MuseDockPanel\Router::post('/settings/mcp/change-requests', 'McpController@changeRequests');
 \MuseDockPanel\Router::get('/settings/notifications', 'NotificationController@index');
 \MuseDockPanel\Router::post('/settings/notifications/save', 'NotificationController@save');
 \MuseDockPanel\Router::post('/settings/notifications/test-email', 'NotificationController@testEmail');

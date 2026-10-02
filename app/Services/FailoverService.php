@@ -1302,6 +1302,7 @@ class FailoverService
             'failover_load_critical_mult', 'failover_load_warning_mult',
             'failover_pg_panel_severity', 'failover_pg_hosting_severity',
             'failover_mysql_severity', 'failover_caddy_severity',
+            'failover_dns_exclude', 'failover_dns_exclude_auto',
         ];
     }
 
@@ -1344,6 +1345,10 @@ class FailoverService
         // Siempre descifrado: el slave no puede descifrar lo cifrado con la clave de
         // este panel (ver CloudflareService::accountsForTransfer).
         $cfAccountsForPush = CloudflareService::accountsForTransfer();
+        // Los nombres de máquina que conoce el master (su hostname, sus nodos) viajan al
+        // slave, que es quien hace el relevo y debe dejarlos quietos.
+        Settings::set('failover_dns_exclude_auto', implode(',', CloudflareService::machineNameLabels()));
+        $config['failover_dns_exclude_auto'] = Settings::get('failover_dns_exclude_auto', '');
 
         $payload = [
             'config'            => $config,

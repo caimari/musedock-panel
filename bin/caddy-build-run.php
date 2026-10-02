@@ -9,7 +9,8 @@
  * result to a status file; the node handler launches it detached (nohup) and
  * returns immediately, and the master polls the status.
  *
- * Usage: php bin/caddy-build-run.php <provider> <taskId>
+ * Usage: php bin/caddy-build-run.php <provider> <taskId> [--force]
+ *   --force: recompila aunque el módulo ya esté (lo actualiza a su última versión).
  */
 require_once __DIR__ . '/../app/bootstrap.php';
 
@@ -33,7 +34,7 @@ $write = static function (array $data) use ($statusFile) {
 $write(['status' => 'building', 'provider' => $provider, 'started_at' => gmdate('c')]);
 
 try {
-    $res = SystemService::installCaddyDnsProvider($provider);
+    $res = SystemService::installCaddyDnsProvider($provider, in_array('--force', $argv, true));
     $write([
         'status'      => !empty($res['ok']) ? 'done' : 'failed',
         'provider'    => $provider,

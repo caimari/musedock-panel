@@ -31,6 +31,16 @@ while (($line = fgets(STDIN)) !== false) {
     $msg = json_decode($line, true);
     if (!is_array($msg)) {
         $resp = ['jsonrpc' => '2.0', 'id' => null, 'error' => ['code' => -32700, 'message' => 'Parse error']];
+    } elseif (($msg['method'] ?? '') === 'tools/call'
+        && !empty($msg['params']['arguments']['apply'])
+        && \MuseDockPanel\Mcp\McpTools::isWrite((string)($msg['params']['name'] ?? ''))
+        && function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+        // Sin root, una acción que modifica se queda a medias: la BD sí se escribe,
+        // pero no los ficheros del sistema (DKIM, Maildir, Caddy…). Pasó el 2026-10-02.
+        $resp = ['jsonrpc' => '2.0', 'id' => $msg['id'] ?? null, 'result' => [
+            'isError' => true,
+            'content' => [['type' => 'text', 'text' => 'Este transporte stdio no corre como root: las acciones que modifican (apply) quedarían a medias. Ejecútalo como root (ssh root@servidor php bin/mcp-stdio.php) o usa el MCP del panel.']],
+        ]];
     } else {
         $resp = McpServer::handle($msg, 'stdio');
     }

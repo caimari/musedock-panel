@@ -67,7 +67,7 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
                 <input class="form-check-input" type="checkbox" role="switch" id="mcp_allow_write" name="mcp_allow_write" value="1"
                        <?= $allowWrite ? 'checked' : '' ?> <?= !$hasToken ? 'disabled' : '' ?>>
                 <label class="form-check-label" for="mcp_allow_write">Permitir acciones que modifican
-                    <span class="text-muted small">(crear dominios de correo, publicar DNS en Cloudflare, buzones, alias)</span></label>
+                    <span class="text-muted small">(crear dominios de correo, buzones, alias, bases de datos, publicar DNS en Cloudflare, pedir cambios de contraseña; <strong>nunca borra</strong> buzones ni bases de datos)</span></label>
             </div>
             <div class="form-check form-switch m-0">
                 <input class="form-check-input" type="checkbox" role="switch" id="mcp_allow_dns" name="mcp_allow_dns" value="1"
@@ -95,26 +95,127 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
 </div>
 <?php endif; ?>
 
+<?php if (!empty($changeRequests)): ?>
+<div class="card mb-3" style="border-color:rgba(56,189,248,.45);">
+    <form method="post" action="/settings/mcp/change-requests" id="mcp-change-form" class="m-0">
+        <?= View::csrf() ?>
+        <input type="hidden" name="decision" id="mcp-change-decision" value="">
+        <div class="card-header d-flex flex-wrap gap-2 justify-content-between align-items-center">
+            <span><i class="bi bi-list-check me-2"></i>Cambios por aprobar (<?= count($changeRequests) ?>)</span>
+            <span class="d-flex gap-2">
+                <button type="button" class="btn btn-success btn-sm" data-decision="approve"><i class="bi bi-check2-all me-1"></i>Aprobar seleccionados</button>
+                <button type="button" class="btn btn-outline-secondary btn-sm" data-decision="reject"><i class="bi bi-x-lg me-1"></i>Rechazar seleccionados</button>
+            </span>
+        </div>
+        <div class="card-body p-0">
+            <p class="small text-muted px-3 pt-3 mb-2">Cambios que ha preparado la IA por MCP. No se aplica nada hasta que los apruebas aquí. Caducan a los 7 días.</p>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0 align-middle">
+                    <thead><tr>
+                        <th class="ps-3" style="width:32px"><input class="form-check-input" type="checkbox" id="mcp-change-all" checked title="Todos"></th>
+                        <th>Cambio</th><th>Tipo</th><th>Motivo</th><th>Pedido</th>
+                    </tr></thead>
+                    <tbody>
+                    <?php foreach ($changeRequests as $r): ?>
+                        <tr>
+                            <td class="ps-3"><input class="form-check-input mcp-change-cb" type="checkbox" name="ids[]" value="<?= View::e($r['id']) ?>" checked></td>
+                            <td><?= View::e($r['summary']) ?></td>
+                            <td class="small text-muted"><?= View::e($r['type_label']) ?></td>
+                            <td class="small"><?= View::e($r['reason'] !== '' ? $r['reason'] : '—') ?></td>
+                            <td class="small text-muted"><?= View::e($r['at_label']) ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </form>
+</div>
+<script>
+(function () {
+    var form = document.getElementById('mcp-change-form');
+    if (!form) return;
+    var cbs = function () { return Array.prototype.slice.call(form.querySelectorAll('.mcp-change-cb')); };
+    document.getElementById('mcp-change-all').addEventListener('change', function (e) {
+        cbs().forEach(function (c) { c.checked = e.target.checked; });
+    });
+    form.querySelectorAll('[data-decision]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var sel = cbs().filter(function (c) { return c.checked; });
+            if (!sel.length) { (window.musedockToast || alert)('Selecciona al menos una solicitud.', 'warning'); return; }
+            var approve = btn.dataset.decision === 'approve';
+            var list = sel.map(function (c) { return '<li>' + c.closest('tr').children[1].innerHTML + '</li>'; }).join('');
+            var S = window.SwalDark || window.Swal;
+            var go = function () { document.getElementById('mcp-change-decision').value = btn.dataset.decision; form.submit(); };
+            if (!S || typeof S.fire !== 'function') { if (confirm((approve ? 'Aprobar ' : 'Rechazar ') + sel.length + ' cambio(s)?')) go(); return; }
+            S.fire({ icon: approve ? 'question' : 'warning',
+                     title: (approve ? '¿Aprobar y aplicar ' : '¿Rechazar ') + sel.length + ' cambio(s)?',
+                     html: '<ul class="text-start small mb-0">' + list + '</ul>',
+                     showCancelButton: true, reverseButtons: true, focusCancel: true,
+                     confirmButtonText: approve ? 'Aprobar' : 'Rechazar', cancelButtonText: 'Cancelar' })
+             .then(function (r) { if (r.isConfirmed) go(); });
+        });
+    });
+})();
+</script>
+<?php endif; ?>
+
+<?php if (!empty($passwordRequests)): ?>
+<div class="card mb-3" style="border-color:rgba(239,68,68,.45);">
+    <div class="card-header"><i class="bi bi-shield-lock-fill me-2"></i>Cambios de contraseña por confirmar (<?= count($passwordRequests) ?>)</div>
+    <div class="card-body p-0">
+        <p class="small text-muted px-3 pt-3 mb-2">El MCP solo puede <strong>pedir</strong> un cambio de contraseña. No se cambia nada hasta que lo confirmas aquí con <strong>tu contraseña de administrador</strong>. La nueva se genera en el servidor y aparece en Credenciales pendientes. Nunca root, cuentas del sistema ni la base de datos del panel. Caducan a las 24 h.</p>
+        <div class="table-responsive">
+            <table class="table table-sm mb-0 align-middle">
+                <thead><tr><th class="ps-3">Cuenta</th><th>Motivo</th><th>Pedido</th><th class="text-end pe-3">Confirmar</th></tr></thead>
+                <tbody>
+                <?php foreach ($passwordRequests as $r): ?>
+                    <tr>
+                        <td class="ps-3"><div><?= View::e($r['desc']) ?></div><div class="small text-muted"><?= View::e($r['kind_label']) ?></div></td>
+                        <td class="small"><?= View::e($r['reason'] !== '' ? $r['reason'] : '—') ?></td>
+                        <td class="small text-muted"><?= View::e($r['at_label']) ?></td>
+                        <td class="text-end pe-3">
+                            <form method="post" action="/settings/mcp/password-requests" class="d-inline-flex gap-1 m-0">
+                                <?= View::csrf() ?>
+                                <input type="hidden" name="id" value="<?= View::e($r['id']) ?>">
+                                <input type="password" name="admin_password" class="form-control form-control-sm" style="width:190px" placeholder="Tu contraseña de admin" autocomplete="current-password" required>
+                                <button class="btn btn-danger btn-sm" name="decision" value="approve"><i class="bi bi-key me-1"></i>Cambiar</button>
+                            </form>
+                            <form method="post" action="/settings/mcp/password-requests" class="d-inline m-0">
+                                <?= View::csrf() ?>
+                                <input type="hidden" name="id" value="<?= View::e($r['id']) ?>">
+                                <button class="btn btn-outline-secondary btn-sm" name="decision" value="reject">Rechazar</button>
+                            </form>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <?php if (!empty($pendingCredentials)): ?>
 <div class="card mb-3" style="border-color:rgba(234,179,8,.4);">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-key-fill me-2"></i>Credenciales pendientes (<?= count($pendingCredentials) ?>)</span>
         <form method="post" action="/settings/mcp/credentials/clear" class="js-confirm-token m-0"
               data-confirm-title="¿Borrar las credenciales pendientes?"
-              data-confirm-html="<?= View::e('Asegúrate de haberlas guardado: <strong>no se pueden recuperar</strong> (sí cambiar la contraseña desde el buzón).') ?>">
+              data-confirm-html="<?= View::e('Asegúrate de haberlas guardado: <strong>no se pueden recuperar</strong> (sí cambiar la contraseña desde el panel).') ?>">
             <?= View::csrf() ?>
             <button class="btn btn-outline-warning btn-sm"><i class="bi bi-trash me-1"></i>Ya las he guardado, borrar</button>
         </form>
     </div>
     <div class="card-body p-0">
-        <p class="small text-muted px-3 pt-3 mb-2">Contraseñas generadas por el MCP al crear buzones. No se muestran en el chat con la IA: solo aquí, y caducan a los 7 días.</p>
+        <p class="small text-muted px-3 pt-3 mb-2">Contraseñas generadas por el MCP (buzones, acceso SFTP de hostings, usuarios de bases de datos…). Nunca pasan por el chat con la IA: solo se ven aquí, y caducan a los 7 días.</p>
         <div class="table-responsive">
             <table class="table table-sm mb-0">
-                <thead><tr><th class="ps-3">Buzón</th><th>Contraseña</th><th>Creada</th></tr></thead>
+                <thead><tr><th class="ps-3">Para</th><th>Contraseña</th><th>Datos de conexión</th><th>Creada</th></tr></thead>
                 <tbody>
                 <?php foreach ($pendingCredentials as $i => $c): ?>
                     <tr>
-                        <td class="ps-3 align-middle"><?= View::e($c['email']) ?></td>
+                        <td class="ps-3 align-middle"><div><?= View::e($c['label']) ?></div><div class="small text-muted"><?= View::e($c['kind_label']) ?></div></td>
                         <td class="align-middle">
                             <div class="input-group input-group-sm" style="max-width:340px;">
                                 <input type="password" class="form-control font-monospace" id="pc<?= $i ?>" value="<?= View::e($c['password']) ?>" readonly>
@@ -124,6 +225,7 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
                                         onclick="navigator.clipboard.writeText(document.getElementById('pc<?= $i ?>').value);this.innerHTML='<i class=&quot;bi bi-check2&quot;></i>'"><i class="bi bi-clipboard"></i></button>
                             </div>
                         </td>
+                        <td class="align-middle small"><?php foreach ($c['details'] as $dk => $dv): ?><div><span class="text-muted"><?= View::e((string)$dk) ?>:</span> <code><?= View::e((string)$dv) ?></code></div><?php endforeach; ?></td>
                         <td class="align-middle small text-muted"><?= View::e($c['at']) ?></td>
                     </tr>
                 <?php endforeach; ?>

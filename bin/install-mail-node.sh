@@ -453,7 +453,7 @@ cat > /etc/opendkim.conf <<'DKIMCONF'
 Syslog          yes
 SyslogSuccess   yes
 LogWhy          yes
-Mode            sv
+Mode            s
 Canonicalization relaxed/simple
 Domain          *
 SubDomains      no
@@ -504,6 +504,22 @@ timeout = 120s;
 upstream "local" {
   default = yes;
   self_scan = yes;
+}
+RSPCONF
+
+# Resultados SPF/DKIM/DMARC del correo entrante en Authentication-Results, firmados con
+# el myhostname de Postfix; quita los que traiga el mensaje. OpenDKIM va en modo "s"
+# (solo firma): la verificación la hace rspamd.
+cat > /etc/rspamd/local.d/milter_headers.conf <<'RSPCONF'
+use = ["authentication-results"];
+skip_local = false;
+skip_authenticated = true;
+routines {
+  authentication-results {
+    header = "Authentication-Results";
+    remove = 0;
+    add_smtp_user = false;
+  }
 }
 RSPCONF
 

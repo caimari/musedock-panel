@@ -314,6 +314,48 @@ class CloudflareService
         return ['ok' => $failed === 0, 'updated' => $updated, 'skipped' => $skipped, 'failed' => $failed];
     }
 
+    /**
+     * Nombres de MÁQUINA que un relevo nunca mueve (primera etiqueta: "srv1" en
+     * srv1.ejemplo.com). Se deducen solos, sin nombres fijos en el código: el
+     * hostname de este servidor, el del panel y los nombres de los nodos del cluster.
+     * Además, failover_dns_exclude (manual, separado por comas). El master guarda
+     * los suyos en failover_dns_exclude_auto, que viaja a los slaves (quien hace el
+     * relevo es el slave y necesita saber cómo se llama el master).
+     */
+    public static function machineNameLabels(): array
+    {
+        $labels = [];
+        $add = static function (string $n) use (&$labels): void {
+            $n = strtolower(trim($n));
+            if (preg_match('/^([a-z0-9][a-z0-9-]*)/', $n, $m) && !in_array($m[1], ['www', 'mail', 'webmail', 'localhost'], true)) {
+                $labels[$m[1]] = true;
+            }
+        };
+        $add((string)gethostname());
+        $add((string)Settings::get('panel_hostname', ''));
+        try {
+            foreach (ClusterService::getNodes() as $n) {
+                $add((string)($n['name'] ?? ''));
+                $meta = is_array($n['metadata'] ?? null) ? $n['metadata'] : (json_decode((string)($n['metadata'] ?? ''), true) ?: []);
+                $add((string)($meta['hostname'] ?? ''));
+            }
+        } catch (\Throwable) {
+        }
+        foreach (['failover_dns_exclude', 'failover_dns_exclude_auto'] as $k) {
+            foreach (explode(',', (string)Settings::get($k, '')) as $x) {
+                $add($x);
+            }
+        }
+        return array_keys($labels);
+    }
+
+    /** ¿Es un nombre de máquina que el relevo debe dejar quieto? */
+    public static function isFailoverExcluded(string $name): bool
+    {
+        $first = explode('.', strtolower(rtrim($name, '.')), 2)[0];
+        return in_array($first, self::machineNameLabels(), true);
+    }
+
     public static function batchUpdateIp(string $token, string $zoneId, string $oldIp, string $newIp, int $ttl = 60, ?string $journal = null): array
     {
         $records = self::listARecordsByIp($token, $zoneId, $oldIp);
@@ -326,6 +368,10 @@ class CloudflareService
         $details = [];
 
         foreach ($records['result'] ?? [] as $record) {
+            if (self::isFailoverExcluded((string)$record['name'])) {
+                $details[] = ['name' => $record['name'], 'ok' => true, 'skipped' => 'nombre de máquina: no se mueve'];
+                continue;
+            }
             $result = self::updateRecord($token, $zoneId, $record['id'], [
                 'type'    => 'A',
                 'name'    => $record['name'],
@@ -495,6 +541,17 @@ class CloudflareService
         $v = self::verifyToken($token);
         if (empty($v['ok']) || (($v['result']['status'] ?? '') !== 'active')) {
             return [false, 'Cloudflare no da el token por activo; Caddy se queda con el que tenía'];
+        }
+        // Los tokens nuevos de Cloudflare (cfut_/cfat_) solo los acepta caddy-dns/cloudflare
+        // >= v0.2.4; con uno anterior Caddy no puede cargar su configuración (no renueva
+        // certificados por DNS y cualquier recarga falla).
+        if (preg_match('/^cf(ut|at)_/', $token)) {
+            $mods = (string)shell_exec('caddy list-modules --versions 2>/dev/null');
+            if (preg_match('/dns\.providers\.cloudflare\s+v(\d+)\.(\d+)\.(\d+)/', $mods, $mv)
+                && version_compare("{$mv[1]}.{$mv[2]}.{$mv[3]}", '0.2.4', '<')) {
+                return [false, "el módulo cloudflare de Caddy (v{$mv[1]}.{$mv[2]}.{$mv[3]}) no acepta tokens cfut_/cfat_: "
+                    . 'recompila Caddy (php bin/caddy-build-run.php cloudflare manual --force, como root) y vuelve a guardar'];
+            }
         }
         if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
             // Panel sin root: solo queda el ayudante (reinicia Caddy en el acto).

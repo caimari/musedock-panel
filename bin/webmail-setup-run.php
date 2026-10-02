@@ -84,6 +84,21 @@ function webmail_latest_roundcube_url(): string
     throw new RuntimeException('La release de Roundcube no contiene un tar.gz descargable.');
 }
 
+/**
+ * Host de Redis para Roundcube. Si Redis exige contraseña (requirepass, p. ej. al
+ * replicarlo a otro nodo), va como host:puerto:bd:contraseña; sin ella Roundcube
+ * no puede guardar sesiones y webmail da error 500.
+ */
+function webmail_redis_host(): string
+{
+    foreach (@file('/etc/redis/redis.conf', FILE_IGNORE_NEW_LINES) ?: [] as $l) {
+        if (preg_match('/^\s*requirepass\s+(\S+)/', $l, $m)) {
+            return '127.0.0.1:6379:0:' . trim($m[1], '"');
+        }
+    }
+    return '127.0.0.1:6379';
+}
+
 function webmail_php_value(string $value): string
 {
     return var_export($value, true);
@@ -267,7 +282,7 @@ try {
         . "\$config['imap_cache_ttl'] = '10d';\n"
         . "\$config['messages_cache_ttl'] = '10d';\n"
         . "\$config['session_storage'] = 'redis';\n"
-        . "\$config['redis_hosts'] = ['127.0.0.1:6379'];\n"
+        . "\$config['redis_hosts'] = [" . webmail_php_value(webmail_redis_host()) . "];\n"
         . "\$config['check_all_folders'] = false;\n"
         . "\$config['refresh_interval'] = 60;\n"
         . "\$config['imap_timeout'] = 5;\n"

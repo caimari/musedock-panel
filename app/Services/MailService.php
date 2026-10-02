@@ -300,6 +300,24 @@ class MailService
         $update['updated_at'] = date('Y-m-d H:i:s');
         Database::update('mail_accounts', $update, 'id = :id', ['id' => $id]);
 
+        // La contraseña nueva también a las réplicas de correo (Filemon): cada una
+        // autentica contra SU copia de mail_accounts; sin esto, tras un relevo el
+        // buzón solo aceptaría la contraseña antigua. Upsert idempotente, sin secretos
+        // en claro (solo el hash).
+        if (isset($update['password_hash'])) {
+            self::replicateMailOp('mail_create_mailbox', [
+                'email'         => $account['email'],
+                'home_dir'      => $account['home_dir'],
+                'quota_mb'      => (int)($data['quota_mb'] ?? $account['quota_mb']),
+                'domain'        => substr(strrchr((string)$account['email'], '@'), 1),
+                'local_part'    => $account['local_part'] ?? strstr((string)$account['email'], '@', true),
+                'password_hash' => $update['password_hash'],
+                'display_name'  => $data['display_name'] ?? ($account['display_name'] ?? ''),
+                'send_mode'     => $account['send_mode'] ?? 'normal',
+                'rate_limit_per_hour' => (int)($account['rate_limit_per_hour'] ?? 0),
+            ]);
+        }
+
         // Enqueue quota update on mail node if quota changed
         if (isset($data['quota_mb'])) {
             $quotaPayload = [
@@ -312,6 +330,8 @@ class MailService
             } elseif (Settings::get('mail_local_configured', '') === '1') {
                 self::nodeUpdateQuota($quotaPayload);
             }
+            // Y a las réplicas de correo (Filemon), para que tras un relevo valga la misma cuota.
+            self::replicateMailOp('mail_update_quota', $quotaPayload);
         }
 
         // Enqueue suspend/activate on mail node
@@ -518,6 +538,94 @@ class MailService
             'dns_record' => "{$selector}._domainkey.{$domain['domain']}",
             'dns_value'  => "v=DKIM1; k=rsa; p={$pubKeyClean}",
         ];
+    }
+
+    /**
+     * Rehace en ESTE servidor los ficheros de un dominio de correo a partir de la BD,
+     * sin tocar la BD: carpeta del dominio, clave DKIM + tablas de OpenDKIM y el
+     * Maildir/fichero de cuota de cada buzón. Idempotente. Para cuando el alta quedó
+     * en la BD pero los ficheros no se escribieron (p. ej. se ejecutó sin root).
+     */
+    public static function repairLocalFiles(string $domainName): array
+    {
+        $d = self::getDomainByName(strtolower(trim($domainName)));
+        if (!$d) {
+            return ['ok' => false, 'error' => "{$domainName}: no existe como dominio de correo"];
+        }
+        $done = [];
+        $domainDir = '/var/mail/vhosts/' . $d['domain'];
+        if (!is_dir($domainDir)) {
+            mkdir($domainDir, 0700, true);
+            $done[] = 'carpeta del dominio';
+        }
+        shell_exec(sprintf('chown vmail:vmail %s 2>&1', escapeshellarg($domainDir)));
+
+        $key = (string)($d['dkim_private_key'] ?? '');
+        $sel = (string)($d['dkim_selector'] ?? '') ?: 'default';
+        if ($key !== '') {
+            $dkimDir = '/etc/opendkim/keys/' . $d['domain'];
+            if (!is_dir($dkimDir)) {
+                mkdir($dkimDir, 0700, true);
+            }
+            $file = "{$dkimDir}/{$sel}.private";
+            if (!is_file($file) || trim((string)file_get_contents($file)) !== trim($key)) {
+                file_put_contents($file, $key);
+                $done[] = 'clave DKIM';
+            }
+            chmod($file, 0600);
+            shell_exec(sprintf('chown -R opendkim:opendkim %s 2>&1', escapeshellarg($dkimDir)));
+            self::updateDkimSigningTable($d['domain'], $sel);
+            shell_exec('systemctl reload opendkim 2>&1');
+        }
+
+        foreach (Database::fetchAll("SELECT email, home_dir, quota_mb FROM mail_accounts WHERE mail_domain_id = :id", ['id' => $d['id']]) as $a) {
+            $home = (string)$a['home_dir'];
+            if ($home === '' || !str_starts_with($home, '/var/mail/vhosts/')) {
+                continue;
+            }
+            foreach (['cur', 'new', 'tmp'] as $sub) {
+                if (!is_dir("{$home}/Maildir/{$sub}")) {
+                    mkdir("{$home}/Maildir/{$sub}", 0700, true);
+                    $done[] = "Maildir de {$a['email']}";
+                }
+            }
+            if (!is_file("{$home}/dovecot-quota")) {
+                file_put_contents("{$home}/dovecot-quota", '* storage=' . ((int)$a['quota_mb'] * 1024 * 1024) . "\n");
+            }
+            shell_exec(sprintf('chown -R vmail:vmail %s 2>&1', escapeshellarg($home)));
+        }
+        return ['ok' => true, 'domain' => $d['domain'], 'repaired' => array_values(array_unique($done))];
+    }
+
+    /**
+     * Cambia el selector DKIM de un dominio (p. ej. 'default' → 'musedock') con la
+     * MISMA clave, para convivir con otro remitente que ya publica su clave en
+     * default._domainkey (Sweego, la web…). Reinstala en OpenDKIM aquí y en las
+     * réplicas de correo. El DNS se publica después (mail_dns_publish).
+     */
+    public static function setDkimSelector(string $domainName, string $selector): array
+    {
+        $selector = strtolower(trim($selector));
+        if (!preg_match('/^[a-z0-9][a-z0-9-]{0,30}$/', $selector)) {
+            return ['ok' => false, 'error' => 'Selector no válido (letras, números y guiones).'];
+        }
+        $d = self::getDomainByName(strtolower(trim($domainName)));
+        if (!$d) {
+            return ['ok' => false, 'error' => "{$domainName}: no existe como dominio de correo"];
+        }
+        if (empty($d['dkim_private_key'])) {
+            return ['ok' => false, 'error' => "{$d['domain']}: no tiene clave DKIM generada"];
+        }
+        Database::update('mail_domains', ['dkim_selector' => $selector, 'updated_at' => date('Y-m-d H:i:s')], 'id = :id', ['id' => (int)$d['id']]);
+        $payload = ['domain' => $d['domain'], 'dkim_selector' => $selector, 'dkim_private_key' => (string)$d['dkim_private_key']];
+        if (!empty($d['mail_node_id'])) {
+            ClusterService::enqueue((int)$d['mail_node_id'], 'mail_create_domain', $payload);
+        } elseif (Settings::get('mail_local_configured', '') === '1') {
+            self::repairLocalFiles($d['domain']);
+        }
+        $replicas = self::replicateMailOp('mail_create_domain', $payload);
+        LogService::log('mail.dkim.selector', $d['domain'], "Selector DKIM: " . ($d['dkim_selector'] ?: 'default') . " → {$selector}");
+        return ['ok' => true, 'domain' => $d['domain'], 'old' => $d['dkim_selector'] ?: 'default', 'new' => $selector, 'replicas' => $replicas];
     }
 
     public static function getDkimPrivateKey(int $domainId): string
@@ -2670,9 +2778,16 @@ class MailService
             return ['ok' => false, 'error' => 'Missing home_dir'];
         }
 
-        $quotaBytes = $quotaMb * 1024 * 1024;
+        $quotaBytes = $quotaMb * 1024 * 1024;   // 0 = sin límite para Dovecot
         file_put_contents($homeDir . '/dovecot-quota', "* storage={$quotaBytes}\n");
         shell_exec(sprintf('chown vmail:vmail %s 2>&1', escapeshellarg($homeDir . '/dovecot-quota')));
+        // En una réplica, su copia local de mail_accounts también (la que ve su panel).
+        if (!empty($payload['email'])) {
+            try {
+                Database::update('mail_accounts', ['quota_mb' => (int)$quotaMb], 'lower(email) = :e', ['e' => strtolower((string)$payload['email'])]);
+            } catch (\Throwable) {
+            }
+        }
 
         return ['ok' => true, 'message' => "Quota updated to {$quotaMb}MB"];
     }
@@ -3666,21 +3781,26 @@ class MailService
 
     private static function updateDkimSigningTable(string $domain, string $selector): void
     {
-        $signingFile = '/etc/opendkim/signing.table';
-        $keyFile = '/etc/opendkim/key.table';
-
-        // signing.table: *@domain default._domainkey.domain
-        $signingLine = "*@{$domain} {$selector}._domainkey.{$domain}";
-        $existingContent = is_file($signingFile) ? file_get_contents($signingFile) : '';
-        if (!str_contains($existingContent, "*@{$domain}")) {
-            file_put_contents($signingFile, $existingContent . $signingLine . "\n");
-        }
-
-        // key.table: default._domainkey.domain domain:default:/etc/opendkim/keys/domain/default.private
-        $keyLine = "{$selector}._domainkey.{$domain} {$domain}:{$selector}:/etc/opendkim/keys/{$domain}/{$selector}.private";
-        $existingContent = is_file($keyFile) ? file_get_contents($keyFile) : '';
-        if (!str_contains($existingContent, "{$selector}._domainkey.{$domain}")) {
-            file_put_contents($keyFile, $existingContent . $keyLine . "\n");
+        // Sustituye las líneas de ESTE dominio (exactas: no las de otro dominio que lo
+        // contenga) por las del selector actual. Antes solo añadía si el dominio no
+        // estaba, así que un cambio de selector nunca llegaba a OpenDKIM.
+        $tables = [
+            '/etc/opendkim/signing.table' => [
+                "*@{$domain} {$selector}._domainkey.{$domain}",
+                static fn(string $l) => (bool)preg_match('/^\*@' . preg_quote($domain, '/') . '\s/', $l),
+            ],
+            '/etc/opendkim/key.table' => [
+                "{$selector}._domainkey.{$domain} {$domain}:{$selector}:/etc/opendkim/keys/{$domain}/{$selector}.private",
+                static fn(string $l) => (bool)preg_match('/^[^\s]+\._domainkey\.' . preg_quote($domain, '/') . '\s/', $l),
+            ],
+        ];
+        foreach ($tables as $file => [$line, $isOurs]) {
+            $lines = is_file($file) ? (file($file, FILE_IGNORE_NEW_LINES) ?: []) : [];
+            $kept = array_values(array_filter($lines, static fn($l) => trim($l) !== '' && !$isOurs($l)));
+            $new = array_merge($kept, [$line]);
+            if ($new !== array_values(array_filter($lines, static fn($l) => trim($l) !== ''))) {
+                file_put_contents($file, implode("\n", $new) . "\n");
+            }
         }
     }
 

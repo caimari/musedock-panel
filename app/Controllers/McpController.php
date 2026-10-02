@@ -119,7 +119,9 @@ class McpController
             'enabled' => Settings::get('mcp_enabled', '0') === '1',
             'allowWrite' => Settings::get('mcp_allow_write', '0') === '1',
             'allowDns' => Settings::get('mcp_allow_dns', '0') === '1',
-            'pendingCredentials' => \MuseDockPanel\Mcp\McpMailTools::pendingCredentials(),
+            'pendingCredentials' => \MuseDockPanel\Mcp\McpCredentials::pending(),
+            'passwordRequests' => \MuseDockPanel\Mcp\McpPasswordChanges::pending(),
+            'changeRequests' => \MuseDockPanel\Mcp\McpChangeRequests::pending(),
             'hasToken' => Settings::get('mcp_token_hash', '') !== '',
             'tokenCreatedAt' => Settings::get('mcp_token_created_at', ''),
             'tokenHint' => Settings::get('mcp_token_hint', ''),
@@ -151,6 +153,67 @@ class McpController
             . '; editar DNS: ' . ($dns ? 'PERMITIDO' : 'no'));
         Flash::set('success', 'Servidor MCP ' . ($enable ? 'activado' : 'desactivado')
             . ($enable ? ($write ? ' con acciones que modifican permitidas.' : ' en solo lectura.') : '.'));
+        header('Location: /settings/mcp');
+        exit;
+    }
+
+    /**
+     * POST /settings/mcp/password-requests — confirmar o rechazar una solicitud de
+     * cambio de contraseña hecha por el MCP. Confirmar exige la contraseña del
+     * administrador conectado: la IA nunca puede cambiar una contraseña sola.
+     */
+    public function passwordRequest(): void
+    {
+        View::verifyCsrf();
+        $id = (string)($_POST['id'] ?? '');
+        if (($_POST['decision'] ?? '') === 'reject') {
+            \MuseDockPanel\Mcp\McpPasswordChanges::reject($id);
+            LogService::log('mcp.password.rejected', $id, 'Solicitud MCP de cambio de contraseña rechazada');
+            Flash::set('success', 'Solicitud rechazada: no se ha cambiado nada.');
+            header('Location: /settings/mcp');
+            exit;
+        }
+        $adminId = (int)($_SESSION['panel_user']['id'] ?? 0);
+        $admin = $adminId > 0 ? \MuseDockPanel\Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]) : null;
+        if (!$admin || !password_verify((string)($_POST['admin_password'] ?? ''), (string)$admin['password_hash'])) {
+            LogService::log('mcp.password.denied', $id, 'Confirmación de cambio de contraseña con contraseña de administrador incorrecta');
+            Flash::set('error', 'Contraseña de administrador incorrecta: no se ha cambiado nada.');
+            header('Location: /settings/mcp');
+            exit;
+        }
+        try {
+            Flash::set('success', \MuseDockPanel\Mcp\McpPasswordChanges::approve($id));
+        } catch (\Throwable $e) {
+            Flash::set('error', 'No se pudo cambiar la contraseña: ' . $e->getMessage());
+        }
+        header('Location: /settings/mcp');
+        exit;
+    }
+
+    /**
+     * POST /settings/mcp/change-requests — aprobar o rechazar (varias a la vez) las
+     * solicitudes sin secretos que preparó el MCP, p. ej. cuotas. La confirmación es
+     * el modal de la página; aquí no se pide contraseña (no hay secretos).
+     */
+    public function changeRequests(): void
+    {
+        View::verifyCsrf();
+        $ids = array_filter(array_map('strval', (array)($_POST['ids'] ?? [])));
+        $approve = ($_POST['decision'] ?? '') === 'approve';
+        if (!$ids) {
+            Flash::set('warning', 'No has seleccionado ninguna solicitud.');
+            header('Location: /settings/mcp');
+            exit;
+        }
+        [$done, $rejected, $errors] = \MuseDockPanel\Mcp\McpChangeRequests::decide($ids, $approve);
+        if ($approve) {
+            Flash::set('success', "{$done} cambio(s) aprobado(s) y aplicado(s).");
+        } else {
+            Flash::set('success', "{$rejected} solicitud(es) rechazada(s): no se ha cambiado nada.");
+        }
+        if ($errors) {
+            Flash::set('error', 'No se pudieron aplicar: ' . implode(' | ', $errors));
+        }
         header('Location: /settings/mcp');
         exit;
     }

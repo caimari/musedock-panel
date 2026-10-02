@@ -142,7 +142,7 @@ final class McpClusterTools
             'server_profile_set' => [
                 'write' => true,
                 'title' => 'Cambiar el destino por defecto de los dominios nuevos',
-                'description' => 'Fija dns_default_target: el nombre al que apuntan por CNAME los dominios nuevos de este servidor (p. ej. mortadelo.musedock.com). No cambia ningún DNS existente. Primero sin apply.',
+                'description' => 'Fija dns_default_target: el nombre al que apuntan por CNAME los dominios nuevos de este servidor (p. ej. srv1.ejemplo.com). No cambia ningún DNS existente. Primero sin apply.',
                 'inputSchema' => $o(['dns_default_target' => ['type' => 'string'], 'apply' => $apply], ['dns_default_target']),
             ],
             'monitor_status' => [
@@ -267,6 +267,16 @@ final class McpClusterTools
                 'description' => 'Revisa si el servidor está realmente protegido. No mira reglas sueltas: simula la llegada de una conexión nueva a cada puerto en escucha (TCP y UDP) desde una IP cualquiera de internet y desde cada origen autorizado, siguiendo las cadenas de iptables. Dice por puerto si está abierto a todo internet, solo a ciertas IPs o cerrado, y avisa de: servicios sensibles expuestos (bases de datos, Redis, panel, APIs), IPv6 sin proteger, reglas que aceptan todo, orígenes con acceso a todos los puertos que no son de confianza, puertos de Docker (no pasan por INPUT) y ufw mezclado con iptables propio. Con `node` se audita otro nodo. Solo lectura.',
                 'inputSchema' => $o([]),
             ],
+            'fail2ban_manage' => [
+                'write' => true,
+                'title' => 'fail2ban: ver bloqueos, desbloquear una IP y lista blanca',
+                'description' => 'Sin `ip`: solo lectura, lista por jail las IPs bloqueadas ahora y la lista blanca (ignoreip). Con `ip`: plan para desbloquearla en todos los jails donde esté y, con whitelist=true, añadirla a la lista blanca para que no se vuelva a bloquear (p. ej. un servidor propio que se conecta a los buzones por IMAP). Nunca quita IPs de la lista blanca. Primero sin apply. Requiere "Permitir acciones que modifican" para aplicar.',
+                'inputSchema' => $o([
+                    'ip' => ['type' => 'string', 'description' => 'IPv4/IPv6 (o CIDR para whitelist)'],
+                    'whitelist' => ['type' => 'boolean', 'description' => 'Añadirla además a la lista blanca de fail2ban'],
+                    'apply' => $apply,
+                ]),
+            ],
             'firewall_trusted_sources' => [
                 'write' => true,
                 'title' => 'Orígenes de confianza del firewall',
@@ -370,6 +380,7 @@ final class McpClusterTools
             'firewall_audit'        => \MuseDockPanel\Services\FirewallAuditService::refreshStored(),
             'firewall_check_ip'     => \MuseDockPanel\Services\FirewallAuditService::checkSource((string)($args['ip'] ?? ''), isset($args['port']) ? (int)$args['port'] : null),
             'firewall_trusted_sources' => self::trustedSources($args),
+            'fail2ban_manage' => self::fail2banManage($args),
             'filesync_status'       => self::filesyncStatus(),
             'filesync_configure'    => self::filesyncConfigure($args),
             'filesync_extra_paths'  => self::filesyncExtraPaths($args),
@@ -525,7 +536,8 @@ final class McpClusterTools
     private static function dnsZoneFor(string $name): array
     {
         $name = strtolower(trim(rtrim($name, '.')));
-        if ($name === '' || !preg_match('/^(\*\.)?[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/', $name)) {
+        // El "_" se admite en las etiquetas: lo llevan selector._domainkey, _dmarc, _acme-challenge…
+        if ($name === '' || !preg_match('/^(\*\.)?[a-z0-9_]([a-z0-9_.-]*[a-z0-9])?\.[a-z]{2,}$/', $name)) {
             throw new \InvalidArgumentException("Nombre de dominio no válido: {$name}");
         }
         $zone = CloudflareService::findZoneForDomain($name);
@@ -583,11 +595,13 @@ final class McpClusterTools
         }
         $want = CloudflareService::caddyTokenFor(CloudflareService::accountsForTransfer());
         $have = CloudflareService::currentCaddyToken();
+        $readable = is_readable('/etc/default/caddy');
         return [
             'tokens' => $out,
-            'caddy_token' => $want === '' ? 'el panel no tiene cuentas con token'
+            'caddy_token' => !$readable ? 'no se puede comprobar: este proceso no puede leer /etc/default/caddy'
+                : ($want === '' ? 'el panel no tiene cuentas con token'
                 : ($have === $want ? 'Caddy tiene el token de la cuenta con la zona del panel (correcto)'
-                : 'Caddy NO tiene el token de la cuenta con la zona del panel: arréglalo con cloudflare_caddy_token_sync (o Guardar en Cuentas Cloudflare del master)'),
+                : 'Caddy NO tiene el token de la cuenta con la zona del panel: arréglalo con cloudflare_caddy_token_sync (o Guardar en Cuentas Cloudflare del master)')),
             'note' => 'Para reconocerlos en Cloudflare (Mi perfil → Tokens de API, donde todos se llaman igual): por el número de zonas y los permisos. Un token que no aparezca aquí no lo usa ESTE servidor, pero puede usarlo otro (los nodos, el CMS MuseDock en sus ajustes de Cloudflare, otros proyectos): compruébalo antes de borrarlo.',
         ];
     }
@@ -652,19 +666,16 @@ final class McpClusterTools
                 }
                 $checked++;
                 $set = CloudflareService::apiRequest($token, 'GET', "/zones/{$zone['id']}/email/routing");
-                if (empty($set['ok'])) {
-                    $errors[] = "{$name}: " . ($set['error'] ?? 'sin acceso') . ' (¿el token no tiene permiso de Email Routing?)';
-                    continue;
-                }
-                $enabled = !empty($set['result']['enabled']);
-                if ($onlyEnabled && !$enabled) {
-                    continue;
-                }
+                // El estado (/email/routing) pide un permiso que no tienen todos los
+                // tokens; las reglas, otro. Sin el estado se siguen leyendo las reglas y
+                // el MX, y se deduce si recibe por Cloudflare (MX route*.mx.cloudflare.net).
+                $setOk = !empty($set['ok']);
                 $rules = [];
                 $catchAll = null;
                 $rr = CloudflareService::apiRequest($token, 'GET', "/zones/{$zone['id']}/email/routing/rules", ['per_page' => 50]);
                 if (empty($rr['ok'])) {
                     $errors[] = "{$name}: no se pudieron leer sus reglas: " . ($rr['error'] ?? 'sin acceso') . ' (¿el token no tiene permiso "Email Routing Rules: Read"?)';
+                    continue;
                 }
                 foreach (($rr['ok'] ?? false) ? ($rr['result'] ?? []) : [] as $rule) {
                     $to = [];
@@ -692,11 +703,17 @@ final class McpClusterTools
                 }
                 $mx = array_map(static fn($r) => ($r['priority'] ?? '') . ' ' . $r['content'],
                     (CloudflareService::listRecords($token, (string)$zone['id'], ['type' => 'MX', 'name' => $name])['result'] ?? []));
+                $mxCf = (bool)array_filter($mx, static fn($m) => str_contains($m, '.mx.cloudflare.net'));
+                $enabled = $setOk ? !empty($set['result']['enabled']) : ($mxCf || (bool)array_filter($rules, static fn($r) => $r['enabled']));
+                if ($onlyEnabled && !$enabled) {
+                    continue;
+                }
                 $out[] = [
                     'domain' => $name,
                     'account' => $acct['name'] ?? '',
-                    'email_routing' => $enabled ? 'activado' : 'desactivado',
-                    'status' => $set['result']['status'] ?? null,
+                    'email_routing' => ($enabled ? 'activado' : 'desactivado') . ($setOk ? '' : ' (deducido por MX/reglas: el token no puede leer el estado)'),
+                    'status' => $setOk ? ($set['result']['status'] ?? null) : null,
+                    'mx_to_cloudflare' => $mxCf,
                     'rules' => $rules,
                     'catch_all' => $catchAll,
                     'mx' => $mx,
@@ -768,6 +785,13 @@ final class McpClusterTools
             foreach ($same as $x) {
                 if (trim((string)$x['content'], '"') === trim($data['content'], '"')) {
                     return ['status' => 'ya_existe', 'record' => "{$type} {$name} → {$x['content']}", 'note' => 'No hace falta cambiar nada.'] + $plan;
+                }
+            }
+            // Dos registros SPF (o DMARC) en el mismo nombre invalidan los dos: se edita el existente.
+            foreach (['v=spf1' => 'mail_dns_publish con spf_add', 'v=dmarc1' => 'Cloudflare (editar el registro existente)'] as $pfx => $how) {
+                if ($type === 'TXT' && str_starts_with(strtolower(trim($data['content'], '" ')), $pfx)
+                    && array_filter($same, fn($x) => str_starts_with(strtolower(trim((string)$x['content'], '" ')), $pfx))) {
+                    throw new \RuntimeException("{$name} ya tiene un registro {$pfx}: añadir otro invalidaría los dos. Para cambiarlo usa {$how}.");
                 }
             }
             $plan['action'] = "AÑADIR {$type} {$name} → {$data['content']}" . (count($same) ? ' (se conservan los otros ' . count($same) . " {$type} de ese nombre)" : '');
@@ -1003,6 +1027,7 @@ final class McpClusterTools
         $out = [];
         $errors = [];
         $total = 0;
+        $machineNames = []; // nombres de máquina que el relevo deja quietos
         $moved = [];      // nombres cuyo A cambia
         $cnames = [];     // nombre → destino, de todas las zonas
         $zoneNames = [];
@@ -1019,6 +1044,11 @@ final class McpClusterTools
                         $errors[] = "{$zone['name']} ({$acct['name']}): " . ($r['error'] ?? 'error');
                         continue;
                     }
+                    $kept = array_values(array_filter($r['result'] ?? [], static fn($x) => $cf::isFailoverExcluded((string)$x['name'])));
+                    foreach ($kept as $x) {
+                        $machineNames[] = (string)$x['name'];
+                    }
+                    $r['result'] = array_values(array_filter($r['result'] ?? [], static fn($x) => !$cf::isFailoverExcluded((string)$x['name'])));
                     $names = array_map(static fn($x) => $x['name'] . (!empty($x['proxied']) ? ' (proxy)' : ''), $r['result'] ?? []);
                     foreach ($r['result'] ?? [] as $x) {
                         $moved[strtolower((string)$x['name'])] = true;
@@ -1096,6 +1126,8 @@ final class McpClusterTools
             'records_that_would_change' => $total,
             'zones' => $out,
             'moved_via_cname' => $viaCname,
+            'machine_names_kept' => array_values(array_unique($machineNames)),
+            'machine_names_rule' => 'No se mueven nunca (nombres de máquina, deducidos de los hostnames y nodos del cluster; se pueden añadir en failover_dns_exclude): ' . implode(', ', $cf::machineNameLabels()),
             'hosting_domains_not_moved' => $notMoved,
             'caddy_domains_checked' => count($caddy['domains'] ?? []),
             'caddy_domains_not_moved' => $caddyNotMoved,
@@ -1688,6 +1720,69 @@ final class McpClusterTools
     }
 
     // ── Firewall: orígenes de confianza ──────────────────────────────────
+
+    private static function fail2banIgnore(): array
+    {
+        $c = is_file('/etc/fail2ban/jail.local') ? (string)file_get_contents('/etc/fail2ban/jail.local') : '';
+        return preg_match('/^ignoreip\s*=\s*(.+)$/m', $c, $m) ? array_values(array_filter(preg_split('/[\s,]+/', trim($m[1])) ?: [])) : [];
+    }
+
+    private static function fail2banManage(array $args): array
+    {
+        if (trim((string)shell_exec('command -v fail2ban-client 2>/dev/null')) === '') {
+            throw new \RuntimeException('fail2ban no está instalado en este servidor.');
+        }
+        preg_match('/Jail list:\s*(.+)$/m', (string)shell_exec('fail2ban-client status 2>&1'), $jm);
+        $jails = array_values(array_filter(array_map('trim', explode(',', $jm[1] ?? ''))));
+        $banned = [];
+        foreach ($jails as $j) {
+            preg_match('/Banned IP list:\s*(.*)$/m', (string)shell_exec('fail2ban-client status ' . escapeshellarg($j) . ' 2>&1'), $bm);
+            $banned[$j] = array_values(array_filter(preg_split('/\s+/', trim($bm[1] ?? '')) ?: []));
+        }
+        $ignore = self::fail2banIgnore();
+        $ip = trim((string)($args['ip'] ?? ''));
+        if ($ip === '') {
+            return ['banned_now' => array_filter($banned), 'whitelist' => $ignore];
+        }
+        [$addr, $bits] = array_pad(explode('/', $ip, 2), 2, null);
+        if (!filter_var($addr, FILTER_VALIDATE_IP) || ($bits !== null && (!ctype_digit($bits) || (int)$bits > 128))) {
+            throw new \InvalidArgumentException("No es una IP ni un rango CIDR válido: {$ip}");
+        }
+        $in = array_keys(array_filter($banned, fn($l) => in_array($addr, $l, true)));
+        $wl = !empty($args['whitelist']) && !in_array($ip, $ignore, true);
+        $plan = ['ip' => $ip, 'actions' => []];
+        foreach ($in as $j) {
+            $plan['actions'][] = "Desbloquear en el jail {$j}";
+        }
+        if ($wl) {
+            $plan['actions'][] = 'Añadir a la lista blanca (ignoreip de /etc/fail2ban/jail.local) y recargar fail2ban';
+        } elseif (!empty($args['whitelist'])) {
+            $plan['actions'][] = 'Ya está en la lista blanca';
+        }
+        if (!$plan['actions'] || (!$in && !$wl)) {
+            return ['status' => 'nada_que_hacer', 'note' => 'No está bloqueada' . (!empty($args['whitelist']) ? ' y ya está en la lista blanca.' : '.')] + $plan;
+        }
+        if (empty($args['apply'])) {
+            return ['status' => 'plan', 'apply' => false] + $plan;
+        }
+        $done = [];
+        foreach ($in as $j) {
+            $o = trim((string)shell_exec('fail2ban-client set ' . escapeshellarg($j) . ' unbanip ' . escapeshellarg($addr) . ' 2>&1'));
+            $done[] = "{$j}: " . ($o === '1' ? 'desbloqueada' : $o);
+        }
+        if ($wl) {
+            $file = '/etc/fail2ban/jail.local';
+            $c = is_file($file) ? (string)file_get_contents($file) : "[DEFAULT]\n";
+            @copy($file, $file . '.bak.' . date('Ymd_His'));
+            $line = 'ignoreip = ' . implode(' ', array_values(array_unique(array_merge(['127.0.0.1/8', '::1'], $ignore, [$ip]))));
+            $c = preg_match('/^ignoreip\s*=.*$/m', $c) ? preg_replace('/^ignoreip\s*=.*$/m', $line, $c, 1)
+                : (str_contains($c, '[DEFAULT]') ? preg_replace('/^\[DEFAULT\]\s*$/m', "[DEFAULT]\n{$line}", $c, 1) : "[DEFAULT]\n{$line}\n" . $c);
+            file_put_contents($file, $c);
+            $done[] = 'lista blanca: ' . trim((string)shell_exec('fail2ban-client reload 2>&1') ?: 'recargado');
+        }
+        LogService::log('mcp.fail2ban', $ip, implode('; ', $done));
+        return ['status' => 'aplicado', 'done' => $done] + $plan;
+    }
 
     private static function trustedSources(array $args): array
     {

@@ -248,135 +248,19 @@ class DatabaseController
             return;
         }
 
-        $accountId = (int) ($_POST['account_id'] ?? 0);
-        $dbSuffix = trim($_POST['db_name'] ?? '');
-        $dbType = trim($_POST['db_type'] ?? 'mysql');
-
-        if (!in_array($dbType, ['mysql', 'pgsql'], true)) {
-            $dbType = 'mysql';
-        }
-
-        if (empty($accountId) || empty($dbSuffix)) {
-            Flash::set('error', 'Todos los campos son obligatorios.');
+        // La creación vive en DatabaseService (la usa también el MCP database_create).
+        $r = \MuseDockPanel\Services\DatabaseService::createForAccount(
+            (int)($_POST['account_id'] ?? 0),
+            (string)($_POST['db_name'] ?? ''),
+            (string)($_POST['db_type'] ?? 'mysql'),
+            (string)($_POST['db_custom_user'] ?? '')
+        );
+        if (empty($r['ok'])) {
+            Flash::set('error', $r['error'] ?? 'No se pudo crear la base de datos.');
             Router::redirect('/databases/create');
             return;
         }
-
-        if (!preg_match('/^[a-zA-Z0-9_]+$/', $dbSuffix)) {
-            Flash::set('error', 'El nombre de la base de datos solo puede contener letras, numeros y guion bajo.');
-            Router::redirect('/databases/create');
-            return;
-        }
-
-        $account = Database::fetchOne("SELECT id, username, domain FROM hosting_accounts WHERE id = :id", ['id' => $accountId]);
-        if (!$account) {
-            Flash::set('error', 'Cuenta de hosting no encontrada.');
-            Router::redirect('/databases/create');
-            return;
-        }
-
-        $username = $account['username'];
-        $fullDbName = $username . '_' . $dbSuffix;
-        $customUser = trim($_POST['db_custom_user'] ?? '');
-        $fullDbUser = !empty($customUser) ? $customUser : $username . '_' . $dbSuffix;
-
-        if (strlen($fullDbName) > 64) {
-            Flash::set('error', 'El nombre completo de la base de datos no puede exceder 64 caracteres. Actual: ' . strlen($fullDbName));
-            Router::redirect('/databases/create');
-            return;
-        }
-
-        if (strlen($fullDbUser) > 32) {
-            Flash::set('error', 'El nombre de usuario de la base de datos no puede exceder 32 caracteres. Actual: ' . strlen($fullDbUser));
-            Router::redirect('/databases/create');
-            return;
-        }
-
-        $existing = Database::fetchOne("SELECT id FROM hosting_databases WHERE db_name = :name", ['name' => $fullDbName]);
-        if ($existing) {
-            Flash::set('error', "La base de datos '{$fullDbName}' ya existe.");
-            Router::redirect('/databases/create');
-            return;
-        }
-
-        $dbPassword = bin2hex(random_bytes(12));
-
-        if ($dbType === 'pgsql') {
-            $sqlUser = sprintf("CREATE USER %s WITH PASSWORD %s;", escapeshellarg($fullDbUser), escapeshellarg($dbPassword));
-            $cmdUser = 'sudo -u postgres psql -c ' . escapeshellarg($sqlUser) . ' 2>&1';
-            $outputUser = shell_exec($cmdUser);
-
-            if ($outputUser !== null && stripos($outputUser, 'ERROR') !== false) {
-                LogService::log('database.create.error', $fullDbName, "PostgreSQL error creating user: {$outputUser}");
-                Flash::set('error', 'Error al crear el usuario en PostgreSQL: ' . $outputUser);
-                Router::redirect('/databases/create');
-                return;
-            }
-
-            $sqlDb = sprintf("CREATE DATABASE %s OWNER %s;", escapeshellarg($fullDbName), escapeshellarg($fullDbUser));
-            $cmdDb = 'sudo -u postgres psql -c ' . escapeshellarg($sqlDb) . ' 2>&1';
-            $outputDb = shell_exec($cmdDb);
-
-            if ($outputDb !== null && stripos($outputDb, 'ERROR') !== false) {
-                LogService::log('database.create.error', $fullDbName, "PostgreSQL error creating database: {$outputDb}");
-                Flash::set('error', 'Error al crear la base de datos en PostgreSQL: ' . $outputDb);
-                Router::redirect('/databases/create');
-                return;
-            }
-
-            $sqlGrant = sprintf("GRANT ALL PRIVILEGES ON DATABASE %s TO %s;", escapeshellarg($fullDbName), escapeshellarg($fullDbUser));
-            $cmdGrant = 'sudo -u postgres psql -c ' . escapeshellarg($sqlGrant) . ' 2>&1';
-            $outputGrant = shell_exec($cmdGrant);
-
-            if ($outputGrant !== null && stripos($outputGrant, 'ERROR') !== false) {
-                LogService::log('database.create.error', $fullDbName, "PostgreSQL error granting privileges: {$outputGrant}");
-                Flash::set('error', 'Error al asignar privilegios en PostgreSQL: ' . $outputGrant);
-                Router::redirect('/databases/create');
-                return;
-            }
-
-            $dbHost = 'localhost';
-            $logType = 'PostgreSQL';
-        } else {
-            $mysqlCmd = $this->buildMysqlCommand();
-            if ($mysqlCmd === null) {
-                Flash::set('error', 'No se pudo determinar el metodo de autenticacion de MySQL. Verifica MYSQL_AUTH_METHOD en .env');
-                Router::redirect('/databases/create');
-                return;
-            }
-
-            $sqlCreate = sprintf("CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;", $this->quoteIdentifier($fullDbName));
-            $sqlUser = sprintf("CREATE USER IF NOT EXISTS %s@'localhost' IDENTIFIED BY %s;", $this->quoteLiteral($fullDbUser), $this->quoteLiteral($dbPassword));
-            $sqlGrant = sprintf("GRANT ALL PRIVILEGES ON %s.* TO %s@'localhost';", $this->quoteIdentifier($fullDbName), $this->quoteLiteral($fullDbUser));
-            $sqlFlush = "FLUSH PRIVILEGES;";
-
-            $fullSql = $sqlCreate . ' ' . $sqlUser . ' ' . $sqlGrant . ' ' . $sqlFlush;
-            $cmd = $mysqlCmd . ' -e ' . escapeshellarg($fullSql) . ' 2>&1';
-            $output = shell_exec($cmd);
-
-            if ($output !== null && stripos($output, 'ERROR') !== false) {
-                LogService::log('database.create.error', $fullDbName, "MySQL error: {$output}");
-                Flash::set('error', 'Error al crear la base de datos en MySQL: ' . $output);
-                Router::redirect('/databases/create');
-                return;
-            }
-
-            $dbHost = 'localhost';
-            $logType = 'MySQL';
-        }
-
-        Database::insert('hosting_databases', [
-            'account_id' => $accountId,
-            'db_name' => $fullDbName,
-            'db_user' => $fullDbUser,
-            'db_type' => $dbType,
-            'created_at' => date('Y-m-d H:i:s'),
-        ]);
-
-        LogService::log('database.create', $fullDbName, "Created {$logType} database: {$fullDbName}, user: {$fullDbUser} for account {$username}");
-
-        // Sync database registration to slaves
-        $this->syncDatabasesForAccount($accountId, $account['domain']);
+        [$fullDbName, $fullDbUser, $dbPassword, $dbHost, $dbType] = [$r['db_name'], $r['db_user'], $r['db_pass'], $r['db_host'], $r['db_type']];
 
         Flash::set('success', "Base de datos '{$fullDbName}' creada exitosamente. Las credenciales se muestran abajo.");
         Flash::set('db_credentials', json_encode([

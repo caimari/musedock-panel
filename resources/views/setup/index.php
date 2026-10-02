@@ -54,9 +54,7 @@
             <p>Primera configuracion — crea tu cuenta de administrador</p>
         </div>
 
-        <?php foreach (Flash::all() as $type => $msg): ?>
-            <div class="alert alert-<?= $type === 'error' ? 'danger' : $type ?> mb-3"><?= View::e($msg) ?></div>
-        <?php endforeach; ?>
+        <?php include dirname(__DIR__) . '/partials/flash-toasts.php'; ?>
 
         <!-- System Checks -->
         <div class="mb-4">

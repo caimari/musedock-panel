@@ -767,13 +767,17 @@ CONF;
         return is_array($data) ? $data : ['status' => 'unknown'];
     }
 
-    public static function installCaddyDnsProvider(string $provider): array
+    /**
+     * $force: recompilar aunque el módulo ya esté (para actualizarlo a su última
+     * versión; p. ej. caddy-dns/cloudflare < v0.2.4 rechaza los tokens nuevos cfut_/cfat_).
+     */
+    public static function installCaddyDnsProvider(string $provider, bool $force = false): array
     {
         $provider = strtolower(trim($provider));
         if ($provider === '' || !preg_match('/^[a-z0-9][a-z0-9_.-]{1,63}$/', $provider)) {
             return ['ok' => false, 'error' => 'Proveedor DNS invalido'];
         }
-        if (self::caddyHasDnsProvider($provider)) {
+        if (!$force && self::caddyHasDnsProvider($provider)) {
             return ['ok' => true, 'installed' => false, 'message' => "dns.providers.{$provider} ya esta instalado"];
         }
 
@@ -846,7 +850,11 @@ CONF;
             ];
         }
 
-        $validateOut = trim((string)shell_exec(escapeshellarg($buildPath) . ' validate --config /etc/caddy/Caddyfile 2>&1'));
+        // Con el entorno del servicio (token de Cloudflare de /etc/default/caddy): sin él
+        // la validación falla siempre con "API token '' appears invalid".
+        $validateOut = trim((string)shell_exec('sh -c ' . escapeshellarg(
+            'set -a; [ -r /etc/default/caddy ] && . /etc/default/caddy; set +a; '
+            . escapeshellarg($buildPath) . ' validate --config /etc/caddy/Caddyfile') . ' 2>&1'));
         if (stripos($validateOut, 'valid') === false && stripos($validateOut, 'adapted config') === false) {
             // Validation output varies by Caddy version; do not block on empty output,
             // but block on explicit errors.

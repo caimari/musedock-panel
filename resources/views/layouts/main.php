@@ -220,37 +220,7 @@
     </div>
 
     <div class="content-area">
-        <?php foreach (Flash::all() as $type => $msg): ?>
-            <?php
-                $alertClass = match($type) {
-                    'error' => 'danger',
-                    default => $type,
-                };
-                $bgColor = match($type) {
-                    'success' => 'rgba(34,197,94,0.15)',
-                    'error' => 'rgba(239,68,68,0.15)',
-                    'warning' => 'rgba(251,191,36,0.15)',
-                    default => 'rgba(56,189,248,0.15)',
-                };
-                $textColor = match($type) {
-                    'success' => '#22c55e',
-                    'error' => '#ef4444',
-                    'warning' => '#fbbf24',
-                    default => '#38bdf8',
-                };
-                $borderColor = match($type) {
-                    'success' => 'rgba(34,197,94,0.3)',
-                    'error' => 'rgba(239,68,68,0.3)',
-                    'warning' => 'rgba(251,191,36,0.3)',
-                    default => 'rgba(56,189,248,0.3)',
-                };
-            ?>
-            <?php /* Errores y avisos no se cierran solos (se perdían antes de poder leerlos/copiarlos) y además salen en un modal. */ ?>
-            <div class="alert alert-dismissible fade show <?= in_array($type, ['error', 'warning'], true) ? 'flash-sticky' : 'flash-alert' ?>" role="alert" data-flash-type="<?= View::e($type) ?>" style="background: <?= $bgColor ?>; border: 1px solid <?= $borderColor ?>; color: <?= $textColor ?>; user-select: text;">
-                <span class="flash-text"><?= View::e($msg) ?></span>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" style="filter: invert(1); opacity: 0.6;"></button>
-            </div>
-        <?php endforeach; ?>
+        <?php include dirname(__DIR__) . '/partials/flash-toasts.php'; ?>
 
         <?= $content ?>
     </div>
@@ -377,41 +347,7 @@ function confirmAction(form, options, preSubmitFn) {
     });
 }
 
-// Auto-dismiss flash alerts after 4 seconds (solo éxito/info; errores y avisos se quedan)
-document.querySelectorAll('.flash-alert').forEach(function(el) {
-    setTimeout(function() {
-        var alert = bootstrap.Alert.getOrCreateInstance(el);
-        alert.close();
-    }, 4000);
-});
-
-// Errores/avisos: además en un modal, con el texto seleccionable y botón Copiar.
-(function () {
-    const items = Array.from(document.querySelectorAll('.flash-sticky'));
-    if (!items.length || typeof Swal === 'undefined') return;
-    const isError = items.some(el => el.dataset.flashType === 'error');
-    const esc = t => t.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-    const text = items.map(el => el.querySelector('.flash-text').textContent.trim()).join('\n\n');
-    const others = Array.from(document.querySelectorAll('.flash-alert')).map(el => el.textContent.trim()).filter(Boolean);
-    Swal.fire(Object.assign({}, musedockSwalDefaults, {
-        icon: isError ? 'error' : 'warning',
-        title: isError ? 'Error' : 'Aviso',
-        html: '<pre style="white-space:pre-wrap;text-align:left;user-select:text;font-size:.85rem;color:#f8fafc;background:#0f172a;padding:.75rem;border-radius:8px;max-height:50vh;overflow:auto">' + esc(text) + '</pre>'
-            + (others.length ? '<div class="small text-muted text-start mt-2">' + others.map(esc).join('<br>') + '</div>' : ''),
-        width: 720,
-        showCancelButton: true,
-        confirmButtonText: 'Cerrar',
-        cancelButtonText: 'Copiar',
-        reverseButtons: true,
-        preConfirm: () => true,
-    })).then(r => {
-        if (r.dismiss === Swal.DismissReason.cancel) {
-            (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
-                .then(() => Swal.fire(Object.assign({}, musedockSwalDefaults, { icon: 'success', title: 'Copiado', timer: 1200, showConfirmButton: false })))
-                .catch(() => {});
-        }
-    });
-})();
+// Los mensajes Flash se muestran como toasts (partials/flash-toasts.php).
 
 function musedockParseLegacyConfirmText(handler) {
     const match = String(handler || '').trim().match(/^return\s+confirm\(([\s\S]+)\)\s*;?\s*$/i);

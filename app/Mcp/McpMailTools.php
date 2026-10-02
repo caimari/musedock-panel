@@ -48,6 +48,7 @@ final class McpMailTools
                 'inputSchema' => $o([
                     'domain' => ['type' => 'string'],
                     'replace_conflicts' => ['type' => 'boolean', 'description' => 'Sustituir/borrar registros que chocan (revisa antes el plan)'],
+                    'spf_add' => ['type' => 'string', 'description' => 'Opcional: términos a AÑADIR al SPF existente, separados por espacios (p. ej. "include:spf.proveedor-de-envio.com"). Edita el único registro SPF, nunca crea otro.'],
                     'apply' => $apply,
                 ], ['domain']),
             ],
@@ -78,10 +79,36 @@ final class McpMailTools
                 'title' => 'Dominio alias (sinónimo) de otro dominio de correo',
                 'description' => 'Hace que un dominio sea sinónimo de otro: todo lo que llegue a X@alias se entrega en X@destino (mismos buzones y alias; se conserva el nombre de usuario). Da de alta el dominio alias en el correo del panel si no existe (con su DKIM, para cuando se publique su DNS) y crea su catch-all "@alias" → "@destino" (Postfix reescribe @otrodominio conservando el usuario). Se niega si el dominio alias ya tiene buzones propios (el catch-all les quitaría el correo). No toca el DNS: después, mail_dns_publish del dominio alias. Primero sin apply.',
                 'inputSchema' => $o([
-                    'alias_domain' => ['type' => 'string', 'description' => 'p. ej. screenart.info'],
-                    'target_domain' => ['type' => 'string', 'description' => 'Dominio de correo existente en el panel, p. ej. screenart.es'],
+                    'alias_domain' => ['type' => 'string', 'description' => 'p. ej. ejemplo.net'],
+                    'target_domain' => ['type' => 'string', 'description' => 'Dominio de correo existente en el panel, p. ej. ejemplo.com'],
                     'apply' => $apply,
                 ], ['alias_domain', 'target_domain']),
+            ],
+            'mail_dkim_selector' => [
+                'write' => true,
+                'title' => 'Cambiar el selector DKIM de un dominio de correo',
+                'description' => 'Para cuando otro remitente (un proveedor de envío, la web…) ya publica su clave en default._domainkey del dominio y mail_dns_publish da DKIM "conflicto": el panel pasa a firmar con otro selector (por defecto "musedock") con la MISMA clave, y las dos conviven sin tocar la del otro. Reinstala la clave en OpenDKIM aquí y en las réplicas. No toca el DNS: después, mail_dns_publish (crea el registro del nuevo selector). Primero sin apply.',
+                'inputSchema' => $o([
+                    'domain' => ['type' => 'string'],
+                    'selector' => ['type' => 'string', 'description' => 'Nuevo selector (por defecto musedock)'],
+                    'apply' => $apply,
+                ], ['domain']),
+            ],
+            'mail_replication_status' => [
+                'write' => false,
+                'title' => 'Copia en vivo de los buzones (dsync) con el otro nodo de correo',
+                'description' => 'Solo lectura. Dice si este nodo replica el CONTENIDO de los buzones (Dovecot dsync) con su pareja, y por buzón: si el replicador lo conoce, última sincronización correcta y si falló. Avisa de los buzones del panel que el replicador aún no tiene. Con `node` se consulta el otro nodo. Sirve para confirmar que el correo recibido también está en el slave antes de un relevo.',
+                'inputSchema' => $o(['domain' => ['type' => 'string', 'description' => 'Opcional: solo los buzones de este dominio']], []),
+            ],
+            'mail_resync_node' => [
+                'write' => true,
+                'title' => 'Reenviar todo el correo (dominios, buzones, alias) a un nodo réplica',
+                'description' => 'En el MASTER. Reenvía a un nodo de correo réplica (el slave de correo) TODOS los dominios de correo, buzones (con su hash de contraseña) y alias del panel: lo que le falte se crea y lo que tenga se actualiza; en el nodo NUNCA se borra nada. Es el botón "Sincronizar" de Mail → Infraestructura. Úsalo cuando mail_replication_status diga que al nodo le faltan dominios o buzones. Con copy_mail=true pide además a Dovecot una copia completa de todos los buzones hacia la pareja (dsync) — mejor en una segunda llamada, cuando la cola ya haya creado los buzones en el nodo. Primero sin apply.',
+                'inputSchema' => $o([
+                    'target_node' => ['type' => 'string', 'description' => 'Id o nombre del nodo réplica (list_nodes)'],
+                    'copy_mail' => ['type' => 'boolean', 'description' => 'Forzar además la copia completa del contenido de los buzones (dsync)'],
+                    'apply' => $apply,
+                ], ['target_node']),
             ],
             'mail_domain_verify' => [
                 'write' => false,
@@ -106,11 +133,163 @@ final class McpMailTools
             'mail_alias_create'   => self::aliasCreate($args),
             'mail_domain_alias'   => self::domainAlias($args),
             'mail_domain_verify'  => self::domainVerify($args),
+            'mail_replication_status' => self::replicationStatus($args),
+            'mail_resync_node'    => self::resyncNode($args),
+            'mail_dkim_selector'  => self::dkimSelector($args),
             default               => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
         };
     }
 
     // ── Guardas y utilidades ─────────────────────────────────────────────
+
+    private static function replicationStatus(array $args): array
+    {
+        $st = \MuseDockPanel\Services\MailReplicationService::status();
+        if (empty($st['configured'])) {
+            return $st;
+        }
+        $only = strtolower(trim((string)($args['domain'] ?? '')));
+        // doveadm replicator status '*': username, priority, fast sync, full sync, success sync, failed
+        $users = [];
+        foreach (preg_split('/\R/', (string)shell_exec("doveadm replicator status '*' 2>/dev/null")) as $line) {
+            $c = preg_split('/\s{2,}|\t/', trim($line));
+            if (count($c) < 5 || strtolower($c[0]) === 'username') {
+                continue;
+            }
+            $users[strtolower($c[0])] = ['last_ok' => $c[4] ?? '', 'failed' => strtolower(trim((string)end($c))) === 'y'];
+        }
+        $boxes = [];
+        $missing = [];
+        foreach (\MuseDockPanel\Database::fetchAll("SELECT lower(email) AS email FROM mail_accounts ORDER BY email") as $r) {
+            if ($only !== '' && !str_ends_with($r['email'], '@' . $only)) {
+                continue;
+            }
+            if (!isset($users[$r['email']])) {
+                $missing[] = $r['email'];
+                continue;
+            }
+            $boxes[$r['email']] = $users[$r['email']];
+        }
+        unset($st['replicator']);
+        $st['nodes_compared'] = self::compareWithReplicas();
+        return $st + [
+            'mailboxes' => $boxes,
+            'failed' => array_keys(array_filter($boxes, fn($b) => $b['failed'])),
+            'not_in_replicator' => $missing,
+            'note' => $missing
+                ? 'Los buzones de not_in_replicator aún no se han replicado nunca: Dovecot los añade al recibir o al tocar su primer correo. Sin correo todavía, no es un fallo.'
+                : null,
+        ];
+    }
+
+    /** Compara dominios/buzones/alias de este master con cada réplica de correo. */
+    private static function compareWithReplicas(): array
+    {
+        $out = [];
+        // Mismas cifras que devuelve mail_domains en el nodo (igual con igual).
+        $mine = [];
+        foreach (\MuseDockPanel\Database::fetchAll(
+            "SELECT d.domain,
+                    (SELECT COUNT(*) FROM mail_accounts a WHERE a.mail_domain_id = d.id) AS mailboxes,
+                    (SELECT COUNT(*) FROM mail_aliases al WHERE al.mail_domain_id = d.id) AS aliases
+             FROM mail_domains d") as $d) {
+            $mine[strtolower($d['domain'])] = [(int)$d['mailboxes'], (int)$d['aliases']];
+        }
+        foreach (MailService::getMailReplicaNodes() as $n) {
+            try {
+                $r = \MuseDockPanel\Services\ClusterService::callNode((int)$n['id'], 'POST', '/api/cluster/action',
+                    ['action' => 'mcp-call', 'payload' => ['tool' => 'mail_domains', 'arguments' => []]]);
+                $body = $r['data'] ?? [];
+                if (empty($r['ok']) || empty($body['ok'])) {
+                    $out[$n['name']] = ['error' => (string)($body['error'] ?? $r['error'] ?? 'sin respuesta')];
+                    continue;
+                }
+                $theirs = [];
+                foreach (($body['data']['domains'] ?? []) as $d) {
+                    $theirs[strtolower($d['domain'])] = [(int)$d['mailboxes'], (int)$d['aliases']];
+                }
+                $missing = array_values(array_diff(array_keys($mine), array_keys($theirs)));
+                $short = [];
+                foreach ($mine as $dom => [$mb, $al]) {
+                    if (isset($theirs[$dom]) && ($theirs[$dom][0] < $mb || $theirs[$dom][1] < $al)) {
+                        $short[$dom] = "buzones {$theirs[$dom][0]}/{$mb}, alias {$theirs[$dom][1]}/{$al}";
+                    }
+                }
+                $out[$n['name']] = ($missing || $short)
+                    ? ['ok' => false, 'missing_domains' => $missing, 'incomplete_domains' => $short,
+                       'fix' => "mail_resync_node target_node=\"{$n['name']}\""]
+                    : ['ok' => true, 'note' => 'Tiene los mismos dominios, buzones y alias.'];
+            } catch (\Throwable $e) {
+                $out[$n['name']] = ['error' => $e->getMessage()];
+            }
+        }
+        return $out;
+    }
+
+    private static function resyncNode(array $args): array
+    {
+        self::guardWritable();
+        $want = trim((string)($args['target_node'] ?? ''));
+        $node = null;
+        foreach (MailService::getMailReplicaNodes() as $n) {
+            if ((string)$n['id'] === $want || strcasecmp((string)$n['name'], $want) === 0 || stripos((string)$n['name'], $want) !== false) {
+                $node = $n;
+                break;
+            }
+        }
+        if (!$node) {
+            throw new \InvalidArgumentException("'{$want}' no es un nodo réplica de correo online. Mira mail_replication_status.");
+        }
+        $copy = !empty($args['copy_mail']);
+        $nd = \MuseDockPanel\Database::fetchOne("SELECT COUNT(*) AS n FROM mail_domains WHERE status != 'deleted'")['n'] ?? 0;
+        $nm = \MuseDockPanel\Database::fetchOne("SELECT COUNT(*) AS n FROM mail_accounts WHERE status != 'deleted'")['n'] ?? 0;
+        $plan = ['node' => $node['name'], 'actions' => [
+            "Encolar hacia {$node['name']}: {$nd} dominios y {$nm} buzones con sus alias (crea lo que falte, actualiza lo que haya; nunca borra en el nodo)",
+        ]];
+        if ($copy) {
+            $plan['actions'][] = 'Pedir a Dovecot una copia completa de todos los buzones hacia la pareja (doveadm replicator replicate -f)';
+        }
+        if (empty($args['apply'])) {
+            return ['status' => 'plan', 'apply' => false] + $plan;
+        }
+        $r = MailService::resyncMailToNode((int)$node['id']);
+        $res = ['status' => 'encolado', 'queued' => $r] + $plan;
+        if ($copy) {
+            $o = trim((string)shell_exec("doveadm replicator replicate -f '*' 2>&1"));
+            $res['copy_mail'] = $o !== '' ? $o : 'pedida';
+        }
+        $res['next'] = 'La cola lo procesa en ~1 min. Luego mail_replication_status (y, si los buzones aún no copian, otra llamada con copy_mail=true).';
+        return $res;
+    }
+
+    private static function dkimSelector(array $args): array
+    {
+        $domain = self::domainArg($args);
+        $row = self::requireDomain($domain);
+        self::guardWritable();
+        $new = strtolower(trim((string)($args['selector'] ?? ''))) ?: 'musedock';
+        $old = (string)($row['dkim_selector'] ?? '') ?: 'default';
+        if ($new === $old) {
+            return ['status' => 'ya_esta', 'domain' => $domain, 'selector' => $old];
+        }
+        $plan = [
+            'domain' => $domain,
+            'actions' => [
+                "El panel firmará con {$new}._domainkey.{$domain} (misma clave; antes {$old})",
+                'Reinstalar la clave en OpenDKIM aquí y en las réplicas de correo (el slave de correo)',
+                "No se toca el registro {$old}._domainkey existente (es de otro remitente)",
+            ],
+            'next' => "mail_dns_publish {$domain} para crear {$new}._domainkey",
+        ];
+        if (empty($args['apply'])) {
+            return ['status' => 'plan', 'apply' => false] + $plan;
+        }
+        $r = MailService::setDkimSelector($domain, $new);
+        if (empty($r['ok'])) {
+            throw new \RuntimeException($r['error'] ?? 'No se pudo cambiar el selector.');
+        }
+        return ['status' => 'cambiado', 'old' => $r['old'], 'new' => $r['new'], 'replicas' => $r['replicas']] + $plan;
+    }
 
     private static function domainAlias(array $args): array
     {
@@ -139,7 +318,7 @@ final class McpMailTools
             $plan['actions'][] = "Dar de alta {$alias} en el correo del panel (con su clave DKIM; cliente: el de {$target})";
         }
         $plan['actions'][] = "Catch-all @{$alias} → @{$target}: X@{$alias} se entrega en X@{$target}";
-        $plan['actions'][] = 'Replicarlo a los nodos de correo (p. ej. Filemon)';
+        $plan['actions'][] = 'Replicarlo a los nodos de correo (el slave de correo)';
         $plan['note'] = "Ojo: una dirección que no exista en {$target} se acepta y luego se devuelve con un rebote (el catch-all acepta cualquier nombre). El DNS no se toca: después, mail_dns_publish {$alias} (si el dominio recibe correo por el Email Routing de Cloudflare, lo detecta como conflicto).";
         if (empty($args['apply'])) {
             return ['status' => 'plan', 'apply' => false] + $plan;
@@ -259,7 +438,7 @@ final class McpMailTools
         $plan = ['domain' => $domain, 'actions' => [
             'Crear el dominio de correo en el panel (servidor de correo local)',
             'Generar su clave DKIM (selector "default") y cargarla en OpenDKIM',
-            'Replicarlo a los nodos de correo del cluster (p. ej. Filemon)',
+            'Replicarlo a los nodos de correo del cluster (el slave de correo)',
         ], 'next' => 'Después: mail_dns_publish para publicar MX/SPF/DKIM/DMARC en Cloudflare.'];
         if ($hosting) {
             $plan['hosting'] = "Este dominio ya es una web del panel ({$hosting['kind']} del hosting {$hosting['domain']}). "
@@ -344,10 +523,22 @@ final class McpMailTools
                     $curTxt = self::txtNorm((string)$cur[0]['content']);
                     $terms = preg_split('/\s+/', strtolower($curTxt)) ?: [];
                     $ourIp = preg_match('/ip4:(\S+)/', $e['content'], $ipm) ? $ipm[1] : '';
+                    // Restos del Email Routing de Cloudflare: si el MX ya no va a Cloudflare,
+                    // su include sobra. Se EDITA el registro quitando solo ese término.
+                    $cfInc = 'include:_spf.mx.cloudflare.net';
+                    $mxOnCf = (bool)array_filter($curMx, fn($r) => str_contains(strtolower((string)$r['content']), '.mx.cloudflare.net'));
+                    if (in_array($cfInc, $terms, true) && !$mxOnCf
+                        && (array_intersect(['mx', '+mx'], $terms) || ($ourIp !== '' && in_array("ip4:{$ourIp}", $terms, true)))) {
+                        $cleaned = trim(preg_replace('/\s+/', ' ', preg_replace('/(^|\s)' . preg_quote($cfInc, '/') . '(?=\s|$)/i', ' ', $curTxt)));
+                        $plan['spf'] = ['name' => $e['name'], 'current' => [$curTxt], 'expected' => $cleaned, 'status' => 'limpiar',
+                            'note' => 'Se quita solo include:_spf.mx.cloudflare.net (era del Email Routing de Cloudflare; el MX ya no va allí). El resto se mantiene.',
+                            'conflicting' => [], 'create' => false, 'update_id' => (string)$cur[0]['id']];
+                        continue;
+                    }
                     if (array_intersect(['mx', '+mx'], $terms) || ($ourIp !== '' && in_array("ip4:{$ourIp}", $terms, true))) {
                         $plan['spf'] = ['name' => $e['name'], 'current' => [$curTxt], 'status' => 'ok',
                             'note' => 'El SPF actual ya autoriza a este servidor: se respeta tal cual (no se quita a otros remitentes).',
-                            'conflicting' => [], 'create' => false];
+                            'conflicting' => [], 'create' => false, 'update_id' => (string)$cur[0]['id']];
                         continue;
                     }
                     $add = 'mx' . ($ourIp !== '' ? " ip4:{$ourIp}" : '');
@@ -381,6 +572,33 @@ final class McpMailTools
         }
         if ($plan['mx']['status'] === 'conflicto' && !$replace) {
             $notes[] = 'Hay MX de otro servidor. NO se añade el MX propio: con dos MX el correo se repartiría entre ambos. Revisa el plan y relanza con replace_conflicts=true para sustituirlos.';
+        }
+
+        // spf_add: términos extra (otro proveedor de envío…) en el MISMO registro SPF.
+        $spfAdd = array_values(array_filter(preg_split('/\s+/', strtolower(trim((string)($args['spf_add'] ?? '')))) ?: []));
+        if ($spfAdd) {
+            foreach ($spfAdd as $t) {
+                if (!preg_match('/^[+~?-]?(include|a|mx|ip4|ip6|exists):[a-z0-9._:\/-]+$/', $t)) {
+                    throw new \InvalidArgumentException("spf_add: \"{$t}\" no es un término SPF válido (p. ej. include:spf.proveedor.com, ip4:1.2.3.4).");
+                }
+            }
+            $sp = $plan['spf'] ?? [];
+            $base = (string)($sp['expected'] ?? ($sp['current'][0] ?? ''));
+            if (empty($sp['update_id']) || !str_starts_with($base, 'v=spf1')) {
+                throw new \RuntimeException('spf_add necesita que el dominio tenga ya UN registro SPF (publica primero sin spf_add).');
+            }
+            $terms = preg_split('/\s+/', strtolower($base)) ?: [];
+            $missing = array_values(array_filter($spfAdd, fn($t) => !in_array($t, $terms, true)));
+            if ($missing) {
+                $add = implode(' ', $missing);
+                $merged = preg_match('/\s[~+?-]?all$/i', $base) ? preg_replace('/\s([~+?-]?all)$/i', " {$add} $1", $base) : "{$base} {$add}";
+                // mx/ip4 de este servidor, si los hay, al final (antes de all): solo estética, no cambia el resultado.
+                $plan['spf']['expected'] = $merged;
+                $plan['spf']['note'] = trim(($sp['status'] === 'limpiar' ? 'Se quita include:_spf.mx.cloudflare.net. ' : '') . "Se AÑADE {$add} al SPF existente (mismo registro, sin quitar a nadie).");
+                if ($sp['status'] === 'ok') {
+                    $plan['spf']['status'] = 'ampliar';
+                }
+            }
         }
 
         $summary = array_map(fn($p) => $p['status'], $plan);
@@ -431,10 +649,17 @@ final class McpMailTools
             if (($p['status'] ?? '') === 'ok' || ($p['status'] ?? '') === 'omitido') {
                 continue;
             }
+            if (($p['status'] ?? '') === 'limpiar') { // SPF: quitar el include sobrante de Cloudflare
+                if ($cf('limpiar SPF', CloudflareService::updateRecord($token, $zoneId, (string)$p['update_id'],
+                        ['type' => 'TXT', 'name' => $p['name'], 'content' => $p['expected'], 'ttl' => 1]))) {
+                    $done[] = 'SPF: quitado include:_spf.mx.cloudflare.net (el resto se mantiene)';
+                }
+                continue;
+            }
             if (($p['status'] ?? '') === 'ampliar') { // SPF: añadir este servidor sin quitar nada
                 if ($cf('ampliar SPF', CloudflareService::updateRecord($token, $zoneId, (string)$p['update_id'],
                         ['type' => 'TXT', 'name' => $p['name'], 'content' => $p['expected'], 'ttl' => 1]))) {
-                    $done[] = 'SPF: ampliado (se añade este servidor, se mantienen los demás)';
+                    $done[] = 'SPF: ampliado (' . ($p['expected'] ?? '') . ')';
                 }
                 continue;
             }
@@ -509,14 +734,15 @@ final class McpMailTools
             return ['status' => 'plan', 'apply' => false] + $plan;
         }
 
-        $password = $given !== '' ? $given : self::generatePassword();
+        $password = $given !== '' ? $given : McpCredentials::generate();
         MailService::createAccount((int)$row['id'], $local, $password, [
             'display_name' => (string)($args['display_name'] ?? ''),
             'quota_mb' => $quota,
         ]);
         LogService::log('mail.account.create', $email, "Mailbox created via MCP (quota: {$quota}MB)");
         if ($given === '') {
-            self::storePendingCredential($email, $password);
+            $host = self::mailHostFor($row);
+            McpCredentials::store('mail', $email, $password, ['imap' => "{$host}:993 SSL/TLS", 'smtp' => "{$host}:587 STARTTLS o 465 SSL/TLS", 'usuario' => $email]);
         }
         unset($password, $given);
         return ['status' => 'creado', 'email' => $email, 'quota_mb' => $quota,
@@ -524,35 +750,10 @@ final class McpMailTools
             'client_settings' => 'Servidor ' . self::mailHostFor($row) . ' — IMAP 993 SSL/TLS, SMTP 465 SSL/TLS, usuario = email completo.'];
     }
 
-    private static function generatePassword(): string
-    {
-        $alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789-_.';
-        $out = '';
-        for ($i = 0; $i < 20; $i++) {
-            $out .= $alphabet[random_int(0, strlen($alphabet) - 1)];
-        }
-        return $out;
-    }
-
-    private static function storePendingCredential(string $email, string $password): void
-    {
-        $list = json_decode(Settings::get('mcp_pending_credentials', '[]'), true) ?: [];
-        $list = array_values(array_filter($list, fn($c) => (int)($c['at'] ?? 0) > time() - 7 * 86400)); // caducan a los 7 días
-        $list[] = ['email' => $email, 'enc' => ReplicationService::encryptPassword($password), 'at' => time()];
-        Settings::set('mcp_pending_credentials', json_encode(array_slice($list, -30)));
-    }
-
-    /** Para la página de Ajustes → MCP. */
+    /** Compatibilidad: Ajustes → MCP ahora usa McpCredentials::pending(). */
     public static function pendingCredentials(): array
     {
-        $out = [];
-        foreach (json_decode(Settings::get('mcp_pending_credentials', '[]'), true) ?: [] as $c) {
-            if ((int)($c['at'] ?? 0) <= time() - 7 * 86400) {
-                continue;
-            }
-            $out[] = ['email' => $c['email'], 'password' => ReplicationService::decryptPassword((string)$c['enc']), 'at' => gmdate('Y-m-d H:i', (int)$c['at']) . ' UTC'];
-        }
-        return $out;
+        return McpCredentials::pending();
     }
 
     // ── mail_alias_create ────────────────────────────────────────────────
@@ -613,8 +814,16 @@ final class McpMailTools
             $checks["mx@{$res}"] = ['ok' => $mx === [self::hostNorm($exp['mx']['content'])], 'found' => $mx, 'expected' => [$exp['mx']['content']]];
         }
         $spf = array_values(array_filter(array_map([self::class, 'txtNorm'], self::dig('TXT', $domain, '1.1.1.1')), fn($v) => str_starts_with(strtolower($v), 'v=spf1')));
-        $checks['spf'] = ['ok' => count($spf) === 1 && $spf[0] === $exp['spf']['content'], 'found' => $spf, 'expected' => $exp['spf']['content'],
-            'note' => count($spf) > 1 ? 'Hay más de un SPF: los receptores lo tratan como error.' : null];
+        // Igual que mail_dns_publish: vale cualquier SPF que autorice a este servidor
+        // (mx o su ip4), aunque autorice también a otros remitentes.
+        $spfTerms = count($spf) === 1 ? (preg_split('/\s+/', strtolower($spf[0])) ?: []) : [];
+        $spfIp = preg_match('/ip4:(\S+)/', $exp['spf']['content'], $ipm) ? $ipm[1] : '';
+        $spfOk = count($spf) === 1 && (array_intersect(['mx', '+mx'], $spfTerms) || ($spfIp !== '' && in_array("ip4:{$spfIp}", $spfTerms, true)));
+        $spfNote = count($spf) > 1 ? 'Hay más de un SPF: los receptores lo tratan como error.' : null;
+        if ($spfOk && in_array('include:_spf.mx.cloudflare.net', $spfTerms, true) && !array_filter(self::dig('MX', $domain, '1.1.1.1'), fn($l) => str_contains($l, '.mx.cloudflare.net'))) {
+            $spfNote = 'Sobra include:_spf.mx.cloudflare.net (era del Email Routing de Cloudflare, ya no se usa). No molesta; se puede quitar.';
+        }
+        $checks['spf'] = ['ok' => $spfOk, 'found' => $spf, 'expected' => 'que autorice a este servidor (' . $exp['spf']['content'] . ')', 'note' => $spfNote];
         $dmarc = array_values(array_filter(array_map([self::class, 'txtNorm'], self::dig('TXT', "_dmarc.{$domain}", '1.1.1.1')), fn($v) => str_starts_with(strtolower($v), 'v=dmarc1')));
         $checks['dmarc'] = ['ok' => count($dmarc) === 1, 'found' => $dmarc, 'expected' => $exp['dmarc']['content']];
         if (isset($exp['dkim'])) {

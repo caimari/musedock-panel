@@ -83,13 +83,13 @@ final class McpTools
             'mail_domain' => [
                 'title' => 'Detalle de dominio de correo',
                 'description' => 'Buzones (sin contraseñas) y alias/catch-all de un dominio de correo.',
-                'inputSchema' => $obj(['domain' => ['type' => 'string', 'description' => 'Dominio, p. ej. screenart.es']], ['domain']),
+                'inputSchema' => $obj(['domain' => ['type' => 'string', 'description' => 'Dominio, p. ej. ejemplo.com']], ['domain']),
             ],
             'tls_check' => [
                 'title' => 'Comprobar certificado TLS',
                 'description' => 'Hace un handshake TLS con SNI y devuelve el certificado servido (sujeto, emisor, SANs, caducidad y días restantes). `target`=local prueba contra este servidor (127.0.0.1), `public` contra la IP pública que resuelva el DNS.',
                 'inputSchema' => $obj([
-                    'host' => ['type' => 'string', 'description' => 'Hostname, p. ej. muserelay.com'],
+                    'host' => ['type' => 'string', 'description' => 'Hostname, p. ej. ejemplo.com'],
                     'target' => ['type' => 'string', 'enum' => ['local', 'public'], 'description' => 'local (por defecto) o public'],
                     'port' => ['type' => 'integer', 'description' => 'Puerto (por defecto 443)'],
                 ], ['host']),
@@ -123,7 +123,7 @@ final class McpTools
     /** Todas las herramientas: las de lectura de arriba + correo + cluster/failover. */
     public static function all(): array
     {
-        return self::definitions() + McpMailTools::definitions() + McpClusterTools::definitions();
+        return self::definitions() + McpMailTools::definitions() + McpClusterTools::definitions() + McpHostingTools::definitions();
     }
 
     /** Formato tools/list de MCP. */
@@ -229,6 +229,7 @@ final class McpTools
             default            => match (true) {
                 McpMailTools::has($name)    => McpMailTools::run($name, $args),
                 McpClusterTools::has($name) => McpClusterTools::run($name, $args),
+                McpHostingTools::has($name) => McpHostingTools::run($name, $args),
                 default                     => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
             },
         };
