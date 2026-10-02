@@ -2043,7 +2043,9 @@
         // Submit out-of-band so the navigation is not killed by the restart.
         fetch(form.action, { method: 'POST', body: new FormData(form), redirect: 'manual' })
             .catch(() => {})            // a dropped connection here is expected
-            .finally(() => waitForPanel(0));
+            // Caddy se reinicia ~3 s DESPUÉS de responder: esperar antes de sondear,
+            // o se recargaría justo cuando Caddy cae.
+            .finally(() => setTimeout(() => waitForPanel(0), 6000));
 
         function waitForPanel(attempt) {
             const maxAttempts = 60;      // ~60s

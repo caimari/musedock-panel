@@ -620,11 +620,11 @@ final class McpClusterTools
         $nodes = [];
         foreach (($push['results'] ?? []) as $r) {
             $nodes[(string)($r['node'] ?? '?')] = empty($r['ok']) ? 'no responde: en cola'
-                : (!empty($r['caddy_token_updated']) ? 'actualizado, Caddy reiniciado'
+                : (!empty($r['caddy_token_updated']) ? 'actualizado, Caddy se reinicia en 3 s'
                 : (!empty($r['caddy_token_error']) ? 'ERROR: ' . $r['caddy_token_error'] : 'ya lo tenía'));
         }
         return [
-            'este_nodo' => $changed ? 'actualizado, Caddy reiniciado' : ($err ? 'ERROR: ' . $err : 'ya lo tenía'),
+            'este_nodo' => $changed ? 'actualizado, Caddy se reinicia en 3 s' : ($err ? 'ERROR: ' . $err : 'ya lo tenía'),
             'slaves' => $nodes,
         ];
     }

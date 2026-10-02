@@ -201,7 +201,7 @@ class FailoverController
                     $same[] = $n;
                 }
             }
-            if ($done) { $msg .= ' Token de Caddy actualizado (Caddy reiniciado) en: ' . implode(', ', $done) . '.'; }
+            if ($done) { $msg .= ' Token de Caddy actualizado (Caddy se reinicia en unos segundos) en: ' . implode(', ', $done) . '.'; }
             if ($same) { $msg .= ' Ya lo tenían bien: ' . implode(', ', $same) . '.'; }
             if ($failed) {
                 Flash::set('error', 'Token de Caddy NO aplicado en: ' . implode(' | ', $failed));

@@ -471,7 +471,7 @@ class CloudflareService
     public static function currentCaddyToken(): string
     {
         foreach (@file('/etc/default/caddy', FILE_IGNORE_NEW_LINES) ?: [] as $l) {
-            if (preg_match('/^\s*CLOUDFLARE_API_TOKEN\s*=\s*"?([^"\s]+)/', $l, $m)) {
+            if (preg_match('/^\s*(?:export\s+)?CLOUDFLARE_API_TOKEN\s*=\s*"?([^"\s]+)/', $l, $m)) {
                 return $m[1];
             }
         }
@@ -482,7 +482,7 @@ class CloudflareService
      * Pone $token en el Caddy de este servidor SOLO si es distinto del que tiene
      * (el ayudante reinicia Caddy), o siempre con $force. Antes de reiniciar comprueba
      * con Cloudflare que el token está activo: nunca cambia uno que funciona por uno
-     * que no. Devuelve [cambiado, error|null].
+     * que no. El reinicio de Caddy queda programado a 3 s (ver abajo). Devuelve [cambiado, error|null].
      */
     public static function syncCaddyToken(string $token, bool $force = false): array
     {
@@ -496,11 +496,45 @@ class CloudflareService
         if (empty($v['ok']) || (($v['result']['status'] ?? '') !== 'active')) {
             return [false, 'Cloudflare no da el token por activo; Caddy se queda con el que tenía'];
         }
-        if (!file_exists('/usr/local/bin/update-caddy-token.sh')) {
-            return [false, 'falta /usr/local/bin/update-caddy-token.sh en este nodo'];
+        if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+            // Panel sin root: solo queda el ayudante (reinicia Caddy en el acto).
+            if (!file_exists('/usr/local/bin/update-caddy-token.sh')) {
+                return [false, 'el panel no corre como root y falta /usr/local/bin/update-caddy-token.sh'];
+            }
+            $out = trim((string)shell_exec('sudo -n /usr/local/bin/update-caddy-token.sh ' . escapeshellarg($token) . ' 2>&1'));
+            return str_contains($out, 'OK') ? [true, null] : [false, 'update-caddy-token.sh: ' . ($out !== '' ? $out : 'sin salida')];
         }
-        $out = trim((string)shell_exec('sudo -n /usr/local/bin/update-caddy-token.sh ' . escapeshellarg($token) . ' 2>&1'));
-        return str_contains($out, 'OK') ? [true, null] : [false, 'update-caddy-token.sh: ' . ($out !== '' ? $out : 'sin salida')];
+
+        // El panel corre como root: escribe el fichero él mismo (no depende del
+        // ayudante, que los nodos antiguos no tienen) y deja el reinicio de Caddy
+        // PROGRAMADO a 3 s. Reiniciar en el acto cortaba la petición en curso (el
+        // panel se sirve a través de Caddy): el master veía "unexpected eof", lo
+        // reintentaba desde la cola y cada reintento volvía a reiniciar Caddy.
+        $file = '/etc/default/caddy';
+        $lines = is_file($file) ? (file($file, FILE_IGNORE_NEW_LINES) ?: []) : [];
+        if (is_file($file) && !@copy($file, $file . '.bak.' . date('Ymd_His'))) {
+            return [false, "no se pudo hacer copia de {$file}"];
+        }
+        $lines = array_values(array_filter($lines, static fn ($l) => !preg_match('/^\s*(export\s+)?CLOUDFLARE_API_TOKEN\s*=/', $l)));
+        $lines[] = 'CLOUDFLARE_API_TOKEN=' . $token;
+        $tmp = $file . '.tmp-musedock';
+        if (@file_put_contents($tmp, implode("\n", $lines) . "\n") === false) {
+            return [false, "no se pudo escribir {$file}"];
+        }
+        @chmod($tmp, 0600);
+        @chown($tmp, 'root');
+        @chgrp($tmp, 'root');
+        if (!@rename($tmp, $file)) {
+            @unlink($tmp);
+            return [false, "no se pudo reemplazar {$file}"];
+        }
+        $unit = 'musedock-caddy-token-' . date('YmdHis');
+        $out = trim((string)shell_exec('systemd-run --quiet --collect --on-active=3 --unit=' . escapeshellarg($unit)
+            . ' /bin/systemctl restart caddy 2>&1'));
+        if ($out !== '') {
+            return [false, "token escrito, pero no se pudo programar el reinicio de Caddy: {$out} (reinícialo a mano)"];
+        }
+        return [true, null];
     }
 
     /** ¿Parece un token de API de Cloudflare (y no un texto cifrado)? */

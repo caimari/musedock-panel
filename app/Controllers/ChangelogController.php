@@ -26,9 +26,11 @@ class ChangelogController
                 'changes' => [
                     'fixed' => [
                         'es' => ['**Token de Caddy sincronizado desde el master**: al guardar las cuentas Cloudflare, cada nodo (master y slaves) compara su CLOUDFLARE_API_TOKEN con el de la cuenta que contiene la zona del panel (antes: siempre la primera cuenta) y solo si cambia lo escribe y reinicia Caddy, tras comprobar con Cloudflare que esta activo. La casilla pasa a "Forzar token en Caddy". Resultado por nodo: actualizado, ya lo tenia, error, en cola o panel antiguo',
+                            'El slave reiniciaba Caddy en mitad de la peticion del master ("unexpected eof" y reintentos en bucle desde la cola) y los nodos antiguos no tenian update-caddy-token.sh: ahora el panel (root) escribe /etc/default/caddy el mismo y programa el reinicio de Caddy 3 s despues de responder',
                             'Tras guardar con reinicio de Caddy se vuelve a la pestaña Failover (antes iba a Estado)',
                             'Los errores y avisos ya no se cierran solos a los 4 s: salen ademas en un modal con texto seleccionable y boton Copiar (en todo el panel)'],
                         'en' => ['**Caddy token synced from the master**: when saving Cloudflare accounts each node (master and slaves) compares its CLOUDFLARE_API_TOKEN with the token of the account holding the panel zone (previously: always the first account) and only if it differs writes it and restarts Caddy, after checking with Cloudflare that it is active. The checkbox becomes "Force token in Caddy". Per-node result: updated, already set, error, queued or outdated panel',
+                            'The slave restarted Caddy in the middle of the master request ("unexpected eof" and looping queue retries) and older nodes lacked update-caddy-token.sh: the panel (root) now writes /etc/default/caddy itself and schedules the Caddy restart 3 s after replying',
                             'After saving with a Caddy restart the page returns to the Failover tab (it used to go to Status)',
                             'Errors and warnings no longer auto-close after 4 s: they also show in a modal with selectable text and a Copy button (panel-wide)'],
                     ],
