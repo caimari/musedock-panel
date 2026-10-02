@@ -224,13 +224,22 @@ final class McpTools
 
     private static function runOnNode(string $node, string $name, array $args): array
     {
+        // Primero id o nombre exactos; solo si no hay, coincidencia parcial del nombre
+        // (antes "1" cogía "Filemon (154)" en vez del nodo con id 1).
         $target = null;
-        foreach (ClusterService::getNodes() as $n) {
-            if ((string)$n['id'] === $node || strcasecmp((string)$n['name'], $node) === 0
-                || stripos((string)$n['name'], $node) !== false) {
+        $nodes = ClusterService::getNodes();
+        foreach ($nodes as $n) {
+            if ((string)$n['id'] === $node || strcasecmp((string)$n['name'], $node) === 0) {
                 $target = $n;
                 break;
             }
+        }
+        if (!$target && !ctype_digit($node)) {
+            $partial = array_values(array_filter($nodes, static fn($n) => stripos((string)$n['name'], $node) !== false));
+            if (count($partial) > 1) {
+                throw new \RuntimeException("'{$node}' coincide con varios nodos: " . implode(', ', array_column($partial, 'name')) . '. Usa el id.');
+            }
+            $target = $partial[0] ?? null;
         }
         if (!$target) {
             throw new \RuntimeException("Nodo '{$node}' no encontrado. Usa list_nodes para ver los nodos.");

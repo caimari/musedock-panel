@@ -20,6 +20,29 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.261',
+                'date' => '2026-10-02',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['SMTP secundario para los avisos (notify_smtp2_*): si el principal falla o rechaza (p. ej. cupo agotado) se envia por el secundario. Configurable por MCP notify_configure (contraseña desde fichero) y copiable a los nodos; notify_status muestra ultimo envio, ultimo error y enviados hoy'],
+                        'en' => ['Secondary SMTP for alerts (notify_smtp2_*): if the primary fails or rejects (e.g. quota exhausted) it is sent through the secondary. Configurable via MCP notify_configure (password from a file) and copyable to nodes; notify_status shows last send, last error and sent today'],
+                    ],
+                    'fixed' => [
+                        'es' => ['**El aviso de disco lleno se enviaba cada 5 min para siempre** (agoto el cupo diario de Sweego en una noche): ahora todos los avisos del monitor (disco, CPU, RAM, GPU) van por episodio: al empezar, repetidos como mucho cada 12 h mientras sigue (monitor_alert_repeat_hours) y otra vez si se arregla y vuelve; cada disco/GPU por separado',
+                            'Tope diario de correos de aviso por panel (notify_email_daily_cap, 25): el ultimo del dia lo indica; el resto queda en el registro',
+                            'Si el SMTP rechazaba un aviso se perdia sin rastro: ahora se comprueba cada paso y el error exacto queda en notify_email_last_error y en el registro (Sweego con el cupo agotado responde 552 Usage over quota). Asunto en UTF-8 y CRLF correctos',
+                            'Los avisos copiados del master ya no llevan su nombre de remitente: cada nodo usa "MuseDock <hostname>"',
+                            'MCP: `node` por id ya no se confunde de nodo ("1" cogia "Filemon (154)" por coincidencia parcial del nombre). Primero id/nombre exactos; la parcial nunca con numeros y, si es ambigua, pide el id'],
+                        'en' => ['**The disk-full alert was emailed every 5 min forever** (it exhausted the daily Sweego quota overnight): all monitor alerts (disk, CPU, RAM, GPU) are now per episode: on start, repeated at most every 12 h while ongoing (monitor_alert_repeat_hours) and again if it clears and comes back; each disk/GPU separately',
+                            'Daily cap of alert emails per panel (notify_email_daily_cap, 25): the last one of the day says so; the rest stays in the log',
+                            'An SMTP rejection used to lose the alert silently: every step is now checked and the exact server error is kept in notify_email_last_error and the log (Sweego over quota answers 552 Usage over quota). Proper UTF-8 subject and CRLF',
+                            'Alerts copied from the master no longer carry its sender name: each node uses "MuseDock <hostname>"',
+                            'MCP: `node` by id no longer picks the wrong node ("1" matched "Filemon (154)" by partial name). Exact id/name first; partial match never for numbers and asks for the id when ambiguous'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.260',
                 'date' => '2026-10-01',
                 'badge' => 'info',

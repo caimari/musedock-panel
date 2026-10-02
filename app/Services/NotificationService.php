@@ -32,8 +32,10 @@ class NotificationService
     /** Claves de avisos que se copian del master a sus nodos. */
     private const SHARED_KEYS = [
         'notify_email_method', 'notify_email_to', 'notify_smtp_host', 'notify_smtp_port', 'notify_smtp_user',
-        'notify_smtp_from', 'notify_smtp_from_name', 'notify_smtp_encryption', 'notify_telegram_chat_id',
+        'notify_smtp_from', 'notify_smtp_encryption', 'notify_telegram_chat_id',
         'monitor_notify_email', 'monitor_notify_telegram',
+        'notify_smtp2_host', 'notify_smtp2_port', 'notify_smtp2_user', 'notify_smtp2_from', 'notify_smtp2_encryption',
+        'notify_email_daily_cap',
     ];
 
     /**
@@ -48,6 +50,7 @@ class NotificationService
             $out[$k] = Settings::get($k, '');
         }
         $out['smtp_pass'] = ReplicationService::decryptPassword(Settings::get('notify_smtp_pass', ''));
+        $out['smtp2_pass'] = ReplicationService::decryptPassword(Settings::get('notify_smtp2_pass', ''));
         $out['telegram_token'] = ReplicationService::decryptPassword(Settings::get('notify_telegram_token', ''));
         return $out;
     }
@@ -65,9 +68,15 @@ class NotificationService
         if (($p['smtp_pass'] ?? '') !== '') {
             Settings::set('notify_smtp_pass', ReplicationService::encryptPassword((string)$p['smtp_pass']));
         }
+        if (($p['smtp2_pass'] ?? '') !== '') {
+            Settings::set('notify_smtp2_pass', ReplicationService::encryptPassword((string)$p['smtp2_pass']));
+        }
         if (($p['telegram_token'] ?? '') !== '') {
             Settings::set('notify_telegram_token', ReplicationService::encryptPassword((string)$p['telegram_token']));
         }
+        // El nombre de remitente es de cada nodo: si no, los avisos de Nitro llegaban
+        // como "Mortadelo Master".
+        Settings::set('notify_smtp_from_name', 'MuseDock ' . (gethostname() ?: 'nodo'));
         LogService::log('cluster.notify', 'import', "Configuración de avisos recibida del master ({$n} ajustes)");
         return ['ok' => true, 'imported' => $n, 'email_ready' => self::isEmailConfigured()];
     }
@@ -130,6 +139,25 @@ class NotificationService
 
         if (!$to) return false;
 
+        // Tope diario por panel: un aviso que se repite no debe agotar el cupo del
+        // proveedor (Sweego gratis = 100/día para TODOS los paneles) y dejar sin
+        // correo el aviso que de verdad importa. Al llegar al tope se manda uno
+        // último diciéndolo y se calla hasta mañana (lo demás queda en el log).
+        $cap = max(5, (int)Settings::get('notify_email_daily_cap', '25'));
+        $day = date('Y-m-d');
+        [$capDay, $sent] = array_pad(explode('|', Settings::get('notify_email_daily_count', '')), 2, '0');
+        $sent = $capDay === $day ? (int)$sent : 0;
+        if ($sent >= $cap) {
+            LogService::log('notify.capped', null, "Correo no enviado (tope diario {$cap}): {$subject}");
+            return false;
+        }
+        Settings::set('notify_email_daily_count', $day . '|' . ($sent + 1));
+        if ($sent + 1 === $cap) {
+            $subject .= ' [último aviso por correo de hoy]';
+            $body .= "\n\n---\nEste panel ha llegado a su tope de {$cap} correos de aviso hoy (notify_email_daily_cap). "
+                . 'Los siguientes avisos de hoy quedan solo en el registro del panel.';
+        }
+
         $from = Settings::get('notify_smtp_from', '');
         if (!$from) $from = self::getAdminEmail();
         $fromName = Settings::get('notify_smtp_from_name', '');
@@ -177,79 +205,117 @@ class NotificationService
         }
     }
 
+    /**
+     * Envío SMTP con servidor principal (notify_smtp_*) y, si falla o rechaza,
+     * servidor secundario (notify_smtp2_*). Antes no se miraba la respuesta a
+     * MAIL FROM/RCPT TO (donde un proveedor rechaza por cupo: Sweego gratis = 100
+     * al día) ni se guardaba el motivo: el aviso se perdía sin rastro.
+     * El último error y el último envío correcto quedan en notify_email_last_*.
+     */
     private static function sendViaSmtp(string $to, string $from, string $subject, string $body, string $fromName = ''): bool
     {
-        $host = Settings::get('notify_smtp_host', '');
-        $port = (int)Settings::get('notify_smtp_port', '587');
-        $user = Settings::get('notify_smtp_user', '');
-        $pass = Settings::get('notify_smtp_pass', '');
-        $encryption = Settings::get('notify_smtp_encryption', 'tls');
-
-        if (!$host) return false;
-
-        if ($pass) {
-            $pass = ReplicationService::decryptPassword($pass);
+        $errors = [];
+        foreach (['notify_smtp_' => 'principal', 'notify_smtp2_' => 'secundario'] as $prefix => $label) {
+            $cfg = self::smtpConfig($prefix);
+            if ($cfg === null) {
+                continue;
+            }
+            // El secundario usa su propio remitente si lo tiene (otro proveedor puede
+            // no aceptar el dominio del principal).
+            $sender = $prefix === 'notify_smtp2_' && $cfg['from'] !== '' ? $cfg['from'] : $from;
+            $r = self::smtpSendOnce($cfg, $to, $sender, $subject, $body, $fromName);
+            if ($r['ok']) {
+                Settings::set('notify_email_last_ok', json_encode(['at' => date('Y-m-d H:i:s'), 'server' => $label . ' ' . $cfg['host']], JSON_UNESCAPED_UNICODE));
+                if ($errors) {
+                    LogService::log('notify.fallback', null, 'Aviso enviado por el SMTP ' . $label . ' tras fallar: ' . implode(' | ', $errors));
+                }
+                return true;
+            }
+            $errors[] = "{$label} {$cfg['host']}: {$r['error']}";
         }
+        if ($errors) {
+            Settings::set('notify_email_last_error', json_encode(['at' => date('Y-m-d H:i:s'), 'errors' => $errors, 'subject' => mb_substr($subject, 0, 120)], JSON_UNESCAPED_UNICODE));
+            LogService::log('notify.failed', null, 'Aviso por correo NO enviado: ' . implode(' | ', $errors));
+        }
+        return false;
+    }
 
+    /** Configuración de un servidor SMTP de avisos, o null si no está configurado. */
+    public static function smtpConfig(string $prefix): ?array
+    {
+        $host = trim(Settings::get($prefix . 'host', ''));
+        if ($host === '') {
+            return null;
+        }
+        $pass = Settings::get($prefix . 'pass', '');
+        return [
+            'host' => $host,
+            'port' => (int)(Settings::get($prefix . 'port', '587') ?: 587),
+            'user' => Settings::get($prefix . 'user', ''),
+            'pass' => $pass !== '' ? ReplicationService::decryptPassword($pass) : '',
+            'encryption' => Settings::get($prefix . 'encryption', 'tls'),
+            'from' => Settings::get($prefix . 'from', ''),
+        ];
+    }
+
+    /** Una conversación SMTP comprobando el código de cada paso. */
+    private static function smtpSendOnce(array $c, string $to, string $from, string $subject, string $body, string $fromName): array
+    {
+        $socket = null;
+        $step = static function (string $cmd, array $okCodes, string $what) use (&$socket): ?string {
+            if ($cmd !== '') {
+                fwrite($socket, $cmd . "\r\n");
+            }
+            $resp = self::readSmtpResponse($socket);
+            $code = (int)substr($resp, 0, 3);
+            if (!in_array($code, $okCodes, true)) {
+                return "{$what}: " . ($resp === '' ? 'sin respuesta' : trim(preg_replace('/\s+/', ' ', $resp)));
+            }
+            return null;
+        };
         try {
-            // Determine connection prefix
-            $prefix = '';
-            if ($encryption === 'ssl') {
-                $prefix = 'ssl://';
+            $prefix = $c['encryption'] === 'ssl' ? 'ssl://' : '';
+            $socket = @fsockopen($prefix . $c['host'], $c['port'], $errno, $errstr, 10);
+            if (!$socket) {
+                return ['ok' => false, 'error' => "no conecta ({$errstr})"];
             }
-
-            $socket = @fsockopen("{$prefix}{$host}", $port, $errno, $errstr, 10);
-            if (!$socket) return false;
-
-            $response = fgets($socket); // Greeting
-
-            fwrite($socket, "EHLO musedock-panel\r\n");
-            $response = self::readSmtpResponse($socket);
-
-            // STARTTLS for TLS mode
-            if ($encryption === 'tls') {
-                fwrite($socket, "STARTTLS\r\n");
-                $response = fgets($socket);
-                if (!str_starts_with(trim($response), '220')) {
-                    fclose($socket);
-                    return false;
+            stream_set_timeout($socket, 15);
+            $fail = $step('', [220], 'saludo')
+                ?? $step('EHLO musedock-panel', [250], 'EHLO');
+            if ($fail === null && $c['encryption'] === 'tls') {
+                $fail = $step('STARTTLS', [220], 'STARTTLS');
+                if ($fail === null && !stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT)) {
+                    $fail = 'TLS: no se pudo negociar';
                 }
-                $crypto = stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT);
-                if (!$crypto) {
-                    fclose($socket);
-                    return false;
-                }
-                fwrite($socket, "EHLO musedock-panel\r\n");
-                $response = self::readSmtpResponse($socket);
+                $fail = $fail ?? $step('EHLO musedock-panel', [250], 'EHLO tras TLS');
             }
-
-            // Auth
-            if ($user) {
-                fwrite($socket, "AUTH LOGIN\r\n"); fgets($socket);
-                fwrite($socket, base64_encode($user) . "\r\n"); fgets($socket);
-                fwrite($socket, base64_encode($pass) . "\r\n");
-                $authResponse = trim(fgets($socket));
-                if (!str_starts_with($authResponse, '235')) {
-                    fclose($socket);
-                    return false;
-                }
+            if ($fail === null && $c['user'] !== '') {
+                $fail = $step('AUTH LOGIN', [334], 'AUTH')
+                    ?? $step(base64_encode($c['user']), [334], 'AUTH usuario')
+                    ?? $step(base64_encode($c['pass']), [235], 'AUTH contraseña');
             }
-
-            fwrite($socket, "MAIL FROM:<{$from}>\r\n"); fgets($socket);
-            fwrite($socket, "RCPT TO:<{$to}>\r\n"); fgets($socket);
-            fwrite($socket, "DATA\r\n"); fgets($socket);
-
-            $date = date('r');
-            $fromHeader = $fromName ? "=?UTF-8?B?" . base64_encode($fromName) . "?= <{$from}>" : $from;
-            $headers = "From: {$fromHeader}\r\nTo: {$to}\r\nSubject: {$subject}\r\nDate: {$date}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n";
-            fwrite($socket, "{$headers}\r\n{$body}\r\n.\r\n");
-            $dataResponse = trim(fgets($socket));
-            fwrite($socket, "QUIT\r\n");
+            $fail = $fail
+                ?? $step("MAIL FROM:<{$from}>", [250], 'MAIL FROM')
+                ?? $step("RCPT TO:<{$to}>", [250, 251], 'RCPT TO')
+                ?? $step('DATA', [354], 'DATA');
+            if ($fail === null) {
+                $enc = static fn(string $t) => preg_match('/[^\x20-\x7E]/', $t) ? '=?UTF-8?B?' . base64_encode($t) . '?=' : $t;
+                $fromHeader = $fromName !== '' ? $enc($fromName) . " <{$from}>" : $from;
+                $headers = "From: {$fromHeader}\r\nTo: {$to}\r\nSubject: " . $enc($subject) . "\r\nDate: " . date('r')
+                    . "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n";
+                // CRLF y "dot-stuffing": una línea que empieza por "." no debe cortar el mensaje.
+                $text = preg_replace('/^\./m', '..', str_replace(["\r\n", "\r", "\n"], ["\n", "\n", "\r\n"], $body));
+                fwrite($socket, $headers . "\r\n" . $text . "\r\n.\r\n");
+                $fail = $step('', [250], 'envío del mensaje');
+            }
+            @fwrite($socket, "QUIT\r\n");
             fclose($socket);
-
-            return str_starts_with($dataResponse, '250');
-        } catch (\Throwable) {
-            return false;
+            return $fail === null ? ['ok' => true] : ['ok' => false, 'error' => $fail];
+        } catch (\Throwable $e) {
+            if (is_resource($socket)) {
+                fclose($socket);
+            }
+            return ['ok' => false, 'error' => $e->getMessage()];
         }
     }
 

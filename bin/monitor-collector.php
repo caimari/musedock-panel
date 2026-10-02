@@ -666,15 +666,33 @@ function checkAlert(string $host, string $type, string $message, float $value): 
     global $alertCooldownSeconds;
     $cooldownSeconds = max(60, min(3600, (int)$alertCooldownSeconds));
 
-    // Anti-spam: max 1 alert per type per configured cooldown
-    $recent = Database::fetchOne(
-        "SELECT id FROM monitor_alerts
-         WHERE host = :host
-           AND type = :type
-           AND ts > NOW() - (CAST(:cooldown_seconds AS integer) * INTERVAL '1 second')",
-        ['host' => $host, 'type' => $type, 'cooldown_seconds' => $cooldownSeconds]
-    );
-    if ($recent) return;
+    // Avisos por EPISODIO, no por lectura. Un problema que sigue (disco lleno, CPU
+    // alta horas) mandaba un correo cada 5 min para siempre (nitro al 96 %,
+    // 2026-10-02: se agotó el cupo diario de Sweego). Ahora: aviso al empezar; si
+    // sigue, se repite como mucho cada monitor_alert_repeat_hours (12 h); si se
+    // arregla (>10 min sin dispararse) y vuelve, es un episodio nuevo y avisa.
+    // Clave por tipo + recurso (cada disco/GPU por separado).
+    $key = $type . '|' . preg_replace('/ at [\d.]+.*$/', '', $message);
+    $repeat = 3600 * max(1, (int)Settings::get('monitor_alert_repeat_hours', '12'));
+    $state = json_decode(Settings::get('monitor_alert_episodes', '{}'), true) ?: [];
+    $now = time();
+    $ep = $state[$key] ?? ['last_seen' => 0, 'last_sent' => 0];
+    $continuing = ($now - (int)$ep['last_seen']) <= 600;
+    $ep['last_seen'] = $now;
+    $send = $continuing
+        ? ($now - (int)$ep['last_sent']) >= $repeat
+        : ($now - (int)$ep['last_sent']) >= $cooldownSeconds;
+    if ($send) {
+        $ep['last_sent'] = $now;
+    }
+    $state[$key] = $ep;
+    // Limpieza: episodios sin verse en 2 días.
+    $state = array_filter($state, static fn($e) => $now - (int)($e['last_seen'] ?? 0) < 172800);
+    Settings::set('monitor_alert_episodes', json_encode($state, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    if (!$send) return;
+    if ($continuing) {
+        $message .= ' (sigue desde el aviso anterior)';
+    }
 
     // Capture top processes + disk info for context
     $processInfo = getTopProcesses($type);

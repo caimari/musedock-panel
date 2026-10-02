@@ -2,6 +2,20 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.261] — 2026-10-02 — Fin del bombardeo de avisos por disco lleno, y `node` por id
+
+### Añadido
+- **SMTP secundario para los avisos** (`notify_smtp2_*`). Si el principal falla o rechaza (por ejemplo, por cupo diario agotado), el aviso se envía por el secundario, con su propio remitente si lo tiene. Se configura con `notify_configure` (`smtp2_host`, `smtp2_port`, `smtp2_user`, `smtp2_from`, `smtp2_encryption`, `smtp2_pass_file`; la contraseña se lee de un fichero, nunca del chat) y se copia a los nodos con `copy_to_nodes`. `notify_status` muestra el secundario, el último envío correcto, el último error y los correos enviados hoy frente al tope.
+
+### Arreglado (importante)
+- **El aviso de disco lleno se enviaba cada 5 minutos para siempre.** La pausa entre avisos del monitor tiene un máximo de 1 h (por defecto 5 min), así que un estado que no se arregla solo, como un disco al 96 %, mandaba un correo cada 5 min. Al activar los avisos en Nitro se agotó en una noche el cupo diario de Sweego (100 correos para todos los paneles). Ahora **todos** los avisos del monitor (disco, CPU, RAM, GPU) van **por episodio**: avisan al empezar el problema, se repiten **como mucho cada 12 h** mientras sigue (`monitor_alert_repeat_hours`), y si se arregla (más de 10 min sin dispararse) y vuelve, es un episodio nuevo y avisa otra vez. La cuenta es por recurso: cada disco, punto de montaje o GPU va aparte.
+- **Tope diario de correos de aviso por panel** (`notify_email_daily_cap`, 25 por defecto): un aviso repetido ya no puede agotar el cupo del proveedor y dejar sin correo el aviso importante. El último correo del día lo dice, y lo demás queda en el registro del panel.
+- **Si el proveedor SMTP rechazaba un aviso, se perdía sin rastro.** No se comprobaba la respuesta a `MAIL FROM` ni a `RCPT TO`, ni se guardaba el motivo. Ahora cada paso de la conversación SMTP se comprueba con su código, y el error exacto del servidor queda en `notify_email_last_error` (visible en `notify_status`) y en el registro del panel. Comprobado con Sweego al agotarse el cupo: responde `552 Usage over quota` al enviar el mensaje. También se codifica el asunto en UTF-8 (las tildes llegaban rotas), se normalizan los saltos de línea a CRLF y se protegen las líneas que empiezan por punto.
+- **Los avisos copiados del master llegaban con el nombre de remitente del master** (los de Nitro salían como "Mortadelo Master"). Ese nombre ya no se copia: cada nodo usa "MuseDock <su hostname>".
+
+### Arreglado
+- **El argumento `node` de las herramientas MCP podía ejecutar la consulta en el nodo equivocado.** Se buscaba por coincidencia parcial del nombre antes que por id, así que `node: "1"` cogía "Filemon (154)" porque su nombre contiene un 1. Ahora tienen prioridad el id y el nombre exactos. La coincidencia parcial solo se usa si no hay ninguna exacta, nunca con un número, y si encaja con varios nodos se pide el id.
+
 ## [1.0.260] — 2026-10-01 — Avisos cuando se rompe una réplica, y avisos configurables por MCP
 
 ### Añadido

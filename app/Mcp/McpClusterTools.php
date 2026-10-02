@@ -152,6 +152,12 @@ final class McpClusterTools
                     'smtp_from' => ['type' => 'string', 'description' => 'Remitente (por defecto smtp_user)'],
                     'smtp_from_name' => ['type' => 'string'],
                     'smtp_pass_file' => ['type' => 'string', 'description' => 'Fichero bajo /root/ con la contraseña SMTP (una línea)'],
+                    'smtp2_host' => ['type' => 'string', 'description' => 'SMTP SECUNDARIO: se usa si el principal falla o rechaza (p. ej. cupo diario agotado). Vacío = quitarlo'],
+                    'smtp2_port' => ['type' => 'integer'],
+                    'smtp2_encryption' => ['type' => 'string', 'enum' => ['tls', 'ssl', 'none']],
+                    'smtp2_user' => ['type' => 'string'],
+                    'smtp2_from' => ['type' => 'string', 'description' => 'Remitente para el secundario (si ese proveedor no acepta el del principal)'],
+                    'smtp2_pass_file' => ['type' => 'string', 'description' => 'Fichero bajo /root/ con la contraseña del SMTP secundario'],
                     'telegram_token_file' => ['type' => 'string', 'description' => 'Fichero bajo /root/ con el token del bot de Telegram'],
                     'telegram_chat_id' => ['type' => 'string'],
                     'enable_email' => ['type' => 'boolean', 'description' => 'Activar (true) o desactivar (false) los avisos por correo con lo ya configurado'],
@@ -298,6 +304,18 @@ final class McpClusterTools
                 'smtp_host' => Settings::get('notify_smtp_host', ''), 'smtp_port' => Settings::get('notify_smtp_port', ''),
                 'smtp_user' => Settings::get('notify_smtp_user', ''), 'smtp_from' => Settings::get('notify_smtp_from', ''),
                 'smtp_password_set' => Settings::get('notify_smtp_pass', '') !== '',
+                'secondary' => Settings::get('notify_smtp2_host', '') === '' ? null : [
+                    'smtp_host' => Settings::get('notify_smtp2_host', ''), 'smtp_port' => Settings::get('notify_smtp2_port', ''),
+                    'smtp_user' => Settings::get('notify_smtp2_user', ''), 'smtp_from' => Settings::get('notify_smtp2_from', ''),
+                    'smtp_password_set' => Settings::get('notify_smtp2_pass', '') !== '',
+                ],
+                'last_ok' => json_decode(Settings::get('notify_email_last_ok', 'null'), true),
+                'last_error' => json_decode(Settings::get('notify_email_last_error', 'null'), true),
+                'sent_today' => (static function () {
+                    [$d, $n] = array_pad(explode('|', Settings::get('notify_email_daily_count', '')), 2, '0');
+                    return $d === date('Y-m-d') ? (int)$n : 0;
+                })(),
+                'daily_cap' => (int)Settings::get('notify_email_daily_cap', '25'),
             ],
             'telegram' => ['active' => $tgOn, 'configured' => $tgReady, 'chat_id' => Settings::get('notify_telegram_chat_id', '')],
             'replication_health' => is_array($health) ? ($health['last'] ?? null) : null,
@@ -329,6 +347,21 @@ final class McpClusterTools
         }
         if (isset($args['smtp_port'])) {
             $set['notify_smtp_port'] = (string)(int)$args['smtp_port'];
+        }
+        foreach (['smtp2_host' => 'notify_smtp2_host', 'smtp2_user' => 'notify_smtp2_user', 'smtp2_from' => 'notify_smtp2_from', 'smtp2_encryption' => 'notify_smtp2_encryption'] as $a => $k) {
+            if (isset($args[$a])) {
+                $set[$k] = trim((string)$args[$a]);
+            }
+        }
+        if (isset($args['smtp2_port'])) {
+            $set['notify_smtp2_port'] = (string)(int)$args['smtp2_port'];
+        }
+        if (!empty($args['smtp2_pass_file'])) {
+            $p2 = $readSecret((string)$args['smtp2_pass_file']);
+            if ($p2 === '') {
+                throw new \InvalidArgumentException('El fichero de la contraseña del SMTP secundario está vacío.');
+            }
+            $set['notify_smtp2_pass'] = ReplicationService::encryptPassword($p2);
         }
         if (isset($args['smtp_encryption'])) {
             $set['notify_smtp_encryption'] = (string)$args['smtp_encryption'];
@@ -378,7 +411,7 @@ final class McpClusterTools
             throw new \InvalidArgumentException('No hay nada que configurar.');
         }
         foreach ($set as $k => $v) {
-            $plan[$k] = in_array($k, ['notify_smtp_pass', 'notify_telegram_token'], true) ? '(cifrado)' : $v;
+            $plan[$k] = in_array($k, ['notify_smtp_pass', 'notify_smtp2_pass', 'notify_telegram_token'], true) ? '(cifrado)' : $v;
         }
         if ($copy) {
             $plan['copy_to_nodes'] = array_map(static fn($n) => (string)$n['name'], $nodes);

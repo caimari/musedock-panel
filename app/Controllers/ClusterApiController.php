@@ -25,7 +25,7 @@ class ClusterApiController
         'master_token', 'nonce',
         // Avisos (set-notify-config): contraseña SMTP y token de Telegram en claro
         // por el canal autenticado; el nodo los vuelve a cifrar con su clave.
-        'smtp_pass', 'telegram_token',
+        'smtp_pass', 'smtp2_pass', 'telegram_token',
     ];
 
     /** Return a copy of $payload with secret values masked, recursively. */
