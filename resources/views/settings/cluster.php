@@ -2058,7 +2058,7 @@
                 .then(r => {
                     if (!r.ok) throw new Error('not ready');
                     // Panel answers again -> safe to reload.
-                    window.location.replace('/settings/cluster?cf_saved=1&_=' + Date.now());
+                    window.location.replace('/settings/cluster?cf_saved=1&_=' + Date.now() + '#failover');
                 })
                 .catch(() => setTimeout(() => waitForPanel(attempt + 1), 1000));
         }

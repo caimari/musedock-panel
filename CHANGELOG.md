@@ -10,6 +10,8 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
   - **al guardar, siempre**: cada nodo (master y slaves) compara su `CLOUDFLARE_API_TOKEN` con ese y **solo si es distinto** lo escribe y reinicia Caddy; antes comprueba con Cloudflare que el token está activo (nunca cambia uno que funciona por uno que no);
   - la casilla pasa a ser **"Forzar token en Caddy"** (reescribir y reiniciar aunque ya esté bien);
   - el mensaje dice nodo a nodo: actualizado, ya lo tenía, error (con el motivo), en cola o panel antiguo sin actualizar.
+- **Tras guardar con reinicio de Caddy, la página volvía a la pestaña Estado** en vez de a Failover. Ahora vuelve a Failover.
+- **Los mensajes de error se cerraban solos a los 4 segundos**, sin tiempo para leerlos ni copiarlos. Ahora (en todo el panel) los errores y avisos no se cierran solos y además salen en un **modal** con el texto seleccionable y un botón **Copiar**. Los mensajes de éxito siguen cerrándose solos.
 
 ### Añadido
 - **MCP `cloudflare_caddy_token_sync`** (en el master, plan/apply): lo mismo que Guardar, con el resultado por nodo.
