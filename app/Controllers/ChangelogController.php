@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.271',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Webmail del slave daba 500: webmail-node-config.php crea las carpetas de datos de Roundcube (fuera de /opt, lsyncd no las copia) y, si Redis es replica de solo lectura, guarda las sesiones en ficheros'],
+                        'en' => ['Slave webmail returned 500: webmail-node-config.php creates the Roundcube data dirs (outside /opt, not synced by lsyncd) and, when Redis is a read-only replica, stores sessions in files'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.270',
                 'date' => '2026-10-03',
                 'badge' => 'info',

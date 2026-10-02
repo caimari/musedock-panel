@@ -49,12 +49,36 @@ foreach (@file('/etc/redis/redis.conf', FILE_IGNORE_NEW_LINES) ?: [] as $l) {
         $redis = '127.0.0.1:6379:0:' . trim($m[1], '"');
     }
 }
+// En un slave de relevo Redis es réplica de SOLO LECTURA: Roundcube no podría guardar
+// la sesión y la página daría 500. Ahí las sesiones van a ficheros locales; tras un
+// relevo siguen funcionando igual (las sesiones no hace falta replicarlas).
+$redisPass = str_contains($redis, ':0:') ? substr($redis, strpos($redis, ':0:') + 3) : '';
+$role = (string)shell_exec(($redisPass !== '' ? 'REDISCLI_AUTH=' . escapeshellarg($redisPass) . ' ' : '')
+    . 'redis-cli -h 127.0.0.1 info replication 2>/dev/null');
+$redisIsReplica = (bool)preg_match('/^role:slave/m', $role);
+
+// Carpetas de datos (temp_dir y log_dir de config.inc.php): no van en /opt, así que
+// lsyncd no las copia; se crean aquí, escribibles por PHP-FPM (www-data).
+foreach (['/var/lib/musedock-webmail' => ['root', 'www-data', 0750],
+          '/var/lib/musedock-webmail/roundcube' => ['www-data', 'www-data', 0770],
+          '/var/lib/musedock-webmail/roundcube/logs' => ['www-data', 'www-data', 0770],
+          '/var/lib/musedock-webmail/roundcube/temp' => ['www-data', 'www-data', 0770]] as $dir => [$u, $g, $mode]) {
+    if (!is_dir($dir)) {
+        mkdir($dir, $mode, true);
+        echo "Creada {$dir}\n";
+    }
+    chown($dir, $u);
+    chgrp($dir, $g);
+    chmod($dir, $mode);
+}
+
 $dsn = sprintf('pgsql://%s:%s@%s:%s/%s',
     rawurlencode((string)Env::get('DB_USER', 'musedock_panel')), rawurlencode((string)Env::get('DB_PASS', '')),
     Env::get('DB_HOST', '127.0.0.1'), Env::get('DB_PORT', '5433'), Env::get('DB_NAME', 'musedock_panel'));
 $local = "<?php\n// Generado por MuseDock Panel (bin/webmail-node-config.php): propio de ESTE nodo, no se copia.\n"
     . '$config[\'password_db_dsn\'] = ' . var_export($dsn, true) . ";\n"
-    . '$config[\'redis_hosts\'] = [' . var_export($redis, true) . "];\n";
+    . '$config[\'redis_hosts\'] = [' . var_export($redis, true) . "];\n"
+    . ($redisIsReplica ? "// Redis es réplica (solo lectura) en este nodo: sesiones en ficheros.\n\$config['session_storage'] = 'php';\n" : '');
 @mkdir('/etc/musedock', 0755, true);
 $localFile = '/etc/musedock/webmail-local.inc.php';
 if (!is_file($localFile) || file_get_contents($localFile) !== $local) {

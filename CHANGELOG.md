@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.271] — 2026-10-03 — Webmail del slave: carpetas de datos y sesiones
+
+### Arreglado
+- **El webmail del slave de relevo daba error 500.** Había dos causas:
+  - Faltaban las carpetas de datos de Roundcube (`/var/lib/musedock-webmail/roundcube/{temp,logs}`): están fuera de `/opt` y lsyncd no las copia. `webmail-node-config.php` ahora las crea, escribibles por PHP-FPM. En el master corrige además la carpeta padre, a la que PHP-FPM no podía entrar.
+  - En el slave, Redis es una réplica de solo lectura y Roundcube no podía guardar la sesión. Si Redis es réplica, `webmail-node-config.php` pone las sesiones en ficheros locales; tras un relevo siguen funcionando.
+
 ## [1.0.270] — 2026-10-03 — Arreglo al mover la base del webmail
 
 ### Arreglado
