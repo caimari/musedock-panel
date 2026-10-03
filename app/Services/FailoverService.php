@@ -1404,6 +1404,15 @@ class FailoverService
                         'caddy_token_updated' => $tokenOk,
                         'caddy_token_error'   => $tokenErr,
                     ];
+                    // La config de relevo se manda ENTERA: los envíos anteriores que fallaron
+                    // a este nodo quedan superados por éste. Si no, el Dashboard seguía
+                    // avisando de "desincronización" por fallos ya resueltos.
+                    try {
+                        Database::update('cluster_queue',
+                            ['status' => 'cancelled', 'error_message' => 'Superado por un envío posterior correcto (' . date('Y-m-d H:i:s') . ')'],
+                            "node_id = :n AND action = 'sync-failover-config' AND status IN ('failed','pending')", ['n' => $nodeId]);
+                    } catch (\Throwable) {
+                    }
                     LogService::log('failover.sync', 'push', "Config pushed to {$node['name']}"
                         . ($updateCaddyToken ? ($tokenOk ? ' (token Caddy OK)' : ' — TOKEN CADDY NO APLICADO: ' . $tokenErr) : ''));
                     continue;

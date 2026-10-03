@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.279] — 2026-10-03 — Sin avisos de desincronización por envíos ya superados
+
+### Arreglado
+- **El Dashboard avisaba de "desincronización" por envíos de la configuración de relevo que fallaron hace tiempo**, aunque después se hubiera enviado bien. La configuración se manda entera y cada envío sustituye al anterior, así que cuando uno llega bien a un nodo, los fallidos o pendientes anteriores a ese nodo se marcan como superados (cancelados).
+
 ## [1.0.278] — 2026-10-03 — El sembrado de MariaDB no choca con una réplica anterior
 
 ### Arreglado

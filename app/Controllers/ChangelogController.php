@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.279',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['El Dashboard ya no avisa de desincronizacion por envios de la config de relevo superados por uno posterior correcto (se marcan como cancelados)'],
+                        'en' => ['The dashboard no longer warns about drift for failover-config pushes superseded by a later successful one (marked cancelled)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.278',
                 'date' => '2026-10-03',
                 'badge' => 'info',
