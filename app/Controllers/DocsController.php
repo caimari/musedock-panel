@@ -413,6 +413,14 @@ class DocsController
                 'keywords' => 'failover manual semiauto auto modo prioridad priority id nodo completo web mail cloudflare dns registro a ttl promocion promote revertir failback caddy-l4 eleccion split-brain quorum master caido nodo caido interruptor dos momentos',
             ],
             [
+                'title' => 'Cambio de rol y slave completo',
+                'description' => 'Pasar el mando de un servidor a otro sin caidas, tipos de nodo (replica completa, a medias, solo ficheros) y como preparar un slave que pueda tomar el mando.',
+                'url' => '/docs/role-switch',
+                'category' => 'Guia especial',
+                'icon' => 'bi-arrow-left-right',
+                'keywords' => 'cambio de rol pasar el mando tomar el mando relevo planificado switchover promote demote fence apartar slave completo replica completa solo ficheros copia en vivo preparar nodo nuevo cluster-switch pg_rewind wal_log_hints log_slave_updates gtid redis rescate',
+            ],
+            [
                 'title' => 'Instalacion y recuperacion',
                 'description' => 'Primera instalacion desde GitHub, opciones del instalador, actualizacion por shell y recuperacion de PostgreSQL/.env.',
                 'url' => '/docs/install-recovery',
@@ -489,6 +497,10 @@ class DocsController
 
         if ($url === '/docs/mail-modes') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'mail-modes.php');
+        }
+
+        if ($url === '/docs/role-switch') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'role-switch.php');
         }
 
         if ($url === '/docs/failover-modes') {
@@ -1394,6 +1406,14 @@ class DocsController
         View::render('help/failover-modes', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Failover: modos y prioridades',
+        ]);
+    }
+
+    public function roleSwitch(): void
+    {
+        View::render('help/role-switch', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Cambio de rol y slave completo',
         ]);
     }
 

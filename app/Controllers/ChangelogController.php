@@ -20,7 +20,22 @@ class ChangelogController
     {
         return [
             [
-                'version' => '1.0.279',
+                'version' => '1.0.281',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['El Dashboard del master muestra que copia guarda cada nodo (ficheros, cada PostgreSQL, MariaDB, Redis, correo) y su tipo: replica completa, a medias o solo ficheros', 'Docs: guia "Cambio de rol y slave completo" (tipos de nodo, preparar un slave completo paso a paso, cluster-switch.php)'],
+                        'en' => ['Master dashboard shows what each node holds (files, each PostgreSQL, MariaDB, Redis, mail) and its type: full replica, partial or files only', 'Docs: "Role switch and full slave" guide'],
+                    ],
+                    'fixed' => [
+                        'es' => ['La red de la VPN ya no esta escrita a fuego (10.10.70.x): se lee de la interfaz WireGuard', 'Replicacion lista las instancias PostgreSQL reales del servidor (no "16/musemind" fijo); g1g2-apply.php exige --slave', 'Cambio de rol: "copia al dia" de PostgreSQL se mide por WAL pendiente (menos de 16 MB) y no por segundos desde la ultima transaccion, que bloqueaba bases sin escrituras recientes'],
+                        'en' => ['VPN network no longer hardcoded (10.10.70.x): read from the WireGuard interface', 'Role switch: PostgreSQL "up to date" now measured by pending WAL (under 16 MB) instead of seconds since the last transaction, which blocked idle databases'],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.280',
                 'date' => '2026-10-03',
                 'badge' => 'info',
                 'changes' => [

@@ -2405,7 +2405,7 @@ class MailService
         }
         shell_exec('chown -R opendkim:opendkim ' . escapeshellarg($dkimDir) . ' 2>&1');
 
-        self::ensureRelayOpenDkimFiles(Settings::get('mail_relay_wireguard_cidr', '10.10.70.0/24'));
+        self::ensureRelayOpenDkimFiles(Settings::get('mail_relay_wireguard_cidr', WireGuardService::vpnCidr('10.10.70.0/24')));
         self::upsertLine('/etc/opendkim/signing.table', "*@{$domain} {$selector}._domainkey.{$domain}", "*@{$domain}");
         self::upsertLine('/etc/opendkim/key.table', "{$selector}._domainkey.{$domain} {$domain}:{$selector}:{$dkimDir}/{$selector}.private", "{$selector}._domainkey.{$domain}");
         shell_exec('systemctl reload opendkim 2>&1 || systemctl restart opendkim 2>&1');
@@ -2489,7 +2489,7 @@ class MailService
         }
         shell_exec('chown -R opendkim:opendkim ' . escapeshellarg($dkimDir) . ' 2>&1');
 
-        self::ensureRelayOpenDkimFiles(Settings::get('mail_relay_wireguard_cidr', '10.10.70.0/24'));
+        self::ensureRelayOpenDkimFiles(Settings::get('mail_relay_wireguard_cidr', WireGuardService::vpnCidr('10.10.70.0/24')));
         self::upsertLine('/etc/opendkim/signing.table', "*@{$domain} {$selector}._domainkey.{$domain}", "*@{$domain}");
         self::upsertLine('/etc/opendkim/key.table', "{$selector}._domainkey.{$domain} {$domain}:{$selector}:{$dkimDir}/{$selector}.private", "{$selector}._domainkey.{$domain}");
         shell_exec('systemctl reload opendkim 2>&1 || systemctl restart opendkim 2>&1 || true');

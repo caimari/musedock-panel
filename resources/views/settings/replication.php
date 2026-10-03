@@ -80,7 +80,7 @@
             </table>
         </div>
         <small class="text-muted d-block mt-2">
-            Cada instancia PostgreSQL (14/main, 14/panel, 16/musemind) y MariaDB/MySQL se configura y
+            Cada instancia PostgreSQL (<?= htmlspecialchars(implode(', ', array_map(static fn($c) => (string)$c['key'], \MuseDockPanel\Services\PgClusterService::listClusters())) ?: 'p. ej. 14/main') ?>) y MariaDB/MySQL se configura y
             monitoriza por separado. Un motor no se marca como replicado globalmente porque otra instancia lo esté.
         </small>
     </div>
@@ -163,7 +163,7 @@
                         </div>
                         <div class="mb-3">
                             <label class="form-label text-light">IPs de los slaves (WireGuard)</label>
-                            <input type="text" class="form-control bg-dark text-light border-secondary" id="pgMasterSlaveIps" placeholder="10.10.70.154">
+                            <input type="text" class="form-control bg-dark text-light border-secondary" id="pgMasterSlaveIps" placeholder="IP de la VPN del slave">
                             <div class="form-text">Separadas por coma. Solo nodos registrados del clúster.</div>
                         </div>
                         <div class="d-flex gap-2">

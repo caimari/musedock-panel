@@ -87,7 +87,7 @@
         <ol class="small mb-3" style="line-height:1.9;">
             <li>En el master, ve a <code>Mail → Infra</code>. Verás la tarjeta
                 <strong>"Réplica de respaldo de correo (failover)"</strong> con la lista de nodos slave.</li>
-            <li>Pulsa <strong>"Instalar réplica de correo"</strong> en el nodo deseado (p.ej. Filemon) y confirma tu contraseña de administrador.</li>
+            <li>Pulsa <strong>"Instalar réplica de correo"</strong> en el nodo deseado y confirma tu contraseña de administrador.</li>
             <li>El master hace todo automáticamente:
                 <ul class="mb-1">
                     <li>abre su <code>pg_hba</code> para que el slave lea las cuentas por WireGuard;</li>

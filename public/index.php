@@ -578,6 +578,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/process-queue', 'ClusterController@processQueue');
 \MuseDockPanel\Router::post('/settings/cluster/promote', 'ClusterController@promoteLocal');
 \MuseDockPanel\Router::get('/settings/cluster/role-switch/preflight', 'ClusterController@roleSwitchPreflight');
+\MuseDockPanel\Router::get('/settings/cluster/nodes-overview', 'ClusterController@nodesOverview');
 \MuseDockPanel\Router::post('/settings/cluster/role-switch/start', 'ClusterController@roleSwitchStart');
 \MuseDockPanel\Router::get('/settings/cluster/role-switch/status', 'ClusterController@roleSwitchStatus');
 \MuseDockPanel\Router::post('/settings/cluster/demote', 'ClusterController@demoteLocal');
@@ -733,6 +734,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/docs/settings/{slug}', 'DocsController@settingsGuide');
 \MuseDockPanel\Router::get('/docs/cluster-basics', 'DocsController@clusterBasics');
 \MuseDockPanel\Router::get('/docs/failover-modes', 'DocsController@failoverModes');
+\MuseDockPanel\Router::get('/docs/role-switch', 'DocsController@roleSwitch');
 \MuseDockPanel\Router::get('/docs/mail-modes', 'DocsController@mailModes');
 \MuseDockPanel\Router::get('/docs/postgresql-mirror-master-slave', 'DocsController@postgresqlMirrorMasterSlave');
 \MuseDockPanel\Router::get('/docs/install-recovery', 'DocsController@installRecovery');

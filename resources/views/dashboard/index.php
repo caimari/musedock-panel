@@ -493,6 +493,7 @@ systemctl restart caddy</pre>
                     <span class="text-muted"><i class="bi bi-hourglass me-1"></i>Esperando heartbeat del master...</span>
                 <?php elseif ($cRole === 'master'): ?>
                     <span class="text-muted"><i class="bi bi-broadcast me-1"></i>Este servidor gestiona y sincroniza hostings a los nodos slave.</span>
+                    <div id="nodes-overview" class="mt-2 small text-muted"><i class="bi bi-hourglass-split me-1"></i>Mirando qué copia guarda cada nodo…</div>
                 <?php endif; ?>
             </div>
         </div>
@@ -501,6 +502,26 @@ systemctl restart caddy</pre>
 <?php endif; ?>
 
 <script>
+// Qué copia guarda cada nodo (se pide aparte: consulta a cada nodo y no frena el Dashboard).
+(function () {
+    const box = document.getElementById('nodes-overview');
+    if (!box) return;
+    const esc = t => String(t ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const color = { full: 'success', partial: 'warning', files: 'info', unknown: 'secondary' };
+    fetch('/settings/cluster/nodes-overview', { cache: 'no-store' }).then(r => r.json()).then(d => {
+        if (!d.nodes || !d.nodes.length) { box.remove(); return; }
+        box.className = 'mt-2';
+        box.innerHTML = d.nodes.map(n =>
+            '<div class="d-flex flex-wrap align-items-center gap-2 py-1 border-top border-secondary-subtle">'
+            + '<strong class="me-1">' + esc(n.name) + '</strong>'
+            + '<span class="badge bg-' + (color[n.kind] || 'secondary') + '">' + esc(n.label) + '</span>'
+            + (n.items || []).map(i => '<span class="small ' + (i.ok ? 'text-success' : 'text-muted') + '" title="' + esc(i.detail) + '">'
+                + (i.ok ? '✔' : '✖') + ' ' + esc(i.name) + ' <span class="text-muted">(' + esc(i.detail) + ')</span></span>').join('')
+            + '</div>').join('')
+            + '<div class="small mt-1"><a href="/docs/role-switch" class="text-info"><i class="bi bi-question-circle me-1"></i>Qué significa cada tipo y cómo preparar un slave completo</a></div>';
+    }).catch(() => { box.innerHTML = '<span class="text-muted">No se pudo consultar a los nodos.</span>'; });
+})();
+
 // Tras cargar la página: SweetAlert se carga en el layout DESPUÉS de esta vista, y
 // ejecutándose antes "S" quedaba sin definir y el botón no hacía nada.
 document.addEventListener('DOMContentLoaded', function () {

@@ -155,7 +155,7 @@ try {
 
             // 'pg' is now conservative: true ONLY when EVERY PostgreSQL cluster is
             // streaming. This fixes the old bug where a single streaming cluster
-            // (e.g. 14/main) suppressed dumps for the others (14/panel, 16/musemind).
+            // (e.g. 14/main) suppressed dumps for the others (14/panel, 16/otra).
             // Per-cluster detail is in $streamingStatus['pg_by_cluster'].
             $skipPgsql = $streamingStatus['pg'] ?? false;
             $skipMysql = $streamingStatus['mysql'] ?? false;

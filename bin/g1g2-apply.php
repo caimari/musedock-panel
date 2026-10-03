@@ -8,7 +8,7 @@
  *
  * ⚠️ REINICIA el cluster 5433 (~2-5s): corta panel + servidor de licencias.
  *    Ejecutar EN VENTANA TRANQUILA, como ROOT:
- *      sudo php /opt/musedock-panel/bin/g1g2-apply.php --slave=10.10.70.154 --confirm
+ *      sudo php /opt/musedock-panel/bin/g1g2-apply.php --slave=<IP-VPN-del-slave> --confirm
  *
  * Sin --confirm hace DRY-RUN. La contraseña de replicación se genera y se guarda
  * cifrada en panel_settings (repl_pg_password) para que G3 la reutilice.
@@ -27,7 +27,10 @@ use MuseDockPanel\Services\ReplicationService;
 use MuseDockPanel\Settings;
 
 $opts = getopt('', ['slave:', 'confirm']);
-$slaveIp = $opts['slave'] ?? '10.10.70.154';
+$slaveIp = (string)($opts['slave'] ?? '');
+if ($slaveIp === '') {
+    fwrite(STDERR, "Falta --slave=<IP de la VPN del slave>\n"); exit(1);
+}
 $confirm = isset($opts['confirm']);
 
 if (!filter_var($slaveIp, FILTER_VALIDATE_IP)) {
@@ -47,10 +50,10 @@ $replPass = Settings::get('repl_pg_password', '');
 if ($replPass === '') {
     $replPass = bin2hex(random_bytes(18));
 }
-$slot = 'panel_slave_' . preg_replace('/[^0-9]/', '', $slaveIp); // e.g. panel_slave_101070154
+$slot = 'panel_slave_' . preg_replace('/[^0-9]/', '', $slaveIp); // p. ej. panel_slave_1921680010
 
 echo "== G1+G2 sobre cluster panel (5433) ==\n";
-echo "  slave (Filemon) = {$slaveIp}\n";
+echo "  slave           = {$slaveIp}\n";
 echo "  rol replicación = {$replUser}\n";
 echo "  slot            = {$slot}\n";
 echo "  modo            = " . ($confirm ? "APLICAR (reinicia 5433)" : "DRY-RUN") . "\n\n";

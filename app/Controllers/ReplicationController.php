@@ -407,7 +407,7 @@ class ReplicationController
             // preflight-gated flow instead of running the old data-wipe.
             Flash::set('error',
                 'La conversión PostgreSQL a slave ahora requiere seleccionar un clúster explícito '
-                . '(14/main, 14/panel o 16/musemind) con preflight y confirmación. '
+                . '(' . self::pgClusterList() . ') con preflight y confirmación. '
                 . 'Usa el nuevo asistente por instancia en esta página.');
             header('Location: /settings/replication');
             exit;
@@ -794,7 +794,7 @@ class ReplicationController
             // cluster only if a single PG cluster is in recovery.
             $cluster = PgClusterService::get(trim($_POST['pg_version'] ?? ''), trim($_POST['cluster_name'] ?? ''));
             if ($cluster === null) {
-                Flash::set('error', 'Selecciona un clúster PostgreSQL explícito (14/main, 14/panel o 16/musemind) para promover.');
+                Flash::set('error', 'Selecciona un clúster PostgreSQL explícito (' . self::pgClusterList() . ') para promover.');
                 header('Location: /settings/replication');
                 exit;
             }
@@ -950,4 +950,16 @@ class ReplicationController
         ]);
         exit;
     }
+
+    /** Las instancias PostgreSQL de ESTE servidor para los mensajes ("14/main, 14/panel o 16/otra"). */
+    private static function pgClusterList(): string
+    {
+        $keys = array_map(static fn($c) => (string)$c['key'], \MuseDockPanel\Services\PgClusterService::listClusters());
+        if (!$keys) {
+            return 'p. ej. 14/main';
+        }
+        $last = array_pop($keys);
+        return $keys ? implode(', ', $keys) . ' o ' . $last : $last;
+    }
+
 }

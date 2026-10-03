@@ -2,7 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [1.0.279] — 2026-10-03 — Cambio de rol con un botón
+## [1.0.281] — 2026-10-03 — Qué copia guarda cada nodo, y "copia al día" real en el cambio de rol
+
+### Añadido
+- **El Dashboard del master dice qué guarda cada nodo**: ficheros de las webs, cada base de PostgreSQL, MariaDB, Redis y correo, y con eso qué tipo de nodo es: *réplica completa* (puede tomar el mando), *réplica a medias* o *solo copia de ficheros* (las webs sin sus bases de datos). Se consulta en segundo plano para no frenar la página.
+- **Docs → "Cambio de rol y slave completo"**: qué es el cambio de rol (frente al failover por caída), los tipos de nodo, cómo preparar paso a paso un slave que pueda tomar el mando, qué hace el panel en cada paso y las órdenes de `cluster-switch.php`. Enlazada desde el Dashboard y desde la guía del cluster.
+
+### Arreglado
+- **La red de la VPN estaba escrita a fuego (10.10.70.x)** al buscar la IP de la VPN del servidor (réplicas y correo), en los orígenes de confianza del firewall y como valor por defecto de la red del relé de correo. Ahora se lee de la interfaz WireGuard del servidor, sea cual sea su red.
+- **Textos con nombres de nuestra instalación**: los avisos y la ayuda de Replicación ponían "16/musemind" como instancia de ejemplo; ahora listan las instancias de PostgreSQL de cada servidor. `bin/g1g2-apply.php` tenía la IP de un slave concreto por defecto; ahora `--slave` es obligatorio.
+- **El cambio de rol se bloqueaba con una réplica de PostgreSQL al día** ("retraso 72 s" en musemind): medía los segundos desde la última transacción aplicada, y una base sin escrituras durante un rato parecía retrasada. Ahora compara la posición del WAL del master con la que ha aplicado la réplica: al día si le quedan menos de 16 MB por aplicar. Muestra lo pendiente y, aparte, hace cuánto fue la última escritura.
+
+## [1.0.280] — 2026-10-03 — Cambio de rol con un botón
 
 ### Añadido
 - **Botón "Pasar el mando a…" / "Tomar el mando" en el Dashboard** (tarjeta Cluster), independiente del relevo por caída. Es un cambio de rol planificado con los dos servidores bien: el master pasa el mando al nodo que elijas en un desplegable, y desde un slave se le pide al master que se lo pase a él. El panel hace todo el proceso:

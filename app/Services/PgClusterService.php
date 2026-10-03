@@ -125,7 +125,7 @@ class PgClusterService
 
     /**
      * Resolve the cluster that owns a given TCP port. Unambiguous on this host
-     * (5432→14/main, 5433→14/panel, 5434→16/musemind).
+     * (p. ej. 5432→14/main, 5433→14/panel, 5434→16/otra).
      */
     public static function getByPort(int $port): ?array
     {

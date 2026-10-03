@@ -100,6 +100,45 @@ class WireGuardService
         return '';
     }
 
+    /**
+     * IP/prefijo de este servidor en la VPN, sea cual sea la red y el nombre de la
+     * interfaz WireGuard (antes se buscaba "10.10.70.x" a fuego). '' si no hay VPN.
+     */
+    public static function vpnAddress(): string
+    {
+        static $addr = null;
+        if ($addr !== null) {
+            return $addr;
+        }
+        $addr = '';
+        $ifaces = preg_split('/\s+/', trim((string)shell_exec("ip -o link show type wireguard 2>/dev/null | awk -F': ' '{print \$2}'"))) ?: [];
+        foreach (array_filter($ifaces) as $if) {
+            $out = (string)shell_exec('ip -o -4 addr show dev ' . escapeshellarg(explode('@', $if)[0]) . ' 2>/dev/null');
+            if (preg_match('/inet\s+(\d+\.\d+\.\d+\.\d+\/\d+)/', $out, $m)) {
+                return $addr = $m[1];
+            }
+        }
+        return $addr;
+    }
+
+    /** IP de este servidor en la VPN, o ''. */
+    public static function vpnIp(): string
+    {
+        return explode('/', self::vpnAddress())[0];
+    }
+
+    /** Red de la VPN en CIDR (p. ej. 10.20.0.0/24), o $default si no hay VPN. */
+    public static function vpnCidr(string $default = ''): string
+    {
+        $a = self::vpnAddress();
+        if (!preg_match('/^(\d+\.\d+\.\d+\.\d+)\/(\d+)$/', $a, $m)) {
+            return $default;
+        }
+        $bits = (int)$m[2];
+        $mask = $bits === 0 ? 0 : (~0 << (32 - $bits)) & 0xFFFFFFFF;
+        return long2ip(ip2long($m[1]) & $mask) . '/' . $bits;
+    }
+
     public static function getConfig(): string
     {
         $path = '/etc/wireguard/wg0.conf';

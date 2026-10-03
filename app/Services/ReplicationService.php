@@ -2347,14 +2347,10 @@ class ReplicationService
         return trim((string)$out);
     }
 
-    /** Best-effort WireGuard IP (10.10.70.x on this fleet). */
+    /** IP de este servidor en la VPN (WireGuard), sea cual sea su red. */
     public static function detectWireguardIp(): string
     {
-        $out = trim((string)shell_exec("ip -o -4 addr show 2>/dev/null | awk '{print \$4}' | cut -d/ -f1"));
-        foreach (preg_split('/\s+/', $out) as $ip) {
-            if (str_starts_with($ip, '10.10.70.')) return $ip;
-        }
-        return '';
+        return WireGuardService::vpnIp();
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -2602,7 +2598,7 @@ class ReplicationService
      *
      * Returns:
      *   [
-     *     'pg_by_cluster' => ['14/main'=>bool, '14/panel'=>bool, '16/musemind'=>bool],
+     *     'pg_by_cluster' => ['14/main'=>bool, '14/panel'=>bool, '16/otra'=>bool],
      *     'pg_all'        => bool,   // true only if EVERY pg cluster streams
      *     'mysql'         => bool,
      *     'any_active'    => bool,

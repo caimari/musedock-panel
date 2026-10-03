@@ -327,11 +327,7 @@ CONF;
 
     public static function wireguardIp(): string
     {
-        $out = trim((string)shell_exec("ip -o -4 addr show 2>/dev/null | awk '{print \$4}' | cut -d/ -f1"));
-        foreach (preg_split('/\s+/', $out) as $ip) {
-            if (str_starts_with($ip, '10.10.70.')) return $ip;
-        }
-        return '';
+        return WireGuardService::vpnIp();
     }
 
     private static function columnExists(string $table, string $column): bool

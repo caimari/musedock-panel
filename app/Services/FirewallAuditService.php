@@ -184,7 +184,7 @@ final class FirewallAuditService
     /** Orígenes de confianza: nodos del cluster, servidores de failover, ALLOWED_IPS, VPN y la lista manual. */
     public static function trustedSources(): array
     {
-        $t = ['10.10.70.0/24'];
+        $t = array_values(array_filter([WireGuardService::vpnCidr()]));
         foreach (ClusterService::getNodes() as $n) {
             $h = parse_url((string)$n['api_url'], PHP_URL_HOST);
             if ($h) {

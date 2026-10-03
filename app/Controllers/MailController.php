@@ -313,7 +313,7 @@ class MailController
             )),
             'outbound_domain' => trim((string)Settings::get('mail_outbound_domain', '')),
             'wireguard_ip' => trim((string)Settings::get('mail_relay_wireguard_ip', '')),
-            'wireguard_cidr' => trim((string)Settings::get('mail_relay_wireguard_cidr', '10.10.70.0/24')),
+            'wireguard_cidr' => trim((string)Settings::get('mail_relay_wireguard_cidr', \MuseDockPanel\Services\WireGuardService::vpnCidr('10.10.70.0/24'))),
             'relay_public_ip' => trim((string)Settings::get('mail_relay_public_ip', '')),
             'ssl_mode' => trim((string)Settings::get('mail_ssl_mode', 'letsencrypt')) ?: 'letsencrypt',
             'smtp_host' => trim((string)Settings::get('mail_smtp_host', '')),
@@ -847,7 +847,7 @@ class MailController
             }
         }
         if (!is_file('/etc/opendkim/trusted.hosts')) {
-            $cidr = trim((string)Settings::get('mail_relay_wireguard_cidr', '10.10.70.0/24'));
+            $cidr = trim((string)Settings::get('mail_relay_wireguard_cidr', \MuseDockPanel\Services\WireGuardService::vpnCidr('10.10.70.0/24')));
             file_put_contents('/etc/opendkim/trusted.hosts', "127.0.0.1\n::1\nlocalhost\n{$cidr}\n");
         }
 

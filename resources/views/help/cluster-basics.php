@@ -50,7 +50,8 @@
                 <div class="p-3 rounded h-100" style="background:rgba(56,189,248,.08);border:1px solid rgba(56,189,248,.2);">
                     <h6 class="mb-2"><a href="/settings/cluster#failover" class="text-decoration-none text-info">Failover</a></h6>
                     <p class="small text-muted mb-0">Conmutacion de trafico (DNS/Cloudflare), estado de emergencia y failback.
-                        Detalle en <a href="/docs/failover-modes" class="text-info">Failover: modos, prioridades e IDs</a>.</p>
+                        Detalle en <a href="/docs/failover-modes" class="text-info">Failover: modos, prioridades e IDs</a>.
+                        Para un relevo planificado con los dos servidores bien: <a href="/docs/role-switch" class="text-info">Cambio de rol y slave completo</a>.</p>
                 </div>
             </div>
             <div class="col-lg-6">

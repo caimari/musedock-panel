@@ -67,6 +67,7 @@ class RoleSwitchService
                 'streaming'   => (bool)($s['streaming'] ?? false),
                 'sender'      => (string)($s['sender_host'] ?? ''),
                 'lag_seconds' => (int)($s['lag_seconds'] ?? 0),
+                'replay_lsn'  => (string)($s['replay_lsn'] ?? ''),
                 'wal_log_hints' => ($hints[0][0] ?? '') === 'on',
             ];
         }
@@ -138,6 +139,74 @@ class RoleSwitchService
         return '';
     }
 
+    // ── Qué copia tiene cada nodo (en el master) ────────────────────────────
+
+    /**
+     * Qué guarda cada nodo de este master, en llano: ficheros de las webs, cada base
+     * de PostgreSQL, MariaDB, Redis y correo, y con eso qué tipo de nodo es (réplica
+     * completa que puede tomar el mando, o solo copia de ficheros, o a medias).
+     */
+    public static function nodesOverview(): array
+    {
+        $me = self::health();
+        $fs = FileSyncService::getConfig();
+        $out = [];
+        foreach (ClusterService::getNodes() as $node) {
+            $services = json_decode((string)($node['services'] ?? ''), true) ?: [];
+            $items = [];
+            $items[] = ['name' => 'Ficheros de las webs', 'ok' => $fs['enabled'],
+                'detail' => $fs['enabled'] ? ($fs['sync_mode'] === 'lsyncd' ? 'al instante (lsyncd)' : "cada {$fs['interval_minutes']} min") : 'no se copian'];
+            $t = null;
+            if (($node['status'] ?? '') === 'online') {
+                $r = ClusterService::callNode((int)$node['id'], 'POST', 'api/cluster/action', ['action' => 'role-switch-health', 'payload' => []]);
+                $t = $r['data']['result'] ?? null;
+            }
+            if (!is_array($t)) {
+                $out[] = ['id' => (int)$node['id'], 'name' => (string)$node['name'], 'kind' => 'unknown',
+                    'label' => 'Sin datos (no responde o panel antiguo)', 'items' => $items];
+                continue;
+            }
+            $dbTotal = 0;
+            $dbOk = 0;
+            foreach ($me['pg'] as $key => $mine) {
+                $dbTotal++;
+                $th = $t['pg'][$key] ?? null;
+                $ok = $th && $th['in_recovery'] && $th['streaming'];
+                $dbOk += $ok ? 1 : 0;
+                $items[] = ['name' => "PostgreSQL {$key}", 'ok' => $ok,
+                    'detail' => !$th ? 'no existe allí' : ($ok ? 'réplica en vivo' : ($th['in_recovery'] ? 'réplica parada' : 'base propia, no es copia'))];
+            }
+            if (!empty($me['mysql']['configured'])) {
+                $dbTotal++;
+                $tm = $t['mysql'] ?? [];
+                $ok = ($tm['io'] ?? '') === 'Yes' && ($tm['sql'] ?? '') === 'Yes';
+                $dbOk += $ok ? 1 : 0;
+                $items[] = ['name' => 'MariaDB', 'ok' => $ok,
+                    'detail' => $ok ? 'réplica en vivo' : (!empty($tm['is_slave']) ? 'réplica parada' : 'base propia, no es copia')];
+            }
+            if (!empty($me['redis']['installed'])) {
+                $tr = $t['redis'] ?? [];
+                $items[] = ['name' => 'Redis', 'ok' => ($tr['role'] ?? '') === 'slave' && ($tr['link'] ?? '') === 'up',
+                    'detail' => ($tr['role'] ?? '') === 'slave' ? 'réplica, enlace ' . ($tr['link'] ?? '?') : 'independiente'];
+            }
+            $hasMail = in_array('mail', $services, true);
+            $items[] = ['name' => 'Correo', 'ok' => $hasMail, 'detail' => $hasMail ? 'nodo de correo' : 'no lleva correo'];
+            $pubOk = self::publicIpFor((array)($t['local_ips'] ?? [])) !== '';
+
+            if ($dbTotal > 0 && $dbOk === $dbTotal && $pubOk) {
+                [$kind, $label] = ['full', 'Réplica completa: puede tomar el mando'];
+            } elseif ($dbTotal > 0 && $dbOk === $dbTotal) {
+                [$kind, $label] = ['full', 'Réplica completa (falta su IP pública en Failover para poder tomar el mando)'];
+            } elseif ($dbOk === 0) {
+                [$kind, $label] = ['files', $fs['enabled'] ? 'Solo copia de ficheros: las webs sin sus bases de datos (no puede tomar el mando)' : 'Sin copia de datos'];
+            } else {
+                [$kind, $label] = ['partial', "Réplica a medias: {$dbOk} de {$dbTotal} bases en vivo"];
+            }
+            $out[] = ['id' => (int)$node['id'], 'name' => (string)$node['name'], 'kind' => $kind, 'label' => $label, 'items' => $items];
+        }
+        return ['ok' => true, 'nodes' => $out];
+    }
+
     // ── Comprobaciones previas (en el master) ───────────────────────────────
 
     public static function candidates(): array
@@ -178,9 +247,26 @@ class RoleSwitchService
         $myVpn = self::myIpTowards($vpn);
         foreach ($me['pg'] as $key => $mine) {
             $their = $t['pg'][$key] ?? null;
-            $ok = $their && $their['in_recovery'] && $their['streaming'] && $their['lag_seconds'] <= 10;
+            // "Al día" = le queda poco WAL por aplicar respecto a lo que lleva escrito este
+            // master. Los segundos desde la última transacción no sirven: una base sin
+            // escrituras un rato parecía "72 s de retraso" estando al día.
+            $behind = null;
+            $replay = (string)($their['replay_lsn'] ?? '');
+            if ($their && preg_match('/^[0-9A-F]+\/[0-9A-F]+$/i', $replay)) {
+                foreach (PgClusterService::listClusters() as $c) {
+                    if ($c['key'] === $key) {
+                        $d = ReplicationService::queryCluster($c, "SELECT pg_wal_lsn_diff(pg_current_wal_lsn(), '{$replay}')::bigint");
+                        $behind = isset($d[0][0]) && is_numeric($d[0][0]) ? max(0, (int)$d[0][0]) : null;
+                        break;
+                    }
+                }
+            }
+            $upToDate = $behind !== null ? $behind <= 16 * 1024 * 1024 : ($their['lag_seconds'] ?? 99) <= 10;
+            $ok = $their && $their['in_recovery'] && $their['streaming'] && $upToDate;
             $add("PostgreSQL {$key}: {$node['name']} copia al día", $ok,
-                $their ? (($their['streaming'] ? 'streaming' : 'SIN streaming') . ", retraso {$their['lag_seconds']} s") : 'no existe en el nodo');
+                $their ? (($their['streaming'] ? 'streaming' : 'SIN streaming')
+                    . ($behind !== null ? ', pendiente ' . ($behind < 1024 ? "{$behind} B" : round($behind / 1048576, 1) . ' MB') : '')
+                    . ", última escritura aplicada hace {$their['lag_seconds']} s") : 'no existe en el nodo');
             $add("PostgreSQL {$key}: wal_log_hints en los dos", $mine['wal_log_hints'] && ($their['wal_log_hints'] ?? false),
                 'aquí ' . ($mine['wal_log_hints'] ? 'on' : 'OFF') . ', allí ' . (($their['wal_log_hints'] ?? false) ? 'on' : 'OFF')
                 . ' (sin esto la vuelta copia la base entera)', false);

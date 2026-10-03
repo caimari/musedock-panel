@@ -763,6 +763,12 @@ class ClusterController
         $this->jsonOut(\MuseDockPanel\Services\RoleSwitchService::preflight((int)($_GET['node'] ?? 0)));
     }
 
+    /** GET /settings/cluster/nodes-overview: qué copia guarda cada nodo (en el master). */
+    public function nodesOverview(): void
+    {
+        $this->jsonOut(\MuseDockPanel\Services\RoleSwitchService::nodesOverview());
+    }
+
     /** POST /settings/cluster/role-switch/start: node (en el master), admin_password */
     public function roleSwitchStart(): void
     {
@@ -1724,7 +1730,7 @@ class ClusterController
                          ? $_POST['mail_mode'] : 'full';
         $outboundDomain = strtolower(trim($_POST['outbound_domain'] ?? ''));
         $wireguardIp = trim($_POST['wireguard_ip'] ?? '');
-        $wireguardCidr = trim($_POST['wireguard_cidr'] ?? '10.10.70.0/24');
+        $wireguardCidr = trim($_POST['wireguard_cidr'] ?? \MuseDockPanel\Services\WireGuardService::vpnCidr('10.10.70.0/24'));
         $relayPublicIp = trim($_POST['relay_public_ip'] ?? '');
         $sslMode      = in_array($_POST['ssl_mode'] ?? '', ['letsencrypt', 'selfsigned', 'manual'])
                          ? $_POST['ssl_mode'] : 'letsencrypt';
@@ -1987,7 +1993,7 @@ class ClusterController
                          ? $_POST['mail_mode'] : 'full';
         $outboundDomain = strtolower(trim($_POST['outbound_domain'] ?? ''));
         $wireguardIp = trim($_POST['wireguard_ip'] ?? '');
-        $wireguardCidr = trim($_POST['wireguard_cidr'] ?? '10.10.70.0/24');
+        $wireguardCidr = trim($_POST['wireguard_cidr'] ?? \MuseDockPanel\Services\WireGuardService::vpnCidr('10.10.70.0/24'));
         $relayPublicIp = trim($_POST['relay_public_ip'] ?? '');
         $sslMode      = in_array($_POST['ssl_mode'] ?? '', ['letsencrypt', 'selfsigned', 'manual'])
                          ? $_POST['ssl_mode'] : 'letsencrypt';
