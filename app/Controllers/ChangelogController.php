@@ -24,9 +24,13 @@ class ChangelogController
                 'date' => '2026-10-03',
                 'badge' => 'info',
                 'changes' => [
+                    'added' => [
+                        'es' => ['Boton "Pasar el mando a…" / "Tomar el mando" en el Dashboard: cambio de rol planificado completo (comprobaciones, apartar, promover comprobando escrituras, DNS, invertir relevo, antiguo master como copia en vivo) con avance paso a paso y correo final. Tambien cluster-switch.php switch-check / switch-to'],
+                        'en' => ['"Hand over to…" / "Take over" button on the dashboard: full planned role switch (checks, fence, promote with write check, DNS, swap failover roles, old master as live replica) with step-by-step progress and final email. Also cluster-switch.php switch-check / switch-to'],
+                    ],
                     'fixed' => [
-                        'es' => ['El Dashboard ya no avisa de desincronizacion por envios de la config de relevo superados por uno posterior correcto (se marcan como cancelados)'],
-                        'en' => ['The dashboard no longer warns about drift for failover-config pushes superseded by a later successful one (marked cancelled)'],
+                        'es' => ['El Dashboard ya no avisa de desincronizacion por envios de la config de relevo superados por uno posterior correcto (se marcan como cancelados)', 'Los avisos salen con el remitente del servidor que envia (antes el del master en todos)', 'El boton "Pasar el mando a…" no abria la ventana (se ejecutaba antes de cargar SweetAlert)', 'Al promover se abren tambien los puertos del correo (25, 465, 587, 993, 143) si el nodo tiene correo', 'Al promover ya no se etiquetan reglas de firewall que ya existian (al volver a slave se borraban y cerraban 80/443)'],
+                        'en' => ['The dashboard no longer warns about drift for failover-config pushes superseded by a later successful one (marked cancelled)', 'The "Hand over to…" button did not open its dialog (ran before SweetAlert loaded)', 'Promote also opens the mail ports (25, 465, 587, 993, 143) when the node has mail', 'Promote no longer tags pre-existing firewall rules (demote used to delete them, closing 80/443)'],
                     ],
                 ],
             ],

@@ -445,9 +445,23 @@ systemctl restart caddy</pre>
                     <i class="bi bi-diagram-3 me-2"></i>Cluster
                     <span class="badge <?= $cBadge ?> ms-2"><?= $cLabel ?></span>
                 </span>
-                <a href="/settings/cluster" class="btn btn-outline-light btn-sm">
-                    <i class="bi bi-gear me-1"></i>Configuracion
-                </a>
+                <span class="d-flex gap-2">
+                    <?php
+                        $__rsFenced = \MuseDockPanel\Settings::get('cluster_fenced', '0') === '1' || is_file(\MuseDockPanel\Services\FailoverSafetyService::FENCE_FLAG);
+                        $__rsCands = $cRole === 'master' ? \MuseDockPanel\Services\RoleSwitchService::candidates() : [];
+                    ?>
+                    <?php if (!$__rsFenced && (($cRole === 'master' && $__rsCands) || $cRole === 'slave')): ?>
+                    <button type="button" class="btn btn-warning btn-sm" id="rs-btn"
+                            data-role="<?= View::e($cRole) ?>"
+                            data-cands='<?= View::e(json_encode($__rsCands, JSON_UNESCAPED_UNICODE)) ?>'
+                            data-csrf="<?= View::e(View::csrfToken()) ?>">
+                        <i class="bi bi-arrow-left-right me-1"></i><?= $cRole === 'master' ? 'Pasar el mando a…' : 'Tomar el mando' ?>
+                    </button>
+                    <?php endif; ?>
+                    <a href="/settings/cluster" class="btn btn-outline-light btn-sm">
+                        <i class="bi bi-gear me-1"></i>Configuracion
+                    </a>
+                </span>
             </div>
             <div class="card-body py-2">
                 <?php if ($cRole === 'slave' && !empty($clusterInfo['self_standby'])): ?>
@@ -485,6 +499,103 @@ systemctl restart caddy</pre>
     </div>
 </div>
 <?php endif; ?>
+
+<script>
+// Tras cargar la página: SweetAlert se carga en el layout DESPUÉS de esta vista, y
+// ejecutándose antes "S" quedaba sin definir y el botón no hacía nada.
+document.addEventListener('DOMContentLoaded', function () {
+    const btn = document.getElementById('rs-btn');
+    if (!btn) return;
+    const S = window.SwalDark || window.Swal;
+    const esc = t => String(t ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const role = btn.dataset.role, csrf = btn.dataset.csrf;
+    const cands = JSON.parse(btn.dataset.cands || '[]');
+
+    function checksHtml(pre) {
+        return '<ul class="text-start small mb-0" style="list-style:none;padding-left:0">' + (pre.checks || []).map(c =>
+            '<li class="mb-1">' + (c.ok ? '✅' : (c.blocking ? '❌' : '⚠️')) + ' <strong>' + esc(c.name) + '</strong> — ' + esc(c.detail) + '</li>').join('') + '</ul>';
+    }
+
+    async function askPassword(title, html) {
+        const r = await S.fire({ title, html, input: 'password', inputPlaceholder: 'Tu contraseña de administrador',
+            inputAttributes: { autocomplete: 'current-password' }, showCancelButton: true, confirmButtonText: 'Empezar el cambio',
+            cancelButtonText: 'Cancelar', reverseButtons: true, focusCancel: true, width: 720,
+            inputValidator: v => !v && 'Hace falta la contraseña' });
+        return r.isConfirmed ? r.value : null;
+    }
+
+    function follow(task, remote, target) {
+        let seen = 0, fails = 0, done = false;
+        S.fire({ title: 'Cambio de rol en marcha', width: 760, allowOutsideClick: false, showConfirmButton: false,
+            html: '<div id="rs-log" class="text-start small" style="max-height:55vh;overflow:auto;font-family:monospace"></div>'
+                + '<div id="rs-note" class="small text-muted mt-2">No cierres esta ventana. Si se corta la conexión es normal: este servidor se aparta y su nombre pasa al nuevo master.</div>' });
+        const log = () => document.getElementById('rs-log');
+        const tick = async () => {
+            if (done) return;
+            try {
+                const r = await fetch('/settings/cluster/role-switch/status?task=' + encodeURIComponent(task) + (remote ? '&remote=' + remote : ''), { cache: 'no-store' });
+                const st = await r.json();
+                fails = 0;
+                (st.steps || []).slice(seen).forEach(s => {
+                    const el = log(); if (!el) return;
+                    el.insertAdjacentHTML('beforeend', '<div>' + esc(s.at) + ' ' + (s.ok === true ? '✅ ' : s.ok === false ? '❌ ' : '• ') + esc(s.msg) + '</div>');
+                    el.scrollTop = el.scrollHeight;
+                });
+                seen = (st.steps || []).length;
+                if (st.state === 'done' || st.state === 'failed') {
+                    done = true;
+                    S.fire({ icon: st.state === 'done' ? 'success' : 'error', width: 760,
+                        title: st.state === 'done' ? 'Cambio de rol hecho' : 'Cambio de rol parado',
+                        html: '<div class="text-start small" style="max-height:55vh;overflow:auto;font-family:monospace">'
+                            + (st.steps || []).map(s => esc(s.at) + ' ' + (s.ok === true ? '✅ ' : s.ok === false ? '❌ ' : '• ') + esc(s.msg)).join('<br>') + '</div>'
+                            + (st.error ? '<div class="alert alert-danger mt-2 small">' + esc(st.error) + '</div>' : '') });
+                    return;
+                }
+            } catch (e) {
+                if (++fails >= 3) {
+                    const n = document.getElementById('rs-note');
+                    if (n) n.innerHTML = '<strong>Se ha perdido la conexión con este panel</strong> (es lo esperado: este servidor se ha apartado). '
+                        + 'El cambio sigue en segundo plano y al acabar llegará un correo. Sigue el resultado en el panel de <strong>' + esc(target) + '</strong>.';
+                }
+            }
+            setTimeout(tick, 3000);
+        };
+        tick();
+    }
+
+    btn.addEventListener('click', async () => {
+        if (role === 'master') {
+            const opts = {}; cands.forEach(c => opts[c.id] = c.name);
+            const sel = await S.fire({ title: 'Pasar el mando a…', input: 'select', inputOptions: opts, showCancelButton: true,
+                confirmButtonText: 'Comprobar', cancelButtonText: 'Cancelar', reverseButtons: true,
+                html: '<div class="small text-muted">Este servidor se convertirá en copia en vivo del nodo elegido. Nada se borra.</div>' });
+            if (!sel.isConfirmed) return;
+            const node = sel.value, target = opts[node];
+            S.fire({ title: 'Comprobando…', didOpen: () => S.showLoading(), allowOutsideClick: false });
+            const pre = await (await fetch('/settings/cluster/role-switch/preflight?node=' + encodeURIComponent(node), { cache: 'no-store' })).json();
+            if (!pre.ok) {
+                S.fire({ icon: 'error', title: 'No se puede hacer todavía', width: 760, html: checksHtml(pre) });
+                return;
+            }
+            const pass = await askPassword('Pasar el mando a ' + target, checksHtml(pre)
+                + '<div class="small mt-2">Las webs se cortan unos segundos mientras cambia el DNS. Este servidor quedará como copia de ' + esc(target) + '.</div>');
+            if (!pass) return;
+            const fd = new FormData(); fd.append('_csrf_token', csrf); fd.append('node', node); fd.append('admin_password', pass);
+            const res = await (await fetch('/settings/cluster/role-switch/start', { method: 'POST', body: fd })).json();
+            if (!res.ok) { S.fire({ icon: 'error', title: 'No se ha empezado', html: esc(res.error || '') + (res.preflight ? checksHtml(res.preflight) : ''), width: 760 }); return; }
+            follow(res.task, 0, target);
+        } else {
+            const pass = await askPassword('Tomar el mando', '<div class="small text-start">Se pide al master actual que pase el mando a este servidor: '
+                + 'el master comprueba que todo está al día, se aparta, este servidor se promueve y el antiguo master queda como copia en vivo. Nada se borra.</div>');
+            if (!pass) return;
+            const fd = new FormData(); fd.append('_csrf_token', csrf); fd.append('admin_password', pass);
+            const res = await (await fetch('/settings/cluster/role-switch/start', { method: 'POST', body: fd })).json();
+            if (!res.ok) { S.fire({ icon: 'error', title: 'El master no ha empezado el cambio', html: esc(res.error || '') + (res.preflight ? checksHtml(res.preflight) : ''), width: 760 }); return; }
+            follow(res.task, res.remote, 'este servidor');
+        }
+    });
+});
+</script>
 
 <!-- Failover ISP Status -->
 <?php if (!empty($failoverStatus)):

@@ -553,6 +553,19 @@ class ClusterApiController
                 'notify-iface-down' => $this->handleNotifyIfaceDown($payload),
                 'notify-iface-up'   => $this->handleNotifyIfaceUp($payload),
                 'query-local-state' => $this->handleQueryLocalState(),
+                // Cambio de rol planificado (RoleSwitchService).
+                'role-switch-health'  => ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::health()],
+                'role-switch-promote' => ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::startPromoteHere(
+                    (string)($payload['old_vpn_ip'] ?? ''), (string)($payload['old_public_ip'] ?? ''), (string)($payload['new_public_ip'] ?? ''))],
+                'role-switch-status'  => ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::status((string)($payload['task'] ?? ''))],
+                // Un slave pide al master que le pase el mando a él.
+                'role-switch-request' => (function () {
+                    $nid = (int)($_REQUEST['_api_node_id'] ?? 0);
+                    if ($nid < 1) {
+                        return ['ok' => false, 'error' => 'quien pide no es un nodo registrado en este master'];
+                    }
+                    return ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::start($nid, 'petición del nodo')];
+                })(),
                 // Configuración de copia de ficheros de este nodo (sin secretos), para que
                 // el nodo que se promueve la adopte (ClusterService::adoptPeerAsFileSyncTarget).
                 'filesync-snapshot' => ['ok' => true, 'snapshot' => \MuseDockPanel\Services\FileSyncService::snapshotForPeer()],

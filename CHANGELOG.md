@@ -2,9 +2,23 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [1.0.279] — 2026-10-03 — Sin avisos de desincronización por envíos ya superados
+## [1.0.279] — 2026-10-03 — Cambio de rol con un botón
+
+### Añadido
+- **Botón "Pasar el mando a…" / "Tomar el mando" en el Dashboard** (tarjeta Cluster), independiente del relevo por caída. Es un cambio de rol planificado con los dos servidores bien: el master pasa el mando al nodo que elijas en un desplegable, y desde un slave se le pide al master que se lo pase a él. El panel hace todo el proceso:
+  1. comprobaciones previas: réplicas de PostgreSQL, MariaDB y Redis al día, `wal_log_hints`, `log_slave_updates`, IPs públicas para el DNS y ruta entre los nodos;
+  2. pide la contraseña de administrador;
+  3. el master se aparta;
+  4. el elegido se promueve (comprobando que cada base acepta escrituras), mueve el DNS hacia su IP pública e invierte los papeles del relevo (él pasa a principal y el otro a relevo);
+  5. el antiguo master se convierte en su copia en vivo, solo con lo cambiado.
+
+  El avance se ve paso a paso en una ventana y al terminar llega un correo con el resultado. Si el elegido no llega a promoverse, el master se reactiva y todo queda como antes. Nada tiene nombres fijos: nodos, IPs y cuentas salen del cluster y del relevo. También desde la terminal: `cluster-switch.php switch-check <id>` y `switch-to <id>`.
 
 ### Arreglado
+- **Los avisos por correo salían con el remitente del master** ("Mortadelo Master" también en los de nitro), porque la configuración de avisos se copia entre nodos. Ahora el remitente es el servidor que envía ("Nitro · MuseDock Panel"), y el asunto lo lleva delante (`[nitro] …`).
+- **El botón "Pasar el mando a…" no abría nada**: su código se ejecutaba antes de que la página cargara las ventanas (SweetAlert). Ahora espera a que la página esté cargada.
+- **Al promover un nodo no se abrían los puertos del correo** (25, 465, 587, 993, 143): tras un relevo el correo no entraba hasta abrirlos a mano. Ahora, si el nodo tiene correo instalado, se abren junto con 80/443.
+- **Al promover se "apropiaba" de puertos que ya estaban abiertos**: `ufw allow` sobre una regla existente le ponía la etiqueta del relevo y al volver a slave se borraba, cerrando 80/443 que estaban abiertos de siempre. Ahora, si una regla propia del servidor ya abre el puerto a todos, no se toca; al volver a slave solo se cierra lo que abrió el panel.
 - **El Dashboard avisaba de "desincronización" por envíos de la configuración de relevo que fallaron hace tiempo**, aunque después se hubiera enviado bien. La configuración se manda entera y cada envío sustituye al anterior, así que cuando uno llega bien a un nodo, los fallidos o pendientes anteriores a ese nodo se marcan como superados (cancelados).
 
 ## [1.0.278] — 2026-10-03 — El sembrado de MariaDB no choca con una réplica anterior

@@ -1933,12 +1933,52 @@ class FirewallService
      * Open HTTP/HTTPS ports to the public (when slave becomes master)
      * Adds rules with a comment marker so we can identify and remove them later
      */
+    /** Puertos que abre un nodo al promoverse: web y, si tiene correo, los del correo. */
+    public static function failoverPorts(): array
+    {
+        $ports = [80, 443];
+        // Correo: sin esto, tras un relevo el correo no entraba (había que abrirlo a mano).
+        if (is_dir('/etc/postfix') && is_dir('/etc/dovecot')) {
+            $ports = array_merge($ports, [25, 465, 587, 993, 143]);
+        }
+        return $ports;
+    }
+
+    /**
+     * ¿Ya hay una regla de ufw SIN etiqueta del panel que abre este puerto a todo el
+     * mundo? Entonces no se toca: "ufw allow" sobre ella le cambiaba el comentario a
+     * musedock-failover y el demote la borraba, cerrando un puerto que estaba abierto
+     * de siempre (80/443 de Filemon, 2026-10-03).
+     */
+    private static function ufwOpenToAllUntagged(int $port): bool
+    {
+        foreach (self::ufwGetRules() as $r) {
+            if (stripos($r['action'], 'ALLOW') === false || stripos($r['comment'] ?? '', 'musedock-failover') !== false) {
+                continue;
+            }
+            $from = strtolower(trim((string)$r['from']));
+            if ($from !== 'anywhere' && $from !== 'anywhere (v6)') {
+                continue;
+            }
+            // "443/tcp", "443", "80,443/tcp"… y nunca "x on wg0" (eso no es público).
+            $to = trim((string)$r['to']);
+            if (str_contains($to, ' on ')) {
+                continue;
+            }
+            $list = preg_split('/[,\s]+/', preg_replace('/\/(tcp|udp)\b|\(v6\)/i', '', $to)) ?: [];
+            if (in_array((string)$port, $list, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static function openPublicPorts(): array
     {
         $type = self::getType();
         $results = [];
 
-        $ports = [80, 443];
+        $ports = self::failoverPorts();
 
         if ($type === 'iptables') {
             foreach ($ports as $port) {
@@ -1961,6 +2001,10 @@ class FirewallService
 
         } elseif ($type === 'ufw') {
             foreach ($ports as $port) {
+                if (self::ufwOpenToAllUntagged($port)) {
+                    $results[] = ['port' => $port, 'ok' => true, 'output' => 'Ya abierto (regla propia del servidor): no se toca'];
+                    continue;
+                }
                 $result = self::ufwAddRule('allow', '0.0.0.0/0', (string)$port, 'tcp', 'musedock-failover');
                 $results[] = ['port' => $port, 'ok' => $result['ok'], 'output' => $result['output']];
             }

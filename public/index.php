@@ -577,6 +577,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/cluster/ping-node', 'ClusterController@pingNode');
 \MuseDockPanel\Router::post('/settings/cluster/process-queue', 'ClusterController@processQueue');
 \MuseDockPanel\Router::post('/settings/cluster/promote', 'ClusterController@promoteLocal');
+\MuseDockPanel\Router::get('/settings/cluster/role-switch/preflight', 'ClusterController@roleSwitchPreflight');
+\MuseDockPanel\Router::post('/settings/cluster/role-switch/start', 'ClusterController@roleSwitchStart');
+\MuseDockPanel\Router::get('/settings/cluster/role-switch/status', 'ClusterController@roleSwitchStatus');
 \MuseDockPanel\Router::post('/settings/cluster/demote', 'ClusterController@demoteLocal');
 \MuseDockPanel\Router::post('/settings/cluster/generate-token', 'ClusterController@generateToken');
 \MuseDockPanel\Router::post('/settings/cluster/save-settings', 'ClusterController@saveSettings');

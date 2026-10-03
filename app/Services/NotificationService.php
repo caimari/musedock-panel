@@ -179,6 +179,11 @@ class NotificationService
         $from = Settings::get('notify_smtp_from', '');
         if (!$from) $from = self::getAdminEmail();
         $fromName = Settings::get('notify_smtp_from_name', '');
+        // La configuración de avisos se copia entre nodos: sin esto, los correos de TODOS
+        // salían con el nombre del master ("Mortadelo Master" en los de nitro). El
+        // remitente lleva el nombre de quien envía de verdad.
+        $short = explode('.', (string)(Settings::get('panel_hostname', '') ?: gethostname() ?: 'servidor'))[0];
+        $fromName = ucfirst($short) . ' · MuseDock Panel';
 
         if ($method === 'php') {
             return self::sendViaPhpMail($to, $from, $subject, $body, $fromName);

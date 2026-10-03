@@ -729,6 +729,74 @@ class ClusterController
         exit;
     }
 
+    // ─── Cambio de rol planificado (RoleSwitchService) ───────────────
+
+    private function jsonOut(array $d): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode($d, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+
+    private function adminPasswordOk(string $password): bool
+    {
+        $id = (int)($_SESSION['panel_user']['id'] ?? 0);
+        $a = $id > 0 ? \MuseDockPanel\Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $id]) : null;
+        return $a && password_verify($password, (string)$a['password_hash']);
+    }
+
+    /** Nodo master visto desde un slave (el de la IP de la que replica). */
+    private function masterNodeFromSlave(): ?array
+    {
+        $ip = \MuseDockPanel\Settings::get('repl_remote_ip', '') ?: \MuseDockPanel\Settings::get('cluster_master_heartbeat_ip', '');
+        foreach (\MuseDockPanel\Services\ClusterService::getNodes() as $n) {
+            if ($ip !== '' && str_contains((string)$n['api_url'], '//' . $ip . ':')) {
+                return $n;
+            }
+        }
+        return null;
+    }
+
+    /** GET /settings/cluster/role-switch/preflight?node=ID (master) */
+    public function roleSwitchPreflight(): void
+    {
+        $this->jsonOut(\MuseDockPanel\Services\RoleSwitchService::preflight((int)($_GET['node'] ?? 0)));
+    }
+
+    /** POST /settings/cluster/role-switch/start: node (en el master), admin_password */
+    public function roleSwitchStart(): void
+    {
+        View::verifyCsrf();
+        if (!$this->adminPasswordOk((string)($_POST['admin_password'] ?? ''))) {
+            $this->jsonOut(['ok' => false, 'error' => 'Contraseña de administrador incorrecta.']);
+        }
+        $who = (string)($_SESSION['panel_user']['username'] ?? 'admin');
+        if (\MuseDockPanel\Settings::get('cluster_role', '') === 'slave') {
+            // Desde un slave: pedir al master que me pase el mando a mí.
+            $m = $this->masterNodeFromSlave();
+            if (!$m) {
+                $this->jsonOut(['ok' => false, 'error' => 'Este slave no tiene registrado a su master como nodo (Ajustes → Cluster → Nodos).']);
+            }
+            $r = \MuseDockPanel\Services\ClusterService::callNode((int)$m['id'], 'POST', 'api/cluster/action', ['action' => 'role-switch-request', 'payload' => []]);
+            $res = $r['data']['result'] ?? [];
+            $this->jsonOut(!empty($res['ok']) ? ['ok' => true, 'task' => $res['task'], 'remote' => (int)$m['id']]
+                : ['ok' => false, 'error' => $res['error'] ?? $r['error'] ?? 'el master no respondió', 'preflight' => $res['preflight'] ?? null]);
+        }
+        $this->jsonOut(\MuseDockPanel\Services\RoleSwitchService::start((int)($_POST['node'] ?? 0), $who));
+    }
+
+    /** GET /settings/cluster/role-switch/status?task=…[&remote=ID] */
+    public function roleSwitchStatus(): void
+    {
+        $task = (string)($_GET['task'] ?? '');
+        $remote = (int)($_GET['remote'] ?? 0);
+        if ($remote > 0) {
+            $r = \MuseDockPanel\Services\ClusterService::callNode($remote, 'POST', 'api/cluster/action', ['action' => 'role-switch-status', 'payload' => ['task' => $task]]);
+            $this->jsonOut(is_array($r['data']['result'] ?? null) ? $r['data']['result'] : ['state' => 'unknown', 'error' => $r['error'] ?? 'sin respuesta', 'steps' => []]);
+        }
+        $this->jsonOut(\MuseDockPanel\Services\RoleSwitchService::status($task));
+    }
+
     /**
      * POST /settings/cluster/promote
      */

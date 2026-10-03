@@ -18,6 +18,8 @@
  *   php bin/cluster-switch.php demote <ip-vpn-del-nuevo-master>
  *                                              reconstruye ESTE nodo como slave del nuevo master
  *                                              (pg_rewind, MariaDB desde cero, Redis)
+ *   php bin/cluster-switch.php switch-check <id-nodo>   (master) comprobaciones de un cambio de rol
+ *   php bin/cluster-switch.php switch-to <id-nodo>      (master) cambio de rol completo, con avance
  *   php bin/cluster-switch.php adopt-peer <ip-vpn>
  *                                              (master) registra el otro nodo y le manda los
  *                                              ficheros en vivo (lsyncd), como hacía el master
@@ -102,6 +104,31 @@ switch ($cmd) {
         $r = ClusterService::demoteToSlave($ip);
         $out($r);
         $ok = !empty($r['ok']);
+        break;
+
+    case 'switch-check':
+        // (en el master) comprobaciones previas de un cambio de rol hacia el nodo <id>
+        $out(\MuseDockPanel\Services\RoleSwitchService::preflight((int)($argv[2] ?? 0)));
+        break;
+
+    case 'switch-to':
+        // (en el master) cambio de rol completo hacia el nodo <id>, en primer plano
+        $pre = \MuseDockPanel\Services\RoleSwitchService::start((int)($argv[2] ?? 0), 'terminal');
+        if (empty($pre['ok'])) {
+            $out($pre);
+            exit(1);
+        }
+        echo "Tarea {$pre['task']} en segundo plano. Avance:\n";
+        $seen = 0;
+        do {
+            sleep(3);
+            $st = \MuseDockPanel\Services\RoleSwitchService::status($pre['task']);
+            foreach (array_slice($st['steps'] ?? [], $seen) as $x) {
+                echo $x['at'] . ' ' . ($x['ok'] === true ? '[OK] ' : ($x['ok'] === false ? '[ERROR] ' : '')) . $x['msg'] . "\n";
+            }
+            $seen = count($st['steps'] ?? []);
+        } while (!in_array($st['state'] ?? '', ['done', 'failed'], true));
+        $ok = ($st['state'] ?? '') === 'done';
         break;
 
     case 'adopt-peer':
