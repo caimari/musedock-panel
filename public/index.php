@@ -217,6 +217,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // master (404 si no) y unirse exige aprobar el código en el master.
 \MuseDockPanel\Router::post('/api/pair/request', 'ClusterPairController@request');
 \MuseDockPanel\Router::post('/api/mcp', 'McpController@handle');
+// Mapa de dominios para el proxy de entrada alternativa (clave propia en el controlador).
+\MuseDockPanel\Router::get('/api/ingress/domains', 'IngressController@domains');
 \MuseDockPanel\Router::get('/api/mcp', 'McpController@handle');
 
 // Federation API (token auth — called by remote peers)

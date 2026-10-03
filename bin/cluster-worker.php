@@ -177,6 +177,17 @@ if (time() - (int)Settings::get('replication_health_run_at', '0') >= 300) {
     }
 }
 
+// ─── Step 0g: Entrada alternativa por proxy (8443 + PROXY protocol) ─────
+// Una recarga de Caddy desde el Caddyfile la quita: se vuelve a poner.
+try {
+    $ing = \MuseDockPanel\Services\IngressService::ensure();
+    if (!empty($ing['changed'])) {
+        logMsg('Entrada por proxy restaurada: ' . implode(', ', $ing['changed']) . (empty($ing['ok']) ? ' (errores: ' . implode('; ', $ing['errors'] ?? []) . ')' : ''));
+    }
+} catch (\Throwable $e) {
+    logMsg('Ingress error: ' . $e->getMessage());
+}
+
 // ─── Step 0f: Aviso en las terminales si este servidor es copia ─────────
 try {
     \MuseDockPanel\Services\ClusterService::refreshRoleBanner();

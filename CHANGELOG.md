@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.290] — 2026-10-03 — Entrada alternativa por un proxy de SNI (segunda línea)
+
+### Añadido
+- **Entrada alternativa por un proxy de SNI con PROXY protocol v2** (por ejemplo, una segunda línea con IP dinámica). El proxy reenvía cada conexión, tal cual, a un puerto aparte de este servidor. Con `php bin/ingress.php enable --source=<IP del proxy> --health=<nombre> [--port=8443]`:
+  - el servidor de Caddy de las webs escucha también en ese puerto, con las mismas rutas y certificados;
+  - la cabecera PROXY (IP real del cliente) se lee **solo** de la IP del proxy; cualquier otra conexión, la del 443 incluida, se trata como siempre (`fallback_policy: skip`);
+  - un nombre de comprobación responde `ok-<servidor>`;
+  - el cortafuegos abre el puerto solo a la IP del proxy;
+  - `GET /api/ingress/domains` (clave propia, `Authorization: Bearer` o `X-Api-Key`) da la lista de dominios que sirve este Caddy, para que el proxy sepa a quién mandar cada uno. La clave solo se ve en la terminal (`show-key`, `rotate-key`).
+
+  El cluster-worker lo vuelve a poner si una recarga de Caddy lo quita. También: `status` y `disable`.
+
 ## [1.0.285] — 2026-10-03 — El relevo DNS deja de decir "caído" sin estarlo
 
 ### Arreglado

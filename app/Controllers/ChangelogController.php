@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.290',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Entrada alternativa por proxy de SNI con PROXY protocol v2 (bin/ingress.php): puerto aparte solo desde la IP del proxy, nombre de comprobacion, cortafuegos y mapa de dominios con clave (/api/ingress/domains)'],
+                        'en' => ['Alternate ingress via an SNI proxy with PROXY protocol v2 (bin/ingress.php): separate port only from the proxy IP, health name, firewall and keyed domain map (/api/ingress/domains)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.285',
                 'date' => '2026-10-03',
                 'badge' => 'info',
