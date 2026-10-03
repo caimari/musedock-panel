@@ -29,12 +29,30 @@ use MuseDockPanel\Services\CloudflareService;
                     <?= \MuseDockPanel\View::csrf() ?>
                             <input type="hidden" name="suspend_mail" id="suspend-mail-input" value="0">
                             <input type="hidden" name="remove_caddy" id="remove-caddy-input" value="0">
-                            <button type="button" class="btn btn-outline-warning btn-sm" onclick="confirmAction(document.getElementById('suspendForm'), {
-                                title: 'Suspend <?= View::e($account['domain']) ?>?',
-                                html: '<p style=\'color:#94a3b8;\'>This will:</p><ul style=\'text-align:left;color:#94a3b8;font-size:0.9rem;\'><li>Block SSH/SFTP access</li><li>Stop PHP-FPM pool</li><li>Website will go offline</li></ul><div style=\'margin-top:12px;padding:10px;background:rgba(148,163,184,0.1);border-radius:6px;text-align:left;\'><label style=\'color:#cbd5e1;font-size:0.85rem;cursor:pointer;\'><input type=\'checkbox\' id=\'swal-remove-caddy\' style=\'margin-right:6px;\'>Quitar también de Caddy (dominio caducado o sin uso: sin página de mantenimiento y sin pedir certificados). No se borra nada; al reactivar se restaura.</label></div><?= $hasActiveMail ? "<div style=\"margin-top:12px;padding:10px;background:rgba(251,191,36,0.1);border-radius:6px;text-align:left;\"><label style=\"color:#fbbf24;font-size:0.85rem;cursor:pointer;\"><input type=\"checkbox\" id=\"swal-suspend-mail\" style=\"margin-right:6px;\">Suspender tambien el correo (" . count($mailAccounts) . " cuenta/s)</label></div>" : "" ?>',
-                                icon: 'warning',
-                                confirmText: 'Yes, suspend it'
-                            }, function() { document.getElementById('remove-caddy-input').value = document.getElementById('swal-remove-caddy')?.checked ? '1' : '0'; <?= $hasActiveMail ? "document.getElementById('suspend-mail-input').value = document.getElementById('swal-suspend-mail')?.checked ? '1' : '0';" : "" ?> })"><i class="bi bi-pause-circle"></i> Suspend</button>
+                            <?php
+                                // El texto de la ventana va a un script con json_encode: antes iba dentro
+                                // de onclick="…" y las comillas dobles de la opción de correo cerraban el
+                                // atributo (la cabecera salía rota en los hostings con correo).
+                                $suspendHtml = "<p style='color:#94a3b8;'>This will:</p><ul style='text-align:left;color:#94a3b8;font-size:0.9rem;'><li>Block SSH/SFTP access</li><li>Stop PHP-FPM pool</li><li>Website will go offline</li></ul>"
+                                    . "<div style='margin-top:12px;padding:10px;background:rgba(148,163,184,0.1);border-radius:6px;text-align:left;'><label style='color:#cbd5e1;font-size:0.85rem;cursor:pointer;'><input type='checkbox' id='swal-remove-caddy' style='margin-right:6px;'>Quitar también de Caddy (dominio caducado o sin uso: sin página de mantenimiento y sin pedir certificados). No se borra nada; al reactivar se restaura.</label></div>"
+                                    . ($hasActiveMail ? "<div style='margin-top:12px;padding:10px;background:rgba(251,191,36,0.1);border-radius:6px;text-align:left;'><label style='color:#fbbf24;font-size:0.85rem;cursor:pointer;'><input type='checkbox' id='swal-suspend-mail' style='margin-right:6px;'>Suspender también el correo (" . count($mailAccounts) . " cuenta/s)</label></div>" : '');
+                                $jsonFlags = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE;
+                            ?>
+                            <script>
+                            function suspendAccount() {
+                                confirmAction(document.getElementById('suspendForm'), {
+                                    title: <?= json_encode('Suspend ' . $account['domain'] . '?', $jsonFlags) ?>,
+                                    html: <?= json_encode($suspendHtml, $jsonFlags) ?>,
+                                    icon: 'warning',
+                                    confirmText: 'Yes, suspend it'
+                                }, function () {
+                                    document.getElementById('remove-caddy-input').value = document.getElementById('swal-remove-caddy')?.checked ? '1' : '0';
+                                    const m = document.getElementById('swal-suspend-mail');
+                                    if (m) document.getElementById('suspend-mail-input').value = m.checked ? '1' : '0';
+                                });
+                            }
+                            </script>
+                            <button type="button" class="btn btn-outline-warning btn-sm" onclick="suspendAccount()"><i class="bi bi-pause-circle"></i> Suspend</button>
                         </form>
                     <?php else: ?>
                         <form id="activateForm" method="POST" action="/accounts/<?= $account['id'] ?>/activate">

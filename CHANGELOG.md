@@ -8,6 +8,7 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 - **"Primarios caídos — Failover activo" aunque nadie estuviera caído.** Tras un relevo hecho a mano (`dns-failover`) o un cambio de rol, el relevo DNS se quedaba en estado de caída y con el antiguo master como principal. Ahora:
   - el cambio de rol deja los dos nodos en "Normal", con los papeles intercambiados y sin restos del relevo (diarios, marca de activación, resync pendiente);
   - `cluster-switch.php failover-normalize` lo arregla a mano en el master.
+- **Ficha del hosting: la cabecera salía rota** (trozos de JavaScript a la vista) en los hostings con correo: el texto de "Suspender también el correo" iba con comillas dobles dentro del `onclick` del botón Suspend y cerraba el atributo. Ahora va en una función con el texto escapado.
 - **MariaDB (ya en el código de la 1.0.284, sin anotar): la comprobación para seguir por GTID usa `gtid_current_pos` del nuevo master.** Cuenta lo escrito y lo recibido como réplica. Justo después de un sembrado, `gtid_binlog_pos` podía quedarse corto y se creía que faltaba algo, lo que acababa en copia completa.
 
 ## [1.0.284] — 2026-10-03 — Cambio de rol robusto: nunca a medias ni a ciegas
