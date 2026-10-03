@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.273',
+                'date' => '2026-10-03',
+                'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Grave: el relevo dejaba fuera las webs que apuntan al servidor por CNAME (la regla de nombres de maquina frenaba tambien el nombre al que apuntan). Ahora un nombre de maquina solo se queda quieto si ningun dominio apunta a el por CNAME'],
+                        'en' => ['Critical: failover left out sites pointing to the server via CNAME (the machine-name rule also froze their target). A machine name now stays put only if no domain CNAMEs to it'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.272',
                 'date' => '2026-10-03',
                 'badge' => 'info',

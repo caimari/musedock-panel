@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.273] — 2026-10-03 — El relevo vuelve a mover las webs que apuntan al servidor por CNAME
+
+### Arreglado
+- **Grave (desde la 1.0.265): el relevo dejaba fuera todas las webs que apuntan al servidor por CNAME.** Por ejemplo `festgate.com → CNAME srv1.ejemplo.com`. La regla "los nombres de máquina no se mueven" también frenaba `srv1.ejemplo.com`, y con él todas esas webs. Ahora un nombre de máquina solo se queda quieto si ningún otro dominio apunta a él por CNAME. Si alguno apunta, hace de dirección de servicio y se mueve.
+
 ## [1.0.272] — 2026-10-03 — Cambio de roles planificado (switchover) seguro y desde la terminal
 
 ### Añadido

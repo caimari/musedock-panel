@@ -352,8 +352,35 @@ class CloudflareService
     /** ¿Es un nombre de máquina que el relevo debe dejar quieto? */
     public static function isFailoverExcluded(string $name): bool
     {
-        $first = explode('.', strtolower(rtrim($name, '.')), 2)[0];
-        return in_array($first, self::machineNameLabels(), true);
+        $name = strtolower(rtrim($name, '.'));
+        $first = explode('.', $name, 2)[0];
+        if (!in_array($first, self::machineNameLabels(), true)) {
+            return false;
+        }
+        // Si otros dominios apuntan a este nombre por CNAME (p. ej. las webs que van a
+        // srv1.ejemplo.com), hace de dirección de SERVICIO: tiene que moverse, o esas
+        // webs se quedarían sin relevo. Solo se queda quieto si nadie apunta a él.
+        return !isset(self::cnameTargets()[$name]);
+    }
+
+    /** Destinos de todos los CNAME de las zonas de este panel (cacheado por proceso). */
+    private static ?array $cnameTargets = null;
+
+    public static function cnameTargets(): array
+    {
+        if (self::$cnameTargets !== null) {
+            return self::$cnameTargets;
+        }
+        $t = [];
+        foreach (self::getConfiguredAccounts() as $acct) {
+            foreach (($acct['zones'] ?? []) as $zone) {
+                $r = self::listRecordsAll((string)$acct['token'], (string)$zone['id'], ['type' => 'CNAME']);
+                foreach (($r['ok'] ?? false) ? ($r['result'] ?? []) : [] as $x) {
+                    $t[strtolower(rtrim((string)$x['content'], '.'))] = true;
+                }
+            }
+        }
+        return self::$cnameTargets = $t;
     }
 
     public static function batchUpdateIp(string $token, string $zoneId, string $oldIp, string $newIp, int $ttl = 60, ?string $journal = null): array
