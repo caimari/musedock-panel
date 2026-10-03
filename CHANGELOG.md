@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.283] — 2026-10-03 — Sin "www." en los subdominios
+
+### Arreglado
+- **A todo dominio se le añadía "www." en Caddy, también a los subdominios** (`www.develop.ejemplo.org`, `www.webmail.cliente.com`): nombres sin DNS a los que Caddy intentaba sacar certificado y que salían en el plan DNS como "sin DNS". Ahora `www.` solo se añade a la raíz de su zona (`ejemplo.com`, `ejemplo.org.es`), y a un subdominio solo si su `www.` existe de verdad en el DNS. Vale para hostings, alias, redirecciones, la página de mantenimiento y el registro de accesos (`SystemService::hostsWithWww`).
+- **Para las rutas que ya existían**: `bin/caddy-drop-www-subdomains.php` enseña qué `www.` sobran en las rutas del panel y con `--apply` los quita, cambiando solo la lista de nombres de cada ruta (no reconstruye nada). Con `--all-routes` aplica la misma regla a las rutas de otras aplicaciones (p. ej. un CMS).
+
 ## [1.0.282] — 2026-10-03 — El cambio de rol enseña qué dominios mueve, y lo cuenta por correo
 
 ### Añadido

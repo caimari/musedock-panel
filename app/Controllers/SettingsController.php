@@ -2566,8 +2566,7 @@ class SettingsController
             $subs = Database::fetchAll("SELECT subdomain as domain FROM hosting_subdomains");
             $allDomains = [];
             foreach (array_merge($accounts, $subs) as $row) {
-                $allDomains[] = $row['domain'];
-                $allDomains[] = 'www.' . $row['domain'];
+                $allDomains = array_merge($allDomains, \MuseDockPanel\Services\SystemService::hostsWithWww((string)$row['domain']));
             }
             \MuseDockPanel\Services\SystemService::ensureHostingAccessLog($caddyApi, $allDomains);
             $installed[] = 'caddy: hosting-access logger';

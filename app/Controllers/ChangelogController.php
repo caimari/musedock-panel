@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.283',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Caddy ya no anade "www." a los subdominios (solo a la raiz de la zona, o si el www existe en el DNS); bin/caddy-drop-www-subdomains.php limpia las rutas que ya existian'],
+                        'en' => ['Caddy no longer adds "www." to subdomains (only to the zone apex, or if the www exists in DNS); bin/caddy-drop-www-subdomains.php cleans existing routes'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.282',
                 'date' => '2026-10-03',
                 'badge' => 'info',

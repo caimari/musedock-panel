@@ -172,7 +172,7 @@ class McpHostingTools
         // Que no lo sirva ya Caddy por otro lado (Caddyfile, otra aplicación…): se pisarían.
         $caddy = \MuseDockPanel\Services\CaddyDomainsService::classify();
         foreach (($caddy['domains'] ?? []) as $cd) {
-            if (in_array((string)$cd['host'], [$domain, "www.{$domain}"], true)) {
+            if (in_array((string)$cd['host'], \MuseDockPanel\Services\SystemService::hostsWithWww($domain), true)) {
                 throw new \InvalidArgumentException("Caddy ya sirve {$cd['host']} ({$cd['group']}: {$cd['detail']}). No se crea para no pisarlo.");
             }
         }
@@ -184,7 +184,7 @@ class McpHostingTools
         $ips = @gethostbynamel($domain) ?: [];
         $here = (bool)array_intersect($ips, array_filter($mine));
         $plan = [
-            'redirect' => "{$domain} (y www.{$domain}) → {$target}",
+            'redirect' => implode(' y ', \MuseDockPanel\Services\SystemService::hostsWithWww($domain)) . " → {$target}",
             'code' => $code === 301 ? '301 permanente' : '302 temporal',
             'path' => $preserve ? 'conserva la ruta (/x → destino/x)' : 'siempre a la portada del destino',
             'dns' => $ips ? implode(', ', $ips) . ($here ? ' — llega a este servidor (o al cluster): el certificado podrá emitirse'

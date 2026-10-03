@@ -1381,7 +1381,7 @@ CONF;
         }
         self::ensureTlsCatchAllPolicy($caddyApi);
 
-        $hosts = [$domain, "www.{$domain}"];
+        $hosts = self::hostsWithWww($domain);
         $subroutes = self::buildCaddySubroutes($documentRoot, $username, $phpVersion, $hostingType);
 
         $caddyConfig = [
@@ -1405,7 +1405,7 @@ CONF;
 
         if ($httpCode >= 200 && $httpCode < 300) {
             // Register domains for access logging (Fail2Ban wp-login protection)
-            self::ensureHostingAccessLog($caddyApi, [$domain, "www.{$domain}"]);
+            self::ensureHostingAccessLog($caddyApi, $hosts);
             return $routeId;
         }
         return null;
@@ -2876,12 +2876,11 @@ CONF;
         $routeId = self::caddyRouteId($mainDomain);
 
         // Build full host list: main + www.main + each alias + www.alias
-        $hosts = [$mainDomain, "www.{$mainDomain}"];
+        $hosts = self::hostsWithWww($mainDomain);
         foreach ($aliasDomains as $alias) {
             $alias = trim($alias);
             if ($alias && !in_array($alias, $hosts)) {
-                $hosts[] = $alias;
-                $hosts[] = "www.{$alias}";
+                $hosts = array_merge($hosts, self::hostsWithWww($alias));
             }
         }
 
@@ -2933,6 +2932,60 @@ CONF;
     /**
      * Add a Caddy redirect route (301/302) for a domain pointing to another domain.
      */
+    /**
+     * Los nombres que sirve Caddy para un dominio: el dominio y, si es la raíz de su
+     * zona (ejemplo.com, aca.org.es), también www. A un subdominio (develop.ejemplo.org,
+     * webmail.cliente.com) solo se le añade www si ese www existe en el DNS: antes se
+     * añadía siempre y quedaban nombres sin DNS a los que Caddy intentaba sacar certificado.
+     */
+    public static function hostsWithWww(string $domain): array
+    {
+        $d = strtolower(trim($domain));
+        if ($d === '' || str_starts_with($d, 'www.') || str_starts_with($d, '*.')) {
+            return $d === '' ? [] : [$d];
+        }
+        return self::isApexDomain($d) || self::nameHasDns("www.{$d}") ? [$d, "www.{$d}"] : [$d];
+    }
+
+    /** ¿Es la raíz de su zona? Primero por las zonas de Cloudflare del panel; si no, por sufijos conocidos. */
+    public static function isApexDomain(string $domain): bool
+    {
+        static $zones = null;
+        if ($zones === null) {
+            $zones = [];
+            try {
+                foreach (CloudflareService::getConfiguredAccounts() as $a) {
+                    foreach (($a['zones'] ?? []) as $z) {
+                        $zones[strtolower((string)($z['name'] ?? ''))] = true;
+                    }
+                }
+            } catch (\Throwable) {
+            }
+        }
+        $d = strtolower(rtrim($domain, '.'));
+        if (isset($zones[$d])) {
+            return true;
+        }
+        foreach (array_keys($zones) as $z) {
+            if ($z !== '' && str_ends_with($d, '.' . $z)) {
+                return false;   // subdominio de una zona conocida
+            }
+        }
+        // Sin zona conocida: dos niveles (ejemplo.com) o tres con sufijo de dos niveles (ejemplo.org.es).
+        $parts = explode('.', $d);
+        if (count($parts) <= 2) {
+            return true;
+        }
+        $second = ['com', 'org', 'net', 'edu', 'gob', 'gov', 'nom', 'co', 'ac', 'or', 'ne', 'go', 'ltd', 'plc', 'me'];
+        return count($parts) === 3 && in_array($parts[1], $second, true) && strlen($parts[2]) === 2;
+    }
+
+    private static function nameHasDns(string $name): bool
+    {
+        static $cache = [];
+        return $cache[$name] ??= (bool)(@dns_get_record($name, DNS_A) ?: @dns_get_record($name, DNS_CNAME));
+    }
+
     public static function addCaddyRedirectRoute(string $fromDomain, string $toDomain, int $code = 301, bool $preservePath = true): ?string
     {
         $config = require PANEL_ROOT . '/config/panel.php';
@@ -2955,7 +3008,7 @@ CONF;
 
         $caddyConfig = [
             '@id' => $routeId,
-            'match' => [['host' => [$fromDomain, "www.{$fromDomain}"]]],
+            'match' => [['host' => self::hostsWithWww($fromDomain)]],
             'handle' => [
                 [
                     'handler' => 'static_response',
@@ -3111,7 +3164,7 @@ CONF;
 
         $maintenanceRoute = [
             '@id' => $routeId,
-            'match' => [['host' => [$domain, "www.{$domain}"]]],
+            'match' => [['host' => self::hostsWithWww($domain)]],
             'handle' => [
                 [
                     'handler' => 'static_response',
