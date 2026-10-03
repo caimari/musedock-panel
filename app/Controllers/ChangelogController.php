@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.272',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Herramientas MCP como cluster_drift aceptan parte del nombre del nodo ("Filemon"), como las demas', 'Al apartar un nodo (fence) se para lsyncd (borraba en el nuevo master lo subido durante el relevo) y la BD del propio panel sigue con escritura', 'Tras promover, el aviso a los nodos usa la IP por la que se llega a cada uno (VPN), no la publica'],
+                        'en' => ['MCP tools such as cluster_drift accept part of the node name ("Filemon"), like the others', 'Fencing a node stops lsyncd (it deleted on the new master what was uploaded during the failover) and keeps the panel DB writable', 'After promotion, nodes are told the IP that reaches them (VPN), not the public one'],
+                    ],
+                    'added' => [
+                        'es' => ['bin/cluster-switch.php: cada paso de un cambio de roles desde la terminal (status, push-config, dns-plan, fence, unfence, promote, demote, dns-failover, dns-failback)'],
+                        'en' => ['bin/cluster-switch.php: each switchover step from the terminal (status, push-config, dns-plan, fence, unfence, promote, demote, dns-failover, dns-failback)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.271',
                 'date' => '2026-10-03',
                 'badge' => 'info',

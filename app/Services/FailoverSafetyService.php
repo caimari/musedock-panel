@@ -133,8 +133,23 @@ class FailoverSafetyService
         $stopped = trim((string)shell_exec('systemctl is-active caddy 2>/dev/null')) !== 'active';
         $steps[] = ['name' => 'Detener Caddy', 'ok' => $stopped, 'output' => $stopped ? 'detenido' : trim((string)$out)];
 
-        // Make every PostgreSQL cluster read-only (defense in depth).
+        // Dejar de empujar ficheros al nuevo master. lsyncd copia en ESPEJO: si siguiera
+        // en marcha, borraría en el nuevo master lo que se suba allí mientras este nodo
+        // está apartado. No se toca filesync_enabled: al reactivar (unfenceSelf) o al
+        // volver a ser master se vuelve a arrancar.
+        shell_exec('systemctl stop lsyncd 2>&1');
+        $lsyncdStopped = trim((string)shell_exec('systemctl is-active lsyncd 2>/dev/null')) !== 'active';
+        $steps[] = ['name' => 'Detener lsyncd (copia de ficheros)', 'ok' => $lsyncdStopped, 'output' => $lsyncdStopped ? 'detenido' : 'sigue activo'];
+
+        // Make every PostgreSQL cluster read-only (defense in depth) — menos el del
+        // propio panel: es de este nodo (no se replica) y, en solo lectura, el panel no
+        // podría ni guardar su rol al reconstruirse como slave del nuevo master.
+        $panelPort = (int)\MuseDockPanel\Env::get('DB_PORT', 5433);
         foreach (PgClusterService::listClusters() as $c) {
+            if ((int)$c['port'] === $panelPort) {
+                $steps[] = ['name' => "PostgreSQL {$c['key']}", 'ok' => true, 'output' => 'es la base del panel: se deja con escritura'];
+                continue;
+            }
             $sql = 'ALTER SYSTEM SET default_transaction_read_only = on';
             shell_exec('sudo -u postgres psql -p ' . (int)$c['port'] . ' -c ' . escapeshellarg($sql) . ' 2>&1');
             shell_exec('sudo -u postgres psql -p ' . (int)$c['port'] . ' -c ' . escapeshellarg('SELECT pg_reload_conf()') . ' 2>&1');
@@ -268,6 +283,10 @@ class FailoverSafetyService
             $steps[] = ['name' => "PostgreSQL {$c['key']}", 'ok' => true, 'output' => 'read-only revertido'];
         }
         shell_exec('systemctl start caddy 2>&1');
+        if (Settings::get('filesync_enabled', '0') === '1' && Settings::get('cluster_role', '') === 'master') {
+            shell_exec('systemctl start lsyncd 2>&1');
+            $steps[] = ['name' => 'lsyncd', 'ok' => true, 'output' => 'arrancado de nuevo'];
+        }
         Settings::set('cluster_fenced', '0');
         LogService::log('cluster.failover', 'unfence-self', 'Nodo reactivado');
         return ['ok' => true, 'steps' => $steps];

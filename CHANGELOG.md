@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.272] — 2026-10-03 — Cambio de roles planificado (switchover) seguro y desde la terminal
+
+### Añadido
+- **`bin/cluster-switch.php`** (root): cada paso de un cambio de roles desde la terminal, aunque Caddy esté parado y el panel web del nodo no responda. Órdenes: `status`, `push-config`, `dns-plan`, `fence`, `unfence`, `promote [--force]`, `demote <ip>`, `dns-failover` y `dns-failback`.
+
+### Arreglado
+- **Al apartar un nodo (fence), lsyncd seguía copiando en espejo al nuevo master** y habría borrado allí los ficheros subidos durante el relevo. Ahora se para, y vuelve a arrancar al reactivar el nodo si es master.
+- **Al apartar un nodo, también se ponía en solo lectura la base de su propio panel**, y no podía ni guardar su rol al reconstruirse como slave. Ahora se deja con escritura: es propia de cada nodo y no se replica.
+- **Tras promover un master, el aviso a los demás nodos les daba su IP pública** (la primera de `hostname -I`) y la réplica chocaba con el cortafuegos. Ahora se usa la IP por la que se llega a cada nodo (normalmente la VPN).
+- **Algunas herramientas MCP (`cluster_drift`, `filesync_extra_paths`…) no encontraban un nodo por parte de su nombre** ("Filemon" en lugar de "Filemon (154)"), al contrario que el resto. Ahora lo aceptan si coincide con un único nodo.
+
 ## [1.0.271] — 2026-10-03 — Webmail del slave: carpetas de datos y sesiones
 
 ### Arreglado

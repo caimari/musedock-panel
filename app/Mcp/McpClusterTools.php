@@ -1164,9 +1164,21 @@ final class McpClusterTools
 
     private static function findNode(string $ref): array
     {
-        foreach (ClusterService::getNodes() as $n) {
+        $nodes = ClusterService::getNodes();
+        foreach ($nodes as $n) {
             if ((string)$n['id'] === $ref || strcasecmp((string)$n['name'], $ref) === 0) {
                 return $n;
+            }
+        }
+        // Como el argumento `node` del resto de herramientas: parte del nombre ("Filemon"),
+        // solo si coincide con un único nodo.
+        if (!ctype_digit($ref) && trim($ref) !== '') {
+            $partial = array_values(array_filter($nodes, static fn($n) => stripos((string)$n['name'], $ref) !== false));
+            if (count($partial) === 1) {
+                return $partial[0];
+            }
+            if (count($partial) > 1) {
+                throw new \RuntimeException("'{$ref}' coincide con varios nodos: " . implode(', ', array_column($partial, 'name')) . '. Usa el id.');
             }
         }
         throw new \RuntimeException("Nodo '{$ref}' no encontrado. Usa list_nodes.");

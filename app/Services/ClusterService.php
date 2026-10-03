@@ -2521,15 +2521,25 @@ class ClusterService
                 continue;
             }
 
+            // La IP que ese nodo debe usar para replicar es la de ESTE servidor por la ruta
+            // hacia él (normalmente la VPN), no "la primera de hostname -I", que suele ser
+            // la pública: la réplica por la pública choca con el cortafuegos.
+            $nodeHost = (string)parse_url($nodeUrl, PHP_URL_HOST);
+            $reachIp = $newMasterIp;
+            if ($nodeHost !== '' && filter_var($nodeHost, FILTER_VALIDATE_IP)
+                && preg_match('/\bsrc\s+(\S+)/', (string)shell_exec('ip route get ' . escapeshellarg($nodeHost) . ' 2>/dev/null'), $rm)
+                && filter_var($rm[1], FILTER_VALIDATE_IP)) {
+                $reachIp = $rm[1];
+            }
             try {
                 $result = self::callNode((int)$node['id'], 'POST', 'api/cluster/action', [
                     'action'  => 'reconfigure-replication',
-                    'payload' => ['new_master_ip' => $newMasterIp],
+                    'payload' => ['new_master_ip' => $reachIp],
                 ]);
 
                 if ($result['ok'] ?? false) {
                     LogService::log('cluster.replication', 'broadcast',
-                        "Nodo {$node['name']} reconfigurado → master {$newMasterIp}");
+                        "Nodo {$node['name']} reconfigurado → master {$reachIp}");
                 } else {
                     LogService::log('cluster.replication', 'broadcast-warn',
                         "Nodo {$node['name']}: " . ($result['error'] ?? json_encode($result['errors'] ?? [])));
