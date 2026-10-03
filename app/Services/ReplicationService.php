@@ -1155,13 +1155,20 @@ class ReplicationService
         shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' stop 2>&1');
         $steps[] = ['name' => "Detener clúster {$cluster['key']}", 'ok' => true, 'output' => 'pg_ctlcluster stop (solo este clúster)'];
 
+        // Slot propio en el master ANTES de copiar: así guarda el WAL desde ya y la
+        // réplica no se queda sin historial al arrancar.
+        $slot = static::replicaSlotName($cluster);
+        $slotRes = static::ensureSlotOnMaster($masterIp, $sourcePort, $replUser, $replPass, $slot);
+        $steps[] = ['name' => "Slot {$slot} en el master", 'ok' => $slotRes['ok'], 'output' => $slotRes['message']];
+
         // Stream into a fresh temp dir using a protected password file (no PGPASSWORD in argv).
         $pgpass = static::writeTempPgpass($masterIp, $sourcePort, '*', $replUser, $replPass);
         $safeMaster = escapeshellarg($masterIp);
         $safeUser   = escapeshellarg($replUser);
         $safeTmp    = escapeshellarg($tmpDir);
         $env = 'PGPASSFILE=' . escapeshellarg($pgpass) . ' ';
-        $cmd = $env . "pg_basebackup -h {$safeMaster} -p {$sourcePort} -U {$safeUser} -D {$safeTmp} -Fp -Xs -P -R 2>&1";
+        $cmd = $env . "pg_basebackup -h {$safeMaster} -p {$sourcePort} -U {$safeUser} -D {$safeTmp} -Fp -Xs -P -R"
+             . (!empty($slotRes['ok']) ? ' -S ' . escapeshellarg($slot) : '') . ' 2>&1';
         $output = shell_exec($cmd);
         @unlink($pgpass);
 
@@ -1205,6 +1212,9 @@ class ReplicationService
             return ['ok' => false, 'steps' => $steps, 'error' => "No se pudo instalar el standby; se restauró {$dataDir} desde {$oldDir}."];
         }
 
+        // -R escribió primary_conninfo con el .pgpass TEMPORAL (ya borrado) encima de lo
+        // que traía la copia del master: se deja una sola conexión, con el permanente.
+        static::normalizeStandbyConf("{$dataDir}/postgresql.auto.conf", $masterIp, $sourcePort, $replUser, $replPass, !empty($slotRes['ok']) ? $slot : null);
         static::runChecked('chown -R postgres:postgres ' . escapeshellarg($dataDir));
         $steps[] = ['name' => 'Sustituir directorio de datos', 'ok' => true, 'output' => "anterior apartado en {$oldDir}"];
 
@@ -1429,13 +1439,7 @@ class ReplicationService
         // que ya se ha borrado: la réplica no podría autenticarse ("no password
         // supplied"). Se pasa al .pgpass permanente de postgres, con la entrada de
         // este master.
-        static::ensurePostgresPgpass($newMasterIp, $sourcePort, $replUser, $replPass);
-        static::pointPassfileToPermanent($autoConf);
-        // La configuración copiada del master puede traer SU primary_slot_name (el de
-        // cuando él era réplica): se sustituye por el de este nodo.
-        if (!empty($slotRes['ok'])) {
-            static::setPrimarySlotName($autoConf, $slot);
-        }
+        static::normalizeStandbyConf($autoConf, $newMasterIp, $sourcePort, $replUser, $replPass, !empty($slotRes['ok']) ? $slot : null);
         static::runChecked('chown -R postgres:postgres ' . escapeshellarg($dataDir));
         $steps[] = ['name' => 'Configurar standby', 'ok' => true, 'output' => "standby.signal + primary_conninfo → {$newMasterIp}"];
 
@@ -1566,6 +1570,32 @@ class ReplicationService
         @chmod($autoConf, 0600);
     }
 
+    /**
+     * Deja postgresql.auto.conf de una réplica LIMPIO: una sola primary_conninfo hacia el
+     * master (con el .pgpass permanente, nunca uno temporal), un solo primary_slot_name
+     * (el de este nodo) y sin default_transaction_read_only heredado. pg_rewind y
+     * pg_basebackup -R añaden líneas sobre las que ya traía la copia del otro nodo y se
+     * acumulaban (3 primary_conninfo y 2 slots en Filemon, 2026-10-03). Escribe también
+     * la contraseña en el .pgpass permanente.
+     */
+    public static function normalizeStandbyConf(string $autoConf, string $host, int $port, string $user, string $pass, ?string $slot): void
+    {
+        static::ensurePostgresPgpass($host, $port, $user, $pass);
+        $c = (string)shell_exec('cat ' . escapeshellarg($autoConf) . ' 2>/dev/null');
+        if ($c !== '') {
+            @copy($autoConf, $autoConf . '.bak.' . date('Ymd_His'));
+        }
+        $c = preg_replace('/^\s*(primary_conninfo|primary_slot_name|default_transaction_read_only)\s*=.*\R?/m', '', $c);
+        $node = strtolower(preg_replace('/[^a-z0-9]/i', '', explode('.', (string)gethostname())[0]) ?: 'node');
+        $c = rtrim($c) . "\n"
+            . "primary_conninfo = 'host={$host} port={$port} user={$user} passfile=''" . self::POSTGRES_PGPASS . "'' application_name={$node}'\n"
+            . ($slot ? "primary_slot_name = '{$slot}'\n" : '');
+        file_put_contents($autoConf, $c);
+        @chown($autoConf, 'postgres');
+        @chgrp($autoConf, 'postgres');
+        @chmod($autoConf, 0600);
+    }
+
     public const POSTGRES_PGPASS = '/var/lib/postgresql/.pgpass';
 
     /** Añade/actualiza host:puerto:*:usuario:clave en el .pgpass permanente de postgres (0600). */
@@ -1659,6 +1689,10 @@ class ReplicationService
             'relay-log'  => 'relay-bin',
             'read_only'  => '1',
             'log-bin'    => 'mysql-bin', // needed so this node can later become master
+            // Que lo replicado también quede en el binlog de esta réplica: si un día es el
+            // master, el antiguo puede seguirla por GTID con SOLO lo nuevo (sin esto, no
+            // encuentra en ella sus propias transacciones y hay que copiarlo todo).
+            'log_slave_updates' => '1',
         ], 'mysqld');
         $steps[] = ['name' => 'Configurar MySQL slave', 'ok' => $ok, 'output' => "server-id={$serverId} vendor=" . ($isMaria ? 'mariadb' : 'mysql')];
 
@@ -1796,7 +1830,11 @@ class ReplicationService
                 }
             }
             if (!$dbs) {
-                return ['ok' => false, 'error' => 'No se pudo listar las bases de datos del master (¿el usuario de réplica tiene SHOW DATABASES y SELECT?)'];
+                // Lo habitual: el usuario de réplica solo tiene REPLICATION en el master (le
+                // basta para replicar, no para copiar los datos). Decir exactamente qué falta.
+                $myIp = trim((string)shell_exec('ip route get ' . escapeshellarg($masterIp) . " 2>/dev/null | grep -oP 'src \\K\\S+'")) ?: '<ip-de-esta-replica>';
+                return ['ok' => false, 'error' => "El usuario de réplica no puede ver las bases de datos del master (le faltan permisos para copiarlas). "
+                    . "En el master, como root: GRANT SELECT, SHOW DATABASES, LOCK TABLES, RELOAD, SHOW VIEW, EVENT, TRIGGER ON *.* TO '{$replUser}'@'{$myIp}'; FLUSH PRIVILEGES;"];
             }
             $dumpCmd = escapeshellarg($dumpBin) . ' --defaults-extra-file=' . escapeshellarg($cnf)
                 . ' --single-transaction ' . $masterDataFlag . ' ' . $gtidFlag

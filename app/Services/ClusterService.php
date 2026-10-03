@@ -2510,8 +2510,18 @@ class ClusterService
                 $r = ReplicationService::rewindPgClusterFrom($cluster, $newMasterIp, $srcPort, $pgUser, $pgPass);
                 if (empty($r['ok'])) {
                     // Rewind not possible/failed → full basebackup rebuild (confirmed wipe).
-                    self::progress("PostgreSQL {$cluster['key']}: el rebobinado no fue posible; copia completa…");
+                    $why = trim((string)($r['error'] ?? ''));
+                    foreach (array_reverse($r['steps'] ?? []) as $st) {
+                        if (empty($st['ok']) && !empty($st['output'])) {
+                            $why .= ' | ' . $st['name'] . ': ' . mb_substr(trim((string)$st['output']), 0, 400);
+                            break;
+                        }
+                    }
+                    self::progress("PostgreSQL {$cluster['key']}: el rebobinado no fue posible ({$why}); copia completa…");
+                    LogService::log('cluster.failover', 'pg-rewind-failed', "{$cluster['key']}: {$why}");
+                    $rewindError = $why;
                     $r = ReplicationService::setupPgSlaveForCluster($cluster, $newMasterIp, $srcPort, $pgUser, $pgPass, true);
+                    $r['rewind_error'] = $rewindError;
                 }
                 self::progress("PostgreSQL {$cluster['key']}: " . (!empty($r['ok']) ? 'OK, replicando' : 'ERROR ' . ($r['error'] ?? '')));
                 $results['pg_demote'][$cluster['key']] = $r;
@@ -2627,11 +2637,22 @@ class ClusterService
             $results['unfenced'] = true;
         }
 
-        // Lo copiado del master se vuelve a apagar (programas parados, crons off).
+        // Lo copiado del master se vuelve a apagar (programas parados, crons off) y el
+        // Caddyfile vuelve a ser el propio de slave.
         try {
             $results['config_mirror'] = ConfigMirrorService::deactivate();
         } catch (\Throwable $e) {
             $errors[] = 'Config mirror (desactivar): ' . $e->getMessage();
+        }
+
+        // Ya es slave legítimo: fuera la marca de apartado y el panel de rescate, y Caddy
+        // arrancado como en cualquier slave (antes quedaba parado y el panel sin web).
+        if (is_file(FailoverSafetyService::FENCE_FLAG)) {
+            self::progress('Quitando el aislamiento: Caddy de slave en marcha, sin panel de rescate');
+            @unlink(FailoverSafetyService::FENCE_FLAG);
+            shell_exec('php ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/panel-rescue.php') . ' stop 2>&1');
+            shell_exec('systemctl start caddy 2>&1');
+            $results['caddy'] = trim((string)shell_exec('systemctl is-active caddy 2>/dev/null'));
         }
 
         // Scripts de relevo del administrador (/etc/musedock/hooks/demote.d): parar

@@ -508,6 +508,8 @@ final class ConfigMirrorService
      */
     private const CADDY_LIVE = '/etc/caddy/Caddyfile';
     private const CADDY_STAGED = '/var/lib/musedock/Caddyfile.from-master';
+    /** Caddyfile propio del slave, guardado al poner el del master (promote) para devolverlo (demote). */
+    private const CADDY_OWN = '/var/lib/musedock/Caddyfile.own';
 
     /** Bloques de webs (ni globales ni del panel) de un Caddyfile. */
     private static function caddySites(string $file, int $panelPort): array
@@ -723,9 +725,49 @@ final class ConfigMirrorService
             return;
         }
         self::backup(self::CADDY_LIVE);
+        @copy(self::CADDY_LIVE, self::CADDY_OWN);   // para devolverlo al volver a ser slave
         file_put_contents(self::CADDY_LIVE, $candidate);
         shell_exec('systemctl restart caddy 2>&1'); // el reparador repone las rutas del panel
         $done[] = 'Caddy reiniciado con las webs del master';
+    }
+
+    /**
+     * Lo contrario de activateCaddyfile: al volver a ser slave, el Caddyfile vuelve a
+     * ser el propio (sin las webs del master). Usa la copia guardada al promover; si no
+     * hay (promoción con una versión anterior), el bloque propio del Caddyfile actual +
+     * las webs de la copia más antigua del panel. Valida antes de escribir. No reinicia
+     * Caddy si está parado (nodo apartado): lo arrancará unfence.
+     */
+    public static function deactivateCaddyfile(): ?string
+    {
+        if (!is_file(self::CADDY_LIVE) || !is_file(self::CADDY_STAGED)) {
+            return null;
+        }
+        $live = (string)file_get_contents(self::CADDY_LIVE);
+        $myPort = (int)(Settings::get('panel_port', '8444') ?: 8444);
+        if (is_file(self::CADDY_OWN)) {
+            $own = (string)file_get_contents(self::CADDY_OWN);
+            $ownSites = self::caddySites($own, $myPort);
+        } else {
+            $backups = glob(self::BACKUP_DIR . '/etc_caddy_Caddyfile.*') ?: [];
+            sort($backups);
+            $ownSites = $backups ? self::caddySites((string)@file_get_contents($backups[0]), $myPort) : [];
+            $own = implode("\n\n", array_merge(self::caddyKeep($live, $myPort), $ownSites)) . "\n";
+        }
+        if (self::normSup($own) === self::normSup($live)) {
+            return null;
+        }
+        [$ok, $out] = self::caddyValidate($own, $ownSites, false);
+        if (!$ok) {
+            return 'Caddyfile propio NO restaurado (no valida): ' . trim(implode(' ', array_slice($out, -1)));
+        }
+        self::backup(self::CADDY_LIVE);
+        file_put_contents(self::CADDY_LIVE, $own);
+        if (trim((string)shell_exec('systemctl is-active caddy 2>/dev/null')) === 'active') {
+            shell_exec('systemctl restart caddy 2>&1');
+            return 'Caddyfile propio de slave restaurado y Caddy reiniciado';
+        }
+        return 'Caddyfile propio de slave restaurado (Caddy parado: arrancará al reactivar)';
     }
 
     /**
@@ -1021,6 +1063,14 @@ final class ConfigMirrorService
     {
         $state = self::state();
         $done = [];
+        try {
+            $cf = self::deactivateCaddyfile();
+            if ($cf) {
+                $done[] = $cf;
+            }
+        } catch (\Throwable $e) {
+            $done[] = 'Caddyfile: ' . $e->getMessage();
+        }
         foreach ($state['supervisor'] as $name => $orig) {
             $path = "/etc/supervisor/conf.d/{$name}";
             if (!is_file($path)) {

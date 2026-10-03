@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.277] — 2026-10-03 — La promoción de PostgreSQL ya no puede quedarse a medias
+
+### Arreglado
+- **Grave: al promover un nodo, una base PostgreSQL podía quedarse como réplica en solo lectura.** Para saber si era réplica se consultaba `pg_is_in_recovery()`, y si la consulta fallaba se daba por "ya es principal" y no se promovía. Tampoco se comprobaba el resultado. En la vuelta del relevo del 2026-10-03, la base principal de mortadelo se quedó así y las webs no podían guardar (inscripciones de festgate, formularios, admin del CMS) hasta promoverla a mano. Ahora `standby.signal` es la prueba definitiva, tras promover se comprueba hasta 30 s que acepta escrituras (y se quita el solo lectura del aislamiento), y si no queda promovida, el `promote` lo da como error.
+- **La copia completa de PostgreSQL (cuando no se puede rebobinar) no aplicaba los arreglos de contraseña y slot**, que solo estaban en el rebobinado. Además, `postgresql.auto.conf` acumulaba conexiones y slots de copias anteriores (3 `primary_conninfo` y 2 slots en Filemon). Ahora los dos caminos crean antes su slot en el master (`pg_basebackup -S`) y dejan la configuración limpia con `normalizeStandbyConf`: una sola conexión con el `.pgpass` permanente, un solo slot propio y sin solo lectura heredado.
+- **Cuando el rebobinado falla, se ve el motivo real** en pantalla y en el registro (`pg-rewind-failed`). Antes solo decía "no fue posible". El del 2026-10-03 era: "el origen no es PRIMARY", consecuencia del fallo de promoción.
+- **MariaDB "solo lo nuevo" (GTID) necesita `log_slave_updates`** en el nuevo master: sin él, su binlog no tiene las transacciones del antiguo y no puede seguirle. Ahora se comprueba antes, y si falta lo dice y hace la copia completa. Las réplicas que configura el panel lo activan.
+- **Si al usuario de réplica de MariaDB le faltan permisos para copiar los datos**, el error dice exactamente qué `GRANT` ejecutar en el master.
+- **El `demote` deja el nodo como un slave normal:** devuelve su Caddyfile propio (guardado al promover en `/var/lib/musedock/Caddyfile.own`), quita la marca de apartado y el panel de rescate, y arranca Caddy. Antes se quedaba con el Caddyfile del master y Caddy parado.
+- **El panel de rescate solo tenía certificado para las IPs**: entrando por nombre (MCP, otros nodos) el TLS fallaba ("handshake failed"). Ahora incluye también el nombre del panel y el del servidor.
+
 ## [1.0.276] — 2026-10-03 — Panel de rescate con la CA de siempre; adopt-peer comprueba SSH de verdad
 
 ### Arreglado

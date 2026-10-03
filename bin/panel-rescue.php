@@ -62,6 +62,13 @@ foreach (preg_split('/\s+/', trim((string)shell_exec('hostname -I 2>/dev/null'))
         $names[] = $ip;
     }
 }
+// Y el nombre del panel y del servidor: quien entra por nombre (MCP, otros nodos,
+// navegador) necesita un certificado para ese nombre, o el TLS ni siquiera arranca.
+foreach ([(string)\MuseDockPanel\Settings::get('panel_hostname', ''), (string)gethostname()] as $h) {
+    if ($h !== '' && preg_match('/^[a-z0-9.-]+$/i', $h)) {
+        $names[] = strtolower($h);
+    }
+}
 $names = array_values(array_unique($names));
 
 $cfg = [

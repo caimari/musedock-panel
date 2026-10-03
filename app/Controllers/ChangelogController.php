@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.277',
+                'date' => '2026-10-03',
+                'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Grave: al promover, una base PostgreSQL podia quedarse como replica en solo lectura si la consulta de estado fallaba. Ahora standby.signal manda, se comprueba que acepta escrituras y si no, es error', 'El panel de rescate tiene certificado tambien para el nombre del panel y del servidor', 'La copia completa de PostgreSQL tambien crea su slot y deja una sola conexion con el .pgpass permanente (normalizeStandbyConf)', 'Se registra el motivo real cuando falla pg_rewind', 'MariaDB GTID: se comprueba log_slave_updates en el nuevo master y las replicas lo activan', 'Error de permisos de MariaDB con el GRANT exacto', 'demote devuelve el Caddyfile propio, quita el aislamiento y arranca Caddy'],
+                        'en' => ['Critical: on promote a PostgreSQL cluster could stay a read-only replica if the status query failed. standby.signal now decides, writes are verified, otherwise it is an error', 'The rescue panel certificate also covers the panel and server names', 'Full PostgreSQL copy also creates its slot and leaves a single connection with the permanent .pgpass (normalizeStandbyConf)', 'The real pg_rewind failure reason is logged', 'MariaDB GTID: log_slave_updates checked on the new master and enabled on replicas', 'MariaDB permission error shows the exact GRANT', 'demote restores the own Caddyfile, clears fencing and starts Caddy'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.276',
                 'date' => '2026-10-03',
                 'badge' => 'info',

@@ -383,7 +383,11 @@ class FailoverSafetyService
         $results = [];
         foreach (PgClusterService::listClusters() as $c) {
             $status = ReplicationService::getPgSlaveStatusForCluster($c);
-            if ($status === null) {
+            // Si la consulta falla, getPgSlaveStatusForCluster devuelve null y antes se
+            // daba por "ya es primary": una réplica se quedaba sin promover y las webs en
+            // solo lectura (2026-10-03). standby.signal es la prueba definitiva.
+            $standbyFile = is_file(rtrim((string)($c['data_dir'] ?? ''), '/') . '/standby.signal');
+            if ($status === null && !$standbyFile) {
                 $results[$c['key']] = ['ok' => true, 'skipped' => true, 'message' => 'no esta en recovery (ya es primary)'];
                 continue;
             }
@@ -393,7 +397,22 @@ class FailoverSafetyService
                 continue;
             }
             $r = ReplicationService::promotePgSlaveForCluster($c);
-            $results[$c['key']] = ['ok' => $r['ok'], 'message' => $r['error'] ?? 'promovido'];
+            // Comprobar de verdad que ya acepta escrituras (hasta ~30 s).
+            $promoted = false;
+            for ($i = 0; $i < 15 && !$promoted; $i++) {
+                $rec = ReplicationService::queryCluster($c, 'SELECT pg_is_in_recovery()');
+                $promoted = ($rec[0][0] ?? '') === 'f' && !is_file(rtrim((string)($c['data_dir'] ?? ''), '/') . '/standby.signal');
+                if (!$promoted) {
+                    sleep(2);
+                }
+            }
+            if ($promoted) {
+                // Por si venía de un nodo apartado: que no se quede en solo lectura.
+                ReplicationService::queryCluster($c, 'ALTER SYSTEM RESET default_transaction_read_only');
+                ReplicationService::queryCluster($c, 'SELECT pg_reload_conf()');
+            }
+            $results[$c['key']] = ['ok' => $promoted, 'message' => $promoted ? 'promovido (comprobado: acepta escrituras)'
+                : 'NO quedó promovido: ' . ($r['error'] ?? 'sigue en recuperación')];
         }
         return $results;
     }
@@ -565,6 +584,13 @@ class FailoverSafetyService
             $remote = new \PDO("mysql:host={$masterIp};port={$port}", $user, $pass, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION, \PDO::ATTR_TIMEOUT => 5]);
             $mine = (string)$local->query('SELECT @@GLOBAL.gtid_binlog_pos')->fetchColumn();
             $theirs = (string)$remote->query('SELECT @@GLOBAL.gtid_binlog_pos')->fetchColumn();
+            // El nuevo master tiene que haber guardado en su binlog lo que replicaba de
+            // éste (log_slave_updates); si no, no puede servirle "desde aquí".
+            $lsu = (string)$remote->query('SELECT @@GLOBAL.log_slave_updates')->fetchColumn();
+            if ($lsu !== '1' && strtoupper($lsu) !== 'ON') {
+                return ['ok' => false, 'reason' => 'el nuevo master tiene log_slave_updates desactivado (su binlog no guarda lo que replicaba); se necesita la copia completa. Actívalo en los dos nodos para que la próxima vez sea solo lo nuevo',
+                        'local' => $mine, 'master' => $theirs];
+            }
         } catch (\Throwable $e) {
             return ['ok' => false, 'reason' => 'no se pudo comparar el GTID: ' . $e->getMessage()];
         }
