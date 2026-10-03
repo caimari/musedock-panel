@@ -515,6 +515,12 @@ class RoleSwitchService
             return;
         }
         self::step($task, $st, "Este servidor es ahora copia de {$pre['node']}.", true);
+        // Sin restos de un relevo por caída en este nodo (su Dashboard decía "Primarios caídos").
+        foreach (['failover_activated_at', 'failover_original_master_ip', 'failover_resync_status',
+                  FailoverService::DNS_JOURNAL, FailoverService::DNS_JOURNAL_BACKUP] as $k) {
+            Settings::set($k, '');
+        }
+        Settings::set('failover_state', 'normal');
         $st['state'] = 'done';
         self::step($task, $st, "Cambio de rol terminado: {$pre['node']} es el master.", true);
         LogService::log('cluster.role-switch', 'done', "{$pre['node']} es el master; este servidor es su copia");
@@ -583,6 +589,57 @@ class RoleSwitchService
         }
     }
 
+    /**
+     * Deja el relevo DNS coherente con quién manda de verdad: este servidor (el master)
+     * como principal y los demás como relevo, estado "normal" y sin restos de un relevo
+     * por caída (diarios, marca de activación, resync pendiente). Para después de un
+     * cambio de rol o de un relevo hecho a mano (dns-failover), que dejaba "Primarios
+     * caídos — Failover activo" aunque nadie estuviera caído.
+     */
+    public static function normalizeFailover(): array
+    {
+        $mine = preg_split('/\s+/', trim((string)shell_exec('hostname -I 2>/dev/null'))) ?: [];
+        $servers = FailoverService::getServers();
+        $meId = null;
+        foreach ($servers as $s) {
+            if (in_array((string)($s['ip'] ?? ''), $mine, true)) {
+                $meId = $s['id'];
+            }
+        }
+        if ($meId === null) {
+            return ['ok' => false, 'error' => 'este servidor no está en la lista de servidores del relevo (Failover → Servidores)'];
+        }
+        $other = null;
+        foreach ($servers as &$s) {
+            if ($s['id'] === $meId) {
+                $s['role'] = 'primary';
+            } elseif (in_array($s['role'] ?? '', ['primary', 'failover'], true)) {
+                $s['role'] = 'failover';
+                $s['failover_to'] = '';
+                $other ??= $s['id'];
+            }
+        }
+        unset($s);
+        foreach ($servers as &$s) {
+            if ($s['id'] === $meId) {
+                $s['failover_to'] = (string)($other ?? '');
+            }
+        }
+        unset($s);
+        FailoverService::saveServers($servers);
+        foreach (['failover_activated_at', 'failover_original_master_ip', 'failover_resync_status',
+                  FailoverService::DNS_JOURNAL, FailoverService::DNS_JOURNAL_BACKUP] as $k) {
+            Settings::set($k, '');
+        }
+        Settings::set('failover_state', 'normal');
+        LogService::log('cluster.failover', 'normalize', 'Relevo DNS normalizado: este servidor es el principal');
+        try {
+            FailoverService::pushConfigToSlaves();
+        } catch (\Throwable) {
+        }
+        return ['ok' => true, 'primary' => gethostname(), 'failover' => $other];
+    }
+
     // ── En el nodo elegido ─────────────────────────────────────────────────
 
     public static function startPromoteHere(string $oldVpn, string $oldPub, string $newPub, string $orchestratorTask = ''): array
@@ -648,8 +705,13 @@ class RoleSwitchService
         self::step($task, $st, "DNS movido: {$moved} registros (lo que va por CNAME a ellos se mueve con ellos)"
             . ($st['dns_failed'] ? '; ' . count($st['dns_failed']) . ' no se pudieron cambiar' : '') . '.', !$st['dns_failed']);
 
-        // Invertir los papeles del relevo DNS: ahora vigila el otro.
-        $servers = FailoverService::getServers();
+        // Invertir los papeles del relevo DNS: ahora vigila el otro (y sin restos de un
+        // relevo por caída anterior).
+        $norm = self::normalizeFailover();
+        if (!empty($norm['ok'])) {
+            self::step($task, $st, 'Relevo DNS: este servidor es el principal y el otro el de relevo (estado normal).', true);
+        }
+        $servers = !empty($norm['ok']) ? [] : FailoverService::getServers();
         $newId = $oldId = null;
         foreach ($servers as $srv) {
             if (($srv['ip'] ?? '') === $newPub) $newId = $srv['id'];

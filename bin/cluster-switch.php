@@ -25,6 +25,8 @@
  *                                              ficheros en vivo (lsyncd), como hacía el master
  *   php bin/cluster-switch.php dns-failover    DNS de los primarios → este servidor de relevo
  *   php bin/cluster-switch.php dns-failback    devuelve SOLO lo que movió el relevo (diario)
+ *   php bin/cluster-switch.php failover-normalize   (master) este servidor principal del relevo, estado normal
+ *   php bin/cluster-switch.php pg-rebuild <ip-master> <clúster|all> [--max-rate=20M]   copia completa con avance
  */
 
 require_once dirname(__DIR__) . '/app/bootstrap.php';
@@ -129,6 +131,14 @@ switch ($cmd) {
             $seen = count($st['steps'] ?? []);
         } while (!in_array($st['state'] ?? '', ['done', 'failed'], true));
         $ok = ($st['state'] ?? '') === 'done';
+        break;
+
+    case 'failover-normalize':
+        // En el master: este servidor como principal del relevo DNS, los demás de relevo,
+        // estado normal y sin restos de un relevo por caída (dns-failover a mano).
+        $r = \MuseDockPanel\Services\RoleSwitchService::normalizeFailover();
+        $out($r);
+        $ok = !empty($r['ok']);
         break;
 
     case 'pg-rebuild':

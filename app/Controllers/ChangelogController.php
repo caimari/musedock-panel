@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.285',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Tras un cambio de rol o un dns-failover manual el relevo DNS queda Normal con los papeles correctos; cluster-switch.php failover-normalize', 'GTID de MariaDB comparado con gtid_current_pos del nuevo master (evita copias completas tras un sembrado)'],
+                        'en' => ['After a role switch or manual dns-failover the DNS failover is left Normal with the right roles; cluster-switch.php failover-normalize'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.284',
                 'date' => '2026-10-03',
                 'badge' => 'warning',
