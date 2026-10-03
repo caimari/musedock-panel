@@ -427,6 +427,11 @@ systemctl restart caddy</pre>
     </div>
 </div>
 
+<!-- Cambio de rol en curso o reciente: se rellena solo y sobrevive a recargas -->
+<?php if (!empty($clusterInfo)): ?>
+<div id="rs-active" class="mb-4" style="display:none"></div>
+<?php endif; ?>
+
 <!-- Cluster Status (solo si no es standalone) -->
 <?php if (!empty($clusterInfo)): ?>
 <div class="row g-3 mb-4">
@@ -515,6 +520,56 @@ systemctl restart caddy</pre>
 .nodes-ov .nov-item > i { margin-top: .1rem; }
 </style>
 <script>
+// Progreso del cambio de rol, en el panel de los dos nodos y aunque se recargue la página.
+(function () {
+    const box = document.getElementById('rs-active');
+    if (!box) return;
+    const esc = t => String(t ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    // Hitos del cambio y cuánto suponen del total (el texto de cada paso dice dónde va).
+    const marks = [['Comprobaciones previas', 3], ['Calculando qué dominios', 8], ['Apartando este servidor', 15], ['Esperando a que la copia', 22],
+        ['se está promoviendo', 30], ['Promoviendo este servidor', 35], ['Promovido:', 55], ['Moviendo el DNS', 62], ['DNS movido', 70],
+        ['Relevo DNS invertido', 75], ['Convirtiendo este servidor en copia', 80], ['MariaDB', 88], ['es ahora copia', 96], ['Cambio de rol terminado', 100]];
+    let timer = null, open = false;
+    const load = async () => {
+        let d;
+        try { d = await (await fetch('/settings/cluster/role-switch/active', { cache: 'no-store' })).json(); } catch (e) { return; }
+        const t = d && d.task;
+        if (!t || !t.steps || !t.steps.length) { box.style.display = 'none'; return; }
+        const running = t.state === 'running', failed = t.state === 'failed', done = t.state === 'done';
+        let key = 'rs-dismiss-' + t.task;
+        try { if (!running && localStorage.getItem(key)) { box.style.display = 'none'; return; } } catch (e) {}
+        let pct = 0;
+        t.steps.forEach(s => marks.forEach(([m, p]) => { if ((s.msg || '').includes(m)) pct = Math.max(pct, p); }));
+        if (done) pct = 100;
+        const color = failed ? 'danger' : done ? 'success' : 'info';
+        const last = t.steps[t.steps.length - 1] || {};
+        const icon = s => s.ok === true ? '✅' : s.ok === false ? '❌' : '•';
+        box.style.display = '';
+        box.innerHTML = '<div class="card border-' + color + '"><div class="card-body py-3">'
+            + '<div class="d-flex align-items-center gap-2 mb-2">'
+            + (running ? '<span class="spinner-border spinner-border-sm text-info"></span>' : '<i class="bi ' + (failed ? 'bi-x-octagon-fill text-danger' : 'bi-check-circle-fill text-success') + '"></i>')
+            + '<strong>' + (running ? 'Cambio de rol en marcha' : failed ? 'Cambio de rol PARADO' : 'Cambio de rol terminado') + '</strong>'
+            + (t.node ? '<span class="text-muted small">→ ' + esc(t.node) + '</span>' : '')
+            + (t.source === 'remote' ? '<span class="badge bg-secondary-subtle text-secondary">visto desde ' + esc(t.from || 'el otro nodo') + '</span>' : '')
+            + '<span class="ms-auto small text-muted">' + pct + '%</span>'
+            + (!running ? '<button type="button" class="btn-close btn-close-white ms-2" id="rs-active-x" title="Ocultar"></button>' : '')
+            + '</div>'
+            + '<div class="progress mb-2" style="height:8px"><div class="progress-bar bg-' + color + (running ? ' progress-bar-striped progress-bar-animated' : '') + '" style="width:' + pct + '%"></div></div>'
+            + '<div class="small">' + esc(last.at) + ' ' + icon(last) + ' ' + esc(last.msg) + '</div>'
+            + (failed && t.error ? '<div class="alert alert-danger small mt-2 mb-0">' + esc(t.error) + '</div>' : '')
+            + '<details class="small mt-2"' + (open ? ' open' : '') + ' id="rs-active-d"><summary class="text-muted">Todos los pasos (' + t.steps.length + ')</summary>'
+            + '<div style="max-height:40vh;overflow:auto;font-family:monospace" class="mt-1">'
+            + t.steps.map(s => esc(s.at) + ' ' + icon(s) + ' ' + esc(s.msg)).join('<br>') + '</div></details>'
+            + '</div></div>';
+        const det = document.getElementById('rs-active-d'); if (det) det.addEventListener('toggle', () => { open = det.open; });
+        const x = document.getElementById('rs-active-x'); if (x) x.addEventListener('click', () => { try { localStorage.setItem(key, '1'); } catch (e) {} box.style.display = 'none'; });
+        clearTimeout(timer);
+        if (running) timer = setTimeout(load, 3000);
+    };
+    load();
+    window.rsActiveRefresh = load;
+})();
+
 // Qué copia guarda cada nodo (se pide aparte: consulta a cada nodo y no frena el Dashboard).
 (function () {
     const box = document.getElementById('nodes-overview');

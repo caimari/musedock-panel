@@ -350,7 +350,11 @@ CREATE TABLE IF NOT EXISTS monitor_metrics_hourly (
     ts TIMESTAMP NOT NULL,
     host TEXT NOT NULL DEFAULT 'localhost',
     metric TEXT NOT NULL,
-    value DOUBLE PRECISION NOT NULL
+    avg_val DOUBLE PRECISION,
+    p95_val DOUBLE PRECISION,
+    max_val DOUBLE PRECISION,
+    min_val DOUBLE PRECISION,
+    samples INT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mmh_lookup ON monitor_metrics_hourly(host, metric, ts);
 
@@ -359,7 +363,11 @@ CREATE TABLE IF NOT EXISTS monitor_metrics_daily (
     ts TIMESTAMP NOT NULL,
     host TEXT NOT NULL DEFAULT 'localhost',
     metric TEXT NOT NULL,
-    value DOUBLE PRECISION NOT NULL
+    avg_val DOUBLE PRECISION,
+    p95_val DOUBLE PRECISION,
+    max_val DOUBLE PRECISION,
+    min_val DOUBLE PRECISION,
+    samples INT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mmd_lookup ON monitor_metrics_daily(host, metric, ts);
 

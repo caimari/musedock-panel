@@ -770,6 +770,12 @@ class ClusterController
         $this->jsonOut(\MuseDockPanel\Services\RoleSwitchService::startDnsPlan((string)($_POST['from'] ?? ''), (string)($_POST['to'] ?? '')));
     }
 
+    /** GET /settings/cluster/role-switch/active: el cambio de rol en curso o reciente (para el Dashboard). */
+    public function roleSwitchActive(): void
+    {
+        $this->jsonOut(['ok' => true, 'task' => \MuseDockPanel\Services\RoleSwitchService::activeTask()]);
+    }
+
     /** GET /settings/cluster/nodes-overview: qué copia guarda cada nodo (en el master). */
     public function nodesOverview(): void
     {

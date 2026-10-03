@@ -2305,6 +2305,15 @@ class ClusterService
             $errors[] = 'PG promote: ' . $e->getMessage();
         }
 
+        // Reservar desde YA el WAL que el antiguo master necesitará para reincorporarse
+        // con un rebobinado (solo lo cambiado). Sin esto, el nuevo master borraba ese WAL
+        // en unas horas y la vuelta acababa en copia completa (2026-10-03).
+        try {
+            $results['pg_reserve_for_old_master'] = self::reserveWalForOldMaster($oldMasterIp !== '' ? $oldMasterIp : (string)Settings::get('repl_remote_ip', ''));
+        } catch (\Throwable $e) {
+            $results['pg_reserve_for_old_master'] = ['ok' => false, 'error' => $e->getMessage()];
+        }
+
         // Promote MySQL/MariaDB and PERSIST it. The old code only ran STOP SLAVE
         // and left read_only=1 in my.cnf, so the next restart silently turned the
         // brand-new master read-only again.
@@ -2415,7 +2424,7 @@ class ClusterService
         // Tell all other nodes to reconfigure replication to point to this (new) master
         $myIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
         if ($myIp) {
-            self::broadcastReconfigureReplication($myIp);
+            self::broadcastReconfigureReplication($myIp, $oldMasterIp !== '' ? [$oldMasterIp] : []);
         }
 
         // Fase B (simple): this promoted node is now the mail source of truth. Push
@@ -2555,6 +2564,18 @@ class ClusterService
                 // limpio: se puso en solo lectura antes de promover al otro), basta con
                 // seguirle por GTID: solo llega lo nuevo, en segundos. Si no cuadra, copia
                 // completa (lo único seguro tras escrituras divergentes).
+                // ¿Ya replica de ese master y funciona? Entonces no hay nada que hacer: antes
+                // se volvía a comparar GTID y podía acabar en otra copia completa.
+                $already = [];
+                try {
+                    $already = ReplicationService::getMysqlPdo()?->query('SHOW SLAVE STATUS')->fetch(\PDO::FETCH_ASSOC) ?: [];
+                } catch (\Throwable) {
+                }
+                if (($already['Master_Host'] ?? '') === $newMasterIp && ($already['Slave_IO_Running'] ?? '') === 'Yes' && ($already['Slave_SQL_Running'] ?? '') === 'Yes') {
+                    $results['mysql_mode'] = 'ya replicaba de ' . $newMasterIp . ': no se toca';
+                    self::progress('MariaDB: ya es réplica de ' . $newMasterIp . ' y funciona: no se toca');
+                    $result = ['ok' => true, 'skipped' => 'ya replicando'];
+                } else {
                 $gtid = FailoverSafetyService::mysqlCanFollowByGtid($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass);
                 $results['mysql_mode'] = $gtid['ok'] ? 'solo lo nuevo (GTID)' : 'copia completa: ' . ($gtid['reason'] ?? '?');
                 self::progress('MariaDB: ' . $results['mysql_mode']);
@@ -2575,6 +2596,7 @@ class ClusterService
                     self::progress('MariaDB: el seguimiento por GTID falló; se hace la copia completa');
                     $result = ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass, true);
                     $results['mysql_mode'] = 'copia completa (falló el GTID)';
+                }
                 }
                 $results['mysql_demote'] = $result;
                 self::progress('MariaDB: ' . (!empty($result['ok']) ? 'OK, replicando' : 'ERROR ' . ($result['error'] ?? '')));
@@ -2688,7 +2710,49 @@ class ClusterService
      * Each node will re-run setupPgSlave/setupMysqlSlave pointing to $newMasterIp.
      * If direct call fails, enqueue for retry.
      */
-    public static function broadcastReconfigureReplication(string $newMasterIp): void
+    /**
+     * En el nuevo master: crea en cada PostgreSQL (menos el del panel) el slot físico con
+     * el nombre que usará el antiguo master al volver como copia (<su host>_<ver><clúster>,
+     * ReplicationService::replicaSlotName en ese nodo), con el WAL reservado desde ahora.
+     */
+    public static function reserveWalForOldMaster(string $oldIp): array
+    {
+        if (!filter_var($oldIp, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'skipped' => 'sin IP del antiguo master'];
+        }
+        $host = '';
+        foreach (self::getNodes() as $n) {
+            if ((string)parse_url((string)$n['api_url'], PHP_URL_HOST) !== $oldIp) {
+                continue;
+            }
+            $r = self::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'query-local-state', 'payload' => []]);
+            $host = (string)($r['data']['state']['hostname'] ?? '');
+            if ($host === '') {
+                $meta = json_decode((string)($n['metadata'] ?? ''), true) ?: [];
+                $host = (string)($meta['hostname'] ?? '');
+            }
+            break;
+        }
+        $label = strtolower(preg_replace('/[^a-z0-9]/i', '', explode('.', $host)[0]));
+        if ($label === '') {
+            return ['ok' => false, 'skipped' => "no se sabe el nombre del antiguo master ({$oldIp})"];
+        }
+        $panelPort = (int)\MuseDockPanel\Env::int('DB_PORT', 5432);
+        $done = [];
+        foreach (PgClusterService::listClusters() as $c) {
+            if ($c['cluster'] === 'panel' || (int)$c['port'] === $panelPort) {
+                continue;
+            }
+            $slot = substr($label . '_' . (int)$c['version'] . preg_replace('/[^a-z0-9]/', '', strtolower((string)$c['cluster'])), 0, 63);
+            ReplicationService::queryCluster($c, "SELECT pg_create_physical_replication_slot('{$slot}', true) WHERE NOT EXISTS (SELECT 1 FROM pg_replication_slots WHERE slot_name = '{$slot}')");
+            $ok = ReplicationService::queryCluster($c, "SELECT restart_lsn FROM pg_replication_slots WHERE slot_name = '{$slot}'");
+            $done[$c['key']] = isset($ok[0][0]) && $ok[0][0] !== '' ? "slot {$slot} desde {$ok[0][0]}" : "slot {$slot}: NO creado";
+        }
+        self::progress('WAL reservado para el antiguo master: ' . implode('; ', $done));
+        return ['ok' => true, 'slots' => $done];
+    }
+
+    public static function broadcastReconfigureReplication(string $newMasterIp, array $skipIps = []): void
     {
         $nodes = self::getActiveNodes();
         $myIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
@@ -2701,6 +2765,12 @@ class ClusterService
             }
             // Skip the new master itself (it doesn't need to replicate from itself)
             if (str_contains($nodeUrl, $newMasterIp)) {
+                continue;
+            }
+            // Ni el antiguo master: lo convierte en copia el cambio de rol (demote), con
+            // sus comprobaciones, no un aviso.
+            $host = (string)parse_url($nodeUrl, PHP_URL_HOST);
+            if ($host !== '' && in_array($host, $skipIps, true)) {
                 continue;
             }
 

@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.284',
+                'date' => '2026-10-03',
+                'badge' => 'warning',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Promocion PG: con la replica conectada se mide lo pendiente (<= 16 MB), no segundos desde la ultima transaccion (bloqueaba con el master en solo lectura)', 'Antes de promover se espera a que la replica tenga todo el WAL del master (hasta 2 min); si no, se vuelve atras', 'Promocion a medias sin DNS movido: se vuelve atras solo (el otro apartado, este sirve las webs)', 'Avisos de cambio parado tambien a traves del otro nodo (notify-relay)', 'El antiguo master ya no se siembra MariaDB por el aviso reconfigure-replication; PG nunca por aviso; MariaDB solo por GTID', 'Panel de rescate con los mismos certificados que Caddy', 'Monitorizacion: agregacion horaria fallaba en instalaciones nuevas (columnas avg_val...): migracion + schema.sql corregido', 'El demote no recopia MariaDB si ya replica del nuevo master', 'Al promover se reserva el WAL del antiguo master (slot) para que la vuelta sea rebobinado; el rebobinado comprueba 90 s que replica de verdad', 'pg_basebackup con limite de velocidad (20 MB/s por defecto) y avance cada 15 s; nuevo cluster-switch.php pg-rebuild', 'El rebobinado ya no copia antes la carpeta de datos entera (pre-rewind)'],
+                        'en' => ['PG promotion: with a connected replica pending WAL is measured (<= 16 MB), not seconds since last transaction', 'Wait for the replica to have all master WAL before promoting (up to 2 min), else roll back', 'Half promotion without DNS moved: automatic rollback', 'Stopped-switch alerts also relayed through the other node', 'Old master no longer re-seeds MariaDB on reconfigure-replication; PG never via broadcast; MariaDB GTID only', 'Rescue panel reuses Caddy certificates', 'Monitoring: hourly rollup failed on fresh installs (avg_val columns): migration + fixed schema.sql', 'Demote no longer re-copies MariaDB if already replicating from the new master', 'Promotion reserves the old master WAL (slot) so the return is a rewind; rewind verifies streaming for 90 s', 'pg_basebackup rate-limited (20 MB/s default) with progress; new cluster-switch.php pg-rebuild'],
+                    ],
+                    'added' => [
+                        'es' => ['Progreso del cambio de rol en el Dashboard de los dos nodos, persistente al recargar'],
+                        'en' => ['Role switch progress on both nodes dashboards, persistent across reloads'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.283',
                 'date' => '2026-10-03',
                 'badge' => 'info',

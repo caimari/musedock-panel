@@ -654,7 +654,10 @@ class FailoverSafetyService
             }
             $remote = new \PDO("mysql:host={$masterIp};port={$port}", $user, $pass, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION, \PDO::ATTR_TIMEOUT => 5]);
             $mine = (string)$local->query('SELECT @@GLOBAL.gtid_binlog_pos')->fetchColumn();
-            $theirs = (string)$remote->query('SELECT @@GLOBAL.gtid_binlog_pos')->fetchColumn();
+            // Del nuevo master, gtid_current_pos (lo escrito por él y lo que recibió como
+            // réplica): justo tras un sembrado su binlog puede no tener aún lo replicado y
+            // gtid_binlog_pos se quedaba corto → se creía que faltaba algo y se copiaba todo.
+            $theirs = (string)$remote->query('SELECT @@GLOBAL.gtid_current_pos')->fetchColumn();
             // El nuevo master tiene que haber guardado en su binlog lo que replicaba de
             // éste (log_slave_updates); si no, no puede servirle "desde aquí".
             $lsu = (string)$remote->query('SELECT @@GLOBAL.log_slave_updates')->fetchColumn();

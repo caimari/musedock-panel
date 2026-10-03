@@ -1167,9 +1167,14 @@ class ReplicationService
         $safeUser   = escapeshellarg($replUser);
         $safeTmp    = escapeshellarg($tmpDir);
         $env = 'PGPASSFILE=' . escapeshellarg($pgpass) . ' ';
-        $cmd = $env . "pg_basebackup -h {$safeMaster} -p {$sourcePort} -U {$safeUser} -D {$safeTmp} -Fp -Xs -P -R"
+        // Límite de velocidad (repl_pg_basebackup_max_rate, p. ej. "20M" = 20 MB/s; vacío =
+        // sin límite): la copia completa salía de golpe y saturaba la línea del master
+        // (en un cambio de rol, la conexión de casa si el master es el nodo local).
+        $maxRate = trim((string)\MuseDockPanel\Settings::get('repl_pg_basebackup_max_rate', '20M'));
+        $rateOpt = preg_match('/^\d+[kM]?$/', $maxRate) ? ' --max-rate=' . $maxRate : '';
+        $cmd = $env . "pg_basebackup -h {$safeMaster} -p {$sourcePort} -U {$safeUser} -D {$safeTmp} -Fp -Xs -P -R{$rateOpt}"
              . (!empty($slotRes['ok']) ? ' -S ' . escapeshellarg($slot) : '') . ' 2>&1';
-        $output = shell_exec($cmd);
+        $output = static::runWithProgress($cmd, "PostgreSQL {$cluster['key']}: copia completa");
         @unlink($pgpass);
 
         $tmpOk = is_file("{$tmpDir}/PG_VERSION")
@@ -1291,19 +1296,17 @@ class ReplicationService
             return ['ok' => false, 'steps' => $steps, 'error' => "IP del nuevo master inválida: {$newMasterIp}."];
         }
         $localMajor = (int)$cluster['version'];
-        $asideDir   = rtrim($dataDir, '/') . '.pre-rewind.' . date('Ymd_His');
         $connStr    = "host={$newMasterIp} port={$sourcePort} user={$replUser} dbname=postgres";
 
         $plan = [
             "verificar wal_log_hints=on o data checksums en {$cluster['key']}",
             "verificar que {$newMasterIp}:{$sourcePort} es PRIMARY (no in-recovery) y misma versión mayor",
             "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} stop   # parada limpia (requisito de pg_rewind)",
-            "cp -a --reflink=auto {$dataDir} → {$asideDir}   # copia de seguridad (CoW si es posible), NO se borra",
             "pg_rewind --target-pgdata={$dataDir} --source-server=\"{$connStr}\" --write-recovery-conf --progress",
             "asegurar standby.signal + primary_conninfo apuntando a {$newMasterIp}",
             "chown -R postgres:postgres {$dataDir}",
             "pg_ctlcluster {$cluster['version']} {$cluster['cluster']} start   # arranca como standby",
-            "(rollback si falla: rm -rf {$dataDir} && mv {$asideDir} {$dataDir})",
+            "(si falla: copia completa desde el nuevo master, que es quien tiene los datos buenos)",
         ];
         if ($dryRun) {
             return ['ok' => true, 'dry_run' => true, 'steps' => $steps, 'plan' => $plan, 'error' => null];
@@ -1363,16 +1366,10 @@ class ReplicationService
         shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' stop 2>&1');
         $steps[] = ['name' => "Detener clúster {$cluster['key']}", 'ok' => true, 'output' => 'pg_ctlcluster stop (solo este clúster)'];
 
-        // ── Set aside a FULL backup of the data dir (never delete) ──────
-        // --reflink=auto makes this near-instant on CoW filesystems (btrfs/XFS)
-        // and falls back to a full copy elsewhere — the cluster is stopped during
-        // this copy, so on a large data dir a reflink dramatically cuts downtime.
-        $cp = static::runChecked('cp -a --reflink=auto ' . escapeshellarg($dataDir) . ' ' . escapeshellarg($asideDir));
-        if (!$cp['ok']) {
-            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
-            return ['ok' => false, 'steps' => $steps, 'error' => "No se pudo respaldar el data dir antes del rewind: {$cp['output']}. Operación abortada, clúster reiniciado."];
-        }
-        $steps[] = ['name' => 'Backup pre-rewind', 'ok' => true, 'output' => $asideDir];
+        // Sin copia local previa de la carpeta de datos: este nodo es el que deja de mandar
+        // y los datos buenos están en el nuevo master; si el rebobinado falla, se copia de
+        // allí. La copia local tardaba minutos por clúster y llenaba el disco de carpetas
+        // *.pre-rewind.* (2026-10-03).
 
         // ── Slot en el nuevo master ANTES de rebobinar ──
         // Sin slot, el nuevo master recicla su WAL y, si la réplica tarda en
@@ -1405,16 +1402,7 @@ class ReplicationService
         $steps[] = ['name' => 'pg_rewind', 'ok' => $rw['ok'], 'output' => $rw['ok'] ? 'OK' : $rw['output']];
 
         if (!$rw['ok']) {
-            // Restore from the aside backup — rewind may have partially written.
-            static::runChecked('rm -rf ' . escapeshellarg($dataDir));
-            $restore = static::runChecked('mv ' . escapeshellarg($asideDir) . ' ' . escapeshellarg($dataDir));
-            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
-            if ($restore['ok']) {
-                $steps[] = ['name' => 'Rollback', 'ok' => true, 'output' => "Restaurado {$asideDir} → {$dataDir}"];
-                return ['ok' => false, 'steps' => $steps, 'error' => "pg_rewind falló; se restauró el estado anterior. Detalle: {$rw['output']}"];
-            }
-            $steps[] = ['name' => 'Rollback', 'ok' => false, 'output' => "FALLO al restaurar. Copia intacta en {$asideDir}."];
-            return ['ok' => false, 'steps' => $steps, 'error' => "pg_rewind falló y el rollback automático falló. Datos a salvo en {$asideDir} — restauración manual."];
+            return ['ok' => false, 'steps' => $steps, 'error' => "pg_rewind falló (se pasa a la copia completa desde el nuevo master). Detalle: {$rw['output']}"];
         }
 
         // ── Belt-and-suspenders: guarantee standby.signal + primary_conninfo ──
@@ -1454,27 +1442,78 @@ class ReplicationService
             if (PgClusterService::isRunning($cluster)) { $running = true; break; }
         }
         if (!$running) {
-            static::runChecked('rm -rf ' . escapeshellarg($dataDir));
-            $restore = static::runChecked('mv ' . escapeshellarg($asideDir) . ' ' . escapeshellarg($dataDir));
-            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
-            if ($restore['ok']) {
-                $steps[] = ['name' => 'Rollback', 'ok' => true, 'output' => "No arrancó como standby; restaurado {$asideDir}"];
-                return ['ok' => false, 'steps' => $steps, 'error' => "El clúster no arrancó tras el rewind; se restauró el estado anterior."];
-            }
-            $steps[] = ['name' => 'Rollback', 'ok' => false, 'output' => "FALLO al restaurar. Copia intacta en {$asideDir}."];
-            return ['ok' => false, 'steps' => $steps, 'error' => "El clúster no arrancó y el rollback falló. Datos a salvo en {$asideDir}."];
+            return ['ok' => false, 'steps' => $steps, 'error' => "El clúster no arrancó tras el rebobinado (se pasa a la copia completa desde el nuevo master)."];
         }
 
-        // Confirm it actually came up in recovery (as a standby, not a primary).
-        $inRecovery = trim((string)shell_exec('sudo -u postgres psql -p ' . (int)$cluster['port'] . " -tAc 'SELECT pg_is_in_recovery();' 2>&1"));
-        $steps[] = ['name' => "Iniciar clúster {$cluster['key']}", 'ok' => true, 'output' => $inRecovery === 't' ? 'Activo como standby (in-recovery)' : "Activo pero pg_is_in_recovery={$inRecovery} — REVISAR"];
+        // Que de verdad replique: hasta 90 s esperando a que reciba del nuevo master. Antes
+        // se daba por bueno con que arrancara, y en el cambio del 2026-10-03 los dos
+        // clústeres quedaron "OK" pero sin replicar: el nuevo master ya había borrado el
+        // WAL desde el relevo y el antiguo no podía alcanzar un estado consistente.
+        $streaming = false;
+        $inRecovery = '';
+        for ($i = 0; $i < 30 && !$streaming; $i++) {
+            usleep(3_000_000);
+            $inRecovery = trim((string)shell_exec('sudo -u postgres psql -p ' . (int)$cluster['port'] . " -tAc 'SELECT pg_is_in_recovery();' 2>/dev/null"));
+            $wr = trim((string)shell_exec('sudo -u postgres psql -p ' . (int)$cluster['port'] . " -tAc \"SELECT status FROM pg_stat_wal_receiver\" 2>/dev/null"));
+            $streaming = $inRecovery === 't' && $wr === 'streaming';
+        }
+        if (!$streaming) {
+            $log = '/var/log/postgresql/postgresql-' . $cluster['version'] . '-' . $cluster['cluster'] . '.log';
+            $tail = (string)shell_exec('tail -n 40 ' . escapeshellarg($log) . ' 2>/dev/null');
+            $walGone = (bool)preg_match('/already been removed|ya ha sido eliminado/i', $tail);
+            $why = $walGone
+                ? 'el nuevo master ya no tiene el WAL desde el relevo (lo borró antes de que este nodo volviera)'
+                : 'no recibe del nuevo master en 90 s (mira ' . $log . ')';
+            $steps[] = ['name' => "Replicar desde {$newMasterIp}", 'ok' => false, 'output' => $why];
+            return [
+                'ok' => false, 'steps' => $steps,
+                'error' => "{$cluster['key']}: rebobinado hecho pero NO replica: {$why}. Hace falta la copia completa de este clúster (el demote la hace a continuación; a mano: php bin/cluster-switch.php pg-rebuild {$newMasterIp} {$cluster['key']})",
+                'in_recovery' => ($inRecovery === 't'), 'needs_basebackup' => $walGone,
+            ];
+        }
+        $steps[] = ['name' => "Iniciar clúster {$cluster['key']}", 'ok' => true, 'output' => 'standby replicando (streaming) desde ' . $newMasterIp];
 
         return [
             'ok' => true, 'steps' => $steps, 'error' => null,
-            'aside_data_dir' => $asideDir,
             'in_recovery'    => ($inRecovery === 't'),
-            'note'           => "Antiguo master reincorporado como standby de {$newMasterIp} vía pg_rewind. Copia de seguridad en {$asideDir} (borrar cuando se confirme la salud).",
+            'note'           => "Antiguo master reincorporado como standby de {$newMasterIp} vía pg_rewind (solo lo cambiado).",
         ];
+    }
+
+    /**
+     * Ejecuta un comando largo (pg_basebackup -P) y va contando su avance por
+     * ClusterService::progress cada ~15 s ("1234/5678 MB, 22 %"), para que en la
+     * terminal y en el panel se vea que avanza. Devuelve toda la salida, como shell_exec.
+     */
+    public static function runWithProgress(string $cmd, string $label): string
+    {
+        $p = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        if (!is_resource($p)) {
+            return (string)shell_exec($cmd);
+        }
+        stream_set_blocking($pipes[1], false);
+        $all = '';
+        $last = 0;
+        while (true) {
+            $chunk = (string)stream_get_contents($pipes[1]);
+            $all .= $chunk;
+            if (time() - $last >= 15 && preg_match_all('#(\d+)/(\d+) kB \((\d+)%\)#', $all, $m, PREG_SET_ORDER)) {
+                $x = end($m);
+                \MuseDockPanel\Services\ClusterService::progress(sprintf('%s: %d de %d MB (%d %%)', $label, (int)$x[1] / 1024, (int)$x[2] / 1024, (int)$x[3]));
+                $last = time();
+                $all = substr($all, -4000);   // que no crezca sin límite
+            }
+            $st = proc_get_status($p);
+            if (!$st['running']) {
+                $all .= (string)stream_get_contents($pipes[1]);
+                break;
+            }
+            usleep(500_000);
+        }
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_close($p);
+        return $all;
     }
 
     /**
@@ -2838,7 +2877,20 @@ class ReplicationService
         // unless the caller explicitly forced it ($maxLagSeconds === null).
         if ($maxLagSeconds !== null) {
             $st = static::getPgSlaveStatusForCluster($cluster);
-            if ($st !== null) {
+            // Con la réplica conectada (streaming) el master le manda todo lo que escribe:
+            // si ha aplicado lo recibido, no le falta nada, aunque haga rato de la última
+            // transacción. Los segundos desde la última transacción NO miden retraso: con
+            // el master apartado (solo lectura) suben sin parar y la promoción de un cambio
+            // de rol se bloqueaba con la réplica al día (2026-10-03, webs caídas).
+            $pending = null;
+            if ($st !== null && !empty($st['streaming'])) {
+                $d = static::queryCluster($cluster, 'SELECT pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn())::bigint');
+                $pending = isset($d[0][0]) && is_numeric($d[0][0]) ? max(0, (int)$d[0][0]) : null;
+            }
+            if ($st !== null && $pending !== null && $pending <= 16 * 1024 * 1024) {
+                $steps[] = ['name' => 'Comprobar retraso', 'ok' => true,
+                    'output' => "conectada al master, pendiente de aplicar {$pending} B (última transacción hace {$st['lag_seconds']}s)"];
+            } elseif ($st !== null) {
                 $lag = (int)($st['lag_seconds'] ?? 999999);
                 if ($lag > $maxLagSeconds) {
                     $steps[] = ['name' => 'Comprobar retraso (lag)', 'ok' => false,

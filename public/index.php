@@ -579,6 +579,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/promote', 'ClusterController@promoteLocal');
 \MuseDockPanel\Router::get('/settings/cluster/role-switch/preflight', 'ClusterController@roleSwitchPreflight');
 \MuseDockPanel\Router::get('/settings/cluster/nodes-overview', 'ClusterController@nodesOverview');
+\MuseDockPanel\Router::get('/settings/cluster/role-switch/active', 'ClusterController@roleSwitchActive');
 \MuseDockPanel\Router::post('/settings/cluster/role-switch/dns-plan', 'ClusterController@roleSwitchDnsPlan');
 \MuseDockPanel\Router::post('/settings/cluster/role-switch/start', 'ClusterController@roleSwitchStart');
 \MuseDockPanel\Router::get('/settings/cluster/role-switch/status', 'ClusterController@roleSwitchStatus');

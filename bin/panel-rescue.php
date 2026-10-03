@@ -92,11 +92,19 @@ $cfg = [
 // Misma autoridad de certificados que el Caddy principal: los otros nodos del cluster
 // ya confían en ella (su CA está anclada en cada nodo). Con una CA nueva, la API del
 // panel fallaba desde los demás ("authority and subject key identifier mismatch").
-foreach (['/var/lib/caddy/.local/share/caddy/pki', '/root/.local/share/caddy/pki'] as $pki) {
-    if (is_dir($pki . '/authorities/local')) {
+// Y los MISMOS certificados que ya servía (los de la CA interna): con uno nuevo, el
+// navegador que había aceptado el anterior (entrada por IP, "No seguro") rechazaba en
+// silencio las consultas del progreso del cambio de rol y parecía que no avanzaba.
+// Los que falten se emiten con esa misma CA.
+foreach (['/var/lib/caddy/.local/share/caddy', '/root/.local/share/caddy'] as $store) {
+    if (is_dir($store . '/pki/authorities/local')) {
         @mkdir("{$dir}/data", 0700, true);
-        shell_exec('rm -rf ' . escapeshellarg("{$dir}/data/pki") . ' && cp -a ' . escapeshellarg($pki) . ' ' . escapeshellarg("{$dir}/data/pki"));
-        shell_exec('rm -rf ' . escapeshellarg("{$dir}/data/certificates"));   // que se reemitan con esa CA
+        shell_exec('rm -rf ' . escapeshellarg("{$dir}/data/pki") . ' && cp -a ' . escapeshellarg("{$store}/pki") . ' ' . escapeshellarg("{$dir}/data/pki"));
+        shell_exec('rm -rf ' . escapeshellarg("{$dir}/data/certificates"));
+        if (is_dir("{$store}/certificates/local")) {
+            @mkdir("{$dir}/data/certificates", 0700, true);
+            shell_exec('cp -a ' . escapeshellarg("{$store}/certificates/local") . ' ' . escapeshellarg("{$dir}/data/certificates/local"));
+        }
         break;
     }
 }

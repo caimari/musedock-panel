@@ -2,6 +2,35 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.284] — 2026-10-03 — Cambio de rol robusto: nunca a medias ni a ciegas
+
+Lo aprendido en la prueba del 3-oct, en la que el cambio se paró a mitad y las webs se quedaron sin servidor.
+
+### Arreglado
+- **La promoción de PostgreSQL se bloqueaba con la réplica al día.** Medía "segundos desde la última transacción", y con el master apartado (solo lectura) suben sin parar. Ahora, si la réplica está conectada al master y le queda poco por aplicar (≤ 16 MB), se promueve. La medida en segundos solo cuenta si la réplica no está conectada (caída real del master).
+- **Antes de promover al otro, se espera a que tenga todo.** Tras apartarse, el master compara la posición del WAL de cada PostgreSQL con lo aplicado por la réplica, hasta 2 minutos. Si no llega, se vuelve atrás sin tocar nada.
+- **Si el otro se promueve a medias y el DNS no se ha movido, se vuelve atrás solo.** Se aparta al otro (sus bases en solo lectura) y este servidor vuelve a servir las webs. Antes se quedaba apartado, con las webs caídas. Si el DNS ya se movió, las webs están en el otro y se dice cómo terminar.
+- **El aviso de un cambio parado no llegaba.** El nodo apartado tiene el correo parado. Ahora el aviso sale también a través del otro nodo (acción de cluster `notify-relay`), y el que se promueve avisa si su promoción falla.
+- **El antiguo master se sembraba MariaDB entera por un aviso.** Al promoverse, el nuevo master pide a los nodos que repliquen de él (`reconfigure-replication`). El antiguo master lo atendía haciendo una copia completa de MariaDB dentro de la petición, y el panel quedaba bloqueado. Ahora:
+  - ese aviso no se manda al antiguo master;
+  - un nodo que es o era master, o que está apartado, no lo atiende;
+  - PostgreSQL nunca se reconfigura por aviso;
+  - MariaDB solo sigue por GTID (solo lo nuevo) y nunca hace una copia completa automática.
+- **Monitorización: la agregación horaria fallaba cada 30 s en instalaciones nuevas** ("no existe la columna avg_val"): `database/schema.sql` creaba las tablas de resumen horario y diario con otras columnas que las que usa el recolector, y las gráficas de 7 días o más quedaban vacías. Migración que añade las columnas que faltan (sin borrar nada) y `schema.sql` corregido.
+- **El paso a copia (demote) no vuelve a copiar MariaDB entera si ya replica del nuevo master.**
+- **El antiguo master volvía "OK" sin replicar PostgreSQL.** El nuevo master borraba en unas horas el WAL desde el relevo, y el rebobinado del antiguo no podía alcanzar un estado consistente ("requested WAL segment … has already been removed"). Pero el demote lo daba por bueno solo con que arrancara. Ahora:
+  - **al promover**, el nuevo master crea en cada PostgreSQL el slot del antiguo master (`<host>_<versión><clúster>`) con el WAL reservado desde ese momento, así la vuelta siempre puede ser un rebobinado (solo lo cambiado);
+  - **el rebobinado comprueba hasta 90 s que de verdad replica** (`pg_stat_wal_receiver` en *streaming*); si no, lo dice y el demote pasa a la copia completa.
+- **El rebobinado ya no hace una copia local de toda la carpeta de datos antes** (`*.pre-rewind.*`): tardaba minutos por clúster y llenaba el disco, y no aporta nada (los datos buenos están en el nuevo master; si el rebobinado falla, se copia de allí).
+- **La copia completa de PostgreSQL ya no satura la línea**: `pg_basebackup` va con límite de velocidad (`repl_pg_basebackup_max_rate`, 20 MB/s por defecto; vacío = sin límite) y enseña su avance (MB y %) cada 15 s en la terminal y en el panel.
+
+### Añadido también
+- `cluster-switch.php pg-rebuild <ip-master> <clúster|all> [--max-rate=10M]`: copia completa de un clúster PostgreSQL desde el master, con avance. Aparta los datos actuales, no los borra.
+- **El panel de rescate usa los mismos certificados que el Caddy principal.** Con uno nuevo, el navegador que había aceptado el anterior rechazaba en silencio las consultas del progreso.
+
+### Añadido
+- **Progreso del cambio de rol en el Dashboard de los dos nodos**: barra de progreso, último paso y todos los pasos. Sigue ahí aunque se recargue la página o se entre por el panel del otro nodo (el que recibe el mando enseña la versión completa del que lo pasa).
+
 ## [1.0.283] — 2026-10-03 — Sin "www." en los subdominios
 
 ### Arreglado

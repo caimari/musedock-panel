@@ -131,6 +131,35 @@ switch ($cmd) {
         $ok = ($st['state'] ?? '') === 'done';
         break;
 
+    case 'pg-rebuild':
+        // Copia completa (pg_basebackup) de un clúster PostgreSQL desde el master, para
+        // cuando el rebobinado no es posible. Aparta los datos actuales (no los borra).
+        $ip = (string)($argv[2] ?? '');
+        $which = (string)($argv[3] ?? '');
+        if (!filter_var($ip, FILTER_VALIDATE_IP) || $which === '') {
+            fwrite(STDERR, "Uso: pg-rebuild <ip-vpn-del-master> <clúster, p. ej. 14/main | all> [--max-rate=20M]\n");
+            exit(1);
+        }
+        foreach ($argv as $a) {
+            if (preg_match('/^--max-rate=(\d+[kM]?|0)$/', $a, $m)) {
+                Settings::set('repl_pg_basebackup_max_rate', $m[1] === '0' ? '' : $m[1]);
+            }
+        }
+        $pgUser = Settings::get('repl_pg_user', Settings::get('repl_panel_slave_ip', '') !== '' ? 'repl_panel' : 'replicator');
+        $pgPass = \MuseDockPanel\Services\ReplicationService::decryptPassword(Settings::get('repl_pg_password', Settings::get('repl_pg_pass', '')));
+        $panelPort = (int)\MuseDockPanel\Env::int('DB_PORT', 5432);
+        $ok = true;
+        foreach (\MuseDockPanel\Services\PgClusterService::listClusters() as $c) {
+            if ($c['cluster'] === 'panel' || (int)$c['port'] === $panelPort || ($which !== 'all' && $c['key'] !== $which)) {
+                continue;
+            }
+            echo '[' . date('H:i:s') . "] {$c['key']}: copia completa desde {$ip} (límite " . (Settings::get('repl_pg_basebackup_max_rate', '20M') ?: 'ninguno') . ")…\n";
+            $r = \MuseDockPanel\Services\ReplicationService::setupPgSlaveForCluster($c, $ip, (int)$c['port'], $pgUser, $pgPass, true);
+            echo '[' . date('H:i:s') . "] {$c['key']}: " . (!empty($r['ok']) ? 'OK, replicando' : 'ERROR ' . ($r['error'] ?? '')) . "\n";
+            $ok = $ok && !empty($r['ok']);
+        }
+        break;
+
     case 'adopt-peer':
         // (en el master) registrar el otro nodo y mandarle los ficheros en vivo
         $out(ClusterService::adoptPeerAsFileSyncTarget((string)($argv[2] ?? '')));

@@ -556,8 +556,19 @@ class ClusterApiController
                 // Cambio de rol planificado (RoleSwitchService).
                 'role-switch-health'  => ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::health()],
                 'role-switch-promote' => ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::startPromoteHere(
-                    (string)($payload['old_vpn_ip'] ?? ''), (string)($payload['old_public_ip'] ?? ''), (string)($payload['new_public_ip'] ?? ''))],
+                    (string)($payload['old_vpn_ip'] ?? ''), (string)($payload['old_public_ip'] ?? ''), (string)($payload['new_public_ip'] ?? ''),
+                    (string)($payload['orchestrator_task'] ?? ''))],
                 'role-switch-status'  => ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::status((string)($payload['task'] ?? ''))],
+                // Otro nodo del cluster pide enviar un aviso (él puede tener el correo parado, p. ej. apartado).
+                'notify-relay' => (function () use ($payload) {
+                    $subj = mb_substr(trim((string)($payload['subject'] ?? '')), 0, 200);
+                    $msg = mb_substr((string)($payload['message'] ?? ''), 0, 20000);
+                    if ($subj === '') {
+                        return ['ok' => false, 'error' => 'falta el asunto'];
+                    }
+                    \MuseDockPanel\Services\NotificationService::send($subj, $msg);
+                    return ['ok' => true];
+                })(),
                 // Un slave pide al master que le pase el mando a él.
                 'role-switch-request' => (function () {
                     $nid = (int)($_REQUEST['_api_node_id'] ?? 0);
@@ -872,39 +883,42 @@ class ClusterApiController
             return ['ok' => true, 'skipped' => true, 'reason' => 'This node is the new master'];
         }
 
+        // El antiguo master (o un nodo apartado) NO se reconfigura por aquí: eso lo hace
+        // el cambio de rol / demote con sus comprobaciones (rebobinado de PostgreSQL,
+        // GTID de MariaDB). Antes, el aviso del nodo recién promovido hacía que el antiguo
+        // master se sembrara MariaDB entera dentro de esta petición, con el panel
+        // bloqueado mientras tanto (2026-10-03).
+        if ($myRole === 'master' || Settings::get('cluster_fenced', '0') === '1' || is_file(\MuseDockPanel\Services\FailoverSafetyService::FENCE_FLAG)) {
+            return ['ok' => true, 'skipped' => true, 'reason' => 'este nodo es (o era) el master o está apartado: se convierte en copia con el demote, no por aviso'];
+        }
+
         $errors = [];
         $results = [];
 
-        // Reconfigure PostgreSQL (port 5432 — hosting DB)
-        $pgUser = Settings::get('repl_pg_user', 'replicator');
-        $pgPass = \MuseDockPanel\Services\ReplicationService::decryptPassword(Settings::get('repl_pg_pass', ''));
-        $pgPort = (int)Settings::get('repl_pg_port', '5432');
+        // PostgreSQL: no se toca por aquí. El camino antiguo (setupPgSlave) es de un solo
+        // clúster y reconstruye desde cero; las réplicas por clúster se gestionan en
+        // Replicación o con el demote (rebobinado + slots).
+        $results['pg'] = ['skipped' => true, 'reason' => 'PostgreSQL se reconfigura por clúster (Replicación / demote), no por aviso'];
 
-        if ($pgUser && $pgPass) {
-            try {
-                $pgResult = \MuseDockPanel\Services\ReplicationService::setupPgSlave($newMasterIp, $pgPort, $pgUser, $pgPass);
-                $results['pg'] = $pgResult;
-                if (!$pgResult['ok']) {
-                    $errors[] = 'PG: ' . ($pgResult['error'] ?? 'Unknown');
-                }
-            } catch (\Throwable $e) {
-                $errors[] = 'PG: ' . $e->getMessage();
-            }
-        } else {
-            $results['pg'] = ['skipped' => true, 'reason' => 'No replication credentials configured'];
-        }
-
-        // Reconfigure MySQL
+        // MariaDB: solo si este nodo ya es réplica, y solo siguiendo por GTID (solo lo
+        // nuevo). Nunca una copia completa automática: si no cuadra, se avisa y se decide.
         $mysqlUser = Settings::get('repl_mysql_user', 'repl_user');
         $mysqlPass = \MuseDockPanel\Services\ReplicationService::decryptPassword(Settings::get('repl_mysql_pass', ''));
         $mysqlPort = (int)Settings::get('repl_mysql_port', '3306');
 
-        if ($mysqlUser && $mysqlPass) {
+        if (Settings::get('repl_mysql_role', 'standalone') !== 'slave') {
+            $results['mysql'] = ['skipped' => true, 'reason' => 'MariaDB de este nodo no es réplica'];
+        } elseif ($mysqlUser && $mysqlPass) {
             try {
-                $mysqlResult = \MuseDockPanel\Services\ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass);
-                $results['mysql'] = $mysqlResult;
-                if (!$mysqlResult['ok']) {
-                    $errors[] = 'MySQL: ' . ($mysqlResult['error'] ?? 'Unknown');
+                $gtid = \MuseDockPanel\Services\FailoverSafetyService::mysqlCanFollowByGtid($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass);
+                if (!empty($gtid['ok'])) {
+                    $mysqlResult = \MuseDockPanel\Services\ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass, false);
+                    $results['mysql'] = $mysqlResult + ['mode' => 'GTID (solo lo nuevo)'];
+                    if (!$mysqlResult['ok']) {
+                        $errors[] = 'MySQL: ' . ($mysqlResult['error'] ?? 'Unknown');
+                    }
+                } else {
+                    $errors[] = 'MariaDB no puede seguir al nuevo master por GTID (' . ($gtid['reason'] ?? '?') . '): necesita una copia completa, que no se hace sola. Hazla desde Replicación cuando decidas.';
                 }
             } catch (\Throwable $e) {
                 $errors[] = 'MySQL: ' . $e->getMessage();

@@ -295,6 +295,42 @@ class RoleSwitchService
                 'ips' => ['my_vpn' => $myVpn, 'their_vpn' => $vpn, 'my_public' => $myPub, 'their_public' => $theirPub]];
     }
 
+    // ── Cambio en curso o reciente, para el Dashboard de cualquier nodo ───────
+
+    /**
+     * El cambio de rol más reciente que ha pasado por este nodo (como el que pasa el
+     * mando o como el que lo recibe), para enseñar su progreso en el Dashboard aunque
+     * se recargue la página o se entre por el panel del otro nodo. En el que lo recibe
+     * se pide al otro su versión completa (lleva también los pasos de este lado).
+     */
+    public static function activeTask(int $maxAgeHours = 6): ?array
+    {
+        $files = array_merge(glob(self::DIR . '/role-switch-switch-*.json') ?: [], glob(self::DIR . '/role-switch-promote-*.json') ?: []);
+        usort($files, static fn($a, $b) => filemtime($b) <=> filemtime($a));
+        $f = $files[0] ?? null;
+        if (!$f || time() - filemtime($f) > $maxAgeHours * 3600) {
+            return null;
+        }
+        $task = preg_replace('/^role-switch-|\.json$/', '', basename($f));
+        $st = self::status($task);
+        $out = ['task' => $task, 'role' => $st['role'] ?? '', 'state' => $st['state'] ?? 'unknown', 'error' => $st['error'] ?? '',
+                'steps' => $st['steps'] ?? [], 'updated_at' => $st['updated_at'] ?? '', 'node' => $st['node'] ?? '', 'source' => 'local'];
+        if (($st['role'] ?? '') === 'target' && !empty($st['orchestrator_task']) && !empty($st['old_vpn'])) {
+            foreach (ClusterService::getNodes() as $n) {
+                if ((string)parse_url((string)$n['api_url'], PHP_URL_HOST) === $st['old_vpn']) {
+                    $r = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'role-switch-status', 'payload' => ['task' => $st['orchestrator_task']]]);
+                    $o = $r['data']['result'] ?? null;
+                    if (is_array($o) && !empty($o['steps'])) {
+                        $out = ['task' => $st['orchestrator_task'], 'role' => 'target', 'state' => $o['state'] ?? 'unknown', 'error' => $o['error'] ?? '',
+                                'steps' => $o['steps'], 'updated_at' => $o['updated_at'] ?? '', 'node' => $o['node'] ?? '', 'source' => 'remote', 'from' => $n['name']];
+                    }
+                    break;
+                }
+            }
+        }
+        return $out;
+    }
+
     // ── Plan de DNS del cambio (en el master, en segundo plano) ─────────────
 
     /** Tarea fija por pareja de IPs: el plan se reutiliza unos minutos (botón, orquestación, correo). */
@@ -371,15 +407,13 @@ class RoleSwitchService
     {
         $st = self::status($task);
         $st['state'] = 'running';
-        $fail = static function (string $msg) use ($task, &$st): void {
+        $fail = static function (string $msg) use ($task, &$st, $nodeId): void {
             $st['state'] = 'failed';
             $st['error'] = $msg;
             self::step($task, $st, 'PARADO: ' . $msg, false);
             LogService::log('cluster.role-switch', 'failed', $msg);
-            try {
-                NotificationService::send('Cambio de rol PARADO', $msg . "\n\nRevisa el panel (Dashboard → Rol de este servidor).");
-            } catch (\Throwable) {
-            }
+            self::alert('Cambio de rol PARADO', $msg . "\n\nRevisa los dos paneles (Dashboard).\n\n── Pasos ──\n"
+                . implode("\n", array_map(static fn($s) => "{$s['at']} {$s['msg']}", $st['steps'])), $nodeId);
         };
         ClusterService::$progressCb = static function (string $m) use ($task, &$st): void {
             self::step($task, $st, $m);
@@ -412,11 +446,23 @@ class RoleSwitchService
         self::step($task, $st, 'Apartando este servidor (sin webs, bases en solo lectura, panel de rescate)…');
         FailoverSafetyService::fenceSelf("cambio de rol hacia {$pre['node']}");
         self::step($task, $st, 'Este servidor está apartado.', true);
-        sleep(3);   // que las réplicas reciban lo último
+
+        // Antes de promover al otro: que haya aplicado TODO lo que escribió este servidor
+        // (posición del WAL de cada PostgreSQL). Si no llega, se vuelve atrás sin tocar
+        // nada en el otro: es lo único seguro.
+        self::step($task, $st, 'Esperando a que la copia tenga todo lo escrito aquí…');
+        $wait = self::waitReplicaCaughtUp($nodeId, 120);
+        if (empty($wait['ok'])) {
+            FailoverSafetyService::unfenceSelf();
+            $fail("{$pre['node']} no llegó a tener todo lo escrito aquí (" . ($wait['detail'] ?? '?') . '). Este servidor se ha reactivado: todo sigue como antes.');
+            return;
+        }
+        self::step($task, $st, 'La copia tiene todo: ' . $wait['detail'], true);
 
         // 2) Que el otro se promueva (en segundo plano allí) y esperarle.
         $r = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'role-switch-promote', 'payload' => [
             'old_vpn_ip' => $ips['my_vpn'], 'old_public_ip' => $ips['my_public'], 'new_public_ip' => $ips['their_public'],
+            'orchestrator_task' => $task,
         ]]);
         $remoteTask = (string)($r['data']['result']['task'] ?? $r['data']['task'] ?? '');
         if (empty($r['ok']) || $remoteTask === '') {
@@ -445,8 +491,18 @@ class RoleSwitchService
             if (empty($remote['promoted'])) {
                 FailoverSafetyService::unfenceSelf();
                 $fail("{$pre['node']} no se promovió (" . ($remote['error'] ?? 'tiempo agotado') . '). Este servidor se ha reactivado: todo sigue como antes.');
+            } elseif (empty($remote['dns_done'])) {
+                // Se promovió a medias y el DNS NO se movió: las webs siguen apuntando aquí
+                // y nadie ha escrito allí. Lo seguro para no dejarlas caídas: apartar al otro
+                // (sus bases en solo lectura) y reactivar éste. Luego hay que rehacer su copia.
+                self::step($task, $st, "{$pre['node']} se promovió a medias y el DNS no se movió: se aparta y este servidor vuelve a servir las webs…", false);
+                $fr = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'fence-self', 'payload' => ['reason' => 'cambio de rol revertido']]);
+                FailoverSafetyService::unfenceSelf();
+                $fail("{$pre['node']} se promovió a medias (" . ($remote['error'] ?? '?') . '). Revertido: este servidor sirve las webs de nuevo'
+                    . (!empty($fr['ok']) ? " y {$pre['node']} está apartado" : " (OJO: no se pudo apartar {$pre['node']}: " . ($fr['error'] ?? '?') . ')')
+                    . ". Para rehacer su copia, en {$pre['node']} como root: php bin/cluster-switch.php demote {$ips['my_vpn']}");
             } else {
-                $fail("{$pre['node']} se promovió pero terminó con errores (" . ($remote['error'] ?? '?') . '). Este servidor sigue APARTADO; revisa los dos antes de seguir.');
+                $fail("{$pre['node']} se promovió y movió el DNS, pero terminó con errores (" . ($remote['error'] ?? '?') . "). Las webs van a {$pre['node']}; este servidor sigue apartado. Para que sea su copia: php bin/cluster-switch.php demote {$ips['their_vpn']}");
             }
             return;
         }
@@ -471,9 +527,65 @@ class RoleSwitchService
         }
     }
 
+    /**
+     * Espera a que el nodo $nodeId haya aplicado todo el WAL que ha escrito este
+     * servidor en cada PostgreSQL (tras apartarse ya no se escribe nada nuevo).
+     */
+    public static function waitReplicaCaughtUp(int $nodeId, int $timeout = 120): array
+    {
+        $panelPort = (int)\MuseDockPanel\Env::int('DB_PORT', 5432);
+        $clusters = array_values(array_filter(PgClusterService::listClusters(),
+            static fn($c) => $c['cluster'] !== 'panel' && (int)$c['port'] !== $panelPort));
+        if (!$clusters) {
+            return ['ok' => true, 'detail' => 'sin PostgreSQL que esperar'];
+        }
+        $deadline = time() + $timeout;
+        $detail = '';
+        do {
+            $r = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'role-switch-health', 'payload' => []]);
+            $t = $r['data']['result'] ?? null;
+            $pending = [];
+            foreach ($clusters as $c) {
+                $replay = (string)($t['pg'][$c['key']]['replay_lsn'] ?? '');
+                if (!preg_match('/^[0-9A-F]+\/[0-9A-F]+$/i', $replay)) {
+                    $pending[] = "{$c['key']}: sin dato";
+                    continue;
+                }
+                $d = ReplicationService::queryCluster($c, "SELECT pg_wal_lsn_diff(pg_current_wal_lsn(), '{$replay}')::bigint");
+                $behind = isset($d[0][0]) && is_numeric($d[0][0]) ? (int)$d[0][0] : null;
+                if ($behind === null || $behind > 0) {
+                    $pending[] = "{$c['key']}: faltan " . ($behind ?? '?') . ' B';
+                }
+            }
+            if (!$pending) {
+                return ['ok' => true, 'detail' => implode(', ', array_map(static fn($c) => $c['key'], $clusters)) . ' al día (0 B pendientes)'];
+            }
+            $detail = implode('; ', $pending);
+            sleep(2);
+        } while (time() < $deadline);
+        return ['ok' => false, 'detail' => $detail];
+    }
+
+    /** Avisar por todas las vías, también a través del otro nodo (este puede tener el correo parado). */
+    public static function alert(string $subject, string $message, int $peerNodeId = 0): void
+    {
+        try {
+            NotificationService::send($subject, $message);
+        } catch (\Throwable) {
+        }
+        if ($peerNodeId > 0) {
+            try {
+                ClusterService::callNode($peerNodeId, 'POST', 'api/cluster/action', ['action' => 'notify-relay', 'payload' => [
+                    'subject' => $subject, 'message' => "(Aviso reenviado desde " . gethostname() . ")\n\n" . $message,
+                ]]);
+            } catch (\Throwable) {
+            }
+        }
+    }
+
     // ── En el nodo elegido ─────────────────────────────────────────────────
 
-    public static function startPromoteHere(string $oldVpn, string $oldPub, string $newPub): array
+    public static function startPromoteHere(string $oldVpn, string $oldPub, string $newPub, string $orchestratorTask = ''): array
     {
         foreach ([$oldVpn, $oldPub, $newPub] as $ip) {
             if (!filter_var($ip, FILTER_VALIDATE_IP)) {
@@ -484,7 +596,8 @@ class RoleSwitchService
             return ['ok' => false, 'error' => 'este nodo no es slave'];
         }
         $task = 'promote-' . gmdate('YmdHis') . '-' . bin2hex(random_bytes(3));
-        self::write($task, ['state' => 'running', 'role' => 'target', 'promoted' => false, 'started_at' => gmdate('c'), 'steps' => []]);
+        self::write($task, ['state' => 'running', 'role' => 'target', 'promoted' => false, 'started_at' => gmdate('c'), 'steps' => [],
+            'old_vpn' => $oldVpn, 'orchestrator_task' => preg_replace('/[^a-zA-Z0-9_-]/', '', $orchestratorTask)]);
         shell_exec(sprintf('setsid nohup php %s promote %s %s %s %s > /dev/null 2>&1 &',
             escapeshellarg(PANEL_ROOT . '/bin/role-switch-run.php'), escapeshellarg($task),
             escapeshellarg($oldVpn), escapeshellarg($oldPub), escapeshellarg($newPub)));
@@ -504,6 +617,7 @@ class RoleSwitchService
             $st['state'] = 'failed';
             $st['error'] = implode('; ', $p['errors'] ?? ['error']);
             self::step($task, $st, 'La promoción terminó con errores: ' . $st['error'], false);
+            self::alert('Cambio de rol: la promoción de ' . gethostname() . ' falló', $st['error'] . "\n\nEl nodo que pasaba el mando decidirá: si el DNS no se movió, vuelve a servir las webs él.");
             return;
         }
         self::step($task, $st, 'Promovido: bases de datos con escritura, Caddy con las webs.', true);
@@ -530,6 +644,7 @@ class RoleSwitchService
                 }
             }
         }
+        $st['dns_done'] = true;
         self::step($task, $st, "DNS movido: {$moved} registros (lo que va por CNAME a ellos se mueve con ellos)"
             . ($st['dns_failed'] ? '; ' . count($st['dns_failed']) . ' no se pudieron cambiar' : '') . '.', !$st['dns_failed']);
 
