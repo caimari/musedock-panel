@@ -1585,6 +1585,12 @@ class ReplicationService
         return substr($host . '_' . (int)$cluster['version'] . preg_replace('/[^a-z0-9]/', '', strtolower((string)$cluster['cluster'])), 0, 63);
     }
 
+    /** Marca (por su fecha) de que la réplica de este clúster estaba recibiendo del master. */
+    public static function streamingMarkFile(array $cluster): string
+    {
+        return '/var/lib/musedock/pg-streaming-' . preg_replace('/[^a-z0-9]/i', '_', (string)$cluster['key']);
+    }
+
     /** Crea (si no existe) un slot físico con WAL reservado en el master, por el protocolo de réplica. */
     public static function ensureSlotOnMaster(string $ip, int $port, string $user, string $pass, string $slot): array
     {
@@ -2887,9 +2893,26 @@ class ReplicationService
                 $d = static::queryCluster($cluster, 'SELECT pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn())::bigint');
                 $pending = isset($d[0][0]) && is_numeric($d[0][0]) ? max(0, (int)$d[0][0]) : null;
             }
+            // Master caído de verdad (la réplica ya no recibe): vale si aplicó todo lo que
+            // recibió y estaba recibiendo hasta hace poco (marca del cluster-worker cada
+            // minuto). Lo no recibido en los últimos instantes se pierde en cualquier
+            // réplica asíncrona; lo que se evita es promover una réplica desconectada
+            // desde hace horas.
+            $recentMark = null;
+            if ($st !== null && empty($st['streaming'])) {
+                $d = static::queryCluster($cluster, 'SELECT pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn())::bigint');
+                $pendingDown = isset($d[0][0]) && is_numeric($d[0][0]) ? max(0, (int)$d[0][0]) : null;
+                $mark = @filemtime(static::streamingMarkFile($cluster));
+                if ($pendingDown !== null && $pendingDown <= 16 * 1024 * 1024 && $mark && time() - $mark <= 15 * 60) {
+                    $recentMark = ['pending' => $pendingDown, 'ago' => time() - $mark];
+                }
+            }
             if ($st !== null && $pending !== null && $pending <= 16 * 1024 * 1024) {
                 $steps[] = ['name' => 'Comprobar retraso', 'ok' => true,
                     'output' => "conectada al master, pendiente de aplicar {$pending} B (última transacción hace {$st['lag_seconds']}s)"];
+            } elseif ($recentMark !== null) {
+                $steps[] = ['name' => 'Comprobar retraso', 'ok' => true,
+                    'output' => "master no disponible; la réplica recibía hace {$recentMark['ago']} s y ha aplicado todo lo recibido (pendiente {$recentMark['pending']} B)"];
             } elseif ($st !== null) {
                 $lag = (int)($st['lag_seconds'] ?? 999999);
                 if ($lag > $maxLagSeconds) {

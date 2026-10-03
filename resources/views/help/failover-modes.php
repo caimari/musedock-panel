@@ -34,35 +34,44 @@
                     <th>Modo</th>
                     <th>Emails de caída</th>
                     <th>Cae el master → ¿cambia las IPs?</th>
-                    <th>Vuelve el master → ¿revierte solo?</th>
+                    <th>Vuelve el master caído</th>
                 </tr></thead>
                 <tbody>
                     <tr>
                         <td><span class="badge bg-secondary">manual</span></td>
                         <td>✅ Sí</td>
-                        <td>❌ No (lo haces tú desde el panel)</td>
-                        <td>❌ No</td>
+                        <td>❌ No (lo haces tú: Dashboard → Tomar el mando)</td>
+                        <td>Se aparta solo y se reincorpora como copia</td>
                     </tr>
                     <tr>
                         <td><span class="badge bg-warning text-dark">semiauto</span></td>
                         <td>✅ Sí</td>
-                        <td>✅ <strong>Sí, automático</strong> (repunta DNS + promociona)</td>
-                        <td>❌ No — <strong>tú confirmas</strong> «Revertir Failover»</td>
+                        <td>✅ <strong>Sí, automático</strong> (promociona y, solo si lo consigue, mueve el DNS)</td>
+                        <td>Se aparta solo y se reincorpora como copia</td>
                     </tr>
                     <tr>
                         <td><span class="badge bg-success">auto</span></td>
                         <td>✅ Sí</td>
-                        <td>✅ Sí, automático</td>
-                        <td>✅ Sí, automático</td>
+                        <td>✅ Sí, automático (igual que semiauto)</td>
+                        <td>Se reincorpora como copia y, tras 15 min estable, <strong>recupera el mando solo</strong></td>
                     </tr>
                 </tbody>
             </table>
         </div>
         <div class="alert alert-info small mb-0">
-            <strong>Por qué semiauto no revierte solo:</strong> devolver el tráfico al master cuando vuelve es lo más delicado
-            (si el master regresa inestable —por ejemplo tras un corte de luz— un cambio automático de vuelta podría causar
-            flapping o líos de datos). Por eso en <strong>semiauto</strong> la vuelta es una decisión humana consciente.
-            Solo <strong>auto</strong> lo hace todo solo.
+            <strong>El titular.</strong> Es el servidor al que diste el mando con un <a href="/docs/role-switch" class="text-info">cambio de rol planificado</a>;
+            un relevo por caída no lo cambia. Cuando el titular caído vuelve, se aparta solo (no sirve webs ni acepta escrituras) y se
+            reincorpora como copia del sustituto, copiando solo lo cambiado. Después:
+            <ul class="mb-1">
+                <li><strong>auto</strong>: cuando lleva 15 min seguidos respondiendo bien (<code>failover_return_stable_minutes</code>) y es copia al día,
+                    el sustituto le devuelve el mando solo, con el mismo cambio de rol del botón. Si vuelve inestable, el contador empieza de cero: sin idas y venidas.</li>
+                <li><strong>semiauto</strong>: te avisa de que está listo y le devuelves el mando tú con el botón.</li>
+            </ul>
+            <br><strong>Quién actúa:</strong> solo la réplica que debe tomar el mando, nunca el propio master (un master que no
+            se alcanza a sí mismo por su IP pública, típico con NAT en casa, no mueve el DNS).
+            <br><strong>Testigo:</strong> antes de promoverse, la réplica pregunta a los otros nodos del cluster si ven al master.
+            Si alguno lo ve vivo, no se promueve (sería un corte de red, no una caída). Los testigos que no responden no cuentan:
+            para que proteja de verdad, conviene un testigo en <em>otro proveedor</em> que el master.
         </div>
     </div>
 </div>

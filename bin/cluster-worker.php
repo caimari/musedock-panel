@@ -177,6 +177,32 @@ if (time() - (int)Settings::get('replication_health_run_at', '0') >= 300) {
     }
 }
 
+// ─── Step 0f: Aviso en las terminales si este servidor es copia ─────────
+try {
+    \MuseDockPanel\Services\ClusterService::refreshRoleBanner();
+} catch (\Throwable $e) {
+    logMsg('Role banner error: ' . $e->getMessage());
+}
+
+// ─── Step 0e: Apuntar que cada réplica de PostgreSQL está recibiendo ─────
+// Si el master se cae de verdad, la réplica deja de recibir y la promoción solo puede
+// saber si estaba al día por esto: "recibía hace menos de X minutos". Sin ello se
+// bloqueaba siempre (miraba segundos desde la última transacción).
+try {
+    $panelPortW = (int)\MuseDockPanel\Env::int('DB_PORT', 5432);
+    foreach (\MuseDockPanel\Services\PgClusterService::listClusters() as $c) {
+        if ($c['cluster'] === 'panel' || (int)$c['port'] === $panelPortW) {
+            continue;
+        }
+        $st = \MuseDockPanel\Services\ReplicationService::getPgSlaveStatusForCluster($c);
+        if ($st !== null && !empty($st['streaming'])) {
+            @touch(\MuseDockPanel\Services\ReplicationService::streamingMarkFile($c));
+        }
+    }
+} catch (\Throwable $e) {
+    logMsg('Streaming mark error: ' . $e->getMessage());
+}
+
 // ─── Step 1: Process pending queue items ──────────────────────
 logMsg("Processing queue...");
 try {

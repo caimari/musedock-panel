@@ -25,7 +25,7 @@ class ChangelogController
                 'badge' => 'info',
                 'changes' => [
                     'fixed' => [
-                        'es' => ['Tras un cambio de rol o un dns-failover manual el relevo DNS queda Normal con los papeles correctos; cluster-switch.php failover-normalize', 'GTID de MariaDB comparado con gtid_current_pos del nuevo master (evita copias completas tras un sembrado)', 'Ficha del hosting: cabecera rota en hostings con correo (comillas en el boton Suspend)'],
+                        'es' => ['Tras un cambio de rol o un dns-failover manual el relevo DNS queda Normal con los papeles correctos; cluster-switch.php failover-normalize', 'GTID de MariaDB comparado con gtid_current_pos del nuevo master (evita copias completas tras un sembrado)', 'Ficha del hosting: cabecera rota en hostings con correo (comillas en el boton Suspend)', 'Aviso en la terminal (VS Code y SSH) cuando el servidor es copia o esta apartado; solo avisa, desaparece al mandar', 'Vuelta automatica al titular en modo auto: tras un relevo por caida, cuando el titular lleva 15 min estable y es copia al dia, se le devuelve el mando con el cambio de rol planificado (semiauto: aviso)', 'Relevo automatico por caida: PG se promueve si la replica recibia hace < 15 min y aplico todo (antes se bloqueaba siempre)', 'Relevo automatico revisado: ahora si promueve (IPs VPN vs publicas), promueve antes de mover el DNS, el master nunca mueve el DNS, testigos caidos no bloquean, vuelta antigua (resync + rsync --delete) eliminada'],
                         'en' => ['After a role switch or manual dns-failover the DNS failover is left Normal with the right roles; cluster-switch.php failover-normalize'],
                     ],
                 ],

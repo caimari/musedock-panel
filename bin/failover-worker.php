@@ -240,58 +240,31 @@ try {
         $isFailback = ($shouldBe === FailoverService::STATE_NORMAL && $currentState !== FailoverService::STATE_NORMAL);
         $isFailover = in_array($shouldBe, [FailoverService::STATE_DEGRADED, FailoverService::STATE_PRIMARY_DOWN, FailoverService::STATE_EMERGENCY]);
 
-        // ─── RESYNC: always runs automatically when server recovers, regardless of mode ───
+        // ─── VUELTA: el principal original ha vuelto ───────────────────
+        // Ya no se "resincroniza" ni se devuelve el DNS solo: el antiguo master, al
+        // volver, se aparta él mismo (checkStaleMaster) y se reincorpora como copia
+        // del nuevo (autoRejoinAsSlave). Aquí, en el que manda, solo se ordenan los
+        // papeles del relevo (este principal, el otro de relevo, estado normal). La
+        // vuelta a mandar el original es un cambio de rol planificado (botón).
+        // El resync antiguo (volcado del panel + rsync --delete) fallaba siempre y
+        // avisaba cada 15 min.
         if ($isFailback) {
-            $resyncStatus = Settings::get('failover_resync_status', '');
-
-            if (str_starts_with($resyncStatus, 'failed:')) {
-                // Resync previously failed — BLOCK failback, notify periodically
-                $failedStep = substr($resyncStatus, 7);
-                $failedDetail = Settings::get('failover_resync_detail', '');
-                logMsg("Resync BLOCKED at step '{$failedStep}': {$failedDetail} — failback NOT allowed");
-
-                // Notify every 15 min that failback is blocked
-                $lastBlockNotif = Settings::get('failover_resync_block_notif', '');
-                if (!$lastBlockNotif || (time() - strtotime($lastBlockNotif)) >= 900) {
+            $localRoleFb = Settings::get('cluster_role', '');
+            if ($localRoleFb === 'master') {
+                $norm = \MuseDockPanel\Services\RoleSwitchService::normalizeFailover();
+                logMsg('Principal original de vuelta: relevo normalizado — ' . json_encode($norm));
+                if (!empty($norm['ok'])) {
                     NotificationService::send(
-                        "Failover: failback BLOQUEADO — resync falló en '{$failedStep}'",
-                        "El servidor principal se ha recuperado pero el failback está BLOQUEADO.\n\n" .
-                        "Paso fallido: {$failedStep}\n" .
-                        "Detalle: {$failedDetail}\n\n" .
-                        "El failback NO se ejecutará (ni manual ni auto) hasta resolver el resync.\n" .
-                        "Opciones:\n" .
-                        "1. Resolver el problema y reintentar el resync desde el panel\n" .
-                        "2. Ejecutar resync manual y marcar como completado"
+                        'Failover: el servidor caído ha vuelto',
+                        "Este servidor sigue mandando y ahora figura como principal del relevo; el que había caído queda de relevo.\n"
+                        . "Al volver se aparta solo y se reincorpora como copia. Para que vuelva a mandar: Dashboard → Pasar el mando a…"
                     );
-                    Settings::set('failover_resync_block_notif', date('Y-m-d H:i:s'));
                 }
-
-                $isFailback = false;
-                $stateChanged = false;
-
-            } elseif ($resyncStatus === 'completed') {
-                // Resync already done — proceed to failback
-                logMsg("Resync already completed — proceeding to failback");
-
-            } elseif (str_starts_with($resyncStatus, 'syncing_')) {
-                // Resync in progress (another worker run?) — wait
-                logMsg("Resync in progress ({$resyncStatus}) — waiting");
-                $isFailback = false;
-                $stateChanged = false;
-
             } else {
-                // No resync yet (pending or empty) — start it now
-                logMsg("Server recovered — running mandatory resync before failback (any mode)");
-                setResyncStatus('pending', 'Starting resync');
-                $resyncResult = autoFailbackResync($foConfig, false);
-                if (!$resyncResult) {
-                    logMsg("Resync FAILED — failback blocked until resync succeeds");
-                    $isFailback = false;
-                    $stateChanged = false;
-                } else {
-                    logMsg("Resync completed — data is ready for failback");
-                }
+                logMsg('Principal original de vuelta; este nodo no es master: nada que hacer');
             }
+            $isFailback = false;
+            $stateChanged = false;
         }
 
         // ─── COOLDOWN: prevent re-failover right after failback ─────
@@ -309,92 +282,48 @@ try {
         }
 
         if ($isFailover) {
-            // ─── FAILOVER (down transition) ──────────────────
-            if ($foMode === 'auto') {
-                logMsg("AUTO mode — transitioning to {$shouldBe}");
-                $result = FailoverService::transitionTo($shouldBe, 'auto-worker');
-                logMsg("Transition result: " . implode('; ', $result['actions'] ?? []));
-
-                if ($currentState === FailoverService::STATE_NORMAL) {
-                    Settings::set('failover_activated_at', date('Y-m-d H:i:s'));
-                    Settings::set('failover_resync_status', '');
-                    logMsg("Failover activated — timestamp saved for resync");
-                }
-
-                autoPromoteIfNeeded($checks, $foConfig);
-
-            } elseif ($foMode === 'semiauto') {
-                // SEMIAUTO: ejecuta el FORWARD automáticamente (repunta DNS al
-                // slave + lo promociona con el guard de quórum de
-                // autoPromoteIfNeeded) para que los sitios sigan online. El
-                // FAILBACK permanece MANUAL (más abajo): el sistema NUNCA revierte
-                // solo un slave promovido de vuelta a slave cuando el master
-                // regresa — evita el flapping en recuperaciones inestables. El
-                // admin confirma el failback desde el panel.
+            // ─── RELEVO POR CAÍDA ─────────────────────────────
+            // Solo actúa la réplica que debe tomar el mando, y en este orden:
+            // 1) promoverse (con elección y testigo), 2) SOLO si se promovió, mover el DNS,
+            // 3) dejar el relevo ordenado (ella principal, el caído de relevo).
+            // Antes se movía el DNS primero (las webs iban a una copia en solo lectura si
+            // el testigo paraba la promoción) y el propio master podía mover el DNS si no
+            // se alcanzaba a sí mismo por su IP pública (NAT en casa).
+            $localRoleFo = Settings::get('cluster_role', '');
+            if ($localRoleFo !== 'slave') {
+                logMsg("Relevo: este nodo es '{$localRoleFo}', no la réplica: no mueve DNS ni promueve (lo hace la réplica)");
+            } elseif ($foMode === 'auto' || $foMode === 'semiauto') {
                 $stateLabel = FailoverService::stateLabel($shouldBe);
-                logMsg("SEMIAUTO mode — forward failover a {$shouldBe} (DNS+promote automático; failback manual)");
-
-                $result = FailoverService::transitionTo($shouldBe, 'semiauto-worker');
-                logMsg("Transition result: " . implode('; ', $result['actions'] ?? []));
-
-                if ($currentState === FailoverService::STATE_NORMAL) {
-                    Settings::set('failover_activated_at', date('Y-m-d H:i:s'));
-                    Settings::set('failover_resync_status', '');
+                logMsg(strtoupper($foMode) . " — relevo hacia {$shouldBe}: primero promover, luego DNS");
+                $promoted = autoPromoteIfNeeded($checks, $foConfig);
+                if ($promoted) {
+                    $result = FailoverService::transitionTo($shouldBe, $foMode . '-worker');
+                    logMsg("DNS: " . implode('; ', $result['actions'] ?? []));
+                    $norm = \MuseDockPanel\Services\RoleSwitchService::normalizeFailover();
+                    logMsg('Relevo ordenado: ' . json_encode($norm));
+                    NotificationService::send(
+                        "Failover EJECUTADO ({$foMode}) → este servidor manda",
+                        "El principal cayó y este servidor ha tomado el mando automáticamente:\n"
+                        . "- Bases de datos promovidas\n- DNS movido a este servidor\n- Ahora figura como principal del relevo\n\n"
+                        . "Caídos: " . implode(', ', array_map(fn($id) => $checks[$id]['name'] ?? $id, $newlyDown)) . "\n\n"
+                        . "Cuando el otro vuelva se apartará solo y se reincorporará como copia. Para que vuelva a mandar: Dashboard → Pasar el mando a…"
+                    );
+                    LogService::log('failover.' . $foMode, $shouldBe, 'Relevo por caída ejecutado: promovido + DNS');
+                } else {
+                    logMsg('Relevo NO ejecutado (no se promovió): el DNS no se toca');
                 }
-
-                autoPromoteIfNeeded($checks, $foConfig);
-
-                NotificationService::send(
-                    "Failover EJECUTADO (semiauto) → {$stateLabel}",
-                    "El master cayó y el sistema ejecutó el failover automáticamente:\n" .
-                    "- DNS repuntado al slave de mayor prioridad\n" .
-                    "- Slave promovido (si el quórum lo confirmó)\n\n" .
-                    "Servidores caídos: " . implode(', ', array_map(fn($id) => $checks[$id]['name'] ?? $id, $newlyDown)) . "\n\n" .
-                    "IMPORTANTE: en semiauto el FAILBACK no es automático. Cuando el master vuelva, revisa y pulsa 'Revertir Failover' en el panel cuando TÚ decidas."
-                );
-                LogService::log('failover.semiauto', $shouldBe, "Forward failover EJECUTADO (DNS+promote). Failback queda manual.");
             }
-            // manual mode: worker detects but does nothing, dashboard shows the state
+            // manual: solo se ve en el Dashboard y se avisa.
 
-        } elseif ($isFailback && $stateChanged) {
-            // ─── FAILBACK (recovery transition) ──────────────
-            // Resync already completed above. Now handle DNS revert according to mode.
-            if ($foMode === 'auto') {
-                logMsg("AUTO mode — failback: resync done, reverting DNS + demote");
-                $result = FailoverService::transitionTo($shouldBe, 'auto-failback');
-                logMsg("Failback result: " . implode('; ', $result['actions'] ?? []));
-                autoFailbackDemote($foConfig);
-                Settings::set('failover_resync_status', '');
-                Settings::set('failover_activated_at', '');
-                Settings::set('failover_last_failback_at', date('Y-m-d H:i:s'));
-                logMsg("Cooldown started: " . ($foConfig['failover_cooldown_minutes'] ?? 15) . " min before re-failover allowed");
-
-            } elseif ($foMode === 'semiauto') {
-                logMsg("SEMIAUTO mode — resync done, notifying admin to confirm failback");
-                NotificationService::send(
-                    "Failover: servidor recuperado — resync completado",
-                    "El servidor principal se ha recuperado y los datos han sido sincronizados.\n\n" .
-                    "Resync: COMPLETADO (pg_dump + rsync ejecutados)\n" .
-                    "Servidores recuperados: " . implode(', ', array_map(fn($id) => $checks[$id]['name'] ?? $id, $newlyUp)) . "\n\n" .
-                    "Accede al panel y pulsa 'Revertir Failover' para cambiar DNS de vuelta.\n" .
-                    "El resync ya está hecho — solo falta confirmar el cambio DNS."
-                );
-                LogService::log('failover.semiauto', 'failback_ready',
-                    "Resync completado. Esperando confirmación del admin para failback DNS.");
-
-            } else {
-                // manual: resync done automatically, dashboard shows "Revertir failover" button
-                logMsg("MANUAL mode — resync done, waiting for admin to click failback button");
-                Settings::set('failover_failback_ready', '1');
-                LogService::log('failover.manual', 'failback_ready',
-                    "Resync completado. Botón 'Revertir Failover' disponible en el dashboard.");
-            }
         }
     } else {
         $upCount = count(array_filter($confirmedChecks, fn($c) => !empty($c['ok'])));
         $totalCount = count($confirmedChecks);
         logMsg("No state change needed. Servers: {$upCount}/{$totalCount} UP");
     }
+
+    // ─── 4. Vuelta al titular (modo auto) ───────────────────────
+    autoReturnToPreferred($foMode, $foConfig, $counters);
 
 } catch (\Throwable $e) {
     logMsg("ERROR: " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
@@ -422,337 +351,195 @@ exit(0);
 // ═══════════════════════════════════════════════════════════
 
 /**
- * Auto-promote a failover server to master if it's now the active receiver.
+ * Promueve ESTE nodo (réplica) a master si el principal del relevo está caído, le
+ * toca a él y un testigo no lo contradice. Devuelve true solo si se promovió.
+ *
+ * IPs: el relevo (failover_servers) usa IPs públicas; el cluster, las de la VPN.
+ * Antes se comparaba la del master del cluster (VPN) con las de las comprobaciones
+ * (públicas): nunca coincidían y la promoción automática no se hacía nunca.
  */
-function autoPromoteIfNeeded(array $checks, array $foConfig): void
+function autoPromoteIfNeeded(array $checks, array $foConfig): bool
 {
     $clusterRole = Settings::get('cluster_role', 'standalone');
-    $envRole = \MuseDockPanel\Env::get('PANEL_ROLE', 'standalone');
-    $localRole = ($clusterRole !== '' && $clusterRole !== 'standalone') ? $clusterRole : $envRole;
-
-    // Only promote if THIS server is a slave that should become master
-    if ($localRole !== 'slave') {
-        logMsg("Auto-promote: local role is '{$localRole}', not slave — skipping");
-        return;
+    if ($clusterRole !== 'slave') {
+        logMsg("Auto-promote: este nodo es '{$clusterRole}', no réplica — no se promueve");
+        return false;
     }
 
-    // Check if the current master is among the servers that are down
-    $masterIp = Settings::get('cluster_master_ip', '');
-    if (!$masterIp) {
-        logMsg("Auto-promote: no master IP known — skipping");
-        return;
+    // Quién soy en el relevo (por mis IPs) y qué principal caído me toca.
+    $mine = preg_split('/\s+/', trim((string)shell_exec('hostname -I 2>/dev/null'))) ?: [];
+    $servers = FailoverService::getServers();
+    $me = null;
+    foreach ($servers as $srv) {
+        if (in_array((string)($srv['ip'] ?? ''), $mine, true)) {
+            $me = $srv;
+        }
+    }
+    if (!$me) {
+        logMsg('Auto-promote: este servidor no está en Failover → Servidores — no se promueve');
+        return false;
+    }
+    $downPrimary = null;
+    $downIps = [];
+    foreach ($servers as $srv) {
+        $ok = !empty($checks[$srv['id']]['ok']);
+        if (!$ok) {
+            $downIps[] = (string)$srv['ip'];
+        }
+        if (($srv['role'] ?? '') === FailoverService::ROLE_PRIMARY && !$ok) {
+            $downPrimary = $srv;
+        }
+    }
+    if (!$downPrimary) {
+        logMsg('Auto-promote: ningún principal caído — no se promueve');
+        return false;
+    }
+    if (!FailoverService::shouldPromote((string)$me['ip'], $downIps)) {
+        logMsg('Auto-promote: elección — otra réplica de más prioridad está viva; le toca a ella');
+        return false;
     }
 
-    // Is the master down in our health checks?
-    $masterDown = false;
-    foreach ($checks as $check) {
-        if (($check['ip'] ?? '') === $masterIp && empty($check['ok'])) {
-            $masterDown = true;
+    // El master en el cluster (IP de la VPN), para el testigo y para apartarlo.
+    $masterVpn = (string)Settings::get('cluster_master_ip', '');
+
+    // ── Testigo: otro nodo confirma desde otro sitio que el master está caído ──
+    // Una partición de red se ve igual que un master caído. Solo cuentan los testigos
+    // que RESPONDEN: si un testigo está caído también (p. ej. en la misma línea que el
+    // master), no aporta nada y no debe bloquear. Si alguno ve al master vivo, no se
+    // promueve.
+    $answered = 0;
+    $sawAlive = false;
+    foreach (\MuseDockPanel\Services\ClusterService::getNodes() as $wn) {
+        $wHost = (string)(parse_url((string)($wn['api_url'] ?? ''), PHP_URL_HOST) ?: '');
+        if ($wHost === '' || in_array($wHost, $mine, true) || $wHost === $masterVpn) {
+            continue;
+        }
+        try {
+            $probe = \MuseDockPanel\Services\ClusterService::callNode((int)$wn['id'], 'POST', 'api/cluster/action',
+                ['action' => 'probe-host', 'payload' => ['ip' => $masterVpn !== '' ? $masterVpn : (string)$downPrimary['ip']]]);
+            $res = $probe['data']['result'] ?? $probe['result'] ?? $probe['data'] ?? [];
+            if (!empty($probe['ok']) && isset($res['reachable'])) {
+                $answered++;
+                if ($res['reachable'] === true) {
+                    $sawAlive = true;
+                }
+                logMsg("Auto-promote: testigo {$wn['name']} ve el master " . ($res['reachable'] ? 'VIVO' : 'caído'));
+            } else {
+                logMsg("Auto-promote: testigo {$wn['name']} no responde (no cuenta)");
+            }
+        } catch (\Throwable $e) {
+            logMsg("Auto-promote: testigo {$wn['name']} error: " . $e->getMessage() . ' (no cuenta)');
+        }
+    }
+    if ($sawAlive) {
+        logMsg("Auto-promote: ABORTADO — un testigo aún alcanza el master: probable corte de red entre nodos, no caída");
+        NotificationService::send(
+            'Failover: relevo automático ABORTADO (posible corte de red)',
+            "Este nodo ve caído el principal ({$downPrimary['name']}), pero otro nodo SÍ lo alcanza.\n"
+            . "No se ha tomado el mando para no tener dos masters. Revisa la red; si de verdad está caído: Dashboard → Tomar el mando."
+        );
+        return false;
+    }
+    if ($answered === 0) {
+        logMsg('Auto-promote: sin testigo que responda — se decide con la vista de este nodo (configura un testigo en otro proveedor)');
+    }
+
+    logMsg("Auto-promote: principal {$downPrimary['name']} caído y me toca — promoviendo este servidor");
+    Settings::set('failover_original_master_ip', $masterVpn);
+    try {
+        $result = \MuseDockPanel\Services\ClusterService::promoteToMaster(false, $masterVpn);
+        if (!empty($result['ok'])) {
+            logMsg('Auto-promote: OK — este servidor es master');
+            LogService::log('failover.auto_promote', 'master', "Réplica promovida: el principal {$downPrimary['name']} no responde");
+            return true;
+        }
+        $errors = implode(', ', $result['errors'] ?? ['error desconocido']);
+        logMsg("Auto-promote: FALLÓ — {$errors}");
+        LogService::log('failover.auto_promote', 'error', "Promoción automática fallida: {$errors}");
+        NotificationService::send('Failover: la promoción automática FALLÓ', "El principal {$downPrimary['name']} no responde, pero este servidor no pudo tomar el mando:\n{$errors}\n\nEl DNS no se ha movido.");
+    } catch (\Throwable $e) {
+        logMsg('Auto-promote: EXCEPCIÓN — ' . $e->getMessage());
+    }
+    return false;
+}
+
+/**
+ * Si este servidor manda como SUSTITUTO (el titular cayó y se hizo un relevo), y el
+ * titular lleva failover_return_stable_minutes respondiendo bien y ya es su copia al
+ * día, en modo auto se le devuelve el mando con el cambio de rol planificado (mismas
+ * comprobaciones, apartado, promoción, DNS y copia que el botón). En semiauto se avisa.
+ * El titular es quien recibió el mando en el último cambio planificado.
+ */
+function autoReturnToPreferred(string $foMode, array $foConfig, array $counters): void
+{
+    if (Settings::get('cluster_role', '') !== 'master' || Settings::get('cluster_fenced', '0') === '1') {
+        return;
+    }
+    $pref = trim((string)($foConfig['failover_preferred_ip'] ?? ''));
+    if ($pref === '') {
+        return;
+    }
+    $mine = preg_split('/\s+/', trim((string)shell_exec('hostname -I 2>/dev/null'))) ?: [];
+    if (in_array($pref, $mine, true)) {
+        return;   // el titular soy yo
+    }
+    $srv = null;
+    foreach (FailoverService::getServers() as $s) {
+        if ((string)($s['ip'] ?? '') === $pref) {
+            $srv = $s;
+        }
+    }
+    if (!$srv) {
+        return;
+    }
+    $interval = max(30, (int)($foConfig['failover_check_interval'] ?? 60));
+    $stableMin = max(5, (int)($foConfig['failover_return_stable_minutes'] ?? 15));
+    $need = (int)ceil($stableMin * 60 / $interval);
+    $c = $counters[$srv['id']] ?? [];
+    if (($c['last_status'] ?? '') !== 'ok' || (int)($c['ok_count'] ?? 0) < $need) {
+        logMsg("Titular {$srv['name']}: aún no estable (" . (int)($c['ok_count'] ?? 0) . "/{$need} comprobaciones bien)");
+        return;
+    }
+    $active = \MuseDockPanel\Services\RoleSwitchService::activeTask(1);
+    if ($active && ($active['state'] ?? '') === 'running') {
+        return;
+    }
+    if (time() - (int)Settings::get('failover_return_started_at', '0') < 1800) {
+        return;   // no reintentar en bucle
+    }
+    // Su nodo en el cluster (por sus IPs).
+    $nodeId = 0;
+    foreach (\MuseDockPanel\Services\ClusterService::getNodes() as $n) {
+        $r = \MuseDockPanel\Services\ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'role-switch-health', 'payload' => []]);
+        if (in_array($pref, (array)($r['data']['result']['local_ips'] ?? []), true)) {
+            $nodeId = (int)$n['id'];
             break;
         }
     }
-
-    if (!$masterDown) {
-        logMsg("Auto-promote: master ({$masterIp}) is not in failed checks — skipping");
+    if ($nodeId === 0) {
+        logMsg("Titular {$srv['name']}: no se encuentra entre los nodos del cluster");
         return;
     }
-
-    // Election: collect down IPs and check if we're the highest-priority candidate
-    $downIps = [];
-    foreach ($checks as $check) {
-        if (empty($check['ok'])) {
-            $downIps[] = $check['ip'] ?? '';
+    $pre = \MuseDockPanel\Services\RoleSwitchService::preflight($nodeId);
+    if (empty($pre['ok'])) {
+        $bad = array_map(fn($x) => $x['name'], array_filter($pre['checks'] ?? [], fn($x) => !$x['ok'] && $x['blocking']));
+        logMsg("Titular {$srv['name']}: estable pero aún no listo para recibir el mando (" . implode('; ', $bad) . ')');
+        return;
+    }
+    if ($foMode !== 'auto') {
+        if (Settings::get('failover_return_notified', '') !== $pref . date('Y-m-d')) {
+            NotificationService::send("Failover: {$srv['name']} está listo para volver a mandar",
+                "{$srv['name']} lleva {$stableMin} min estable y es copia al día de este servidor.\n"
+                . "Para devolverle el mando: Dashboard → Pasar el mando a… {$srv['name']} (en modo auto se haría solo).");
+            Settings::set('failover_return_notified', $pref . date('Y-m-d'));
         }
-    }
-    $downIps[] = $masterIp; // Master is definitely down
-
-    $myIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
-    if ($myIp && !\MuseDockPanel\Services\FailoverService::shouldPromote($myIp, $downIps)) {
-        logMsg("Auto-promote: election — a higher-priority slave is alive, deferring promotion");
         return;
     }
-
-    // ── C3 quorum guard: don't auto-promote on THIS node's view alone ──
-    // A network partition looks identical to a dead master from here: the old
-    // master may be alive and still serving writes to clients that can reach it.
-    // Promoting anyway = split-brain (two masters). Before promoting, confirm the
-    // master is down from a SECOND vantage point (another cluster node acting as
-    // witness). If no witness confirms — or a witness sees the master ALIVE — we
-    // refuse to auto-promote and fall back to notifying the admin (semiauto
-    // behaviour). To promote with a single node's view, the admin must do it
-    // manually from the panel.
-    $witnessConfirmedDown = false;
-    $witnessSawAlive = false;
-    $witnesses = 0;
-    foreach (\MuseDockPanel\Services\ClusterService::getNodes() as $wn) {
-        $wHost = parse_url((string)($wn['api_url'] ?? ''), PHP_URL_HOST) ?: '';
-        if ($wHost === '' || $wHost === $myIp || $wHost === $masterIp) continue; // skip self & the master
-        $witnesses++;
-        try {
-            $probe = \MuseDockPanel\Services\ClusterService::callNode(
-                (int)$wn['id'], 'POST', 'api/cluster/action',
-                ['action' => 'probe-host', 'payload' => ['ip' => $masterIp]]
-            );
-            $res = $probe['result'] ?? $probe['data'] ?? [];
-            if (!empty($probe['ok']) && isset($res['reachable'])) {
-                if ($res['reachable'] === true)  { $witnessSawAlive = true; }
-                if ($res['reachable'] === false) { $witnessConfirmedDown = true; }
-            }
-        } catch (\Throwable $e) {
-            logMsg("Auto-promote: witness {$wHost} probe error: " . $e->getMessage());
-        }
-    }
-    if ($witnessSawAlive) {
-        logMsg("Auto-promote: ABORTED — a witness node still reaches the master ({$masterIp}). Likely a partition, not a dead master. Notifying admin instead.");
-        \MuseDockPanel\Services\NotificationService::send(
-            "Failover: auto-promote ABORTADO (posible partición de red)",
-            "Este nodo veía el master ({$masterIp}) caído, pero otro nodo SÍ lo alcanza.\n" .
-            "No se ha promovido para evitar split-brain (dos masters). Revisa la red y actúa manualmente si procede."
-        );
-        return;
-    }
-    if ($witnesses > 0 && !$witnessConfirmedDown) {
-        logMsg("Auto-promote: DEFERRED — no witness could confirm the master is down (witnesses unreachable). Not promoting on a single node's view.");
-        \MuseDockPanel\Services\NotificationService::send(
-            "Failover: auto-promote aplazado (sin confirmación de quórum)",
-            "Este nodo ve el master ({$masterIp}) caído, pero ningún nodo testigo pudo confirmarlo.\n" .
-            "No se promueve automáticamente para evitar split-brain. Actúa manualmente si el master está realmente caído."
-        );
-        return;
-    }
-    // witnesses === 0 → no other node to ask (2-node cluster). We still proceed
-    // (the election already ran), but this is exactly why auto mode needs a real
-    // external witness; documented as a known limitation.
-    if ($witnesses === 0) {
-        logMsg("Auto-promote: WARNING — no witness node available (single-slave cluster). Proceeding on local view only; consider semiauto mode.");
-    }
-
-    // Master is down and we're the highest-priority slave — promote ourselves
-    logMsg("Auto-promote: master ({$masterIp}) is DOWN, election won — promoting this slave to master");
-
-    // Save original master IP for resync during failback
-    Settings::set('failover_original_master_ip', $masterIp);
-
-    try {
-        $result = \MuseDockPanel\Services\ClusterService::promoteToMaster();
-        if (!empty($result['ok'])) {
-            logMsg("Auto-promote: SUCCESS — this server is now master");
-            LogService::log('failover.auto_promote', 'master', "Slave auto-promoted to master because master ({$masterIp}) is down");
-            NotificationService::send(
-                "Failover: Auto-Promote ejecutado",
-                "Este servidor ha sido promovido automáticamente a Master.\n" .
-                "Master anterior ({$masterIp}) no responde.\n" .
-                "Timestamp: " . date('Y-m-d H:i:s')
-            );
-        } else {
-            $errors = implode(', ', $result['errors'] ?? ['Unknown error']);
-            logMsg("Auto-promote: FAILED — {$errors}");
-            LogService::log('failover.auto_promote', 'error', "Auto-promote failed: {$errors}");
-        }
-    } catch (\Throwable $e) {
-        logMsg("Auto-promote: EXCEPTION — " . $e->getMessage());
-    }
+    Settings::set('failover_return_started_at', (string)time());
+    $r = \MuseDockPanel\Services\RoleSwitchService::start($nodeId, 'vuelta automática al titular');
+    logMsg("Titular {$srv['name']}: estable {$stableMin} min — devolviendo el mando: " . json_encode($r));
+    LogService::log('failover.auto_return', $srv['name'], 'Vuelta automática al titular: ' . (!empty($r['ok']) ? 'iniciada' : ($r['error'] ?? '?')));
 }
 
-/**
- * Handle failback resync ONLY (no demote, no DNS change).
- * Resync runs automatically in ANY mode — it's a data integrity precaution, not a decision.
- *
- * States: pending → syncing_db → syncing_files → syncing_certs → completed
- *         Any step can fail → failed:step_name (e.g. "failed:syncing_db")
- *
- * If state is "failed:*", failback is BLOCKED until admin resolves and retries.
- * Returns true only if ALL steps completed successfully.
- */
-function autoFailbackResync(array $foConfig, bool $alsoDemote = false): bool
-{
-    $activatedAt = Settings::get('failover_activated_at', '');
-    if (!$activatedAt) {
-        logMsg("Failback resync: no activation timestamp — no data to sync");
-        setResyncStatus('completed', 'No data to sync (no activation timestamp)');
-        return true;
-    }
-
-    $clusterRole = Settings::get('cluster_role', 'standalone');
-    $envRole = \MuseDockPanel\Env::get('PANEL_ROLE', 'standalone');
-    $localRole = ($clusterRole !== '' && $clusterRole !== 'standalone') ? $clusterRole : $envRole;
-
-    if ($localRole !== 'master') {
-        logMsg("Failback resync: local role is '{$localRole}', not temporary master — no resync needed");
-        setResyncStatus('completed', 'Not temporary master, no resync needed');
-        return true;
-    }
-
-    $originalMasterIp = Settings::get('failover_original_master_ip', '');
-    if (!$originalMasterIp) {
-        logMsg("Failback resync: no original master IP stored — manual resync needed");
-        setResyncStatus('failed:no_master_ip', 'No original master IP stored');
-        NotificationService::send(
-            "Failover: Resync BLOQUEADO — falta IP del master original",
-            "El servidor original ha vuelto a estar disponible, pero no se puede hacer resync automático.\n" .
-            "No hay IP del master original guardada.\n" .
-            "El failback está BLOQUEADO hasta que se resuelva.\n" .
-            "Ejecute el resync manualmente desde el panel."
-        );
-        return false;
-    }
-
-    logMsg("Failback resync: we are temporary master since {$activatedAt}, syncing to {$originalMasterIp}");
-
-    // ─── Step 1: syncing_db — PostgreSQL dump + push ──────────
-    setResyncStatus('syncing_db', "Dumping PostgreSQL data to push to {$originalMasterIp}");
-    logMsg("Resync step 1/3: syncing_db");
-
-    $panelPort = (int)Settings::get('panel_port', '8444') ?: 8444;
-    $token = Settings::get('cluster_api_token', '');
-
-    try {
-        $dumpFile = PANEL_ROOT . '/storage/failover-resync-' . date('YmdHis') . '.sql.gz';
-        $cmd = "sudo -u postgres pg_dump -p 5433 musedock_panel --data-only " .
-               "--table=hosting_accounts --table=panel_settings --table=dns_records " .
-               "--table=email_accounts --table=databases " .
-               "2>/dev/null | gzip > {$dumpFile}";
-        shell_exec($cmd);
-
-        if (!file_exists($dumpFile) || filesize($dumpFile) <= 20) {
-            setResyncStatus('failed:syncing_db', 'pg_dump produced empty or no output');
-            logMsg("Resync FAILED at syncing_db: dump file empty or missing");
-            return false;
-        }
-
-        if (!$token) {
-            setResyncStatus('failed:syncing_db', 'No cluster API token configured — cannot push dump to original master');
-            logMsg("Resync FAILED at syncing_db: no cluster API token");
-            return false;
-        }
-
-        $pushCmd = "curl -sk -X POST 'https://{$originalMasterIp}:{$panelPort}/api/cluster/action' " .
-                   "-H 'X-Panel-Token: {$token}' " .
-                   "-F 'action=restore-panel-dump' " .
-                   "-F 'dump=@{$dumpFile}' " .
-                   "-F 'since={$activatedAt}' 2>/dev/null";
-        $pushResult = trim((string)shell_exec($pushCmd));
-        $pushData = json_decode($pushResult, true);
-
-        if (empty($pushData['ok'])) {
-            $pushError = $pushData['error'] ?? ($pushResult ?: 'no response from original master');
-            setResyncStatus('failed:syncing_db', "Push failed: {$pushError}");
-            logMsg("Resync FAILED at syncing_db: push to {$originalMasterIp} failed — {$pushError}");
-            return false;
-        }
-
-        logMsg("Resync syncing_db: OK — dump pushed to {$originalMasterIp}");
-    } catch (\Throwable $e) {
-        setResyncStatus('failed:syncing_db', $e->getMessage());
-        logMsg("Resync FAILED at syncing_db: " . $e->getMessage());
-        return false;
-    }
-
-    // ─── Step 2: syncing_files — rsync vhosts ─────────────────
-    setResyncStatus('syncing_files', "Syncing /var/www/vhosts/ to {$originalMasterIp}");
-    logMsg("Resync step 2/3: syncing_files");
-
-    $sshKey = PANEL_ROOT . '/storage/.ssh/cluster_key';
-    if (!file_exists($sshKey)) {
-        setResyncStatus('failed:syncing_files', 'No SSH key at ' . $sshKey);
-        logMsg("Resync FAILED at syncing_files: no SSH key");
-        return false;
-    }
-
-    try {
-        $rsyncCmd = "rsync -az --delete -e 'ssh -i {$sshKey} -o StrictHostKeyChecking=no -p 22' " .
-                    "/var/www/vhosts/ root@{$originalMasterIp}:/var/www/vhosts/ 2>&1";
-        $rsyncResult = trim((string)shell_exec($rsyncCmd));
-
-        if (str_contains($rsyncResult, 'error') || str_contains($rsyncResult, 'rsync:')) {
-            setResyncStatus('failed:syncing_files', "rsync error: {$rsyncResult}");
-            logMsg("Resync FAILED at syncing_files: {$rsyncResult}");
-            return false;
-        }
-        logMsg("Resync syncing_files: OK");
-    } catch (\Throwable $e) {
-        setResyncStatus('failed:syncing_files', $e->getMessage());
-        logMsg("Resync FAILED at syncing_files: " . $e->getMessage());
-        return false;
-    }
-
-    // ─── Step 3: syncing_certs — rsync SSL certificates ───────
-    setResyncStatus('syncing_certs', "Syncing SSL certificates to {$originalMasterIp}");
-    logMsg("Resync step 3/3: syncing_certs");
-
-    try {
-        $certCmd = "rsync -az -e 'ssh -i {$sshKey} -o StrictHostKeyChecking=no -p 22' " .
-                   "/var/lib/caddy/.local/share/caddy/ root@{$originalMasterIp}:/var/lib/caddy/.local/share/caddy/ 2>&1";
-        $certResult = trim((string)shell_exec($certCmd));
-
-        if (str_contains($certResult, 'error') || str_contains($certResult, 'rsync:')) {
-            setResyncStatus('failed:syncing_certs', "rsync error: {$certResult}");
-            logMsg("Resync FAILED at syncing_certs: {$certResult}");
-            return false;
-        }
-        logMsg("Resync syncing_certs: OK");
-    } catch (\Throwable $e) {
-        setResyncStatus('failed:syncing_certs', $e->getMessage());
-        logMsg("Resync FAILED at syncing_certs: " . $e->getMessage());
-        return false;
-    }
-
-    // ─── All steps completed ──────────────────────────────────
-    setResyncStatus('completed', "All 3 steps completed: db, files, certs synced to {$originalMasterIp}");
-    logMsg("Failback resync: ALL STEPS COMPLETED");
-    LogService::log('failover.resync', 'completed', "Full resync to {$originalMasterIp} completed successfully");
-
-    if ($alsoDemote) {
-        autoFailbackDemote($foConfig);
-    }
-
-    return true;
-}
-
-/**
- * Set resync status with detail message.
- * States: pending, syncing_db, syncing_files, syncing_certs, completed, failed:*
- */
-function setResyncStatus(string $status, string $detail = ''): void
-{
-    Settings::set('failover_resync_status', $status);
-    Settings::set('failover_resync_detail', $detail);
-    Settings::set('failover_resync_updated_at', date('Y-m-d H:i:s'));
-}
-
-/**
- * Demote this server back to slave after failback.
- * Called separately from resync so that mode logic controls when this happens.
- */
-function autoFailbackDemote(array $foConfig): void
-{
-    $originalMasterIp = Settings::get('failover_original_master_ip', '');
-    if (!$originalMasterIp) {
-        logMsg("Failback demote: no original master IP — skipping");
-        return;
-    }
-
-    logMsg("Failback demote: demoting self back to slave, master: {$originalMasterIp}");
-    try {
-        $demoteResult = \MuseDockPanel\Services\ClusterService::demoteToSlave($originalMasterIp);
-        if (!empty($demoteResult['ok'])) {
-            logMsg("Failback demote: SUCCESS — back to slave");
-            Settings::set('failover_activated_at', '');
-            Settings::set('failover_original_master_ip', '');
-            Settings::set('failover_resync_status', '');
-            Settings::set('failover_failback_ready', '');
-            LogService::log('failover.auto_demote', 'slave', "Auto-demoted back to slave after failback");
-            NotificationService::send(
-                "Failover: Failback completado",
-                "Este servidor vuelve a ser slave.\n" .
-                "Master original ({$originalMasterIp}) restaurado.\n" .
-                "Timestamp: " . date('Y-m-d H:i:s')
-            );
-        } else {
-            $errors = implode(', ', $demoteResult['errors'] ?? []);
-            logMsg("Failback demote: FAILED — {$errors}");
-        }
-    } catch (\Throwable $e) {
-        logMsg("Failback demote: EXCEPTION — " . $e->getMessage());
-    }
-}
+// (El resync y la vuelta automática antiguos se quitaron: el antiguo master se
+// reincorpora como copia él solo y la vuelta a mandar es un cambio de rol planificado.)

@@ -2370,6 +2370,10 @@ class ClusterService
         self::updateEnvRole('master');
         Settings::set('repl_role', 'master');
         Settings::set('cluster_role', 'master');
+        try {
+            self::refreshRoleBanner();
+        } catch (\Throwable) {
+        }
         // Stamp the promotion time so DAV snapshots carry "last promotion wins"
         // ordering (CardDavService::exportSnapshot / applySnapshot C2 guard).
         Settings::set('cluster_promoted_at', gmdate('c'));
@@ -2624,6 +2628,10 @@ class ClusterService
         self::updateEnvRole('slave');
         Settings::set('repl_role', 'slave');
         Settings::set('cluster_role', 'slave');
+        try {
+            self::refreshRoleBanner();
+        } catch (\Throwable) {
+        }
         Settings::set('repl_remote_ip', $newMasterIp);
 
         try {
@@ -2750,6 +2758,71 @@ class ClusterService
         }
         self::progress('WAL reservado para el antiguo master: ' . implode('; ', $done));
         return ['ok' => true, 'slots' => $done];
+    }
+
+    /**
+     * Aviso al abrir una terminal (VS Code o SSH) cuando este servidor es COPIA: lo que
+     * se edite aquí se sobrescribe desde el master. Solo avisa, no bloquea nada. Cuando
+     * el servidor manda, el aviso desaparece. Lo llaman la promoción, el paso a copia y
+     * el cluster-worker cada minuto (por si el rol cambió de otra forma).
+     */
+    public static function refreshRoleBanner(): void
+    {
+        $dir = '/etc/musedock';
+        $txt = "{$dir}/role-banner.txt";
+        $sh = "{$dir}/role-banner.sh";
+        $role = (string)Settings::get('cluster_role', '');
+        $fenced = Settings::get('cluster_fenced', '0') === '1' || is_file(FailoverSafetyService::FENCE_FLAG);
+
+        $msg = '';
+        if ($fenced) {
+            $msg = "⚠ ESTE SERVIDOR ESTÁ APARTADO (no sirve webs ni acepta escrituras).\n"
+                 . "  No edites aquí: lo que cambies no llegará a ningún sitio y se sobrescribirá.\n";
+        } elseif ($role === 'slave') {
+            $mip = (string)Settings::get('cluster_master_ip', '');
+            $mname = $mip;
+            foreach (self::getNodes() as $n) {
+                if ((string)parse_url((string)$n['api_url'], PHP_URL_HOST) === $mip) {
+                    $mname = (string)$n['name'];
+                }
+            }
+            $msg = "⚠ ESTE SERVIDOR ES COPIA de " . ($mname !== '' ? $mname : 'otro servidor') . " (manda allí).\n"
+                 . "  Lo que edites aquí se sobrescribirá. Edita en el master o pásale el mando a este.\n";
+        }
+
+        @mkdir($dir, 0755, true);
+        $cur = is_file($txt) ? (string)file_get_contents($txt) : '';
+        if ($cur !== $msg) {
+            if ($msg === '') {
+                @unlink($txt);
+            } else {
+                file_put_contents($txt, $msg);
+                @chmod($txt, 0644);
+            }
+        }
+
+        // El script que lo enseña (una vez por sesión y solo en terminales interactivas) y
+        // los dos enganches: /etc/profile.d (SSH, shells de login) y /etc/bash.bashrc (la
+        // terminal de VS Code no es de login y no lee profile.d).
+        $script = "# MuseDock: aviso si este servidor es copia o está apartado. Lo gestiona el panel.\n"
+            . "case \$- in *i*) ;; *) return 0 2>/dev/null || exit 0 ;; esac\n"
+            . "[ -n \"\$MUSEDOCK_ROLE_BANNER\" ] && return 0 2>/dev/null\n"
+            . "export MUSEDOCK_ROLE_BANNER=1\n"
+            . "if [ -s {$txt} ]; then printf '\\n\\033[1;33m'; cat {$txt}; printf '\\033[0m\\n'; fi\n";
+        if (!is_file($sh) || file_get_contents($sh) !== $script) {
+            file_put_contents($sh, $script);
+            @chmod($sh, 0644);
+        }
+        $hook = "[ -r {$sh} ] && . {$sh}  # musedock-role-banner";
+        $profiled = '/etc/profile.d/zz-musedock-role-banner.sh';
+        if (!is_file($profiled) || trim((string)file_get_contents($profiled)) !== $hook) {
+            @file_put_contents($profiled, $hook . "\n");
+            @chmod($profiled, 0644);
+        }
+        $bashrc = '/etc/bash.bashrc';
+        if (is_file($bashrc) && !str_contains((string)file_get_contents($bashrc), 'musedock-role-banner')) {
+            @file_put_contents($bashrc, "\n" . $hook . "\n", FILE_APPEND);
+        }
     }
 
     public static function broadcastReconfigureReplication(string $newMasterIp, array $skipIps = []): void

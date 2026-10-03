@@ -731,8 +731,15 @@ class RoleSwitchService
             FailoverService::pushConfigToSlaves();
         } catch (\Throwable) {
         }
+        // Cambio planificado: este servidor pasa a ser el TITULAR del mando. Si luego cae
+        // y otro le sustituye, en modo auto el mando vuelve aquí cuando esté estable.
+        Settings::set('failover_preferred_ip', $newPub);
+        try {
+            FailoverService::pushConfigToSlaves();
+        } catch (\Throwable) {
+        }
         $st['state'] = 'done';
-        self::step($task, $st, 'Listo en este lado.', true);
+        self::step($task, $st, 'Listo en este lado. Este servidor es el titular del mando.', true);
         LogService::log('cluster.role-switch', 'promoted', "Promovido por cambio de rol; DNS {$oldPub} → {$newPub} ({$moved} registros)");
     }
 }

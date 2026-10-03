@@ -69,6 +69,11 @@ class FailoverService
         'failover_up_threshold'     => '5',
         'failover_check_timeout'    => '10',
         'failover_cooldown_minutes' => '15',  // min after failback before allowing re-failover
+        // Titular: el servidor al que se dio el mando con un cambio de rol planificado.
+        // En modo auto, tras un relevo por caída, el mando vuelve a él cuando lleva
+        // failover_return_stable_minutes respondiendo bien y es copia al día.
+        'failover_preferred_ip'           => '',
+        'failover_return_stable_minutes'  => '15',
 
         // Health severity thresholds (configurable by admin)
         'failover_disk_critical_pct'  => '5',   // <5% free → critical (failover)
@@ -1303,6 +1308,7 @@ class FailoverService
             'failover_pg_panel_severity', 'failover_pg_hosting_severity',
             'failover_mysql_severity', 'failover_caddy_severity',
             'failover_dns_exclude', 'failover_dns_exclude_auto',
+            'failover_preferred_ip', 'failover_return_stable_minutes',
             'filesync_snapshot',
         ];
     }

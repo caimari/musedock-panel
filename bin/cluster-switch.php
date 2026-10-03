@@ -25,7 +25,7 @@
  *                                              ficheros en vivo (lsyncd), como hacía el master
  *   php bin/cluster-switch.php dns-failover    DNS de los primarios → este servidor de relevo
  *   php bin/cluster-switch.php dns-failback    devuelve SOLO lo que movió el relevo (diario)
- *   php bin/cluster-switch.php failover-normalize   (master) este servidor principal del relevo, estado normal
+ *   php bin/cluster-switch.php failover-normalize   (master) este servidor principal y TITULAR del relevo, estado normal
  *   php bin/cluster-switch.php pg-rebuild <ip-master> <clúster|all> [--max-rate=20M]   copia completa con avance
  */
 
@@ -136,7 +136,14 @@ switch ($cmd) {
     case 'failover-normalize':
         // En el master: este servidor como principal del relevo DNS, los demás de relevo,
         // estado normal y sin restos de un relevo por caída (dns-failover a mano).
-        $r = \MuseDockPanel\Services\RoleSwitchService::normalizeFailover();
+        // Además, este servidor pasa a ser el TITULAR del mando (decisión del administrador):
+        // si cae y otro le sustituye, en modo auto el mando vuelve aquí cuando esté estable.
+        foreach (\MuseDockPanel\Services\FailoverService::getServers() as $s) {
+            if (in_array((string)($s['ip'] ?? ''), preg_split('/\s+/', trim((string)shell_exec('hostname -I'))) ?: [], true)) {
+                Settings::set('failover_preferred_ip', (string)$s['ip']);
+            }
+        }
+        $r = \MuseDockPanel\Services\RoleSwitchService::normalizeFailover() + ['titular' => Settings::get('failover_preferred_ip', '')];
         $out($r);
         $ok = !empty($r['ok']);
         break;
