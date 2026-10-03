@@ -18,6 +18,9 @@
  *   php bin/cluster-switch.php demote <ip-vpn-del-nuevo-master>
  *                                              reconstruye ESTE nodo como slave del nuevo master
  *                                              (pg_rewind, MariaDB desde cero, Redis)
+ *   php bin/cluster-switch.php adopt-peer <ip-vpn>
+ *                                              (master) registra el otro nodo y le manda los
+ *                                              ficheros en vivo (lsyncd), como hacía el master
  *   php bin/cluster-switch.php dns-failover    DNS de los primarios → este servidor de relevo
  *   php bin/cluster-switch.php dns-failback    devuelve SOLO lo que movió el relevo (diario)
  */
@@ -34,6 +37,12 @@ if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
     exit(1);
 }
 $cmd = $argv[1] ?? '';
+// Avance en directo: cada paso largo (rebobinado, copia de MariaDB, Redis…) se ve al momento.
+ClusterService::$progressCb = static function (string $m): void {
+    echo '[' . date('H:i:s') . '] ' . $m . "\n";
+    @ob_flush();
+    flush();
+};
 $out = static function ($data): void {
     echo json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), "\n";
 };
@@ -93,6 +102,11 @@ switch ($cmd) {
         $r = ClusterService::demoteToSlave($ip);
         $out($r);
         $ok = !empty($r['ok']);
+        break;
+
+    case 'adopt-peer':
+        // (en el master) registrar el otro nodo y mandarle los ficheros en vivo
+        $out(ClusterService::adoptPeerAsFileSyncTarget((string)($argv[2] ?? '')));
         break;
 
     case 'dns-failover':

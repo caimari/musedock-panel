@@ -2159,6 +2159,95 @@ class ClusterService
     // ═══════════════════════════════════════════════════════════
 
     /**
+     * Tras promover este nodo: el antiguo master pasa a ser SU nodo (si no lo tenía),
+     * con su clave SSH instalada, y la copia de ficheros en vivo (lsyncd) va hacia él
+     * con la misma configuración que tenía el master (filesync_snapshot, que el master
+     * manda en pushConfigToSlaves). Así los ficheros siguen en espejo sea quien sea el
+     * principal, sin rsync a mano. No borra nada en este nodo; lsyncd sí es ESPEJO
+     * hacia el otro (como siempre: el principal manda).
+     */
+    public static function adoptPeerAsFileSyncTarget(string $peerIp): array
+    {
+        $steps = [];
+        if (!filter_var($peerIp, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'error' => 'IP del otro nodo no válida', 'steps' => $steps];
+        }
+        // 1) Nodo registrado.
+        $node = Database::fetchOne("SELECT * FROM cluster_nodes WHERE api_url LIKE :u LIMIT 1", ['u' => '%//' . $peerIp . ':%']);
+        if (!$node) {
+            $token = ReplicationService::decryptPassword(Settings::get('cluster_local_token', ''));
+            if ($token === '') {
+                return ['ok' => false, 'error' => 'este panel no tiene cluster_local_token', 'steps' => $steps];
+            }
+            $id = self::addNode("Antiguo master ({$peerIp})", "https://{$peerIp}:" . (int)Env::get('PANEL_PORT', 8444), $token, ['web', 'mail']);
+            Database::update('cluster_nodes', ['role' => 'slave', 'status' => 'online'], 'id = :id', ['id' => $id]);
+            $node = self::getNode($id);
+            $steps[] = "registrado como nodo #{$id}";
+            try {
+                $st = self::callNode($id, 'POST', 'api/cluster/action', ['action' => 'query-local-state', 'payload' => []]);
+                $host = (string)($st['data']['state']['hostname'] ?? $st['data']['state']['panel_hostname'] ?? '');
+                if ($host !== '') {
+                    Database::update('cluster_nodes', ['name' => explode('.', $host)[0] . " ({$peerIp})"], 'id = :id', ['id' => $id]);
+                }
+            } catch (\Throwable) {
+            }
+        } else {
+            $steps[] = "ya era el nodo #{$node['id']}";
+        }
+        $nodeId = (int)$node['id'];
+
+        // 2) Clave SSH de este nodo en el otro (para lsyncd/rsync).
+        $keyPath = Settings::get('filesync_ssh_key_path', '/root/.ssh/id_ed25519') ?: '/root/.ssh/id_ed25519';
+        if (!is_file($keyPath)) {
+            FileSyncService::generateSshKey($keyPath);
+            $steps[] = "clave SSH generada en {$keyPath}";
+        }
+        $pub = FileSyncService::getPublicKey($keyPath);
+        $r = self::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'install-ssh-key', 'payload' => ['public_key' => $pub]]);
+        $steps[] = !empty($r['ok']) ? 'clave SSH instalada en el otro nodo' : 'AVISO clave SSH: ' . ($r['error'] ?? 'sin respuesta');
+
+        // 3) Configuración de copia de ficheros como la tenía el master.
+        $snap = json_decode(Settings::get('filesync_snapshot', ''), true);
+        if (!is_array($snap)) {
+            // No llegó por pushConfigToSlaves (master con versión anterior): pedírsela.
+            $r2 = self::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'filesync-snapshot', 'payload' => []]);
+            $snap = $r2['data']['result']['snapshot'] ?? $r2['data']['snapshot'] ?? null;
+            $steps[] = is_array($snap) ? 'configuración de copia pedida al otro nodo' : 'el otro nodo no dio su configuración de copia: se usan los valores de este';
+        }
+        if (is_array($snap)) {
+            foreach ($snap as $k => $v) {
+                if (str_starts_with((string)$k, 'filesync_') && $k !== 'filesync_extra_nodes') {
+                    Settings::set((string)$k, (string)$v);
+                }
+            }
+            $steps[] = 'configuración de copia de ficheros tomada del master';
+        }
+        if (Settings::get('filesync_extra_paths', '') !== '') {
+            Settings::set('filesync_extra_nodes', (string)$nodeId);
+        }
+        if (is_array($snap) && ($snap['filesync_enabled'] ?? '0') !== '1') {
+            return ['ok' => true, 'steps' => array_merge($steps, ['el master no tenía activada la copia de ficheros: no se activa'])];
+        }
+        Settings::set('filesync_enabled', '1');
+        $gen = FileSyncService::generateLsyncdConfig();
+        shell_exec('systemctl restart lsyncd 2>&1');
+        $running = trim((string)shell_exec('systemctl is-active lsyncd 2>/dev/null')) === 'active';
+        $steps[] = $running ? 'lsyncd en marcha hacia el otro nodo (espejo en vivo)' : 'ERROR lsyncd no arrancó: ' . ($gen['error'] ?? '');
+        LogService::log('cluster.failover', 'adopt-peer', "Copia de ficheros en vivo hacia {$peerIp}: " . implode('; ', $steps));
+        return ['ok' => $running, 'steps' => $steps];
+    }
+
+    /** Para mostrar el avance en la terminal (bin/cluster-switch.php); en web no hace nada. */
+    public static $progressCb = null;
+
+    public static function progress(string $msg): void
+    {
+        if (is_callable(self::$progressCb)) {
+            (self::$progressCb)($msg);
+        }
+    }
+
+    /**
      * Promote this node to master.
      *
      * @param bool   $force       skip the fencing gate (DANGEROUS: only when you
@@ -2352,6 +2441,27 @@ class ClusterService
             $errors[] = 'carddav resync: ' . $e->getMessage();
         }
 
+        // Ficheros en vivo hacia el antiguo master (registrarlo como nodo si hace falta).
+        $peerIp = Settings::get('cluster_master_heartbeat_ip', '') ?: Settings::get('repl_remote_ip', '');
+        if ($peerIp === '' && filter_var($oldMasterIp, FILTER_VALIDATE_IP)) {
+            $peerIp = $oldMasterIp;
+        }
+        if (filter_var($peerIp, FILTER_VALIDATE_IP)) {
+            self::progress("Ficheros: copia en vivo hacia el antiguo master ({$peerIp})");
+            try {
+                $results['filesync_peer'] = self::adoptPeerAsFileSyncTarget($peerIp);
+            } catch (\Throwable $e) {
+                $errors[] = 'Copia de ficheros hacia el antiguo master: ' . $e->getMessage();
+            }
+        }
+
+        // Si este nodo estaba apartado (marca en disco: Caddy principal bloqueado y panel
+        // de rescate), ahora es el master: se reactiva para que sirva las webs.
+        if (is_file(FailoverSafetyService::FENCE_FLAG) || Settings::get('cluster_fenced', '0') === '1') {
+            self::progress('Este nodo estaba apartado: se reactiva (Caddy principal, sin panel de rescate)');
+            $results['unfence'] = FailoverSafetyService::unfenceSelf();
+        }
+
         return [
             'ok'      => empty($errors),
             'results' => $results,
@@ -2389,11 +2499,14 @@ class ClusterService
                 }
                 $srcPort = (int)$cluster['port']; // same cluster identity on the new master
                 // Try incremental rewind first.
+                self::progress("PostgreSQL {$cluster['key']}: rebobinando desde el nuevo master (solo lo cambiado)…");
                 $r = ReplicationService::rewindPgClusterFrom($cluster, $newMasterIp, $srcPort, $pgUser, $pgPass);
                 if (empty($r['ok'])) {
                     // Rewind not possible/failed → full basebackup rebuild (confirmed wipe).
+                    self::progress("PostgreSQL {$cluster['key']}: el rebobinado no fue posible; copia completa…");
                     $r = ReplicationService::setupPgSlaveForCluster($cluster, $newMasterIp, $srcPort, $pgUser, $pgPass, true);
                 }
+                self::progress("PostgreSQL {$cluster['key']}: " . (!empty($r['ok']) ? 'OK, replicando' : 'ERROR ' . ($r['error'] ?? '')));
                 $results['pg_demote'][$cluster['key']] = $r;
                 if (empty($r['ok'])) {
                     $errors[] = "PG demote {$cluster['key']}: " . ($r['error'] ?? 'error desconocido');
@@ -2421,14 +2534,51 @@ class ClusterService
                 // seed=true forces a FULL rebuild from the new master (dump+import),
                 // discarding the divergent local data — the MySQL equivalent of the
                 // PG rewind/basebackup path. This is the only safe way to demote.
-                $result = ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass, true);
+                // Si este nodo no tiene nada que el nuevo master no tenga (cambio de roles
+                // limpio: se puso en solo lectura antes de promover al otro), basta con
+                // seguirle por GTID: solo llega lo nuevo, en segundos. Si no cuadra, copia
+                // completa (lo único seguro tras escrituras divergentes).
+                $gtid = FailoverSafetyService::mysqlCanFollowByGtid($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass);
+                $results['mysql_mode'] = $gtid['ok'] ? 'solo lo nuevo (GTID)' : 'copia completa: ' . ($gtid['reason'] ?? '?');
+                self::progress('MariaDB: ' . $results['mysql_mode']);
+                $result = ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass, !$gtid['ok']);
+                if (!empty($result['ok']) && $gtid['ok']) {
+                    // Que de verdad replique: unos segundos y mirar los dos hilos.
+                    sleep(4);
+                    try {
+                        $st = ReplicationService::getMysqlPdo()?->query('SHOW SLAVE STATUS')->fetch(\PDO::FETCH_ASSOC) ?: [];
+                        if (($st['Slave_IO_Running'] ?? '') !== 'Yes' || ($st['Slave_SQL_Running'] ?? '') !== 'Yes') {
+                            $result = ['ok' => false, 'error' => 'réplica GTID no arrancó: ' . trim(($st['Last_IO_Error'] ?? '') . ' ' . ($st['Last_SQL_Error'] ?? ''))];
+                        }
+                    } catch (\Throwable $e) {
+                        $result = ['ok' => false, 'error' => $e->getMessage()];
+                    }
+                }
+                if (empty($result['ok']) && $gtid['ok']) {
+                    self::progress('MariaDB: el seguimiento por GTID falló; se hace la copia completa');
+                    $result = ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass, true);
+                    $results['mysql_mode'] = 'copia completa (falló el GTID)';
+                }
                 $results['mysql_demote'] = $result;
+                self::progress('MariaDB: ' . (!empty($result['ok']) ? 'OK, replicando' : 'ERROR ' . ($result['error'] ?? '')));
                 if (!$result['ok']) {
                     $errors[] = 'MySQL demote: ' . ($result['error'] ?? 'Unknown error');
                 }
             } catch (\Throwable $e) {
                 $errors[] = 'MySQL demote: ' . $e->getMessage();
             }
+        }
+
+        // Redis: réplica del nuevo master (antes se quedaba de principal).
+        self::progress('Redis: pasando a réplica del nuevo master');
+        try {
+            $rr = FailoverSafetyService::demoteRedis($newMasterIp);
+            $results['redis_demote'] = $rr;
+            if (empty($rr['ok'])) {
+                $errors[] = 'Redis demote: ' . ($rr['error'] ?? $rr['message'] ?? 'fallo');
+            }
+        } catch (\Throwable $e) {
+            $errors[] = 'Redis demote: ' . $e->getMessage();
         }
 
         // Update env and settings — all three role indicators must be consistent
@@ -2526,7 +2676,11 @@ class ClusterService
             // la pública: la réplica por la pública choca con el cortafuegos.
             $nodeHost = (string)parse_url($nodeUrl, PHP_URL_HOST);
             $reachIp = $newMasterIp;
-            if ($nodeHost !== '' && filter_var($nodeHost, FILTER_VALIDATE_IP)
+            // Solo si el nuevo master es ESTE servidor (promote): entonces se le da la IP
+            // propia por la ruta hacia ese nodo. En un demote el nuevo master es otro y su
+            // IP se pasa tal cual (antes se sustituía por la de este servidor: error).
+            $isMe = in_array($newMasterIp, preg_split('/\s+/', trim((string)shell_exec('hostname -I 2>/dev/null'))) ?: [], true);
+            if ($isMe && $nodeHost !== '' && filter_var($nodeHost, FILTER_VALIDATE_IP)
                 && preg_match('/\bsrc\s+(\S+)/', (string)shell_exec('ip route get ' . escapeshellarg($nodeHost) . ' 2>/dev/null'), $rm)
                 && filter_var($rm[1], FILTER_VALIDATE_IP)) {
                 $reachIp = $rm[1];

@@ -922,6 +922,13 @@ class ClusterController
     public function syncAllHostings(): void
     {
         View::verifyCsrf();
+        // Un nodo apartado tiene datos viejos: re-provisionar desde aquí pisaría lo nuevo
+        // del nodo que ahora es el principal.
+        if (\MuseDockPanel\Settings::get('cluster_fenced', '0') === '1') {
+            Flash::set('error', 'Este servidor está APARTADO: no se sincroniza nada desde aquí (pisaría los datos del principal actual).');
+            header('Location: /settings/cluster');
+            exit;
+        }
 
         $nodeId = (int)($_POST['node_id'] ?? 0);
         if ($nodeId < 1) {

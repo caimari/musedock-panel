@@ -1807,6 +1807,21 @@ class FileSyncService
         '*.tmp.*',
     ];
 
+    /** Ajustes de copia de ficheros que se pasan al otro nodo (ninguno es secreto). */
+    public const PEER_KEYS = ['filesync_enabled', 'filesync_method', 'filesync_sync_mode', 'filesync_ssh_user', 'filesync_ssh_port',
+        'filesync_ssh_key_path', 'filesync_exclude', 'filesync_bwlimit', 'filesync_interval', 'filesync_lsyncd_auto_heal',
+        'filesync_lsyncd_default_excludes', 'filesync_rsync_default_excludes', 'filesync_ssl_certs',
+        'filesync_ssl_cert_path', 'filesync_extra_paths'];
+
+    public static function snapshotForPeer(): array
+    {
+        $o = [];
+        foreach (self::PEER_KEYS as $k) {
+            $o[$k] = Settings::get($k, '');
+        }
+        return $o;
+    }
+
     /**
      * Carpetas extra que lsyncd copia además de /var/www/vhosts (setting
      * filesync_extra_paths): apps que viven fuera de los hostings. Solo carpetas

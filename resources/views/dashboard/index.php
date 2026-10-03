@@ -169,7 +169,7 @@
         <div class="card border-warning">
             <div class="card-header bg-warning text-dark d-flex justify-content-between align-items-center py-2">
                 <span><i class="bi bi-exclamation-triangle-fill me-2"></i>Desincronización entre nodos detectada</span>
-                <a href="/settings/cluster" class="btn btn-dark btn-sm py-0 px-2"><i class="bi bi-arrow-repeat me-1"></i>Sincronizar Todo</a>
+                <?php if (\MuseDockPanel\Settings::get('cluster_fenced', '0') !== '1'): ?><a href="/settings/cluster" class="btn btn-dark btn-sm py-0 px-2"><i class="bi bi-arrow-repeat me-1"></i>Sincronizar Todo</a><?php else: ?><span class="small fw-semibold">Bloqueado: servidor apartado</span><?php endif; ?>
             </div>
             <div class="card-body py-2">
                 <p class="small text-muted mb-2">

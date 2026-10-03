@@ -553,6 +553,9 @@ class ClusterApiController
                 'notify-iface-down' => $this->handleNotifyIfaceDown($payload),
                 'notify-iface-up'   => $this->handleNotifyIfaceUp($payload),
                 'query-local-state' => $this->handleQueryLocalState(),
+                // Configuración de copia de ficheros de este nodo (sin secretos), para que
+                // el nodo que se promueve la adopte (ClusterService::adoptPeerAsFileSyncTarget).
+                'filesync-snapshot' => ['ok' => true, 'snapshot' => \MuseDockPanel\Services\FileSyncService::snapshotForPeer()],
                 // Configuración del sistema (supervisor, cron, Caddyfile, pools PHP) que
                 // el slave copia y adapta (ConfigMirrorService). Solo lectura aquí.
                 'export-system-config' => \MuseDockPanel\Services\ConfigMirrorService::export(),
@@ -1065,6 +1068,7 @@ class ClusterApiController
         return [
             'ok'   => true,
             'state' => [
+                'hostname'                    => (string)gethostname(),
                 'failover_state'              => Settings::get('failover_state', 'normal'),
                 'failover_iface_mode'         => Settings::get('failover_iface_mode', 'normal'),
                 'failover_dns_changed_locally' => Settings::get('failover_dns_changed_locally', '0') === '1',

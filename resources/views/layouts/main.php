@@ -220,6 +220,17 @@
     </div>
 
     <div class="content-area">
+        <?php if (\MuseDockPanel\Settings::get('cluster_fenced', '0') === '1' || is_file(\MuseDockPanel\Services\FailoverSafetyService::FENCE_FLAG)): ?>
+        <?php /* Servidor apartado (fence): que se vea en todas las páginas, no solo en Cluster. */ ?>
+        <div class="alert mb-3" role="alert" style="background:rgba(239,68,68,.15);border:1px solid rgba(239,68,68,.5);color:#fca5a5;">
+            <i class="bi bi-sign-stop-fill me-2"></i><strong>Servidor APARTADO (fenced)</strong> desde
+            <?= \MuseDockPanel\View::e(\MuseDockPanel\Settings::get('cluster_fenced_at', '?')) ?>:
+            no sirve webs (Caddy parado), sus bases de datos de clientes están en solo lectura y no copia ficheros.
+            Otro nodo hace de principal. Estás en el <strong>panel de rescate</strong>.
+            <span class="d-block small mt-1 text-muted">Motivo: <?= \MuseDockPanel\View::e(\MuseDockPanel\Settings::get('cluster_fenced_reason', '—')) ?>
+            · Para reactivarlo o convertirlo en copia del principal: <code>bin/cluster-switch.php</code> (unfence / demote / promote).</span>
+        </div>
+        <?php endif; ?>
         <?php include dirname(__DIR__) . '/partials/flash-toasts.php'; ?>
 
         <?= $content ?>

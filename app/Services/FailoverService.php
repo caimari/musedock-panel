@@ -1303,6 +1303,7 @@ class FailoverService
             'failover_pg_panel_severity', 'failover_pg_hosting_severity',
             'failover_mysql_severity', 'failover_caddy_severity',
             'failover_dns_exclude', 'failover_dns_exclude_auto',
+            'filesync_snapshot',
         ];
     }
 
@@ -1348,6 +1349,11 @@ class FailoverService
         // Los nombres de máquina que conoce el master (su hostname, sus nodos) viajan al
         // slave, que es quien hace el relevo y debe dejarlos quietos.
         Settings::set('failover_dns_exclude_auto', implode(',', CloudflareService::machineNameLabels()));
+        // Copia de ficheros del master, para que el slave, si se promueve, mande los
+        // ficheros al antiguo master igual que se los mandaba él (ClusterService::adoptPeerAsFileSyncTarget).
+        $fs = FileSyncService::snapshotForPeer();
+        Settings::set('filesync_snapshot', json_encode($fs));
+        $config['filesync_snapshot'] = Settings::get('filesync_snapshot', '');
         $config['failover_dns_exclude_auto'] = Settings::get('failover_dns_exclude_auto', '');
 
         $payload = [

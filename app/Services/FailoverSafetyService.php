@@ -125,13 +125,61 @@ class FailoverSafetyService
      * Stops Caddy (web + panel routes) and puts databases in read-only so no
      * write can land here while another node is the master.
      */
+    public const FENCE_FLAG = '/var/lib/musedock/fenced';
+
+    /**
+     * Que el aislamiento sobreviva a un reinicio: mientras exista FENCE_FLAG, systemd
+     * no arranca el Caddy principal (ExecCondition) y sí el panel de rescate. Sin esto,
+     * un nodo apartado que se reinicia (corte de red, proveedor…) volvería a servir
+     * webs con datos viejos hasta que el cluster-worker lo apartara otra vez.
+     */
+    private static function installFenceGuard(): void
+    {
+        $panel = dirname(__DIR__, 2);
+        $dropin = "/etc/systemd/system/caddy.service.d/zz-musedock-fence.conf";
+        $unit = "/etc/systemd/system/musedock-fence-guard.service";
+        $want = [
+            $dropin => "# MuseDock: con el nodo apartado (" . self::FENCE_FLAG . ") el Caddy principal no arranca.\n"
+                . "[Service]\nExecCondition=/bin/sh -c 'test ! -e " . self::FENCE_FLAG . "'\n",
+            $unit => "# MuseDock: al arrancar, si el nodo está apartado, panel de rescate en el puerto del panel.\n"
+                . "[Unit]\nDescription=MuseDock: panel de rescate si el nodo esta apartado\n"
+                . "ConditionPathExists=" . self::FENCE_FLAG . "\nAfter=network-online.target musedock-panel.service\nWants=network-online.target\n\n"
+                . "[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/bin/php {$panel}/bin/panel-rescue.php start\n\n"
+                . "[Install]\nWantedBy=multi-user.target\n",
+        ];
+        $changed = false;
+        @mkdir(dirname($dropin), 0755, true);
+        foreach ($want as $file => $content) {
+            if (!is_file($file) || file_get_contents($file) !== $content) {
+                file_put_contents($file, $content);
+                $changed = true;
+            }
+        }
+        if ($changed) {
+            shell_exec('systemctl daemon-reload 2>&1; systemctl enable musedock-fence-guard.service 2>&1');
+        }
+    }
+
     public static function fenceSelf(string $reason = ''): array
     {
         $steps = [];
 
+        // Primero la marca persistente: si el servidor se reinicia a partir de aquí,
+        // sigue apartado.
+        @mkdir(dirname(self::FENCE_FLAG), 0755, true);
+        file_put_contents(self::FENCE_FLAG, date('c') . ' ' . $reason . "\n");
+        self::installFenceGuard();
+
         $out = shell_exec('systemctl stop caddy 2>&1');
         $stopped = trim((string)shell_exec('systemctl is-active caddy 2>/dev/null')) !== 'active';
         $steps[] = ['name' => 'Detener Caddy', 'ok' => $stopped, 'output' => $stopped ? 'detenido' : trim((string)$out)];
+
+        // El panel sigue accesible (https://IP:puerto-del-panel) con un Caddy mínimo de
+        // rescate que solo lleva al panel: si algo va mal, se puede entrar sin túneles.
+        if ($stopped) {
+            $r = trim((string)shell_exec('php ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/panel-rescue.php') . ' start 2>&1'));
+            $steps[] = ['name' => 'Panel de rescate', 'ok' => str_contains($r, 'ACTIVO'), 'output' => $r];
+        }
 
         // Dejar de empujar ficheros al nuevo master. lsyncd copia en ESPEJO: si siguiera
         // en marcha, borraría en el nuevo master lo que se suba allí mientras este nodo
@@ -218,7 +266,20 @@ class FailoverSafetyService
                     return ['stale' => true, 'winner' => $n['name'], 'reason' => $reason];
                 }
                 $host = (string)(parse_url((string)$n['api_url'], PHP_URL_HOST) ?: '');
-                return ['stale' => true, 'winner' => $n['name'], 'reason' => $reason] + self::fenceStaleMaster($reason, $host);
+                $fence = self::fenceStaleMaster($reason, $host);
+                // Y, si es seguro, pasar a ser espejo del nuevo master sin esperar a nadie.
+                $rejoin = self::autoRejoinAsSlave($host);
+                try {
+                    NotificationService::send(
+                        $rejoin['done'] ? 'Failover: este servidor ya es espejo del nuevo master' : 'Failover: este servidor sigue apartado (decide tú)',
+                        $rejoin['done']
+                            ? "Tras apartarse, se ha convertido en réplica de {$n['name']} ({$host}): no tenía escrituras propias tras el relevo. Volver a ser principal es manual."
+                            : 'No se ha convertido en réplica automáticamente: ' . ($rejoin['reason'] ?? '?')
+                              . "\n\nRevisa y, si procede: php bin/cluster-switch.php demote {$host}"
+                    );
+                } catch (\Throwable) {
+                }
+                return ['stale' => true, 'winner' => $n['name'], 'reason' => $reason, 'rejoin' => $rejoin] + $fence;
             }
         }
         return ['stale' => false, 'nodes_asked' => $asked];
@@ -258,6 +319,17 @@ class FailoverSafetyService
         }
         $hooks = RoleHookService::run('demote', $hookEnv);
 
+        // Igual que fenceSelf: marca persistente (sobrevive a reinicios), sin servir webs
+        // ni copiar ficheros, y el panel accesible por el de rescate.
+        @mkdir(dirname(self::FENCE_FLAG), 0755, true);
+        file_put_contents(self::FENCE_FLAG, date('c') . ' ' . $reason . "\n");
+        self::installFenceGuard();
+        shell_exec('systemctl stop lsyncd 2>&1');
+        $steps[] = 'lsyncd detenido';
+        shell_exec('systemctl stop caddy 2>&1');
+        $steps[] = 'Caddy detenido (no sirve webs con datos viejos)';
+        $steps[] = trim((string)shell_exec('php ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/panel-rescue.php') . ' start 2>&1'));
+
         Settings::set('cluster_fenced', '1');
         Settings::set('cluster_fenced_at', date('Y-m-d H:i:s'));
         Settings::set('cluster_fenced_reason', $reason);
@@ -265,7 +337,7 @@ class FailoverSafetyService
         try {
             NotificationService::send('Failover: este servidor se ha aislado (master caducado)',
                 "{$reason}.\n\nPara evitar dos masters, sus bases de datos de clientes están en solo lectura y se han ejecutado "
-                . "los scripts demote.d. El panel sigue accesible. Siguiente paso: devolverlo como slave del nuevo master.");
+                . "los scripts demote.d; Caddy y lsyncd parados. El panel sigue accesible por IP (panel de rescate). Siguiente paso: devolverlo como slave del nuevo master.");
         } catch (\Throwable) {
         }
         return ['fenced' => true, 'steps' => $steps, 'hooks' => $hooks];
@@ -282,6 +354,10 @@ class FailoverSafetyService
                 . escapeshellarg('SELECT pg_reload_conf()') . ' 2>&1');
             $steps[] = ['name' => "PostgreSQL {$c['key']}", 'ok' => true, 'output' => 'read-only revertido'];
         }
+        // Quitar la marca ANTES de arrancar Caddy (si no, su ExecCondition lo impide) y
+        // liberar el puerto del panel (lo tiene el Caddy de rescate).
+        @unlink(self::FENCE_FLAG);
+        shell_exec('php ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/panel-rescue.php') . ' stop 2>&1');
         shell_exec('systemctl start caddy 2>&1');
         if (Settings::get('filesync_enabled', '0') === '1' && Settings::get('cluster_role', '') === 'master') {
             shell_exec('systemctl start lsyncd 2>&1');
@@ -355,6 +431,161 @@ class FailoverSafetyService
         $r2 = trim((string)shell_exec($cli . 'CONFIG REWRITE 2>&1'));
         $ok = $r1 === 'OK';
         return ['ok' => $ok, 'message' => $ok ? 'Redis promovido a master' . ($r2 === 'OK' ? ' y persistido' : " (CONFIG REWRITE: {$r2})") : "REPLICAOF NO ONE: {$r1}"];
+    }
+
+    /**
+     * Lo contrario de promoteRedis: este nodo pasa a ser réplica del Redis del nuevo
+     * master (misma contraseña en los dos: masterauth = requirepass local) y se
+     * persiste. Sin esto, un antiguo master degradado seguía con Redis de principal.
+     */
+    public static function demoteRedis(string $masterIp, int $port = 6379): array
+    {
+        if (trim((string)shell_exec('command -v redis-cli 2>/dev/null')) === '') {
+            return ['ok' => true, 'skipped' => 'Redis no instalado'];
+        }
+        if (!filter_var($masterIp, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'error' => 'IP del nuevo master no válida'];
+        }
+        $pass = '';
+        foreach (@file('/etc/redis/redis.conf', FILE_IGNORE_NEW_LINES) ?: [] as $l) {
+            if (preg_match('/^\s*requirepass\s+(\S+)/', $l, $m)) {
+                $pass = trim($m[1], '"\'');
+            }
+        }
+        $cli = ($pass !== '' ? 'REDISCLI_AUTH=' . escapeshellarg($pass) . ' ' : '') . 'timeout 10 redis-cli --no-auth-warning ';
+        if ($pass !== '') {
+            shell_exec($cli . 'CONFIG SET masterauth ' . escapeshellarg($pass) . ' 2>&1');
+        }
+        $r1 = trim((string)shell_exec($cli . 'REPLICAOF ' . escapeshellarg($masterIp) . ' ' . (int)$port . ' 2>&1'));
+        $r2 = trim((string)shell_exec($cli . 'CONFIG REWRITE 2>&1'));
+        $ok = str_starts_with($r1, 'OK');
+        return ['ok' => $ok, 'message' => $ok ? "Redis réplica de {$masterIp}" . ($r2 === 'OK' ? ' (persistido)' : " (CONFIG REWRITE: {$r2})") : "REPLICAOF: {$r1}"];
+    }
+
+    /**
+     * PostgreSQL: ¿escribió este antiguo master algo DESPUÉS de que el nuevo tomara el
+     * relevo? Se compara su posición actual de WAL con el punto en que el nuevo master
+     * abrió su línea de tiempo (historial del nuevo timeline, por el protocolo de
+     * réplica). Si está por detrás o igual, no hay nada propio que perder. Ante la duda
+     * (no se puede leer algo), se considera que SÍ divergió: nunca se decide a ciegas.
+     */
+    public static function pgDivergedFrom(array $cluster, string $masterIp, int $port, string $user, string $pass): array
+    {
+        $local = static fn(string $sql) => trim((string)shell_exec('cd /tmp && runuser -u postgres -- psql -p ' . (int)$cluster['port']
+            . ' -XAtc ' . escapeshellarg($sql) . ' 2>/dev/null'));
+        if ($local('select pg_is_in_recovery()') !== 'f') {
+            return ['diverged' => false, 'reason' => 'ya es réplica'];
+        }
+        $myLsn = $local('select pg_current_wal_lsn()');
+        $myTli = (int)$local('select timeline_id from pg_control_checkpoint()');
+        $env = 'PGPASSWORD=' . escapeshellarg($pass) . ' PGCONNECT_TIMEOUT=5 ';
+        $conn = escapeshellarg("host={$masterIp} port={$port} user={$user} dbname=postgres replication=database");
+        $ident = trim((string)shell_exec($env . 'psql ' . $conn . ' -XAt -c "IDENTIFY_SYSTEM" 2>/dev/null'));
+        $theirTli = (int)(explode('|', $ident)[1] ?? 0);
+        if ($myLsn === '' || $myTli < 1 || $theirTli < 1) {
+            return ['diverged' => true, 'reason' => 'no se pudo leer la posición de WAL o el timeline'];
+        }
+        if ($theirTli <= $myTli) {
+            return ['diverged' => true, 'reason' => "el nuevo master no tiene un timeline posterior ({$theirTli} vs {$myTli})"];
+        }
+        $hist = (string)shell_exec($env . 'psql ' . $conn . ' -XAt -c ' . escapeshellarg("TIMELINE_HISTORY {$theirTli}") . ' 2>/dev/null');
+        $switch = null;
+        foreach (preg_split('/\R/', $hist) as $line) {
+            if (preg_match('/^\s*(\d+)\s+([0-9A-F]+\/[0-9A-F]+)/i', $line, $m) && (int)$m[1] === $myTli) {
+                $switch = $m[2];
+            }
+        }
+        if ($switch === null) {
+            return ['diverged' => true, 'reason' => "el historial del nuevo master no incluye nuestro timeline {$myTli}"];
+        }
+        $toInt = static fn(string $l) => (static function ($p) { return (hexdec($p[0]) << 32) + hexdec($p[1]); })(explode('/', $l));
+        $diverged = $toInt($myLsn) > $toInt($switch);
+        return ['diverged' => $diverged, 'local_lsn' => $myLsn, 'switch_lsn' => $switch,
+                'reason' => $diverged ? "este nodo escribió después del relevo ({$myLsn} > {$switch})" : 'sin escrituras propias tras el relevo'];
+    }
+
+    /**
+     * Antiguo master que vuelve y ve que otro es el principal: tras apartarse, se
+     * convierte SOLO en espejo del nuevo master si es seguro (ni PostgreSQL ni MariaDB
+     * tienen escrituras que el nuevo no tenga). Si no, se queda apartado y avisa.
+     * Desactivable con cluster_auto_rejoin = 0. Volver a ser principal nunca es automático.
+     */
+    public static function autoRejoinAsSlave(string $newMasterIp): array
+    {
+        if (Settings::get('cluster_auto_rejoin', '1') === '0') {
+            return ['done' => false, 'reason' => 'desactivado (cluster_auto_rejoin = 0)'];
+        }
+        if (!filter_var($newMasterIp, FILTER_VALIDATE_IP)) {
+            return ['done' => false, 'reason' => 'IP del nuevo master desconocida'];
+        }
+        $checks = [];
+        $pgUser = Settings::get('repl_pg_user', 'replicator');
+        $pgPass = ReplicationService::decryptPassword(Settings::get('repl_pg_password', Settings::get('repl_pg_pass', '')));
+        $panelPort = (int)\MuseDockPanel\Env::int('DB_PORT', 5432);
+        foreach (PgClusterService::listClusters() as $c) {
+            if ($c['cluster'] === 'panel' || (int)$c['port'] === $panelPort) {
+                continue;
+            }
+            $d = self::pgDivergedFrom($c, $newMasterIp, (int)$c['port'], $pgUser, $pgPass);
+            $checks["PostgreSQL {$c['key']}"] = $d['reason'];
+            if (!empty($d['diverged'])) {
+                return ['done' => false, 'reason' => "PostgreSQL {$c['key']}: {$d['reason']}", 'checks' => $checks];
+            }
+        }
+        if (Settings::get('repl_mysql_role', 'standalone') !== 'standalone') {
+            $g = self::mysqlCanFollowByGtid($newMasterIp, (int)Settings::get('repl_mysql_port', '3306'),
+                Settings::get('repl_mysql_user', 'repl_user'), ReplicationService::decryptPassword(Settings::get('repl_mysql_pass', '')));
+            $checks['MariaDB'] = $g['ok'] ? 'sin escrituras propias' : ($g['reason'] ?? '?');
+            if (empty($g['ok'])) {
+                return ['done' => false, 'reason' => 'MariaDB: ' . ($g['reason'] ?? '?'), 'checks' => $checks];
+            }
+        }
+        $r = ClusterService::demoteToSlave($newMasterIp);
+        return ['done' => !empty($r['ok']), 'checks' => $checks, 'demote' => $r];
+    }
+
+    /**
+     * MariaDB/MySQL: ¿puede este antiguo master seguir replicando del nuevo SOLO con lo
+     * que le falta (por GTID), sin copia completa? Sí cuando no tiene nada que el
+     * nuevo no tenga: cada dominio de su gtid_binlog_pos está en el del nuevo master
+     * con secuencia igual o mayor. Es el caso de un cambio de roles limpio (este nodo
+     * se puso en solo lectura antes de promover al otro). Si escribió algo después,
+     * no cuadra y hace falta la copia completa.
+     */
+    public static function mysqlCanFollowByGtid(string $masterIp, int $port, string $user, string $pass): array
+    {
+        try {
+            $local = ReplicationService::getMysqlPdo();
+            if (!$local) {
+                return ['ok' => false, 'reason' => 'sin conexión a la MariaDB local'];
+            }
+            if (stripos((string)$local->query('SELECT VERSION()')->fetchColumn(), 'mariadb') === false) {
+                return ['ok' => false, 'reason' => 'no es MariaDB (el seguimiento por GTID solo está programado para MariaDB)'];
+            }
+            $remote = new \PDO("mysql:host={$masterIp};port={$port}", $user, $pass, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION, \PDO::ATTR_TIMEOUT => 5]);
+            $mine = (string)$local->query('SELECT @@GLOBAL.gtid_binlog_pos')->fetchColumn();
+            $theirs = (string)$remote->query('SELECT @@GLOBAL.gtid_binlog_pos')->fetchColumn();
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'reason' => 'no se pudo comparar el GTID: ' . $e->getMessage()];
+        }
+        $parse = static function (string $g): array {
+            $o = [];
+            foreach (array_filter(array_map('trim', explode(',', $g))) as $part) {
+                if (preg_match('/^(\d+)-(\d+)-(\d+)$/', $part, $m)) {
+                    $o[(int)$m[1]] = (int)$m[3];
+                }
+            }
+            return $o;
+        };
+        $m = $parse($mine);
+        $t = $parse($theirs);
+        foreach ($m as $domain => $seq) {
+            if (!isset($t[$domain]) || $t[$domain] < $seq) {
+                return ['ok' => false, 'reason' => "este nodo tiene escrituras que el nuevo master no tiene (dominio {$domain}: aquí {$seq}, allí " . ($t[$domain] ?? 'nada') . ')',
+                        'local' => $mine, 'master' => $theirs];
+            }
+        }
+        return ['ok' => true, 'local' => $mine, 'master' => $theirs];
     }
 
     /**

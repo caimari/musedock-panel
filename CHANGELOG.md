@@ -2,6 +2,28 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.275] — 2026-10-03 — El panel sigue accesible con el servidor apartado
+
+### Añadido
+- **Cambio de roles de MariaDB sin copia completa cuando se puede.** Al convertir un antiguo master en réplica (`demote`), si no tiene escrituras que el nuevo master no tenga (lo comprueba por GTID), le sigue con `MASTER_USE_GTID=current_pos`: solo llega lo nuevo, en segundos. Si no cuadra, o si la réplica no arranca, hace la copia completa como antes.
+- **El antiguo master que vuelve se convierte solo en espejo, si es seguro.** Cuando detecta que otro nodo se promovió mientras no estaba, se aparta y, si ni PostgreSQL ni MariaDB tienen escrituras propias posteriores al relevo, pasa a ser réplica del nuevo master automáticamente. PostgreSQL lo comprueba comparando su WAL con el punto de bifurcación del timeline del nuevo master. Si no es seguro, se queda apartado y avisa con la orden para hacerlo a mano. Volver a ser principal nunca es automático. Se puede desactivar con `cluster_auto_rejoin = 0`.
+- **`cluster-switch.php` muestra el avance en directo** (rebobinado de cada PostgreSQL, modo de MariaDB, Redis…). Antes la terminal se quedaba muda varios minutos.
+
+- **Los ficheros también en espejo sea quien sea el principal.** Al promoverse, un nodo registra al antiguo master como su nodo si no lo tenía, le instala su clave SSH y arranca lsyncd hacia él con la misma configuración de copia que tenía el master: carpetas extra, exclusiones, certificados… Esa configuración la manda el master a los slaves (`filesync_snapshot`), o se pide al otro nodo con la acción `filesync-snapshot`. Ya no hace falta `rsync` a mano en la vuelta. A mano: `cluster-switch.php adopt-peer <ip>`.
+
+### Arreglado (1.0.275)
+- **Tras `demote` (pg_rewind), la réplica de PostgreSQL no conectaba con el nuevo master** ("fe_sendauth: no password supplied"). `--write-recovery-conf` dejaba `passfile=` apuntando al `.pgpass` temporal, que se borra al acabar. Ahora la contraseña de réplica queda en `/var/lib/postgresql/.pgpass` (0600, postgres) y `primary_conninfo` apunta ahí. Para réplicas ya afectadas: `bin/pg-replica-passfile.php` (root).
+- **Tras `demote`, la réplica de PostgreSQL perdía el historial y había que copiarlo todo.** El nuevo master no guardaba su WAL para ella (no había slot) y además heredaba su `primary_slot_name`, que no existía. Ahora, antes de rebobinar, se crea en el nuevo master un slot físico con WAL reservado (`<nodo>_<versión><cluster>`, por el protocolo de réplica) y `primary_slot_name` apunta a él. El cambio de roles de PostgreSQL vuelve a ser solo lo cambiado.
+- **`demote` avisaba a los demás nodos con la IP de este servidor en vez de la del nuevo master** (desde la 1.0.272). Solo se usa la IP propia cuando el nuevo master es este servidor (promote).
+- **`demote` no convertía Redis en réplica:** el antiguo master se quedaba con Redis de principal. Ahora pasa a ser réplica del nuevo, con su contraseña, y lo deja persistido.
+- **Tras `demote`, `promote` no reactivaba Caddy** si el nodo había estado apartado: quedaba la marca en disco y el Caddy principal bloqueado. Ahora `promote` siempre quita la marca y arranca Caddy. El aviso rojo también tiene en cuenta esa marca.
+- **Aviso rojo en todo el panel cuando el servidor está apartado (fenced)**, con la fecha y el motivo. Antes el Dashboard decía "Master / Normal".
+- **El aislamiento sobrevive a un reinicio.** Si un servidor apartado se reinicia (corte de red, proveedor…), su Caddy principal ya no arranca solo ni vuelve a servir webs con datos viejos, y el panel de rescate sí arranca. Funciona con una marca en disco (`/var/lib/musedock/fenced`), `ExecCondition` en Caddy y la unidad `musedock-fence-guard`.
+- **Con el servidor apartado no se empuja nada a otros nodos.** Se bloquean "Sincronizar Todo" (también el botón del Dashboard) y la cola del cluster-worker: sus datos son viejos y pisarían los del principal actual.
+- **Con el servidor apartado no se empuja nada a otros nodos.** Se bloquean "Sincronizar Todo" (también el botón del Dashboard) y la cola del cluster-worker: sus datos son viejos y pisarían los del principal actual.
+- **Un master caducado que vuelve tras una caída real** (otro nodo se promovió mientras tanto) ahora también para Caddy y lsyncd, y deja el panel de rescate. Antes solo ponía las bases en solo lectura y seguía sirviendo webs.
+- **Panel de rescate** (`bin/panel-rescue.php start|stop|status`). Al apartar un servidor (fence) se para Caddy entero, y con él el panel web; solo se podía entrar con un túnel SSH. Ahora arranca un Caddy mínimo y aparte que **solo** escucha en el puerto del panel y **solo** lleva al panel interno: no conoce ninguna web y no puede volver a servirlas. Usa un certificado propio, así que hay que entrar por IP (`https://IP:8444`) y aceptar el aviso del navegador. El fence lo arranca solo y el unfence lo para antes de arrancar Caddy.
+
 ## [1.0.274] — 2026-10-03 — Plan de DNS del relevo más rápido
 
 ### Arreglado

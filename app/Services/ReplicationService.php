@@ -1364,6 +1364,15 @@ class ReplicationService
         }
         $steps[] = ['name' => 'Backup pre-rewind', 'ok' => true, 'output' => $asideDir];
 
+        // ── Slot en el nuevo master ANTES de rebobinar ──
+        // Sin slot, el nuevo master recicla su WAL y, si la réplica tarda en
+        // conectarse, ya no tiene lo que necesita ("requested WAL segment … has already
+        // been removed") y solo queda la copia completa. Con el slot (RESERVE_WAL) el
+        // historial se guarda desde ya. Nombre: <este nodo>_<versión><cluster>.
+        $slot = static::replicaSlotName($cluster);
+        $slotRes = static::ensureSlotOnMaster($newMasterIp, $sourcePort, $replUser, $replPass, $slot);
+        $steps[] = ['name' => "Slot {$slot} en el nuevo master", 'ok' => $slotRes['ok'], 'output' => $slotRes['message']];
+
         // ── pg_rewind (run as postgres, password via .pgpass, not argv) ──
         // CRITICAL: pg_rewind runs as the `postgres` user (uid 115), but the panel
         // process is uid !=postgres. A 0600 .pgpass owned by the panel user is
@@ -1415,6 +1424,17 @@ class ReplicationService
         $auto = (string)shell_exec('sudo -u postgres cat ' . escapeshellarg($autoConf) . ' 2>/dev/null');
         if (!str_contains($auto, 'primary_conninfo')) {
             static::runChecked('sudo -u postgres bash -c ' . escapeshellarg('echo ' . escapeshellarg($connInfo) . ' >> ' . escapeshellarg($autoConf)));
+        }
+        // --write-recovery-conf deja passfile= apuntando al .pgpass TEMPORAL de arriba,
+        // que ya se ha borrado: la réplica no podría autenticarse ("no password
+        // supplied"). Se pasa al .pgpass permanente de postgres, con la entrada de
+        // este master.
+        static::ensurePostgresPgpass($newMasterIp, $sourcePort, $replUser, $replPass);
+        static::pointPassfileToPermanent($autoConf);
+        // La configuración copiada del master puede traer SU primary_slot_name (el de
+        // cuando él era réplica): se sustituye por el de este nodo.
+        if (!empty($slotRes['ok'])) {
+            static::setPrimarySlotName($autoConf, $slot);
         }
         static::runChecked('chown -R postgres:postgres ' . escapeshellarg($dataDir));
         $steps[] = ['name' => 'Configurar standby', 'ok' => true, 'output' => "standby.signal + primary_conninfo → {$newMasterIp}"];
@@ -1515,6 +1535,70 @@ class ReplicationService
      * Written under postgres' home so /tmp mount options (noexec/nosuid) and
      * per-user tmp isolation can't hide it from postgres.
      */
+    /** Nombre del slot que este nodo usa en su master: <hostname corto>_<versión><cluster>. */
+    public static function replicaSlotName(array $cluster): string
+    {
+        $host = strtolower(preg_replace('/[^a-z0-9]/i', '', explode('.', (string)gethostname())[0]) ?: 'node');
+        return substr($host . '_' . (int)$cluster['version'] . preg_replace('/[^a-z0-9]/', '', strtolower((string)$cluster['cluster'])), 0, 63);
+    }
+
+    /** Crea (si no existe) un slot físico con WAL reservado en el master, por el protocolo de réplica. */
+    public static function ensureSlotOnMaster(string $ip, int $port, string $user, string $pass, string $slot): array
+    {
+        $env = 'PGPASSWORD=' . escapeshellarg($pass) . ' PGCONNECT_TIMEOUT=8 ';
+        $conn = escapeshellarg("host={$ip} port={$port} user={$user} dbname=postgres replication=database");
+        $out = trim((string)shell_exec($env . 'psql ' . $conn . ' -XAt -c ' . escapeshellarg("CREATE_REPLICATION_SLOT {$slot} PHYSICAL RESERVE_WAL") . ' 2>&1'));
+        if ($out !== '' && stripos($out, 'already exists') === false && stripos($out, 'ya existe') === false && stripos($out, 'error') !== false) {
+            return ['ok' => false, 'message' => "no se pudo crear el slot {$slot}: {$out}"];
+        }
+        return ['ok' => true, 'message' => stripos($out, 'exist') !== false ? "slot {$slot} ya existía" : "slot {$slot} creado (WAL reservado)"];
+    }
+
+    /** primary_slot_name = $slot en postgresql.auto.conf (sustituye el que hubiera). */
+    public static function setPrimarySlotName(string $autoConf, string $slot): void
+    {
+        $c = (string)shell_exec('cat ' . escapeshellarg($autoConf) . ' 2>/dev/null');
+        $c = preg_replace("/^\\s*primary_slot_name\\s*=.*\\n?/m", '', $c);
+        $c = rtrim($c) . "\nprimary_slot_name = '{$slot}'\n";
+        file_put_contents($autoConf, $c);
+        @chown($autoConf, 'postgres');
+        @chgrp($autoConf, 'postgres');
+        @chmod($autoConf, 0600);
+    }
+
+    public const POSTGRES_PGPASS = '/var/lib/postgresql/.pgpass';
+
+    /** Añade/actualiza host:puerto:*:usuario:clave en el .pgpass permanente de postgres (0600). */
+    public static function ensurePostgresPgpass(string $host, int $port, string $user, string $pass): void
+    {
+        $f = self::POSTGRES_PGPASS;
+        $esc = static fn(string $v) => str_replace(['\\', ':'], ['\\\\', '\\:'], $v);
+        $prefix = "{$host}:{$port}:*:{$esc($user)}:";
+        $lines = is_file($f) ? (file($f, FILE_IGNORE_NEW_LINES) ?: []) : [];
+        $lines = array_values(array_filter($lines, static fn($l) => trim($l) !== '' && !str_starts_with($l, $prefix)));
+        $lines[] = $prefix . $esc($pass);
+        file_put_contents($f, implode("\n", $lines) . "\n");
+        @chown($f, 'postgres');
+        @chgrp($f, 'postgres');
+        @chmod($f, 0600);
+    }
+
+    /** En postgresql.auto.conf, passfile='…mdpgpass…' (temporal) → el .pgpass permanente. */
+    public static function pointPassfileToPermanent(string $autoConf): bool
+    {
+        $c = (string)shell_exec('cat ' . escapeshellarg($autoConf) . ' 2>/dev/null');
+        if ($c === '' || !preg_match("/passfile=''[^']*mdpgpass[^']*''/", $c)) {
+            return false;
+        }
+        @copy($autoConf, $autoConf . '.bak.' . date('Ymd_His'));
+        $new = preg_replace("/passfile=''[^']*mdpgpass[^']*''/", "passfile=''" . self::POSTGRES_PGPASS . "''", $c);
+        file_put_contents($autoConf, $new);
+        @chown($autoConf, 'postgres');
+        @chgrp($autoConf, 'postgres');
+        @chmod($autoConf, 0600);
+        return true;
+    }
+
     private static function writeTempPgpassForPostgres(string $host, int $port, string $db, string $user, string $pass): string
     {
         $dir = '/var/lib/postgresql';
@@ -1621,7 +1705,10 @@ class ReplicationService
                     ", MASTER_PORT={$port}" .
                     ", MASTER_USER=" . $pdo->quote($replUser) .
                     ", MASTER_PASSWORD=" . $pdo->quote($replPass) .
-                    ", MASTER_USE_GTID=slave_pos");
+                    // Sin siembra (antiguo master que sigue al nuevo por GTID): continuar
+                    // desde lo que este nodo YA tiene (current_pos = su binlog), no desde
+                    // un gtid_slave_pos viejo de cuando era réplica.
+                    ($seed ? ", MASTER_USE_GTID=slave_pos" : ", MASTER_USE_GTID=current_pos"));
                 $pdo->exec("START SLAVE");
             } else {
                 // Oracle MySQL 8: GTID auto-position (seeded via --source-data=1).

@@ -180,7 +180,8 @@ if (time() - (int)Settings::get('replication_health_run_at', '0') >= 300) {
 // ─── Step 1: Process pending queue items ──────────────────────
 logMsg("Processing queue...");
 try {
-    $queueResults = ClusterService::processQueue();
+    // Apartado (fence): no se empuja nada a otros nodos; los datos de aquí son viejos.
+    $queueResults = \MuseDockPanel\Settings::get('cluster_fenced', '0') === '1' ? [] : ClusterService::processQueue();
     $ok = 0;
     $fail = 0;
     foreach ($queueResults as $r) {

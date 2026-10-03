@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.275',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Panel de rescate (bin/panel-rescue.php): con el servidor apartado (fence) el panel sigue accesible en https://IP:8444 con un Caddy minimo que solo lleva al panel; fence lo arranca y unfence lo para', 'Aviso rojo en todo el panel con el servidor apartado', 'El aislamiento sobrevive a un reinicio (Caddy principal no arranca, si el panel de rescate) y el master caducado que vuelve tras una caida tambien para Caddy y lsyncd', 'demote de MariaDB sin copia completa cuando no hay escrituras divergentes (GTID current_pos); si no, copia completa', 'El antiguo master que vuelve se convierte solo en espejo si PostgreSQL (WAL vs bifurcacion del timeline) y MariaDB (GTID) no tienen escrituras propias; si no, se queda apartado y avisa (cluster_auto_rejoin)', 'cluster-switch.php muestra el avance en directo', 'demote ahora convierte Redis en replica, y promote siempre reactiva Caddy si el nodo estuvo apartado'],
+                        'en' => ['Rescue panel (bin/panel-rescue.php): with the server fenced the panel stays reachable at https://IP:8444 through a minimal Caddy that only proxies the panel; fence starts it and unfence stops it', 'Red banner across the panel while the server is fenced', 'Fencing survives a reboot (main Caddy does not start, rescue panel does) and a stale master returning after an outage also stops Caddy and lsyncd', 'MariaDB demote without a full copy when there are no divergent writes (GTID current_pos); otherwise full copy', 'A returning old master becomes a mirror automatically when PostgreSQL (WAL vs timeline fork) and MariaDB (GTID) have no own writes; otherwise stays fenced and alerts (cluster_auto_rejoin)', 'cluster-switch.php shows live progress', 'demote now turns Redis into a replica, and promote always re-enables Caddy if the node was fenced'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.274',
                 'date' => '2026-10-03',
                 'badge' => 'info',
