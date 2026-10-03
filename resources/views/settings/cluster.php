@@ -1788,7 +1788,7 @@
                 <strong style="color:#f87171;">Acción atómica</strong> — Cada botón ejecuta todo de golpe en un solo clic:<br>
                 <span class="ms-3">✓ DNS en Cloudflare (redirige tráfico web)</span><br>
                 <span class="ms-3">✓ Promote/Demote del cluster (BD acepta escrituras)</span><br>
-                <span class="ms-3">✓ Firewall (abre/cierra puertos 80/443)</span><br>
+                <span class="ms-3">✓ Firewall (abre/cierra los puertos web y, si hay correo, los del correo)</span><br>
                 <span class="ms-3 text-warning">⚠ La sincronización de archivos (lsyncd) no se invierte automáticamente — revisa la pestaña Archivos tras un failover.</span><br>
                 <span style="color:#6ea8fe;">Para operaciones quirúrgicas</span> (cambiar solo la BD sin tocar DNS), usa Promote/Demote en la pestaña <strong>Estado</strong>.
             </div>

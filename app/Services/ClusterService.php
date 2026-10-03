@@ -2392,7 +2392,7 @@ class ClusterService
             $errors[] = 'Hooks promote: ' . $e->getMessage();
         }
 
-        // Open public ports (80/443) so this server can serve web traffic
+        // Abrir los puertos públicos (web y, si hay correo, los del correo) para servir el tráfico
         try {
             $fwResults = FirewallService::openPublicPorts();
             $results['firewall'] = $fwResults;
@@ -2653,6 +2653,11 @@ class ClusterService
             shell_exec('php ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/panel-rescue.php') . ' stop 2>&1');
             shell_exec('systemctl start caddy 2>&1');
             $results['caddy'] = trim((string)shell_exec('systemctl is-active caddy 2>/dev/null'));
+        }
+        // El correo que paró el aislamiento vuelve como réplica (la réplica de buzones lo necesita).
+        if ($mail = FailoverSafetyService::resumeMailIntake()) {
+            self::progress('Correo en marcha de nuevo como réplica: ' . implode(', ', $mail));
+            $results['mail'] = $mail;
         }
 
         // Scripts de relevo del administrador (/etc/musedock/hooks/demote.d): parar

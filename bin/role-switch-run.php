@@ -4,6 +4,7 @@
  * deja el avance en /var/lib/musedock/role-switch-<tarea>.json.
  *
  *   php bin/role-switch-run.php orchestrate <tarea> <id-nodo>                 (en el master)
+ *   php bin/role-switch-run.php dnsplan <tarea> <ip-origen> <ip-destino>                 (en el master, solo lectura)
  *   php bin/role-switch-run.php promote <tarea> <ip-vpn-antiguo> <ip-pub-antiguo> <ip-pub-nuevo>   (en el elegido)
  */
 
@@ -25,6 +26,8 @@ if ($task === '') {
 try {
     if ($mode === 'orchestrate') {
         RoleSwitchService::orchestrate($task, (int)($argv[3] ?? 0));
+    } elseif ($mode === 'dnsplan') {
+        RoleSwitchService::runDnsPlan($task, (string)($argv[3] ?? ''), (string)($argv[4] ?? ''));
     } elseif ($mode === 'promote') {
         RoleSwitchService::promoteHere($task, (string)($argv[3] ?? ''), (string)($argv[4] ?? ''), (string)($argv[5] ?? ''));
     } else {

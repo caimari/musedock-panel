@@ -294,4 +294,78 @@ class DomainAliasService
             self::rebuildCaddyRoute($account);
         }
     }
+
+    // ── Redirecciones sueltas (sin hosting): /domains y MCP ─────────────────
+
+    /** Comprueba una redirección suelta sin crear nada. ['ok'] o ['ok'=>false,'error']. */
+    public static function checkStandaloneRedirect(string $domain, string $targetUrl): array
+    {
+        if (!preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i', $domain)) {
+            return ['ok' => false, 'error' => 'Formato de dominio no valido.'];
+        }
+        if (!preg_match('#^https?://[a-z0-9.-]+\.[a-z]{2,}(:\d+)?(/.*)?$#i', $targetUrl)) {
+            return ['ok' => false, 'error' => 'La URL destino debe empezar por https:// (o http://) y llevar un dominio.'];
+        }
+        if (Database::fetchOne("SELECT id FROM hosting_accounts WHERE domain = :d", ['d' => $domain])) {
+            return ['ok' => false, 'error' => "'{$domain}' ya existe como cuenta de hosting."];
+        }
+        if (Database::fetchOne("SELECT id FROM hosting_domain_aliases WHERE domain = :d", ['d' => $domain])) {
+            return ['ok' => false, 'error' => "'{$domain}' ya existe como alias o redirect."];
+        }
+        return ['ok' => true];
+    }
+
+    /**
+     * Crea una redirección suelta: ruta en Caddy (con certificado), registro en
+     * hosting_domain_aliases y copia a los nodos web si este servidor es el master.
+     */
+    public static function createStandaloneRedirect(string $domain, string $targetUrl, int $code = 301, bool $preservePath = true, ?int $customerId = null): array
+    {
+        $domain = strtolower(trim($domain));
+        $targetUrl = trim($targetUrl);
+        if ($targetUrl !== '' && !preg_match('#^https?://#i', $targetUrl)) {
+            $targetUrl = 'https://' . $targetUrl;   // como antes: "ejemplo.com" vale
+        }
+        $chk = self::checkStandaloneRedirect($domain, $targetUrl);
+        if (empty($chk['ok'])) {
+            return $chk;
+        }
+        if (!in_array($code, [301, 302], true)) {
+            $code = 301;
+        }
+        $targetDomain = preg_replace('#^https?://#', '', rtrim($targetUrl, '/'));
+        $targetDomain = explode('/', $targetDomain)[0];
+
+        $routeId = SystemService::addCaddyRedirectRoute($domain, $targetDomain, $code, $preservePath);
+        Database::query(
+            "INSERT INTO hosting_domain_aliases (hosting_account_id, domain, type, redirect_code, preserve_path, caddy_route_id, customer_id, target_url)
+             VALUES (:aid, :d, 'redirect', :code, :pp, :rid, :cid, :target)",
+            ['aid' => null, 'd' => $domain, 'code' => $code, 'pp' => $preservePath ? 't' : 'f', 'rid' => $routeId, 'cid' => $customerId, 'target' => $targetUrl]
+        );
+        LogService::log('domain.redirect', $domain, "Standalone redirect created: {$domain} → {$targetUrl} ({$code})");
+
+        if (\MuseDockPanel\Settings::get('cluster_role', 'standalone') === 'master') {
+            self::syncStandaloneRedirectToCluster('sync', $domain, $targetUrl, $code, $preservePath, $customerId);
+        }
+        return ['ok' => true, 'route_id' => $routeId, 'caddy' => $routeId !== null];
+    }
+
+    /** Encola el alta/baja de una redirección suelta en todos los nodos web. */
+    public static function syncStandaloneRedirectToCluster(string $op, string $domain, string $targetUrl = '', int $code = 301, bool $preservePath = true, ?int $customerId = null): void
+    {
+        $action = $op === 'remove' ? 'remove_standalone_redirect' : 'sync_standalone_redirect';
+        foreach (ClusterService::getWebNodes() as $node) {
+            ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
+                'hosting_action' => $action,
+                'hosting_data'   => [
+                    'domain'        => $domain,
+                    'target_url'    => $targetUrl,
+                    'redirect_code' => $code,
+                    'preserve_path' => $preservePath,
+                    'customer_id'   => $customerId,
+                ],
+            ], 6);
+        }
+    }
+
 }

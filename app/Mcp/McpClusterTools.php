@@ -1005,9 +1005,8 @@ final class McpClusterTools
 
     private static function dnsPlan(): array
     {
-        $cf = \MuseDockPanel\Services\CloudflareService::class;
         $fo = \MuseDockPanel\Services\FailoverService::class;
-        $accounts = $cf::getConfiguredAccounts();
+        $cf = \MuseDockPanel\Services\CloudflareService::class;
         $pairs = [];
         foreach ($fo::getServers() as $srv) {
             if (($srv['role'] ?? '') !== 'primary' || empty($srv['enabled'] ?? true)) {
@@ -1021,129 +1020,10 @@ final class McpClusterTools
         if (!$pairs) {
             return ['ok' => false, 'error' => 'No hay servidor primario con servidor de relevo: failover_configure en el master.'];
         }
-        if (!$accounts) {
-            return ['ok' => false, 'error' => 'Este panel no tiene cuentas de Cloudflare: no podría cambiar ningún DNS.'];
-        }
-        $out = [];
-        $errors = [];
-        $total = 0;
-        $machineNames = []; // nombres de máquina que el relevo deja quietos
-        $moved = [];      // nombres cuyo A cambia
-        $cnames = [];     // nombre → destino, de todas las zonas
-        $zoneNames = [];
-        // 1ª pasada: los CNAME de todas las zonas (los necesita la regla de nombres de
-        // máquina: uno al que apuntan webs por CNAME sí se mueve).
-        foreach ($accounts as $acct) {
-            foreach (($acct['zones'] ?? []) as $zone) {
-                $zoneNames[strtolower((string)$zone['name'])] = true;
-                $c = $cf::listRecordsAll((string)$acct['token'], (string)$zone['id'], ['type' => 'CNAME']);
-                foreach (($c['ok'] ? ($c['result'] ?? []) : []) as $x) {
-                    $cnames[strtolower((string)$x['name'])] = strtolower(rtrim((string)$x['content'], '.'));
-                }
-            }
-        }
-        $cf::primeCnameTargets(array_fill_keys(array_values($cnames), true));
-        foreach ($accounts as $acct) {
-            foreach (($acct['zones'] ?? []) as $zone) {
-                foreach ($pairs as $p) {
-                    $r = $cf::listARecordsByIp((string)$acct['token'], (string)$zone['id'], $p['from']);
-                    if (!$r['ok']) {
-                        $errors[] = "{$zone['name']} ({$acct['name']}): " . ($r['error'] ?? 'error');
-                        continue;
-                    }
-                    $kept = array_values(array_filter($r['result'] ?? [], static fn($x) => $cf::isFailoverExcluded((string)$x['name'])));
-                    foreach ($kept as $x) {
-                        $machineNames[] = (string)$x['name'];
-                    }
-                    $r['result'] = array_values(array_filter($r['result'] ?? [], static fn($x) => !$cf::isFailoverExcluded((string)$x['name'])));
-                    $names = array_map(static fn($x) => $x['name'] . (!empty($x['proxied']) ? ' (proxy)' : ''), $r['result'] ?? []);
-                    foreach ($r['result'] ?? [] as $x) {
-                        $moved[strtolower((string)$x['name'])] = true;
-                    }
-                    if ($names) {
-                        $out[] = ['zone' => $zone['name'], 'account' => $acct['name'], 'records' => $names];
-                        $total += count($names);
-                    }
-                }
-            }
-        }
-        // Lo que va por CNAME a un nombre que cambia, también se mueve (aunque no se toque).
-        $follows = static function (string $n) use ($cnames, $moved): bool {
-            for ($i = 0; $i < 10 && isset($cnames[$n]); $i++) {
-                $n = $cnames[$n];
-                if (isset($moved[$n])) {
-                    return true;
-                }
-            }
-            return false;
-        };
-        $viaCname = array_keys(array_filter($cnames, static fn($t, $n) => $follows($n), ARRAY_FILTER_USE_BOTH));
-        sort($viaCname);
-        // Dominios de los hostings de este panel que el relevo NO movería.
-        $notMoved = [];
-        foreach ($fo::getLocalDomains() as $d) {
-            $d = strtolower((string)$d);
-            foreach ([$d, "www.{$d}"] as $n) {
-                if (isset($moved[$n]) || $follows($n)) {
-                    continue 2;
-                }
-            }
-            $inZone = false;
-            $parts = explode('.', $d);
-            for ($i = 0; $i < count($parts) - 1; $i++) {
-                if (isset($zoneNames[implode('.', array_slice($parts, $i))])) {
-                    $inZone = true;
-                    break;
-                }
-            }
-            $notMoved[] = $d . ($inZone ? ' (su zona está en estas cuentas, pero no apunta al primario: ¿otro servidor o registro distinto?)' : ' (su zona NO está en las cuentas de Cloudflare de este panel)');
-        }
-        // Todo lo que sirve Caddy aquí (hostings del panel, Caddyfile y lo añadido
-        // por otras aplicaciones, p. ej. los tenants del CMS), no solo los hostings.
-        // Ojo: en un slave, Caddy solo sirve lo suyo; para verlo todo, en el master.
-        $caddyNotMoved = [];
-        $caddyNoDns = [];
-        $caddy = \MuseDockPanel\Services\CaddyDomainsService::classify();
-        foreach (($caddy['domains'] ?? []) as $cd) {
-            $n = $cd['host'];
-            if (isset($moved[$n]) || $follows($n)) {
-                continue;
-            }
-            // Sin DNS no hay nada que mover (dominio caducado, sin www…): aparte, para
-            // no mezclarlo con lo que de verdad se quedaría atrás.
-            if (!str_starts_with($n, '*.') && !@dns_get_record($n, DNS_A) && !@dns_get_record($n, DNS_CNAME)) {
-                $caddyNoDns[] = "{$n} [{$cd['group']}]";
-                continue;
-            }
-            $parts = explode('.', ltrim($n, '*.'));
-            $inZone = false;
-            for ($i = 0; $i < count($parts) - 1; $i++) {
-                if (isset($zoneNames[implode('.', array_slice($parts, $i))])) {
-                    $inZone = true;
-                    break;
-                }
-            }
-            $caddyNotMoved[] = "{$n} [{$cd['group']}: {$cd['detail']}] — " . ($inZone
-                ? 'su zona está en estas cuentas, pero no apunta al primario (¿sin DNS, otro servidor o registro distinto?)'
-                : 'su zona NO está en las cuentas de Cloudflare de este panel');
-        }
-        return [
-            'ok' => !$errors,
-            'switch' => array_map(static fn($p) => "{$p['from_name']} {$p['from']} → {$p['to_name']} {$p['to']}", $pairs),
-            'records_that_would_change' => $total,
-            'zones' => $out,
-            'moved_via_cname' => $viaCname,
-            'machine_names_kept' => array_values(array_unique($machineNames)),
-            'machine_names_rule' => 'No se mueven nunca (nombres de máquina, deducidos de los hostnames y nodos del cluster; se pueden añadir en failover_dns_exclude): ' . implode(', ', $cf::machineNameLabels()),
-            'hosting_domains_not_moved' => $notMoved,
-            'caddy_domains_checked' => count($caddy['domains'] ?? []),
-            'caddy_domains_not_moved' => $caddyNotMoved,
-            'caddy_domains_without_dns' => $caddyNoDns,
+        return \MuseDockPanel\Services\DnsPlanService::plan($pairs) + [
             // Lo que un relevo ya movió desde ESTE panel y devolverá la vuelta (solo esto).
-            'journal_moved' => $cf::journal(\MuseDockPanel\Services\FailoverService::DNS_JOURNAL),
-            'journal_moved_backup' => $cf::journal(\MuseDockPanel\Services\FailoverService::DNS_JOURNAL_BACKUP),
-            'zone_errors' => $errors,
-            'note' => 'Cambian los registros A que apuntan exactamente a la IP del primario, en las zonas de las cuentas de ESTE panel; lo que va por CNAME a esos nombres se mueve con ellos. Un dominio cuya zona esté en otra cuenta de Cloudflare no cambiaría.',
+            'journal_moved' => $cf::journal($fo::DNS_JOURNAL),
+            'journal_moved_backup' => $cf::journal($fo::DNS_JOURNAL_BACKUP),
         ];
     }
 

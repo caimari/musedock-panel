@@ -108,6 +108,9 @@
         <ol class="small mb-3" style="line-height:1.9;">
             <li><strong>Comprobaciones</strong>: réplicas al día (lo que le queda por aplicar a cada una), <code>wal_log_hints</code>,
                 <code>log_slave_updates</code>, Redis, IPs públicas y ruta entre los nodos. Si una que bloquea falla, no empieza.</li>
+            <li><strong>Plan DNS</strong>: lista qué registros cambian, qué dominios van con ellos por CNAME, qué nombres de máquina se quedan
+                y qué dominios <strong>no se pueden mover</strong> porque su DNS no está en las cuentas de Cloudflare del panel. Si el nombre del panel
+                se va al nuevo master, lo avisa. (Reglas en <a href="/docs/failover-modes" class="text-info">Failover → Qué se mueve en el DNS</a>.)</li>
             <li>Pide tu <strong>contraseña de administrador</strong>.</li>
             <li>El master se <strong>aparta</strong>: deja de servir webs y sus bases pasan a solo lectura. Su panel sigue accesible
                 por IP en el puerto del panel (panel de rescate), con un aviso rojo "Servidor APARTADO".</li>
@@ -116,7 +119,9 @@
             <li>El antiguo master se convierte en <strong>copia en vivo</strong> del nuevo, solo con lo cambiado.</li>
         </ol>
         <p class="small text-muted mb-0">
-            El avance se ve paso a paso y al terminar llega un correo con el resultado. Durante el cambio de DNS las webs se cortan unos segundos.
+            El avance se ve paso a paso. Al terminar, la ventana ofrece recargar este panel (por IP si su nombre se ha ido al nuevo master)
+            o abrir el del otro nodo, y llega un correo con el resultado: registros cambiados, los que fallaron y los dominios que no se
+            pudieron mover, para cambiarlos a mano. Durante el cambio de DNS las webs se cortan unos segundos.
             Si el elegido no llega a promoverse, el master se reactiva solo y todo queda como estaba.
             Si se pierde la conexión con el panel es normal (su nombre pasa al nuevo master): sigue el resultado en el panel del otro.
         </p>

@@ -2,6 +2,25 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.282] — 2026-10-03 — El cambio de rol enseña qué dominios mueve, y lo cuenta por correo
+
+### Añadido
+- **Antes de pedir la contraseña, el cambio de rol enseña el plan DNS**: qué registros A cambian, qué dominios van con ellos por CNAME, qué nombres de máquina se quedan y qué dominios **no se pueden mover** porque su DNS no está en las cuentas de Cloudflare del panel (hostings y todo lo que sirve Caddy). En listas plegables; las comprobaciones también se pliegan si todo va bien.
+- **Si el nombre del panel se va al nuevo master** (cuando es destino de los CNAME de las webs), lo avisa antes de empezar y al terminar recarga el panel por la IP de este servidor.
+- **Correo del cambio de rol con el informe de DNS**: "<nodo> es el master (<IP>)", registros cambiados, los que no se pudieron cambiar, lo que va por CNAME, nombres de máquina y dominios que no se pudieron mover para cambiarlos a mano.
+- **Docs → Failover: "Qué se mueve en el DNS, y por qué"**: las reglas (por IP, CNAME, nombres de máquina y su excepción), qué pasa con el nombre del panel, qué no se puede mover y que hoy el relevo de DNS es solo para Cloudflare.
+- **MCP: redirecciones de dominio.** `domain_redirects` (lectura) lista las redirecciones sueltas y las de los hostings; `domain_redirect_create` crea una como en *Dominios → Redirect* (p. ej. `webmail.cliente.com` → `https://webmail.servidor.com`), con plan previo: comprueba que el dominio no sea ya un hosting, alias, redirección ni lo sirva Caddy, y dice si su DNS llega a este servidor (si no, el certificado no saldría). Se copia a los nodos web. No hay herramienta de borrado. El panel y el MCP usan el mismo código (`DomainAliasService::createStandaloneRedirect`).
+- **Lista de nodos del Dashboard más compacta**: cada nodo es una fila (tipo, si puede tomar el mando y cuántas cosas guarda, p. ej. 6/6) que se despliega para ver el detalle en tarjetas.
+- **Al terminar el cambio de rol**, la ventana ofrece *Recargar este panel* y *Abrir el panel del otro nodo* (por su IP pública). Si se pierde la conexión durante el cambio, enlaces para abrir este panel por IP y el del otro nodo.
+- **Docs → Failover: "Cómo configurarlo, paso a paso"**: requisitos, cuentas de Cloudflare y token de Caddy, qué poner en cada campo de servidores, modo y tiempos, comprobar sin tocar nada (plan DNS, nombres de máquina que no se mueven), qué hace un relevo y cómo probarlo.
+
+### Arreglado
+- **Al apartarse (cambio de rol o master caducado), el nodo seguía aceptando correo.** Paraba las webs y la copia de ficheros, pero Postfix y Dovecot seguían recibiendo correo y atendiendo buzones: los remitentes con el DNS viejo en caché y los móviles conectados por IMAP/POP3 escribían en los dos nodos a la vez, y al juntarse los buzones la réplica renumeraba mensajes ("este correo ya no está en el buzón"). Ahora el nodo apartado para también el correo: los remitentes reintentan y entregan en el nuevo master, sin perder nada. Si se reinicia apartado, el correo no arranca. Vuelve a arrancar solo al reactivarse o al quedar como copia del nuevo master.
+
+### Cambiado
+- **El plan DNS lee cada zona una sola vez** (todos sus registros) en vez de una consulta por tipo e IP: con las zonas de mortadelo tarda unos 30 s (por MCP antes se pasaba del tiempo de espera). Es el mismo código para el MCP, el botón y el correo.
+- La pestaña Failover dice que el firewall abre los puertos web **y los del correo** si lo hay (antes decía solo 80/443).
+
 ## [1.0.281] — 2026-10-03 — Qué copia guarda cada nodo, y "copia al día" real en el cambio de rol
 
 ### Añadido

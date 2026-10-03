@@ -32,6 +32,23 @@ class McpHostingTools
                     'apply' => $apply,
                 ], ['hosting', 'name']),
             ],
+            'domain_redirects' => [
+                'title' => 'Ver las redirecciones de dominio',
+                'description' => 'Solo lectura. Lista las redirecciones del panel: las sueltas (un dominio que solo redirige a una URL, como en /domains) y las de los hostings (un dominio que redirige al dominio del hosting).',
+                'inputSchema' => $o(['domain' => ['type' => 'string', 'description' => 'Opcional: filtrar por dominio']], []),
+            ],
+            'domain_redirect_create' => [
+                'write' => true,
+                'title' => 'Crear una redirección de dominio',
+                'description' => 'Crea una redirección suelta, igual que /domains → Redirect: el dominio (y su www) responde con un 301/302 hacia la URL destino, con certificado propio. Útil p. ej. para webmail.cliente.com → https://webmail.servidor.com. Comprueba antes que el dominio no sea ya un hosting, alias, redirección ni lo sirva Caddy, y dice a dónde apunta su DNS (para el certificado debe apuntar a este servidor: si no, crea antes el DNS con dns_record_set). Se copia a los nodos web. No borra nada. Primero sin apply. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o([
+                    'domain' => ['type' => 'string', 'description' => 'Dominio que redirige (p. ej. webmail.cliente.com)'],
+                    'target_url' => ['type' => 'string', 'description' => 'URL destino (p. ej. https://webmail.servidor.com)'],
+                    'code' => ['type' => 'integer', 'enum' => [301, 302], 'description' => '301 permanente (por defecto) o 302 temporal'],
+                    'preserve_path' => ['type' => 'boolean', 'description' => 'true (por defecto) = conserva la ruta (/x → destino/x); false = siempre a la portada del destino'],
+                    'apply' => $apply,
+                ], ['domain', 'target_url']),
+            ],
             'mail_quota_request' => [
                 'write' => true,
                 'title' => 'Pedir el cambio de cuota de uno o varios buzones',
@@ -67,6 +84,8 @@ class McpHostingTools
     {
         return match ($name) {
             'database_create'       => self::databaseCreate($args),
+            'domain_redirects'      => self::redirectsList($args),
+            'domain_redirect_create' => self::redirectCreate($args),
             'password_change_request' => self::passwordRequest($args),
             'mail_quota_request'      => self::quotaRequest($args),
         };
@@ -118,6 +137,69 @@ class McpHostingTools
         ]);
         unset($r['db_pass']);
         return ['status' => 'creada', 'note' => McpCredentials::notice("{$r['db_user']}")] + $plan;
+    }
+
+    private static function redirectsList(array $args): array
+    {
+        $f = strtolower(trim((string)($args['domain'] ?? '')));
+        $rows = Database::fetchAll(
+            "SELECT a.domain, a.redirect_code, a.preserve_path, a.target_url, h.domain AS hosting
+               FROM hosting_domain_aliases a LEFT JOIN hosting_accounts h ON h.id = a.hosting_account_id
+              WHERE a.type = 'redirect'" . ($f !== '' ? ' AND lower(a.domain) LIKE :f' : '') . ' ORDER BY a.domain',
+            $f !== '' ? ['f' => "%{$f}%"] : []);
+        return ['count' => count($rows), 'redirects' => array_map(static fn($r) => [
+            'domain' => $r['domain'],
+            'to' => $r['hosting'] ? 'https://' . $r['hosting'] . ' (hosting)' : (string)$r['target_url'],
+            'code' => (int)$r['redirect_code'],
+            'preserve_path' => in_array($r['preserve_path'], [true, 't', '1', 1], true),
+        ], $rows)];
+    }
+
+    private static function redirectCreate(array $args): array
+    {
+        self::guardMaster();
+        $domain = strtolower(trim((string)($args['domain'] ?? '')));
+        $target = trim((string)($args['target_url'] ?? ''));
+        if ($target !== '' && !preg_match('#^https?://#i', $target)) {
+            $target = 'https://' . $target;
+        }
+        $code = (int)($args['code'] ?? 301) === 302 ? 302 : 301;
+        $preserve = !array_key_exists('preserve_path', $args) || !empty($args['preserve_path']);
+        $chk = \MuseDockPanel\Services\DomainAliasService::checkStandaloneRedirect($domain, $target);
+        if (empty($chk['ok'])) {
+            throw new \InvalidArgumentException($chk['error']);
+        }
+        // Que no lo sirva ya Caddy por otro lado (Caddyfile, otra aplicación…): se pisarían.
+        $caddy = \MuseDockPanel\Services\CaddyDomainsService::classify();
+        foreach (($caddy['domains'] ?? []) as $cd) {
+            if (in_array((string)$cd['host'], [$domain, "www.{$domain}"], true)) {
+                throw new \InvalidArgumentException("Caddy ya sirve {$cd['host']} ({$cd['group']}: {$cd['detail']}). No se crea para no pisarlo.");
+            }
+        }
+        // A dónde apunta su DNS: el certificado solo sale si llega a este servidor.
+        $mine = preg_split('/\s+/', trim((string)shell_exec('hostname -I 2>/dev/null'))) ?: [];
+        foreach (\MuseDockPanel\Services\FailoverService::getServers() as $s) {
+            $mine[] = (string)($s['ip'] ?? '');
+        }
+        $ips = @gethostbynamel($domain) ?: [];
+        $here = (bool)array_intersect($ips, array_filter($mine));
+        $plan = [
+            'redirect' => "{$domain} (y www.{$domain}) → {$target}",
+            'code' => $code === 301 ? '301 permanente' : '302 temporal',
+            'path' => $preserve ? 'conserva la ruta (/x → destino/x)' : 'siempre a la portada del destino',
+            'dns' => $ips ? implode(', ', $ips) . ($here ? ' — llega a este servidor (o al cluster): el certificado podrá emitirse'
+                : ' — NO llega a este servidor: el certificado no saldrá hasta que el DNS apunte aquí (o el proxy de Cloudflare lo traiga)') : 'sin DNS: créalo antes (dns_record_set) o no funcionará',
+            'cluster' => 'se copia a los nodos web',
+        ];
+        if (empty($args['apply'])) {
+            return ['status' => 'plan', 'apply' => false] + $plan;
+        }
+        $r = \MuseDockPanel\Services\DomainAliasService::createStandaloneRedirect($domain, $target, $code, $preserve);
+        if (empty($r['ok'])) {
+            throw new \RuntimeException($r['error'] ?? 'No se pudo crear la redirección.');
+        }
+        LogService::log('mcp.redirect', $domain, "Redirección creada por MCP: {$domain} → {$target} ({$code})");
+        return ['status' => 'creada', 'caddy_route' => $r['caddy'] ? 'activa' : 'NO se pudo crear la ruta en Caddy (revisa /domains)'] + $plan;
     }
 
     private static function quotaRequest(array $args): array

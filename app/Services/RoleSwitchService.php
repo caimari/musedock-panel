@@ -202,7 +202,8 @@ class RoleSwitchService
             } else {
                 [$kind, $label] = ['partial', "Réplica a medias: {$dbOk} de {$dbTotal} bases en vivo"];
             }
-            $out[] = ['id' => (int)$node['id'], 'name' => (string)$node['name'], 'kind' => $kind, 'label' => $label, 'items' => $items];
+            $out[] = ['id' => (int)$node['id'], 'name' => (string)$node['name'], 'kind' => $kind, 'label' => $label,
+                'can_take_over' => $kind === 'full' && $pubOk, 'items' => $items];
         }
         return ['ok' => true, 'nodes' => $out];
     }
@@ -294,6 +295,60 @@ class RoleSwitchService
                 'ips' => ['my_vpn' => $myVpn, 'their_vpn' => $vpn, 'my_public' => $myPub, 'their_public' => $theirPub]];
     }
 
+    // ── Plan de DNS del cambio (en el master, en segundo plano) ─────────────
+
+    /** Tarea fija por pareja de IPs: el plan se reutiliza unos minutos (botón, orquestación, correo). */
+    public static function dnsPlanTask(string $from, string $to): string
+    {
+        return 'plan-' . str_replace(['.', ':'], '-', $from) . '--' . str_replace(['.', ':'], '-', $to);
+    }
+
+    /** Lanza el cálculo del plan (lee todas las zonas de Cloudflare: puede tardar). */
+    public static function startDnsPlan(string $from, string $to): array
+    {
+        $known = array_column(FailoverService::getServers(), 'ip');
+        foreach ([$from, $to] as $ip) {
+            if (!filter_var($ip, FILTER_VALIDATE_IP) || !in_array($ip, $known, true)) {
+                return ['ok' => false, 'error' => 'IP no válida o no es un servidor del relevo'];
+            }
+        }
+        $task = self::dnsPlanTask($from, $to);
+        $cur = self::status($task);
+        $fresh = ($cur['state'] ?? '') === 'running' && time() - strtotime((string)($cur['updated_at'] ?? '')) < 600;
+        if (!$fresh) {
+            self::write($task, ['state' => 'running', 'role' => 'dns-plan', 'steps' => []]);
+            shell_exec(sprintf('setsid nohup php %s dnsplan %s %s %s > /dev/null 2>&1 &',
+                escapeshellarg(PANEL_ROOT . '/bin/role-switch-run.php'), escapeshellarg($task), escapeshellarg($from), escapeshellarg($to)));
+        }
+        return ['ok' => true, 'task' => $task];
+    }
+
+    public static function runDnsPlan(string $task, string $from, string $to): void
+    {
+        $name = static function (string $ip): string {
+            foreach (FailoverService::getServers() as $s) {
+                if (($s['ip'] ?? '') === $ip) {
+                    return (string)$s['name'];
+                }
+            }
+            return $ip;
+        };
+        $plan = DnsPlanService::plan([['from' => $from, 'from_name' => $name($from), 'to' => $to, 'to_name' => $name($to)]]);
+        self::write($task, ['state' => 'done', 'role' => 'dns-plan', 'steps' => [], 'plan' => $plan, 'computed_at' => time()]);
+    }
+
+    /** El plan ya calculado si es reciente; si no, lo calcula ahora. */
+    public static function dnsPlanFor(string $from, string $to, int $maxAge = 1800): array
+    {
+        $task = self::dnsPlanTask($from, $to);
+        $cur = self::status($task);
+        if (($cur['state'] ?? '') === 'done' && time() - (int)($cur['computed_at'] ?? 0) < $maxAge && is_array($cur['plan'] ?? null)) {
+            return $cur['plan'];
+        }
+        self::runDnsPlan($task, $from, $to);
+        return self::status($task)['plan'] ?? [];
+    }
+
     // ── Lanzar y orquestar (en el master) ──────────────────────────────────
 
     public static function start(int $nodeId, string $by = ''): array
@@ -339,6 +394,19 @@ class RoleSwitchService
         }
         $ips = $pre['ips'];
         self::step($task, $st, "Comprobaciones OK. Pasando el mando a {$pre['node']} ({$ips['their_vpn']}).", true);
+
+        // Qué dominios se moverán y cuáles no (para el correo final). Antes de apartarse:
+        // si tarda, las webs siguen funcionando mientras tanto.
+        self::step($task, $st, 'Calculando qué dominios se mueven en el DNS…');
+        $plan = [];
+        try {
+            $plan = self::dnsPlanFor($ips['my_public'], $ips['their_public']);
+            self::step($task, $st, 'Plan DNS: ' . (int)($plan['records_that_would_change'] ?? 0) . ' registros cambian, '
+                . count($plan['moved_via_cname'] ?? []) . ' van con ellos por CNAME, '
+                . (count($plan['hosting_domains_not_moved'] ?? []) + count($plan['caddy_domains_not_moved'] ?? [])) . ' no se pueden mover desde el panel.', true);
+        } catch (\Throwable $e) {
+            self::step($task, $st, 'No se pudo calcular el plan DNS (' . $e->getMessage() . '); el cambio sigue igual.', false);
+        }
 
         // 1) Apartarse: ya no escribe nadie aquí.
         self::step($task, $st, 'Apartando este servidor (sin webs, bases en solo lectura, panel de rescate)…');
@@ -395,7 +463,10 @@ class RoleSwitchService
         self::step($task, $st, "Cambio de rol terminado: {$pre['node']} es el master.", true);
         LogService::log('cluster.role-switch', 'done', "{$pre['node']} es el master; este servidor es su copia");
         try {
-            NotificationService::send("Cambio de rol hecho: {$pre['node']} es el master", implode("\n", array_map(static fn($s) => "{$s['at']} {$s['msg']}", $st['steps'])));
+            NotificationService::send("Cambio de rol hecho: {$pre['node']} es el master ({$ips['their_public']})",
+                "{$pre['node']} ha sido promovido a master. Este servidor es ahora su copia en vivo.\n\n"
+                . ($plan ? "── DNS ──\n" . DnsPlanService::reportText($plan, (array)($remote['dns_moved'] ?? []), (array)($remote['dns_failed'] ?? [])) . "\n\n" : '')
+                . "── Pasos ──\n" . implode("\n", array_map(static fn($s) => "{$s['at']} {$s['msg']}", $st['steps'])));
         } catch (\Throwable) {
         }
     }
@@ -442,13 +513,25 @@ class RoleSwitchService
         $c = FailoverService::getConfig();
         $ttl = (int)($c['failover_ttl_normal'] ?? 300) ?: 300;
         $moved = 0;
+        $st['dns_moved'] = $st['dns_failed'] = [];
         foreach (CloudflareService::getConfiguredAccounts() as $acct) {
             foreach (($acct['zones'] ?? []) as $zone) {
                 $r = CloudflareService::batchUpdateIp((string)$acct['token'], (string)$zone['id'], $oldPub, $newPub, $ttl, 'role_switch');
                 $moved += (int)($r['updated'] ?? 0);
+                foreach ((array)($r['details'] ?? []) as $d) {
+                    if (empty($d['ok'])) {
+                        $st['dns_failed'][] = $d['name'] . ' (' . ($d['error'] ?? 'error') . ')';
+                    } elseif (empty($d['skipped'])) {
+                        $st['dns_moved'][] = (string)$d['name'];
+                    }
+                }
+                if (empty($r['ok']) && !empty($r['error'])) {
+                    $st['dns_failed'][] = "zona {$zone['name']}: {$r['error']}";
+                }
             }
         }
-        self::step($task, $st, "DNS movido: {$moved} registros (lo que va por CNAME a ellos se mueve con ellos).", true);
+        self::step($task, $st, "DNS movido: {$moved} registros (lo que va por CNAME a ellos se mueve con ellos)"
+            . ($st['dns_failed'] ? '; ' . count($st['dns_failed']) . ' no se pudieron cambiar' : '') . '.', !$st['dns_failed']);
 
         // Invertir los papeles del relevo DNS: ahora vigila el otro.
         $servers = FailoverService::getServers();

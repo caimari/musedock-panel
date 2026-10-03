@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.282',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['El nodo apartado (cambio de rol o master caducado) ya no acepta correo ni sirve buzones: antes los dos nodos recibian a la vez y la replica renumeraba mensajes. Vuelve solo al reactivarse o al quedar como copia'],
+                        'en' => ['A fenced node (role switch or stale master) no longer accepts mail or serves mailboxes: both nodes used to receive at once and replication renumbered messages. It resumes when unfenced or once it is a replica'],
+                    ],
+                    'added' => [
+                        'es' => ['El cambio de rol muestra el plan DNS antes de la contraseña (cambian, por CNAME, nombres de maquina, no se pueden mover) y avisa si el nombre del panel se va al nuevo master (recarga por IP)', 'Correo del cambio de rol con informe DNS: cambiados, fallidos y dominios que no se pudieron mover', 'Docs: Failover - que se mueve en el DNS y por que (CNAME, nombres de maquina, solo Cloudflare)', 'Plan DNS mas rapido: una lectura por zona (el MCP ya no se pasa del tiempo)', 'MCP: domain_redirects (lectura) y domain_redirect_create (plan previo, comprueba conflictos con hostings/alias/Caddy y si el DNS llega aqui; sin borrado)', 'Lista de nodos del Dashboard plegable (tipo, puede tomar el mando, 6/6) con detalle al desplegar', 'Al terminar el cambio de rol: botones Recargar este panel y Abrir el panel del otro nodo (por IP)', 'Docs: guia de Failover con la configuracion paso a paso'],
+                        'en' => ['Role switch shows the DNS plan before the password and warns if the panel name moves to the new master (reloads by IP)', 'Role switch email with DNS report: changed, failed and domains that could not be moved', 'Docs: Failover - what moves in DNS and why', 'Faster DNS plan: one read per zone', 'MCP: domain_redirects (read) and domain_redirect_create (plan first, conflict and DNS checks; no delete)', 'Collapsible node list on the dashboard (type, can take over, 6/6) with details on expand', 'After a role switch: Reload this panel and Open the other node panel (by IP) buttons', 'Docs: step-by-step failover setup guide'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.281',
                 'date' => '2026-10-03',
                 'badge' => 'info',

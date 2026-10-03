@@ -138,18 +138,22 @@ class FailoverSafetyService
         $panel = dirname(__DIR__, 2);
         $dropin = "/etc/systemd/system/caddy.service.d/zz-musedock-fence.conf";
         $unit = "/etc/systemd/system/musedock-fence-guard.service";
+        $cond = "[Service]\nExecCondition=/bin/sh -c 'test ! -e " . self::FENCE_FLAG . "'\n";
         $want = [
-            $dropin => "# MuseDock: con el nodo apartado (" . self::FENCE_FLAG . ") el Caddy principal no arranca.\n"
-                . "[Service]\nExecCondition=/bin/sh -c 'test ! -e " . self::FENCE_FLAG . "'\n",
+            $dropin => "# MuseDock: con el nodo apartado (" . self::FENCE_FLAG . ") el Caddy principal no arranca.\n" . $cond,
             $unit => "# MuseDock: al arrancar, si el nodo está apartado, panel de rescate en el puerto del panel.\n"
                 . "[Unit]\nDescription=MuseDock: panel de rescate si el nodo esta apartado\n"
                 . "ConditionPathExists=" . self::FENCE_FLAG . "\nAfter=network-online.target musedock-panel.service\nWants=network-online.target\n\n"
                 . "[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/usr/bin/php {$panel}/bin/panel-rescue.php start\n\n"
                 . "[Install]\nWantedBy=multi-user.target\n",
         ];
+        // Y el correo: apartado, tampoco acepta correo ni conexiones de buzones al reiniciar.
+        foreach (self::mailUnits() as $u) {
+            $want["/etc/systemd/system/{$u}.d/zz-musedock-fence.conf"] = "# MuseDock: con el nodo apartado (" . self::FENCE_FLAG . ") el correo no arranca.\n" . $cond;
+        }
         $changed = false;
-        @mkdir(dirname($dropin), 0755, true);
         foreach ($want as $file => $content) {
+            @mkdir(dirname($file), 0755, true);
             if (!is_file($file) || file_get_contents($file) !== $content) {
                 file_put_contents($file, $content);
                 $changed = true;
@@ -158,6 +162,62 @@ class FailoverSafetyService
         if ($changed) {
             shell_exec('systemctl daemon-reload 2>&1; systemctl enable musedock-fence-guard.service 2>&1');
         }
+    }
+
+    /**
+     * Unidades systemd del correo de este nodo (Postfix recibe, Dovecot sirve los
+     * buzones). En Ubuntu el Postfix real es postfix@-.service. Vacío si no hay correo.
+     */
+    private static function mailUnits(): array
+    {
+        $units = [];
+        if (is_dir('/etc/postfix')) {
+            $units[] = 'postfix@-.service';
+        }
+        if (is_dir('/etc/dovecot')) {
+            $units[] = 'dovecot.service';
+        }
+        return $units;
+    }
+
+    private const MAIL_STOPPED = '/var/lib/musedock/fenced-mail';
+
+    /**
+     * Apartado, el nodo deja de aceptar correo y conexiones de buzones. Si siguiera,
+     * los remitentes con el DNS viejo en caché y los móviles conectados por IMAP/POP3
+     * escribirían aquí mientras el nuevo master recibe lo demás: al juntarse los dos
+     * buzones, la réplica (dsync) renumera mensajes y los clientes ven "este correo
+     * ya no está" (2026-10-03). Postfix parado no pierde nada: el remitente reintenta
+     * y acaba entregando en el nuevo master; lo que hubiera en cola aquí sale al volver.
+     */
+    public static function stopMailIntake(): array
+    {
+        $stopped = [];
+        foreach (self::mailUnits() as $u) {
+            if (trim((string)shell_exec('systemctl is-active ' . escapeshellarg($u) . ' 2>/dev/null')) === 'active') {
+                shell_exec('systemctl stop ' . escapeshellarg($u) . ' 2>&1');
+                $stopped[] = $u;
+            }
+        }
+        if ($stopped) {
+            @mkdir(dirname(self::MAIL_STOPPED), 0755, true);
+            file_put_contents(self::MAIL_STOPPED, implode("\n", $stopped) . "\n");
+        }
+        return $stopped;
+    }
+
+    /** Vuelve a arrancar lo que paró stopMailIntake (solo eso). */
+    public static function resumeMailIntake(): array
+    {
+        $started = [];
+        foreach (array_filter(array_map('trim', (array)@file(self::MAIL_STOPPED))) as $u) {
+            if (in_array($u, self::mailUnits(), true)) {
+                shell_exec('systemctl start ' . escapeshellarg($u) . ' 2>&1');
+                $started[] = $u . ': ' . trim((string)shell_exec('systemctl is-active ' . escapeshellarg($u) . ' 2>/dev/null'));
+            }
+        }
+        @unlink(self::MAIL_STOPPED);
+        return $started;
     }
 
     public static function fenceSelf(string $reason = ''): array
@@ -188,6 +248,11 @@ class FailoverSafetyService
         shell_exec('systemctl stop lsyncd 2>&1');
         $lsyncdStopped = trim((string)shell_exec('systemctl is-active lsyncd 2>/dev/null')) !== 'active';
         $steps[] = ['name' => 'Detener lsyncd (copia de ficheros)', 'ok' => $lsyncdStopped, 'output' => $lsyncdStopped ? 'detenido' : 'sigue activo'];
+
+        $mail = self::stopMailIntake();
+        if ($mail) {
+            $steps[] = ['name' => 'Detener el correo (no recibe ni sirve buzones)', 'ok' => true, 'output' => implode(', ', $mail)];
+        }
 
         // Make every PostgreSQL cluster read-only (defense in depth) — menos el del
         // propio panel: es de este nodo (no se replica) y, en solo lectura, el panel no
@@ -328,6 +393,9 @@ class FailoverSafetyService
         $steps[] = 'lsyncd detenido';
         shell_exec('systemctl stop caddy 2>&1');
         $steps[] = 'Caddy detenido (no sirve webs con datos viejos)';
+        if ($mail = self::stopMailIntake()) {
+            $steps[] = 'Correo detenido (no recibe ni sirve buzones): ' . implode(', ', $mail);
+        }
         $steps[] = trim((string)shell_exec('php ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/panel-rescue.php') . ' start 2>&1'));
 
         Settings::set('cluster_fenced', '1');
@@ -337,7 +405,7 @@ class FailoverSafetyService
         try {
             NotificationService::send('Failover: este servidor se ha aislado (master caducado)',
                 "{$reason}.\n\nPara evitar dos masters, sus bases de datos de clientes están en solo lectura y se han ejecutado "
-                . "los scripts demote.d; Caddy y lsyncd parados. El panel sigue accesible por IP (panel de rescate). Siguiente paso: devolverlo como slave del nuevo master.");
+                . "los scripts demote.d; Caddy, lsyncd y el correo parados. El panel sigue accesible por IP (panel de rescate). Siguiente paso: devolverlo como slave del nuevo master.");
         } catch (\Throwable) {
         }
         return ['fenced' => true, 'steps' => $steps, 'hooks' => $hooks];
@@ -359,6 +427,9 @@ class FailoverSafetyService
         @unlink(self::FENCE_FLAG);
         shell_exec('php ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/panel-rescue.php') . ' stop 2>&1');
         shell_exec('systemctl start caddy 2>&1');
+        if ($mail = self::resumeMailIntake()) {
+            $steps[] = ['name' => 'Correo', 'ok' => true, 'output' => implode(', ', $mail)];
+        }
         if (Settings::get('filesync_enabled', '0') === '1' && Settings::get('cluster_role', '') === 'master') {
             shell_exec('systemctl start lsyncd 2>&1');
             $steps[] = ['name' => 'lsyncd', 'ok' => true, 'output' => 'arrancado de nuevo'];

@@ -406,7 +406,7 @@ class DocsController
             ],
             [
                 'title' => 'Failover: modos, prioridades e IDs',
-                'description' => 'Que hace cada modo (manual/semiauto/auto), a que nodo va el failover y como se asignan prioridades e IDs.',
+                'description' => 'Como configurar el failover paso a paso (Cloudflare, servidores, modo, tiempos, plan DNS), que hace cada modo y a que nodo va.',
                 'url' => '/docs/failover-modes',
                 'category' => 'Guia especial',
                 'icon' => 'bi-toggles',

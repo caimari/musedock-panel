@@ -501,24 +501,53 @@ systemctl restart caddy</pre>
 </div>
 <?php endif; ?>
 
+<style>
+.nodes-ov .nov-node { border-top: 1px solid rgba(148,163,184,.15); }
+.nodes-ov .nov-head { all: unset; box-sizing: border-box; width: 100%; display: flex; align-items: center; gap: .6rem; padding: .55rem .25rem; cursor: pointer; border-radius: 8px; }
+.nodes-ov .nov-head:hover { background: rgba(148,163,184,.07); }
+.nodes-ov .nov-head:focus-visible { outline: 2px solid rgba(56,189,248,.5); }
+.nodes-ov .nov-name { font-weight: 600; color: #e2e8f0; }
+.nodes-ov .nov-chev { color: #94a3b8; transition: transform .2s; }
+.nodes-ov .nov-head:not(.collapsed) .nov-chev { transform: rotate(180deg); }
+.nodes-ov .nov-body { padding: .25rem .25rem .75rem 1.85rem; }
+.nodes-ov .nov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .5rem; }
+.nodes-ov .nov-item { display: flex; gap: .5rem; align-items: flex-start; padding: .45rem .6rem; border-radius: 8px; background: rgba(15,23,42,.45); border: 1px solid rgba(148,163,184,.12); font-size: .85rem; }
+.nodes-ov .nov-item > i { margin-top: .1rem; }
+</style>
 <script>
 // Qué copia guarda cada nodo (se pide aparte: consulta a cada nodo y no frena el Dashboard).
 (function () {
     const box = document.getElementById('nodes-overview');
     if (!box) return;
     const esc = t => String(t ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-    const color = { full: 'success', partial: 'warning', files: 'info', unknown: 'secondary' };
+    const kinds = {
+        full:    { color: 'success',   icon: 'bi-shield-check',        short: 'Réplica completa' },
+        partial: { color: 'warning',   icon: 'bi-shield-exclamation',  short: 'Réplica a medias' },
+        files:   { color: 'info',      icon: 'bi-folder2',             short: 'Solo ficheros' },
+        unknown: { color: 'secondary', icon: 'bi-question-circle',     short: 'Sin datos' },
+    };
     fetch('/settings/cluster/nodes-overview', { cache: 'no-store' }).then(r => r.json()).then(d => {
         if (!d.nodes || !d.nodes.length) { box.remove(); return; }
-        box.className = 'mt-2';
-        box.innerHTML = d.nodes.map(n =>
-            '<div class="d-flex flex-wrap align-items-center gap-2 py-1 border-top border-secondary-subtle">'
-            + '<strong class="me-1">' + esc(n.name) + '</strong>'
-            + '<span class="badge bg-' + (color[n.kind] || 'secondary') + '">' + esc(n.label) + '</span>'
-            + (n.items || []).map(i => '<span class="small ' + (i.ok ? 'text-success' : 'text-muted') + '" title="' + esc(i.detail) + '">'
-                + (i.ok ? '✔' : '✖') + ' ' + esc(i.name) + ' <span class="text-muted">(' + esc(i.detail) + ')</span></span>').join('')
-            + '</div>').join('')
-            + '<div class="small mt-1"><a href="/docs/role-switch" class="text-info"><i class="bi bi-question-circle me-1"></i>Qué significa cada tipo y cómo preparar un slave completo</a></div>';
+        box.className = 'mt-2 nodes-ov';
+        box.innerHTML = d.nodes.map(n => {
+            const k = kinds[n.kind] || kinds.unknown, items = n.items || [], ok = items.filter(i => i.ok).length, id = 'nov-' + n.id;
+            return '<div class="nov-node">'
+                + '<button type="button" class="nov-head collapsed" data-bs-toggle="collapse" data-bs-target="#' + id + '" aria-expanded="false">'
+                + '<i class="bi ' + k.icon + ' text-' + k.color + '"></i>'
+                + '<span class="nov-name">' + esc(n.name) + '</span>'
+                + '<span class="badge rounded-pill bg-' + k.color + '-subtle text-' + k.color + ' border border-' + k.color + '-subtle">' + esc(k.short) + '</span>'
+                + (n.can_take_over ? '<span class="small text-success d-none d-sm-inline"><i class="bi bi-arrow-left-right me-1"></i>puede tomar el mando</span>' : '')
+                + '<span class="ms-auto small text-muted">' + ok + '/' + items.length + '</span>'
+                + '<i class="bi bi-chevron-down nov-chev"></i>'
+                + '</button>'
+                + '<div id="' + id + '" class="collapse"><div class="nov-body">'
+                + '<div class="small mb-2 text-' + k.color + '">' + esc(n.label) + '</div>'
+                + '<div class="nov-grid">' + items.map(i =>
+                    '<div class="nov-item"><i class="bi ' + (i.ok ? 'bi-check-circle-fill text-success' : 'bi-dash-circle text-secondary') + '"></i>'
+                    + '<div><div class="' + (i.ok ? '' : 'text-muted') + '">' + esc(i.name) + '</div><div class="small text-muted">' + esc(i.detail) + '</div></div></div>').join('')
+                + '</div></div></div></div>';
+        }).join('')
+            + '<div class="small mt-2"><a href="/docs/role-switch" class="text-muted text-decoration-none"><i class="bi bi-question-circle me-1"></i>Qué significa cada tipo</a></div>';
     }).catch(() => { box.innerHTML = '<span class="text-muted">No se pudo consultar a los nodos.</span>'; });
 })();
 
@@ -537,6 +566,54 @@ document.addEventListener('DOMContentLoaded', function () {
             '<li class="mb-1">' + (c.ok ? '✅' : (c.blocking ? '❌' : '⚠️')) + ' <strong>' + esc(c.name) + '</strong> — ' + esc(c.detail) + '</li>').join('') + '</ul>';
     }
 
+    // Comprobaciones plegadas si todo va bien (si algo falla se ven abiertas).
+    function checksBlock(pre) {
+        const bad = (pre.checks || []).filter(c => !c.ok).length;
+        return '<details class="text-start mb-2"' + (bad ? ' open' : '') + '><summary class="small">'
+            + (bad ? '⚠️ ' + bad + ' avisos en las comprobaciones' : '✅ ' + (pre.checks || []).length + ' comprobaciones correctas')
+            + '</summary>' + checksHtml(pre) + '</details>';
+    }
+
+    // Lista plegable para el plan DNS.
+    function listBlock(title, items, open, cls) {
+        if (!items || !items.length) return '';
+        return '<details class="text-start small mb-1"' + (open ? ' open' : '') + '><summary class="' + (cls || '') + '">' + esc(title) + ' (' + items.length + ')</summary>'
+            + '<div style="max-height:180px;overflow:auto;font-family:monospace" class="ps-3">'
+            + items.map(i => typeof i === 'string' ? esc(i) : esc(i.name) + (i.why ? ' <span class="text-muted">— ' + esc(i.why) + '</span>' : '')).join('<br>')
+            + '</div></details>';
+    }
+
+    function planHtml(plan, movesHere, hereUrl) {
+        if (!plan || plan.ok === false && !plan.zones) {
+            return '<div class="alert alert-warning small text-start">No se pudo calcular el plan DNS: ' + esc(plan && plan.error || 'sin respuesta') + '. El cambio puede hacerse igual; el correo final dirá qué se movió.</div>';
+        }
+        const recs = []; (plan.zones || []).forEach(z => (z.records || []).forEach(r => recs.push(r)));
+        const notMoved = (plan.hosting_domains_not_moved || []).concat(plan.caddy_domains_not_moved || []);
+        return '<div class="text-start small mb-1"><strong>DNS:</strong> cambian <strong>' + recs.length + '</strong> registros y van con ellos por CNAME <strong>'
+            + (plan.moved_via_cname || []).length + '</strong>.'
+            + (notMoved.length ? ' <span class="text-warning">' + notMoved.length + ' no se pueden mover desde el panel.</span>' : '') + '</div>'
+            + listBlock('Registros A que cambian', recs, false)
+            + listBlock('Se mueven con ellos por CNAME', plan.moved_via_cname, false)
+            + listBlock('Nombres de máquina que se quedan en su servidor', plan.machine_names_kept, false)
+            + listBlock('⚠️ No se pueden mover: su DNS no está en las cuentas de Cloudflare del panel', notMoved, true, 'text-warning')
+            + listBlock('Sin DNS (nada que mover)', plan.caddy_domains_without_dns, false)
+            + listBlock('Zonas que no se pudieron leer', plan.zone_errors, true, 'text-danger')
+            + (movesHere ? '<div class="alert alert-info small text-start mt-2 mb-0"><i class="bi bi-info-circle me-1"></i>El nombre de este panel (<code>' + esc(location.hostname)
+                + '</code>) se mueve al nuevo master. Al terminar, este servidor seguirá en <code>' + esc(hereUrl) + '</code>.</div>' : '');
+    }
+
+    async function waitPlan(from, to) {
+        const fd = new FormData(); fd.append('_csrf_token', csrf); fd.append('from', from); fd.append('to', to);
+        const st = await (await fetch('/settings/cluster/role-switch/dns-plan', { method: 'POST', body: fd })).json();
+        if (!st.ok) return { ok: false, error: st.error };
+        for (let i = 0; i < 100; i++) {   // hasta ~5 min
+            await new Promise(r => setTimeout(r, 3000));
+            const d = await (await fetch('/settings/cluster/role-switch/status?task=' + encodeURIComponent(st.task), { cache: 'no-store' })).json();
+            if (d.state === 'done') return d.plan || { ok: false, error: 'plan vacío' };
+        }
+        return { ok: false, error: 'tarda demasiado' };
+    }
+
     async function askPassword(title, html) {
         const r = await S.fire({ title, html, input: 'password', inputPlaceholder: 'Tu contraseña de administrador',
             inputAttributes: { autocomplete: 'current-password' }, showCancelButton: true, confirmButtonText: 'Empezar el cambio',
@@ -545,7 +622,13 @@ document.addEventListener('DOMContentLoaded', function () {
         return r.isConfirmed ? r.value : null;
     }
 
-    function follow(task, remote, target) {
+    // Enlaces para seguir al terminar: este panel (recargar) y el del otro nodo, por IP
+    // pública y el mismo puerto (por IP siempre llega aunque Caddy cambie durante el relevo).
+    const port = location.port ? ':' + location.port : '';
+    const panelByIp = ip => ip ? 'https://' + ip + port + '/' : '';
+
+    function follow(task, remote, target, links) {
+        links = links || {};
         let seen = 0, fails = 0, done = false;
         S.fire({ title: 'Cambio de rol en marcha', width: 760, allowOutsideClick: false, showConfirmButton: false,
             html: '<div id="rs-log" class="text-start small" style="max-height:55vh;overflow:auto;font-family:monospace"></div>'
@@ -566,17 +649,25 @@ document.addEventListener('DOMContentLoaded', function () {
                 if (st.state === 'done' || st.state === 'failed') {
                     done = true;
                     S.fire({ icon: st.state === 'done' ? 'success' : 'error', width: 760,
+                        allowOutsideClick: false, confirmButtonText: '<i class="bi bi-arrow-clockwise me-1"></i>' + (links.reload ? 'Recargar este panel (por IP)' : 'Recargar este panel'),
+                        showDenyButton: !!links.there, denyButtonText: 'Abrir el panel de ' + esc(target), denyButtonColor: '#0ea5e9',
+                        preDeny: () => { window.open(links.there, '_blank', 'noopener'); return false; },
                         title: st.state === 'done' ? 'Cambio de rol hecho' : 'Cambio de rol parado',
                         html: '<div class="text-start small" style="max-height:55vh;overflow:auto;font-family:monospace">'
                             + (st.steps || []).map(s => esc(s.at) + ' ' + (s.ok === true ? '✅ ' : s.ok === false ? '❌ ' : '• ') + esc(s.msg)).join('<br>') + '</div>'
-                            + (st.error ? '<div class="alert alert-danger mt-2 small">' + esc(st.error) + '</div>' : '') });
+                            + (st.error ? '<div class="alert alert-danger mt-2 small">' + esc(st.error) + '</div>' : '') })
+                        .then(r => { if (r.isConfirmed) { if (links.reload) location.href = links.reload; else location.reload(); } });
                     return;
                 }
             } catch (e) {
                 if (++fails >= 3) {
                     const n = document.getElementById('rs-note');
                     if (n) n.innerHTML = '<strong>Se ha perdido la conexión con este panel</strong> (es lo esperado: este servidor se ha apartado). '
-                        + 'El cambio sigue en segundo plano y al acabar llegará un correo. Sigue el resultado en el panel de <strong>' + esc(target) + '</strong>.';
+                        + 'El cambio sigue en segundo plano y al acabar llegará un correo. Sigue el resultado en el panel de <strong>' + esc(target) + '</strong>.'
+                        + '<div class="mt-2 d-flex gap-2 justify-content-center flex-wrap">'
+                        + (links.here ? '<a class="btn btn-sm btn-outline-light" href="' + esc(links.here) + '">Abrir este panel por IP</a>' : '')
+                        + (links.there ? '<a class="btn btn-sm btn-info" target="_blank" rel="noopener" href="' + esc(links.there) + '">Abrir el panel de ' + esc(target) + '</a>' : '')
+                        + '</div>';
                 }
             }
             setTimeout(tick, 3000);
@@ -598,13 +689,23 @@ document.addEventListener('DOMContentLoaded', function () {
                 S.fire({ icon: 'error', title: 'No se puede hacer todavía', width: 760, html: checksHtml(pre) });
                 return;
             }
-            const pass = await askPassword('Pasar el mando a ' + target, checksHtml(pre)
+            const ips = pre.ips || {};
+            S.fire({ title: 'Calculando qué dominios se mueven…', html: '<div class="small text-muted">Se leen todas las zonas de Cloudflare; puede tardar un minuto.</div>',
+                didOpen: () => S.showLoading(), allowOutsideClick: false });
+            let plan;
+            try { plan = await waitPlan(ips.my_public, ips.their_public); } catch (e) { plan = { ok: false, error: String(e) }; }
+            // ¿El nombre por el que se entra a este panel se va al nuevo master? Entonces, al acabar, por IP.
+            const hereUrl = panelByIp(ips.my_public);
+            const movesHere = !/^[\d.]+$/.test(location.hostname) && plan && ((plan.moved_names || []).includes(location.hostname) || (plan.moved_via_cname || []).includes(location.hostname));
+            const pass = await askPassword('Pasar el mando a ' + target, checksBlock(pre) + planHtml(plan, movesHere, hereUrl)
                 + '<div class="small mt-2">Las webs se cortan unos segundos mientras cambia el DNS. Este servidor quedará como copia de ' + esc(target) + '.</div>');
             if (!pass) return;
             const fd = new FormData(); fd.append('_csrf_token', csrf); fd.append('node', node); fd.append('admin_password', pass);
             const res = await (await fetch('/settings/cluster/role-switch/start', { method: 'POST', body: fd })).json();
             if (!res.ok) { S.fire({ icon: 'error', title: 'No se ha empezado', html: esc(res.error || '') + (res.preflight ? checksHtml(res.preflight) : ''), width: 760 }); return; }
-            follow(res.task, 0, target);
+            // Si se entra por nombre, ofrecer también la IP de este servidor por si el nombre deja de llegar.
+            const byName = !/^[\d.]+$/.test(location.hostname);
+            follow(res.task, 0, target, { here: byName ? hereUrl : '', there: panelByIp(ips.their_public), reload: movesHere ? hereUrl : '' });
         } else {
             const pass = await askPassword('Tomar el mando', '<div class="small text-start">Se pide al master actual que pase el mando a este servidor: '
                 + 'el master comprueba que todo está al día, se aparta, este servidor se promueve y el antiguo master queda como copia en vivo. Nada se borra.</div>');

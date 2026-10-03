@@ -95,56 +95,11 @@ class DomainController
             return;
         }
 
-        if (!in_array($code, [301, 302])) $code = 301;
-
-        // Validate domain format
-        if (!preg_match('/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/i', $domain)) {
-            Flash::set('error', 'Formato de dominio no valido.');
+        $r = \MuseDockPanel\Services\DomainAliasService::createStandaloneRedirect($domain, $targetUrl, $code, $preservePath, $customerId);
+        if (empty($r['ok'])) {
+            Flash::set('error', $r['error']);
             Router::redirect('/domains');
             return;
-        }
-
-        // Check domain is not already in use
-        $exists = Database::fetchOne("SELECT id FROM hosting_accounts WHERE domain = :d", ['d' => $domain]);
-        if ($exists) {
-            Flash::set('error', "'{$domain}' ya existe como cuenta de hosting.");
-            Router::redirect('/domains');
-            return;
-        }
-        $exists2 = Database::fetchOne("SELECT id FROM hosting_domain_aliases WHERE domain = :d", ['d' => $domain]);
-        if ($exists2) {
-            Flash::set('error', "'{$domain}' ya existe como alias o redirect.");
-            Router::redirect('/domains');
-            return;
-        }
-
-        // Parse target to get the destination domain for Caddy
-        $targetDomain = preg_replace('#^https?://#', '', rtrim($targetUrl, '/'));
-        $targetDomain = explode('/', $targetDomain)[0]; // just the host part
-
-        // Create Caddy redirect route
-        $routeId = \MuseDockPanel\Services\SystemService::addCaddyRedirectRoute($domain, $targetDomain, $code, $preservePath);
-
-        // Insert record
-        $stmt = Database::query(
-            "INSERT INTO hosting_domain_aliases (hosting_account_id, domain, type, redirect_code, preserve_path, caddy_route_id, customer_id, target_url)
-             VALUES (:aid, :d, 'redirect', :code, :pp, :rid, :cid, :target)",
-            [
-                'aid' => null,
-                'd' => $domain,
-                'code' => $code,
-                'pp' => $preservePath ? 't' : 'f',
-                'rid' => $routeId,
-                'cid' => $customerId,
-                'target' => $targetUrl,
-            ]
-        );
-
-        LogService::log('domain.redirect', $domain, "Standalone redirect created: {$domain} → {$targetUrl} ({$code})");
-
-        // Replicate to slaves (standalone redirects were NOT synced before this).
-        if (Settings::get('cluster_role', 'standalone') === 'master') {
-            self::syncStandaloneRedirectToCluster('sync', $domain, $targetUrl, $code, $preservePath, $customerId);
         }
 
         Flash::set('success', "Redirect creado: {$domain} → {$targetUrl}");
@@ -154,19 +109,7 @@ class DomainController
     /** Enqueue a standalone-redirect create/remove to every web node. */
     private static function syncStandaloneRedirectToCluster(string $op, string $domain, string $targetUrl = '', int $code = 301, bool $preservePath = true, ?int $customerId = null): void
     {
-        $action = $op === 'remove' ? 'remove_standalone_redirect' : 'sync_standalone_redirect';
-        foreach (\MuseDockPanel\Services\ClusterService::getWebNodes() as $node) {
-            \MuseDockPanel\Services\ClusterService::enqueue((int)$node['id'], 'sync-hosting', [
-                'hosting_action' => $action,
-                'hosting_data'   => [
-                    'domain'        => $domain,
-                    'target_url'    => $targetUrl,
-                    'redirect_code' => $code,
-                    'preserve_path' => $preservePath,
-                    'customer_id'   => $customerId,
-                ],
-            ], 6);
-        }
+        \MuseDockPanel\Services\DomainAliasService::syncStandaloneRedirectToCluster($op, $domain, $targetUrl, $code, $preservePath, $customerId);
     }
 
     /**

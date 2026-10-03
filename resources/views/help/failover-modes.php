@@ -109,7 +109,7 @@
             <strong>Imprescindible: la lista de servidores de failover.</strong> Estas reglas deciden <em>QUIÉN</em> promociona,
             pero el <strong>repunte de DNS</strong> necesita la <strong>IP pública</strong> de cada nodo y el mapeo de zonas Cloudflare,
             y eso <strong>solo</strong> vive en la lista de servidores de failover. Los nodos del cluster solo conocen su IP
-            <strong>WireGuard privada</strong> (<code>10.10.70.x</code>), que como destino DNS público rompería todos los dominios.
+            <strong>privada de la VPN</strong> (WireGuard), que como destino DNS público rompería todos los dominios.
             Por eso, si la lista está <strong>vacía</strong>, el failover automático <strong>no actúa</strong> (aunque estés en <code>auto</code>):
             primero hay que rellenarla con las IPs públicas. El desempate por completitud/ID es una red para cuando la lista
             <em>sí</em> está configurada pero <strong>olvidaste los números de prioridad</strong>, no un sustituto de configurarla.
@@ -119,17 +119,118 @@
     </div>
 </div>
 
-<!-- Cómo configurarlo -->
-<div class="card mb-4">
-    <div class="card-header"><i class="bi bi-gear me-2"></i>Cómo configurarlo (checklist)</div>
+<!-- Qué se mueve en el DNS -->
+<div class="card mb-4" style="border-color:rgba(251,191,36,.3);">
+    <div class="card-header"><i class="bi bi-signpost-split me-2"></i>Qué se mueve en el DNS, y por qué</div>
     <div class="card-body small">
-        <ol class="mb-2">
-            <li>En <a href="/settings/cluster" class="text-info">Settings → Cluster</a>, sección <strong>servidores de failover</strong>:</li>
-            <li>Añade el <strong>master</strong> como <code>primary</code>.</li>
-            <li>Añade cada <strong>slave</strong> como <code>failover</code>, con su <strong>prioridad</strong> (p.ej. el más completo = 1) y su <strong>failover_to</strong>.</li>
-            <li>Elige el <strong>modo</strong> (empieza por <code>semiauto</code> — automatiza el forward, tú controlas la vuelta).</li>
-            <li><strong>Prueba con calma</strong> (idealmente un fallo provocado controlado) antes de fiarte del automático en producción.</li>
+        <p class="text-muted">Nada está escrito a mano en el panel: lo que se mueve se decide en el momento, con estas reglas.</p>
+        <ol class="mb-3" style="line-height:1.8;">
+            <li><strong>Las IPs</strong> salen de <em>Cluster → Failover → Servidores</em>: la IP pública del servidor que deja de mandar (origen)
+                y la del que pasa a mandar (destino).</li>
+            <li><strong>Dónde busca</strong>: en todas las zonas (dominios) de todas las cuentas de Cloudflare configuradas en Failover.</li>
+            <li><strong>Qué cambia</strong>: los <strong>registros A cuyo contenido es exactamente la IP de origen</strong>. Se busca por IP, no por la
+                lista de hostings: si algo apunta a ese servidor, se mueve, aunque no sea un hosting del panel (por ejemplo, webs que añade otra aplicación).
+                Se respeta si va por el proxy de Cloudflare o no.</li>
+            <li><strong>Los CNAME no se tocan</strong>: siguen a su destino. Si <code>www.ejemplo.com</code> es CNAME de <code>ejemplo.com</code>,
+                se mueve cuando se mueve <code>ejemplo.com</code>. Por eso un cambio puede tocar 8 registros A y mover con ellos 180 dominios.</li>
+            <li><strong>Los nombres de máquina se quedan quietos</strong>: el hostname de cada servidor, el nombre del panel y los nombres de los nodos
+                (se deducen solos; se pueden añadir más en <code>failover_dns_exclude</code>). Cada uno debe seguir apuntando a su propio servidor.</li>
+            <li><strong>Excepción: un nombre de máquina al que apuntan webs por CNAME sí se mueve.</strong> Es el caso habitual cuando los dominios
+                se configuran con CNAME al nombre del servidor (el <em>destino por defecto</em> de los dominios nuevos). Si no se moviera,
+                todas esas webs se quedarían apuntando al servidor que ya no manda.</li>
         </ol>
-        <p class="text-muted mb-0">Recuerda: el failover de tráfico necesita las credenciales de Cloudflare configuradas (se usan para repuntar los registros A).</p>
+        <div class="alert alert-info small">
+            <i class="bi bi-info-circle me-1"></i>
+            <strong>Consecuencia para entrar al panel:</strong> si el nombre del panel es también el destino de los CNAME de las webs, tras el cambio
+            ese nombre lleva al panel del <em>nuevo</em> master. Al servidor que deja de mandar se entra por su IP pública
+            (<code>https://IP:puerto</code>). El cambio de rol lo detecta: lo avisa antes de empezar y, al terminar, recarga el panel por IP.
+        </div>
+        <p class="mb-1"><strong>Qué no se puede mover</strong>: un dominio cuyo DNS no está en las cuentas de Cloudflare del panel
+            (en otra cuenta, o en otro proveedor DNS) no cambia. El panel lo detecta y lo lista, tanto los hostings como todo lo que sirve Caddy:</p>
+        <ul class="mb-3">
+            <li><strong>Antes</strong>: en el cambio de rol, la ventana muestra la lista completa (qué cambia, qué va por CNAME, qué se queda y qué no se puede mover)
+                antes de pedir la contraseña. También <code>cluster-switch.php dns-plan</code> o, por MCP, <code>failover_dns_plan</code>.</li>
+            <li><strong>Después</strong>: el correo del cambio lista los registros cambiados, los que fallaron y los dominios que no se pudieron mover,
+                para cambiarlos a mano en su proveedor.</li>
+        </ul>
+        <div class="alert alert-warning small mb-0">
+            <i class="bi bi-cloud me-1"></i>
+            <strong>Hoy el panel está hecho para Cloudflare</strong>: el relevo de DNS solo cambia registros en Cloudflare.
+            Los dominios con el DNS en otro proveedor quedan fuera del relevo automático (salen en las listas de "no se puede mover").
+            Está previsto estudiar otros proveedores DNS en paralelo a Cloudflare.
+        </div>
+    </div>
+</div>
+
+<!-- Cómo configurarlo -->
+<div class="card mb-4" style="border-color:rgba(34,197,94,.3);">
+    <div class="card-header"><i class="bi bi-gear me-2"></i>Cómo configurarlo, paso a paso</div>
+    <div class="card-body small">
+        <p class="text-muted">Todo se hace en el <strong>master</strong>, en <a href="/settings/cluster#tab-failover" class="text-info">Ajustes → Cluster → Failover</a>.
+            Al guardar, la configuración se copia sola a los demás nodos.</p>
+
+        <h6 class="mt-3">1. Antes de empezar</h6>
+        <ul class="mb-2">
+            <li>Un <strong>slave que tenga copia de todo</strong> (ficheros, bases de datos, correo si lo hay). Si solo tiene ficheros, al promoverlo
+                las webs se quedarían sin datos. El Dashboard del master dice qué guarda cada nodo; cómo prepararlo en
+                <a href="/docs/role-switch" class="text-info">Cambio de rol y slave completo</a>.</li>
+            <li>Los dominios gestionados en <strong>Cloudflare</strong> (es lo que se repunta).</li>
+        </ul>
+
+        <h6 class="mt-3">2. Cuentas de Cloudflare</h6>
+        <ul class="mb-2">
+            <li>En la tarjeta <strong>Cuentas Cloudflare</strong>, añade un nombre y un <strong>API Token</strong> por cuenta.
+                El token necesita permiso de <em>Zona → DNS → Editar</em> y <em>Zona → Leer</em> sobre las zonas que se mueven.</li>
+            <li>Marca <strong>"Actualizar token de Caddy"</strong> si Caddy usa ese mismo token para sacar certificados por DNS:
+                se copia a Caddy en todos los nodos (y el slave podrá renovar certificados cuando mande él).</li>
+        </ul>
+
+        <h6 class="mt-3">3. Servidores</h6>
+        <p class="text-muted mb-1">En <strong>Infraestructura → Servidores → Añadir servidor</strong>, uno por fila:</p>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-2">
+                <thead><tr><th>Campo</th><th>Qué poner</th></tr></thead>
+                <tbody>
+                    <tr><td>Nombre</td><td>El que quieras (aparece en avisos y en el Dashboard).</td></tr>
+                    <tr><td>IP</td><td>La <strong>IP pública</strong> del servidor: la que verán los registros DNS. Nunca la de la VPN.</td></tr>
+                    <tr><td>Rol</td><td><code>Primary</code> el master; <code>Failover</code> cada slave que puede tomar el mando;
+                        <code>Backup</code> solo un último recurso con caddy-l4 (puede tener IP dinámica con DynDNS).</td></tr>
+                    <tr><td>Prio</td><td>Solo en los <code>Failover</code>: 1 = el primero en promoverse. Con un solo slave, 1.</td></tr>
+                    <tr><td>Failover a</td><td>En cada <code>Primary</code>: a qué <code>Failover</code> va su tráfico si cae.</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h6 class="mt-3">4. Modo y tiempos</h6>
+        <ul class="mb-2">
+            <li><strong>Modo</strong>: empieza por <code>semiauto</code> (si cae el master el relevo es automático; la vuelta la decides tú).</li>
+            <li><strong>TTL</strong>: normal, alerta y failover. Un TTL bajo en failover hace que el cambio llegue antes a quien no usa el proxy de Cloudflare.</li>
+            <li><strong>Health checks</strong>: cada cuánto se comprueba, cuántos fallos seguidos marcan un servidor como caído y cuántos OK como recuperado.
+                Subir los fallos evita relevos por un corte de unos segundos.</li>
+        </ul>
+
+        <h6 class="mt-3">5. Comprobar sin tocar nada</h6>
+        <ul class="mb-2">
+            <li>En la terminal del master: <code>php bin/cluster-switch.php dns-plan</code>. Lista qué registros DNS se moverían
+                y cuáles no se tocan. Por MCP: <code>failover_dns_plan</code> y <code>failover_preflight</code>
+                (en el master <em>y</em> en el slave), que dice en llano qué falta.</li>
+            <li>Revisa sobre todo la lista de <strong>"no se puede mover"</strong> (dominios con el DNS fuera de las cuentas de Cloudflare del panel)
+                y los <strong>nombres de máquina</strong> (ver <em>Qué se mueve en el DNS</em> arriba).</li>
+        </ul>
+
+        <h6 class="mt-3">6. Qué hace un relevo</h6>
+        <ul class="mb-2">
+            <li>Repunta en Cloudflare los registros que apuntaban al servidor caído y apunta un diario de lo movido: la vuelta solo deshace eso.</li>
+            <li>Promueve el slave (sus bases aceptan escrituras) y abre los puertos públicos: web y, si tiene correo, los del correo.
+                Los puertos que el servidor ya tenía abiertos por su cuenta no se tocan; al volver a slave solo se cierra lo que abrió el panel.</li>
+            <li>Si el antiguo master vuelve, se <strong>aparta</strong> solo (no sirve webs ni acepta escrituras) para que no haya dos masters,
+                y su panel sigue accesible por IP. Desde ahí se convierte en copia del nuevo master.</li>
+            <li>La copia de ficheros no se invierte sola en un relevo por caída: revisa <em>Cluster → Archivos</em> después.
+                En un <a href="/docs/role-switch" class="text-info">cambio de rol planificado</a> sí se hace todo.</li>
+        </ul>
+
+        <h6 class="mt-3">7. Probar</h6>
+        <p class="mb-0 text-muted">Antes de fiarte del modo automático, haz un <a href="/docs/role-switch" class="text-info">cambio de rol planificado</a>
+            de ida y vuelta: prueba lo mismo que un relevo (DNS, bases, puertos, correo) con los dos servidores bien y sin prisas.</p>
     </div>
 </div>

@@ -763,6 +763,13 @@ class ClusterController
         $this->jsonOut(\MuseDockPanel\Services\RoleSwitchService::preflight((int)($_GET['node'] ?? 0)));
     }
 
+    /** POST /settings/cluster/role-switch/dns-plan: from, to → tarea (se sigue con role-switch/status). */
+    public function roleSwitchDnsPlan(): void
+    {
+        View::verifyCsrf();
+        $this->jsonOut(\MuseDockPanel\Services\RoleSwitchService::startDnsPlan((string)($_POST['from'] ?? ''), (string)($_POST['to'] ?? '')));
+    }
+
     /** GET /settings/cluster/nodes-overview: qué copia guarda cada nodo (en el master). */
     public function nodesOverview(): void
     {
