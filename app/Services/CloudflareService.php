@@ -366,6 +366,12 @@ class CloudflareService
     /** Destinos de todos los CNAME de las zonas de este panel (cacheado por proceso). */
     private static ?array $cnameTargets = null;
 
+    /** Para quien ya ha leído los CNAME de todas las zonas (failover_dns_plan): evita repetirlo. */
+    public static function primeCnameTargets(array $targets): void
+    {
+        self::$cnameTargets = $targets;
+    }
+
     public static function cnameTargets(): array
     {
         if (self::$cnameTargets !== null) {

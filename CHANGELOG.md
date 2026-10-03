@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.274] — 2026-10-03 — Plan de DNS del relevo más rápido
+
+### Arreglado
+- **`failover_dns_plan` leía los CNAME de todas las zonas dos veces** (desde la 1.0.273) y por MCP se pasaba del tiempo límite. Ahora los lee una vez.
+
 ## [1.0.273] — 2026-10-03 — El relevo vuelve a mover las webs que apuntan al servidor por CNAME
 
 ### Arreglado

@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.274',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['failover_dns_plan leia los CNAME de todas las zonas dos veces y por MCP se pasaba del tiempo limite'],
+                        'en' => ['failover_dns_plan read every zone CNAME twice and timed out over MCP'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.273',
                 'date' => '2026-10-03',
                 'badge' => 'danger',

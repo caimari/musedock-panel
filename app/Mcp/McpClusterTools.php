@@ -1031,6 +1031,8 @@ final class McpClusterTools
         $moved = [];      // nombres cuyo A cambia
         $cnames = [];     // nombre → destino, de todas las zonas
         $zoneNames = [];
+        // 1ª pasada: los CNAME de todas las zonas (los necesita la regla de nombres de
+        // máquina: uno al que apuntan webs por CNAME sí se mueve).
         foreach ($accounts as $acct) {
             foreach (($acct['zones'] ?? []) as $zone) {
                 $zoneNames[strtolower((string)$zone['name'])] = true;
@@ -1038,6 +1040,11 @@ final class McpClusterTools
                 foreach (($c['ok'] ? ($c['result'] ?? []) : []) as $x) {
                     $cnames[strtolower((string)$x['name'])] = strtolower(rtrim((string)$x['content'], '.'));
                 }
+            }
+        }
+        $cf::primeCnameTargets(array_fill_keys(array_values($cnames), true));
+        foreach ($accounts as $acct) {
+            foreach (($acct['zones'] ?? []) as $zone) {
                 foreach ($pairs as $p) {
                     $r = $cf::listARecordsByIp((string)$acct['token'], (string)$zone['id'], $p['from']);
                     if (!$r['ok']) {
