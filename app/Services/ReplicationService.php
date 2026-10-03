@@ -1718,6 +1718,18 @@ class ReplicationService
         // import over a live datadir; the alternative would be a filesystem-level
         // snapshot, out of scope here.)
         if ($seed) {
+            // Una réplica anterior arranca sola al reiniciar MariaDB, y el CHANGE MASTER
+            // del volcado falla con "you have a running slave; run STOP SLAVE first"
+            // (Filemon, 2026-10-03). Pararla y olvidar su configuración de réplica antes
+            // de importar. RESET SLAVE ALL solo borra la configuración de réplica y los
+            // relay logs, NO datos.
+            try {
+                $pdo->exec($isMaria ? 'STOP SLAVE' : 'STOP REPLICA');
+                $pdo->exec($isMaria ? 'RESET SLAVE ALL' : 'RESET REPLICA ALL');
+                $steps[] = ['name' => 'Parar y olvidar la réplica anterior', 'ok' => true, 'output' => 'STOP + RESET SLAVE ALL (no toca datos)'];
+            } catch (\Throwable $e) {
+                $steps[] = ['name' => 'Parar y olvidar la réplica anterior', 'ok' => true, 'output' => 'no había réplica: ' . $e->getMessage()];
+            }
             $seedRes = static::seedMysqlSlaveFromMaster($masterIp, $port, $replUser, $replPass, $isMaria);
             $steps[] = ['name' => 'Sembrar datos desde el master', 'ok' => !empty($seedRes['ok']), 'output' => $seedRes['output'] ?? ''];
             if (empty($seedRes['ok'])) {

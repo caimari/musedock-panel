@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.278',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['El sembrado de MariaDB fallaba si habia una replica anterior (arrancaba sola al reiniciar): ahora STOP + RESET SLAVE ALL antes de importar (no toca datos)'],
+                        'en' => ['MariaDB seeding failed when an older replica existed (it auto-started on restart): now STOP + RESET SLAVE ALL before importing (no data touched)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.277',
                 'date' => '2026-10-03',
                 'badge' => 'danger',

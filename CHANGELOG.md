@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.278] — 2026-10-03 — El sembrado de MariaDB no choca con una réplica anterior
+
+### Arreglado
+- **El sembrado de una réplica MariaDB fallaba si ya había una réplica configurada**: al reiniciar MariaDB, la anterior arrancaba sola y el `CHANGE MASTER` del volcado daba "you have a running slave; run STOP SLAVE first". No se importaba nada. Ahora, antes de importar, se para y se olvida la réplica anterior (`STOP SLAVE` + `RESET SLAVE ALL`, que no toca datos).
+
 ## [1.0.277] — 2026-10-03 — La promoción de PostgreSQL ya no puede quedarse a medias
 
 ### Arreglado
