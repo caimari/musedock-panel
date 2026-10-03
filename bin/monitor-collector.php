@@ -677,11 +677,23 @@ function checkAlert(string $host, string $type, string $message, float $value): 
     $state = json_decode(Settings::get('monitor_alert_episodes', '{}'), true) ?: [];
     $now = time();
     $ep = $state[$key] ?? ['last_seen' => 0, 'last_sent' => 0];
-    $continuing = ($now - (int)$ep['last_seen']) <= 600;
+    // Cargas que van a ráfagas (CPU, RAM, GPU, red): avisar solo si duran (por defecto
+    // 5 min seguidos) y dar el episodio por cerrado tras 1 h sin repetirse. Si no, una
+    // tarea programada que sube la CPU cada pocos minutos mandaba un correo por ráfaga
+    // (22 en una mañana con el relevo activo, 2026-10-03). Disco y temperatura: igual que antes.
+    $bursty = in_array($type, ['CPU_HIGH', 'RAM_HIGH', 'GPU_HIGH', 'NET_HIGH'], true);
+    $gap = $bursty ? 60 * max(10, (int)Settings::get('monitor_alert_episode_gap_minutes', '60')) : 600;
+    $sustain = $bursty ? 60 * max(0, (int)Settings::get('monitor_alert_sustain_minutes', '5')) : 0;
+    $continuing = ($now - (int)$ep['last_seen']) <= $gap;
+    // Racha: lecturas por encima del umbral sin huecos de más de 90 s (se mide cada 30 s).
+    if (($now - (int)$ep['last_seen']) > 90 || empty($ep['streak_start'])) {
+        $ep['streak_start'] = $now;
+    }
     $ep['last_seen'] = $now;
-    $send = $continuing
+    $sustained = ($now - (int)$ep['streak_start']) >= $sustain;
+    $send = $sustained && ($continuing && (int)$ep['last_sent'] > 0
         ? ($now - (int)$ep['last_sent']) >= $repeat
-        : ($now - (int)$ep['last_sent']) >= $cooldownSeconds;
+        : ($now - (int)$ep['last_sent']) >= $cooldownSeconds);
     if ($send) {
         $ep['last_sent'] = $now;
     }

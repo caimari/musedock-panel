@@ -82,6 +82,17 @@ $cfg = [
     ],
 ];
 @mkdir($dir, 0700, true);
+// Misma autoridad de certificados que el Caddy principal: los otros nodos del cluster
+// ya confían en ella (su CA está anclada en cada nodo). Con una CA nueva, la API del
+// panel fallaba desde los demás ("authority and subject key identifier mismatch").
+foreach (['/var/lib/caddy/.local/share/caddy/pki', '/root/.local/share/caddy/pki'] as $pki) {
+    if (is_dir($pki . '/authorities/local')) {
+        @mkdir("{$dir}/data", 0700, true);
+        shell_exec('rm -rf ' . escapeshellarg("{$dir}/data/pki") . ' && cp -a ' . escapeshellarg($pki) . ' ' . escapeshellarg("{$dir}/data/pki"));
+        shell_exec('rm -rf ' . escapeshellarg("{$dir}/data/certificates"));   // que se reemitan con esa CA
+        break;
+    }
+}
 file_put_contents($conf, json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 chmod($conf, 0600);
 

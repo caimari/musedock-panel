@@ -579,7 +579,14 @@ systemctl restart caddy</pre>
     </div>
 </div>
 
-<?php if (empty($offlineNodes) && !empty($onlineNodes)): ?>
+<?php
+// Solo el master sincroniza nodos: en un slave o un nodo apartado esta lista es la que
+// tenía cuando era master y no refleja nada real.
+$__isActiveMaster = \MuseDockPanel\Settings::get('cluster_role', '') === 'master'
+    && \MuseDockPanel\Settings::get('cluster_fenced', '0') !== '1'
+    && !is_file(\MuseDockPanel\Services\FailoverSafetyService::FENCE_FLAG);
+?>
+<?php if ($__isActiveMaster && empty($offlineNodes) && !empty($onlineNodes)): ?>
 <!-- Synced Nodes (info, no alert) -->
 <div class="row g-3 mb-4">
     <div class="col-12">

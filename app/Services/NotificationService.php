@@ -15,8 +15,25 @@ class NotificationService
     /**
      * Send notification via all configured channels
      */
+    /**
+     * "[servidor] asunto": con varios paneles avisando al mismo buzón (master, slaves,
+     * nodos) hay que saber de un vistazo QUIÉN avisa. Se usa el hostname del servidor
+     * (nada fijo en el código); si el asunto ya lo lleva, no se repite.
+     */
+    public static function tagSubject(string $subject): string
+    {
+        $host = (string)(Settings::get('panel_hostname', '') ?: gethostname() ?: 'servidor');
+        $short = explode('.', $host)[0];
+        // Ya lo lleva (p. ej. "[mortadelo.musedock.com] …"): no repetir.
+        if (stripos($subject, $host) !== false || stripos($subject, "[{$short}]") !== false) {
+            return $subject;
+        }
+        return "[{$host}] {$subject}";
+    }
+
     public static function send(string $subject, string $message): void
     {
+        $subject = self::tagSubject($subject);
         if (Settings::get('monitor_notify_email', '0') === '1') {
             self::sendEmail($subject, $message);
         }
@@ -134,6 +151,7 @@ class NotificationService
 
     public static function sendEmail(string $subject, string $body): bool
     {
+        $subject = self::tagSubject($subject);
         $method = Settings::get('notify_email_method', 'smtp');
         $to = self::getRecipientEmail();
 

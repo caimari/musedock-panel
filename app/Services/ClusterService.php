@@ -2204,7 +2204,14 @@ class ClusterService
         }
         $pub = FileSyncService::getPublicKey($keyPath);
         $r = self::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'install-ssh-key', 'payload' => ['public_key' => $pub]]);
-        $steps[] = !empty($r['ok']) ? 'clave SSH instalada en el otro nodo' : 'AVISO clave SSH: ' . ($r['error'] ?? 'sin respuesta');
+        // Lo que importa es que SSH entre, no que la API conteste: se comprueba de verdad.
+        $ssh = FileSyncService::testSshConnection($peerIp, (int)(Settings::get('filesync_ssh_port', '22') ?: 22), $keyPath, Settings::get('filesync_ssh_user', 'root') ?: 'root');
+        $sshOk = !empty($ssh['ok']);
+        $steps[] = (!empty($r['ok']) ? 'clave SSH instalada por la API' : 'la API del otro nodo no respondió (' . ($r['error'] ?? '?') . ')')
+            . ($sshOk ? '; SSH al otro nodo: OK' : '; SSH al otro nodo: FALLA');
+        if (!$sshOk) {
+            return ['ok' => false, 'error' => 'sin acceso SSH al otro nodo: no se puede copiar ficheros', 'steps' => $steps];
+        }
 
         // 3) Configuración de copia de ficheros como la tenía el master.
         $snap = json_decode(Settings::get('filesync_snapshot', ''), true);

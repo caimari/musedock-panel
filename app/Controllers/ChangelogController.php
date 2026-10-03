@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.276',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['El panel de rescate usa la misma autoridad de certificados que el Caddy principal (los otros nodos no podian usar su API)', 'adopt-peer comprueba que SSH entra de verdad antes de activar la copia de ficheros'],
+                        'en' => ['The rescue panel uses the same certificate authority as the main Caddy (other nodes could not use its API)', 'adopt-peer checks that SSH really works before enabling file sync'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.275',
                 'date' => '2026-10-03',
                 'badge' => 'info',

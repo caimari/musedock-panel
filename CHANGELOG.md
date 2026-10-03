@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.276] — 2026-10-03 — Panel de rescate con la CA de siempre; adopt-peer comprueba SSH de verdad
+
+### Arreglado
+- **Con el panel de rescate, los otros nodos no podían usar la API del panel** ("authority and subject key identifier mismatch"): el rescate se creaba su propia autoridad de certificados. Ahora usa la misma del Caddy principal, en la que los nodos ya confían.
+- **Todos los avisos (correo y Telegram) llevan en el asunto qué servidor los envía**: `[nombre-del-servidor] …`, con el nombre del panel o el hostname, sin nada fijo en el código. Con varios paneles avisando al mismo buzón no se sabía quién avisaba.
+- **Se acabaron las ráfagas de avisos de CPU/RAM/GPU/red.** Solo avisa si la carga dura (por defecto 5 minutos seguidos, `monitor_alert_sustain_minutes`) y da el episodio por cerrado tras 1 hora sin repetirse (`monitor_alert_episode_gap_minutes`). Antes, una tarea programada que subía la CPU cada pocos minutos mandaba un correo por ráfaga: 22 en una mañana durante el relevo. Disco y temperatura avisan igual que antes.
+- **El Dashboard de un slave o de un nodo apartado ya no muestra "N nodos sincronizados"**: era la lista de cuando fue master.
+- **`adopt-peer` daba por buena la instalación de la clave SSH aunque la API hubiera fallado.** Ahora comprueba que SSH entra de verdad. Si no entra, no activa la copia de ficheros y lo dice.
+
 ## [1.0.275] — 2026-10-03 — El panel sigue accesible con el servidor apartado
 
 ### Añadido
