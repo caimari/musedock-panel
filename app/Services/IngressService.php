@@ -125,21 +125,75 @@ class IngressService
         $route = [
             '@id' => self::ROUTE_ID,
             'match' => [['host' => [$c['health_name']]]],
-            'handle' => [['handler' => 'static_response', 'status_code' => 200, 'body' => 'ok-' . strtolower(explode('.', (string)gethostname())[0])]],
+            'handle' => [['handler' => 'static_response', 'status_code' => 200, 'body' => 'ok-' . self::healthLabel($c['health_name'])]],
             'terminal' => true,
         ];
         $cur = self::get('/id/' . self::ROUTE_ID);
         if (!is_array($cur)) {
             $done['route'] = self::send('PUT', "{$base}/routes/0", $route);
-        } elseif (($cur['match'][0]['host'] ?? []) !== [$c['health_name']]) {
+        } elseif (($cur['match'][0]['host'] ?? []) !== [$c['health_name']] || ($cur['handle'] ?? []) != $route['handle']) {
             $done['route'] = self::send('PATCH', '/id/' . self::ROUTE_ID, $route);
         }
         try {
             SystemService::ensureTlsCatchAllPolicy(self::api());
         } catch (\Throwable) {
         }
+        // 4) Certificado del nombre de comprobación SIEMPRE por DNS: por HTTP/TLS-ALPN
+        // solo sale si el proxy ya está abierto, y si no, Let's Encrypt bloquea el nombre
+        // una hora tras 5 fallos (pasó con obelix).
+        $tls = self::ensureDnsPolicy($c['health_name']);
+        if ($tls !== null) {
+            $done['tls'] = $tls;
+        }
         $errors = array_filter($done, static fn($r) => empty($r['ok']));
         return ['ok' => !$errors, 'changed' => array_keys($done), 'errors' => array_map(static fn($r) => $r['error'] ?? '', $errors)];
+    }
+
+    /**
+     * Lo que responde la comprobación: "ok-<nombre>" sacado del nombre de comprobación
+     * (health-filemon.ejemplo.com → filemon). El hostname del sistema puede ser algo como
+     * "155" y no dice nada.
+     */
+    public static function healthLabel(string $healthName): string
+    {
+        $first = explode('.', strtolower($healthName))[0];
+        $label = preg_replace('/^(health|check|hc)[-_]/', '', $first);
+        return $label !== '' ? $label : strtolower(explode('.', (string)gethostname())[0]);
+    }
+
+    /**
+     * Política TLS propia para el nombre de comprobación con reto DNS (Cloudflare, el
+     * token del entorno de Caddy). null si ya está; ['ok'=>false] si este Caddy no tiene
+     * el módulo o el token (entonces se queda con la política general).
+     */
+    private static function ensureDnsPolicy(string $name): ?array
+    {
+        $policies = self::get('/config/apps/tls/automation/policies');
+        $policies = is_array($policies) && array_is_list($policies) ? $policies : [];
+        foreach ($policies as $p) {
+            if (($p['subjects'] ?? []) === [$name] && isset($p['issuers'][0]['challenges']['dns'])) {
+                return null;
+            }
+        }
+        if (!SystemService::isDnsProviderInstalled('cloudflare')) {
+            return ['ok' => false, 'error' => 'este Caddy no tiene el módulo dns.providers.cloudflare: el certificado de ' . $name . ' irá por HTTP (necesita el proxy abierto)'];
+        }
+        if (!str_contains((string)@file_get_contents('/etc/default/caddy'), 'CLOUDFLARE_API_TOKEN')) {
+            return ['ok' => false, 'error' => 'falta CLOUDFLARE_API_TOKEN en /etc/default/caddy: el certificado de ' . $name . ' irá por HTTP'];
+        }
+        $mine = [
+            'subjects' => [$name],
+            'issuers' => [[
+                'module' => 'acme',
+                'challenges' => ['dns' => [
+                    'provider' => ['name' => 'cloudflare', 'api_token' => '{env.CLOUDFLARE_API_TOKEN}'],
+                    'resolvers' => ['1.1.1.1', '8.8.8.8'],
+                ]],
+            ]],
+        ];
+        $keep = array_values(array_filter($policies, static fn($p) => ($p['subjects'] ?? []) !== [$name]));
+        array_unshift($keep, $mine);
+        return self::send('PATCH', '/config/apps/tls/automation/policies', $keep);
     }
 
     /** Dominios que sirve este Caddy (los de las webs; comodines incluidos) + el de comprobación. */

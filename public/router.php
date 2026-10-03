@@ -8,8 +8,11 @@ require_once dirname(__DIR__) . '/app/Env.php';
 \MuseDockPanel\Env::load(dirname(__DIR__) . '/.env');
 
 // Enforce ALLOWED_IPS for all requests, including static files.
+// Excepción: el mapa de dominios del proxy de entrada alternativa tiene su propia clave
+// (IngressService) y lo pide un equipo que no tiene por qué estar en la lista.
 $allowedRaw = trim((string)\MuseDockPanel\Env::get('ALLOWED_IPS', ''));
-if ($allowedRaw !== '') {
+$routerPath = rtrim((string)(strtok($_SERVER['REQUEST_URI'] ?? '/', '?') ?: '/'), '/');
+if ($allowedRaw !== '' && $routerPath !== '/api/ingress/domains') {
     $allowedIps = array_filter(array_map('trim', explode(',', $allowedRaw)));
     $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '';
     $clientIp = '';

@@ -368,4 +368,36 @@ class DomainAliasService
         }
     }
 
+
+    /**
+     * Rutas de Caddy de las redirecciones sueltas que estén en la base de datos pero no
+     * en Caddy (p. ej. llegaron a un nodo como datos pero la ruta se perdió en una
+     * recarga o en un cambio de rol): se crean. Solo crea lo que falta, no borra nada.
+     */
+    public static function ensureStandaloneRedirectRoutes(): array
+    {
+        $api = rtrim((string)((require PANEL_ROOT . '/config/panel.php')['caddy']['api_url'] ?? 'http://localhost:2019'), '/');
+        $created = [];
+        $rows = Database::fetchAll("SELECT domain, target_url, redirect_code, preserve_path FROM hosting_domain_aliases WHERE type = 'redirect' AND hosting_account_id IS NULL AND COALESCE(target_url, '') <> ''");
+        foreach ($rows as $r) {
+            $domain = strtolower((string)$r['domain']);
+            $id = 'redirect-' . str_replace('.', '-', $domain);
+            $ch = curl_init("{$api}/id/{$id}");
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
+            curl_exec($ch);
+            $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if ($code === 200 || $code === 0) {
+                continue;   // existe (o Caddy no responde: no se toca)
+            }
+            $target = preg_replace('#^https?://#', '', rtrim((string)$r['target_url'], '/'));
+            $target = explode('/', $target)[0];
+            $pp = in_array($r['preserve_path'], [true, 't', '1', 1], true);
+            if (SystemService::addCaddyRedirectRoute($domain, $target, (int)$r['redirect_code'] ?: 301, $pp) !== null) {
+                $created[] = $domain;
+            }
+        }
+        return $created;
+    }
+
 }

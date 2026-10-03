@@ -33,7 +33,8 @@ if (rtrim($requestPath, '/') === '/api/internal/smtp-config') {
 
 // IP allowlist (ALLOWED_IPS in .env)
 $allowedIps = array_values($config['allowed_ips'] ?? []);
-if (!empty($allowedIps)) {
+// El mapa de dominios del proxy de entrada alternativa tiene su propia clave (IngressService).
+if (!empty($allowedIps) && rtrim($requestPath, '/') !== '/api/ingress/domains') {
     $clientIp = (static function (): string {
         $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '';
 

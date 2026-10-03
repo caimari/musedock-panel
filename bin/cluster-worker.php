@@ -177,6 +177,33 @@ if (time() - (int)Settings::get('replication_health_run_at', '0') >= 300) {
     }
 }
 
+// ─── Step 0h: Rutas de Caddy que deberían estar y faltan (cada 5 min) ────
+// Redirecciones sueltas de la base de datos y la ruta de CardDAV: se perdían en
+// recargas o cambios de rol (en el relevo del 2026-10-03 faltaban en Filemon).
+if (time() - (int)Settings::get('route_guard_run_at', '0') >= 300) {
+    Settings::set('route_guard_run_at', (string)time());
+    try {
+        $made = \MuseDockPanel\Services\DomainAliasService::ensureStandaloneRedirectRoutes();
+        if ($made) {
+            logMsg('Redirecciones restauradas en Caddy: ' . implode(', ', $made));
+        }
+        if (\MuseDockPanel\Services\CardDavService::isInstalled()) {
+            $davHost = \MuseDockPanel\Services\CardDavService::host();
+            $ch = curl_init('http://localhost:2019/id/' . \MuseDockPanel\Services\CardDavService::routeIdForHost($davHost));
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
+            curl_exec($ch);
+            $davCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            if ($davCode === 404) {
+                $dr = \MuseDockPanel\Services\CardDavService::ensureCaddyRoute($davHost, (string)Settings::get('carddav_php_version', '8.3') ?: '8.3');
+                logMsg('Ruta CardDAV restaurada: ' . (!empty($dr['ok']) ? 'OK' : ($dr['error'] ?? '?')));
+            }
+        }
+    } catch (\Throwable $e) {
+        logMsg('Route guard error: ' . $e->getMessage());
+    }
+}
+
 // ─── Step 0g: Entrada alternativa por proxy (8443 + PROXY protocol) ─────
 // Una recarga de Caddy desde el Caddyfile la quita: se vuelve a poner.
 try {

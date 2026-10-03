@@ -46,7 +46,7 @@ class CardDavService
         ];
     }
 
-    private static function routeIdForHost(string $host): string
+    public static function routeIdForHost(string $host): string
     {
         return 'carddav-' . preg_replace('/[^a-z0-9]/', '', strtolower($host));
     }

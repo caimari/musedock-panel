@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.291] — 2026-10-04 — Rutas que faltaban tras un cambio de rol
+
+### Arreglado
+- **Rutas que faltaban en Caddy tras un cambio de rol**: redirecciones sueltas que estaban en la base de datos pero no en Caddy (en Filemon faltaban `orientalartsresearchcenter.com` y `webmail.picalias.com`), y la ruta de CardDAV (`dav.musedock.com`). Ahora el cluster-worker las repone cada 5 minutos en cualquier nodo. Solo crea lo que falta, nunca borra.
+- **Entrada alternativa: el mapa de dominios daba 403 "IP no permitida"** si el proxy no estaba en `ALLOWED_IPS`. Ahora `/api/ingress/domains` no pasa por esa lista, porque ya tiene su propia clave. El resto del panel sigue igual de protegido.
+- **Entrada alternativa: el certificado del nombre de comprobación iba por HTTP/TLS-ALPN**, y solo sale si el proxy ya está abierto. En obelix falló 5 veces y Let's Encrypt bloqueó el nombre una hora. Ahora tiene su propia política con reto **DNS** (Cloudflare, el token del entorno de Caddy). Si a ese Caddy le falta el módulo o el token, `ingress.php status` lo dice.
+- **Entrada alternativa:** la comprobación responde `ok-<nombre>` sacado del nombre de comprobación (`health-obelix…` → `ok-obelix`), no del hostname del sistema (en obelix es "155"). Se actualiza sola en el siguiente minuto.
+
 ## [1.0.290] — 2026-10-03 — Entrada alternativa por un proxy de SNI (segunda línea)
 
 ### Añadido

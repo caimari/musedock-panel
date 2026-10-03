@@ -38,7 +38,7 @@ switch ($argv[1] ?? '') {
         }
         $c = IngressService::config();
         echo "\nURL del mapa (por la VPN): https://<IP-VPN-de-este-servidor>:" . (\MuseDockPanel\Settings::get('panel_port', '8444') ?: 8444) . "/api/ingress/domains\n";
-        echo "Comprobación: https://{$c['health_name']} (por el proxy) debe responder ok-" . strtolower(explode('.', (string)gethostname())[0]) . "\n";
+        echo "Comprobación: https://{$c['health_name']} (por el proxy) debe responder ok-" . IngressService::healthLabel($c['health_name']) . "\n";
         exit(empty($r['ok']) ? 1 : 0);
     case 'status':
         $c = IngressService::config();

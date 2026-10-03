@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.291',
+                'date' => '2026-10-04',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['El cluster-worker repone cada 5 min las rutas de redirecciones sueltas y de CardDAV que falten en Caddy (se perdian en cambios de rol)', 'Entrada alternativa: la comprobacion responde ok-<nombre> del nombre de comprobacion, no del hostname', 'Entrada alternativa: /api/ingress/domains no pasa por ALLOWED_IPS (tiene clave propia); certificado del nombre de comprobacion por reto DNS'],
+                        'en' => ['The cluster-worker restores missing standalone-redirect and CardDAV routes every 5 min', 'Alternate ingress: health check answers ok-<name> from the health name'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.290',
                 'date' => '2026-10-03',
                 'badge' => 'info',

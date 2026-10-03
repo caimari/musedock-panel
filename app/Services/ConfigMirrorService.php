@@ -606,8 +606,31 @@ final class ConfigMirrorService
                 }
             }
         }
+        // runuser borra el entorno al cambiar de usuario: las variables pasadas al proceso
+        // no llegaban a caddy validate, que fallaba siempre con {env.CLOUDFLARE_API_TOKEN}
+        // vacío ("loading TLS automation management module"), y al promover el Caddyfile
+        // del master no se aplicaba nunca (Filemon, 2026-10-03). Ahora el entorno se carga
+        // DENTRO de la orden, desde un fichero temporal que solo puede leer caddy (el token
+        // tampoco sale en `ps`).
+        $envFile = '';
+        if (str_starts_with($validate, 'runuser') && $env) {
+            $envFile = tempnam('/run', 'mdcaddyenv') ?: tempnam(sys_get_temp_dir(), 'mdcaddyenv');
+            $lines = '';
+            foreach ($env as $k => $v) {
+                if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', (string)$k)) {
+                    $lines .= 'export ' . $k . '=' . escapeshellarg((string)$v) . "\n";
+                }
+            }
+            file_put_contents($envFile, $lines);
+            @chmod($envFile, 0600);
+            @chown($envFile, 'caddy');
+            $validate = 'runuser -u caddy -- sh -c ' . escapeshellarg('. ' . escapeshellarg($envFile) . ' && HOME=/var/lib/caddy exec caddy validate --adapter caddyfile --config ' . escapeshellarg($tmp)) . ' 2>&1';
+        }
         [$out, $rc] = self::runWithEnv($validate, $env);
         @unlink($tmp);
+        if ($envFile !== '') {
+            @unlink($envFile);
+        }
         return [$rc === 0, $out, $missingEnv];
     }
 
