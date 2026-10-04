@@ -37,6 +37,7 @@ servicio). Ejemplo:
 Solo biblioteca estándar de Python 3.
 """
 import hmac
+import ipaddress
 import json
 import os
 import socket
@@ -49,7 +50,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 CONFIG = os.environ.get("MUSEDOCK_WITNESS_CONFIG", "/etc/musedock-witness/config.json")
-VERSION = "1"
+VERSION = "2"
 
 with open(CONFIG, "r", encoding="utf-8") as f:
     cfg = json.load(f)
@@ -120,6 +121,11 @@ def loop():
                 fails = sum(1 for o, _ in st["hist"] if not o)
                 lat = [m for o, m in st["hist"] if o and m is not None]
                 st["last"] = {
+                    "type": t.get("type", "tcp"),
+                    # Qué dirección mira (no es secreto): el panel lo usa para saber qué
+                    # comprobación corresponde a qué servidor.
+                    "addr": t.get("resolve") or t.get("host") or (urlparse(t.get("url", "")).hostname or ""),
+                    "name": urlparse(t.get("url", "")).hostname or t.get("host", ""),
                     "ok": ok,
                     "latency_ms": ms,
                     "latency_avg_ms": int(sum(lat) / len(lat)) if lat else None,
@@ -160,14 +166,47 @@ class Handler(BaseHTTPRequestHandler):
                          "interval": INTERVAL, "targets": targets})
 
 
+class TLSServer(ThreadingHTTPServer):
+    """El saludo TLS se hace en el hilo de cada conexión y con tiempo límite: hecho al
+    aceptar (en el hilo principal), un cliente que abriera la conexión sin enviar nada
+    dejaba el agente sin responder a nadie más."""
+    sctx = None
+
+    def finish_request(self, request, client_address):
+        request.settimeout(10)
+        try:
+            tls = self.sctx.wrap_socket(request, server_side=True, do_handshake_on_connect=False)
+            tls.do_handshake()
+        except (ssl.SSLError, OSError):
+            return
+        try:
+            self.RequestHandlerClass(tls, client_address, self)
+        finally:
+            try:
+                tls.close()
+            except OSError:
+                pass
+
+
+def is_private(addr):
+    try:
+        return ipaddress.ip_address(addr).is_private
+    except ValueError:
+        return False
+
+
 if __name__ == "__main__":
     threading.Thread(target=loop, daemon=True).start()
-    httpd = ThreadingHTTPServer((cfg.get("listen", "127.0.0.1"), int(cfg.get("port", 8447))), Handler)
+    listen = str(cfg.get("listen", "127.0.0.1"))
+    port = int(cfg.get("port", 8447))
     if cfg.get("tls_cert") and cfg.get("tls_key"):
         sctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         sctx.minimum_version = ssl.TLSVersion.TLSv1_2
         sctx.load_cert_chain(cfg["tls_cert"], cfg["tls_key"])
-        httpd.socket = sctx.wrap_socket(httpd.socket, server_side=True)
-    elif not str(cfg.get("listen", "127.0.0.1")).startswith(("127.", "10.", "192.168.", "172.")):
+        TLSServer.sctx = sctx
+        httpd = TLSServer((listen, port), Handler)
+    elif not is_private(listen):
         sys.exit("config: para escuchar en una IP pública hacen falta tls_cert y tls_key (la clave no debe ir en claro)")
+    else:
+        httpd = ThreadingHTTPServer((listen, port), Handler)
     httpd.serve_forever()

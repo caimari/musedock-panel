@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.294',
+                'date' => '2026-10-04',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Testigos externos en el panel (bin/witness.php) con huella del certificado fijada y clave sin pasar por argumentos', 'El relevo automatico pregunta a los testigos y no toma el mando si el principal responde por su entrada alternativa', 'Vigilante de entrada (bin/ingress-watch.php): ONO caida o muy lenta y Orange bien → mueve el DNS a Orange y lo devuelve al estabilizarse'],
+                        'en' => ['External witnesses in the panel (bin/witness.php) with pinned certificate fingerprint', 'Automatic failover asks witnesses and does not take over if the primary answers via its alternate ingress', 'Ingress watcher (bin/ingress-watch.php): primary line down or very slow and alternate ok → DNS moved to alternate and back when stable'],
+                    ],
+                    'changed' => [
+                        'es' => ['Agente testigo v2: saludo TLS por conexion con tiempo limite, IP privada exacta, addr/name en el estado'],
+                        'en' => ['Witness agent v2: per-connection TLS handshake with timeout, exact private IP check, addr/name in status'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.293',
                 'date' => '2026-10-04',
                 'badge' => 'info',

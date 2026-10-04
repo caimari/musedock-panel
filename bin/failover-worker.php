@@ -440,6 +440,25 @@ function autoPromoteIfNeeded(array $checks, array $foConfig): bool
         );
         return false;
     }
+    // ── Testigos externos ("solo ojos", WitnessService): miran desde fuera ──
+    $answers = \MuseDockPanel\Services\WitnessService::queryAll();
+    $ext = \MuseDockPanel\Services\WitnessService::verdicts((string)$downPrimary['ip'], null, 0, 0, $answers);
+    if ($ext) {
+        logMsg('Auto-promote: testigos externos ven el principal: ' . json_encode($ext));
+        $answered += count($ext);
+    }
+    if (in_array('up', $ext, true)) {
+        logMsg('Auto-promote: ABORTADO — un testigo externo llega al principal: no está caído');
+        NotificationService::send('Failover: relevo automático ABORTADO (un testigo ve el principal vivo)',
+            "Este nodo ve caído el principal ({$downPrimary['name']}), pero un testigo externo SÍ llega: " . json_encode($ext) . ".\nNo se toma el mando.");
+        return false;
+    }
+    // Si se llega por su entrada alternativa (otra línea), el servidor está vivo: lo que
+    // toca es cambiar la ENTRADA (IngressWatchService), no el mando.
+    if (\MuseDockPanel\Services\IngressWatchService::reachableViaAlternate((string)$downPrimary['ip'], $answers)) {
+        logMsg('Auto-promote: NO — el principal responde por su entrada alternativa; se cambia la entrada, no el mando');
+        return false;
+    }
     if ($answered === 0) {
         logMsg('Auto-promote: sin testigo que responda — se decide con la vista de este nodo (configura un testigo en otro proveedor)');
     }

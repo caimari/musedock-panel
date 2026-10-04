@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.294] — 2026-10-04 — Testigos en el panel y vigilante de entrada (ONO ↔ Orange)
+
+### Añadido
+- **Testigos externos en el panel** (`bin/witness.php add|list|test|remove`). Cada panel registra sus testigos con URL, **huella SHA-256 del certificado** (se fija: sin ella no conecta) y clave. La clave se escribe en la terminal sin verse, o por la entrada estándar; nunca como argumento. Antes de guardar se comprueba que el testigo contesta.
+- **El relevo automático pregunta a los testigos externos** antes de tomar el mando. Si alguno llega al principal, no se promueve. Y si el principal **responde por su entrada alternativa** (otra línea), tampoco: lo que toca es cambiar la entrada, no el servidor.
+- **Vigilante de entrada** (`bin/ingress-watch.php`, en el panel de fuera). Si la entrada normal de un servidor (su IP, p. ej. ONO) falla o va extremadamente lenta (umbrales configurables: 1.500 ms o 30 % de pérdidas por defecto) durante unos minutos, **según él y los testigos**, y la alternativa (p. ej. Orange) responde, mueve en Cloudflare los registros A a la IP alternativa, con diario. Sigue a la IP alternativa si cambia (línea dinámica) y lo devuelve cuando la normal lleva un rato estable. No mueve nombres de máquina ni destinos de MX (el proxy solo lleva 80/443). Si no hay nada que mover (el servidor es copia), no hace nada. Avisa al cambiar y al volver. También: `status`, `check` y `force-primary`.
+
+### Cambiado
+- **Agente testigo v2**: el saludo TLS se hace en el hilo de cada conexión y con tiempo límite (un cliente que abría la conexión sin hablar dejaba el agente sin responder a nadie); "IP privada" se comprueba con `ipaddress` (antes cualquier 172.x contaba como privada); el estado incluye qué dirección mira cada comprobación (`addr`, `name`) para que el panel sepa a qué servidor corresponde.
+
 ## [1.0.293] — 2026-10-04 — Agente testigo por HTTPS
 
 ### Cambiado

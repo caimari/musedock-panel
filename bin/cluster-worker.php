@@ -204,6 +204,20 @@ if (time() - (int)Settings::get('route_guard_run_at', '0') >= 300) {
     }
 }
 
+// ─── Step 0i: Vigilante de entrada (normal ↔ alternativa) de otros servidores ───
+try {
+    if (\MuseDockPanel\Services\IngressWatchService::config()['servers']) {
+        $iw = \MuseDockPanel\Services\IngressWatchService::run();
+        foreach ((array)($iw['log'] ?? []) as $l) {
+            if (str_contains($l, '→') || str_contains($l, 'MAL')) {
+                logMsg('Entrada: ' . $l);
+            }
+        }
+    }
+} catch (\Throwable $e) {
+    logMsg('Ingress watch error: ' . $e->getMessage());
+}
+
 // ─── Step 0g: Entrada alternativa por proxy (8443 + PROXY protocol) ─────
 // Una recarga de Caddy desde el Caddyfile la quita: se vuelve a poner.
 try {

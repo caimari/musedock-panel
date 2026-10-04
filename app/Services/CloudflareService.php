@@ -255,7 +255,7 @@ class CloudflareService
      * que apuntaba a la IP del servidor de relevo, incluidos sus propios
      * registros de siempre (p. ej. filemon.musedock.com) y otros servicios en esa IP.
      */
-    private static function journalAdd(string $journal, string $zoneId, array $record, string $from, string $to): void
+    public static function journalAdd(string $journal, string $zoneId, array $record, string $from, string $to): void
     {
         $list = json_decode(Settings::get($journal, '[]'), true);
         $list = is_array($list) ? $list : [];
