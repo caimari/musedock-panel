@@ -807,7 +807,7 @@ use MuseDockPanel\Services\CloudflareService;
 
         <!-- Blindar WordPress -->
         <?php $wh = $wpInfo['harden'] ?? ['level' => 'standard', 'allow_xmlrpc' => null, 'unlock_until' => 0]; $wq = $wpInfo['quick'] ?? null;
-              $wBad = $wq ? count($wq['php_in_uploads']) + count($wq['odd_in_wp_content']) + count($wq['known_bad_plugins']) : 0; ?>
+              $wBad = $wq ? count($wq['php_in_uploads']) + count($wq['odd_in_wp_content']) + count($wq['known_bad_plugins']) + count($wq['odd_dropins'] ?? []) + count($wq['sc_markers'] ?? []) : 0; ?>
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-shield-lock me-2"></i>Blindar WordPress</span>
@@ -834,6 +834,8 @@ use MuseDockPanel\Services\CloudflareService;
                     <?php if ($wq['known_bad_plugins']): ?> plugins de malware conocido: <code><?= View::e(implode(', ', $wq['known_bad_plugins'])) ?></code>.<?php endif; ?>
                     <?php if ($wq['php_in_uploads']): ?> PHP en uploads: <?= count($wq['php_in_uploads']) ?>.<?php endif; ?>
                     <?php if ($wq['odd_in_wp_content']): ?> carpetas raras: <code><?= View::e(implode(', ', $wq['odd_in_wp_content'])) ?></code>.<?php endif; ?>
+                    <?php if (!empty($wq['odd_dropins'])): ?> PHP suelto en wp-content: <code><?= View::e(implode(', ', $wq['odd_dropins'])) ?></code>.<?php endif; ?>
+                    <?php if (!empty($wq['sc_markers'])): ?> código ofuscado (SC_*_BEGIN): <code><?= View::e(implode(', ', array_slice($wq['sc_markers'], 0, 5))) ?></code>.<?php endif; ?>
                     Análisis completo y limpieza: <code>php bin/wp-harden.php scan <?= View::e($account['domain']) ?></code> o MCP <code>wordpress_scan</code>.
                 </div>
                 <?php endif; ?>

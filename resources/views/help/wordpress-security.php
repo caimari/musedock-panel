@@ -53,7 +53,9 @@
         <p class="text-muted"><strong>Análisis</strong> (<code>php bin/wp-harden.php scan &lt;dominio&gt;</code> o MCP <code>wordpress_scan</code>). Solo lee y <strong>no ejecuta el PHP del sitio</strong>:</p>
         <ul>
             <li>núcleo contra las sumas oficiales de wordpress.org: ficheros cambiados y <strong>ficheros de más</strong> en <code>wp-admin</code>/<code>wp-includes</code> (un sitio típico de puertas traseras);</li>
-            <li>cada plugin contra wordpress.org: igual, modificado, inexistente allí o malware conocido;</li>
+            <li>cada plugin y cada tema contra wordpress.org (el tema activo, marcado): igual, modificado, inexistente allí (comercial: revisar a mano) o malware conocido;</li>
+            <li>drop-ins y PHP sueltos en <code>wp-content</code> (<code>db.php</code>, <code>advanced-cache.php</code>, <code>object-cache.php</code>… son un escondite habitual);</li>
+            <li>código ofuscado: marcas <code>SC_*_BEGIN</code> y líneas de más de 3000 caracteres (sin contar los ficheros idénticos al original);</li>
             <li>trozos típicos de puertas traseras en <code>wp-content</code> (algunos temas comerciales dan falsos positivos: revisar), PHP en uploads, zips subidos, mu-plugins, carpetas raras;</li>
             <li>base de datos: administradores (para ver si hay alguno que no conoces), opciones con scripts inyectados, entradas recientes.</li>
         </ul>

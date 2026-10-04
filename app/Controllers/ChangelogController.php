@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.302',
+                'date' => '2026-10-04',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Mail Node Degraded: solo el master, reintento, aviso si dura 5 min seguidos y aviso de recuperacion (antes un correo por cada corte de 1 min)', 'Ya no culpa a PostgreSQL cuando lo que no respondio fue la API del nodo', 'Las actualizaciones ya no repiten avisos: el estado de las vigilancias pasa de storage/cache a storage/state', 'Hardening: solo avisa si falla un control nuevo', 'Analisis de WordPress: temas contra wordpress.org (y el activo), drop-ins y PHP sueltos de wp-content, ofuscacion SC_*_BEGIN y lineas de mas de 3000 caracteres fuera de ficheros originales'],
+                        'en' => ['Mail node alert: master only, retry, 5-minute sustain, recovery notice', 'No longer blames PostgreSQL when the node API did not answer', 'Updates no longer repeat alerts (watch state moved to storage/state)', 'Hardening alerts only on newly failing controls'],
+                    ],
+                    'added' => [
+                        'es' => ['Ajustes > Avisos: silenciar tipos, aceptar controles de hardening, umbral o silencio por disco y servidor, minutos del aviso de correo; se copia a los nodos', 'MCP alerts_status y alerts_configure', 'Docs: Avisos'],
+                        'en' => ['Settings > Alerts: mute types, accept hardening controls, per-disk thresholds, mail alert delay; pushed to nodes', 'MCP alerts_status and alerts_configure', 'Docs: Alerts'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.301',
                 'date' => '2026-10-04',
                 'badge' => 'warning',

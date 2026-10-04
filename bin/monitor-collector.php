@@ -719,7 +719,11 @@ function checkAlert(string $host, string $type, string $message, float $value): 
         'details' => !empty($details) ? $details : null,
     ]);
 
-    // Send notification with process + disk details
+    // Send notification with process + disk details (salvo tipo silenciado en Ajustes → Avisos)
+    if (\MuseDockPanel\Services\AlertPolicyService::muted($type)) {
+        logMsg("ALERT (silenciado, sin correo): {$type} - {$message}");
+        return;
+    }
     try {
         $body = "{$message}\nHost: {$host}\nValue: {$value}\nTime: " . date('Y-m-d H:i:s');
         if (!empty($details)) {
@@ -933,7 +937,7 @@ function checkFirewallIntegrityWatch(string $host): void
     $interval = (int)Settings::get('firewall_change_watch_interval_seconds', '60');
     $interval = max(30, min(3600, $interval));
 
-    $cacheDir = PANEL_ROOT . '/storage/cache';
+    $cacheDir = watchStateDir();
     if (!is_dir($cacheDir)) {
         @mkdir($cacheDir, 0755, true);
     }
@@ -1058,7 +1062,7 @@ function checkServerRebootWatch(string $host): void
         return;
     }
 
-    $cacheDir = PANEL_ROOT . '/storage/cache';
+    $cacheDir = watchStateDir();
     if (!is_dir($cacheDir)) {
         @mkdir($cacheDir, 0755, true);
     }
@@ -1133,7 +1137,7 @@ function checkCollectorGapWatch(string $host): void
     $threshold = (int)Settings::get('notify_event_collector_gap_seconds', '300');
     $threshold = max(120, min(86400, $threshold));
 
-    $cacheDir = PANEL_ROOT . '/storage/cache';
+    $cacheDir = watchStateDir();
     if (!is_dir($cacheDir)) {
         @mkdir($cacheDir, 0755, true);
     }
@@ -1183,6 +1187,30 @@ function checkCollectorGapWatch(string $host): void
 
     $state['last_run_ts'] = $now;
     @file_put_contents($stateFile, json_encode($state, JSON_UNESCAPED_SLASHES), LOCK_EX);
+}
+
+/**
+ * Carpeta del estado de las vigilancias (firewall, hardening, drift, reinicios…). Antes
+ * era storage/cache, que update.sh vacía: tras cada actualización se perdía el estado y
+ * se repetían avisos ya dados (hardening de Filemon y asterisk, 2026-10-04). La primera
+ * vez se traen los ficheros que hubiera en storage/cache.
+ */
+function watchStateDir(): string
+{
+    static $dir = null;
+    if ($dir !== null) {
+        return $dir;
+    }
+    $dir = PANEL_ROOT . '/storage/state';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0700, true);
+    }
+    foreach (glob(PANEL_ROOT . '/storage/cache/*-watch-state.json') ?: [] as $old) {
+        if (!is_file($dir . '/' . basename($old))) {
+            @rename($old, $dir . '/' . basename($old));
+        }
+    }
+    return $dir;
 }
 
 function readWatchState(string $stateFile): array
@@ -1330,7 +1358,7 @@ function checkConfigDriftWatch(string $host): void
     $interval = (int)Settings::get('notify_event_config_drift_interval_seconds', '120');
     $interval = max(60, min(3600, $interval));
     $now = time();
-    $stateFile = PANEL_ROOT . '/storage/cache/config-drift-watch-state.json';
+    $stateFile = watchStateDir() . '/config-drift-watch-state.json';
     $state = readWatchState($stateFile);
     $lastChecked = (int)($state['last_checked_at'] ?? 0);
     if ($lastChecked > 0 && ($now - $lastChecked) < $interval) {
@@ -1409,7 +1437,7 @@ function checkHardeningWatch(string $host): void
     $interval = (int)Settings::get('notify_event_hardening_interval_seconds', '180');
     $interval = max(60, min(3600, $interval));
     $now = time();
-    $stateFile = PANEL_ROOT . '/storage/cache/security-hardening-watch-state.json';
+    $stateFile = watchStateDir() . '/security-hardening-watch-state.json';
     $state = readWatchState($stateFile);
     $lastChecked = (int)($state['last_checked_at'] ?? 0);
     if ($lastChecked > 0 && ($now - $lastChecked) < $interval) {
@@ -1418,9 +1446,11 @@ function checkHardeningWatch(string $host): void
 
     $audit = \MuseDockPanel\Services\SecurityService::getHardeningAudit();
     $checks = is_array($audit['checks'] ?? null) ? $audit['checks'] : [];
+    // Controles que el administrador ha dado por buenos (Ajustes → Avisos): no se avisa de ellos.
+    $accepted = \MuseDockPanel\Services\AlertPolicyService::hardeningAccepted();
     $failed = [];
     foreach ($checks as $check) {
-        if (!empty($check['ok'])) {
+        if (!empty($check['ok']) || in_array((string)($check['title'] ?? ''), $accepted, true)) {
             continue;
         }
         $failed[] = [
@@ -1436,7 +1466,23 @@ function checkHardeningWatch(string $host): void
     $failedCount = count($failed);
     $score = (int)($audit['score'] ?? 0);
 
-    if ($failedCount > 0 && $failedHash !== $prevFailedHash) {
+    // Sin estado (primera vez o se perdió): si ya se avisó de esto hace poco, solo se
+    // toma nota; no se repite el correo.
+    $quietBaseline = false;
+    if (!array_key_exists('failed_hash', $state) && $failedCount > 0) {
+        try {
+            $quietBaseline = (bool)Database::fetchOne("SELECT id FROM monitor_alerts WHERE host = :h AND type = 'SECURITY_HARDENING'
+                AND ts > NOW() - INTERVAL '7 days' AND message = :m LIMIT 1",
+                ['h' => $host, 'm' => "Hardening degradado: {$failedCount} controles fuera de baseline"]);
+        } catch (\Throwable) {
+        }
+    }
+
+    if ($quietBaseline) {
+        logMsg('Hardening watch: sin estado previo y ya avisado en los últimos 7 días; solo se toma nota.');
+    } elseif ($failedCount > 0 && $failedHash !== $prevFailedHash
+        && array_diff(array_column($failed, 'title'), (array)($state['failed_titles'] ?? [])) ) {
+        // Solo si falla algo NUEVO: arreglar o aceptar un control no manda otro correo.
         $lines = [];
         foreach ($failed as $f) {
             $lines[] = '- ' . $f['title'] . ': actual=' . ($f['current'] !== '' ? $f['current'] : 'n/a') . ', recomendado=' . $f['recommended'];
@@ -1473,6 +1519,7 @@ function checkHardeningWatch(string $host): void
     }
 
     $state['failed_hash'] = $failedHash;
+    $state['failed_titles'] = array_column($failed, 'title');
     $state['failed_count'] = $failedCount;
     $state['score'] = $score;
     $state['last_checked_at'] = $now;
@@ -1562,7 +1609,7 @@ function checkPublicExposureWatch(string $host): void
     $interval = (int)Settings::get('notify_event_public_exposure_interval_seconds', '120');
     $interval = max(60, min(3600, $interval));
     $now = time();
-    $stateFile = PANEL_ROOT . '/storage/cache/public-exposure-watch-state.json';
+    $stateFile = watchStateDir() . '/public-exposure-watch-state.json';
     $state = readWatchState($stateFile);
     $lastChecked = (int)($state['last_checked_at'] ?? 0);
     if ($lastChecked > 0 && ($now - $lastChecked) < $interval) {
@@ -1726,10 +1773,12 @@ foreach ($inserts as $row) {
 }
 
 // Check disk alerts (0 = disabled)
-if ($alertDiskThreshold > 0 && !empty($diskData)) {
+// Umbral propio por disco de este servidor, o silenciado (Ajustes → Avisos).
+if (!empty($diskData)) {
     foreach ($diskData as $d) {
-        if ($d['percent'] > $alertDiskThreshold) {
-            checkAlert($hostname, 'DISK_HIGH', "Disk {$d['device']} ({$d['mount']}) at {$d['percent']}% (threshold: {$alertDiskThreshold}%)", $d['percent']);
+        $thr = \MuseDockPanel\Services\AlertPolicyService::diskThreshold((string)$d['mount'], $alertDiskThreshold);
+        if ($thr > 0 && $d['percent'] > $thr) {
+            checkAlert($hostname, 'DISK_HIGH', "Disk {$d['device']} ({$d['mount']}) at {$d['percent']}% (threshold: {$thr}%)", $d['percent']);
         }
     }
 }

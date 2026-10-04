@@ -413,6 +413,14 @@ class DocsController
                 'keywords' => 'failover manual semiauto auto modo prioridad priority id nodo completo web mail cloudflare dns registro a ttl promocion promote revertir failback caddy-l4 eleccion split-brain quorum master caido nodo caido interruptor dos momentos',
             ],
             [
+                'title' => 'Avisos: qué llega y cómo silenciarlo',
+                'description' => 'Quién envía cada correo de aviso, por qué, y cómo silenciar tipos, aceptar controles de hardening y ajustar discos por servidor.',
+                'url' => '/docs/alerts',
+                'category' => 'Guia especial',
+                'icon' => 'bi-bell-slash',
+                'keywords' => 'avisos alertas correo email silenciar mute hardening disco disk_high nodo de correo mail node degraded cpu ram firewall telegram tope diario sweego',
+            ],
+            [
                 'title' => 'Blindar WordPress',
                 'description' => 'Niveles standard y strict por hosting, baneos detrás de Cloudflare, cómo detectar una infección y limpiarla sin borrar nada (cuarentena, reinstalar desde wordpress.org).',
                 'url' => '/docs/wordpress-security',
@@ -521,6 +529,10 @@ class DocsController
 
         if ($url === '/docs/mail-modes') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'mail-modes.php');
+        }
+
+        if ($url === '/docs/alerts') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'alerts.php');
         }
 
         if ($url === '/docs/wordpress-security') {
@@ -1442,6 +1454,14 @@ class DocsController
         View::render('help/failover-modes', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Failover: modos y prioridades',
+        ]);
+    }
+
+    public function alerts(): void
+    {
+        View::render('help/alerts', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Avisos',
         ]);
     }
 

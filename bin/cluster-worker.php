@@ -217,7 +217,7 @@ if (\MuseDockPanel\Services\WitnessService::all() && time() - (int)Settings::get
             $s = $wState[$n] ?? ['down_since' => 0, 'alerted' => false];
             if (!empty($a['ok'])) {
                 if (!empty($s['alerted'])) {
-                    \MuseDockPanel\Services\NotificationService::send("Testigo {$n}: responde de nuevo", "El testigo {$n} ({$w['url']}) vuelve a responder.");
+                    \MuseDockPanel\Services\NotificationService::send("Testigo {$n}: responde de nuevo", "El testigo {$n} ({$w['url']}) vuelve a responder.", 'witness');
                 }
                 $s = ['down_since' => 0, 'alerted' => false];
             } else {
@@ -226,7 +226,7 @@ if (\MuseDockPanel\Services\WitnessService::all() && time() - (int)Settings::get
                     $others = count(\MuseDockPanel\Services\WitnessService::all()) - 1;
                     \MuseDockPanel\Services\NotificationService::send("Testigo {$n}: no responde",
                         "El testigo {$n} ({$w['url']}) no responde desde hace 10 min: " . ($a['error'] ?? '?') . ".\n"
-                        . ($others > 0 ? 'Los relevos siguen protegidos por el otro testigo.' : 'Sin testigos, los relevos se deciden solo con la vista de este nodo.'));
+                        . ($others > 0 ? 'Los relevos siguen protegidos por el otro testigo.' : 'Sin testigos, los relevos se deciden solo con la vista de este nodo.'), 'witness');
                     $s['alerted'] = true;
                     logMsg("Testigo {$n} no responde desde hace 10 min");
                 }
@@ -429,46 +429,76 @@ if ($myClusterRole === 'master') {
 }
 
 // ─── Step 2b: Mail node health check ────────────────────────────
-if (Settings::get('mail_enabled', '0') === '1') {
+// Solo el master (o un panel solo): una copia no vigila el correo del master. Antes avisaba
+// a la primera lectura fallida y mortadelo, ya copia, mandó 12 correos en un día por
+// cortes de un minuto (2026-10-04). Ahora: aviso si el fallo dura N minutos seguidos
+// (Ajustes → Avisos, 5 por defecto), recordatorio cada monitor_alert_repeat_hours y
+// aviso de recuperación.
+if (Settings::get('mail_enabled', '0') === '1' && Settings::get('cluster_role', 'standalone') !== 'slave') {
     logMsg("Checking mail nodes...");
     try {
         $mailNodes = \MuseDockPanel\Services\MailService::getMailNodes();
+        $afterSec = 60 * \MuseDockPanel\Services\AlertPolicyService::mailNodeAfterMinutes();
+        $repeatSec = 3600 * max(1, (int)Settings::get('monitor_alert_repeat_hours', '12'));
         foreach ($mailNodes as $mn) {
             if ($mn['standby'] ?? false) continue; // skip standby nodes
 
+            $stKey = 'mail_node_health_' . (int)$mn['id'];
+            $st = json_decode((string)Settings::get($stKey, ''), true) ?: ['fail_since' => 0, 'alerted_at' => 0];
             $health = \MuseDockPanel\Services\MailService::checkMailNodeHealth((int)$mn['id']);
+            if (!$health['ok']) {
+                // Un reintento: por la VPN se pierde a ratos una conexión suelta (~3 %).
+                sleep(3);
+                $health = \MuseDockPanel\Services\MailService::checkMailNodeHealth((int)$mn['id']);
+            }
             if ($health['ok']) {
                 logMsg("  Mail node #{$mn['id']} ({$mn['name']}): ALL OK");
-            } else {
-                $failedSvcs = [];
-                foreach ($health['services'] ?? [] as $svc => $info) {
-                    if (!$info['ok']) {
-                        $portLabel = isset($info['port']) ? " (port {$info['port']})" : '';
-                        $failedSvcs[] = "{$svc}{$portLabel}: " . ($info['error'] ?? '');
-                    }
+                if (!empty($st['alerted_at'])) {
+                    $mins = (int)round((time() - (int)$st['fail_since']) / 60);
+                    \MuseDockPanel\Services\NotificationService::send("Nodo de correo recuperado: {$mn['name']}",
+                        "El correo de {$mn['name']} vuelve a responder bien (problema de unos {$mins} min).", 'mail_node');
                 }
-                $dbHealth = $health['db_health'] ?? [];
-                if (!empty($dbHealth['message'])) {
-                    $failedSvcs[] = 'db: ' . $dbHealth['message'];
+                if (!empty($st['fail_since'])) {
+                    Settings::set($stKey, json_encode(['fail_since' => 0, 'alerted_at' => 0]));
                 }
-                $failMsg = implode(', ', $failedSvcs) ?: 'unknown mail health failure';
-                logMsg("  Mail node #{$mn['id']} ({$mn['name']}): DEGRADED - {$failMsg}");
+                continue;
+            }
 
-                $alertKey = 'mail_node_degraded_alert_' . (int)$mn['id'];
-                $lastAlert = (int)Settings::get($alertKey, '0');
-                if ($lastAlert < time() - 3600) {
-                    try {
-                        \MuseDockPanel\Services\NotificationService::send(
-                            "Mail Node Degraded: {$mn['name']}",
-                            "Mail node {$mn['name']} has degraded services:\n{$failMsg}\n\nCheck mail services and local PostgreSQL replica on this node.",
-                            'warning'
-                        );
-                        Settings::set($alertKey, (string)time());
-                    } catch (\Throwable $ne) {
-                        logMsg("  Failed to send mail node alert: " . $ne->getMessage());
-                    }
+            $apiDown = isset($health['services']['panel_api']) && empty($health['services']['panel_api']['ok']);
+            $failedSvcs = [];
+            foreach ($health['services'] ?? [] as $svc => $info) {
+                if (!$info['ok']) {
+                    $portLabel = isset($info['port']) ? " (port {$info['port']})" : '';
+                    $failedSvcs[] = "{$svc}{$portLabel}: " . ($info['error'] ?? '');
                 }
             }
+            $dbHealth = $health['db_health'] ?? [];
+            if ($apiDown) {
+                // Sin API no se pudo preguntar por la base de datos: no culpar a PostgreSQL.
+                $failedSvcs[] = 'db: no se pudo consultar (la API del panel del nodo no respondió)';
+            } elseif (!empty($dbHealth['message'])) {
+                $failedSvcs[] = 'db: ' . $dbHealth['message'];
+            }
+            $failMsg = implode(', ', $failedSvcs) ?: 'unknown mail health failure';
+            logMsg("  Mail node #{$mn['id']} ({$mn['name']}): DEGRADED - {$failMsg}");
+
+            $st['fail_since'] = $st['fail_since'] ?: time();
+            $lasting = time() - (int)$st['fail_since'];
+            if ($lasting >= $afterSec && (empty($st['alerted_at']) || time() - (int)$st['alerted_at'] >= $repeatSec)) {
+                try {
+                    \MuseDockPanel\Services\NotificationService::send(
+                        "Nodo de correo con problemas: {$mn['name']}",
+                        "El correo de {$mn['name']} falla desde hace " . (int)round($lasting / 60) . " min:\n{$failMsg}\n\n"
+                        . ($apiDown ? "La API del panel de ese nodo no responde: puede ser la red/VPN entre nodos o el panel de ese nodo, no necesariamente el correo.\n" : '')
+                        . "Revisa los servicios de correo y la réplica de PostgreSQL de ese nodo.",
+                        'mail_node'
+                    );
+                    $st['alerted_at'] = time();
+                } catch (\Throwable $ne) {
+                    logMsg("  Failed to send mail node alert: " . $ne->getMessage());
+                }
+            }
+            Settings::set($stKey, json_encode($st));
         }
         if (empty($mailNodes)) {
             logMsg("  No mail nodes configured.");
@@ -650,7 +680,7 @@ try {
                     . "Acción recomendada: Cluster > Archivos > botón 'Autocorregir (contener)'.\n"
                     . "Fecha: " . date('Y-m-d H:i:s');
 
-                \MuseDockPanel\Services\NotificationService::send($subject, $body);
+                \MuseDockPanel\Services\NotificationService::send($subject, $body, 'lsyncd');
                 LogService::log('cluster.lsyncd', 'alert', "lsyncd issue: rss={$rssMb}MB queue={$activeEvents} bad_nodes={$badNodesTxt}");
                 logMsg("  lsyncd alert sent ({$severity}): rss={$rssMb}MB, queue={$activeEvents}, bad_nodes={$badNodesTxt}");
                 pushMonitorAlert(
@@ -714,7 +744,8 @@ try {
                     logMsg("  lsyncd auto-heal executed: " . ($actions !== '' ? $actions : 'ok'));
                     \MuseDockPanel\Services\NotificationService::send(
                         '[MuseDock Cluster] lsyncd auto-heal ejecutado',
-                        "Se ejecutó auto-heal en lsyncd.\nAcciones: " . ($actions !== '' ? $actions : 'N/A') . "\nFecha: " . date('Y-m-d H:i:s')
+                        "Se ejecutó auto-heal en lsyncd.\nAcciones: " . ($actions !== '' ? $actions : 'N/A') . "\nFecha: " . date('Y-m-d H:i:s'),
+                        'lsyncd'
                     );
                 }
             }
@@ -722,7 +753,8 @@ try {
             if (!empty($state['active'])) {
                 \MuseDockPanel\Services\NotificationService::send(
                     '[MuseDock Cluster] lsyncd recuperado',
-                    "El estado de lsyncd volvió a normal.\nFecha: " . date('Y-m-d H:i:s')
+                    "El estado de lsyncd volvió a normal.\nFecha: " . date('Y-m-d H:i:s'),
+                    'lsyncd'
                 );
                 LogService::log('cluster.lsyncd', 'recovered', 'lsyncd back to normal');
                 logMsg("  lsyncd recovered notification sent.");

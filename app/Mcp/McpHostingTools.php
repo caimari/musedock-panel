@@ -5,6 +5,7 @@ use MuseDockPanel\Database;
 use MuseDockPanel\Services\DatabaseService;
 use MuseDockPanel\Services\LogService;
 use MuseDockPanel\Services\WordPressHardenService as WP;
+use MuseDockPanel\Services\AlertPolicyService as AP;
 use MuseDockPanel\Settings;
 
 /**
@@ -72,7 +73,7 @@ class McpHostingTools
             ],
             'wordpress_scan' => [
                 'title' => 'Analizar un WordPress en busca de infección',
-                'description' => 'Solo lectura, no ejecuta el PHP del sitio. Compara el núcleo y cada plugin con wordpress.org (ficheros cambiados o que sobran, plugins que no existen allí o de malware conocido), busca trozos típicos de puertas traseras, PHP en uploads, zips subidos, mu-plugins, carpetas raras, y en la base de datos: administradores, opciones con scripts inyectados y entradas recientes. Devuelve un veredicto. Siguiente paso: wordpress_repair. `domain` puede ser un subdominio con WordPress. Con `node`, en otro nodo.',
+                'description' => 'Solo lectura, no ejecuta el PHP del sitio. Compara el núcleo, cada plugin y cada tema con wordpress.org (ficheros cambiados o que sobran, los que no existen allí o de malware conocido; marca el tema activo), revisa los drop-ins y PHP sueltos de wp-content, busca ofuscación (marcas SC_*_BEGIN y líneas de más de 3000 caracteres fuera de ficheros originales) y trozos típicos de puertas traseras, PHP en uploads, zips subidos, mu-plugins, carpetas raras, y en la base de datos: administradores, opciones con scripts inyectados y entradas recientes. Devuelve un veredicto. Siguiente paso: wordpress_repair. `domain` puede ser un subdominio con WordPress. Con `node`, en otro nodo.',
                 'inputSchema' => $o([
                     'domain' => ['type' => 'string', 'description' => 'Dominio del hosting o subdominio'],
                     'offline' => ['type' => 'boolean', 'description' => 'true = sin comparar con wordpress.org (más rápido)'],
@@ -103,6 +104,29 @@ class McpHostingTools
                     'apply' => $apply,
                 ], ['domain', 'action']),
             ],
+            'alerts_status' => [
+                'title' => 'Reglas de avisos (silenciados, hardening aceptado, discos)',
+                'description' => 'Solo lectura. Qué tipos de aviso están silenciados, qué controles de hardening se dan por buenos, umbrales propios o silencio por disco y servidor, minutos que debe fallar un nodo de correo antes de avisar, y los controles de hardening que fallan ahora en este servidor. Con `node`, en otro nodo.',
+                'inputSchema' => $o([
+                    'node' => ['type' => 'string', 'description' => 'Opcional. Id o nombre de un nodo del cluster para ejecutarlo en él. Omitir = este servidor.'],
+                ], []),
+            ],
+            'alerts_configure' => [
+                'write' => true,
+                'title' => 'Cambiar las reglas de avisos',
+                'description' => 'Silencia o reactiva tipos de aviso (solo quita el correo/Telegram; siguen en el monitor), da por buenos controles de hardening (por su título, ver alerts_status), pone umbral propio o silencia un disco de un servidor (host corto p. ej. "nitro" o "*"; threshold 0 = sin aviso, null = quitar la regla) y fija cuántos minutos debe fallar un nodo de correo antes de avisar. Lo que no se indique se deja igual. Se guarda en este panel (master) y se copia a sus nodos. Primero sin apply. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o([
+                    'mute' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos a silenciar (ver alerts_status → types)'],
+                    'unmute' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos a reactivar'],
+                    'accept_hardening' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Títulos de controles a dar por buenos'],
+                    'unaccept_hardening' => ['type' => 'array', 'items' => ['type' => 'string']],
+                    'disk_rules' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => (object)[
+                        'host' => ['type' => 'string'], 'mount' => ['type' => 'string'], 'threshold' => ['type' => ['number', 'null']]]],
+                        'description' => 'p. ej. [{"host":"nitro","mount":"/workspace","threshold":0}]'],
+                    'mail_node_after_minutes' => ['type' => 'integer'],
+                    'apply' => $apply,
+                ], []),
+            ],
             'password_change_request' => [
                 'write' => true,
                 'title' => 'Pedir el cambio de contraseña de un buzón, usuario de base de datos o acceso SFTP',
@@ -130,6 +154,8 @@ class McpHostingTools
             'domain_redirect_create' => self::redirectCreate($args),
             'password_change_request' => self::passwordRequest($args),
             'mail_quota_request'      => self::quotaRequest($args),
+            'alerts_status'           => self::alertsStatus(),
+            'alerts_configure'        => self::alertsConfigure($args),
             'wordpress_status'        => self::wpStatus($args),
             'wordpress_scan'          => self::wpScan($args),
             'wordpress_harden'        => self::wpHarden($args),
@@ -418,5 +444,64 @@ class McpHostingTools
             'rotate_salts' => WP::rotateSalts($root, $d),
         };
         return ['status' => !empty($r['ok']) ? 'hecho' : 'con errores', 'result' => $r] + $plan;
+    }
+
+    // ───────────────────────── Reglas de avisos ─────────────────────────
+
+    private static function alertsStatus(): array
+    {
+        $failed = [];
+        try {
+            foreach ((array)(\MuseDockPanel\Services\SecurityService::getHardeningAudit()['checks'] ?? []) as $c) {
+                if (empty($c['ok'])) {
+                    $failed[] = (string)($c['title'] ?? '') . ' (ahora: ' . (string)($c['current'] ?? '') . ')';
+                }
+            }
+        } catch (\Throwable) {
+        }
+        return AP::export() + [
+            'this_host' => AP::shortHost(),
+            'hardening_failing_here' => $failed,
+            'types' => array_map(static fn($t) => $t[0], AP::TYPES),
+            'not_mutable' => 'los avisos del relevo (failover, cambio de rol) no se pueden silenciar',
+        ];
+    }
+
+    private static function alertsConfigure(array $args): array
+    {
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            throw new \RuntimeException('Este servidor es copia: las reglas de avisos se cambian en el master y se copian aquí.');
+        }
+        $cur = AP::export();
+        $bad = array_diff(array_merge((array)($args['mute'] ?? []), (array)($args['unmute'] ?? [])), array_keys(AP::TYPES));
+        if ($bad) {
+            throw new \InvalidArgumentException('Tipos desconocidos: ' . implode(', ', $bad) . '. Válidos: ' . implode(', ', array_keys(AP::TYPES)));
+        }
+        $new = $cur;
+        $new['muted'] = array_values(array_diff(array_unique(array_merge($cur['muted'], (array)($args['mute'] ?? []))), (array)($args['unmute'] ?? [])));
+        $new['hardening_accepted'] = array_values(array_diff(array_unique(array_merge($cur['hardening_accepted'], (array)($args['accept_hardening'] ?? []))),
+            (array)($args['unaccept_hardening'] ?? [])));
+        foreach ((array)($args['disk_rules'] ?? []) as $r) {
+            $h = AP::shortHost((string)($r['host'] ?? ''));
+            $m = (string)($r['mount'] ?? '');
+            if ($h === '' || $m === '' || $m[0] !== '/') {
+                throw new \InvalidArgumentException('Cada regla de disco necesita host y mount (empieza por /).');
+            }
+            if (!array_key_exists('threshold', $r) || $r['threshold'] === null) {
+                unset($new['disk_overrides'][$h][$m]);
+            } else {
+                $new['disk_overrides'][$h][$m] = (float)$r['threshold'];
+            }
+        }
+        if (isset($args['mail_node_after_minutes'])) {
+            $new['mail_node_after_minutes'] = (int)$args['mail_node_after_minutes'];
+        }
+        $plan = ['before' => $cur, 'after' => $new, 'nodes' => array_map(static fn($n) => (string)$n['name'], \MuseDockPanel\Services\ClusterService::getNodes())];
+        if (empty($args['apply'])) {
+            return ['status' => 'plan', 'apply' => false] + $plan;
+        }
+        $saved = AP::save($new);
+        LogService::log('alerts.policy', 'mcp', 'Reglas de avisos cambiadas por MCP');
+        return ['status' => 'guardado', 'policy' => $saved, 'copied' => AP::pushToNodes()];
     }
 }

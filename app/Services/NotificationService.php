@@ -31,8 +31,15 @@ class NotificationService
         return "[{$host}] {$subject}";
     }
 
-    public static function send(string $subject, string $message): void
+    /**
+     * $type: tipo del aviso (AlertPolicyService::TYPES) para poder silenciarlo. Sin tipo,
+     * o con 'warning'/'critical'/'info' (llamadas antiguas), no se puede silenciar.
+     */
+    public static function send(string $subject, string $message, string $type = ''): void
     {
+        if (AlertPolicyService::muted($type)) {
+            return;
+        }
         $subject = self::tagSubject($subject);
         if (Settings::get('monitor_notify_email', '0') === '1') {
             self::sendEmail($subject, $message);
@@ -129,8 +136,8 @@ class NotificationService
         }
         $eventKey = preg_replace('/[^a-z0-9_.-]+/', '_', $eventKey) ?: 'generic';
 
-        if (!self::isEmailConfigured()) {
-            return false;
+        if (!self::isEmailConfigured() || AlertPolicyService::muted($eventKey)) {
+            return false; // sin correo configurado, o tipo silenciado en Ajustes → Avisos
         }
 
         $cooldownSeconds = max(60, min(86400, $cooldownSeconds));

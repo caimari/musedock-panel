@@ -2,6 +2,32 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.302] — 2026-10-04 — Avisos: menos ruido y control de lo que llega
+
+### Arreglado
+- **"Mail Node Degraded" mandaba un correo por cada corte de un minuto** (12 en un día desde mortadelo). Ahora:
+  - solo lo vigila el master;
+  - reintenta a los 3 s;
+  - avisa si el fallo dura 5 minutos seguidos (ajustable) y otra vez al recuperarse.
+- **El mismo aviso echaba la culpa a PostgreSQL** ("PostgreSQL local no responde") cuando en realidad no había podido preguntar a la API del nodo. Ahora dice que la API no respondió.
+- **Tras cada actualización del panel se repetían avisos ya dados** (hardening, firewall, ficheros críticos…): `update.sh` vacía `storage/cache`, donde se guardaba su estado. Ahora el estado va en `storage/state`, y si falta, no se repite un aviso de hardening ya dado en los últimos 7 días.
+- **Hardening:** solo avisa cuando falla un control nuevo; arreglar o aceptar un control ya no manda otro correo.
+- **El análisis de WordPress no veía la reinfección de almatwins:** no revisaba los drop-ins ni los temas, ni detectaba código ofuscado. Ahora:
+  - compara **cada tema** con su original de wordpress.org (misma versión) y marca el activo; los comerciales, a revisar a mano;
+  - lista los **drop-ins y PHP sueltos** de `wp-content` (`db.php`, `advanced-cache.php`, `object-cache.php`…) con su origen, y reconoce los legítimos (WP Toolkit de Plesk, Autoptimize);
+  - busca **marcas `SC_*_BEGIN`** y **líneas de más de 3000 caracteres**, sin contar los ficheros idénticos al original (Yoast, Jetpack…);
+  - la ficha del hosting avisa también de PHP suelto en `wp-content` y de marcas de ofuscación.
+
+### Añadido
+- **Ajustes → Avisos** (y MCP `alerts_status` / `alerts_configure`). Se guarda en el master y se copia a los nodos (acción de cluster `set-alert-policy`, sin secretos). Permite:
+  - silenciar tipos de aviso (solo quita el correo; siguen en el monitor);
+  - dar por buenos controles de hardening;
+  - poner umbral propio o silencio por disco y servidor (p. ej. `nitro` `/workspace`);
+  - fijar los minutos de espera del aviso de correo.
+
+  Los avisos del relevo no se pueden silenciar.
+- **Docs → Avisos:** quién envía cada correo y cómo silenciarlo.
+
 ## [1.0.301] — 2026-10-04 — Blindar WordPress; copiar a Caddy las webs PHP del master
 
 ### Añadido

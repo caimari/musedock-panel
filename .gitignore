@@ -2,6 +2,7 @@ storage/backups/
 storage/db-backups/
 storage/sessions/
 storage/cache/
+storage/state/
 storage/logs/
 storage/tls/*
 !storage/tls/.gitkeep

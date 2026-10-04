@@ -642,6 +642,133 @@ class WordPressHardenService
         ];
     }
 
+    /** Drop-ins legítimos de WordPress (ficheros PHP sueltos en wp-content que carga el núcleo). */
+    private const DROPINS = ['advanced-cache.php', 'db.php', 'db-error.php', 'install.php', 'maintenance.php', 'object-cache.php',
+        'php-error.php', 'fatal-error-handler.php', 'sunrise.php', 'blog-deleted.php', 'blog-inactive.php', 'blog-suspended.php'];
+
+    /**
+     * Ofuscación que no tiene firmas fijas (almatwins se reinfectaba con ella mientras el
+     * análisis decía "limpio"): bloques marcados SC_*_BEGIN y líneas de más de 3000
+     * caracteres en PHP (código empaquetado). Se excluyen las traducciones (*.l10n.php y
+     * wp-content/languages), que son arrays largos legítimos.
+     */
+    public static function obfuscation(string $root): array
+    {
+        $dirs = escapeshellarg("{$root}/wp-content");
+        $rootPhp = implode(' ', array_map('escapeshellarg', glob("{$root}/*.php") ?: []));
+        $excl = "--exclude=*.l10n.php --exclude-dir=languages --exclude-dir=cache";
+        $run = static fn(string $pat, bool $pcre) => array_values(array_filter(explode("\n", trim((string)shell_exec(
+            'timeout 120 grep -rl' . ($pcre ? 'P' : 'E') . " --include=*.php --include=*.phtml --include=*.inc {$excl} " . escapeshellarg($pat)
+            . " {$dirs} {$rootPhp} 2>/dev/null | head -60")))));
+        $rel = static fn(array $l) => array_map(static fn($f) => substr($f, strlen($root) + 1), $l);
+        return [
+            'sc_markers' => $rel($run('SC_[A-Za-z0-9_]+_BEGIN', false)),
+            'long_lines' => $rel($run('^.{3000}', true)),
+        ];
+    }
+
+    /** Ficheros PHP sueltos en wp-content: drop-ins conocidos (con su origen) y los que no deberían estar. */
+    public static function dropins(string $root, array $obf = []): array
+    {
+        $out = [];
+        foreach (glob("{$root}/wp-content/*.php") ?: [] as $f) {
+            $name = basename($f);
+            if ($name === 'index.php' && filesize($f) < 200) {
+                continue;
+            }
+            $head = (string)@file_get_contents($f, false, null, 0, 4096);
+            preg_match('/(?:Plugin Name|Drop-?in|Description):\s*(.+)$/mi', $head, $m);
+            if (str_contains($head, 'GENERATED AUTOMATICALLY') && str_contains($head, 'maintenance/template.phtml')) {
+                $m[1] = 'WP Toolkit de Plesk (página de mantenimiento)';
+            }
+            $rel = "wp-content/{$name}";
+            $flags = [];
+            // Ficheros sueltos conocidos de plugins legítimos (solo si su plugin está instalado).
+            $known = ['autoptimize_404_handler.php' => 'autoptimize'];
+            if (isset($known[$name]) && is_dir("{$root}/wp-content/plugins/{$known[$name]}")) {
+                $m[1] = "del plugin {$known[$name]}";
+            } elseif (!in_array($name, self::DROPINS, true)) {
+                $flags[] = 'no es un drop-in de WordPress';
+            }
+            if (in_array($rel, $obf['sc_markers'] ?? [], true)) {
+                $flags[] = 'marca SC_*_BEGIN';
+            }
+            if (in_array($rel, $obf['long_lines'] ?? [], true)) {
+                $flags[] = 'líneas de más de 3000 caracteres';
+            }
+            $out[] = ['file' => $rel, 'size' => filesize($f), 'modified' => date('Y-m-d', (int)filemtime($f)),
+                'origin' => trim($m[1] ?? '') ?: 'sin cabecera', 'flags' => $flags,
+                'verdict' => $flags ? 'SOSPECHOSO' : 'parece legítimo (comprobar que su plugin está instalado)'];
+        }
+        return $out;
+    }
+
+    /** Tema activo (y padre) según la base de datos, sin ejecutar nada. */
+    private static function activeThemes(string $root): array
+    {
+        $db = self::wpDb($root);
+        if (!$db) {
+            return [];
+        }
+        try {
+            $st = $db['pdo']->query("SELECT option_name, option_value FROM {$db['prefix']}options WHERE option_name IN ('stylesheet', 'template')");
+            return array_values(array_unique(array_column($st->fetchAll(\PDO::FETCH_ASSOC), 'option_value')));
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /**
+     * Cada tema contra su original de wordpress.org (misma versión): ficheros cambiados y
+     * PHP de más. Los temas que no están allí (comerciales) se marcan para revisar a mano.
+     */
+    private static function themesCheck(string $root, array $obf): array
+    {
+        $active = self::activeThemes($root);
+        $out = [];
+        foreach (array_slice(glob("{$root}/wp-content/themes/*", GLOB_ONLYDIR) ?: [], 0, 10) as $dir) {
+            $slug = basename($dir);
+            $ver = self::headerValue("{$dir}/style.css", 'Version');
+            $t = ['slug' => $slug, 'version' => $ver, 'active' => in_array($slug, $active, true), 'modified' => date('Y-m-d', (int)filemtime($dir))];
+            $inTheme = static fn(array $l) => array_values(array_filter($l, static fn($f) => str_starts_with($f, "wp-content/themes/{$slug}/")));
+            $t['sc_markers'] = $inTheme($obf['sc_markers'] ?? []);
+            $t['long_lines'] = $inTheme($obf['long_lines'] ?? []);
+            $zip = $ver !== '' ? self::downloadZip("https://downloads.wordpress.org/theme/{$slug}.{$ver}.zip") : null;
+            if (!$zip || !is_dir("{$zip}/{$slug}")) {
+                $t['verdict'] = 'no está en wordpress.org (o esa versión): tema comercial o propio, revisar a mano'
+                    . ($t['sc_markers'] || $t['long_lines'] ? ' — TIENE OFUSCACIÓN' : '');
+                if ($zip) {
+                    shell_exec('rm -rf ' . escapeshellarg($zip));
+                }
+                $out[] = $t;
+                continue;
+            }
+            $orig = "{$zip}/{$slug}";
+            $changed = [];
+            $extra = [];
+            $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
+            foreach ($it as $f) {
+                if (!$f->isFile()) {
+                    continue;
+                }
+                $rel = substr($f->getPathname(), strlen($dir) + 1);
+                if (!is_file("{$orig}/{$rel}")) {
+                    if (preg_match('/\.(php[0-9]?|phtml|phar|inc|js)$/i', $rel)) {
+                        $extra[] = $rel;
+                    }
+                } elseif (md5_file($f->getPathname()) !== md5_file("{$orig}/{$rel}")) {
+                    $changed[] = $rel;
+                }
+            }
+            shell_exec('rm -rf ' . escapeshellarg($zip));
+            $t['changed'] = array_slice($changed, 0, 30);
+            $t['extra'] = array_slice($extra, 0, 30);
+            $t['verdict'] = ($changed || $extra) ? 'MODIFICADO respecto a wordpress.org' : 'igual que wordpress.org';
+            $out[] = $t;
+        }
+        return $out;
+    }
+
     /** Indicios rápidos (segundos): PHP en uploads, carpetas raras, mu-plugins, plugins de malware conocido. */
     public static function quickScan(string $root): array
     {
@@ -657,6 +784,10 @@ class WordPressHardenService
             'known_bad_plugins' => $bad,
             'mu_plugins' => array_map('basename', glob("{$root}/wp-content/mu-plugins/*.php") ?: []),
             'php_changed_14d' => count($find("-name '*.php' -mtime -14 -not -path '*/cache/*'")),
+            'odd_dropins' => array_values(array_map('basename', array_filter(glob("{$root}/wp-content/*.php") ?: [],
+                static fn($f) => basename($f) !== 'index.php' && !in_array(basename($f), self::DROPINS, true)))),
+            'sc_markers' => $rel(array_values(array_filter(explode("\n", trim((string)shell_exec('timeout 30 grep -rlE --include=*.php '
+                . escapeshellarg('SC_[A-Za-z0-9_]+_BEGIN') . ' ' . escapeshellarg("{$root}/wp-content") . ' 2>/dev/null | head -20')))))),
         ];
     }
 
@@ -687,6 +818,8 @@ class WordPressHardenService
             'odd_in_wp_content' => $rel($find("-maxdepth 2 -regextype posix-extended -regex '.*/wp-content/(wp-[0-9a-f]{12}-prev|\\.[0-9a-f]{16})'")),
             'php_changed_14d' => $rel($find("-name '*.php' -mtime -14 -not -path '*/cache/*'")),
             'signature_hits' => self::signatureHits($root),
+            'obfuscation' => $obf = self::obfuscation($root),
+            'dropins' => self::dropins($root, $obf),
             'wp_config' => [
                 'DISALLOW_FILE_MODS' => (bool)preg_match("/define\s*\(\s*['\"]DISALLOW_FILE_MODS['\"]\s*,\s*true/i", $wpc),
                 'DISALLOW_FILE_EDIT' => (bool)preg_match("/define\s*\(\s*['\"]DISALLOW_FILE_EDIT['\"]\s*,\s*true/i", $wpc),
@@ -695,11 +828,35 @@ class WordPressHardenService
         if ($online) {
             $r['core'] = self::coreCheck($root);
             $r['plugins'] = self::pluginsCheck($root);
+            $r['themes'] = self::themesCheck($root, $obf);
+            // Líneas largas en ficheros idénticos al original de wordpress.org no cuentan
+            // (Yoast, Jetpack, iconos SVG… las tienen legítimamente).
+            $same = static function (string $f, array $items, string $base): bool {
+                foreach ($items as $it) {
+                    $dir = "wp-content/{$base}/{$it['slug']}/";
+                    if (!str_starts_with($f, $dir)) {
+                        continue;
+                    }
+                    $v = (string)($it['verdict'] ?? '');
+                    $inner = substr($f, strlen($dir));
+                    return str_starts_with($v, 'igual')
+                        || (str_starts_with($v, 'MODIFICADO') && !in_array($inner, array_merge($it['changed'] ?? [], $it['extra'] ?? [], $it['extra_php'] ?? []), true));
+                }
+                return false;
+            };
+            $all = $r['obfuscation']['long_lines'];
+            $r['obfuscation']['long_lines'] = array_values(array_filter($all,
+                static fn($f) => !$same($f, $r['plugins'], 'plugins') && !$same($f, $r['themes'], 'themes')));
+            $r['obfuscation']['long_lines_in_original_files'] = count($all) - count($r['obfuscation']['long_lines']);
+            $obf = $r['obfuscation'];
         }
         $r['database'] = self::dbCheck($root);
         $bad = count($r['php_in_uploads']) + count($r['signature_hits']) + count($r['odd_in_wp_content'])
             + count(array_filter($r['plugins'] ?? [], static fn($p) => str_starts_with((string)($p['verdict'] ?? ''), 'MALWARE') || str_starts_with((string)($p['verdict'] ?? ''), 'MODIFICADO')))
-            + (int)($r['core']['changed_count'] ?? 0) + (int)($r['core']['extra_count'] ?? 0);
+            + (int)($r['core']['changed_count'] ?? 0) + (int)($r['core']['extra_count'] ?? 0)
+            + count($obf['sc_markers']) + count($obf['long_lines'])
+            + count(array_filter($r['dropins'], static fn($d) => $d['flags']))
+            + count(array_filter($r['themes'] ?? [], static fn($t) => str_starts_with((string)$t['verdict'], 'MODIFICADO') || str_contains((string)$t['verdict'], 'OFUSCACIÓN')));
         $r['verdict'] = $bad ? "{$bad} indicios: revisar y limpiar (quarantine / reinstall)" : 'sin indicios';
         return $r;
     }

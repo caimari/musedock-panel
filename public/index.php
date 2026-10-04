@@ -519,6 +519,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 
 // Notifications
 \MuseDockPanel\Router::get('/settings/mcp', 'McpController@settings');
+\MuseDockPanel\Router::get('/settings/alerts', 'AlertsController@index');
+\MuseDockPanel\Router::post('/settings/alerts/save', 'AlertsController@save');
 \MuseDockPanel\Router::get('/settings/witnesses', 'WitnessController@index');
 \MuseDockPanel\Router::get('/settings/witnesses/status', 'WitnessController@status');
 \MuseDockPanel\Router::post('/settings/witnesses/script', 'WitnessController@script');
@@ -527,6 +529,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/docs/witnesses', 'DocsController@witnesses');
 \MuseDockPanel\Router::get('/docs/mcp-nodes', 'DocsController@mcpNodes');
 \MuseDockPanel\Router::get('/docs/wordpress-security', 'DocsController@wordpressSecurity');
+\MuseDockPanel\Router::get('/docs/alerts', 'DocsController@alerts');
 \MuseDockPanel\Router::post('/settings/mcp/save', 'McpController@save');
 \MuseDockPanel\Router::post('/settings/mcp/token', 'McpController@token');
 \MuseDockPanel\Router::post('/settings/mcp/credentials/clear', 'McpController@clearCredentials');
