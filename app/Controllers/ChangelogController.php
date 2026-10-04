@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.300',
+                'date' => '2026-10-04',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Ajustes > MCP: interruptor "Permitir consultas reenviadas desde otros nodos" (activado por defecto); si se apaga, el nodo solo responde a su propio token', 'Aviso en Ajustes > MCP y guia en Docs (MCP entre nodos): desde el MCP de un panel se leen los demas nodos de su cluster sin su token, solo lectura', 'Las consultas reenviadas quedan en el registro de actividad del nodo consultado (herramienta y nodo origen)'],
+                        'en' => ['Settings > MCP: "Allow forwarded queries from other nodes" toggle (on by default)', 'Notice and Docs guide on cross-node MCP access (read-only, no per-node token needed)', 'Forwarded queries are logged on the queried node'],
+                    ],
+                    'security' => [
+                        'es' => ['page_check se niega a abrir rutas con pinta de accion (logout, delete, restart, apply...)'],
+                        'en' => ['page_check refuses action-like paths'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.299',
                 'date' => '2026-10-04',
                 'badge' => 'warning',

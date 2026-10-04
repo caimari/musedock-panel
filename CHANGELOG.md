@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.300] — 2026-10-04 — MCP entre nodos: aviso, interruptor y registro
+
+### Añadido
+- **Interruptor "Permitir consultas reenviadas desde otros nodos"** en *Ajustes → MCP* (activado por defecto). Si se desactiva, el nodo solo responde a su propio token MCP: el MCP de otro panel del cluster ya no puede consultarlo con `node`.
+- **Aviso en *Ajustes → MCP*** que explica el acceso reenviado: desde el MCP de un panel se leen los demás nodos de su cluster **sin el token de cada uno**, en los dos sentidos (master → copias y copia → master si lo tiene registrado). Lista los nodos a los que se llega.
+- **Guía en Docs: "MCP entre nodos (acceso reenviado)"** (`/docs/mcp-nodes`): sentidos, límites y cómo cerrarlo.
+- **Las consultas reenviadas quedan en el registro de actividad del nodo consultado** (`mcp.call`, con la herramienta y el nodo que preguntó; sin argumentos).
+
+### Seguridad
+- **`page_check` se niega a abrir rutas con pinta de acción** (logout, delete, restart, apply, toggle, promote…). Solo carga páginas de consulta.
+
 ## [1.0.299] — 2026-10-04 — Migraciones que no se ejecutaban; diagnóstico por MCP
 
 ### Arreglado

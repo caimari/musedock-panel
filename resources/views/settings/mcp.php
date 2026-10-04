@@ -45,7 +45,7 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
         <p class="small text-muted mb-3">
             Permite que un asistente de IA (Claude, ChatGPT, VS Code…) consulte este servidor: estado del servidor y del
             cluster, servicios, correo, certificados, failover y el inventario para clonar un slave. Desde el master puede
-            consultar también los nodos del cluster (el nodo consultado debe tener su MCP activado).
+            consultar también los nodos del cluster (ver el aviso de abajo).
             Con el segundo interruptor puede además <strong>gestionar el correo</strong>: crear dominios, publicar su DNS en
             Cloudflare, y crear buzones y alias (siempre con plan previo y confirmación).
         </p>
@@ -55,6 +55,24 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
             <li>Los tokens incorrectos quedan en el log que vigila <strong>fail2ban</strong> (5 fallos → ban 1 h).</li>
             <li>Cada llamada queda en el <a href="/logs" class="text-info">log de actividad</a>. Nunca se devuelven contraseñas, tokens ni claves.</li>
         </ul>
+
+        <div class="alert small py-2 px-3 mb-3" style="background:rgba(251,191,36,0.08);border:1px solid rgba(251,191,36,0.3);color:#e2e8f0;">
+            <i class="bi bi-diagram-3 me-1" style="color:#fbbf24;"></i>
+            <strong>Acceso a otros nodos a través de este MCP.</strong> Con el argumento <code>node</code>, un asistente conectado al MCP de
+            <em>este</em> panel puede consultar los demás nodos de su cluster <strong>sin el token MCP de cada uno</strong>: la consulta viaja por la API del
+            cluster, con la clave entre nodos. Funciona en los dos sentidos: del master a sus copias y de una copia al master, si lo tiene registrado
+            (pasa tras un cambio de rol). Límites que aplica siempre el nodo consultado:
+            <ul class="mb-1 mt-1">
+                <li>solo herramientas de <strong>lectura</strong> (las que modifican nunca se reenvían);</li>
+                <li>solo si ese nodo tiene su MCP <strong>activado</strong> y además <strong>"Permitir consultas reenviadas desde otros nodos"</strong>;</li>
+                <li>solo desde nodos registrados en su cluster; la respuesta va con los secretos tapados y la consulta queda en su log de actividad (con el nodo que preguntó).</li>
+            </ul>
+            Para que un nodo solo se pueda consultar con su propio token, desactiva aquí "Permitir consultas reenviadas".
+            <a href="/docs/mcp-nodes" class="text-info">Guía</a>.
+            <?php if (!empty($clusterNodes)): ?>
+                <div class="mt-1">Desde este panel se puede llegar a: <?= implode(', ', array_map(static fn($n) => '<code>' . View::e($n['name']) . '</code>', $clusterNodes)) ?>.</div>
+            <?php endif; ?>
+        </div>
 
         <form method="post" action="/settings/mcp/save" class="d-flex align-items-center gap-3 flex-wrap">
             <?= View::csrf() ?>
@@ -74,6 +92,12 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
                        <?= !empty($allowDns) ? 'checked' : '' ?> <?= !$hasToken ? 'disabled' : '' ?>>
                 <label class="form-check-label" for="mcp_allow_dns">Permitir editar DNS en Cloudflare
                     <span class="text-muted small">(crear y modificar registros A, AAAA, CNAME, TXT y MX con <code>dns_record_set</code>; <strong>nunca borra</strong>; requiere también la opción anterior)</span></label>
+            </div>
+            <div class="form-check form-switch m-0">
+                <input class="form-check-input" type="checkbox" role="switch" id="mcp_allow_forwarded" name="mcp_allow_forwarded" value="1"
+                       <?= !empty($allowForwarded) ? 'checked' : '' ?> <?= !$hasToken ? 'disabled' : '' ?>>
+                <label class="form-check-label" for="mcp_allow_forwarded">Permitir consultas reenviadas desde otros nodos
+                    <span class="text-muted small">(el MCP de otro panel del cluster puede consultar este servidor sin su token; solo lectura; ver abajo)</span></label>
             </div>
             <button class="btn btn-primary btn-sm" <?= !$hasToken ? 'disabled' : '' ?>><i class="bi bi-check2 me-1"></i>Guardar</button>
             <?php if (!$hasToken): ?>

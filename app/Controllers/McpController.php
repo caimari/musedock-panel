@@ -119,6 +119,9 @@ class McpController
             'enabled' => Settings::get('mcp_enabled', '0') === '1',
             'allowWrite' => Settings::get('mcp_allow_write', '0') === '1',
             'allowDns' => Settings::get('mcp_allow_dns', '0') === '1',
+            'allowForwarded' => Settings::get('mcp_allow_forwarded', '1') === '1',
+            'clusterNodes' => array_map(static fn($n) => ['name' => (string)$n['name'], 'role' => (string)($n['role'] ?? ''), 'host' => (string)parse_url((string)$n['api_url'], PHP_URL_HOST)],
+                \MuseDockPanel\Services\ClusterService::getNodes()),
             'pendingCredentials' => \MuseDockPanel\Mcp\McpCredentials::pending(),
             'passwordRequests' => \MuseDockPanel\Mcp\McpPasswordChanges::pending(),
             'changeRequests' => \MuseDockPanel\Mcp\McpChangeRequests::pending(),
@@ -148,9 +151,11 @@ class McpController
         Settings::set('mcp_enabled', $enable ? '1' : '0');
         Settings::set('mcp_allow_write', $write ? '1' : '0');
         Settings::set('mcp_allow_dns', $dns ? '1' : '0');
+        $fwd = !empty($_POST['mcp_allow_forwarded']);
+        Settings::set('mcp_allow_forwarded', $fwd ? '1' : '0');
         LogService::log('mcp.settings', $enable ? 'enabled' : 'disabled',
             'Servidor MCP ' . ($enable ? 'activado' : 'desactivado') . '; acciones que modifican: ' . ($write ? 'PERMITIDAS' : 'no')
-            . '; editar DNS: ' . ($dns ? 'PERMITIDO' : 'no'));
+            . '; editar DNS: ' . ($dns ? 'PERMITIDO' : 'no') . '; consultas reenviadas desde otros nodos: ' . ($fwd ? 'sí' : 'NO'));
         Flash::set('success', 'Servidor MCP ' . ($enable ? 'activado' : 'desactivado')
             . ($enable ? ($write ? ' con acciones que modifican permitidas.' : ' en solo lectura.') : '.'));
         header('Location: /settings/mcp');

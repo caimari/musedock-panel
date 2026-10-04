@@ -524,6 +524,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/witnesses/add', 'WitnessController@add');
 \MuseDockPanel\Router::post('/settings/witnesses/remove', 'WitnessController@remove');
 \MuseDockPanel\Router::get('/docs/witnesses', 'DocsController@witnesses');
+\MuseDockPanel\Router::get('/docs/mcp-nodes', 'DocsController@mcpNodes');
 \MuseDockPanel\Router::post('/settings/mcp/save', 'McpController@save');
 \MuseDockPanel\Router::post('/settings/mcp/token', 'McpController@token');
 \MuseDockPanel\Router::post('/settings/mcp/credentials/clear', 'McpController@clearCredentials');

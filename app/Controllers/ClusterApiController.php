@@ -1077,6 +1077,9 @@ class ClusterApiController
         if (\MuseDockPanel\Settings::get('mcp_enabled', '0') !== '1') {
             return ['ok' => false, 'error' => 'El MCP está desactivado en este nodo (Ajustes → MCP).'];
         }
+        if (\MuseDockPanel\Settings::get('mcp_allow_forwarded', '1') !== '1') {
+            return ['ok' => false, 'error' => 'Este nodo no acepta consultas MCP reenviadas desde otros nodos (Ajustes → MCP): conéctate a su MCP con su propio token.'];
+        }
         $tool = (string)($payload['tool'] ?? '');
         if (!\MuseDockPanel\Mcp\McpTools::exists($tool)) {
             return ['ok' => false, 'error' => "Herramienta desconocida: {$tool}"];
@@ -1087,6 +1090,13 @@ class ClusterApiController
         }
         $args = is_array($payload['arguments'] ?? null) ? $payload['arguments'] : [];
         unset($args['node']);
+        // Que quede constancia AQUÍ (en el nodo consultado) de quién preguntó.
+        try {
+            $from = (int)($_REQUEST['_api_node_id'] ?? 0);
+            $fromName = $from > 0 ? (string)(\MuseDockPanel\Services\ClusterService::getNode($from)['name'] ?? "nodo {$from}") : 'token de cluster local';
+            LogService::log('mcp.call', $tool, "reenviada desde {$fromName}");
+        } catch (\Throwable) {
+        }
         try {
             $data = \MuseDockPanel\Mcp\McpTools::runLocal($tool, $args);
             return ['ok' => true, 'data' => \MuseDockPanel\Mcp\McpTools::redact($data)];

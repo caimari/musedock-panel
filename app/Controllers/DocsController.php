@@ -413,6 +413,14 @@ class DocsController
                 'keywords' => 'failover manual semiauto auto modo prioridad priority id nodo completo web mail cloudflare dns registro a ttl promocion promote revertir failback caddy-l4 eleccion split-brain quorum master caido nodo caido interruptor dos momentos',
             ],
             [
+                'title' => 'MCP entre nodos (acceso reenviado)',
+                'description' => 'Como el MCP de un panel consulta otros nodos del cluster sin el token de cada uno, que limites tiene, quien puede hacerlo y como cerrarlo.',
+                'url' => '/docs/mcp-nodes',
+                'category' => 'Guia especial',
+                'icon' => 'bi-diagram-3',
+                'keywords' => 'mcp node nodo reenviado reenviada forwarded mcp-call puerta trasera token cluster solo lectura master slave asistente ia claude seguridad auditoria',
+            ],
+            [
                 'title' => 'Testigos externos',
                 'description' => 'Servidores solo ojos que confirman caidas reales antes de un relevo y eligen la entrada (linea normal o alternativa): que son, como crearlos desde el panel y como personalizarlos.',
                 'url' => '/docs/witnesses',
@@ -505,6 +513,10 @@ class DocsController
 
         if ($url === '/docs/mail-modes') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'mail-modes.php');
+        }
+
+        if ($url === '/docs/mcp-nodes') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'mcp-nodes.php');
         }
 
         if ($url === '/docs/witnesses') {
@@ -1418,6 +1430,14 @@ class DocsController
         View::render('help/failover-modes', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Failover: modos y prioridades',
+        ]);
+    }
+
+    public function mcpNodes(): void
+    {
+        View::render('help/mcp-nodes', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - MCP entre nodos',
         ]);
     }
 

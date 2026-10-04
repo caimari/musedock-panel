@@ -1031,6 +1031,10 @@ final class McpClusterTools
         if (!preg_match('#^/[A-Za-z0-9/_.\-]*(\?[A-Za-z0-9_=&%.\-]*)?$#', $path) || str_contains($path, '..')) {
             throw new \InvalidArgumentException('Ruta no válida (p. ej. /domains).');
         }
+        // Solo páginas que se leen: nada que parezca una acción, aunque sea por GET.
+        if (preg_match('#/(logout|delete|remove|destroy|restart|reload|stop|start|run|apply|install|uninstall|purge|clear|reset|toggle|sync|promote|demote|fence|unfence|kill|reboot|rotate|enable|disable|ban|unban|suspend|activate|approve|reject|revoke|import|migrate|download|export)(\b|/|$|-)#i', $path)) {
+            throw new \InvalidArgumentException('page_check solo carga páginas de consulta; esa ruta parece una acción y no se abre.');
+        }
         $out = (string)shell_exec('timeout 90 php ' . escapeshellarg(PANEL_ROOT . '/bin/page-check.php') . ' ' . escapeshellarg($path) . ' 2>&1');
         $tail = substr($out, (int)strrpos($out, '== ' . explode('?', $path)[0]));
         preg_match('/HTTP (\d+), (\d+) bytes/', $tail, $m);
