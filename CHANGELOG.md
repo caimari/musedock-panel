@@ -2,6 +2,25 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.296] — 2026-10-04 — Testigos desde el panel; los modos del relevo, explicados; la copia nunca se queda con papeles viejos
+
+### Arreglado
+- **Un nodo que vuelve tras un relevo podía quedarse con la configuración vieja** ("soy el principal"), porque el envío de cuando se promovió el otro agotaba sus reintentos mientras estaba caído. Entonces no vigilaba al nuevo master ni le sustituía si caía. Ahora:
+  - al ponerse como copia, **pide al nuevo master su configuración de relevo** (acción de cluster `push-failover-config`);
+  - el master **la reenvía a sus copias cada 30 minutos**.
+- **En *Cluster → Failover* y en la guía, una nota que resume la diferencia:** semi-auto y auto solo se diferencian en la vuelta planificada; tomar el mando es automático en los dos y en los dos sentidos.
+- **La explicación de los modos en *Cluster → Failover* era incorrecta** (decía que semi-auto solo avisa). Ahora explica bien manual, semi-auto y auto, con un ejemplo plegable (el servidor A sin luz de 10:00 a 12:00) y enlace a la guía.
+
+### Añadido
+- **Ajustes → Testigos.** Crear y gestionar testigos externos desde el panel, de forma agnóstica:
+  - **estado en vivo** de cada testigo registrado y de sus comprobaciones;
+  - **generador del script de instalación**: propone qué mirar (cada servidor del relevo y, si este panel vigila la entrada de alguno, su línea normal y la alternativa) y quién puede preguntar (las IPs del relevo). Todo se puede editar. El script instala el agente, crea **en el testigo** la clave y el certificado, lo deja como servicio y configura el cortafuegos. No lleva secretos; al volver a ejecutarlo, actualiza y conserva la clave y la huella;
+  - **registrar y quitar** testigos con la contraseña de administrador. Antes de guardar se comprueba que el testigo contesta con esa huella y esa clave.
+- **MCP `witnesses_status`** (solo lectura): los testigos registrados en el panel y si responden ahora, con cada comprobación (dirección, si llega, latencia y pérdidas) y las alertas de testigos caídos, más el estado del vigilante de entrada (servidores vigilados, modo y registros movidos). Nunca muestra claves.
+- **Docs → "Testigos externos"**: para qué sirven, qué son y qué no (sin datos, sin acceso, sin órdenes), cómo crearlos paso a paso, cómo personalizar las comprobaciones y qué pasa si fallan.
+- **Aviso si un testigo externo no responde** durante 10 minutos, y otro cuando vuelve (cluster-worker, cada 5 min). Uno caído no afecta, porque decide el otro, pero conviene saberlo.
+- **Docs → Failover: "Ejemplo: qué pasa en cada modo"**, con una tabla hora a hora (caída, toma del mando, vuelta como copia, recuperar el mando) y qué pasa si después cae el relevo.
+
 ## [1.0.295] — 2026-10-04 — Testigos que siguen una IP dinámica
 
 ### Añadido

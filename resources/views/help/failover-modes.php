@@ -71,8 +71,41 @@
             se alcanza a sí mismo por su IP pública, típico con NAT en casa, no mueve el DNS).
             <br><strong>Testigo:</strong> antes de promoverse, la réplica pregunta a los otros nodos del cluster si ven al master.
             Si alguno lo ve vivo, no se promueve (sería un corte de red, no una caída). Los testigos que no responden no cuentan:
-            para que proteja de verdad, conviene un testigo en <em>otro proveedor</em> que el master.
+            para que proteja de verdad, conviene un testigo en <em>otro proveedor</em> que el master
+            (<a href="/docs/witnesses" class="text-info">testigos externos: cómo crearlos</a>).
         </div>
+    </div>
+</div>
+
+<!-- Ejemplo de los modos -->
+<div class="card mb-4" style="border-color:rgba(56,189,248,.24);">
+    <div class="card-header"><i class="bi bi-clock-history me-2"></i>Ejemplo: qué pasa en cada modo</div>
+    <div class="card-body small">
+        <p class="text-muted">El servidor <strong>A</strong> es el titular (el que manda por decisión tuya) y <strong>B</strong> su relevo, con copia al día de todo.
+            A se queda sin luz de 10:00 a 12:00.</p>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead><tr><th>Hora</th><th>manual</th><th>semiauto</th><th>auto</th></tr></thead>
+                <tbody>
+                    <tr><td>10:00</td><td colspan="3">A cae. B lo comprueba cada minuto y pregunta a los testigos.</td></tr>
+                    <tr><td>10:05</td><td>Te llega el aviso. Las webs siguen caídas hasta que pulses «Tomar el mando» en B.</td>
+                        <td colspan="2">B toma el mando solo (bases de datos, DNS, correo) y te avisa. Las webs vuelven.</td></tr>
+                    <tr><td>12:00</td><td colspan="3">A vuelve: ve que otro manda, se aparta solo y se pone como copia de B (copiando solo lo cambiado).</td></tr>
+                    <tr><td>12:15</td><td>Nada: A sigue de copia hasta que tú decidas.</td>
+                        <td>Te llega «A está listo para volver a mandar». Tú decides cuándo pulsar, por ejemplo de noche, con menos visitas.</td>
+                        <td>A lleva 15 min estable: B le devuelve el mando solo. Las webs se cortan unos segundos mientras cambia el DNS.</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="alert alert-info small">
+            <i class="bi bi-info-circle me-1"></i>
+            <strong>La diferencia entre semiauto y auto es solo la vuelta.</strong> Tomar el mando cuando cae el que manda es automático en los dos,
+            y en los dos sentidos: siempre lo hace el servidor que hace de copia. Lo único que semiauto no hace solo es la <strong>vuelta planificada</strong>:
+            devolver el mando al titular cuando todo está bien. Te avisa y lo decides tú. Auto también lo hace solo.
+        </div>
+        <p class="mb-1"><strong>¿Y si después cae B?</strong> Mientras A sea su copia al día, A toma el mando: en semiauto y auto, solo; en manual, con tu botón.
+            El relevo funciona en los dos sentidos: siempre lo hace el servidor que hace de copia.</p>
+        <p class="mb-0 text-muted">Recomendación: <strong>semiauto</strong> hasta haber visto una caída y una vuelta reales; luego, si quieres, <strong>auto</strong>.</p>
     </div>
 </div>
 

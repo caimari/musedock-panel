@@ -2703,6 +2703,23 @@ class ClusterService
             $results['mail'] = $mail;
         }
 
+        // Pedir al nuevo master su configuración de relevo (quién es principal, modo,
+        // titular…): si este nodo estuvo caído, el envío de cuando se promovió el otro pudo
+        // agotar sus reintentos, y este nodo seguiría creyéndose el principal: no vigilaría
+        // al nuevo master ni le sustituiría si cae.
+        try {
+            foreach (self::getNodes() as $n) {
+                if ((string)parse_url((string)$n['api_url'], PHP_URL_HOST) === $newMasterIp) {
+                    $pr = self::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'push-failover-config', 'payload' => []]);
+                    $results['failover_config'] = !empty($pr['ok']) ? 'pedida al nuevo master' : ('no se pudo pedir: ' . ($pr['error'] ?? '?'));
+                    self::progress('Configuración del relevo: ' . $results['failover_config']);
+                    break;
+                }
+            }
+        } catch (\Throwable $e) {
+            $results['failover_config'] = 'error: ' . $e->getMessage();
+        }
+
         // Scripts de relevo del administrador (/etc/musedock/hooks/demote.d): parar
         // lo que solo debe correr en el master, soltar la IP flotante, etc.
         try {

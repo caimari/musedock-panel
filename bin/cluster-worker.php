@@ -204,6 +204,54 @@ if (time() - (int)Settings::get('route_guard_run_at', '0') >= 300) {
     }
 }
 
+// ─── Step 0k: ¿Responden los testigos externos? (cada 5 min) ──────────────────
+// Uno caído no afecta (decide el otro); los dos caídos tampoco bloquean (se decide con la
+// vista de este nodo), pero se pierde la protección contra cortes de red: se avisa.
+if (\MuseDockPanel\Services\WitnessService::all() && time() - (int)Settings::get('witness_check_at', '0') >= 300) {
+    Settings::set('witness_check_at', (string)time());
+    try {
+        $wState = json_decode((string)Settings::get('witness_health', '{}'), true) ?: [];
+        foreach (\MuseDockPanel\Services\WitnessService::all() as $w) {
+            $a = \MuseDockPanel\Services\WitnessService::query($w);
+            $n = (string)$w['name'];
+            $s = $wState[$n] ?? ['down_since' => 0, 'alerted' => false];
+            if (!empty($a['ok'])) {
+                if (!empty($s['alerted'])) {
+                    \MuseDockPanel\Services\NotificationService::send("Testigo {$n}: responde de nuevo", "El testigo {$n} ({$w['url']}) vuelve a responder.");
+                }
+                $s = ['down_since' => 0, 'alerted' => false];
+            } else {
+                $s['down_since'] = $s['down_since'] ?: time();
+                if (empty($s['alerted']) && time() - $s['down_since'] >= 600) {
+                    $others = count(\MuseDockPanel\Services\WitnessService::all()) - 1;
+                    \MuseDockPanel\Services\NotificationService::send("Testigo {$n}: no responde",
+                        "El testigo {$n} ({$w['url']}) no responde desde hace 10 min: " . ($a['error'] ?? '?') . ".\n"
+                        . ($others > 0 ? 'Los relevos siguen protegidos por el otro testigo.' : 'Sin testigos, los relevos se deciden solo con la vista de este nodo.'));
+                    $s['alerted'] = true;
+                    logMsg("Testigo {$n} no responde desde hace 10 min");
+                }
+            }
+            $wState[$n] = $s;
+        }
+        Settings::set('witness_health', json_encode($wState));
+    } catch (\Throwable $e) {
+        logMsg('Witness health error: ' . $e->getMessage());
+    }
+}
+
+// ─── Step 0j: El master reenvía su configuración de relevo cada 30 min ────────
+// Si una copia estuvo caída cuando cambió (p. ej. tras un relevo), el envío pudo agotar
+// sus reintentos; así ninguna se queda con papeles viejos (principal/relevo, modo, titular).
+if (Settings::get('cluster_role', '') === 'master' && Settings::get('cluster_fenced', '0') !== '1'
+    && time() - (int)Settings::get('failover_config_repush_at', '0') >= 1800) {
+    Settings::set('failover_config_repush_at', (string)time());
+    try {
+        \MuseDockPanel\Services\FailoverService::pushConfigToSlaves();
+    } catch (\Throwable $e) {
+        logMsg('Failover config repush error: ' . $e->getMessage());
+    }
+}
+
 // ─── Step 0i: Vigilante de entrada (normal ↔ alternativa) de otros servidores ───
 try {
     if (\MuseDockPanel\Services\IngressWatchService::config()['servers']) {

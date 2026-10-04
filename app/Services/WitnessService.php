@@ -126,6 +126,204 @@ class WitnessService
         return $v;
     }
 
+    // ── Generador del script de instalación de un testigo ────────────────
+
+    /**
+     * Comprobaciones que se proponen para un testigo nuevo, sin nombres fijos: cada
+     * servidor de Failover → Servidores (tcp a su IP pública, puerto 443) y, por cada
+     * servidor que vigila el vigilante de entrada de este panel, su nombre de
+     * comprobación por la entrada normal (IP fija) y por la alternativa (resolve_host).
+     */
+    public static function defaultTargets(): array
+    {
+        $t = [];
+        $slug = static fn(string $s) => trim(preg_replace('/[^a-z0-9]+/', '-', strtolower($s)), '-') ?: 'srv';
+        foreach (FailoverService::getServers() as $srv) {
+            if (!filter_var((string)($srv['ip'] ?? ''), FILTER_VALIDATE_IP)) {
+                continue;
+            }
+            $t[] = ['id' => $slug((string)$srv['name']), 'type' => 'tcp', 'host' => (string)$srv['ip'], 'port' => 443];
+        }
+        foreach ((array)(IngressWatchService::config()['servers'] ?? []) as $w) {
+            $base = $slug(preg_replace('/^health-/', '', explode('.', (string)$w['health'])[0]));
+            $t[] = ['id' => "{$base}-normal", 'type' => 'https', 'url' => "https://{$w['health']}/", 'resolve' => (string)$w['ip'], 'expect' => 'ok-'];
+            $t[] = ['id' => "{$base}-alternativa", 'type' => 'https', 'url' => "https://{$w['health']}/", 'resolve_host' => (string)$w['alt_host'], 'expect' => 'ok-'];
+        }
+        return $t;
+    }
+
+    /** IPs que podrán preguntar al testigo: las públicas de los servidores del relevo. */
+    public static function defaultAllowed(): array
+    {
+        $ips = [];
+        foreach (FailoverService::getServers() as $srv) {
+            if (filter_var((string)($srv['ip'] ?? ''), FILTER_VALIDATE_IP)) {
+                $ips[] = (string)$srv['ip'];
+            }
+        }
+        return array_values(array_unique($ips));
+    }
+
+    /**
+     * Script de bash que instala (o actualiza) el agente en el servidor testigo. No lleva
+     * ningún secreto: la clave y el certificado se crean EN el testigo. Volver a
+     * ejecutarlo actualiza el agente y la lista de comprobaciones y conserva la clave
+     * y el certificado (la huella no cambia).
+     */
+    public static function installScript(string $listenIp, int $port, array $targets, array $allowed, int $interval = 15): array
+    {
+        if (!filter_var($listenIp, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'error' => 'IP pública del testigo no válida'];
+        }
+        if ($port < 1024 || $port > 65535) {
+            return ['ok' => false, 'error' => 'puerto no válido'];
+        }
+        $clean = [];
+        foreach ($targets as $t) {
+            $id = preg_replace('/[^a-z0-9-]/', '', strtolower((string)($t['id'] ?? '')));
+            $type = ($t['type'] ?? '') === 'https' ? 'https' : 'tcp';
+            if ($id === '') {
+                continue;
+            }
+            if ($type === 'tcp') {
+                if (!filter_var((string)($t['host'] ?? ''), FILTER_VALIDATE_IP) && !preg_match('/^[a-z0-9.-]+$/i', (string)($t['host'] ?? ''))) {
+                    continue;
+                }
+                $clean[] = ['id' => $id, 'type' => 'tcp', 'host' => (string)$t['host'], 'port' => max(1, min(65535, (int)($t['port'] ?? 443)))];
+            } else {
+                if (!preg_match('#^https://[a-z0-9.-]+(:\d+)?/[^\s"\']*$#i', (string)($t['url'] ?? ''))) {
+                    continue;
+                }
+                $c = ['id' => $id, 'type' => 'https', 'url' => (string)$t['url']];
+                if (filter_var((string)($t['resolve'] ?? ''), FILTER_VALIDATE_IP)) {
+                    $c['resolve'] = (string)$t['resolve'];
+                } elseif (preg_match('/^[a-z0-9.-]+\.[a-z]{2,}$/i', (string)($t['resolve_host'] ?? ''))) {
+                    $c['resolve_host'] = strtolower((string)$t['resolve_host']);
+                }
+                if (($t['expect'] ?? '') !== '' && preg_match('/^[\w .:-]{1,60}$/u', (string)$t['expect'])) {
+                    $c['expect'] = (string)$t['expect'];
+                }
+                $clean[] = $c;
+            }
+        }
+        if (!$clean) {
+            return ['ok' => false, 'error' => 'no hay ninguna comprobación válida'];
+        }
+        $allowed = array_values(array_filter(array_map('trim', $allowed), static fn($x) => (bool)preg_match('#^[0-9a-f.:]+(/\d{1,3})?$#i', $x)));
+        $agent = (string)@file_get_contents(PANEL_ROOT . '/bin/witness-agent.py');
+        if ($agent === '') {
+            return ['ok' => false, 'error' => 'no se encuentra bin/witness-agent.py'];
+        }
+        $b64 = chunk_split(base64_encode($agent), 76, "\n");
+        $sha = hash('sha256', $agent);
+        $targetsJson = json_encode($clean, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+        $allowList = implode(' ', array_map('escapeshellarg', $allowed));
+        $panel = (string)(Settings::get('panel_hostname', '') ?: gethostname());
+        $interval = max(5, min(300, $interval));
+
+        $sh = <<<SH
+#!/bin/bash
+# Testigo MuseDock ("solo ojos") — generado por el panel de {$panel} el %DATE%.
+# Instala o actualiza el agente: no tiene datos, ni acceso a otros servidores, ni guarda
+# registros; solo mira una lista fija de comprobaciones y responde con clave por HTTPS.
+# La clave y el certificado se crean AQUÍ y no salen de este servidor. Volver a
+# ejecutar este script actualiza el agente y las comprobaciones y conserva clave y huella.
+set -euo pipefail
+[ "\$(id -u)" = 0 ] || { echo "Ejecútalo como root."; exit 1; }
+for c in python3 openssl base64; do command -v \$c >/dev/null || { echo "Falta \$c (apt install python3 openssl coreutils)."; exit 1; }; done
+
+LISTEN={$listenIp}
+PORT={$port}
+DIR=/etc/musedock-witness
+BIN=/usr/local/bin/musedock-witness.py
+
+id mdwitness >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin -d /nonexistent mdwitness
+install -d -m 700 "\$DIR"
+
+# Agente (sha256 {$sha})
+base64 -d > "\$BIN.new" <<'AGENT'
+{$b64}AGENT
+echo "{$sha}  \$BIN.new" | sha256sum -c --quiet
+install -m 755 "\$BIN.new" "\$BIN" && rm -f "\$BIN.new"
+
+# Certificado propio (solo la primera vez: la huella registrada en el panel no cambia)
+if [ ! -s "\$DIR/cert.pem" ]; then
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \\
+    -subj "/CN=musedock-witness" -keyout "\$DIR/key.pem" -out "\$DIR/cert.pem" 2>/dev/null
+fi
+
+# Configuración: conserva la clave si ya existía; si no, crea una nueva aquí.
+TARGETS=\$(cat <<'TARGETS_JSON'
+{$targetsJson}
+TARGETS_JSON
+)
+MDW_LISTEN="\$LISTEN" MDW_PORT="\$PORT" MDW_INTERVAL={$interval} MDW_TARGETS="\$TARGETS" python3 - <<'PY'
+import json, os, secrets
+p = "/etc/musedock-witness/config.json"
+old = {}
+if os.path.exists(p):
+    with open(p) as f:
+        old = json.load(f)
+cfg = {
+    "listen": os.environ["MDW_LISTEN"], "port": int(os.environ["MDW_PORT"]),
+    "key": old.get("key") or secrets.token_hex(24),
+    "interval": int(os.environ["MDW_INTERVAL"]), "timeout": 8, "window": 20,
+    "tls_cert": "/etc/musedock-witness/cert.pem", "tls_key": "/etc/musedock-witness/key.pem",
+    "targets": json.loads(os.environ["MDW_TARGETS"]),
+}
+fd = os.open(p + ".new", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w") as f:
+    json.dump(cfg, f, indent=2)
+os.replace(p + ".new", p)
+PY
+chown -R mdwitness: "\$DIR"; chmod 600 "\$DIR/config.json" "\$DIR/key.pem"; chmod 644 "\$DIR/cert.pem"
+
+cat > /etc/systemd/system/musedock-witness.service <<'UNIT'
+[Unit]
+Description=MuseDock testigo (solo ojos)
+After=network-online.target
+Wants=network-online.target
+[Service]
+User=mdwitness
+ExecStart=/usr/bin/python3 /usr/local/bin/musedock-witness.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadOnlyPaths=/etc/musedock-witness
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable musedock-witness >/dev/null 2>&1
+systemctl restart musedock-witness
+
+# Cortafuegos: el puerto del testigo SOLO para estos orígenes (si hay ufw activo).
+ALLOWED=({$allowList})
+if command -v ufw >/dev/null && ufw status | grep -q "Status: active"; then
+  for ip in "\${ALLOWED[@]}"; do ufw allow from "\$ip" to any port "\$PORT" proto tcp comment "musedock-witness" >/dev/null; done
+  echo "Cortafuegos: \$PORT abierto solo a: \${ALLOWED[*]}"
+else
+  echo "AVISO: no hay ufw activo. Abre el puerto \$PORT SOLO a: \${ALLOWED[*]} en tu cortafuegos."
+fi
+
+sleep 2
+systemctl is-active --quiet musedock-witness || { journalctl -u musedock-witness -n 20 --no-pager; exit 1; }
+echo
+echo "== Testigo listo. Para registrarlo en el panel (Ajustes → Testigos):"
+echo "   URL:    https://\$LISTEN:\$PORT"
+echo "   Huella: \$(openssl x509 -in "\$DIR/cert.pem" -noout -fingerprint -sha256 | cut -d= -f2)"
+echo "   Clave:  no se muestra aquí. Para verla y copiarla al formulario del panel:"
+echo "           python3 -c \"import json;print(json.load(open('\$DIR/config.json'))['key'])\""
+echo "   (no la pegues en ningún chat ni la guardes en otro sitio)"
+
+SH;
+        $sh = str_replace('%DATE%', date('Y-m-d H:i'), $sh);
+        return ['ok' => true, 'script' => $sh, 'targets' => $clean, 'agent_sha256' => $sha];
+    }
+
     private static function normFingerprint(string $fp): string
     {
         return strtolower(preg_replace('/[^0-9a-f]/i', '', $fp));

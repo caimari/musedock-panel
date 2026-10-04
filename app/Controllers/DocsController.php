@@ -413,6 +413,14 @@ class DocsController
                 'keywords' => 'failover manual semiauto auto modo prioridad priority id nodo completo web mail cloudflare dns registro a ttl promocion promote revertir failback caddy-l4 eleccion split-brain quorum master caido nodo caido interruptor dos momentos',
             ],
             [
+                'title' => 'Testigos externos',
+                'description' => 'Servidores solo ojos que confirman caidas reales antes de un relevo y eligen la entrada (linea normal o alternativa): que son, como crearlos desde el panel y como personalizarlos.',
+                'url' => '/docs/witnesses',
+                'category' => 'Guia especial',
+                'icon' => 'bi-eye',
+                'keywords' => 'testigo testigos witness quorum particion corte de red split brain relevo failover entrada alternativa linea dinamica agente huella certificado clave script instalacion paquito manolo',
+            ],
+            [
                 'title' => 'Cambio de rol y slave completo',
                 'description' => 'Pasar el mando de un servidor a otro sin caidas, tipos de nodo (replica completa, a medias, solo ficheros) y como preparar un slave que pueda tomar el mando.',
                 'url' => '/docs/role-switch',
@@ -497,6 +505,10 @@ class DocsController
 
         if ($url === '/docs/mail-modes') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'mail-modes.php');
+        }
+
+        if ($url === '/docs/witnesses') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'witnesses.php');
         }
 
         if ($url === '/docs/role-switch') {
@@ -1406,6 +1418,14 @@ class DocsController
         View::render('help/failover-modes', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Failover: modos y prioridades',
+        ]);
+    }
+
+    public function witnesses(): void
+    {
+        View::render('help/witnesses', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Testigos externos',
         ]);
     }
 

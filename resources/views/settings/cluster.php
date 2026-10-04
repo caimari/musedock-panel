@@ -2086,9 +2086,23 @@
                 <!-- Modo de operación -->
                 <h6 class="text-muted mb-2">Modo de operación</h6>
                 <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);color:#94a3b8;">
-                    <strong>Manual:</strong> El sistema detecta caídas y muestra el estado, pero el admin pulsa el botón para ejecutar failover/failback.<br>
-                    <strong>Semi-auto:</strong> Detecta caídas y envía notificación (email/Telegram) al admin. El admin confirma con un clic.<br>
-                    <strong>Auto:</strong> Detecta caídas y ejecuta failover/failback automáticamente sin intervención. Incluye promote/demote del cluster.
+                    <strong>Manual:</strong> si cae el servidor que manda, te avisa; tú pasas el mando con el botón del Dashboard.<br>
+                    <strong>Semi-auto:</strong> si cae el que manda, el de relevo <strong>toma el mando solo</strong> y te avisa. Cuando el caído vuelve, se pone como copia y te avisa de que está listo; <strong>la vuelta la decides tú</strong>.<br>
+                    <strong>Auto:</strong> igual que semi-auto, y además, cuando el titular lleva 15 min estable, <strong>recupera el mando solo</strong>.
+                    <div class="mt-2 py-1 px-2 rounded" style="background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.2);">
+                        <i class="bi bi-info-circle me-1" style="color:#38bdf8;"></i>
+                        <strong>La diferencia entre semi-auto y auto es solo la vuelta.</strong> Tomar el mando cuando cae el que manda es automático en los dos, y en los dos sentidos: siempre lo hace el servidor que hace de copia.
+                        Lo único que semi-auto no hace solo es la <strong>vuelta planificada</strong>: devolver el mando al titular cuando todo está bien. Te avisa y lo decides tú. Auto también lo hace solo.
+                    </div>
+                    <details class="mt-2"><summary style="cursor:pointer;">Ejemplo: el servidor A (titular) se queda sin luz de 10:00 a 12:00; B es su relevo</summary>
+                        <ul class="mb-0 mt-1">
+                            <li><strong>Manual:</strong> a las 10:05 te llega el aviso; las webs siguen caídas hasta que pulses «Tomar el mando» en B.</li>
+                            <li><strong>Semi-auto:</strong> a las 10:05 B ya sirve todo. A las 12:00 A vuelve como copia de B. A las 12:15 te llega «A está listo para volver a mandar» y tú decides cuándo, por ejemplo de noche, con menos visitas.</li>
+                            <li><strong>Auto:</strong> igual hasta las 12:15, y a esa hora el mando vuelve a A sin preguntar (las webs se cortan unos segundos mientras cambia el DNS).</li>
+                            <li>En todos los modos, si después cae <strong>B</strong> mientras A es su copia al día, A toma el mando (en semi-auto y auto, solo).</li>
+                        </ul>
+                    </details>
+                    <div class="mt-1"><a href="/docs/failover-modes" class="text-info">Más detalle en la guía de Failover</a></div>
                 </div>
                 <div class="row g-2 mb-3">
                     <div class="col-md-3">

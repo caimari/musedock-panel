@@ -518,6 +518,12 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 
 // Notifications
 \MuseDockPanel\Router::get('/settings/mcp', 'McpController@settings');
+\MuseDockPanel\Router::get('/settings/witnesses', 'WitnessController@index');
+\MuseDockPanel\Router::get('/settings/witnesses/status', 'WitnessController@status');
+\MuseDockPanel\Router::post('/settings/witnesses/script', 'WitnessController@script');
+\MuseDockPanel\Router::post('/settings/witnesses/add', 'WitnessController@add');
+\MuseDockPanel\Router::post('/settings/witnesses/remove', 'WitnessController@remove');
+\MuseDockPanel\Router::get('/docs/witnesses', 'DocsController@witnesses');
 \MuseDockPanel\Router::post('/settings/mcp/save', 'McpController@save');
 \MuseDockPanel\Router::post('/settings/mcp/token', 'McpController@token');
 \MuseDockPanel\Router::post('/settings/mcp/credentials/clear', 'McpController@clearCredentials');

@@ -246,6 +246,12 @@ final class McpClusterTools
                     'apply' => $apply,
                 ]),
             ],
+            'witnesses_status' => [
+                'write' => false,
+                'title' => 'Testigos externos y vigilante de entrada',
+                'description' => 'Solo lectura. Los testigos externos ("solo ojos") registrados en ESTE panel y si responden ahora: por cada uno, sus comprobaciones (qué dirección mira, si llega, latencia media y pérdidas). También el vigilante de entrada de este panel (qué servidores vigila, su entrada normal y alternativa, en qué modo está cada uno y cuántos registros DNS tiene movidos) y las alertas de testigos sin responder. Nunca muestra claves. Para registrar o quitar testigos: Ajustes → Testigos o bin/witness.php.',
+                'inputSchema' => $o([]),
+            ],
             'failover_dns_plan' => [
                 'write' => false,
                 'title' => 'Qué DNS cambiaría un relevo',
@@ -366,6 +372,7 @@ final class McpClusterTools
             'hosting_php_settings'  => self::hostingPhp($args),
             'config_mirror'         => self::configMirror($args),
             'failover_dns_plan'     => self::dnsPlan(),
+            'witnesses_status'      => self::witnessesStatus(),
             'server_profile'        => self::serverProfile(),
             'server_profile_set'    => self::serverProfileSet($args),
             'monitor_status'        => self::monitorStatus(),
@@ -999,6 +1006,48 @@ final class McpClusterTools
             ];
         }
         return ['applied' => true, 'plan' => $plan, 'test_sent' => $test, 'status' => self::notifyStatus()];
+    }
+
+    // ── Testigos externos y vigilante de entrada (solo lectura) ──────────
+
+    private static function witnessesStatus(): array
+    {
+        $ws = \MuseDockPanel\Services\WitnessService::class;
+        $list = $ws::all();
+        $health = json_decode((string)\MuseDockPanel\Settings::get('witness_health', '{}'), true) ?: [];
+        $out = [];
+        foreach ($list as $w) {
+            $a = $ws::query($w);
+            $targets = [];
+            foreach ((array)($a['targets'] ?? []) as $id => $t) {
+                $targets[$id] = ['addr' => $t['addr'] ?? '', 'via' => $t['via'] ?? '', 'ok' => !empty($t['ok']),
+                    'latency_avg_ms' => $t['latency_avg_ms'] ?? null, 'loss_pct' => (int)($t['loss_pct'] ?? 0), 'error' => $t['error'] ?? ''];
+            }
+            $h = $health[$w['name']] ?? [];
+            $out[] = [
+                'name' => $w['name'], 'url' => $w['url'],
+                'fingerprint' => strtoupper(substr((string)$w['fingerprint'], 0, 16)) . '…',
+                'responds' => !empty($a['ok']), 'error' => !empty($a['ok']) ? '' : ($a['error'] ?? ''),
+                'agent_version' => $a['version'] ?? null,
+                'down_since' => !empty($h['down_since']) ? date('Y-m-d H:i:s', (int)$h['down_since']) : null,
+                'alerted' => !empty($h['alerted']),
+                'targets' => $targets,
+            ];
+        }
+        $iw = \MuseDockPanel\Services\IngressWatchService::status();
+        return [
+            'witnesses' => $out,
+            'count' => count($out),
+            'responding' => count(array_filter($out, static fn($x) => $x['responds'])),
+            'note' => !$out ? 'Este panel no tiene testigos: los relevos se deciden solo con su propia vista (Ajustes → Testigos para crear uno).'
+                : 'Un testigo que no responde no cuenta: decide el otro; si no responde ninguno, se decide con la vista de este panel.',
+            'ingress_watch' => [
+                'servers' => $iw['config']['servers'] ?? [],
+                'thresholds' => array_intersect_key($iw['config'], array_flip(['fail_minutes', 'recover_minutes', 'max_latency_ms', 'max_loss_pct'])),
+                'state' => $iw['state'] ?? [],
+                'dns_records_moved' => $iw['moved'] ?? 0,
+            ],
+        ];
     }
 
     // ── Plan de DNS de un relevo (solo lectura) ──────────────────────────

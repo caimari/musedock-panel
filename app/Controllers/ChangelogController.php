@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.296',
+                'date' => '2026-10-04',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Un nodo que vuelve tras un relevo pide al nuevo master su configuracion de relevo, y el master la reenvia cada 30 min (antes podia quedarse creyendose el principal)', 'Explicacion correcta de los modos manual/semi-auto/auto en Cluster → Failover, con ejemplo'],
+                        'en' => ['A node rejoining after a failover pulls the failover config from the new master; the master re-pushes it every 30 min', 'Correct explanation of manual/semi-auto/auto modes with an example'],
+                    ],
+                    'added' => [
+                        'es' => ['Ajustes → Testigos: estado en vivo, generador del script de instalacion (agnostico, sin secretos, clave creada en el testigo) y registro con contrasena de administrador', 'Docs: Testigos externos', 'MCP witnesses_status: testigos, si responden y estado del vigilante de entrada (sin claves)', 'Docs: ejemplo hora a hora de cada modo de relevo', 'Aviso si un testigo no responde 10 min'],
+                        'en' => ['Settings → Witnesses: live status, install script generator (agnostic, no secrets) and registration with admin password', 'Docs: external witnesses', 'Docs: hour-by-hour example of each failover mode', 'Alert when a witness is unreachable for 10 min'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.295',
                 'date' => '2026-10-04',
                 'badge' => 'info',

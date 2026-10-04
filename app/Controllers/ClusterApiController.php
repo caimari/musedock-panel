@@ -558,6 +558,11 @@ class ClusterApiController
                 'role-switch-promote' => ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::startPromoteHere(
                     (string)($payload['old_vpn_ip'] ?? ''), (string)($payload['old_public_ip'] ?? ''), (string)($payload['new_public_ip'] ?? ''),
                     (string)($payload['orchestrator_task'] ?? ''))],
+                // Un nodo que acaba de ponerse como copia pide al master su configuración de
+                // relevo (si estuvo caído, el envío normal pudo agotar sus reintentos).
+                'push-failover-config' => \MuseDockPanel\Settings::get('cluster_role', '') === 'master'
+                    ? ['ok' => true, 'result' => \MuseDockPanel\Services\FailoverService::pushConfigToSlaves()]
+                    : ['ok' => false, 'error' => 'este nodo no es el master'],
                 'role-switch-status'  => ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::status((string)($payload['task'] ?? ''))],
                 // Otro nodo del cluster pide enviar un aviso (él puede tener el correo parado, p. ej. apartado).
                 'notify-relay' => (function () use ($payload) {
