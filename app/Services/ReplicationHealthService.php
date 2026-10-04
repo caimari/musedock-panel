@@ -129,12 +129,12 @@ final class ReplicationHealthService
         if ($new) {
             NotificationService::send("[{$host}] Réplica con problemas",
                 "Este servidor ({$host}) ha detectado problemas de réplica:\n\n- " . implode("\n- ", $new)
-                . "\n\nMientras no se arregle, un relevo podría perder datos o no funcionar.");
+                . "\n\nMientras no se arregle, un relevo podría perder datos o no funcionar.", 'replication');
             LogService::log('cluster.replication', 'alert', implode(' | ', $new));
         }
         if ($fixed) {
             NotificationService::send("[{$host}] Réplica recuperada",
-                "Se han resuelto " . count($fixed) . " problema(s) de réplica en {$host}.");
+                "Se han resuelto " . count($fixed) . " problema(s) de réplica en {$host}.", 'replication');
             LogService::log('cluster.replication', 'recovered', implode(', ', array_keys($fixed)));
         }
         return ['issues' => $issues, 'notified_now' => array_keys($new), 'recovered' => array_keys($fixed)];

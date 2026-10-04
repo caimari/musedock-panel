@@ -28,7 +28,10 @@ class AlertPolicyService
         'public_exposure'    => ['Puerto expuesto', 'Un servicio sensible escucha abierto a internet.'],
         'login_anomaly'      => ['Acceso raro al panel', 'Entrada al panel desde un país o red poco habitual.'],
         'mail_node'          => ['Nodo de correo con problemas', 'Servicios de correo de un nodo sin responder (avisa solo si dura, ver abajo).'],
+        'mail_queue'         => ['Cola de correo pausada', 'Altas/cambios de correo hacia un nodo llevan más de 24 h en pausa (el nodo no las recibe).'],
+        'replication'        => ['Réplica con problemas', 'PostgreSQL, MariaDB o Redis de este nodo no replican bien (o se recuperan). Mejor no silenciarlo: un relevo podría perder datos.'],
         'lsyncd'             => ['Copia de ficheros (lsyncd)', 'La copia de ficheros a los nodos falla o se recupera.'],
+        'config_mirror'      => ['Copia de configuración del master', 'En una copia: algo de la configuración del master no se pudo copiar (avisa solo cuando cambia la lista).'],
         'witness'            => ['Testigos', 'Un testigo externo no responde o vuelve.'],
     ];
 

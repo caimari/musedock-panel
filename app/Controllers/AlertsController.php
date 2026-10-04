@@ -49,7 +49,27 @@ class AlertsController
             'hostHints' => array_values(array_unique(array_filter(array_merge($hosts, ['*'])))),
             'diskDefault' => (float)Settings::get('monitor_alert_disk', '90'),
             'isSlave' => Settings::get('cluster_role', 'standalone') === 'slave',
+            'masterUrl' => self::masterUrl(),
         ]);
+    }
+
+    /** URL del panel del master (para el enlace desde una copia), si está registrado. */
+    private static function masterUrl(): string
+    {
+        foreach (ClusterService::getNodes() as $n) {
+            if (($n['role'] ?? '') === 'master') {
+                $u = parse_url((string)$n['api_url']);
+                // Mejor el nombre del panel del master (certificado válido) que la IP de la VPN.
+                try {
+                    $st = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'query-local-state', 'payload' => []]);
+                    $host = (string)($st['data']['state']['panel_hostname'] ?? '');
+                } catch (\Throwable) {
+                    $host = '';
+                }
+                return 'https://' . ($host !== '' ? $host : (string)($u['host'] ?? '')) . ':' . (int)($u['port'] ?? 8444);
+            }
+        }
+        return '';
     }
 
     public function save(): void

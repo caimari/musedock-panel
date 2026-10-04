@@ -104,6 +104,15 @@ class McpHostingTools
                     'apply' => $apply,
                 ], ['domain', 'action']),
             ],
+            'monitor_stats' => [
+                'title' => 'Estadísticas de un servidor en un periodo',
+                'description' => 'Solo lectura. Para el periodo pedido (1h, 6h, 24h, 7d, 30d): cada métrica del monitor (CPU, RAM, discos, red, GPU, tráfico web, peticiones/s) con media, pico, p95 y último valor, y el tráfico web por hosting (bytes y peticiones) en ese periodo y en el mes. Si el tráfico web sale vacío, el registro de accesos de Caddy no se escribe en ese nodo (el panel lo repara solo cada 30 min). Con `node`, en otro nodo del cluster.',
+                'inputSchema' => $o([
+                    'range' => ['type' => 'string', 'enum' => ['1h', '6h', '24h', '7d', '30d'], 'description' => 'Por defecto 24h'],
+                    'metric' => ['type' => 'string', 'description' => 'Opcional: solo las métricas que contengan este texto (p. ej. "disk", "cpu", "bw")'],
+                    'node' => ['type' => 'string', 'description' => 'Opcional. Id o nombre de un nodo del cluster para ejecutarlo en él. Omitir = este servidor.'],
+                ], []),
+            ],
             'alerts_status' => [
                 'title' => 'Reglas de avisos (silenciados, hardening aceptado, discos)',
                 'description' => 'Solo lectura. Qué tipos de aviso están silenciados, qué controles de hardening se dan por buenos, umbrales propios o silencio por disco y servidor, minutos que debe fallar un nodo de correo antes de avisar, y los controles de hardening que fallan ahora en este servidor. Con `node`, en otro nodo.',
@@ -154,6 +163,7 @@ class McpHostingTools
             'domain_redirect_create' => self::redirectCreate($args),
             'password_change_request' => self::passwordRequest($args),
             'mail_quota_request'      => self::quotaRequest($args),
+            'monitor_stats'           => self::monitorStats($args),
             'alerts_status'           => self::alertsStatus(),
             'alerts_configure'        => self::alertsConfigure($args),
             'wordpress_status'        => self::wpStatus($args),
@@ -503,5 +513,65 @@ class McpHostingTools
         $saved = AP::save($new);
         LogService::log('alerts.policy', 'mcp', 'Reglas de avisos cambiadas por MCP');
         return ['status' => 'guardado', 'policy' => $saved, 'copied' => AP::pushToNodes()];
+    }
+
+    // ───────────────────────── Estadísticas del monitor ─────────────────────────
+
+    private static function monitorStats(array $args): array
+    {
+        $range = in_array($args['range'] ?? '', ['1h', '6h', '24h', '7d', '30d'], true) ? $args['range'] : '24h';
+        $interval = ['1h' => '1 hour', '6h' => '6 hours', '24h' => '24 hours', '7d' => '7 days', '30d' => '30 days'][$range];
+        $host = gethostname() ?: 'localhost';
+        $filter = strtolower(trim((string)($args['metric'] ?? '')));
+        $fmtBytes = static function (float $b): string {
+            foreach (['B', 'KB', 'MB', 'GB', 'TB'] as $u) {
+                if (abs($b) < 1024 || $u === 'TB') {
+                    return round($b, 1) . " {$u}";
+                }
+                $b /= 1024;
+            }
+            return (string)$b;
+        };
+        if (in_array($range, ['1h', '6h', '24h'], true)) {
+            $rows = Database::fetchAll("SELECT metric, avg(value) AS avg, max(value) AS max, percentile_cont(0.95) WITHIN GROUP (ORDER BY value) AS p95,
+                    (array_agg(value ORDER BY ts DESC))[1] AS last, count(*) AS samples
+                FROM monitor_metrics WHERE host = :h AND ts >= NOW() - INTERVAL '{$interval}' GROUP BY metric ORDER BY metric", ['h' => $host]);
+        } else {
+            $table = $range === '7d' ? 'monitor_metrics_hourly' : 'monitor_metrics_daily';
+            $rows = Database::fetchAll("SELECT metric, avg(avg_val) AS avg, max(max_val) AS max, avg(p95_val) AS p95,
+                    (array_agg(avg_val ORDER BY ts DESC))[1] AS last, sum(samples) AS samples
+                FROM {$table} WHERE host = :h AND ts >= NOW() - INTERVAL '{$interval}' GROUP BY metric ORDER BY metric", ['h' => $host]);
+        }
+        $metrics = [];
+        foreach ($rows as $r) {
+            $m = (string)$r['metric'];
+            if ($filter !== '' && !str_contains(strtolower($m), $filter)) {
+                continue;
+            }
+            $isBytes = (bool)preg_match('/(_rx|_tx|_read|_write|bytes_sec)$/', $m);
+            $f = static fn($v) => $v === null ? null : ($isBytes ? $fmtBytes((float)$v) . '/s' : round((float)$v, 2));
+            $metrics[$m] = ['avg' => $f($r['avg']), 'max' => $f($r['max']), 'p95' => $f($r['p95']), 'last' => $f($r['last']), 'samples' => (int)$r['samples']];
+        }
+        $web = [];
+        try {
+            $per = Database::fetchAll("SELECT a.domain, COALESCE(SUM(b.bytes_out), 0) AS bytes, COALESCE(SUM(b.requests), 0) AS req
+                FROM hosting_bandwidth b JOIN hosting_accounts a ON a.id = b.account_id
+                WHERE b.ts >= NOW() - INTERVAL '{$interval}' GROUP BY a.domain ORDER BY bytes DESC LIMIT 25");
+            $month = \MuseDockPanel\Services\BandwidthService::getAllMonthlyTotals();
+            uasort($month, static fn($a, $b) => (float)$b['bytes_out'] <=> (float)$a['bytes_out']);
+            $dom = array_column(Database::fetchAll('SELECT id, domain FROM hosting_accounts'), 'domain', 'id');
+            $web = [
+                'by_hosting_in_range' => array_map(static fn($r) => ['domain' => $r['domain'], 'sent' => $fmtBytes((float)$r['bytes']), 'requests' => (int)$r['req']], $per),
+                'month_top' => array_slice(array_map(static fn($id, $r) => ['domain' => $dom[$id] ?? "#{$id}", 'sent' => $fmtBytes((float)$r['bytes_out']), 'requests' => (int)$r['requests']],
+                    array_keys($month), $month), 0, 25),
+            ];
+        } catch (\Throwable $e) {
+            $web = ['error' => 'sin datos de ancho de banda por hosting: ' . $e->getMessage()];
+        }
+        $note = null;
+        if (!isset($metrics['bw_bytes_sec']) && ($filter === '' || str_contains('bw_bytes_sec', $filter))) {
+            $note = 'Sin tráfico web en el monitor: Caddy no escribe /var/log/caddy/hosting-access.log en este nodo (o es una copia sin tráfico). El panel lo repara solo cada 30 min.';
+        }
+        return ['host' => $host, 'range' => $range, 'metrics' => $metrics, 'web' => $web, 'note' => $note];
     }
 }

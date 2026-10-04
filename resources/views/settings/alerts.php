@@ -10,6 +10,13 @@
     <a href="/settings/notifications" class="btn btn-outline-light btn-sm"><i class="bi bi-envelope me-1"></i>Canales (correo, Telegram)</a>
 </div>
 
+<?php if ($isSlave): ?>
+    <div class="alert small py-2 px-3 mb-3" style="background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.25);color:#e2e8f0;">
+        <i class="bi bi-info-circle me-1" style="color:#38bdf8;"></i>
+        <strong>Este servidor es copia:</strong> aquí solo se ven las reglas. Se cambian en el master<?= !empty($masterUrl) ? ' (<a href="' . View::e($masterUrl) . '/settings/alerts" class="text-info" target="_blank">abrir Avisos del master</a>)' : '' ?>
+        y se copian solas a este servidor al guardar. También por MCP: <code>alerts_configure</code> en el master.
+    </div>
+<?php endif; ?>
 <form method="POST" action="/settings/alerts/save">
     <?= View::csrf() ?>
     <fieldset <?= $isSlave ? 'disabled' : '' ?>>

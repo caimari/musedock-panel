@@ -134,6 +134,16 @@ switch ($cmd) {
         $ok = ($st['state'] ?? '') === 'done';
         break;
 
+    case 'mirror-exclude':
+    case 'mirror-include':
+        // Elementos propios de la máquina del master que este slave no copia (ni avisa de ellos).
+        $items = array_slice($argv, 2);
+        $list = $cmd === 'mirror-exclude'
+            ? \MuseDockPanel\Services\ConfigMirrorService::setExcluded($items)
+            : \MuseDockPanel\Services\ConfigMirrorService::setExcluded([], $items);
+        echo 'Excluidos de la copia: ' . (implode(', ', $list) ?: 'ninguno') . "\n";
+        break;
+
     case 'apply-master-caddyfile':
         // En el que manda: poner las webs del Caddyfile del master anterior que no se
         // pusieron al promover (validando con el entorno real de Caddy).

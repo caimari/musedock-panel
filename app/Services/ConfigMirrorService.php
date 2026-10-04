@@ -159,6 +159,19 @@ final class ConfigMirrorService
             return ['ok' => false, 'applied' => false, 'actions' => [], 'issues' => ['El master no devolvió su configuración: ' . ($cfg['error'] ?? $r['error'] ?? '?') . ' (¿panel del master anterior a 1.0.242?)']];
         }
 
+        // Lo que este slave no debe copiar (propio de la máquina del master, p. ej. el
+        // cambio de líneas WAN o el ventilador de una GPU): ni se copia ni se avisa.
+        $excluded = self::excluded();
+        $skipped = [];
+        foreach (['supervisor' => 'supervisor/', 'cron_d' => 'cron.d/', 'crontabs' => 'crontab:', 'fpm_pools' => 'php-fpm ', 'systemd' => 'systemd/'] as $k => $prefix) {
+            foreach (array_keys((array)($cfg[$k] ?? [])) as $name) {
+                if (in_array($prefix . $name, $excluded, true)) {
+                    unset($cfg[$k][$name]);
+                    $skipped[] = $prefix . $name;
+                }
+            }
+        }
+
         $state = self::state();
         $actions = [];
         $issues = [];
@@ -179,16 +192,38 @@ final class ConfigMirrorService
             if ($changed || $issues) {
                 LogService::log('cluster.mirror', 'run', count($changed) . ' cambios, ' . count($issues) . ' avisos');
             }
-            if ($issues && (time() - (int)Settings::get('cluster_config_mirror_alert_at', '0')) > 3600) {
-                Settings::set('cluster_config_mirror_alert_at', (string)time());
+            // Se avisa cuando la lista de problemas CAMBIA (antes, cada hora mientras siguiera:
+            // dos servicios propios de Filemon habrían mandado 24 correos al día).
+            $hash = $issues ? md5(implode("\n", $issues)) : '';
+            if ($hash !== '' && $hash !== Settings::get('cluster_config_mirror_alert_hash', '')) {
                 try {
                     NotificationService::send('Cluster: la copia de configuración del master tiene avisos',
-                        "Algunos elementos no se han copiado a este slave porque no pasaron la verificación:\n- " . implode("\n- ", $issues));
+                        "Algunos elementos no se han copiado a este slave porque no pasaron la verificación:\n- " . implode("\n- ", $issues)
+                        . "\n\nNo se repetirá mientras no cambie. Si alguno es propio de la máquina del master (p. ej. un servicio de su hardware),"
+                        . " exclúyelo de la copia: MCP config_mirror con exclude, o php bin/cluster-switch.php mirror-exclude <elemento>.",
+                        'config_mirror');
                 } catch (\Throwable) {
                 }
             }
+            Settings::set('cluster_config_mirror_alert_hash', $hash);
         }
-        return ['ok' => true, 'applied' => $apply, 'actions' => $actions, 'issues' => $issues];
+        return ['ok' => true, 'applied' => $apply, 'actions' => $actions, 'issues' => $issues, 'excluded' => $skipped];
+    }
+
+    /** Elementos excluidos de la copia en este slave, p. ej. "systemd/wan-failover.service", "cron.d/x", "crontab:usuario". */
+    public static function excluded(): array
+    {
+        $v = json_decode((string)Settings::get('cluster_config_mirror_exclude', '[]'), true);
+        return is_array($v) ? array_values(array_map('strval', $v)) : [];
+    }
+
+    public static function setExcluded(array $add, array $remove = []): array
+    {
+        $list = array_values(array_diff(array_unique(array_merge(self::excluded(), array_map('trim', $add))), array_map('trim', $remove)));
+        $list = array_values(array_filter($list, static fn($x) => (bool)preg_match('#^(systemd/|supervisor/|cron\.d/|crontab:|php-fpm )[A-Za-z0-9_.@/ -]+$#', $x)));
+        Settings::set('cluster_config_mirror_exclude', json_encode($list));
+        LogService::log('cluster.mirror', 'exclude', 'Excluidos de la copia: ' . (implode(', ', $list) ?: 'ninguno'));
+        return $list;
     }
 
     // ── Supervisor ──

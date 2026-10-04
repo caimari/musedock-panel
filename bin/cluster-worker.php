@@ -248,6 +248,13 @@ if (Settings::get('cluster_fenced', '0') !== '1' && time() - (int)@filemtime($wp
     @mkdir(dirname($wpMark), 0755, true);
     @touch($wpMark);
     try {
+        // Registro de accesos de los hostings (tráfico web del monitor, ancho de banda por
+        // hosting y fail2ban de WordPress): a un nodo que recibió las webs por sincronización
+        // o relevo le faltaba.
+        $al = \MuseDockPanel\Services\SystemService::ensureHostingAccessLogAll();
+        if (!empty($al['added']) || ($al['logger'] ?? '') === 'creado' || empty($al['ok'])) {
+            logMsg('Registro de accesos de hostings: ' . json_encode($al, JSON_UNESCAPED_UNICODE));
+        }
         $wp = \MuseDockPanel\Services\WordPressHardenService::ensureAll();
         if ($wp['fixed'] || $wp['locked']) {
             logMsg('Blindar WordPress: reglas al día en ' . implode(', ', $wp['fixed']) . ($wp['locked'] ? '; código cerrado otra vez en ' . implode(', ', $wp['locked']) : ''));
@@ -515,7 +522,7 @@ if (Settings::get('mail_enabled', '0') === '1' && Settings::get('cluster_role', 
                     "{$count} accion(es) de mail llevan mas de 24h pausadas. Primer nodo: " .
                     ($first['node_name'] ?? ('#' . ($first['node_id'] ?? '?'))) .
                     ". Motivo: " . ($first['paused_reason'] ?? '?'),
-                    'warning'
+                    'mail_queue'
                 );
                 Settings::set('mail_queue_paused_alert_last', (string)time());
             }

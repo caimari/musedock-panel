@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.304',
+                'date' => '2026-10-04',
+                'badge' => 'warning',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Monitor sin trafico web en nodos que recibieron las webs por sincronizacion o relevo: el registro de accesos de Caddy se asegura cada 30 min para todos los hostings (tambien ancho de banda por hosting y fail2ban de WordPress)', 'Copia de configuracion del master: avisa solo cuando cambia la lista (antes cada hora) y se pueden excluir elementos propios del master (MCP config_mirror exclude, cluster-switch mirror-exclude)'],
+                        'en' => ['Monitor web traffic missing on nodes that got sites via sync/failover: hosting access log ensured every 30 min', 'Config mirror warnings only when the list changes; items can be excluded from the copy'],
+                    ],
+                    'added' => [
+                        'es' => ['MCP monitor_stats: estadisticas de un servidor (media, pico, p95) por periodo y trafico por hosting, con node', 'Avisos: se pueden silenciar cola de correo pausada y replica con problemas', 'Ajustes > Avisos en una copia: explica que se cambia en el master y enlaza a su pagina'],
+                        'en' => ['Alerts: mail queue and replication types can be muted', 'Settings > Alerts on a replica links to the master'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.303',
                 'date' => '2026-10-04',
                 'badge' => 'warning',

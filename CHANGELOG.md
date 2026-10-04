@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.304] — 2026-10-04 — Tráfico web en el monitor de cualquier nodo; estadísticas por MCP; avisos de correo silenciables
+
+### Arreglado
+- **Monitor sin "Web Bandwidth" ni "Web Requests" en Filemon:** el registro de accesos de los hostings (`/var/log/caddy/hosting-access.log`) solo se configuraba al crear la ruta de un hosting. En un nodo que recibió las webs por sincronización o por un relevo, faltaba. Por eso tampoco había ancho de banda por hosting, ni el fail2ban de WordPress veía los ataques. Ahora el cluster-worker lo asegura cada 30 min en todos los nodos, para todos los hostings, subdominios y alias, y solo escribe en Caddy lo que falta.
+- **"La copia de configuración del master tiene avisos" se repetía cada hora** mientras no cambiara nada (dos servicios propios de Filemon habrían mandado 24 correos al día). Ahora avisa solo cuando cambia la lista. Además se pueden **excluir de la copia** elementos propios de la máquina del master (p. ej. `systemd/wan-failover.service`): ni se copian ni avisan. Se hace con MCP `config_mirror` (`exclude`/`include`) o con `php bin/cluster-switch.php mirror-exclude|mirror-include <elemento>`, y el aviso es silenciable en Avisos.
+
+### Añadido
+- **MCP `monitor_stats`** (lectura, con `node`): estadísticas de un servidor en 1h, 6h, 24h, 7d o 30d. Para cada métrica (CPU, RAM, discos, red, GPU, tráfico web) da media, pico, p95 y último valor; además, el tráfico web por hosting en el periodo y en el mes.
+- **Avisos:** también se pueden silenciar "Cola de correo pausada" y "Réplica con problemas" (este último, mejor no).
+- **Ajustes → Avisos en una copia** explica que las reglas se cambian en el master y enlaza a su página. La copia pregunta al master su nombre de panel (`panel_hostname`, nuevo en `query-local-state`).
+
 ## [1.0.303] — 2026-10-04 — Análisis de WordPress: lo que se le escapaba en filmsinfest
 
 ### Arreglado

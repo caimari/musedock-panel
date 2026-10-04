@@ -1194,6 +1194,81 @@ CONF;
      * Ensure the 'hosting-access' logger exists in Caddy and register domains to use it.
      * Writes all hosting access logs to /var/log/caddy/hosting-access.log for Fail2Ban.
      */
+    /**
+     * El registro de accesos de los hostings (/var/log/caddy/hosting-access.log) solo se
+     * configuraba al crear la ruta de un hosting. En un nodo cuyas webs llegaron por
+     * sincronización o por un relevo (Filemon, 2026-10-04) faltaba, y el monitor no tenía
+     * tráfico web ni el ancho de banda por hosting, ni fail2ban de WordPress veía nada.
+     * Esto lo asegura para todos los hostings, subdominios y alias, y solo escribe en
+     * Caddy lo que falte (de una vez). Lo llama el cluster-worker cada 30 min.
+     */
+    public static function ensureHostingAccessLogAll(): array
+    {
+        $api = rtrim((string)((require PANEL_ROOT . '/config/panel.php')['caddy']['api_url'] ?? 'http://localhost:2019'), '/');
+        $get = static function (string $path) use ($api) {
+            $ch = curl_init($api . $path);
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
+            $b = (string)curl_exec($ch);
+            $c = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            return $c === 200 ? json_decode($b, true) : false;
+        };
+        $send = static function (string $method, string $path, $body) use ($api): int {
+            $ch = curl_init($api . $path);
+            curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_POSTFIELDS => json_encode($body, JSON_UNESCAPED_SLASHES),
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'], CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
+            curl_exec($ch);
+            $c = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            return $c;
+        };
+        if ($get('/config/apps/http/servers/srv0') === false) {
+            return ['ok' => false, 'error' => 'Caddy no responde o no tiene srv0'];
+        }
+        $out = ['ok' => true, 'logger' => 'ok', 'added' => 0];
+        $logger = $get('/config/logging/logs/hosting-access');
+        if (!is_array($logger) || empty($logger['writer'])) {
+            self::ensureHostingAccessLog($api, []); // definición del registro + excluirlo del general
+            $out['logger'] = 'creado';
+        }
+        $hosts = [];
+        $add = static function (string $d) use (&$hosts): void {
+            foreach (self::hostsWithWww(strtolower(trim($d))) as $h) {
+                if ($h !== '') {
+                    $hosts[$h] = true;
+                }
+            }
+        };
+        foreach ([['hosting_accounts', 'domain'], ['hosting_subdomains', 'subdomain'], ['hosting_domain_aliases', 'domain'], ['hosting_domains', 'domain']] as [$t, $c]) {
+            try {
+                foreach (\MuseDockPanel\Database::fetchAll("SELECT {$c} AS d FROM {$t}") as $r) {
+                    $add((string)$r['d']);
+                }
+            } catch (\Throwable) {
+                // tabla que no existe en este nodo
+            }
+        }
+        $logs = $get('/config/apps/http/servers/srv0/logs');
+        $names = is_array($logs) ? (array)($logs['logger_names'] ?? []) : [];
+        $before = count($names);
+        foreach (array_keys($hosts) as $h) {
+            if (!isset($names[$h])) {
+                $names[$h] = ['hosting-access'];
+            }
+        }
+        $out['added'] = count($names) - $before;
+        if ($out['added'] > 0) {
+            $code = is_array($logs)
+                ? $send('PATCH', '/config/apps/http/servers/srv0/logs/logger_names', $names)
+                : $send('PUT', '/config/apps/http/servers/srv0/logs', ['logger_names' => $names]);
+            $out['ok'] = $code >= 200 && $code < 300;
+            if (!$out['ok']) {
+                $out['error'] = "Caddy respondió HTTP {$code}";
+            }
+        }
+        return $out;
+    }
+
     public static function ensureHostingAccessLog(string $caddyApi, array $domains): void
     {
         // 1) Ensure the logger definition exists

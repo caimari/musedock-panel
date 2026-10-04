@@ -308,9 +308,11 @@ final class McpClusterTools
             'config_mirror' => [
                 'write' => true,
                 'title' => 'Copia de la configuración del sistema desde el master',
-                'description' => 'En un SLAVE: copia del master lo que vive fuera de /var/www y hace falta para un relevo: programas de supervisor, tareas cron (crontabs y /etc/cron.d), webs fijas del Caddyfile y pools de PHP-FPM. Lo adapta al papel de reserva (programas con autostart=false, crons desactivados) y lo verifica antes de aplicar (ejecutable/carpeta/usuario, sintaxis de cron, caddy validate, php-fpm -t); lo que no pasa se omite y se avisa. Nunca borra: lo que el master ya no tiene se aparta con .removed-by-mirror. Caddy no se recarga (el Caddyfile se aplica al promover). Al promover, el panel enciende lo copiado; al degradar, lo apaga. Sin apply: muestra qué haría y el estado. enable=true/false activa o desactiva la copia automática cada 5 minutos. Requiere "Permitir acciones que modifican" para aplicar.',
+                'description' => 'En un SLAVE: copia del master lo que vive fuera de /var/www y hace falta para un relevo: programas de supervisor, tareas cron (crontabs y /etc/cron.d), webs fijas del Caddyfile y pools de PHP-FPM. Lo adapta al papel de reserva (programas con autostart=false, crons desactivados) y lo verifica antes de aplicar (ejecutable/carpeta/usuario, sintaxis de cron, caddy validate, php-fpm -t); lo que no pasa se omite y se avisa. Nunca borra: lo que el master ya no tiene se aparta con .removed-by-mirror. Caddy no se recarga (el Caddyfile se aplica al promover). Al promover, el panel enciende lo copiado; al degradar, lo apaga. Sin apply: muestra qué haría y el estado. enable=true/false activa o desactiva la copia automática cada 5 minutos. exclude/include: elementos propios de la máquina del master que este slave no debe copiar (p. ej. "systemd/wan-failover.service", "supervisor/x.conf", "cron.d/x", "crontab:usuario", "php-fpm 8.3/x.conf"); ni se copian ni avisan. Requiere "Permitir acciones que modifican" para aplicar.',
                 'inputSchema' => $o([
                     'enable' => ['type' => 'boolean', 'description' => 'Activar (true) o desactivar (false) la copia automática cada 5 min'],
+                    'exclude' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Elementos a excluir de la copia'],
+                    'include' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Elementos a volver a copiar'],
                     'apply' => $apply,
                 ]),
             ],
@@ -1824,7 +1826,15 @@ final class McpClusterTools
         $status = [
             'automatic_every_5_min' => \MuseDockPanel\Settings::get('cluster_config_mirror', '0') === '1',
             'last_run' => json_decode(\MuseDockPanel\Settings::get('cluster_config_mirror_last', 'null'), true),
+            'excluded' => $svc::excluded(),
         ];
+        if (!empty($args['exclude']) || !empty($args['include'])) {
+            if (empty($args['apply'])) {
+                return ['applied' => false, 'status' => $status, 'would_exclude' => (array)($args['exclude'] ?? []), 'would_include' => (array)($args['include'] ?? []),
+                    'next' => 'Repite con apply=true para guardarlo.'];
+            }
+            $status['excluded'] = $svc::setExcluded((array)($args['exclude'] ?? []), (array)($args['include'] ?? []));
+        }
         if (empty($args['apply'])) {
             $dry = $svc::run(false);
             return ['applied' => false, 'status' => $status, 'would_do' => $dry['actions'], 'issues' => $dry['issues'],

@@ -1112,6 +1112,7 @@ class ClusterApiController
             'ok'   => true,
             'state' => [
                 'hostname'                    => (string)gethostname(),
+                'panel_hostname'              => (string)\MuseDockPanel\Settings::get('panel_hostname', ''),
                 'failover_state'              => Settings::get('failover_state', 'normal'),
                 'failover_iface_mode'         => Settings::get('failover_iface_mode', 'normal'),
                 'failover_dns_changed_locally' => Settings::get('failover_dns_changed_locally', '0') === '1',
