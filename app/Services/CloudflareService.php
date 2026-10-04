@@ -811,6 +811,37 @@ class CloudflareService
     /**
      * Find zone ID for a domain from configured accounts.
      */
+    /**
+     * Ajuste de una zona (ssl, ssl_automatic_mode, always_use_https, min_tls_version…).
+     * Necesita en el token "Zona → Configuración de zona (Zone Settings): Leer".
+     */
+    public static function getZoneSetting(string $token, string $zoneId, string $setting): array
+    {
+        $r = self::apiRequest($token, 'GET', "/zones/{$zoneId}/settings/{$setting}");
+        return !empty($r['success'])
+            ? ['ok' => true, 'value' => $r['result']['value'] ?? null, 'editable' => (bool)($r['result']['editable'] ?? true)]
+            : ['ok' => false, 'error' => self::parseError($r)];
+    }
+
+    /** Cambia un ajuste de zona. Necesita "Zone Settings: Editar". */
+    public static function setZoneSetting(string $token, string $zoneId, string $setting, $value): array
+    {
+        $r = self::apiRequest($token, 'PATCH', "/zones/{$zoneId}/settings/{$setting}", ['value' => $value]);
+        return !empty($r['success']) ? ['ok' => true, 'value' => $r['result']['value'] ?? $value] : ['ok' => false, 'error' => self::parseError($r)];
+    }
+
+    /** Reglas de una fase (http_config_settings = Configuration Rules, http_request_origin = Origin Rules). */
+    public static function getPhaseRules(string $token, string $zoneId, string $phase): array
+    {
+        $r = self::apiRequest($token, 'GET', "/zones/{$zoneId}/rulesets/phases/{$phase}/entrypoint");
+        if (!empty($r['success'])) {
+            return ['ok' => true, 'rules' => (array)($r['result']['rules'] ?? [])];
+        }
+        $err = self::parseError($r);
+        // Sin reglas de esa fase, Cloudflare responde "not found": no es un error.
+        return stripos($err, 'not found') !== false || stripos($err, 'could not find') !== false ? ['ok' => true, 'rules' => []] : ['ok' => false, 'error' => $err];
+    }
+
     public static function findZoneForDomain(string $domain): ?array
     {
         $accounts = self::getConfiguredAccounts();

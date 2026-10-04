@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.306',
+                'date' => '2026-10-04',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['MCP cf_zone_ssl: modo SSL de las zonas de Cloudflare, si esta en Automatico y reglas que lo cambian', 'MCP cf_zone_ssl_set: poner una zona en Full (strict) y sacarla de Automatico, comprobando antes el certificado del origen', 'cloudflare_tokens dice si el token puede leer el modo SSL'],
+                        'en' => ['MCP cf_zone_ssl and cf_zone_ssl_set: read and set Cloudflare zone SSL mode (Full strict), with origin certificate check'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.305',
                 'date' => '2026-10-04',
                 'badge' => 'info',

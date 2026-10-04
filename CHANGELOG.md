@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.306] — 2026-10-04 — Modo SSL de Cloudflare desde el MCP
+
+### Añadido
+- **MCP `cf_zone_ssl`** (lectura): modo SSL/TLS de la zona de un dominio, o de todas con `all`. Indica si está en "Automático", "Always Use HTTPS", el TLS mínimo y las Configuration/Origin Rules que cambian el SSL o el puerto hacia el origen, con un veredicto ("flexible" = bucle con redirección en el origen).
+- **MCP `cf_zone_ssl_set`:** pone una zona en "Full (strict)" (o "Full") y la saca de "Automático" para que Cloudflare no la cambie sola. Antes de strict comprueba que este servidor tiene un certificado válido para ese dominio (si no, error 526); se puede saltar con `force`. No toca el proxy naranja. Requiere "Permitir editar DNS en Cloudflare" y, en el token, "Zone Settings: Edit".
+- **`cloudflare_tokens`** dice si cada token puede leer el modo SSL de las zonas.
+
 ## [1.0.305] — 2026-10-04 — Correos de aviso que se explican solos
 
 ### Añadido

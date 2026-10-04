@@ -91,7 +91,7 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
                 <input class="form-check-input" type="checkbox" role="switch" id="mcp_allow_dns" name="mcp_allow_dns" value="1"
                        <?= !empty($allowDns) ? 'checked' : '' ?> <?= !$hasToken ? 'disabled' : '' ?>>
                 <label class="form-check-label" for="mcp_allow_dns">Permitir editar DNS en Cloudflare
-                    <span class="text-muted small">(crear y modificar registros A, AAAA, CNAME, TXT y MX con <code>dns_record_set</code>; <strong>nunca borra</strong>; requiere también la opción anterior)</span></label>
+                    <span class="text-muted small">(crear y modificar registros A, AAAA, CNAME, TXT y MX con <code>dns_record_set</code>, y poner el modo SSL de una zona en Full o Full (strict) con <code>cf_zone_ssl_set</code>; <strong>nunca borra</strong> ni toca el proxy naranja; requiere también la opción anterior)</span></label>
             </div>
             <div class="form-check form-switch m-0">
                 <input class="form-check-input" type="checkbox" role="switch" id="mcp_allow_forwarded" name="mcp_allow_forwarded" value="1"
