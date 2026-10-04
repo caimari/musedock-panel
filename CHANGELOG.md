@@ -2,6 +2,20 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.299] — 2026-10-04 — Migraciones que no se ejecutaban; diagnóstico por MCP
+
+### Arreglado
+- **Las migraciones escritas como clase (`return new class { up() }`) no se ejecutaban nunca**, y aun así se apuntaban como hechas. Son 8; en los nodos cuyo esquema no venía de la plantilla faltaban tablas (en Nitro, `hosting_subdomains`: la página Dominios daba 500). Ahora:
+  - el ejecutor llama a `up()`;
+  - una migración de reparación **crea solo lo que falte** (`hosting_subdomains`, `hosting_bandwidth`, `hosting_subdomain_bandwidth`, `replication_users`, `replication_authorized_ips` y columnas de subdominios), con las definiciones de `schema.sql`.
+  
+  No se reejecutan aquellas 8: algunas renombran o quitan columnas o cambian ajustes de réplica, y se toca solo lo que no existe.
+- **`page_check`, `panel_errors` y `witnesses_status` aceptan el argumento `node`** para ejecutarse en otro nodo del cluster.
+
+### Añadido
+- **MCP `page_check`** (solo lectura): carga una página del panel como administrador y devuelve el código HTTP y el error real (excepción, fatal o aviso, con fichero y línea). Con `node`, en otro nodo.
+- **MCP `panel_errors`** (solo lectura): últimas líneas con error de los registros del panel (panel-error, panel, cluster-worker, failover-worker), con tokens y claves tapados.
+
 ## [1.0.298] — 2026-10-04 — Herramienta para ver el error real de una página
 
 ### Añadido

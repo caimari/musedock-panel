@@ -31,6 +31,7 @@ final class McpClusterTools
     public static function definitions(): array
     {
         $apply = ['type' => 'boolean', 'description' => 'false (por defecto) = solo devuelve el plan. true = lo ejecuta. Muestra primero el plan al usuario y pide su confirmación.'];
+        $nodeArg = ['node' => ['type' => 'string', 'description' => 'Opcional. Id o nombre de un nodo del cluster para ejecutarlo en él. Omitir = este servidor.']];
         $o = static fn(array $props, array $req = []) => array_filter([
             'type' => 'object', 'properties' => (object)$props, 'required' => $req ?: null, 'additionalProperties' => false,
         ], static fn($v) => $v !== null);
@@ -246,11 +247,23 @@ final class McpClusterTools
                     'apply' => $apply,
                 ]),
             ],
+            'page_check' => [
+                'write' => false,
+                'title' => 'Comprobar una página del panel (error real)',
+                'description' => 'Solo lectura. Carga una página del panel (petición GET, como el navegador) como el primer administrador y devuelve el código HTTP y el error real si falla: excepción, error fatal o aviso de PHP, con fichero y línea. Para cuando una página da 500 y el registro de errores no dice nada. Con `node` se comprueba en otro nodo del cluster.',
+                'inputSchema' => $o(['path' => ['type' => 'string', 'description' => 'Ruta del panel, p. ej. /domains o /settings/cluster']] + $nodeArg, ['path']),
+            ],
+            'panel_errors' => [
+                'write' => false,
+                'title' => 'Últimos errores de los registros del panel',
+                'description' => 'Solo lectura. Las últimas líneas con error, excepción o fallo de los registros del panel (panel-error.log, panel.log, cluster-worker.log, failover-worker), con las cadenas largas que podrían ser tokens tapadas. Con `node` se mira en otro nodo.',
+                'inputSchema' => $o(['lines' => ['type' => 'integer', 'description' => 'Cuántas líneas por registro (por defecto 30, máx. 200)']] + $nodeArg, []),
+            ],
             'witnesses_status' => [
                 'write' => false,
                 'title' => 'Testigos externos y vigilante de entrada',
-                'description' => 'Solo lectura. Los testigos externos ("solo ojos") registrados en ESTE panel y si responden ahora: por cada uno, sus comprobaciones (qué dirección mira, si llega, latencia media y pérdidas). También el vigilante de entrada de este panel (qué servidores vigila, su entrada normal y alternativa, en qué modo está cada uno y cuántos registros DNS tiene movidos) y las alertas de testigos sin responder. Nunca muestra claves. Para registrar o quitar testigos: Ajustes → Testigos o bin/witness.php.',
-                'inputSchema' => $o([]),
+                'description' => 'Solo lectura. Los testigos externos ("solo ojos") registrados en ESTE panel y si responden ahora: por cada uno, sus comprobaciones (qué dirección mira, si llega, latencia media y pérdidas). También el vigilante de entrada de este panel (qué servidores vigila, su entrada normal y alternativa, en qué modo está cada uno y cuántos registros DNS tiene movidos) y las alertas de testigos sin responder. Nunca muestra claves. Para registrar o quitar testigos: Ajustes → Testigos o bin/witness.php. Con `node`, los de otro nodo.',
+                'inputSchema' => $o($nodeArg),
             ],
             'failover_dns_plan' => [
                 'write' => false,
@@ -373,6 +386,8 @@ final class McpClusterTools
             'config_mirror'         => self::configMirror($args),
             'failover_dns_plan'     => self::dnsPlan(),
             'witnesses_status'      => self::witnessesStatus(),
+            'page_check'            => self::pageCheck($args),
+            'panel_errors'          => self::panelErrors($args),
             'server_profile'        => self::serverProfile(),
             'server_profile_set'    => self::serverProfileSet($args),
             'monitor_status'        => self::monitorStatus(),
@@ -1006,6 +1021,45 @@ final class McpClusterTools
             ];
         }
         return ['applied' => true, 'plan' => $plan, 'test_sent' => $test, 'status' => self::notifyStatus()];
+    }
+
+    // ── Diagnóstico de páginas y registros del panel (solo lectura) ────────
+
+    private static function pageCheck(array $args): array
+    {
+        $path = (string)($args['path'] ?? '');
+        if (!preg_match('#^/[A-Za-z0-9/_.\-]*(\?[A-Za-z0-9_=&%.\-]*)?$#', $path) || str_contains($path, '..')) {
+            throw new \InvalidArgumentException('Ruta no válida (p. ej. /domains).');
+        }
+        $out = (string)shell_exec('timeout 90 php ' . escapeshellarg(PANEL_ROOT . '/bin/page-check.php') . ' ' . escapeshellarg($path) . ' 2>&1');
+        $tail = substr($out, (int)strrpos($out, '== ' . explode('?', $path)[0]));
+        preg_match('/HTTP (\d+), (\d+) bytes/', $tail, $m);
+        $lines = array_values(array_filter(array_slice(explode("\n", trim($tail)), 1)));
+        return ['path' => $path, 'http' => isset($m[1]) ? (int)$m[1] : null, 'bytes' => isset($m[2]) ? (int)$m[2] : null,
+                'ok' => $lines === ['Sin errores de PHP.'], 'problems' => $lines === ['Sin errores de PHP.'] ? [] : $lines];
+    }
+
+    private static function panelErrors(array $args): array
+    {
+        $n = max(5, min(200, (int)($args['lines'] ?? 30)));
+        $logs = [
+            'panel-error.log' => PANEL_ROOT . '/storage/logs/panel-error.log',
+            'panel.log' => PANEL_ROOT . '/storage/logs/panel.log',
+            'cluster-worker.log' => PANEL_ROOT . '/storage/logs/cluster-worker.log',
+            'failover-worker.log' => PANEL_ROOT . '/storage/logs/failover-worker.log',
+        ];
+        $out = [];
+        foreach ($logs as $name => $f) {
+            if (!is_file($f)) {
+                continue;
+            }
+            $raw = (string)shell_exec('tail -n 4000 ' . escapeshellarg($f) . " | grep -iE 'error|exception|fatal|fall[oó]|warning' | tail -n {$n}");
+            // Tapar lo que podría ser un token o una clave (cadenas largas sin espacios).
+            $raw = preg_replace(['/\b[A-Za-z0-9_\-]{32,}\b/', '/(password|pass|token|secret|key)=\S+/i'], ['***', '$1=***'], $raw);
+            $lines = array_values(array_filter(explode("\n", trim((string)$raw))));
+            $out[$name] = ['lines' => $lines, 'modified' => date('Y-m-d H:i:s', (int)filemtime($f))];
+        }
+        return ['logs' => $out, 'note' => 'Solo líneas con error/excepción/fallo/aviso de las últimas 4000 de cada registro.'];
     }
 
     // ── Testigos externos y vigilante de entrada (solo lectura) ──────────

@@ -97,6 +97,10 @@ class MigrationService
 
                 if (is_callable($migration)) {
                     $migration($pdo);
+                } elseif (is_object($migration) && method_exists($migration, 'up')) {
+                    // Migraciones escritas como clase (return new class { up() }): antes no se
+                    // ejecutaban y se apuntaban como hechas igualmente.
+                    $migration->up();
                 }
                 // Legacy support: if the file just runs SQL directly (like the old format),
                 // it has already executed by the time require returns.

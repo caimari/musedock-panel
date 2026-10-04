@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.299',
+                'date' => '2026-10-04',
+                'badge' => 'warning',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Las migraciones de tipo clase (up()) no se ejecutaban y se apuntaban como hechas: el ejecutor llama a up() y una migracion de reparacion crea solo las tablas que falten (Dominios 500 en Nitro)'],
+                        'en' => ['Class-style migrations (up()) never ran but were recorded: runner now calls up() and a repair migration creates only missing tables'],
+                    ],
+                    'added' => [
+                        'es' => ['MCP page_check: carga una pagina como administrador y devuelve el error real', 'MCP panel_errors: ultimos errores de los registros del panel con secretos tapados', 'page_check, panel_errors y witnesses_status aceptan node (otro nodo)'],
+                        'en' => ['MCP page_check: loads a panel page as admin and returns the real error', 'MCP panel_errors: latest errors from panel logs with secrets masked'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.298',
                 'date' => '2026-10-04',
                 'badge' => 'info',
