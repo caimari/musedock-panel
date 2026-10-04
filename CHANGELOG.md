@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.297] — 2026-10-04 — Instalaciones nuevas completas; avisos de entrada más claros
+
+### Arreglado
+- **El instalador no ejecutaba las migraciones**: hacía `php fichero.php`, pero las migraciones son funciones que hay que llamar, así que no pasaba nada. Ahora usa `bin/migrate.php`, que las ejecuta y las apunta.
+- **La plantilla de instalación nueva (`schema.sql`) creaba `hosting_domain_aliases` sin `customer_id` ni `target_url`** (redirecciones sueltas), y la página Dominios podía dar 500. Plantilla corregida, más una migración que añade lo que falte en los nodos ya instalados. Es idempotente y no borra nada.
+- **Entrada alternativa: "este Caddy no tiene el módulo de Cloudflare" salía como error** (`ok: false`). Ahora es un aviso: el certificado del nombre de comprobación se renueva igual por TLS-ALPN (el 443 llega al servidor tal cual por el proxy).
+
 ## [1.0.296] — 2026-10-04 — Testigos desde el panel; los modos del relevo, explicados; la copia nunca se queda con papeles viejos
 
 ### Arreglado

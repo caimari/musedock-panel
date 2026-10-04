@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.297',
+                'date' => '2026-10-04',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['El instalador ejecuta de verdad las migraciones (bin/migrate.php)', 'schema.sql: hosting_domain_aliases con customer_id y target_url + migracion de reparacion (pagina Dominios 500 en instalaciones nuevas)', 'Entrada alternativa: sin modulo de Cloudflare es un aviso, no un error (renueva por TLS-ALPN)'],
+                        'en' => ['Installer really runs migrations (bin/migrate.php)', 'schema.sql: hosting_domain_aliases with customer_id/target_url + repair migration', 'Alternate ingress: missing Cloudflare module is a warning, not an error'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.296',
                 'date' => '2026-10-04',
                 'badge' => 'info',

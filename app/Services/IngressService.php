@@ -145,8 +145,13 @@ class IngressService
         if ($tls !== null) {
             $done['tls'] = $tls;
         }
+        $warnings = array_values(array_filter(array_map(static fn($r) => $r['warning'] ?? '', $done)));
+        unset($done['tls']['warning']);
+        if (isset($done['tls']) && !isset($done['tls']['error']) && count($done['tls']) === 1) {
+            unset($done['tls']);   // solo era el aviso: no hubo cambio
+        }
         $errors = array_filter($done, static fn($r) => empty($r['ok']));
-        return ['ok' => !$errors, 'changed' => array_keys($done), 'errors' => array_map(static fn($r) => $r['error'] ?? '', $errors)];
+        return ['ok' => !$errors, 'changed' => array_keys($done), 'errors' => array_map(static fn($r) => $r['error'] ?? '', $errors), 'warnings' => $warnings];
     }
 
     /**
@@ -176,10 +181,12 @@ class IngressService
             }
         }
         if (!SystemService::isDnsProviderInstalled('cloudflare')) {
-            return ['ok' => false, 'error' => 'este Caddy no tiene el módulo dns.providers.cloudflare: el certificado de ' . $name . ' irá por HTTP (necesita el proxy abierto)'];
+            // Aviso, no error: el certificado se renueva igual por TLS-ALPN (el 443 llega al
+            // servidor tal cual por el proxy de SNI).
+            return ['ok' => true, 'warning' => 'este Caddy no tiene el módulo dns.providers.cloudflare: el certificado de ' . $name . ' se renovará por TLS-ALPN (443), no por DNS'];
         }
         if (!str_contains((string)@file_get_contents('/etc/default/caddy'), 'CLOUDFLARE_API_TOKEN')) {
-            return ['ok' => false, 'error' => 'falta CLOUDFLARE_API_TOKEN en /etc/default/caddy: el certificado de ' . $name . ' irá por HTTP'];
+            return ['ok' => true, 'warning' => 'falta CLOUDFLARE_API_TOKEN en /etc/default/caddy: el certificado de ' . $name . ' se renovará por TLS-ALPN (443), no por DNS'];
         }
         $mine = [
             'subjects' => [$name],

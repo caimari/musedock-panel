@@ -233,7 +233,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sub_bw_sub_ts ON hosting_subdomain_bandwid
 -- Domain aliases (redirects for hosting accounts)
 CREATE TABLE IF NOT EXISTS hosting_domain_aliases (
     id SERIAL PRIMARY KEY,
-    hosting_account_id INTEGER NOT NULL REFERENCES hosting_accounts(id) ON DELETE CASCADE,
+    -- NULL = redirección suelta (sin hosting)
+    hosting_account_id INTEGER REFERENCES hosting_accounts(id) ON DELETE CASCADE,
+    customer_id INTEGER DEFAULT NULL REFERENCES customers(id) ON DELETE SET NULL,
+    target_url VARCHAR(500) DEFAULT NULL,
     domain VARCHAR(255) NOT NULL UNIQUE,
     type VARCHAR(10) NOT NULL DEFAULT 'alias' CHECK (type IN ('alias', 'redirect')),
     redirect_code INTEGER NOT NULL DEFAULT 301 CHECK (redirect_code IN (301, 302)),

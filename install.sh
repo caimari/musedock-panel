@@ -1436,14 +1436,10 @@ if [ "$REPAIR_MODE" = true ]; then
         if [ -d "$MIGRATION_DIR" ]; then
             MIGRATION_COUNT=0
             EXISTING_MIGRATIONS=$(PGPASSWORD="${DB_PASS}" timeout 5 psql -U "${DB_USER}" -h 127.0.0.1 -p "${DB_WORKING_PORT}" -d "${DB_NAME}" -tAc "SELECT migration FROM panel_migrations;" 2>/dev/null || echo "")
-            for mig_file in "$MIGRATION_DIR"/*.php; do
-                [ -f "$mig_file" ] || continue
-                mig_name=$(basename "$mig_file")
-                if echo "$EXISTING_MIGRATIONS" | grep -q "$mig_name" 2>/dev/null; then
-                    continue
-                fi
-                php "$mig_file" 2>/dev/null && MIGRATION_COUNT=$((MIGRATION_COUNT + 1)) && ok "  + $mig_name"
-            done
+            # Las migraciones son funciones (return function(PDO $pdo)): "php fichero" no
+            # ejecutaba nada. bin/migrate.php las ejecuta y las apunta en panel_migrations.
+            MIG_OUT=$(php "${PANEL_DIR}/bin/migrate.php" 2>&1) || warn "Alguna migración falló: revisa php bin/migrate.php --status"
+            MIGRATION_COUNT=$(echo "$MIG_OUT" | grep -c "✓" || true)
             ok "$(t update_migrations) ($MIGRATION_COUNT pendientes)"
         fi
     else
@@ -1926,15 +1922,10 @@ elif [ "$UPDATE_ONLY" = true ]; then
         # Check which migrations have already been run
         EXISTING_MIGRATIONS=$(PGPASSWORD="${DB_PASS}" timeout 5 psql -U "${DB_USER}" -h 127.0.0.1 -p "${UPDATE_DB_PORT}" -d "${DB_NAME}" -tAc "SELECT migration FROM panel_migrations;" 2>/dev/null || echo "")
 
-        for mig_file in "$MIGRATION_DIR"/*.php; do
-            [ -f "$mig_file" ] || continue
-            mig_name=$(basename "$mig_file")
-            if echo "$EXISTING_MIGRATIONS" | grep -q "$mig_name" 2>/dev/null; then
-                continue  # Already executed
-            fi
-            # Run migration via PHP
-            php "$mig_file" 2>/dev/null && MIGRATION_COUNT=$((MIGRATION_COUNT + 1)) && ok "  + $mig_name"
-        done
+        # Las migraciones son funciones (return function(PDO $pdo)): "php fichero" no
+        # ejecutaba nada. bin/migrate.php las ejecuta y las apunta en panel_migrations.
+        MIG_OUT=$(php "${PANEL_DIR}/bin/migrate.php" 2>&1) || warn "Alguna migración falló: revisa php bin/migrate.php --status"
+        MIGRATION_COUNT=$(echo "$MIG_OUT" | grep -c "✓" || true)
 
         if [ "$MIGRATION_COUNT" -gt 0 ]; then
             ok "$(t update_migrations) ($MIGRATION_COUNT)"
