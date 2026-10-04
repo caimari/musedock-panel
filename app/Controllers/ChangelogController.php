@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.293',
+                'date' => '2026-10-04',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'es' => ['Agente testigo por HTTPS (tls_cert/tls_key, huella fijada por el panel); en IP publica sin TLS no arranca'],
+                        'en' => ['Witness agent over HTTPS (tls_cert/tls_key, fingerprint pinned by the panel); refuses public IP without TLS'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.292',
                 'date' => '2026-10-04',
                 'badge' => 'info',

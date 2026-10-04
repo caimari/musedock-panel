@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.293] — 2026-10-04 — Agente testigo por HTTPS
+
+### Cambiado
+- **El agente testigo escucha por HTTPS** si su configuración trae `tls_cert` y `tls_key` (certificado propio; el panel fijará su huella SHA-256). El testigo debe consultarse por su **IP pública** desde fuera de la oficina: si se consulta por una VPN que pasa por la oficina, deja de responder justo cuando la oficina cae. Con IP pública sin TLS no arranca, para que la clave nunca vaya en claro.
+
 ## [1.0.292] — 2026-10-04 — Las webs del Caddyfile del master llegan de verdad al promover; agente testigo
 
 ### Arreglado

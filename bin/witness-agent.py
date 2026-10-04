@@ -16,6 +16,13 @@ Tipos de comprobación:
          certificado, pide la ruta y, si hay "expect", exige ese texto en la respuesta.
   tcp:   abre una conexión a host:port.
 
+Escucha por HTTPS si la configuración trae "tls_cert" y "tls_key" (recomendado: el testigo
+se consulta por su IP pública desde fuera de la oficina, y la clave no debe ir en claro). El
+certificado puede ser propio (autofirmado): el panel fija su huella SHA-256 al registrarlo.
+  openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
+    -subj "/CN=musedock-witness" -keyout key.pem -out cert.pem
+  Huella para el panel: openssl x509 -in cert.pem -noout -fingerprint -sha256
+
 Configuración: /etc/musedock-witness/config.json (permisos 600, dueño el usuario del
 servicio). Ejemplo:
 {
@@ -155,4 +162,12 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     threading.Thread(target=loop, daemon=True).start()
-    ThreadingHTTPServer((cfg.get("listen", "127.0.0.1"), int(cfg.get("port", 8447))), Handler).serve_forever()
+    httpd = ThreadingHTTPServer((cfg.get("listen", "127.0.0.1"), int(cfg.get("port", 8447))), Handler)
+    if cfg.get("tls_cert") and cfg.get("tls_key"):
+        sctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        sctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        sctx.load_cert_chain(cfg["tls_cert"], cfg["tls_key"])
+        httpd.socket = sctx.wrap_socket(httpd.socket, server_side=True)
+    elif not str(cfg.get("listen", "127.0.0.1")).startswith(("127.", "10.", "192.168.", "172.")):
+        sys.exit("config: para escuchar en una IP pública hacen falta tls_cert y tls_key (la clave no debe ir en claro)")
+    httpd.serve_forever()
