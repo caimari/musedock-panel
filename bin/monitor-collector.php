@@ -730,8 +730,9 @@ function checkAlert(string $host, string $type, string $message, float $value): 
             $body .= "\n\n{$details}";
         }
         \MuseDockPanel\Services\NotificationService::send(
-            "[MuseDock Monitor] {$type}",
-            $body
+            "[MuseDock Monitor] " . (\MuseDockPanel\Services\AlertPolicyService::TYPES[$type][0] ?? $type) . " ({$type})",
+            $body,
+            $type
         );
     } catch (\Throwable $e) {
         logMsg("Notification error: " . $e->getMessage());

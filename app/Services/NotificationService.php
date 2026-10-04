@@ -40,6 +40,7 @@ class NotificationService
         if (AlertPolicyService::muted($type)) {
             return;
         }
+        $message .= AlertPolicyService::emailFooter($type);
         $subject = self::tagSubject($subject);
         if (Settings::get('monitor_notify_email', '0') === '1') {
             self::sendEmail($subject, $message);
@@ -151,7 +152,7 @@ class NotificationService
 
         // Mark timestamp before send to avoid bursts on concurrent runs.
         Settings::set($settingKey, (string)$now);
-        return self::sendEmail($subject, $body);
+        return self::sendEmail($subject, $body . AlertPolicyService::emailFooter($eventKey));
     }
 
     // ─── Email ──────────────────────────────────────────────

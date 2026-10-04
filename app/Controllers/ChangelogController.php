@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.305',
+                'date' => '2026-10-04',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Cada correo de aviso explica que significa, que hacer y como silenciarlo; asuntos del monitor legibles', 'Se pueden silenciar reinicio del servidor y monitor sin medidas'],
+                        'en' => ['Alert emails explain what they mean, what to do and how to mute them; readable monitor subjects'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.304',
                 'date' => '2026-10-04',
                 'badge' => 'warning',

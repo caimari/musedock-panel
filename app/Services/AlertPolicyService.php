@@ -27,6 +27,8 @@ class AlertPolicyService
         'firewall_change'    => ['Cambio en el firewall', 'Reglas de ufw/iptables cambiadas fuera del panel.'],
         'public_exposure'    => ['Puerto expuesto', 'Un servicio sensible escucha abierto a internet.'],
         'login_anomaly'      => ['Acceso raro al panel', 'Entrada al panel desde un país o red poco habitual.'],
+        'server_reboot'      => ['Reinicio del servidor', 'El servidor se ha reiniciado.'],
+        'monitor_gap'        => ['Monitor sin medidas', 'El monitor estuvo un rato sin tomar medidas.'],
         'mail_node'          => ['Nodo de correo con problemas', 'Servicios de correo de un nodo sin responder (avisa solo si dura, ver abajo).'],
         'mail_queue'         => ['Cola de correo pausada', 'Altas/cambios de correo hacia un nodo llevan más de 24 h en pausa (el nodo no las recibe).'],
         'replication'        => ['Réplica con problemas', 'PostgreSQL, MariaDB o Redis de este nodo no replican bien (o se recuperan). Mejor no silenciarlo: un relevo podría perder datos.'],
@@ -34,6 +36,62 @@ class AlertPolicyService
         'config_mirror'      => ['Copia de configuración del master', 'En una copia: algo de la configuración del master no se pudo copiar (avisa solo cuando cambia la lista).'],
         'witness'            => ['Testigos', 'Un testigo externo no responde o vuelve.'],
     ];
+
+    /**
+     * Qué significa cada aviso y qué hacer, para el final del correo. Escrito para quien
+     * lo recibe, no para quien programa el panel.
+     */
+    public const EXPLAIN = [
+        'CPU_HIGH' => ['El procesador de este servidor lleva varios minutos seguidos por encima del límite.',
+            'Mira en el correo qué procesos gastan más. Si es una tarea puntual (copia, compilación), no hay que hacer nada. Si se repite cada día, conviene revisar ese proceso o subir el límite.'],
+        'RAM_HIGH' => ['La memoria de este servidor lleva varios minutos casi llena.',
+            'Mira qué procesos usan más memoria. Si llega al 100 %, el sistema puede cerrar programas (bases de datos, PHP). Reinicia el proceso que crece sin control o amplía la memoria.'],
+        'DISK_HIGH' => ['Un disco de este servidor está casi lleno. Si llega al 100 %, las bases de datos y las webs dejan de poder guardar datos.',
+            'Libera espacio (copias viejas, registros, ficheros temporales). Si ese disco está lleno a propósito (p. ej. un disco de trabajo), ponle su propio límite o quítale el aviso en Avisos → Discos.'],
+        'NET_HIGH' => ['Está entrando mucho tráfico de red en este servidor.',
+            'Si no esperabas tráfico (una descarga, una copia), puede ser un ataque: revisa las webs con más peticiones en el monitor.'],
+        'GPU_TEMP' => ['La tarjeta gráfica está más caliente de lo recomendado.', 'Revisa la ventilación y el ventilador de la tarjeta. Si sigue subiendo, para el trabajo que la usa.'],
+        'GPU_HIGH' => ['La tarjeta gráfica lleva un rato al máximo.', 'Normal si está haciendo un trabajo pesado (vídeo, IA). Si no, revisa qué la usa.'],
+        'security_hardening' => ['Algunos ajustes de seguridad del servidor no están como se recomienda (por ejemplo, SSH que acepta contraseña).',
+            'Si están así a propósito, márcalos como aceptados en Avisos → Hardening y no volverá a avisar. Si no, corrígelos (Ajustes → Seguridad). Solo vuelve a avisar si falla uno nuevo.'],
+        'config_drift' => ['Han cambiado ficheros de configuración sensibles (SSH, sudo, firewall…) fuera del panel.',
+            'Si lo hiciste tú o alguien de confianza, no hay que hacer nada. Si no sabes quién lo cambió, revísalo ya: puede ser una intrusión.'],
+        'firewall_change' => ['Han cambiado las reglas del firewall de este servidor fuera del panel.',
+            'Si lo hiciste tú (o un asistente con tu permiso), no hay que hacer nada. Si no, revisa el cambio que viene en el correo.'],
+        'public_exposure' => ['Un servicio delicado (base de datos, Redis, panel…) está abierto a todo internet.',
+            'Ciérralo en el firewall o limítalo a las IPs que lo necesitan (Ajustes → Firewall).'],
+        'login_anomaly' => ['Alguien ha entrado al panel desde un país o una red poco habitual.',
+            'Si fuiste tú (viaje, otra conexión), no hay que hacer nada. Si no, cambia tu contraseña y revisa los accesos.'],
+        'server_reboot' => ['Este servidor se ha reiniciado.', 'Si no lo reiniciaste tú, puede haber sido un corte de luz o del proveedor. Comprueba que las webs y el correo funcionan.'],
+        'monitor_gap' => ['El monitor estuvo un rato sin tomar medidas (el servidor estuvo muy ocupado o parado).', 'Normalmente no hay que hacer nada. Si se repite, revisa la carga del servidor.'],
+        'mail_node' => ['El correo de un servidor no responde bien desde hace unos minutos (puertos de correo, su panel o su base de datos).',
+            'Si en el correo pone que la API no respondió, suele ser la red o la VPN entre servidores, no el correo. Si dura, comprueba que puedes enviar y recibir. Al recuperarse llega otro aviso.'],
+        'mail_queue' => ['Hay cambios de correo (buzones, alias, dominios) que llevan más de un día sin poder llegar a otro servidor.',
+            'Comprueba que ese servidor está encendido y conectado. Mientras tanto, esos buzones no existen allí: en un relevo no funcionarían.'],
+        'replication' => ['Las bases de datos de este servidor no se están copiando bien desde el principal (o se han recuperado).',
+            'Mientras dure, un relevo podría perder datos. Revisa Ajustes → Replicación o pide failover_preflight por MCP.'],
+        'lsyncd' => ['La copia de ficheros de las webs hacia el otro servidor va mal (o se ha recuperado).',
+            'Mientras dure, el otro servidor no tiene los últimos cambios de las webs. Revisa Cluster → Archivos.'],
+        'witness' => ['Un testigo externo (el servidor que confirma las caídas antes de un relevo) no responde, o vuelve.',
+            'Si cae uno, decide el otro. Si caen todos, los relevos se deciden sin testigos. Comprueba que ese servidor está encendido.'],
+        'config_mirror' => ['Este servidor de reserva no ha podido copiar algo de la configuración del principal (un servicio, una tarea programada…).',
+            'Si es algo propio de la máquina principal (su hardware, sus líneas de internet), exclúyelo de la copia. Si no, instala lo que falta aquí para que el relevo funcione.'],
+    ];
+
+    /** Pie del correo: qué significa, qué hacer y cómo silenciarlo. '' si el tipo no tiene explicación. */
+    public static function emailFooter(string $type): string
+    {
+        $e = self::EXPLAIN[$type] ?? null;
+        if (!$e) {
+            return '';
+        }
+        $host = (string)(Settings::get('panel_hostname', '') ?: gethostname());
+        $port = (string)(Settings::get('panel_port', '8444') ?: '8444');
+        $label = self::TYPES[$type][0] ?? $type;
+        return "\n\n──────────\nQué significa: {$e[0]}\n\nQué hacer: {$e[1]}\n\n"
+            . "¿No quieres este aviso? En el panel del servidor principal: Ajustes → Avisos → silenciar \"{$label}\""
+            . " (desde aquí: https://{$host}:{$port}/settings/alerts). Este correo lo envía {$host}.";
+    }
 
     private static function json(string $key, $default)
     {

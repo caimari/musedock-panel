@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.305] — 2026-10-04 — Correos de aviso que se explican solos
+
+### Añadido
+- **Cada correo de aviso explica qué significa y qué hacer**, y cómo silenciarlo (con enlace a Ajustes → Avisos). Los del monitor llevan un asunto legible (p. ej. "Disco lleno (DISK_HIGH)").
+- **Se pueden silenciar** también "Reinicio del servidor" y "Monitor sin medidas".
+
 ## [1.0.304] — 2026-10-04 — Tráfico web en el monitor de cualquier nodo; estadísticas por MCP; avisos de correo silenciables
 
 ### Arreglado
