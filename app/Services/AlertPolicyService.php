@@ -99,10 +99,17 @@ class AlertPolicyService
         return is_array($v) ? $v : $default;
     }
 
-    /** ¿Ese tipo está silenciado en este servidor? */
+    /**
+     * ¿Ese tipo está silenciado en este servidor? En la lista: "TIPO" (en todos los
+     * servidores) o "servidor:TIPO" (solo en ese, nombre corto, p. ej. "nitro:DISK_HIGH").
+     */
     public static function muted(string $type): bool
     {
-        return $type !== '' && in_array($type, self::json('alerts_muted', []), true);
+        if ($type === '') {
+            return false;
+        }
+        $list = self::json('alerts_muted', []);
+        return in_array($type, $list, true) || in_array(self::shortHost() . ':' . $type, $list, true);
     }
 
     /** Títulos de controles de hardening dados por buenos. */
@@ -152,8 +159,14 @@ class AlertPolicyService
     public static function save(array $p): array
     {
         if (array_key_exists('muted', $p)) {
-            $m = array_values(array_intersect(array_map('strval', (array)$p['muted']), array_keys(self::TYPES)));
-            Settings::set('alerts_muted', json_encode($m));
+            $m = [];
+            foreach (array_map('strval', (array)$p['muted']) as $e) {
+                [$h, $t] = str_contains($e, ':') ? explode(':', $e, 2) : ['', $e];
+                if (isset(self::TYPES[$t]) && ($h === '' || preg_match('/^[a-z0-9][a-z0-9-]*$/', $h = self::shortHost($h)))) {
+                    $m[] = $h === '' ? $t : "{$h}:{$t}";
+                }
+            }
+            Settings::set('alerts_muted', json_encode(array_values(array_unique($m))));
         }
         if (array_key_exists('hardening_accepted', $p)) {
             $a = array_values(array_unique(array_filter(array_map(static fn($t) => trim((string)$t), (array)$p['hardening_accepted']))));
@@ -179,6 +192,36 @@ class AlertPolicyService
             Settings::set('alerts_mail_node_after_minutes', (string)max(1, min(120, (int)$p['mail_node_after_minutes'])));
         }
         return self::export();
+    }
+
+    /**
+     * Desde una copia: manda las reglas al master, que las guarda y las reparte a todos
+     * (también a esta copia). Así se pueden cambiar desde cualquier nodo.
+     */
+    public static function saveViaMaster(array $p): array
+    {
+        foreach (ClusterService::getNodes() as $n) {
+            if (($n['role'] ?? '') === 'master') {
+                $r = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'set-alert-policy-master', 'payload' => $p]);
+                if (!empty($r['ok']) && !empty($r['data']['ok'])) {
+                    self::save((array)($r['data']['policy'] ?? $p)); // al momento aquí, sin esperar al reparto
+                    return ['ok' => true, 'policy' => self::export(), 'copied' => (array)($r['data']['copied'] ?? [])];
+                }
+                return ['ok' => false, 'error' => 'El master no aceptó el cambio: ' . ($r['data']['error'] ?? $r['error'] ?? '?') . ' (¿panel del master anterior a 1.0.307?)'];
+            }
+        }
+        return ['ok' => false, 'error' => 'Este servidor es copia y no tiene al master registrado: cámbialo en el master.'];
+    }
+
+    /** Acción de cluster set-alert-policy-master (en el master, pedida por una copia). */
+    public static function importFromNode(array $p): array
+    {
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            return ['ok' => false, 'error' => 'este servidor no es el master'];
+        }
+        $policy = self::save($p);
+        LogService::log('alerts.policy', 'node', 'Reglas de avisos cambiadas desde un nodo del cluster');
+        return ['ok' => true, 'policy' => $policy, 'copied' => self::pushToNodes()];
     }
 
     /** Acción de cluster set-alert-policy (en el nodo). */

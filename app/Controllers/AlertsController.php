@@ -75,11 +75,6 @@ class AlertsController
     public function save(): void
     {
         View::verifyCsrf();
-        if (Settings::get('cluster_role', 'standalone') === 'slave') {
-            Flash::set('error', 'En una copia no se cambian los avisos: se hace en el master y se copian aquí.');
-            Router::redirect('/settings/alerts');
-            return;
-        }
         $disk = [];
         foreach ((array)($_POST['disk_host'] ?? []) as $i => $h) {
             $mount = trim((string)($_POST['disk_mount'][$i] ?? ''));
@@ -89,13 +84,30 @@ class AlertsController
                 $disk[trim((string)$h)][$mount] = $thr;
             }
         }
-        $p = AlertPolicyService::save([
-            'muted' => (array)($_POST['muted'] ?? []),
+        $muted = (array)($_POST['muted'] ?? []);
+        foreach ((array)($_POST['mute_host'] ?? []) as $i => $h) {
+            $t = (string)($_POST['mute_type'][$i] ?? '');
+            if (trim((string)$h) !== '' && $t !== '') {
+                $muted[] = strtolower(trim((string)$h)) . ':' . $t;
+            }
+        }
+        $policy = [
+            'muted' => $muted,
             'hardening_accepted' => array_merge((array)($_POST['accepted'] ?? []),
                 array_filter(array_map('trim', explode("\n", (string)($_POST['accepted_extra'] ?? ''))))),
             'disk_overrides' => $disk,
             'mail_node_after_minutes' => (int)($_POST['mail_node_after_minutes'] ?? 5),
-        ]);
+        ];
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            // Desde una copia: lo guarda el master y lo reparte a todos (también aquí).
+            $r = AlertPolicyService::saveViaMaster($policy);
+            Flash::set(!empty($r['ok']) ? 'success' : 'error', !empty($r['ok'])
+                ? 'Avisos guardados en el master y copiados a los nodos: ' . implode(', ', array_map(static fn($k, $v) => "{$k} {$v}", array_keys($r['copied']), $r['copied'])) . '.'
+                : $r['error']);
+            Router::redirect('/settings/alerts');
+            return;
+        }
+        $p = AlertPolicyService::save($policy);
         $copied = AlertPolicyService::pushToNodes();
         LogService::log('alerts.policy', 'save', 'Silenciados: ' . (implode(', ', $p['muted']) ?: 'ninguno')
             . '; hardening aceptado: ' . count($p['hardening_accepted']) . '; reglas de disco: ' . count($p['disk_overrides']));

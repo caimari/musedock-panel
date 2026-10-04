@@ -211,13 +211,14 @@ final class McpClusterTools
             'cf_zone_ssl_set' => [
                 'write' => true,
                 'title' => 'Poner el modo SSL de una zona de Cloudflare',
-                'description' => 'Pone el modo SSL/TLS de la zona de un dominio en "strict" (Full (strict), recomendado) o "full", y lo saca de "Automático" para que Cloudflare no lo cambie solo. Antes de "strict" comprueba que este servidor tiene un certificado válido para ese dominio (si no, la web daría error 526); se puede saltar con force. No toca el proxy naranja ni los registros. Primero sin apply. Requiere "Permitir acciones que modifican", "Permitir editar DNS en Cloudflare" y en el token "Zone Settings: Edit".',
+                'description' => 'Pone el modo SSL/TLS de la zona de un dominio (o de todas con all=true) en "strict" (Full (strict), recomendado) o "full", y la saca de "Automático" para que Cloudflare no lo cambie solo. Antes de "strict" comprueba, para CADA registro con proxy naranja de la zona, que su servidor de destino real tiene un certificado válido para ese nombre (si no, daría error 526): las zonas que no pasan se dejan como están y se listan. force=true lo pone igualmente. No toca el proxy naranja ni los registros. Con all=true tarda varios minutos. Primero sin apply. Requiere "Permitir acciones que modifican", "Permitir editar DNS en Cloudflare" y en el token "Zone Settings: Edit".',
                 'inputSchema' => $o([
                     'domain' => ['type' => 'string', 'description' => 'Dominio (se busca su zona)'],
+                    'all' => ['type' => 'boolean', 'description' => 'true = todas las zonas de todas las cuentas (solo cambia las que pasan la comprobación)'],
                     'mode' => ['type' => 'string', 'enum' => ['strict', 'full'], 'description' => 'Por defecto strict'],
                     'force' => ['type' => 'boolean', 'description' => 'Poner strict aunque no se pueda comprobar el certificado aquí (p. ej. la web la sirve otro servidor)'],
                     'apply' => $apply,
-                ], ['domain']),
+                ]),
             ],
             'dns_record_set' => [
                 'write' => true,
@@ -791,11 +792,13 @@ final class McpClusterTools
     }
 
     /** Lo que importa del SSL de una zona: modo, automático, reglas que lo cambian. */
-    private static function cfZoneSslInfo(string $token, string $zoneId): array
+    private static function cfZoneSslInfo(string $token, string $zoneId, bool $light = false): array
     {
         $info = [];
         $perm = null;
-        foreach (['ssl' => 'mode', 'ssl_automatic_mode' => 'automatic', 'always_use_https' => 'always_use_https', 'min_tls_version' => 'min_tls'] as $set => $key) {
+        $sets = $light ? ['ssl' => 'mode', 'ssl_automatic_mode' => 'automatic']
+            : ['ssl' => 'mode', 'ssl_automatic_mode' => 'automatic', 'always_use_https' => 'always_use_https', 'min_tls_version' => 'min_tls'];
+        foreach ($sets as $set => $key) {
             $g = CloudflareService::getZoneSetting($token, $zoneId, $set);
             $info[$key] = $g['ok'] ? $g['value'] : null;
             if (!$g['ok'] && $set === 'ssl') {
@@ -807,7 +810,7 @@ final class McpClusterTools
         }
         $info['automatic'] = $info['automatic'] === 'auto' ? 'sí (Cloudflare puede cambiar el modo solo)' : ($info['automatic'] === null ? 'desconocido' : 'no');
         $rules = [];
-        foreach (['http_config_settings' => 'Configuration Rule', 'http_request_origin' => 'Origin Rule'] as $phase => $label) {
+        foreach ($light ? [] : ['http_config_settings' => 'Configuration Rule', 'http_request_origin' => 'Origin Rule'] as $phase => $label) {
             $g = CloudflareService::getPhaseRules($token, $zoneId, $phase);
             if (!$g['ok']) {
                 $rules[] = "{$label}s: sin permiso para leerlas ({$g['error']})";
@@ -835,82 +838,172 @@ final class McpClusterTools
     private static function cfZoneSsl(array $args): array
     {
         if (!empty($args['all'])) {
-            $out = [];
+            // En paralelo: una a una tardaba ~4 min con 89 zonas y bloqueaba el panel.
+            $items = [];
+            $meta = [];
             foreach (CloudflareService::getConfiguredAccounts() as $a) {
                 foreach ((array)($a['zones'] ?? []) as $z) {
-                    $i = self::cfZoneSslInfo((string)$a['token'], (string)$z['id']);
-                    $out[] = ['zone' => $z['name'], 'account' => $a['name'] ?? ''] + $i;
-                    if (isset($i['error'])) {
-                        return ['zones' => $out, 'stopped' => 'Parado en la primera zona sin permiso: el resto de la cuenta tendrá el mismo problema.'];
-                    }
+                    $k = (string)$z['id'];
+                    $meta[$k] = ['zone' => $z['name'], 'account' => $a['name'] ?? ''];
+                    $items["{$k}|ssl"] = [(string)$a['token'], $k, 'ssl'];
+                    $items["{$k}|auto"] = [(string)$a['token'], $k, 'ssl_automatic_mode'];
                 }
             }
+            $res = CloudflareService::getZoneSettingsMulti($items);
+            $out = [];
+            foreach ($meta as $k => $m) {
+                $ssl = $res["{$k}|ssl"] ?? ['ok' => false, 'error' => '?'];
+                $auto = $res["{$k}|auto"] ?? ['ok' => false];
+                if (!$ssl['ok']) {
+                    $out[] = $m + ['error' => 'no se pudo leer: ' . $ssl['error']];
+                    continue;
+                }
+                $out[] = $m + ['mode' => $ssl['value'],
+                    'automatic' => !$auto['ok'] ? 'desconocido' : ($auto['value'] === 'auto' ? 'sí (Cloudflare puede cambiar el modo solo)' : 'no')];
+            }
+            $errors = array_values(array_filter($out, static fn($z) => isset($z['error'])));
+            $out = array_values(array_filter($out, static fn($z) => !isset($z['error'])));
             $bad = array_values(array_filter($out, static fn($z) => !in_array($z['mode'] ?? '', ['strict'], true)));
-            return ['count' => count($out), 'not_strict' => array_map(static fn($z) => "{$z['zone']}: " . ($z['mode'] ?? '?'), $bad), 'zones' => $out];
+            $auto = array_values(array_filter($out, static fn($z) => str_starts_with((string)($z['automatic'] ?? ''), 'sí')));
+            return ['count' => count($out),
+                'not_strict' => array_map(static fn($z) => "{$z['zone']}: " . ($z['mode'] ?? '?'), $bad),
+                'automatic' => array_map(static fn($z) => "{$z['zone']}: " . ($z['mode'] ?? '?'), $auto),
+                'errors' => array_map(static fn($z) => "{$z['zone']}: {$z['error']}", $errors),
+                'note' => 'Resumen rápido (modo y automático). Las reglas que cambian el SSL se ven pidiendo un dominio concreto.'];
         }
         $zone = self::dnsZoneFor((string)($args['domain'] ?? ''));
         return ['zone' => $zone['zone'], 'account' => $zone['account']] + self::cfZoneSslInfo((string)$zone['token'], (string)$zone['zone_id']);
     }
 
-    /** ¿Este servidor sirve ese nombre con un certificado válido? (lo que exige "Full (strict)") */
-    private static function originCertValid(string $host): array
+    /**
+     * "Full (strict)" exige que el servidor de destino de CADA registro con proxy naranja
+     * tenga un certificado válido para ese nombre. Se comprueba contra su destino real
+     * (la IP del registro A/AAAA o lo que resuelva el CNAME), no solo contra este servidor.
+     * Devuelve los nombres comprobados y los que fallarían (error 526 con strict).
+     */
+    private static function zoneStrictCheck(string $token, string $zoneId): array
     {
-        $ctx = stream_context_create(['ssl' => ['peer_name' => $host, 'SNI_enabled' => true, 'verify_peer' => true, 'verify_peer_name' => true]]);
-        $fp = @stream_socket_client('ssl://127.0.0.1:443', $errno, $errstr, 8, STREAM_CLIENT_CONNECT, $ctx);
-        if ($fp) {
-            fclose($fp);
-            return ['ok' => true];
+        $r = CloudflareService::listRecordsAll($token, $zoneId, []);
+        if (empty($r['ok'])) {
+            return ['ok' => false, 'error' => 'no se pudieron leer los registros: ' . ($r['error'] ?? '?')];
         }
-        return ['ok' => false, 'error' => trim($errstr) ?: 'sin conexión'];
+        $checked = [];
+        $failed = [];
+        $unknown = [];
+        foreach ((array)($r['result'] ?? []) as $rec) {
+            if (empty($rec['proxied']) || !in_array($rec['type'], ['A', 'AAAA', 'CNAME'], true)) {
+                continue;
+            }
+            $name = (string)$rec['name'];
+            if (str_starts_with($name, '*.')) {
+                $unknown[] = "{$name} (comodín: no se puede probar)";
+                continue;
+            }
+            $ip = $rec['type'] === 'CNAME' ? (gethostbyname((string)$rec['content']) ?: '') : (string)$rec['content'];
+            if ($ip === '' || $ip === (string)$rec['content'] && $rec['type'] === 'CNAME') {
+                $unknown[] = "{$name} (no se resuelve {$rec['content']})";
+                continue;
+            }
+            if (CloudflareService::isCloudflareIp($ip)) {
+                $unknown[] = "{$name} (su destino {$rec['content']} también va por Cloudflare)";
+                continue;
+            }
+            $host = filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? "[{$ip}]" : $ip;
+            $ctx = stream_context_create(['ssl' => ['peer_name' => $name, 'SNI_enabled' => true, 'verify_peer' => true, 'verify_peer_name' => true]]);
+            $fp = @stream_socket_client("ssl://{$host}:443", $errno, $errstr, 6, STREAM_CLIENT_CONNECT, $ctx);
+            if ($fp) {
+                fclose($fp);
+                $checked[$name] = "válido en {$ip}";
+            } else {
+                $failed[$name] = "{$ip}: " . (trim($errstr) ?: 'sin conexión');
+            }
+        }
+        return ['ok' => true, 'valid' => $checked, 'failed' => $failed, 'unknown' => $unknown];
+    }
+
+    /** Pone una zona en strict (o full) y fuera de "Automático". */
+    private static function zoneSetMode(string $token, string $zoneId, string $mode, string $automatic): array
+    {
+        $done = [];
+        if ($automatic !== 'no') {
+            $a = CloudflareService::setZoneSetting($token, $zoneId, 'ssl_automatic_mode', 'custom');
+            $done['automatic'] = $a['ok'] ? 'desactivado' : 'no se pudo: ' . $a['error'];
+        }
+        $r = CloudflareService::setZoneSetting($token, $zoneId, 'ssl', $mode);
+        $done['mode'] = $r['ok'] ? $r['value'] : 'ERROR: ' . $r['error'];
+        return $done;
     }
 
     private static function cfZoneSslSet(array $args): array
     {
-        $domain = strtolower(trim((string)($args['domain'] ?? '')));
         $mode = ($args['mode'] ?? 'strict') === 'full' ? 'full' : 'strict';
+        $dnsAllowed = Settings::get('mcp_allow_dns', '0') === '1';
+        $apply = !empty($args['apply']);
+        if ($apply && !$dnsAllowed) {
+            throw new \RuntimeException('Cambiar Cloudflare por MCP está desactivado: Ajustes → MCP → "Permitir editar DNS en Cloudflare".');
+        }
+
+        // Todas las zonas: solo se cambian las que pasan la comprobación (o fuerza).
+        if (!empty($args['all'])) {
+            $res = ['changed' => [], 'already' => [], 'skipped' => []];
+            foreach (CloudflareService::getConfiguredAccounts() as $a) {
+                foreach ((array)($a['zones'] ?? []) as $z) {
+                    [$t, $id, $zn] = [(string)$a['token'], (string)$z['id'], (string)$z['name']];
+                    $cur = self::cfZoneSslInfo($t, $id, true);
+                    if (isset($cur['error'])) {
+                        throw new \RuntimeException("{$zn}: {$cur['error']}");
+                    }
+                    if ($cur['mode'] === $mode && $cur['automatic'] === 'no') {
+                        $res['already'][] = $zn;
+                        continue;
+                    }
+                    $chk = $mode === 'strict' ? self::zoneStrictCheck($t, $id) : ['ok' => true, 'failed' => []];
+                    if (empty($chk['ok']) || (!empty($chk['failed']) && empty($args['force']))) {
+                        $res['skipped'][$zn] = empty($chk['ok']) ? $chk['error'] : 'certificado no válido en: ' . json_encode($chk['failed'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                        continue;
+                    }
+                    $res['changed'][$zn] = $apply ? self::zoneSetMode($t, $id, $mode, (string)$cur['automatic']) + ['antes' => $cur['mode']]
+                        : "{$cur['mode']} → {$mode}" . ($cur['automatic'] !== 'no' ? ' y fuera de Automático' : '');
+                    if ($apply) {
+                        LogService::log('mcp.cloudflare', $zn, "Modo SSL {$cur['mode']} → {$mode}");
+                    }
+                }
+            }
+            return ['status' => $apply ? 'hecho' : 'plan', 'apply' => $apply, 'mode' => $mode]
+                + ['would_change_or_changed' => $res['changed'], 'already_ok' => count($res['already']), 'skipped_not_safe' => $res['skipped']]
+                + ($apply ? [] : ['next' => $dnsAllowed ? 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.' : 'Para aplicarlo hay que activar antes Ajustes → MCP → "Permitir editar DNS en Cloudflare".']);
+        }
+
+        $domain = strtolower(trim((string)($args['domain'] ?? '')));
         $zone = self::dnsZoneFor($domain);
         [$token, $zoneId] = [(string)$zone['token'], (string)$zone['zone_id']];
         $cur = self::cfZoneSslInfo($token, $zoneId);
         if (isset($cur['error'])) {
             throw new \RuntimeException($cur['error']);
         }
-        $checks = [];
-        if ($mode === 'strict') {
-            foreach (array_unique([$zone['zone'], 'www.' . $zone['zone'], $domain]) as $h) {
-                $checks[$h] = self::originCertValid($h);
-            }
-        }
-        $badCert = array_filter($checks, static fn($c) => !$c['ok']);
+        $chk = $mode === 'strict' ? self::zoneStrictCheck($token, $zoneId) : ['ok' => true, 'valid' => [], 'failed' => [], 'unknown' => []];
         $plan = ['zone' => $zone['zone'], 'from' => $cur['mode'], 'to' => $mode, 'automatic_now' => $cur['automatic'],
             'will_also' => 'sacar la zona de "Automático" para que Cloudflare no cambie el modo solo',
-            'origin_cert_here' => array_map(static fn($c) => $c['ok'] ? 'válido' : 'NO válido: ' . $c['error'], $checks),
+            'origin_certificates' => ['valid' => $chk['valid'] ?? [], 'failed' => $chk['failed'] ?? [], 'not_checked' => $chk['unknown'] ?? []],
             'rules_affecting_ssl' => $cur['rules_affecting_ssl']];
-        if ($badCert && empty($args['force'])) {
-            $plan['warning'] = 'Este servidor no tiene un certificado válido para ' . implode(', ', array_keys($badCert))
-                . ': con strict esos nombres darían error 526. Usa mode=full, arregla el certificado, o force=true si la web la sirve otro servidor.';
+        if (empty($chk['ok'])) {
+            throw new \RuntimeException($chk['error']);
         }
-        $dnsAllowed = Settings::get('mcp_allow_dns', '0') === '1';
-        if (empty($args['apply'])) {
+        if (!empty($chk['failed']) && empty($args['force'])) {
+            $plan['warning'] = 'Con strict darían error 526: ' . implode(', ', array_keys($chk['failed'])) . '. Usa mode=full, arregla esos certificados, o force=true.';
+        }
+        if (!$apply) {
             return ['status' => 'plan', 'apply' => false] + $plan + ['next' => $dnsAllowed
                 ? 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.'
                 : 'Para aplicarlo hay que activar antes Ajustes → MCP → "Permitir editar DNS en Cloudflare".'];
         }
-        if (!$dnsAllowed) {
-            throw new \RuntimeException('Cambiar Cloudflare por MCP está desactivado: Ajustes → MCP → "Permitir editar DNS en Cloudflare".');
-        }
         if (isset($plan['warning'])) {
             throw new \RuntimeException($plan['warning']);
         }
-        $done = [];
-        if (($cur['automatic'] ?? '') !== 'no') {
-            $a = CloudflareService::setZoneSetting($token, $zoneId, 'ssl_automatic_mode', 'custom');
-            $done['automatic'] = $a['ok'] ? 'desactivado' : 'no se pudo: ' . $a['error'];
+        $done = self::zoneSetMode($token, $zoneId, $mode, (string)$cur['automatic']);
+        if (str_starts_with((string)$done['mode'], 'ERROR')) {
+            throw new \RuntimeException('Cloudflare rechazó el cambio: ' . $done['mode']);
         }
-        $r = CloudflareService::setZoneSetting($token, $zoneId, 'ssl', $mode);
-        if (!$r['ok']) {
-            throw new \RuntimeException('Cloudflare rechazó el cambio: ' . $r['error'] . ' (¿el token tiene "Zone Settings: Edit"?)');
-        }
-        $done['mode'] = $r['value'];
         LogService::log('mcp.cloudflare', $zone['zone'], "Modo SSL {$cur['mode']} → {$mode}");
         return ['status' => 'hecho', 'done' => $done] + $plan;
     }
@@ -986,6 +1079,15 @@ final class McpClusterTools
             $data['proxied'] = $proxied;
             if ($proxied) {
                 $data['ttl'] = 1;
+                // Con el proxy naranja manda el modo SSL de la zona: en "Flexible" Cloudflare
+                // entra por http y, como los servidores redirigen a https, la web entra en bucle.
+                $ssl = CloudflareService::getZoneSetting($token, $zoneId, 'ssl');
+                $auto = CloudflareService::getZoneSetting($token, $zoneId, 'ssl_automatic_mode');
+                if (!empty($ssl['ok']) && in_array($ssl['value'], ['flexible', 'off'], true)) {
+                    $plan['ssl_warning'] = "La zona {$zone['zone']} está en SSL \"{$ssl['value']}\": con el proxy naranja esta web entraría en bucle de redirecciones. Pon antes la zona en Full (strict) con cf_zone_ssl_set.";
+                } elseif (!empty($auto['ok']) && $auto['value'] === 'auto') {
+                    $plan['ssl_note'] = "La zona {$zone['zone']} está en SSL \"Automático\" ({$ssl['value']}): Cloudflare puede cambiarlo solo (a Flexible pasó con relayhop). Conviene fijarla con cf_zone_ssl_set.";
+                }
             }
         }
         $dnsAllowed = Settings::get('mcp_allow_dns', '0') === '1';

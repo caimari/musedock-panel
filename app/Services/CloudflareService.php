@@ -818,43 +818,88 @@ class CloudflareService
     public static function getZoneSetting(string $token, string $zoneId, string $setting): array
     {
         $r = self::apiRequest($token, 'GET', "/zones/{$zoneId}/settings/{$setting}");
-        return !empty($r['success'])
+        return !empty($r['ok'])
             ? ['ok' => true, 'value' => $r['result']['value'] ?? null, 'editable' => (bool)($r['result']['editable'] ?? true)]
-            : ['ok' => false, 'error' => self::parseError($r)];
+            : ['ok' => false, 'error' => (string)($r['error'] ?? 'error') . ' (HTTP ' . ($r['http_code'] ?? '?') . ')'];
+    }
+
+    /**
+     * Varios ajustes de varias zonas a la vez (en paralelo, de $parallel en $parallel).
+     * $items = [clave => [token, zoneId, ajuste]]; devuelve [clave => ['ok'=>…, 'value'|'error'=>…]].
+     * Una a una, 89 zonas tardaban ~4 min y bloqueaban el panel.
+     */
+    public static function getZoneSettingsMulti(array $items, int $parallel = 10): array
+    {
+        $out = [];
+        foreach (array_chunk($items, max(1, $parallel), true) as $chunk) {
+            $mh = curl_multi_init();
+            $handles = [];
+            foreach ($chunk as $key => [$token, $zoneId, $setting]) {
+                $ch = curl_init(self::API_BASE . "/zones/{$zoneId}/settings/{$setting}");
+                curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 20, CURLOPT_CONNECTTIMEOUT => 5,
+                    CURLOPT_IPRESOLVE => CURL_IPRESOLVE_V4,
+                    CURLOPT_HTTPHEADER => ['Authorization: Bearer ' . $token, 'Content-Type: application/json']]);
+                curl_multi_add_handle($mh, $ch);
+                $handles[$key] = $ch;
+            }
+            do {
+                $st = curl_multi_exec($mh, $running);
+                if ($running) {
+                    curl_multi_select($mh, 1.0);
+                }
+            } while ($running && $st === CURLM_OK);
+            foreach ($handles as $key => $ch) {
+                $j = json_decode((string)curl_multi_getcontent($ch), true);
+                $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $out[$key] = !empty($j['success'])
+                    ? ['ok' => true, 'value' => $j['result']['value'] ?? null]
+                    : ['ok' => false, 'error' => (is_array($j) ? self::parseError($j) : 'sin respuesta') . " (HTTP {$code})"];
+                curl_multi_remove_handle($mh, $ch);
+                curl_close($ch);
+            }
+            curl_multi_close($mh);
+        }
+        return $out;
     }
 
     /** Cambia un ajuste de zona. Necesita "Zone Settings: Editar". */
     public static function setZoneSetting(string $token, string $zoneId, string $setting, $value): array
     {
         $r = self::apiRequest($token, 'PATCH', "/zones/{$zoneId}/settings/{$setting}", ['value' => $value]);
-        return !empty($r['success']) ? ['ok' => true, 'value' => $r['result']['value'] ?? $value] : ['ok' => false, 'error' => self::parseError($r)];
+        return !empty($r['ok']) ? ['ok' => true, 'value' => $r['result']['value'] ?? $value]
+            : ['ok' => false, 'error' => (string)($r['error'] ?? 'error') . ' (HTTP ' . ($r['http_code'] ?? '?') . ')'];
     }
 
     /** Reglas de una fase (http_config_settings = Configuration Rules, http_request_origin = Origin Rules). */
     public static function getPhaseRules(string $token, string $zoneId, string $phase): array
     {
         $r = self::apiRequest($token, 'GET', "/zones/{$zoneId}/rulesets/phases/{$phase}/entrypoint");
-        if (!empty($r['success'])) {
+        if (!empty($r['ok'])) {
             return ['ok' => true, 'rules' => (array)($r['result']['rules'] ?? [])];
         }
-        $err = self::parseError($r);
+        $err = (string)($r['error'] ?? '');
+        if ((int)($r['http_code'] ?? 0) === 404) {
+            return ['ok' => true, 'rules' => []];
+        }
         // Sin reglas de esa fase, Cloudflare responde "not found": no es un error.
         return stripos($err, 'not found') !== false || stripos($err, 'could not find') !== false ? ['ok' => true, 'rules' => []] : ['ok' => false, 'error' => $err];
     }
 
     public static function findZoneForDomain(string $domain): ?array
     {
-        $accounts = self::getConfiguredAccounts();
-        $parts = explode('.', $domain);
-        $root = count($parts) >= 2 ? implode('.', array_slice($parts, -2)) : $domain;
-
-        foreach ($accounts as $account) {
+        // La zona es el sufijo más largo del nombre que esté en alguna cuenta. Antes se
+        // tomaban las dos últimas partes y fallaban los dominios de dos niveles
+        // (aca.org.es → "org.es", limpa.co.uk → "co.uk").
+        $domain = strtolower(rtrim(trim($domain), '.'));
+        $best = null;
+        foreach (self::getConfiguredAccounts() as $account) {
             $token = $account['token'] ?? '';
             if (!$token) continue;
 
             foreach ($account['zones'] ?? [] as $zone) {
-                if (($zone['name'] ?? '') === $root) {
-                    return [
+                $zn = strtolower((string)($zone['name'] ?? ''));
+                if ($zn !== '' && ($domain === $zn || str_ends_with($domain, '.' . $zn)) && (!$best || strlen($zn) > strlen($best['zone']))) {
+                    $best = [
                         'token'   => $token,
                         'zone_id' => $zone['id'],
                         'zone'    => $zone['name'],
@@ -863,7 +908,7 @@ class CloudflareService
                 }
             }
         }
-        return null;
+        return $best;
     }
 
     /**

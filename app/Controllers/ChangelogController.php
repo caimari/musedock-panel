@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.307',
+                'date' => '2026-10-04',
+                'badge' => 'warning',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['cf_zone_ssl / cf_zone_ssl_set siempre decian que faltaba el permiso (leian mal la respuesta de Cloudflare); con all=true consulta solo modo y automatico', 'Los avisos se pueden cambiar desde una copia: se envian al master, que los guarda y reparte', 'cf_zone_ssl_set comprueba el certificado del destino de cada registro con proxy y admite all=true (solo cambia las zonas seguras)', 'Zona de dominios de dos niveles (aca.org.es, limpa.co.uk) no se encontraba'],
+                        'en' => ['cf_zone_ssl tools misread Cloudflare responses', 'Alert rules can be changed from a replica (forwarded to the master)'],
+                    ],
+                    'added' => [
+                        'es' => ['Silenciar un aviso solo en un servidor (p. ej. Disco lleno de nitro), en Avisos y por MCP (nitro:DISK_HIGH)', 'dns_record_set avisa al encender el proxy naranja si la zona esta en Flexible o Automatico', 'cf_zone_ssl all=true consulta en paralelo (segundos en vez de minutos)'],
+                        'en' => ['Mute an alert type on a single server'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.306',
                 'date' => '2026-10-04',
                 'badge' => 'info',

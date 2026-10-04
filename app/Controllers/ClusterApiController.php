@@ -591,6 +591,7 @@ class ClusterApiController
                 // Avisos del master copiados a este nodo (notify_configure copy_to_nodes).
                 'set-notify-config' => \MuseDockPanel\Services\NotificationService::importConfig($payload),
                 'set-alert-policy' => \MuseDockPanel\Services\AlertPolicyService::import($payload),
+                'set-alert-policy-master' => \MuseDockPanel\Services\AlertPolicyService::importFromNode($payload),
                 // Inventario de este nodo (solo lectura) para que el master compare
                 // (cluster_drift). No depende de que el MCP esté activado aquí.
                 'clone-inventory'  => ['ok' => true, 'inventory' => \MuseDockPanel\Mcp\McpInventory::build(

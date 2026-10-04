@@ -1459,8 +1459,7 @@ CONF;
         $routeId = self::caddyRouteId($domain);
 
         // Refresh CF zones if this domain isn't in any known zone, then rebuild TLS policies
-        $rootDomain = implode('.', array_slice(explode('.', $domain), -2));
-        $knownZone = CloudflareService::findZoneForDomain($rootDomain);
+        $knownZone = CloudflareService::findZoneForDomain($domain); // también dominios de dos niveles (x.org.es)
         if (!$knownZone) {
             CloudflareService::refreshZones();
         }
@@ -3081,8 +3080,7 @@ CONF;
         $routeId = 'redirect-' . str_replace('.', '-', $fromDomain);
 
         // Refresh CF zones if redirect domain is unknown
-        $rootFrom = implode('.', array_slice(explode('.', $fromDomain), -2));
-        if ($rootFrom && !CloudflareService::findZoneForDomain($rootFrom)) {
+        if ($fromDomain !== '' && !CloudflareService::findZoneForDomain($fromDomain)) {
             CloudflareService::refreshZones();
         }
         self::ensureTlsCatchAllPolicy($caddyApi);

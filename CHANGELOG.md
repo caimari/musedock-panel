@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.307] — 2026-10-04 — Avisos por servidor y desde cualquier nodo; arreglo del modo SSL de Cloudflare
+
+### Arreglado
+- **`cf_zone_ssl` y `cf_zone_ssl_set` (1.0.306) siempre decían "al token le falta el permiso"**: leían mal la respuesta de Cloudflare. Con `all=true` se consulta solo lo esencial (modo y "Automático") para no tardar minutos, y se listan aparte las zonas en "Automático".
+- **`cf_zone_ssl_set` comprueba de verdad que strict no rompe nada:** prueba el certificado del destino real de **cada registro con proxy naranja** de la zona (no solo de este servidor), y con `all=true` cambia solo las zonas que pasan; las demás se listan con el motivo.
+- **No se encontraba la zona de los dominios de dos niveles** (`aca.org.es`, `limpa.co.uk`): se tomaban las dos últimas partes (`org.es`, `co.uk`). Ahora la zona es el sufijo más largo que exista en las cuentas. Afectaba a las herramientas DNS del MCP, a las rutas nuevas y a las migraciones.
+- **En una copia no se podían cambiar los avisos.** Ahora se puede desde cualquier nodo (página y MCP `alerts_configure`): se envía al master (acción `set-alert-policy-master`), que lo guarda y lo reparte a todos.
+
+### Añadido
+- **`dns_record_set` avisa al encender el proxy naranja** si la zona está en SSL "Flexible" (la web entraría en bucle) o en "Automático" (Cloudflare puede cambiarlo solo).
+- **`cf_zone_ssl` con `all=true` consulta en paralelo:** de unos 4 minutos con 89 zonas, que bloqueaban el panel de un nodo de un solo proceso, a unos segundos.
+- **Silenciar un aviso solo en un servidor** (p. ej. "Disco lleno" solo de `nitro`): tabla nueva en Ajustes → Avisos y `mute: ["nitro:DISK_HIGH"]` por MCP.
+
 ## [1.0.306] — 2026-10-04 — Modo SSL de Cloudflare desde el MCP
 
 ### Añadido

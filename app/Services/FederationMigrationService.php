@@ -1405,8 +1405,19 @@ class FederationMigrationService
     private static function updateCloudflareRecord(string $token, string $domain, string $ip): array
     {
         // Find zone for domain
-        $rootDomain = implode('.', array_slice(explode('.', $domain), -2));
-        $zones = CloudflareService::apiRequest($token, 'GET', '/zones', ['name' => $rootDomain]);
+        // Zona = el sufijo más largo que exista en Cloudflare (x.org.es → org.es no es una zona).
+        $parts = explode('.', strtolower($domain));
+        $rootDomain = implode('.', array_slice($parts, -2));
+        $zones = ['result' => []];
+        for ($i = 0; $i <= count($parts) - 2; $i++) {
+            $cand = implode('.', array_slice($parts, $i));
+            $z = CloudflareService::apiRequest($token, 'GET', '/zones', ['name' => $cand]);
+            if (!empty($z['result'])) {
+                $zones = $z;
+                $rootDomain = $cand;
+                break;
+            }
+        }
 
         if (empty($zones['result'])) {
             return ['ok' => false, 'error' => "Zone not found for: {$rootDomain}"];

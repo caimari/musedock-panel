@@ -123,9 +123,9 @@ class McpHostingTools
             'alerts_configure' => [
                 'write' => true,
                 'title' => 'Cambiar las reglas de avisos',
-                'description' => 'Silencia o reactiva tipos de aviso (solo quita el correo/Telegram; siguen en el monitor), da por buenos controles de hardening (por su título, ver alerts_status), pone umbral propio o silencia un disco de un servidor (host corto p. ej. "nitro" o "*"; threshold 0 = sin aviso, null = quitar la regla) y fija cuántos minutos debe fallar un nodo de correo antes de avisar. Lo que no se indique se deja igual. Se guarda en este panel (master) y se copia a sus nodos. Primero sin apply. Requiere "Permitir acciones que modifican".',
+                'description' => 'Silencia o reactiva tipos de aviso (solo quita el correo/Telegram; siguen en el monitor), da por buenos controles de hardening (por su título, ver alerts_status), pone umbral propio o silencia un disco de un servidor (host corto p. ej. "nitro" o "*"; threshold 0 = sin aviso, null = quitar la regla) y fija cuántos minutos debe fallar un nodo de correo antes de avisar. Lo que no se indique se deja igual. Se guarda en el master y se copia a todos sus nodos (desde una copia, se envía al master). Primero sin apply. Requiere "Permitir acciones que modifican".',
                 'inputSchema' => $o([
-                    'mute' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos a silenciar (ver alerts_status → types)'],
+                    'mute' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos a silenciar en todos los servidores ("DISK_HIGH") o solo en uno ("nitro:DISK_HIGH"; nombre corto del servidor). Ver alerts_status → types'],
                     'unmute' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos a reactivar'],
                     'accept_hardening' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Títulos de controles a dar por buenos'],
                     'unaccept_hardening' => ['type' => 'array', 'items' => ['type' => 'string']],
@@ -479,11 +479,9 @@ class McpHostingTools
 
     private static function alertsConfigure(array $args): array
     {
-        if (Settings::get('cluster_role', 'standalone') === 'slave') {
-            throw new \RuntimeException('Este servidor es copia: las reglas de avisos se cambian en el master y se copian aquí.');
-        }
         $cur = AP::export();
-        $bad = array_diff(array_merge((array)($args['mute'] ?? []), (array)($args['unmute'] ?? [])), array_keys(AP::TYPES));
+        $typeOf = static fn($e) => str_contains((string)$e, ':') ? explode(':', (string)$e, 2)[1] : (string)$e;
+        $bad = array_diff(array_map($typeOf, array_merge((array)($args['mute'] ?? []), (array)($args['unmute'] ?? []))), array_keys(AP::TYPES));
         if ($bad) {
             throw new \InvalidArgumentException('Tipos desconocidos: ' . implode(', ', $bad) . '. Válidos: ' . implode(', ', array_keys(AP::TYPES)));
         }
@@ -509,6 +507,14 @@ class McpHostingTools
         $plan = ['before' => $cur, 'after' => $new, 'nodes' => array_map(static fn($n) => (string)$n['name'], \MuseDockPanel\Services\ClusterService::getNodes())];
         if (empty($args['apply'])) {
             return ['status' => 'plan', 'apply' => false] + $plan;
+        }
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            // Desde una copia: lo guarda el master y lo reparte a todos.
+            $r = AP::saveViaMaster($new);
+            if (empty($r['ok'])) {
+                throw new \RuntimeException($r['error']);
+            }
+            return ['status' => 'guardado en el master', 'policy' => $r['policy'], 'copied' => $r['copied']];
         }
         $saved = AP::save($new);
         LogService::log('alerts.policy', 'mcp', 'Reglas de avisos cambiadas por MCP');

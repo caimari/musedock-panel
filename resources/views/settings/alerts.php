@@ -13,13 +13,13 @@
 <?php if ($isSlave): ?>
     <div class="alert small py-2 px-3 mb-3" style="background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.25);color:#e2e8f0;">
         <i class="bi bi-info-circle me-1" style="color:#38bdf8;"></i>
-        <strong>Este servidor es copia:</strong> aquí solo se ven las reglas. Se cambian en el master<?= !empty($masterUrl) ? ' (<a href="' . View::e($masterUrl) . '/settings/alerts" class="text-info" target="_blank">abrir Avisos del master</a>)' : '' ?>
-        y se copian solas a este servidor al guardar. También por MCP: <code>alerts_configure</code> en el master.
+        <strong>Este servidor es copia:</strong> puedes cambiar las reglas aquí; al guardar se envían al master<?= !empty($masterUrl) ? ' (<a href="' . View::e($masterUrl) . '/settings/alerts" class="text-info" target="_blank">abrir Avisos del master</a>)' : '' ?>,
+        que las guarda y las reparte a todos los servidores. Para silenciar algo solo en una máquina, usa "Silenciar solo en un servidor".
     </div>
 <?php endif; ?>
 <form method="POST" action="/settings/alerts/save">
     <?= View::csrf() ?>
-    <fieldset <?= $isSlave ? 'disabled' : '' ?>>
+    <fieldset>
 
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-toggles me-2"></i>Tipos de aviso</div>
@@ -30,12 +30,39 @@
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" role="switch" id="mute-<?= View::e($key) ?>" name="muted[]" value="<?= View::e($key) ?>"
                                 <?= in_array($key, $policy['muted'], true) ? 'checked' : '' ?>>
-                            <label class="form-check-label" for="mute-<?= View::e($key) ?>"><strong>Silenciar: <?= View::e($label) ?></strong>
+                            <label class="form-check-label" for="mute-<?= View::e($key) ?>"><strong>Silenciar en todos: <?= View::e($label) ?></strong>
                                 <span class="text-muted d-block"><?= View::e($desc) ?></span></label>
                         </div>
                     </div>
                 <?php endforeach; ?>
             </div>
+        </div>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-pc-display me-2"></i>Silenciar solo en un servidor</div>
+        <div class="card-body small">
+            <p class="text-muted">Para no recibir un aviso de una máquina concreta (p. ej. "Disco lleno" de <code>nitro</code>) sin quitarlo en las demás.
+                Servidor = nombre corto (el que va entre corchetes al principio del asunto del correo, sin el dominio).</p>
+            <table class="table table-sm align-middle small mb-2" id="mute-rules">
+                <thead><tr><th>Servidor</th><th>Aviso</th><th></th></tr></thead>
+                <tbody>
+                <?php $mrows = [];
+                foreach ($policy['muted'] as $m) { if (str_contains($m, ':')) { $mrows[] = explode(':', $m, 2); } }
+                $mrows[] = ['', ''];
+                foreach ($mrows as [$mh, $mt]): ?>
+                    <tr>
+                        <td><input name="mute_host[]" list="host-hints" value="<?= View::e($mh) ?>" class="form-control form-control-sm" placeholder="nitro"></td>
+                        <td><select name="mute_type[]" class="form-select form-select-sm">
+                                <option value="">—</option>
+                                <?php foreach ($types as $tk => [$tl]): ?><option value="<?= View::e($tk) ?>" <?= $mt === $tk ? 'selected' : '' ?>><?= View::e($tl) ?></option><?php endforeach; ?>
+                            </select></td>
+                        <td><button type="button" class="btn btn-outline-danger btn-sm py-0" onclick="this.closest('tr').remove()">Quitar</button></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+            <button type="button" class="btn btn-outline-light btn-sm" onclick="addRow('#mute-rules')"><i class="bi bi-plus me-1"></i>Añadir</button>
         </div>
     </div>
 
@@ -103,9 +130,7 @@
         </div>
     </div>
 
-    <?php if (!$isSlave): ?>
-        <button class="btn btn-primary"><i class="bi bi-check2 me-1"></i>Guardar y copiar a los nodos</button>
-    <?php endif; ?>
+    <button class="btn btn-primary"><i class="bi bi-check2 me-1"></i><?= $isSlave ? 'Guardar (en el master) y copiar a todos' : 'Guardar y copiar a los nodos' ?></button>
     </fieldset>
 </form>
 
@@ -115,6 +140,13 @@ function addDiskRow() {
     const tr = tb.querySelector('tr:last-child').cloneNode(true);
     tr.querySelectorAll('input').forEach(i => i.value = '');
     tr.querySelector('select').value = 'threshold';
+    tb.appendChild(tr);
+}
+function addRow(sel) {
+    const tb = document.querySelector(sel + ' tbody');
+    const tr = tb.querySelector('tr:last-child').cloneNode(true);
+    tr.querySelectorAll('input').forEach(i => i.value = '');
+    tr.querySelectorAll('select').forEach(s => s.selectedIndex = 0);
     tb.appendChild(tr);
 }
 </script>
