@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.298',
+                'date' => '2026-10-04',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['bin/page-check.php /ruta: carga una pagina como administrador desde la terminal y muestra el error real'],
+                        'en' => ['bin/page-check.php /path: loads a page as admin from the terminal and shows the real error'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.297',
                 'date' => '2026-10-04',
                 'badge' => 'info',

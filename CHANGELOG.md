@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.298] — 2026-10-04 — Herramienta para ver el error real de una página
+
+### Añadido
+- **`php bin/page-check.php /ruta`**: carga una página del panel desde la terminal, como el primer administrador, y enseña el error real (excepción, error fatal o aviso de PHP, con fichero y línea) cuando la página da 500 y el registro de errores no dice nada. Solo hace un GET, como el navegador.
+
 ## [1.0.297] — 2026-10-04 — Instalaciones nuevas completas; avisos de entrada más claros
 
 ### Arreglado
