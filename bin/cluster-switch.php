@@ -25,6 +25,7 @@
  *                                              ficheros en vivo (lsyncd), como hacía el master
  *   php bin/cluster-switch.php dns-failover    DNS de los primarios → este servidor de relevo
  *   php bin/cluster-switch.php dns-failback    devuelve SOLO lo que movió el relevo (diario)
+ *   php bin/cluster-switch.php apply-master-caddyfile [--apply]   (master) enseña / pone las webs del Caddyfile del master anterior
  *   php bin/cluster-switch.php failover-normalize   (master) este servidor principal y TITULAR del relevo, estado normal
  *   php bin/cluster-switch.php pg-rebuild <ip-master> <clúster|all> [--max-rate=20M]   copia completa con avance
  */
@@ -131,6 +132,14 @@ switch ($cmd) {
             $seen = count($st['steps'] ?? []);
         } while (!in_array($st['state'] ?? '', ['done', 'failed'], true));
         $ok = ($st['state'] ?? '') === 'done';
+        break;
+
+    case 'apply-master-caddyfile':
+        // En el que manda: poner las webs del Caddyfile del master anterior que no se
+        // pusieron al promover (validando con el entorno real de Caddy).
+        $r = \MuseDockPanel\Services\ConfigMirrorService::applyStagedCaddyfile(in_array('--apply', $argv, true));
+        $out($r);
+        $ok = !empty($r['ok']);
         break;
 
     case 'failover-normalize':

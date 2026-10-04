@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.292',
+                'date' => '2026-10-04',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Al promover, las webs del Caddyfile del master se ponen de verdad: validacion con el entorno de Caddy (runuser lo borraba), inyeccion por la API con --resume (solo lo que falta, solo 443), aviso si falla y cluster-switch.php apply-master-caddyfile'],
+                        'en' => ['On promotion, the master Caddyfile sites are really applied: validation with Caddy env, API injection with --resume, alert on failure, apply-master-caddyfile'],
+                    ],
+                    'added' => [
+                        'es' => ['bin/witness-agent.py: agente testigo solo ojos (comprobaciones fijas https/tcp, latencia y perdidas, con clave)'],
+                        'en' => ['bin/witness-agent.py: eyes-only witness agent (fixed https/tcp checks, latency and loss, keyed)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.291',
                 'date' => '2026-10-04',
                 'badge' => 'info',

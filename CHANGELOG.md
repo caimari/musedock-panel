@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.292] — 2026-10-04 — Las webs del Caddyfile del master llegan de verdad al promover; agente testigo
+
+### Arreglado
+- **Al promover, las webs del Caddyfile del master no se ponían nunca** (en Filemon faltaban `*.musedock.com` y `license.musedock.com`). Eran tres fallos:
+  1. la validación se hacía con `runuser -u caddy`, que **borra el entorno**: sin `CLOUDFLARE_API_TOKEN` fallaba siempre. Ahora el entorno se carga dentro de la orden, desde un fichero temporal que solo lee `caddy`, y el token no sale en `ps`;
+  2. con Caddy arrancado con **`--resume`**, reiniciarlo ignora el Caddyfile. Ahora esas webs se **inyectan por la API** (`caddy adapt` → rutas `cfmirror-*` y sus políticas de certificado). Solo las del 443, y **solo las que este Caddy no sirve ya** (lo que sirve el panel u otra aplicación no se toca). Los comodines van al final;
+  3. si fallaba, se daba por hecho y no se reintentaba. Ahora sigue pendiente, se avisa en el progreso de la promoción y por correo, y se puede poner a mano con `cluster-switch.php apply-master-caddyfile` (sin `--apply` solo enseña qué haría y si valida).
+
+### Añadido
+- **`bin/witness-agent.py`, agente testigo "solo ojos"** para un servidor ajeno al cluster. Es Python 3 sin dependencias, no tiene datos ni acceso a nada y no guarda registros. Mira cada pocos segundos una lista **fija** de comprobaciones de su configuración (https con SNI y certificado verificado, por una IP concreta si se quiere, o tcp) y responde con clave en `GET /v1/status`: si llega, latencia y pérdidas. Servirá para confirmar caídas reales antes de un relevo y para elegir la entrada (ONO u Orange).
+
 ## [1.0.291] — 2026-10-04 — Rutas que faltaban tras un cambio de rol
 
 ### Arreglado

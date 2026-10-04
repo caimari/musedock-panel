@@ -2386,6 +2386,19 @@ class ClusterService
         // estaba apagado en este slave: se enciende con su configuración original.
         try {
             $results['config_mirror'] = ConfigMirrorService::activate();
+            // Que se vea si las webs del Caddyfile del master NO se pusieron (antes pasaba
+            // en silencio y faltaban, p. ej., *.musedock.com y license.musedock.com).
+            foreach ((array)$results['config_mirror'] as $line) {
+                if (is_string($line) && str_contains($line, 'NO puesto')) {
+                    self::progress('ATENCIÓN: ' . $line);
+                    $errors[] = 'Caddyfile del master: ' . $line;
+                    try {
+                        NotificationService::send('Relevo: faltan webs del Caddyfile del master',
+                            gethostname() . " se ha promovido, pero las webs escritas en el Caddyfile del master no se han puesto:\n{$line}\n\nEl resto funciona. Revísalo cuanto antes.");
+                    } catch (\Throwable) {
+                    }
+                }
+            }
         } catch (\Throwable $e) {
             $errors[] = 'Config mirror (activar): ' . $e->getMessage();
         }

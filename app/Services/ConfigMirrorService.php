@@ -750,8 +750,151 @@ final class ConfigMirrorService
         self::backup(self::CADDY_LIVE);
         @copy(self::CADDY_LIVE, self::CADDY_OWN);   // para devolverlo al volver a ser slave
         file_put_contents(self::CADDY_LIVE, $candidate);
+        // Caddy con --resume arranca con su configuración guardada e IGNORA el Caddyfile:
+        // reiniciarlo no ponía nada (Filemon, 2026-10-03). Se inyectan por la API.
+        if (self::caddyUsesResume()) {
+            $r = self::injectSites($sites);
+            $done[] = !empty($r['ok'])
+                ? 'Webs del master puestas en Caddy por la API: ' . implode(', ', $r['hosts'])
+                : 'Caddyfile del master NO puesto en Caddy (la API lo rechazó): ' . ($r['error'] ?? '?');
+            return;
+        }
         shell_exec('systemctl restart caddy 2>&1'); // el reparador repone las rutas del panel
         $done[] = 'Caddy reiniciado con las webs del master';
+    }
+
+    /** ¿Arranca Caddy con --resume (configuración guardada en vez del Caddyfile)? */
+    private static function caddyUsesResume(): bool
+    {
+        return str_contains((string)shell_exec('systemctl show caddy -p ExecStart --value 2>/dev/null'), '--resume');
+    }
+
+    /**
+     * Mete en el Caddy en marcha las webs de unos bloques de Caddyfile, sin tocar nada
+     * más: se convierten a JSON (caddy adapt) y se añaden sus rutas (con @id
+     * "cfmirror-<host>"; las que ya estaban se sustituyen) y sus políticas de
+     * certificado. Los comodines (*.dominio) van al final, para no tapar las rutas de
+     * nombres concretos. Si la API de Caddy rechaza algo, no se aplica esa parte.
+     */
+    public static function injectSites(array $sites, bool $dryRun = false): array
+    {
+        if (!$sites) {
+            return ['ok' => true, 'hosts' => []];
+        }
+        $tmp = tempnam(sys_get_temp_dir(), 'mdadapt');
+        file_put_contents($tmp, implode("\n\n", $sites) . "\n");
+        @chmod($tmp, 0644);
+        $json = (string)shell_exec('caddy adapt --adapter caddyfile --config ' . escapeshellarg($tmp) . ' 2>/dev/null');
+        @unlink($tmp);
+        $cfg = json_decode($json, true);
+        if (!is_array($cfg)) {
+            return ['ok' => false, 'error' => 'caddy adapt no pudo convertir los bloques'];
+        }
+        $api = rtrim((string)((require PANEL_ROOT . '/config/panel.php')['caddy']['api_url'] ?? 'http://localhost:2019'), '/');
+        $call = static function (string $method, string $path, $body = null) use ($api): array {
+            $ch = curl_init($api . $path);
+            curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15,
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json']]);
+            if ($body !== null) {
+                curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body, JSON_UNESCAPED_SLASHES));
+            }
+            $out = (string)curl_exec($ch);
+            $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            return [$code, $out];
+        };
+
+        // Rutas de todos los servidores HTTP adaptados → al servidor de las webs (srv0).
+        $routes = [];
+        $skipped = [];
+        foreach ((array)($cfg['apps']['http']['servers'] ?? []) as $srv) {
+            // Solo las webs del 443. Bloques de otros puertos (:8446, :8448…) son servicios
+            // propios de aquel servidor: no se meten en el servidor de las webs.
+            if (!in_array(':443', (array)($srv['listen'] ?? []), true)) {
+                $skipped[] = implode(',', (array)($srv['listen'] ?? []));
+                continue;
+            }
+            foreach ((array)($srv['routes'] ?? []) as $r) {
+                $hosts = [];
+                foreach ((array)($r['match'] ?? []) as $m) {
+                    $hosts = array_merge($hosts, (array)($m['host'] ?? []));
+                }
+                if (!$hosts) {
+                    continue;
+                }
+                $r['@id'] = 'cfmirror-' . substr(preg_replace('/[^a-z0-9]+/', '-', strtolower(str_replace('*', 'wild', $hosts[0]))), 0, 60);
+                $routes[] = ['route' => $r, 'hosts' => $hosts, 'wild' => str_starts_with($hosts[0], '*.')];
+            }
+        }
+        usort($routes, static fn($a, $b) => (int)$a['wild'] <=> (int)$b['wild']);
+
+        // Lo que ya sirve este Caddy por el panel u otra aplicación (hostings, CMS…) NO
+        // se toca: esa ruta es la buena aquí (p. ej. musedock.com con su raíz y su
+        // socket de PHP de este nodo). Solo se mete lo que falta (*.dominio, license…).
+        $served = [];
+        [$lc, $lj] = $call('GET', '/config/apps/http/servers/srv0/routes');
+        $walk = static function (array $rs) use (&$walk, &$served): void {
+            foreach ($rs as $r) {
+                if (str_starts_with((string)($r['@id'] ?? ''), 'cfmirror-')) {
+                    continue;
+                }
+                foreach ((array)($r['match'] ?? []) as $m) {
+                    foreach ((array)($m['host'] ?? []) as $h) {
+                        $served[strtolower((string)$h)] = true;
+                    }
+                }
+            }
+        };
+        $walk($lc === 200 ? (json_decode($lj, true) ?: []) : []);
+        $alreadyServed = [];
+        $routes = array_values(array_filter($routes, static function ($x) use ($served, &$alreadyServed) {
+            $missing = array_filter($x['hosts'], static fn($h) => !isset($served[strtolower((string)$h)]));
+            if (!$missing) {
+                $alreadyServed = array_merge($alreadyServed, $x['hosts']);
+                return false;
+            }
+            return true;
+        }));
+
+        if ($dryRun) {
+            return ['ok' => true, 'dry_run' => true,
+                'would_add' => array_values(array_merge(...array_map(static fn($x) => $x['hosts'], $routes ?: [['hosts' => []]]))),
+                'already_served' => $alreadyServed, 'other_ports_skipped' => $skipped];
+        }
+        $put = [];
+        $errors = [];
+        foreach ($routes as $x) {
+            $id = $x['route']['@id'];
+            [$code] = $call('GET', "/id/{$id}");
+            if ($code === 200) {
+                [$c2, $o2] = $call('PATCH', "/id/{$id}", $x['route']);
+            } elseif ($x['wild']) {
+                [$c2, $o2] = $call('POST', '/config/apps/http/servers/srv0/routes', $x['route']);
+            } else {
+                [$c2, $o2] = $call('PUT', '/config/apps/http/servers/srv0/routes/0', $x['route']);
+            }
+            if ($c2 >= 200 && $c2 < 300) {
+                $put = array_merge($put, $x['hosts']);
+            } else {
+                $errors[] = implode(',', $x['hosts']) . ': HTTP ' . $c2 . ' ' . trim($o2);
+            }
+        }
+
+        // Políticas de certificado de esos bloques (p. ej. reto DNS): delante de las demás.
+        $newPol = array_values(array_filter((array)($cfg['apps']['tls']['automation']['policies'] ?? []),
+            static fn($p) => (bool)array_intersect(array_map('strtolower', (array)($p['subjects'] ?? [])), array_map('strtolower', $put))));
+        if ($newPol) {
+            [$pc, $pj] = $call('GET', '/config/apps/tls/automation/policies');
+            $live = $pc === 200 ? (json_decode($pj, true) ?: []) : [];
+            $subj = static fn($p) => json_encode(array_values((array)($p['subjects'] ?? [])));
+            $newKeys = array_map($subj, $newPol);
+            $keep = array_values(array_filter($live, static fn($p) => !in_array($subj($p), $newKeys, true)));
+            [$c3, $o3] = $call($pc === 200 ? 'PATCH' : 'PUT', '/config/apps/tls/automation/policies', array_merge($newPol, $keep));
+            if ($c3 < 200 || $c3 >= 300) {
+                $errors[] = 'políticas TLS: HTTP ' . $c3 . ' ' . trim($o3);
+            }
+        }
+        return ['ok' => !$errors, 'hosts' => $put, 'error' => implode(' | ', $errors), 'other_ports_skipped' => $skipped, 'already_served' => $alreadyServed];
     }
 
     /**
@@ -1074,11 +1217,43 @@ final class ConfigMirrorService
             }
         }
         if (!empty($state['caddy_pending'])) {
+            $n = count($done);
             self::activateCaddyfile($done, !empty($state['caddy_staged']));
-            $state['caddy_pending'] = false;
+            $failed = (bool)array_filter(array_slice($done, $n), static fn($l) => str_contains((string)$l, 'NO puesto'));
+            // Si no se pudo poner, sigue pendiente (antes se daba por hecho y no se
+            // reintentaba nunca): se reintenta con apply-master-caddyfile.
+            $state['caddy_pending'] = $failed;
             self::saveState($state);
         }
         return $done;
+    }
+
+    /**
+     * En un nodo que ya manda: poner ahora las webs del Caddyfile del master anterior
+     * guardadas aparte (si al promover no se pusieron). Mismas comprobaciones que al
+     * promover; si no valida, Caddy sigue como estaba.
+     */
+    public static function applyStagedCaddyfile(bool $apply = false): array
+    {
+        $done = [];
+        if (!is_file(self::CADDY_STAGED)) {
+            return ['ok' => false, 'done' => ['no hay webs del master guardadas aparte (' . self::CADDY_STAGED . ')']];
+        }
+        if (!$apply) {
+            $myPort = (int)(Settings::get('panel_port', '8444') ?: 8444);
+            $sites = self::caddySites((string)file_get_contents(self::CADDY_STAGED), $myPort);
+            [$ok, $out, $missing] = self::caddyValidate(implode("\n\n", $sites) . "\n", $sites, false);
+            return ['ok' => $ok, 'plan' => self::injectSites($sites, true),
+                'validate' => $ok ? 'valida con el entorno real de Caddy' : 'NO valida: ' . trim(implode(' ', array_slice($out, -2))) . ($missing ? ' (falta ' . implode(', ', $missing) . ')' : ''),
+                'staged_at' => date('Y-m-d H:i', (int)filemtime(self::CADDY_STAGED)),
+                'next' => 'Si es lo esperado: apply-master-caddyfile --apply'];
+        }
+        self::activateCaddyfile($done, true);
+        $failed = (bool)array_filter($done, static fn($l) => str_contains((string)$l, 'NO puesto'));
+        $state = self::state();
+        $state['caddy_pending'] = $failed;
+        self::saveState($state);
+        return ['ok' => !$failed && $done !== [], 'done' => $done];
     }
 
     /** Al DEGRADAR o AISLAR: apaga lo copiado (antes de los scripts demote.d). */
