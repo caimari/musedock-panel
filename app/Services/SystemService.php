@@ -1226,6 +1226,18 @@ CONF;
             return ['ok' => false, 'error' => 'Caddy no responde o no tiene srv0'];
         }
         $out = ['ok' => true, 'logger' => 'ok', 'added' => 0];
+        // Caddy escribe con su usuario: si la carpeta o el fichero son de root (los creó un
+        // script antes que Caddy), no puede escribir y no hay tráfico web en el monitor.
+        $caddyUser = function_exists('posix_getpwnam') ? posix_getpwnam('caddy') : false;
+        if ($caddyUser) {
+            foreach (['/var/log/caddy', '/var/log/caddy/hosting-access.log'] as $f) {
+                if (file_exists($f) && fileowner($f) !== (int)$caddyUser['uid']) {
+                    @chown($f, 'caddy');
+                    @chgrp($f, 'caddy');
+                    $out['fixed_owner'][] = $f;
+                }
+            }
+        }
         $logger = $get('/config/logging/logs/hosting-access');
         if (!is_array($logger) || empty($logger['writer'])) {
             self::ensureHostingAccessLog($api, []); // definición del registro + excluirlo del general

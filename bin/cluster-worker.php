@@ -1194,6 +1194,18 @@ try {
     logMsg("ERROR in cert monitor: " . $e->getMessage());
 }
 
+// Cada 6 h: ¿cada web que sirve este Caddy tiene un certificado válido y renovado?
+// (lo anterior solo ve fallos en bucle; esto ve certificados sin renovar o que no son suyos)
+try {
+    $cw = json_decode((string)\MuseDockPanel\Settings::get('cert_watch_last', ''), true) ?: [];
+    if (time() - (int)strtotime($cw['at'] ?? '@0') >= 21600 && \MuseDockPanel\Settings::get('cluster_fenced', '0') !== '1') {
+        $res = \MuseDockPanel\Services\CertWatchService::checkAndAlert();
+        logMsg("Certificados: {$res['checked']} webs, {$res['problems']} con problema" . ($res['no_dns'] ? ", {$res['no_dns']} sin DNS" : ''));
+    }
+} catch (\Throwable $e) {
+    logMsg('ERROR en vigilancia de certificados: ' . $e->getMessage());
+}
+
 cleanup:
 
 $elapsed = round((microtime(true) - $startTime) * 1000, 1);

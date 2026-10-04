@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.308',
+                'date' => '2026-10-05',
+                'badge' => 'warning',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['El servidor de reserva salia "no sano" en el relevo: tiene 80/443 cerrados a proposito (se abren al promover); ahora cuenta su panel', 'Monitor sin trafico web si /var/log/caddy era de root: se deja a nombre de caddy'],
+                        'en' => ['Standby server no longer reported unhealthy because its web ports are closed on purpose', 'Hosting access log owned by caddy so the monitor gets web traffic'],
+                    ],
+                    'added' => [
+                        'es' => ['Vigilancia de certificados cada 6 h: cada web de Caddy con certificado valido para su nombre y renovado (aviso si falta o caduca en menos de 14 dias; explica el efecto con proxy strict/full/gris)', 'MCP cert_status: certificados de todas las webs de un servidor'],
+                        'en' => ['Certificate watch every 6 h for every Caddy site (valid for its name, renewed)', 'MCP cert_status'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.307',
                 'date' => '2026-10-04',
                 'badge' => 'warning',

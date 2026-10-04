@@ -705,6 +705,9 @@ if command -v fail2ban-client >/dev/null 2>&1 && [ -d "${PANEL_DIR}/config/fail2
     mkdir -p /var/log/caddy 2>/dev/null
     touch /var/log/caddy/hosting-access.log 2>/dev/null
     chmod 644 /var/log/caddy/hosting-access.log 2>/dev/null
+    # Caddy (usuario caddy) tiene que poder escribir el registro: si lo creamos como root,
+    # el monitor se queda sin tráfico web y fail2ban de WordPress sin datos.
+    id caddy >/dev/null 2>&1 && chown caddy:caddy /var/log/caddy /var/log/caddy/hosting-access.log 2>/dev/null
 
     # Sync filters
     for f in "${PANEL_DIR}"/config/fail2ban/filter.d/*.conf; do

@@ -33,6 +33,7 @@ class AlertPolicyService
         'mail_queue'         => ['Cola de correo pausada', 'Altas/cambios de correo hacia un nodo llevan más de 24 h en pausa (el nodo no las recibe).'],
         'replication'        => ['Réplica con problemas', 'PostgreSQL, MariaDB o Redis de este nodo no replican bien (o se recuperan). Mejor no silenciarlo: un relevo podría perder datos.'],
         'lsyncd'             => ['Copia de ficheros (lsyncd)', 'La copia de ficheros a los nodos falla o se recupera.'],
+        'cert'               => ['Certificados', 'Una web sin certificado válido o que no se ha renovado (con proxy en strict, error 526).'],
         'config_mirror'      => ['Copia de configuración del master', 'En una copia: algo de la configuración del master no se pudo copiar (avisa solo cuando cambia la lista).'],
         'witness'            => ['Testigos', 'Un testigo externo no responde o vuelve.'],
     ];
@@ -74,6 +75,8 @@ class AlertPolicyService
             'Mientras dure, el otro servidor no tiene los últimos cambios de las webs. Revisa Cluster → Archivos.'],
         'witness' => ['Un testigo externo (el servidor que confirma las caídas antes de un relevo) no responde, o vuelve.',
             'Si cae uno, decide el otro. Si caen todos, los relevos se deciden sin testigos. Comprueba que ese servidor está encendido.'],
+        'cert' => ['Una o varias webs de este servidor no tienen un certificado válido para su nombre, o el suyo está a punto de caducar sin haberse renovado.',
+            'Mira en el correo qué webs son. Suele ser un dominio que ya no apunta a ningún sitio (márcalo inactivo) o un fallo al renovar (revisa journalctl -u caddy). Por MCP: cert_status dice el estado de todas.'],
         'config_mirror' => ['Este servidor de reserva no ha podido copiar algo de la configuración del principal (un servicio, una tarea programada…).',
             'Si es algo propio de la máquina principal (su hardware, sus líneas de internet), exclúyelo de la copia. Si no, instala lo que falta aquí para que el relevo funcione.'],
     ];

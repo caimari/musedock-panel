@@ -2,6 +2,20 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.308] — 2026-10-05 — Vigilancia de certificados de todas las webs
+
+### Arreglado
+- **El servidor de reserva salía "no sano" en la revisión del relevo** aunque estuviera perfecto. Al pasar a copia, el panel cierra a propósito su 80/443 (`closePublicPorts`) y los vuelve a abrir al tomar el mando, pero la comprobación miraba justo el 443. Ahora, para la reserva en estado normal, si su panel responde cuenta como viva y se anota que la web está cerrada a propósito. Para el principal no cambia nada: un 443 cerrado sigue siendo una caída.
+- **Monitor sin tráfico web si `/var/log/caddy` o su registro eran de root** (creados por `update.sh` o `install.sh` antes que Caddy): Caddy no podía escribir. Ahora se dejan a nombre de `caddy`, también en la reparación automática cada 30 min.
+
+### Añadido
+- **Vigilancia de certificados (cada 6 h, en cada servidor).** Comprueba contra el propio servidor (da igual el proxy de Cloudflare) que cada web que sirve Caddy tiene un **certificado válido para su nombre** y que no está a **menos de 14 días de caducar sin renovarse**. Antes solo se detectaban los dominios que fallaban al pedir el certificado muchas veces seguidas.
+  - Avisa por correo cuando cambia la lista de problemas, o una vez al día si alguno caduca en menos de 7 días.
+  - El correo explica qué pasa según el proxy: en "Full (strict)", error 526; en "Full", funciona sin comprobar; con la nube gris, error en el navegador.
+  - Los dominios sin DNS se separan y no avisan.
+  - El aviso "Certificados" se puede silenciar en Avisos.
+- **MCP `cert_status`** (lectura, con `node`): estado del certificado de todas las webs de un servidor, con sus problemas y las que antes caducan.
+
 ## [1.0.307] — 2026-10-04 — Avisos por servidor y desde cualquier nodo; arreglo del modo SSL de Cloudflare
 
 ### Arreglado

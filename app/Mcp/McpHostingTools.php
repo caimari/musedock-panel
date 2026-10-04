@@ -113,6 +113,13 @@ class McpHostingTools
                     'node' => ['type' => 'string', 'description' => 'Opcional. Id o nombre de un nodo del cluster para ejecutarlo en él. Omitir = este servidor.'],
                 ], []),
             ],
+            'cert_status' => [
+                'title' => 'Certificados de todas las webs de un servidor',
+                'description' => 'Solo lectura. Comprueba en este servidor (contra él mismo, da igual el proxy de Cloudflare) cada web que sirve Caddy: si tiene un certificado válido para su nombre y cuántos días le quedan. Lista los problemas (sin certificado, de otro nombre, caducado, o a menos de 14 días sin renovar), separando los dominios sin DNS, y las que antes caducan. Con proxy naranja en Full (strict), un certificado no válido es error 526. Con `node`, en otro nodo.',
+                'inputSchema' => $o([
+                    'node' => ['type' => 'string', 'description' => 'Opcional. Id o nombre de un nodo del cluster para ejecutarlo en él. Omitir = este servidor.'],
+                ], []),
+            ],
             'alerts_status' => [
                 'title' => 'Reglas de avisos (silenciados, hardening aceptado, discos)',
                 'description' => 'Solo lectura. Qué tipos de aviso están silenciados, qué controles de hardening se dan por buenos, umbrales propios o silencio por disco y servidor, minutos que debe fallar un nodo de correo antes de avisar, y los controles de hardening que fallan ahora en este servidor. Con `node`, en otro nodo.',
@@ -164,6 +171,7 @@ class McpHostingTools
             'password_change_request' => self::passwordRequest($args),
             'mail_quota_request'      => self::quotaRequest($args),
             'monitor_stats'           => self::monitorStats($args),
+            'cert_status'             => \MuseDockPanel\Services\CertWatchService::scan(),
             'alerts_status'           => self::alertsStatus(),
             'alerts_configure'        => self::alertsConfigure($args),
             'wordpress_status'        => self::wpStatus($args),

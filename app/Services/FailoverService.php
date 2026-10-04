@@ -693,6 +693,19 @@ class FailoverService
 
             $port = (int)($server['port'] ?? 443) ?: 443;
             $result = self::checkHost($ip, $port, $timeout);
+            // El servidor de RESERVA, mientras no sirve las webs, tiene el 80/443 cerrados a
+            // propósito (closePublicPorts al degradar; se abren al promover). Si su panel
+            // responde, está vivo: no es una caída. Solo para la reserva: para el principal,
+            // un 443 cerrado sí es una caída (y debe contar para el relevo).
+            if (empty($result['ok']) && ($server['role'] ?? '') !== self::ROLE_PRIMARY && self::getState() === 'normal') {
+                $panelPort = (int)Settings::get('panel_port', '8444') ?: 8444;
+                $p = @fsockopen($ip, $panelPort, $e3, $s3, $timeout);
+                if ($p) {
+                    fclose($p);
+                    $result = ['ok' => true, 'severity' => 'ok', 'ip' => $ip, 'method' => 'panel_port',
+                        'note' => "puerto {$port} cerrado (normal en la reserva: se abre al tomar el mando); su panel responde"];
+                }
+            }
             $result['name'] = $server['name'] ?? '';
             $result['role'] = $server['role'] ?? '';
             $result['server_id'] = $server['id'] ?? '';

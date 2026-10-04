@@ -1986,6 +1986,7 @@ CRONEOF
         mkdir -p /var/log/caddy 2>/dev/null
         touch /var/log/caddy/hosting-access.log 2>/dev/null
         chmod 644 /var/log/caddy/hosting-access.log 2>/dev/null
+        id caddy >/dev/null 2>&1 && chown caddy:caddy /var/log/caddy /var/log/caddy/hosting-access.log 2>/dev/null
 
         for f in "${PANEL_DIR}"/config/fail2ban/filter.d/*.conf; do
             [ -f "$f" ] && cp "$f" /etc/fail2ban/filter.d/
@@ -3764,6 +3765,7 @@ if [ "$F2B_CONFIGURE" = true ]; then
     mkdir -p /var/log/caddy
     touch /var/log/caddy/hosting-access.log
     chmod 644 /var/log/caddy/hosting-access.log
+    id caddy >/dev/null 2>&1 && chown caddy:caddy /var/log/caddy /var/log/caddy/hosting-access.log 2>/dev/null
     ok "Log files creados"
 
     # Install filters
