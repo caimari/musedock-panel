@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.303',
+                'date' => '2026-10-04',
+                'badge' => 'warning',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Analisis de WordPress: puertas traseras que ejecutan lo que llega en una cookie, PHP disfrazado en languages, carpetas extrañas de wp-content con PHP, temas sin usar (las 6 que se escaparon en filmsinfest)', 'Temas modificados: muestra el diff (puede ser una personalizacion legitima que se perderia al reinstalar)'],
+                        'en' => ['WordPress scan: cookie-driven backdoors, PHP disguised in languages, unknown wp-content dirs with PHP, unused themes', 'Modified themes show the diff'],
+                    ],
+                    'security' => [
+                        'es' => ['Caddy: sin PHP en wp-content/languages (standard); en strict, los PHP de los temas no se abren por URL'],
+                        'en' => ['Caddy: no PHP in wp-content/languages; in strict, theme PHP files are not directly reachable'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.302',
                 'date' => '2026-10-04',
                 'badge' => 'info',

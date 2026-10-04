@@ -84,7 +84,7 @@ class WordPressHardenService
             return '';
         }
         $s = self::settingsFor($username);
-        return $s['level'] === 'off' ? 'off' : $s['level'] . ':xmlrpc' . (self::xmlrpcOpen($docRoot, $s) ? '1' : '0') . ':v1';
+        return $s['level'] === 'off' ? 'off' : $s['level'] . ':xmlrpc' . (self::xmlrpcOpen($docRoot, $s) ? '1' : '0') . ':v2';
     }
 
     /** Rutas de Caddy (dentro del subroute del hosting) para una raíz WordPress. */
@@ -103,8 +103,14 @@ class WordPressHardenService
         if (!self::xmlrpcOpen($docRoot, $s)) {
             $routes[] = $deny(['path' => ['*/xmlrpc.php']], 'xmlrpc.php desactivado');
         }
-        $routes[] = $deny(['path_regexp' => ['name' => 'wpnophp', 'pattern' => '(?i)/wp-content/(uploads|cache|upgrade|upgrade-temp-backup)/.*\.(php[0-9]?|phtml|phar|pht|phps)$']],
+        $routes[] = $deny(['path_regexp' => ['name' => 'wpnophp', 'pattern' => '(?i)/wp-content/(uploads|cache|upgrade|upgrade-temp-backup|languages)/.*\.(php[0-9]?|phtml|phar|pht|phps)$']],
             'no se ejecuta PHP en esta carpeta');
+        if ($s['level'] === 'strict') {
+            // Los PHP de un tema no se abren nunca por URL: los carga WordPress. Un tema
+            // inactivo con una puerta trasera en functions.php sí se podía llamar (filmsinfest).
+            $routes[] = $deny(['path_regexp' => ['name' => 'wpthemephp', 'pattern' => '(?i)/wp-content/themes/.*\.(php[0-9]?|phtml|phar|pht|phps)$']],
+                'los ficheros del tema no se abren directamente');
+        }
         $routes[] = $deny(['path' => ['*/wp-config.php', '*/wp-config-sample.php', '/readme.html', '/license.txt', '*/wp-content/debug.log',
             '*/.user.ini', '*.sql', '*.sql.gz', '*.php.bak', '*.php.old', '*.php.orig', '*.php.save', '*.php.swp', '*.php~', '*/wp-config.bak']],
             'fichero protegido');
@@ -661,9 +667,16 @@ class WordPressHardenService
             'timeout 120 grep -rl' . ($pcre ? 'P' : 'E') . " --include=*.php --include=*.phtml --include=*.inc {$excl} " . escapeshellarg($pat)
             . " {$dirs} {$rootPhp} 2>/dev/null | head -60")))));
         $rel = static fn(array $l) => array_map(static fn($f) => substr($f, strlen($root) + 1), $l);
+        // Puertas traseras que ejecutan lo que llega en una cookie (filmsinfest: 6, en
+        // temas inactivos y en un falso fichero de idioma). Se busca el acceso a la cookie,
+        // también disfrazado, y en esos ficheros una forma de ejecutar código.
+        $cookie = $run('\\$_COOKIE|_COOKIE[\'"]|\\\\x5f\\\\x43\\\\x4f|chr\\(95\\)\\s*\\.\\s*chr\\(67\\)|HTTP_COOKIE', true);
+        $exec = '/(eval|assert|create_function|call_user_func(_array)?|preg_replace\s*\(.*\/e|base64_decode|gzinflate|gzuncompress|str_rot13|hex2bin|\$[a-z_]+\s*\(\s*\$)/i';
+        $suspects = array_values(array_filter($cookie, static fn($f) => preg_match($exec, (string)@file_get_contents($f))));
         return [
             'sc_markers' => $rel($run('SC_[A-Za-z0-9_]+_BEGIN', false)),
             'long_lines' => $rel($run('^.{3000}', true)),
+            'cookie_exec' => $rel($suspects),
         ];
     }
 
@@ -760,11 +773,38 @@ class WordPressHardenService
                     $changed[] = $rel;
                 }
             }
+            // Qué cambia (las primeras líneas): a menudo es una personalización legítima
+            // (pie de página, un contador…) y reinstalar el tema la borraría.
+            $t['diff'] = [];
+            foreach (array_slice($changed, 0, 5) as $rel) {
+                $t['diff'][$rel] = (string)shell_exec('diff ' . escapeshellarg("{$orig}/{$rel}") . ' ' . escapeshellarg("{$dir}/{$rel}")
+                    . " 2>/dev/null | grep -E '^[<>]' | cut -c1-200 | head -25");
+            }
             shell_exec('rm -rf ' . escapeshellarg($zip));
             $t['changed'] = array_slice($changed, 0, 30);
             $t['extra'] = array_slice($extra, 0, 30);
-            $t['verdict'] = ($changed || $extra) ? 'MODIFICADO respecto a wordpress.org' : 'igual que wordpress.org';
+            $t['verdict'] = ($changed || $extra)
+                ? 'MODIFICADO respecto a wordpress.org: mira el diff; si es una personalización tuya, no lo reinstales (se perdería)'
+                : 'igual que wordpress.org';
             $out[] = $t;
+        }
+        return $out;
+    }
+
+    /** Carpetas de wp-content que no son de WordPress ni de plugins conocidos, con cuántos PHP tienen. */
+    public static function unknownDirs(string $root): array
+    {
+        $known = ['plugins', 'themes', 'uploads', 'mu-plugins', 'languages', 'upgrade', 'upgrade-temp-backup', 'cache', 'maintenance',
+            'wflogs', 'et-cache', 'litespeed', 'w3tc-config', 'wpo-cache', 'updraft', 'ai1wm-backups', 'backups-dup-lite', 'webp-express',
+            'jetpack-waf', 'fonts', 'wpforms', 'gravity_forms', 'ewww', 'smush-webp', 'wp-rocket-config', 'backup-db', 'blogs.dir', 'wpo'];
+        $out = [];
+        foreach (glob("{$root}/wp-content/*", GLOB_ONLYDIR) ?: [] as $d) {
+            $n = basename($d);
+            if (in_array($n, $known, true)) {
+                continue;
+            }
+            $php = (int)trim((string)shell_exec('find ' . escapeshellarg($d) . " -type f -iregex '.*\\.\\(php[0-9]?\\|phtml\\|phar\\)' 2>/dev/null | wc -l"));
+            $out[] = ['dir' => "wp-content/{$n}", 'php' => $php, 'modified' => date('Y-m-d', (int)filemtime($d))];
         }
         return $out;
     }
@@ -784,6 +824,8 @@ class WordPressHardenService
             'known_bad_plugins' => $bad,
             'mu_plugins' => array_map('basename', glob("{$root}/wp-content/mu-plugins/*.php") ?: []),
             'php_changed_14d' => count($find("-name '*.php' -mtime -14 -not -path '*/cache/*'")),
+            'php_in_languages' => $rel($find("-path '*/wp-content/languages/*' -type f -name '*.php' ! -name '*.l10n.php'")),
+            'unknown_dirs_with_php' => array_values(array_column(array_filter(self::unknownDirs($root), static fn($d) => $d['php'] > 0), 'dir')),
             'odd_dropins' => array_values(array_map('basename', array_filter(glob("{$root}/wp-content/*.php") ?: [],
                 static fn($f) => basename($f) !== 'index.php' && !in_array(basename($f), self::DROPINS, true)))),
             'sc_markers' => $rel(array_values(array_filter(explode("\n", trim((string)shell_exec('timeout 30 grep -rlE --include=*.php '
@@ -819,6 +861,8 @@ class WordPressHardenService
             'php_changed_14d' => $rel($find("-name '*.php' -mtime -14 -not -path '*/cache/*'")),
             'signature_hits' => self::signatureHits($root),
             'obfuscation' => $obf = self::obfuscation($root),
+            'php_in_languages' => $rel($find("-path '*/wp-content/languages/*' -type f -name '*.php' ! -name '*.l10n.php'")),
+            'unknown_wp_content_dirs' => self::unknownDirs($root),
             'dropins' => self::dropins($root, $obf),
             'wp_config' => [
                 'DISALLOW_FILE_MODS' => (bool)preg_match("/define\s*\(\s*['\"]DISALLOW_FILE_MODS['\"]\s*,\s*true/i", $wpc),
@@ -848,13 +892,18 @@ class WordPressHardenService
             $r['obfuscation']['long_lines'] = array_values(array_filter($all,
                 static fn($f) => !$same($f, $r['plugins'], 'plugins') && !$same($f, $r['themes'], 'themes')));
             $r['obfuscation']['long_lines_in_original_files'] = count($all) - count($r['obfuscation']['long_lines']);
+            $r['obfuscation']['cookie_exec'] = array_values(array_filter($r['obfuscation']['cookie_exec'],
+                static fn($f) => !$same($f, $r['plugins'], 'plugins') && !$same($f, $r['themes'], 'themes')));
+            $active = array_column(array_filter($r['themes'], static fn($t) => !empty($t['active'])), 'slug');
+            $r['unused_themes'] = $active ? array_values(array_diff(array_column($r['themes'], 'slug'), $active)) : 'sin datos de la base: no se sabe cuál es el activo';
             $obf = $r['obfuscation'];
         }
         $r['database'] = self::dbCheck($root);
         $bad = count($r['php_in_uploads']) + count($r['signature_hits']) + count($r['odd_in_wp_content'])
             + count(array_filter($r['plugins'] ?? [], static fn($p) => str_starts_with((string)($p['verdict'] ?? ''), 'MALWARE') || str_starts_with((string)($p['verdict'] ?? ''), 'MODIFICADO')))
             + (int)($r['core']['changed_count'] ?? 0) + (int)($r['core']['extra_count'] ?? 0)
-            + count($obf['sc_markers']) + count($obf['long_lines'])
+            + count($obf['sc_markers']) + count($obf['long_lines']) + count($obf['cookie_exec'] ?? [])
+            + count($r['php_in_languages']) + count(array_filter($r['unknown_wp_content_dirs'], static fn($d) => $d['php'] > 0))
             + count(array_filter($r['dropins'], static fn($d) => $d['flags']))
             + count(array_filter($r['themes'] ?? [], static fn($t) => str_starts_with((string)$t['verdict'], 'MODIFICADO') || str_contains((string)$t['verdict'], 'OFUSCACIÓN')));
         $r['verdict'] = $bad ? "{$bad} indicios: revisar y limpiar (quarantine / reinstall)" : 'sin indicios';

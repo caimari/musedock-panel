@@ -2,6 +2,20 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.303] — 2026-10-04 — Análisis de WordPress: lo que se le escapaba en filmsinfest
+
+### Arreglado
+- **El análisis no veía 6 puertas traseras de filmsinfest** (las encontró Filemon a mano). Ahora busca:
+  - código que ejecuta lo que llega en una **cookie**, también en temas inactivos;
+  - **PHP disfrazado de idioma** en `wp-content/languages` (solo deben ser `*.l10n.php`);
+  - **carpetas de `wp-content` que no son de WordPress** con PHP dentro (como `assets/`).
+
+  Además lista los **temas sin usar**, porque sus PHP también se pueden abrir por URL.
+- **Temas modificados:** enseña **qué cambia** (diff). A menudo es una personalización legítima (pie de página, un contador de visitas…) que se perdería al reinstalar, como en blogdot y haxel.
+
+### Seguridad
+- **Caddy:** en standard no se ejecuta PHP de `wp-content/languages`. En strict, los PHP de los temas no se abren directamente por URL (los carga WordPress). Las reglas se ponen al día solas en 30 min.
+
 ## [1.0.302] — 2026-10-04 — Avisos: menos ruido y control de lo que llega
 
 ### Arreglado
