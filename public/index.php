@@ -337,6 +337,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/toggle-status', 'AccountController@toggleSubdomainStatus');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/delete', 'AccountController@removeSubdomain');
 \MuseDockPanel\Router::post('/accounts/{id}/toggle-wp-cron', 'AccountController@toggleWpCron');
+\MuseDockPanel\Router::post('/accounts/{id}/wp-harden', 'AccountController@wpHarden');
 \MuseDockPanel\Router::post('/accounts/{id}/subdomains/{sub_id}/promote', 'AccountController@promoteSubdomain');
 
 // Migration
@@ -525,6 +526,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/witnesses/remove', 'WitnessController@remove');
 \MuseDockPanel\Router::get('/docs/witnesses', 'DocsController@witnesses');
 \MuseDockPanel\Router::get('/docs/mcp-nodes', 'DocsController@mcpNodes');
+\MuseDockPanel\Router::get('/docs/wordpress-security', 'DocsController@wordpressSecurity');
 \MuseDockPanel\Router::post('/settings/mcp/save', 'McpController@save');
 \MuseDockPanel\Router::post('/settings/mcp/token', 'McpController@token');
 \MuseDockPanel\Router::post('/settings/mcp/credentials/clear', 'McpController@clearCredentials');

@@ -716,6 +716,16 @@ if command -v fail2ban-client >/dev/null 2>&1 && [ -d "${PANEL_DIR}/config/fail2
         fi
     done
 
+    # Sync actions (p. ej. musedock-caddy-ban: ban por IP real detrás de Cloudflare)
+    for f in "${PANEL_DIR}"/config/fail2ban/action.d/*.conf; do
+        [ -f "$f" ] || continue
+        FNAME=$(basename "$f")
+        if ! cmp -s "$f" "/etc/fail2ban/action.d/${FNAME}" 2>/dev/null; then
+            cp "$f" "/etc/fail2ban/action.d/${FNAME}"
+            F2B_CHANGED=true
+        fi
+    done
+
     # Sync jail config
     if ! cmp -s "${PANEL_DIR}/config/fail2ban/musedock.conf" /etc/fail2ban/jail.d/musedock.conf 2>/dev/null; then
         cp "${PANEL_DIR}/config/fail2ban/musedock.conf" /etc/fail2ban/jail.d/musedock.conf

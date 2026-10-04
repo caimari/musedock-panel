@@ -1793,6 +1793,18 @@ class ClusterService
                     LogService::log('cluster.sync', $domain, "Hosting updated from master: {$changeMsg}");
                     return ['ok' => true, 'message' => "Hosting {$domain} updated: {$changeMsg}"];
 
+                case 'wp_harden':
+                    // Blindar WordPress: nivel y xmlrpc del master → reglas de Caddy de este nodo.
+                    // El código cerrado (strict) llega con los ficheros (lsyncd), no se toca aquí.
+                    $acc = Database::fetchOne('SELECT * FROM hosting_accounts WHERE domain = :d', ['d' => (string)($hostingData['domain'] ?? '')]);
+                    if (!$acc) {
+                        return ['ok' => false, 'message' => 'Hosting not found on this node'];
+                    }
+                    $x = $hostingData['wp_allow_xmlrpc'] ?? 'keep';
+                    $r = \MuseDockPanel\Services\WordPressHardenService::setLevel($acc, (string)($hostingData['wp_harden'] ?? 'standard'),
+                        $x === 'keep' ? 'keep' : ($x === null ? null : in_array($x, [true, 'true', 't', '1', 1], true)), false);
+                    return ['ok' => !empty($r['ok']), 'message' => 'wp_harden ' . ($r['level'] ?? '?') . (empty($r['ok']) ? ': ' . json_encode($r['roots'] ?? []) : '')];
+
                 case 'suspend_hosting':
                     $username = $hostingData['username'] ?? '';
                     if (!$username) return ['ok' => false, 'message' => 'Username required'];

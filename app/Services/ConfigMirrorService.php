@@ -787,7 +787,11 @@ final class ConfigMirrorService
         $json = (string)shell_exec('caddy adapt --adapter caddyfile --config ' . escapeshellarg($tmp) . ' 2>/dev/null');
         @unlink($tmp);
         $cfg = json_decode($json, true);
-        if (!is_array($cfg)) {
+        // Lo que se manda a la API sale de esta copia con objetos: con arrays asociativos,
+        // un objeto vacío ({}, p. ej. el matcher "file" de php_fastcgi) volvería como []
+        // y Caddy lo rechaza ("cannot unmarshal array into ... MatchFile").
+        $cfgObj = json_decode($json);
+        if (!is_array($cfg) || !is_object($cfgObj)) {
             return ['ok' => false, 'error' => 'caddy adapt no pudo convertir los bloques'];
         }
         $api = rtrim((string)((require PANEL_ROOT . '/config/panel.php')['caddy']['api_url'] ?? 'http://localhost:2019'), '/');
@@ -807,14 +811,14 @@ final class ConfigMirrorService
         // Rutas de todos los servidores HTTP adaptados → al servidor de las webs (srv0).
         $routes = [];
         $skipped = [];
-        foreach ((array)($cfg['apps']['http']['servers'] ?? []) as $srv) {
+        foreach ((array)($cfg['apps']['http']['servers'] ?? []) as $srvName => $srv) {
             // Solo las webs del 443. Bloques de otros puertos (:8446, :8448…) son servicios
             // propios de aquel servidor: no se meten en el servidor de las webs.
             if (!in_array(':443', (array)($srv['listen'] ?? []), true)) {
                 $skipped[] = implode(',', (array)($srv['listen'] ?? []));
                 continue;
             }
-            foreach ((array)($srv['routes'] ?? []) as $r) {
+            foreach ((array)($srv['routes'] ?? []) as $ri => $r) {
                 $hosts = [];
                 foreach ((array)($r['match'] ?? []) as $m) {
                     $hosts = array_merge($hosts, (array)($m['host'] ?? []));
@@ -822,8 +826,10 @@ final class ConfigMirrorService
                 if (!$hosts) {
                     continue;
                 }
-                $r['@id'] = 'cfmirror-' . substr(preg_replace('/[^a-z0-9]+/', '-', strtolower(str_replace('*', 'wild', $hosts[0]))), 0, 60);
-                $routes[] = ['route' => $r, 'hosts' => $hosts, 'wild' => str_starts_with($hosts[0], '*.')];
+                $id = 'cfmirror-' . substr(preg_replace('/[^a-z0-9]+/', '-', strtolower(str_replace('*', 'wild', $hosts[0]))), 0, 60);
+                $obj = $cfgObj->apps->http->servers->{$srvName}->routes[$ri];
+                $obj->{'@id'} = $id;
+                $routes[] = ['id' => $id, 'route' => $obj, 'hosts' => $hosts, 'wild' => str_starts_with($hosts[0], '*.')];
             }
         }
         usort($routes, static fn($a, $b) => (int)$a['wild'] <=> (int)$b['wild']);
@@ -864,7 +870,7 @@ final class ConfigMirrorService
         $put = [];
         $errors = [];
         foreach ($routes as $x) {
-            $id = $x['route']['@id'];
+            $id = $x['id'];
             [$code] = $call('GET', "/id/{$id}");
             if ($code === 200) {
                 [$c2, $o2] = $call('PATCH', "/id/{$id}", $x['route']);
@@ -881,12 +887,12 @@ final class ConfigMirrorService
         }
 
         // Políticas de certificado de esos bloques (p. ej. reto DNS): delante de las demás.
-        $newPol = array_values(array_filter((array)($cfg['apps']['tls']['automation']['policies'] ?? []),
-            static fn($p) => (bool)array_intersect(array_map('strtolower', (array)($p['subjects'] ?? [])), array_map('strtolower', $put))));
+        $newPol = array_values(array_filter((array)($cfgObj->apps->tls->automation->policies ?? []),
+            static fn($p) => (bool)array_intersect(array_map('strtolower', (array)($p->subjects ?? [])), array_map('strtolower', $put))));
         if ($newPol) {
             [$pc, $pj] = $call('GET', '/config/apps/tls/automation/policies');
-            $live = $pc === 200 ? (json_decode($pj, true) ?: []) : [];
-            $subj = static fn($p) => json_encode(array_values((array)($p['subjects'] ?? [])));
+            $live = $pc === 200 ? (array)(json_decode($pj) ?: []) : [];
+            $subj = static fn($p) => json_encode(array_values((array)($p->subjects ?? [])));
             $newKeys = array_map($subj, $newPol);
             $keep = array_values(array_filter($live, static fn($p) => !in_array($subj($p), $newKeys, true)));
             [$c3, $o3] = $call($pc === 200 ? 'PATCH' : 'PUT', '/config/apps/tls/automation/policies', array_merge($newPol, $keep));

@@ -1264,12 +1264,22 @@ CONF;
      *
      * @param string $hostingType 'php' | 'spa' | 'static'
      */
-    private static function buildCaddySubroutes(string $documentRoot, string $username, string $phpVersion, string $hostingType): array
+    public static function buildCaddySubroutes(string $documentRoot, string $username, string $phpVersion, string $hostingType): array
     {
         $routes = [];
 
-        // 1. Set root for all subroutes
-        $routes[] = ['handle' => [['handler' => 'vars', 'root' => $documentRoot]]];
+        // 1. Set root for all subroutes (+ firma de Blindar WordPress, para saber si está al día)
+        $vars = ['handler' => 'vars', 'root' => $documentRoot];
+        $wpMark = $hostingType === 'php' ? WordPressHardenService::marker($documentRoot, $username) : '';
+        if ($wpMark !== '') {
+            $vars['wp_harden'] = $wpMark;
+        }
+        $routes[] = ['handle' => [$vars]];
+
+        // 1b. Blindar WordPress: xmlrpc, PHP en uploads, ficheros sensibles, ?author= (403)
+        if ($hostingType === 'php') {
+            array_push($routes, ...WordPressHardenService::caddyRoutes($documentRoot, $username));
+        }
 
         // 2. Static file cache headers (all types)
         $routes[] = [

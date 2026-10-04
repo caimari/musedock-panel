@@ -239,6 +239,24 @@ if (\MuseDockPanel\Services\WitnessService::all() && time() - (int)Settings::get
     }
 }
 
+// ─── Step 0l: Blindar WordPress (cada 30 min, en todos los nodos) ──────────────
+// Reglas de Caddy de cada WordPress al día (nivel nuevo, Jetpack instalado o quitado…),
+// lista de baneos de fail2ban en Caddy y, en el master, código de los "strict" cerrado
+// otra vez si caducó el desbloqueo o alguien lo abrió. Marca local: cada nodo lo suyo.
+$wpMark = '/var/lib/musedock/wp-harden-ensure.at';
+if (Settings::get('cluster_fenced', '0') !== '1' && time() - (int)@filemtime($wpMark) >= 1800) {
+    @mkdir(dirname($wpMark), 0755, true);
+    @touch($wpMark);
+    try {
+        $wp = \MuseDockPanel\Services\WordPressHardenService::ensureAll();
+        if ($wp['fixed'] || $wp['locked']) {
+            logMsg('Blindar WordPress: reglas al día en ' . implode(', ', $wp['fixed']) . ($wp['locked'] ? '; código cerrado otra vez en ' . implode(', ', $wp['locked']) : ''));
+        }
+    } catch (\Throwable $e) {
+        logMsg('Blindar WordPress error: ' . $e->getMessage());
+    }
+}
+
 // ─── Step 0j: El master reenvía su configuración de relevo cada 30 min ────────
 // Si una copia estuvo caída cuando cambió (p. ej. tras un relevo), el envío pudo agotar
 // sus reintentos; así ninguna se queda con papeles viejos (principal/relevo, modo, titular).

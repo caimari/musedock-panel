@@ -804,6 +804,77 @@ use MuseDockPanel\Services\CloudflareService;
                 <?php endif; ?>
             </div>
         </div>
+
+        <!-- Blindar WordPress -->
+        <?php $wh = $wpInfo['harden'] ?? ['level' => 'standard', 'allow_xmlrpc' => null, 'unlock_until' => 0]; $wq = $wpInfo['quick'] ?? null;
+              $wBad = $wq ? count($wq['php_in_uploads']) + count($wq['odd_in_wp_content']) + count($wq['known_bad_plugins']) : 0; ?>
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-shield-lock me-2"></i>Blindar WordPress</span>
+                <span>
+                    <?php $lvlBadge = ['off' => 'bg-secondary', 'standard' => 'bg-info text-dark', 'strict' => 'bg-success']; ?>
+                    <span class="badge <?= $lvlBadge[$wh['level']] ?? 'bg-secondary' ?>"><?= View::e($wh['level']) ?></span>
+                    <?php if ($wh['level'] === 'strict'): ?>
+                        <span class="badge <?= !empty($wpInfo['locked']) ? 'bg-success' : 'bg-warning text-dark' ?>"><?= !empty($wpInfo['locked']) ? 'código cerrado' : 'código abierto' ?></span>
+                    <?php endif; ?>
+                    <?php if ($wBad): ?><span class="badge bg-danger"><?= $wBad ?> indicio(s) de infección</span><?php endif; ?>
+                </span>
+            </div>
+            <div class="card-body py-2 small">
+                <p class="text-muted mb-2">
+                    <strong>standard</strong> (por defecto, no limita al cliente): <code>xmlrpc.php</code> cerrado (salvo Jetpack o permiso), sin PHP en <code>uploads</code>,
+                    ficheros sensibles y <code>?author=</code> en 403.
+                    <strong>strict</strong> (webs propias): además el código queda de solo lectura para PHP y no se pueden instalar ni editar plugins o temas desde el admin,
+                    aunque roben la contraseña. Para actualizar, se desbloquea un rato.
+                    <a href="/docs/wordpress-security" class="text-info">Guía</a>
+                </p>
+                <?php if ($wBad): ?>
+                <div class="mb-2 py-2 px-3 rounded" style="background:rgba(239,68,68,0.1);color:#f87171;">
+                    <i class="bi bi-bug me-1"></i><strong>Posible infección:</strong>
+                    <?php if ($wq['known_bad_plugins']): ?> plugins de malware conocido: <code><?= View::e(implode(', ', $wq['known_bad_plugins'])) ?></code>.<?php endif; ?>
+                    <?php if ($wq['php_in_uploads']): ?> PHP en uploads: <?= count($wq['php_in_uploads']) ?>.<?php endif; ?>
+                    <?php if ($wq['odd_in_wp_content']): ?> carpetas raras: <code><?= View::e(implode(', ', $wq['odd_in_wp_content'])) ?></code>.<?php endif; ?>
+                    Análisis completo y limpieza: <code>php bin/wp-harden.php scan <?= View::e($account['domain']) ?></code> o MCP <code>wordpress_scan</code>.
+                </div>
+                <?php endif; ?>
+                <?php if (!($isSlave ?? false)): ?>
+                <form method="POST" action="/accounts/<?= $account['id'] ?>/wp-harden" class="d-flex flex-wrap align-items-end gap-2">
+                    <?= View::csrf() ?>
+                    <div>
+                        <label class="form-label mb-0">Nivel</label>
+                        <select name="level" class="form-select form-select-sm">
+                            <?php foreach (['standard' => 'standard (recomendado)', 'strict' => 'strict (código de solo lectura)', 'off' => 'off (sin reglas)'] as $k => $t): ?>
+                                <option value="<?= $k ?>" <?= $wh['level'] === $k ? 'selected' : '' ?>><?= $t ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="form-label mb-0">xmlrpc.php</label>
+                        <?php $xv = $wh['allow_xmlrpc'] === null ? 'auto' : ($wh['allow_xmlrpc'] ? 'on' : 'off'); ?>
+                        <select name="xmlrpc" class="form-select form-select-sm">
+                            <option value="auto" <?= $xv === 'auto' ? 'selected' : '' ?>>auto (abierto solo con Jetpack)</option>
+                            <option value="off" <?= $xv === 'off' ? 'selected' : '' ?>>cerrado</option>
+                            <option value="on" <?= $xv === 'on' ? 'selected' : '' ?>>abierto</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-outline-info btn-sm"><i class="bi bi-check2 me-1"></i>Aplicar</button>
+                </form>
+                <?php if ($wh['level'] === 'strict'): ?>
+                <form method="POST" action="/accounts/<?= $account['id'] ?>/wp-harden" class="d-flex align-items-end gap-2 mt-2">
+                    <?= View::csrf() ?>
+                    <div>
+                        <label class="form-label mb-0">Desbloquear para actualizar</label>
+                        <select name="unlock_minutes" class="form-select form-select-sm">
+                            <option value="30">30 min</option><option value="60">1 hora</option><option value="120">2 horas</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-outline-warning btn-sm"><i class="bi bi-unlock me-1"></i>Desbloquear</button>
+                    <?php if ($wh['unlock_until'] > time()): ?><span class="text-warning">abierto hasta las <?= date('H:i', $wh['unlock_until']) ?></span><?php endif; ?>
+                </form>
+                <?php endif; ?>
+                <?php endif; ?>
+            </div>
+        </div>
         <?php endif; ?>
 
         <!-- Databases -->
@@ -1575,7 +1646,7 @@ function confirmDeleteAccount() {
     var domain = <?= json_encode($account['domain']) ?>;
     var dbCount = <?= $dbCount ?? 0 ?>;
     var subCount = <?= $subCount ?? 0 ?>;
-    var hasMail = <?= $hasMailForDelete ? 'true' : 'false' ?>;
+    var hasMail = <?= !empty($hasMailForDelete) ? 'true' : 'false' ?>;
     var mailCount = <?= count($mailAccounts ?? []) ?>;
     var isMaster = <?= ($isMaster ?? false) ? 'true' : 'false' ?>;
 

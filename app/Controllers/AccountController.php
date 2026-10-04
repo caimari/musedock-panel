@@ -674,6 +674,10 @@ class AccountController
                 'is_wordpress' => true,
                 'wp_cron_disabled' => (bool)$wpCronDisabled,
                 'wp_config_path' => $wpConfigPath,
+                'harden' => \MuseDockPanel\Services\WordPressHardenService::settingsFor((string)$account['username']),
+                'locked' => \MuseDockPanel\Services\WordPressHardenService::isLocked(rtrim($docRoot, '/')),
+                'quick' => \MuseDockPanel\Services\WordPressHardenService::isWordPress(rtrim($docRoot, '/'))
+                    ? \MuseDockPanel\Services\WordPressHardenService::quickScan(rtrim($docRoot, '/')) : null,
             ];
         }
 
@@ -1685,6 +1689,35 @@ class AccountController
         }
 
         LogService::log('account.wp_cron', $account['domain'], ($isDisabled ? 'Enabled' : 'Disabled') . " WP-Cron for {$account['domain']}");
+        Router::redirect('/accounts/' . $params['id']);
+    }
+
+    /**
+     * POST /accounts/{id}/wp-harden — Blindar WordPress: nivel (off/standard/strict) y xmlrpc,
+     * o desbloquear el código un rato (strict) para actualizar.
+     */
+    public function wpHarden(array $params): void
+    {
+        if ($this->slaveGuard('Blindar WordPress')) return;
+        View::verifyCsrf();
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) {
+            Flash::set('error', 'Cuenta no encontrada.');
+            Router::redirect('/accounts');
+            return;
+        }
+        $W = \MuseDockPanel\Services\WordPressHardenService::class;
+        if (!empty($_POST['unlock_minutes'])) {
+            $r = $W::unlock($account, (int)$_POST['unlock_minutes']);
+            Flash::set('success', "Código abierto hasta las {$r['until']} para actualizar. Después se cierra solo.");
+        } else {
+            $level = (string)($_POST['level'] ?? 'standard');
+            $x = (string)($_POST['xmlrpc'] ?? 'auto');
+            $r = $W::setLevel($account, $level, $x === 'auto' ? null : $x === 'on');
+            Flash::set(!empty($r['ok']) ? 'success' : 'error', !empty($r['ok'])
+                ? "Blindar WordPress: {$level} aplicado en {$account['domain']}."
+                : 'Aplicado con errores: ' . json_encode($r['roots'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+        }
         Router::redirect('/accounts/' . $params['id']);
     }
 

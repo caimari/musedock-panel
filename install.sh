@@ -3770,6 +3770,7 @@ if [ "$F2B_CONFIGURE" = true ]; then
     cp "${PANEL_DIR}/config/fail2ban/filter.d/musedock-panel.conf" /etc/fail2ban/filter.d/
     cp "${PANEL_DIR}/config/fail2ban/filter.d/musedock-portal.conf" /etc/fail2ban/filter.d/
     cp "${PANEL_DIR}/config/fail2ban/filter.d/musedock-wordpress.conf" /etc/fail2ban/filter.d/
+    cp "${PANEL_DIR}"/config/fail2ban/action.d/*.conf /etc/fail2ban/action.d/ 2>/dev/null
     ok "Filtros Fail2Ban instalados"
 
     # Install jails

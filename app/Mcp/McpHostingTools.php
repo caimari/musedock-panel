@@ -4,6 +4,7 @@ namespace MuseDockPanel\Mcp;
 use MuseDockPanel\Database;
 use MuseDockPanel\Services\DatabaseService;
 use MuseDockPanel\Services\LogService;
+use MuseDockPanel\Services\WordPressHardenService as WP;
 use MuseDockPanel\Settings;
 
 /**
@@ -61,6 +62,47 @@ class McpHostingTools
                     'apply' => $apply,
                 ], ['quota_mb']),
             ],
+            'wordpress_status' => [
+                'title' => 'Estado de "Blindar WordPress" de los hostings',
+                'description' => 'Solo lectura. Cada WordPress del panel: nivel (off, standard, strict), si xmlrpc.php está abierto, si el código está cerrado (strict) y, si se pide `quick`, indicios rápidos de infección (PHP en uploads, carpetas raras, mu-plugins, plugins de malware conocido). Además, cuántas IPs tiene baneadas Caddy (fail2ban detrás de Cloudflare). Con `node`, en otro nodo.',
+                'inputSchema' => $o([
+                    'quick' => ['type' => 'boolean', 'description' => 'true = añade indicios rápidos por sitio (sin consultar wordpress.org)'],
+                    'node' => ['type' => 'string', 'description' => 'Opcional. Id o nombre de un nodo del cluster para ejecutarlo en él. Omitir = este servidor.'],
+                ], []),
+            ],
+            'wordpress_scan' => [
+                'title' => 'Analizar un WordPress en busca de infección',
+                'description' => 'Solo lectura, no ejecuta el PHP del sitio. Compara el núcleo y cada plugin con wordpress.org (ficheros cambiados o que sobran, plugins que no existen allí o de malware conocido), busca trozos típicos de puertas traseras, PHP en uploads, zips subidos, mu-plugins, carpetas raras, y en la base de datos: administradores, opciones con scripts inyectados y entradas recientes. Devuelve un veredicto. Siguiente paso: wordpress_repair. `domain` puede ser un subdominio con WordPress. Con `node`, en otro nodo.',
+                'inputSchema' => $o([
+                    'domain' => ['type' => 'string', 'description' => 'Dominio del hosting o subdominio'],
+                    'offline' => ['type' => 'boolean', 'description' => 'true = sin comparar con wordpress.org (más rápido)'],
+                    'node' => ['type' => 'string', 'description' => 'Opcional. Id o nombre de un nodo del cluster para ejecutarlo en él. Omitir = este servidor.'],
+                ], ['domain']),
+            ],
+            'wordpress_harden' => [
+                'write' => true,
+                'title' => 'Cambiar el nivel de "Blindar WordPress" de un hosting',
+                'description' => 'standard (por defecto, no limita al cliente): xmlrpc.php cerrado salvo Jetpack o permiso, sin PHP en uploads, ficheros sensibles y ?author= en 403. strict (para webs propias): además el código pasa a ser de solo lectura para PHP (solo escribe en uploads/cache) y se impide instalar o editar plugins/temas desde el admin, aunque roben la contraseña; para actualizar se desbloquea un rato (`unlock_minutes`). off: nada. xmlrpc: auto (abierto solo con Jetpack), on, off. Se aplica aquí y en los nodos web. Solo en el master. Primero sin apply. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o([
+                    'domain' => ['type' => 'string', 'description' => 'Dominio o usuario del hosting'],
+                    'level' => ['type' => 'string', 'enum' => ['off', 'standard', 'strict']],
+                    'xmlrpc' => ['type' => 'string', 'enum' => ['auto', 'on', 'off'], 'description' => 'Opcional; si se omite, se deja como está'],
+                    'unlock_minutes' => ['type' => 'integer', 'description' => 'Solo strict: abre el código N minutos (5-240) para actualizar; luego se cierra solo. No cambia el nivel.'],
+                    'apply' => $apply,
+                ], ['domain']),
+            ],
+            'wordpress_repair' => [
+                'write' => true,
+                'title' => 'Limpiar un WordPress infectado',
+                'description' => 'Nada se borra: lo que se quita va a /var/lib/musedock/wp-quarantine/<dominio>/<fecha>/ con su lista. Acciones: quarantine (mueve `paths`, relativas a la web, p. ej. "wp-content/plugins/wp-link-helper" o un fichero), reinstall_core (núcleo de su misma versión desde wordpress.org; lo cambiado o de más va a cuarentena), reinstall_plugin / reinstall_theme (`slug`, desde wordpress.org en su versión; el actual a cuarentena), rotate_salts (claves nuevas en wp-config.php: cierra todas las sesiones; copia antes). Haz antes wordpress_scan. Solo en el master. Primero sin apply. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o([
+                    'domain' => ['type' => 'string', 'description' => 'Dominio del hosting o subdominio'],
+                    'action' => ['type' => 'string', 'enum' => ['quarantine', 'reinstall_core', 'reinstall_plugin', 'reinstall_theme', 'rotate_salts']],
+                    'paths' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'quarantine: rutas relativas a la raíz de la web'],
+                    'slug' => ['type' => 'string', 'description' => 'reinstall_plugin / reinstall_theme: carpeta del plugin o tema'],
+                    'apply' => $apply,
+                ], ['domain', 'action']),
+            ],
             'password_change_request' => [
                 'write' => true,
                 'title' => 'Pedir el cambio de contraseña de un buzón, usuario de base de datos o acceso SFTP',
@@ -88,6 +130,10 @@ class McpHostingTools
             'domain_redirect_create' => self::redirectCreate($args),
             'password_change_request' => self::passwordRequest($args),
             'mail_quota_request'      => self::quotaRequest($args),
+            'wordpress_status'        => self::wpStatus($args),
+            'wordpress_scan'          => self::wpScan($args),
+            'wordpress_harden'        => self::wpHarden($args),
+            'wordpress_repair'        => self::wpRepair($args),
         };
     }
 
@@ -258,5 +304,119 @@ class McpHostingTools
         $r = McpPasswordChanges::request($kind, $target, (string)($args['reason'] ?? ''));
         return ['status' => 'pendiente_de_confirmar', 'request_id' => $r['id'],
             'next' => 'Pide al usuario que la confirme en Ajustes → MCP (Cambios de contraseña por confirmar) con su contraseña de administrador. Caduca en 24 h.'] + $plan;
+    }
+
+    // ───────────────────────── Blindar WordPress ─────────────────────────
+
+    /** Hosting y raíz WordPress de un dominio (principal o subdominio). */
+    private static function wpTarget(array $args): array
+    {
+        $d = strtolower(trim((string)($args['domain'] ?? '')));
+        $acc = WP::account($d);
+        $root = $acc ? WP::docRoot($acc) : '';
+        if (!$acc) {
+            $sub = Database::fetchOne('SELECT s.document_root, a.domain FROM hosting_subdomains s JOIN hosting_accounts a ON a.id = s.account_id WHERE lower(s.subdomain) = :d', ['d' => $d]);
+            if ($sub) {
+                $acc = WP::account((string)$sub['domain']);
+                $root = rtrim((string)$sub['document_root'], '/');
+            }
+        }
+        if (!$acc) {
+            throw new \InvalidArgumentException("No hay ningún hosting ni subdominio '{$d}'.");
+        }
+        if (!WP::isWordPress($root)) {
+            throw new \InvalidArgumentException("{$d} no es un WordPress ({$root}).");
+        }
+        return [$acc, $root, $d];
+    }
+
+    private static function wpStatus(array $args): array
+    {
+        $sites = [];
+        foreach (Database::fetchAll('SELECT * FROM hosting_accounts ORDER BY domain') as $acc) {
+            foreach (WP::wpRoots($acc) as $root) {
+                $s = WP::settingsFor((string)$acc['username']);
+                $row = ['domain' => $acc['domain'], 'root' => $root, 'level' => $s['level'],
+                    'xmlrpc' => $s['allow_xmlrpc'] === null ? 'auto' : ($s['allow_xmlrpc'] ? 'on' : 'off'),
+                    'code' => WP::isLocked($root) ? 'cerrado (solo lectura)' : 'abierto',
+                    'unlocked_until' => $s['unlock_until'] > time() ? date('Y-m-d H:i', $s['unlock_until']) : null];
+                if (!empty($args['quick'])) {
+                    $row['quick'] = WP::quickScan($root);
+                }
+                $sites[] = $row;
+            }
+        }
+        return ['count' => count($sites), 'banned_ips_in_caddy' => WP::bannedCount(), 'sites' => $sites];
+    }
+
+    private static function wpScan(array $args): array
+    {
+        [$acc, $root] = self::wpTarget($args);
+        $r = WP::scan($root, empty($args['offline']));
+        $r['level'] = WP::settingsFor((string)$acc['username'])['level'];
+        return $r;
+    }
+
+    private static function wpHarden(array $args): array
+    {
+        self::guardMaster();
+        [$acc, $root, $d] = self::wpTarget($args);
+        $cur = WP::settingsFor((string)$acc['username']);
+        if (!empty($args['unlock_minutes'])) {
+            if ($cur['level'] !== 'strict') {
+                throw new \InvalidArgumentException("{$d} no está en strict: su código ya es editable.");
+            }
+            $min = max(5, min(240, (int)$args['unlock_minutes']));
+            if (empty($args['apply'])) {
+                return ['status' => 'plan', 'apply' => false, 'domain' => $d, 'unlock' => "el código se abre {$min} min para actualizar y luego se cierra solo"];
+            }
+            return ['status' => 'abierto'] + WP::unlock($acc, $min);
+        }
+        $level = (string)($args['level'] ?? $cur['level']);
+        $x = $args['xmlrpc'] ?? null;
+        $plan = ['domain' => $acc['domain'], 'from' => $cur['level'], 'to' => $level,
+            'xmlrpc' => $x === null ? 'sin cambios' : $x,
+            'effect' => match ($level) {
+                'off' => 'sin reglas de WordPress en Caddy; si estaba en strict, el código vuelve al usuario del hosting',
+                'standard' => 'xmlrpc.php cerrado (salvo Jetpack o permiso), sin PHP en uploads, ficheros sensibles y ?author= en 403. El cliente sigue instalando plugins.',
+                'strict' => 'lo de standard + xmlrpc siempre cerrado + código de solo lectura para PHP (escribe solo en uploads/cache) + sin instalar/editar plugins ni temas desde el admin. Para actualizar: unlock_minutes.',
+                default => throw new \InvalidArgumentException('level: off, standard o strict'),
+            },
+            'cluster' => 'las reglas se copian a los nodos web; el código cerrado llega con los ficheros'];
+        if (empty($args['apply'])) {
+            return ['status' => 'plan', 'apply' => false] + $plan;
+        }
+        $r = WP::setLevel($acc, $level, $x === null ? 'keep' : ($x === 'auto' ? null : $x === 'on'));
+        return ['status' => !empty($r['ok']) ? 'aplicado' : 'con errores', 'detail' => $r['roots']] + $plan;
+    }
+
+    private static function wpRepair(array $args): array
+    {
+        self::guardMaster();
+        [$acc, $root, $d] = self::wpTarget($args);
+        $action = (string)($args['action'] ?? '');
+        $paths = array_values(array_filter(array_map('strval', (array)($args['paths'] ?? []))));
+        $slug = (string)($args['slug'] ?? '');
+        $plan = ['domain' => $d, 'root' => $root, 'action' => $action, 'quarantine' => WP::QUARANTINE_DIR . "/{$d}/<fecha>/ (nada se borra)"];
+        $plan += match ($action) {
+            'quarantine' => $paths ? ['paths' => $paths] : throw new \InvalidArgumentException('Indica `paths`.'),
+            'reinstall_core' => ['what' => 'núcleo de WordPress de su misma versión desde wordpress.org; lo cambiado o de más, a cuarentena'],
+            'reinstall_plugin', 'reinstall_theme' => $slug !== '' ? ['slug' => $slug, 'what' => 'copia de wordpress.org en su versión; la actual entera, a cuarentena']
+                : throw new \InvalidArgumentException('Indica `slug`.'),
+            'rotate_salts' => ['what' => 'claves y salts nuevas en wp-config.php (copia antes a cuarentena); se cierran TODAS las sesiones'],
+            default => throw new \InvalidArgumentException('action no válida'),
+        };
+        if (empty($args['apply'])) {
+            return ['status' => 'plan', 'apply' => false] + $plan;
+        }
+        $user = (string)$acc['username'];
+        $r = match ($action) {
+            'quarantine' => WP::quarantine($root, $d, $paths),
+            'reinstall_core' => WP::reinstallCore($root, $d, $user),
+            'reinstall_plugin' => WP::reinstallPackage($root, $d, $user, 'plugin', $slug),
+            'reinstall_theme' => WP::reinstallPackage($root, $d, $user, 'theme', $slug),
+            'rotate_salts' => WP::rotateSalts($root, $d),
+        };
+        return ['status' => !empty($r['ok']) ? 'hecho' : 'con errores', 'result' => $r] + $plan;
     }
 }

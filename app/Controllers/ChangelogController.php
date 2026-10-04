@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.301',
+                'date' => '2026-10-04',
+                'badge' => 'warning',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Blindar WordPress por hosting: standard (por defecto; xmlrpc cerrado salvo Jetpack, sin PHP en uploads, ficheros sensibles y ?author= en 403) y strict (codigo de solo lectura para PHP + sin instalar/editar plugins; desbloqueo temporal para actualizar)', 'Analisis de infeccion sin ejecutar el PHP del sitio: nucleo y plugins contra wordpress.org, puertas traseras, uploads, mu-plugins, administradores', 'Limpieza sin borrar: cuarentena, reinstalar nucleo/plugin/tema desde wordpress.org, claves nuevas de wp-config', 'MCP: wordpress_status, wordpress_scan, wordpress_harden, wordpress_repair; Docs: Blindar WordPress'],
+                        'en' => ['Per-hosting WordPress hardening (standard/strict)', 'Infection scan without executing site PHP', 'Non-destructive cleanup (quarantine, reinstall from wordpress.org, rotate salts)', 'MCP WordPress tools and docs'],
+                    ],
+                    'security' => [
+                        'es' => ['Los baneos de fail2ban de WordPress no servian detras del proxy de Cloudflare: ahora tambien se banea en Caddy por Cf-Connecting-Ip'],
+                        'en' => ['WordPress fail2ban bans now also apply in Caddy by Cf-Connecting-Ip (iptables bans were useless behind Cloudflare)'],
+                    ],
+                    'fixed' => [
+                        'es' => ['apply-master-caddyfile --apply fallaba con webs PHP (*.musedock.com): los objetos vacios de caddy adapt ("file": {}) se convertian en [] al pasar por PHP', 'Ficha de hosting suspendido: aviso por $hasMailForDelete sin definir'],
+                        'en' => ['apply-master-caddyfile --apply failed for PHP sites: empty objects from caddy adapt became [] in PHP'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.300',
                 'date' => '2026-10-04',
                 'badge' => 'info',

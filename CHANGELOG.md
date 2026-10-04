@@ -2,6 +2,32 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.301] — 2026-10-04 — Blindar WordPress; copiar a Caddy las webs PHP del master
+
+### Añadido
+- **Blindar WordPress, por hosting** (*Hostings → el hosting → Blindar WordPress*, MCP y `bin/wp-harden.php`):
+  - **standard**, por defecto en todos los WordPress, no limita al cliente: `xmlrpc.php` cerrado (abierto automáticamente si tiene Jetpack, o a mano), sin ejecutar PHP en `uploads`/`cache`/`upgrade`, y en 403 `wp-config.php`, `readme.html`, `*.sql`, las copias `.bak` y `?author=`.
+  - **strict**, para webs propias: además el código queda de solo lectura para PHP (solo escribe en `uploads`, `cache` y similares), y un mu-plugin del panel impide instalar o editar plugins y temas desde el admin. Aunque roben la contraseña, no pueden escribir PHP. Para actualizar, se desbloquea 30 min, 1 h o 2 h y el panel lo vuelve a cerrar solo.
+  - El nivel se cambia en el master y se copia a los nodos web. Cada 30 min, cada nodo pone al día sus reglas de Caddy.
+- **Análisis de infección sin ejecutar el PHP del sitio** (`scan`, MCP `wordpress_scan`):
+  - el núcleo y cada plugin, contra las sumas oficiales de wordpress.org (ficheros cambiados o de más, plugins inexistentes allí o de malware conocido);
+  - trozos de puertas traseras en `wp-content`, PHP en uploads, zips subidos, mu-plugins y carpetas raras;
+  - en la base de datos: administradores, opciones con scripts inyectados y entradas recientes.
+  - Además, un aviso en la ficha del hosting si hay indicios.
+- **Limpieza sin borrar nada** (MCP `wordpress_repair` y terminal): todo va a `/var/lib/musedock/wp-quarantine/<dominio>/<fecha>/`, con su lista. Permite:
+  - mover a cuarentena;
+  - reinstalar desde wordpress.org el núcleo, un plugin o un tema en su misma versión;
+  - regenerar las claves de `wp-config.php` (cierra todas las sesiones).
+- **MCP:** `wordpress_status` y `wordpress_scan` (lectura, con `node`); `wordpress_harden` y `wordpress_repair` (modifican; primero el plan).
+- **Docs → Blindar WordPress.**
+
+### Seguridad
+- **Los baneos de fail2ban de WordPress no servían con el proxy de Cloudflare:** se baneaba en iptables la IP real del visitante, pero las conexiones llegan desde IPs de Cloudflare. Ahora la jaula `musedock-wordpress` banea también en Caddy, por la cabecera `Cf-Connecting-Ip` (acción `musedock-caddy-ban`; `update.sh` instala las acciones de fail2ban).
+
+### Arreglado
+- **Ficha de un hosting suspendido:** aviso de PHP por `$hasMailForDelete` sin definir.
+- **`apply-master-caddyfile --apply` no podía meter webs con PHP** (p. ej. `*.musedock.com`): Caddy lo rechazaba con `cannot unmarshal array into Go value of type fileserver.MatchFile`. Al pasar la salida de `caddy adapt` por PHP, los objetos vacíos (`"file": {}` de `php_fastcgi`/`file_server`) se convertían en listas (`[]`). Ahora las rutas y las políticas de certificado se mandan a Caddy conservando los objetos.
+
 ## [1.0.300] — 2026-10-04 — MCP entre nodos: aviso, interruptor y registro
 
 ### Añadido

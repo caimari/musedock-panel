@@ -69,6 +69,9 @@ CREATE TABLE IF NOT EXISTS hosting_accounts (
     caddy_route_id VARCHAR(255),
     shell VARCHAR(50) NOT NULL DEFAULT '/usr/sbin/nologin',
     server_id INTEGER REFERENCES servers(id) ON DELETE SET NULL,
+    wp_harden VARCHAR(10) NOT NULL DEFAULT 'standard',
+    wp_allow_xmlrpc BOOLEAN,
+    wp_unlock_until TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
