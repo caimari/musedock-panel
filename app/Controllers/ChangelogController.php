@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.295',
+                'date' => '2026-10-04',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Agente testigo v3: resolve_host para entradas con IP dinamica (addr = IP actual); el vigilante de entrada lo reconoce'],
+                        'en' => ['Witness agent v3: resolve_host for dynamic-IP ingresses (addr = current IP); recognised by the ingress watcher'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.294',
                 'date' => '2026-10-04',
                 'badge' => 'info',

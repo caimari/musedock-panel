@@ -64,12 +64,25 @@ class IngressWatchService
             if ($altIp !== '' && self::probe((string)$srv['health'], $altIp)['ok']) {
                 return true;
             }
-            $v = WitnessService::verdicts((string)$srv['health'], (string)$srv['health'], 0, 0, $answers);
-            if (in_array('up', $v, true)) {
+            if (in_array('up', self::altVerdicts((string)$srv['health'], $altIp, $answers), true)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * Cómo ven los testigos la entrada alternativa: comprobaciones del nombre de salud
+     * hacia la IP alternativa actual (agente v3, "resolve_host") o sin IP fija (addr =
+     * nombre: van por el CNAME del nombre de salud, que lleva a la alternativa).
+     */
+    private static function altVerdicts(string $health, string $altIp, ?array $answers): array
+    {
+        $v = $altIp !== '' ? WitnessService::verdicts($altIp, $health, 0, 0, $answers) : [];
+        foreach (WitnessService::verdicts($health, $health, 0, 0, $answers) as $w => $x) {
+            $v[$w] ??= $x;
+        }
+        return $v;
     }
 
     /** Una pasada (cluster-worker, cada minuto). */
@@ -105,7 +118,7 @@ class IngressWatchService
 
             // Entrada alternativa.
             $altIp = self::resolve($altHost);
-            $altOk = $altIp !== '' && (self::probe($health, $altIp)['ok'] || in_array('up', WitnessService::verdicts($health, $health, 0, 0, $answers), true));
+            $altOk = $altIp !== '' && (self::probe($health, $altIp)['ok'] || in_array('up', self::altVerdicts($health, $altIp, $answers), true));
 
             $st['bad'] = $primaryBad ? ($st['bad'] ?? 0) + 1 : 0;
             $st['good'] = $primaryGood ? ($st['good'] ?? 0) + 1 : 0;

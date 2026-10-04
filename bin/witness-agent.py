@@ -12,8 +12,10 @@ quien pregunta) y responde cómo las ve a quien traiga la clave.
      "loss_pct": 0, "checked_at": ..., "error": ""}, ...}}
 
 Tipos de comprobación:
-  https: conecta a "resolve" (IP) o al nombre, con SNI = nombre del URL, verifica el
-         certificado, pide la ruta y, si hay "expect", exige ese texto en la respuesta.
+  https: conecta a "resolve" (IP fija), o a la IP que tenga en ese momento "resolve_host"
+         (un nombre DNS, para entradas con IP dinámica), o al nombre del URL; con SNI = nombre
+         del URL, verifica el certificado, pide la ruta y, si hay "expect", exige ese texto.
+         En "addr" se informa de la IP a la que se conectó.
   tcp:   abre una conexión a host:port.
 
 Escucha por HTTPS si la configuración trae "tls_cert" y "tls_key" (recomendado: el testigo
@@ -50,7 +52,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 CONFIG = os.environ.get("MUSEDOCK_WITNESS_CONFIG", "/etc/musedock-witness/config.json")
-VERSION = "2"
+VERSION = "3"
 
 with open(CONFIG, "r", encoding="utf-8") as f:
     cfg = json.load(f)
@@ -68,11 +70,22 @@ state = {}          # id -> {"hist": deque[(ok, latency_ms)], "last": {...}}
 lock = threading.Lock()
 
 
-def check_https(t):
+def target_addr(t):
+    """IP (o nombre) a la que se conecta: fija, la actual de resolve_host, o el nombre."""
+    if t.get("resolve"):
+        return t["resolve"]
+    if t.get("resolve_host"):
+        try:
+            return socket.getaddrinfo(t["resolve_host"], 443, socket.AF_INET, socket.SOCK_STREAM)[0][4][0]
+        except OSError:
+            return t["resolve_host"]
+    return t.get("host") or (urlparse(t.get("url", "")).hostname or "")
+
+
+def check_https(t, addr):
     u = urlparse(t["url"])
     name = u.hostname
     port = u.port or 443
-    addr = t.get("resolve") or name
     ctx = ssl.create_default_context()
     start = time.monotonic()
     with socket.create_connection((addr, port), timeout=TIMEOUT) as raw:
@@ -96,16 +109,16 @@ def check_https(t):
     return ms
 
 
-def check_tcp(t):
+def check_tcp(t, addr=None):
     start = time.monotonic()
     with socket.create_connection((t["host"], int(t["port"])), timeout=TIMEOUT):
         pass
     return int((time.monotonic() - start) * 1000)
 
 
-def run_check(t):
+def run_check(t, addr):
     try:
-        ms = check_https(t) if t.get("type") == "https" else check_tcp(t)
+        ms = check_https(t, addr) if t.get("type") == "https" else check_tcp(t)
         return True, ms, ""
     except Exception as e:  # noqa: BLE001 — cualquier fallo cuenta como "no llega"
         return False, None, str(e)[:200]
@@ -114,7 +127,8 @@ def run_check(t):
 def loop():
     while True:
         for t in TARGETS:
-            ok, ms, err = run_check(t)
+            addr = target_addr(t)
+            ok, ms, err = run_check(t, addr)
             with lock:
                 st = state.setdefault(t["id"], {"hist": deque(maxlen=WINDOW), "last": {}})
                 st["hist"].append((ok, ms))
@@ -124,7 +138,8 @@ def loop():
                     "type": t.get("type", "tcp"),
                     # Qué dirección mira (no es secreto): el panel lo usa para saber qué
                     # comprobación corresponde a qué servidor.
-                    "addr": t.get("resolve") or t.get("host") or (urlparse(t.get("url", "")).hostname or ""),
+                    "addr": addr,
+                    "via": t.get("resolve_host", ""),
                     "name": urlparse(t.get("url", "")).hostname or t.get("host", ""),
                     "ok": ok,
                     "latency_ms": ms,

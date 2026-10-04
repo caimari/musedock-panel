@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.295] — 2026-10-04 — Testigos que siguen una IP dinámica
+
+### Añadido
+- **Agente testigo v3: `resolve_host`**. Para entradas con IP dinámica (p. ej. una segunda línea con DynDNS), la comprobación resuelve ese nombre en cada pasada, se conecta a la IP que tenga en ese momento e informa de esa IP en `addr` (y del nombre en `via`). Sin fijar IPs que caducan.
+- El vigilante de entrada reconoce la alternativa tanto así (IP igual a la que resuelve él) como con las comprobaciones sin IP fija.
+
 ## [1.0.294] — 2026-10-04 — Testigos en el panel y vigilante de entrada (ONO ↔ Orange)
 
 ### Añadido
