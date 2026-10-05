@@ -95,10 +95,9 @@
                 <?php if (!$isSlave && !empty($freeAccounts)): ?>
                 <form method="POST" action="/customers/<?= (int)$customer['id'] ?>/link" class="d-flex gap-2 p-3 border-top" style="border-color:#1e293b!important;">
                     <?= View::csrf() ?><input type="hidden" name="kind" value="hosting">
-                    <select name="item_id" class="form-select form-select-sm" required style="max-width:320px;">
-                        <option value="">Vincular un hosting ya creado…</option>
-                        <?php foreach ($freeAccounts as $fa): ?><option value="<?= (int)$fa['id'] ?>"><?= View::e($fa['domain']) ?></option><?php endforeach; ?>
-                    </select>
+                    <input type="search" name="item_domain" list="freeAccountsList" class="form-control form-control-sm" required style="max-width:320px;"
+                           placeholder="Buscar un hosting ya creado…" autocomplete="off">
+                    <datalist id="freeAccountsList"><?php foreach ($freeAccounts as $fa): ?><option value="<?= View::e($fa['domain']) ?>"><?php endforeach; ?></datalist>
                     <button class="btn btn-sm btn-outline-info"><i class="bi bi-link-45deg me-1"></i>Vincular</button>
                 </form>
                 <?php endif; ?>
@@ -127,15 +126,35 @@
                 <?php if (!$isSlave && !empty($freeMailDomains)): ?>
                 <form method="POST" action="/customers/<?= (int)$customer['id'] ?>/link" class="d-flex gap-2 p-3 border-top" style="border-color:#1e293b!important;">
                     <?= View::csrf() ?><input type="hidden" name="kind" value="mail">
-                    <select name="item_id" class="form-select form-select-sm" required style="max-width:320px;">
-                        <option value="">Vincular un dominio de correo ya creado…</option>
-                        <?php foreach ($freeMailDomains as $fm): ?><option value="<?= (int)$fm['id'] ?>"><?= View::e($fm['domain']) ?></option><?php endforeach; ?>
-                    </select>
+                    <input type="search" name="item_domain" list="freeMailList" class="form-control form-control-sm" required style="max-width:320px;"
+                           placeholder="Buscar un dominio de correo ya creado…" autocomplete="off">
+                    <datalist id="freeMailList"><?php foreach ($freeMailDomains as $fm): ?><option value="<?= View::e($fm['domain']) ?>"><?php endforeach; ?></datalist>
                     <button class="btn btn-sm btn-outline-info"><i class="bi bi-link-45deg me-1"></i>Vincular</button>
                 </form>
                 <?php endif; ?>
             </div>
         </div>
+
+        <?php if (!$isSlave): ?>
+        <!-- Eliminar cliente: solo sin hostings ni dominios, con la contraseña del administrador -->
+        <?php $canDelete = empty($accounts) && empty($mailDomains); ?>
+        <div class="card mt-3" style="border-color:rgba(239,68,68,.35);">
+            <div class="card-body d-flex flex-wrap align-items-center gap-2 small">
+                <i class="bi bi-trash3 text-danger"></i>
+                <?php if ($canDelete): ?>
+                    <form method="POST" action="/customers/<?= (int)$customer['id'] ?>/delete" class="d-flex flex-wrap gap-2 align-items-center"
+                          onsubmit="return confirm(<?= View::js('¿Eliminar al cliente ' . $customer['name'] . ' (' . $customer['email'] . ')? No se puede deshacer.') ?>)">
+                        <?= View::csrf() ?>
+                        <span>Eliminar este cliente. Confirma con tu contraseña de administrador:</span>
+                        <input type="password" name="admin_password" required class="form-control form-control-sm" style="max-width:220px;" autocomplete="current-password" placeholder="Tu contraseña">
+                        <button class="btn btn-sm btn-outline-danger">Eliminar cliente</button>
+                    </form>
+                <?php else: ?>
+                    <span class="text-muted">Para eliminar este cliente, primero desvincula (o elimina) sus hostings y dominios de correo.</span>
+                <?php endif; ?>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 
     <div class="col-md-4">

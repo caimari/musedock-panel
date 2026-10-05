@@ -164,6 +164,11 @@ class CustomerController
         $customer = Database::fetchOne("SELECT id, name FROM customers WHERE id = :id", ['id' => $cid]);
         $table = ($_POST['kind'] ?? '') === 'mail' ? 'mail_domains' : 'hosting_accounts';
         $itemId = (int)($_POST['item_id'] ?? 0);
+        // Desde el buscador se manda el dominio escrito o elegido de la lista.
+        $byDomain = strtolower(trim((string)($_POST['item_domain'] ?? '')));
+        if ($itemId <= 0 && $byDomain !== '') {
+            $itemId = (int)(Database::fetchOne("SELECT id FROM {$table} WHERE lower(domain) = :d", ['d' => $byDomain])['id'] ?? 0);
+        }
         $item = $customer && $itemId > 0 ? Database::fetchOne("SELECT id, domain, customer_id FROM {$table} WHERE id = :id", ['id' => $itemId]) : null;
         if (!$item) {
             Flash::set('error', 'No encontrado.');
@@ -313,10 +318,24 @@ class CustomerController
             return;
         }
 
-        // Check if customer has accounts
-        $accountCount = Database::fetchOne("SELECT COUNT(*) as c FROM hosting_accounts WHERE customer_id = :id", ['id' => $params['id']]);
-        if ($accountCount && $accountCount['c'] > 0) {
-            Flash::set('error', 'No se puede eliminar un cliente con cuentas de hosting activas. Elimina las cuentas primero.');
+        // Confirmación con la contraseña del administrador que está dentro.
+        $adminId = (int)($_SESSION['panel_user']['id'] ?? 0);
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        if (!$admin || !password_verify((string)($_POST['admin_password'] ?? ''), (string)$admin['password_hash'])) {
+            Flash::set('error', 'Contraseña de administrador incorrecta: el cliente no se ha eliminado.');
+            Router::redirect('/customers/' . $params['id']);
+            return;
+        }
+
+        // Solo un cliente sin nada: primero hay que desvincular (o eliminar) sus hostings y dominios de correo.
+        $accountCount = (int)(Database::fetchOne("SELECT COUNT(*) as c FROM hosting_accounts WHERE customer_id = :id", ['id' => $params['id']])['c'] ?? 0);
+        $mailCount = 0;
+        try {
+            $mailCount = (int)(Database::fetchOne("SELECT COUNT(*) as c FROM mail_domains WHERE customer_id = :id", ['id' => $params['id']])['c'] ?? 0);
+        } catch (\Throwable) {
+        }
+        if ($accountCount > 0 || $mailCount > 0) {
+            Flash::set('error', "No se puede eliminar: tiene {$accountCount} hosting(s) y {$mailCount} dominio(s) de correo. Desvincúlalos antes desde su ficha.");
             Router::redirect('/customers/' . $params['id']);
             return;
         }

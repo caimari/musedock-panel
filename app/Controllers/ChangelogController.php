@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.321',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Eliminar un cliente desde su ficha: solo sin hostings ni dominios de correo y con la contrasena del administrador', 'Buscador al vincular hostings y dominios de correo ya creados'],
+                        'en' => ['Delete a customer from its page: only without hostings or mail domains and with the admin password', 'Search box when linking existing hostings and mail domains'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.320',
                 'date' => '2026-10-05',
                 'badge' => 'info',

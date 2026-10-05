@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.321] — 2026-10-05 — Eliminar clientes con contraseña y buscador al vincular
+
+### Añadido
+- **Eliminar un cliente** desde su ficha (en el servidor que manda). Solo si no tiene hostings ni dominios de correo vinculados (si los tiene, hay que desvincularlos antes) y con la **contraseña del administrador** como confirmación. Antes la acción existía pero no había botón, y no pedía contraseña ni miraba los dominios de correo.
+- **Buscador al vincular** hostings y dominios de correo ya creados: se escribe parte del nombre y sale la lista filtrada (en vez de un desplegable largo).
+
 ## [1.0.320] — 2026-10-05 — Clientes: identificador estable entre servidores
 
 ### Arreglado
