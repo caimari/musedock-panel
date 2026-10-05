@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.325] — 2026-10-06 — Las invitaciones del portal salen por el SMTP del panel
+
+### Arreglado
+- **Las invitaciones y los "Reset password" del portal no llegaban** (ni a spam). Se enviaban con `mail()` de PHP por el Postfix local y desde `noreply@<nombre del servidor>`, sin SPF, DKIM ni DNS inverso que cuadrase: Gmail los descartaba. Ahora salen por el mismo SMTP que los avisos del panel (*Ajustes → Notificaciones*: principal y secundario de reserva) con su remitente, y cuentan en el tope diario de correos a clientes.
+
 ## [1.0.324] — 2026-10-06 — "Reset password" del cliente vuelve a funcionar
 
 ### Arreglado

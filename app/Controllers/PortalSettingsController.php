@@ -252,8 +252,10 @@ class PortalSettingsController
         $body .= "Si no solicitaste esto, ignora este mensaje.\n\n";
         $body .= "— MuseDock Panel";
 
-        $headers = "From: noreply@{$host}\r\nContent-Type: text/plain; charset=UTF-8";
-        $sent = @mail($customer['email'], $subject, $body, $headers);
+        // Por el SMTP de avisos del panel (p. ej. Sweego, con el secundario de reserva) y con su
+        // remitente: antes salía con mail() por el Postfix local y desde noreply@<servidor>, sin
+        // SPF/DKIM ni DNS inverso, y Gmail lo descartaba sin dejarlo ni en spam.
+        $sent = \MuseDockPanel\Services\NotificationService::sendToAddress($customer['email'], $subject, $body, 'Portal de clientes');
 
         LogService::log('portal.invitation', $customer['email'],
             ($isNew ? 'Invitation' : 'Password reset') . " sent to: {$customer['name']}");

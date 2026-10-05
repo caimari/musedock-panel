@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.325',
+                'date' => '2026-10-06',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Invitaciones y Reset password del portal no llegaban: salian con mail() por el Postfix local y un remitente sin SPF/DKIM; ahora por el SMTP de avisos del panel (principal y secundario)'],
+                        'en' => ['Portal invitations and password resets were not delivered: sent with mail() via local Postfix from an unauthenticated sender; now via the panel notification SMTP (primary and secondary)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.324',
                 'date' => '2026-10-06',
                 'badge' => 'info',
