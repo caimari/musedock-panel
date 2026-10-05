@@ -33,6 +33,11 @@
                             <label class="form-check-label" for="mute-<?= View::e($key) ?>"><strong>Silenciar en todos: <?= View::e($label) ?></strong>
                                 <span class="text-muted d-block"><?= View::e($desc) ?></span></label>
                         </div>
+                        <div class="form-check form-switch ms-4 mb-2">
+                            <input class="form-check-input" type="checkbox" role="switch" id="hide-<?= View::e($key) ?>" name="hidden[]" value="<?= View::e($key) ?>"
+                                <?= in_array($key, $policy['hidden'] ?? [], true) ? 'checked' : '' ?>>
+                            <label class="form-check-label text-muted" for="hide-<?= View::e($key) ?>">y ocultarlo también del monitor (ni se apunta)</label>
+                        </div>
                     </div>
                 <?php endforeach; ?>
             </div>

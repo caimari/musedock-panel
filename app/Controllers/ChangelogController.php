@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.323',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Monitor: los avisos de CPU, RAM, disco, red y GPU se cierran solos cuando el problema lleva 15 min sin repetirse o se silencio'],
+                        'en' => ['Monitor: CPU, RAM, disk, network and GPU alerts auto-acknowledge after 15 min without firing or when silenced'],
+                    ],
+                    'added' => [
+                        'es' => ['Avisos: ocultar un tipo tambien del monitor (ni se apunta), en todos los servidores o en uno; MCP alerts_configure hide/unhide'],
+                        'en' => ['Alerts: hide a type from the monitor too (not recorded), on all servers or one; MCP alerts_configure hide/unhide'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.322',
                 'date' => '2026-10-05',
                 'badge' => 'info',

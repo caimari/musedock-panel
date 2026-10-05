@@ -93,6 +93,7 @@ class AlertsController
         }
         $policy = [
             'muted' => $muted,
+            'hidden' => (array)($_POST['hidden'] ?? []),
             'hardening_accepted' => array_merge((array)($_POST['accepted'] ?? []),
                 array_filter(array_map('trim', explode("\n", (string)($_POST['accepted_extra'] ?? ''))))),
             'disk_overrides' => $disk,

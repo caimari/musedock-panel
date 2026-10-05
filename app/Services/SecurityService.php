@@ -361,7 +361,7 @@ class SecurityService
                  LIMIT 1",
                 ['host' => $host, 'cooldown' => $cooldown]
             );
-            if (!$recent) {
+            if (!$recent && !AlertPolicyService::hidden('LOGIN_ANOMALY')) {
                 Database::insert('monitor_alerts', [
                     'host' => $host,
                     'type' => 'LOGIN_ANOMALY',

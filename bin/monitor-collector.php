@@ -706,6 +706,9 @@ function checkAlert(string $host, string $type, string $message, float $value): 
         $message .= ' (sigue desde el aviso anterior)';
     }
 
+    // Oculto del monitor (Ajustes → Avisos): ni se apunta.
+    if (\MuseDockPanel\Services\AlertPolicyService::hidden($type)) return;
+
     // Capture top processes + disk info for context
     $processInfo = getTopProcesses($type);
     $diskInfo = getDiskInfo();
@@ -750,6 +753,9 @@ function shortHash(string $value): string
 
 function insertEventAlert(string $host, string $type, string $message, string $details = '', float $value = 1.0, int $cooldownSeconds = 300): bool
 {
+    if (\MuseDockPanel\Services\AlertPolicyService::hidden($type)) {
+        return false; // oculto del monitor (Ajustes → Avisos)
+    }
     $cooldownSeconds = max(60, min(86400, $cooldownSeconds));
     $recent = Database::fetchOne(
         "SELECT id FROM monitor_alerts
@@ -1782,6 +1788,38 @@ if (!empty($diskData)) {
             checkAlert($hostname, 'DISK_HIGH', "Disk {$d['device']} ({$d['mount']}) at {$d['percent']}% (threshold: {$thr}%)", $d['percent']);
         }
     }
+}
+
+// Avisos de métricas que ya no se cumplen (o se silenciaron) se dan por vistos solos: antes
+// se quedaban "Active" para siempre (nitro: miles de DISK_HIGH de un disco ya silenciado).
+// Un aviso se cierra si su recurso (tipo + disco/GPU) lleva 15 min sin dispararse. Cada 10 min.
+try {
+    $ackMark = (int)Settings::get('monitor_auto_ack_at', '0');
+    if (time() - $ackMark >= 600) {
+        Settings::set('monitor_auto_ack_at', (string)time());
+        $episodes = json_decode(Settings::get('monitor_alert_episodes', '{}'), true) ?: [];
+        $groups = Database::fetchAll(
+            "SELECT DISTINCT type, regexp_replace(message, ' at [0-9.]+.*$', '') AS res FROM monitor_alerts
+             WHERE host = :h AND acknowledged = false AND type IN ('CPU_HIGH','RAM_HIGH','DISK_HIGH','NET_HIGH','GPU_TEMP','GPU_HIGH')",
+            ['h' => $hostname]
+        );
+        $closed = 0;
+        foreach ($groups as $g) {
+            $last = (int)($episodes[$g['type'] . '|' . $g['res']]['last_seen'] ?? 0);
+            if (time() - $last >= 900) {
+                $closed += Database::execute(
+                    "UPDATE monitor_alerts SET acknowledged = true WHERE host = :h AND type = :t AND acknowledged = false
+                     AND regexp_replace(message, ' at [0-9.]+.*$', '') = :r",
+                    ['h' => $hostname, 't' => $g['type'], 'r' => $g['res']]
+                );
+            }
+        }
+        if ($closed > 0) {
+            logMsg("Avisos cerrados solos (el problema ya no está o se silenció): {$closed}");
+        }
+    }
+} catch (\Throwable $e) {
+    logMsg('Auto-cierre de avisos error: ' . $e->getMessage());
 }
 
 // ─── Event watchers: firewall external changes + server reboot ───────

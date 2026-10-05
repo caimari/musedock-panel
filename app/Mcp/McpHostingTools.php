@@ -134,6 +134,8 @@ class McpHostingTools
                 'inputSchema' => $o([
                     'mute' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos a silenciar en todos los servidores ("DISK_HIGH") o solo en uno ("servidor2:DISK_HIGH"; nombre corto del servidor). Ver alerts_status → types'],
                     'unmute' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos a reactivar'],
+                    'hide' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos que ni se apuntan en el monitor ni avisan ("DISK_HIGH" o "servidor2:DISK_HIGH")'],
+                    'unhide' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos que vuelven a apuntarse en el monitor'],
                     'accept_hardening' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Títulos de controles a dar por buenos'],
                     'unaccept_hardening' => ['type' => 'array', 'items' => ['type' => 'string']],
                     'disk_rules' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => (object)[
@@ -500,6 +502,7 @@ class McpHostingTools
         }
         $new = $cur;
         $new['muted'] = array_values(array_diff(array_unique(array_merge($cur['muted'], (array)($args['mute'] ?? []))), (array)($args['unmute'] ?? [])));
+        $new['hidden'] = array_values(array_diff(array_unique(array_merge($cur['hidden'] ?? [], (array)($args['hide'] ?? []))), (array)($args['unhide'] ?? [])));
         $new['hardening_accepted'] = array_values(array_diff(array_unique(array_merge($cur['hardening_accepted'], (array)($args['accept_hardening'] ?? []))),
             (array)($args['unaccept_hardening'] ?? [])));
         foreach ((array)($args['disk_rules'] ?? []) as $r) {

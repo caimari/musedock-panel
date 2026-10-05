@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.323] — 2026-10-05 — Monitor: avisos que se cierran solos
+
+### Arreglado
+- **Monitor: los avisos de métricas se cierran solos.** CPU, RAM, disco, red y GPU quedaban "Active" para siempre aunque el problema hubiera pasado o el disco se hubiera silenciado (miles de avisos viejos en un servidor). Ahora, cada 10 min, se dan por vistos los de un recurso (tipo + disco/GPU) que lleva 15 min sin dispararse; los vistos de más de 30 días se borran como antes.
+
+### Añadido
+- **Ocultar un tipo de aviso también del monitor** (*Ajustes → Avisos*, debajo de cada "Silenciar"): además de no enviar correo, ni se apunta en el monitor. Para todos los servidores o solo uno (`servidor:TIPO`, por MCP `alerts_configure` con `hide`/`unhide`). Silenciar sigue igual (quita el correo, el aviso se ve en el monitor).
+
 ## [1.0.322] — 2026-10-05 — Eliminar cliente desde una ventana de confirmación
 
 ### Cambiado

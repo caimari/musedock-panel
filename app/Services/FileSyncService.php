@@ -2296,6 +2296,9 @@ class FileSyncService
 
     private static function pushMonitorAlert(string $type, string $message, ?float $value = null, string $details = ''): void
     {
+        if (AlertPolicyService::hidden($type)) {
+            return; // oculto del monitor (Ajustes → Avisos)
+        }
         try {
             Database::insert('monitor_alerts', [
                 'ts' => date('Y-m-d H:i:s'),

@@ -131,7 +131,27 @@ class AlertPolicyService
             return false;
         }
         $list = self::json('alerts_muted', []);
-        return in_array($type, $list, true) || in_array(self::shortHost() . ':' . $type, $list, true);
+        return in_array($type, $list, true) || in_array(self::shortHost() . ':' . $type, $list, true) || self::hidden($type);
+    }
+
+    /**
+     * Tipos que ni se apuntan en el monitor ni avisan (más que silenciar, que solo quita el
+     * correo). "TIPO" en todos o "servidor:TIPO" solo en ese. Acepta el tipo del monitor
+     * (DISK_HIGH, CONFIG_DRIFT…) o el de la política (config_drift…), sin distinguir mayúsculas.
+     */
+    public static function hidden(string $type): bool
+    {
+        if ($type === '') {
+            return false;
+        }
+        $t = strtolower($type);
+        foreach (self::json('alerts_hidden', []) as $e) {
+            $e = strtolower((string)$e);
+            if ($e === $t || $e === self::shortHost() . ':' . $t) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -208,6 +228,7 @@ class AlertPolicyService
             'maintenance_until_ts' => (int)Settings::get('alerts_maintenance_until', '0'),
             'outage_after_minutes' => self::outageAfterMinutes(),
             'muted' => self::json('alerts_muted', []),
+            'hidden' => self::json('alerts_hidden', []),
             'hardening_accepted' => self::hardeningAcceptedRaw(),
             'disk_overrides' => self::json('alerts_disk_overrides', []),
             'mail_node_after_minutes' => self::mailNodeAfterMinutes(),
@@ -224,6 +245,17 @@ class AlertPolicyService
     /** Guarda las reglas (validadas). Lo que no venga se deja como está. */
     public static function save(array $p): array
     {
+        if (array_key_exists('hidden', $p)) {
+            $h = [];
+            foreach (array_map('strval', (array)$p['hidden']) as $e) {
+                [$host, $t] = str_contains($e, ':') ? explode(':', $e, 2) : ['', $e];
+                $known = array_change_key_case(array_flip(array_keys(self::TYPES)), CASE_LOWER);
+                if (isset($known[strtolower($t)]) && ($host === '' || preg_match('/^[a-z0-9][a-z0-9-]*$/', $host = self::shortHost($host)))) {
+                    $h[] = $host === '' ? $t : "{$host}:{$t}";
+                }
+            }
+            Settings::set('alerts_hidden', json_encode(array_values(array_unique($h))));
+        }
         if (array_key_exists('muted', $p)) {
             $m = [];
             foreach (array_map('strval', (array)$p['muted']) as $e) {
