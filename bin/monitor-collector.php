@@ -1827,6 +1827,24 @@ try {
     logMsg('Public exposure watch error: ' . $e->getMessage());
 }
 
+// Cambios del sistema (cada 10 min): carpetas de apps, /etc, servicios, cron, /usr/local,
+// claves SSH y ejecutables en /tmp. Avisa una vez de cada novedad (posible intruso).
+try {
+    $sw = \MuseDockPanel\Services\SystemWatchService::check();
+    if (!empty($sw['baseline'])) {
+        logMsg('Cambios del sistema: foto inicial tomada.');
+    } elseif (!empty($sw['changes'])) {
+        $n = array_sum(array_map('count', $sw['changes']));
+        $details = \MuseDockPanel\Services\SystemWatchService::report($hostname, $sw['changes']);
+        insertEventAlert($hostname, 'SYSTEM_CHANGES', "{$n} cambios en el sistema", $details, (float)$n, 60);
+        \MuseDockPanel\Services\NotificationService::send("[MuseDock Security] {$n} cambios en el sistema de {$hostname}", $details, 'system_changes');
+        \MuseDockPanel\Services\LogService::log('security.system_watch', $hostname, "{$n} cambios: " . implode(', ', array_keys($sw['changes'])));
+        logMsg("ALERT: SYSTEM_CHANGES - {$n} cambios");
+    }
+} catch (\Throwable $e) {
+    logMsg('System watch error: ' . $e->getMessage());
+}
+
 // ─── Update disk usage for all hosting accounts (configurable cadence) ─
 // du is expensive even with throttling — no need to run it every collector cycle
 $duLockFile = '/tmp/musedock-du-lastrun';

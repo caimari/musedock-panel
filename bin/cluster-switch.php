@@ -178,7 +178,7 @@ switch ($cmd) {
         $nodes = $fs::parseExcludePatterns(Settings::get('filesync_extra_nodes', ''));
         if (!$new || !$nodes) {
             echo $new ? "No hay nodos que reciban carpetas extra: configúralo una vez por MCP filesync_extra_paths (target_nodes).\n"
-                : "Ninguna carpeta válida (solo existentes bajo /opt, /srv o /home, nunca el panel).\n";
+                : "Ninguna carpeta válida (solo existentes bajo /opt, /srv, /home o /var/www menos vhosts; nunca el panel).\n";
             exit(1);
         }
         $paths = array_values(array_unique(array_merge($fs::extraPaths(), $new)));

@@ -41,6 +41,38 @@
     </div>
 </div>
 
+<div class="card mb-4" style="border-color:rgba(239,68,68,.35);">
+    <div class="card-header"><i class="bi bi-eye me-2"></i>Cambios del sistema (posible intruso)</div>
+    <div class="card-body small">
+        <p class="mb-2">Cada 10 minutos <strong>cada servidor</strong> compara lo que hay ahora con la foto anterior en los sitios donde se instalan
+            aplicaciones y donde suele esconderse un intruso. La primera vez solo toma la foto; después avisa <strong>una vez</strong> de cada novedad.</p>
+        <table class="table table-sm small mb-2">
+            <thead><tr><th>Qué mira</th><th>Avisa de</th></tr></thead>
+            <tbody>
+            <tr><td><code>/opt</code>, <code>/srv</code>, <code>/var/www</code></td><td>carpetas nuevas de aplicaciones</td></tr>
+            <tr><td><code>/var/www/vhosts</code></td><td>carpetas que no son de ningún hosting del panel (las de menos de 30 min esperan a la siguiente vuelta)</td></tr>
+            <tr><td><code>/etc</code></td><td>carpetas nuevas que no instala ningún paquete</td></tr>
+            <tr><td><code>/etc/systemd/system</code></td><td>servicios y temporizadores nuevos o cambiados (también los <code>.d/*.conf</code> que cambian un servicio)</td></tr>
+            <tr><td>cron (<code>/etc/crontab</code>, <code>/etc/cron.*</code>, crontabs de usuarios)</td><td>tareas programadas nuevas o cambiadas</td></tr>
+            <tr><td><code>/usr/local/bin</code>, <code>/usr/local/sbin</code></td><td>programas nuevos o cambiados</td></tr>
+            <tr><td><code>authorized_keys</code> de root, de <code>/home</code> y de los hostings</td><td>claves SSH añadidas o quitadas (dice cuál, por su comentario)</td></tr>
+            <tr><td><code>/tmp</code>, <code>/var/tmp</code>, <code>/dev/shm</code></td><td>ficheros ejecutables (el sitio típico de un programa malicioso descargado)</td></tr>
+            </tbody>
+        </table>
+        <ul class="mb-0">
+            <li>No cuenta lo que instala un paquete del sistema (<code>apt</code>) en <code>/opt</code>, <code>/etc</code> o systemd.</li>
+            <li>Al actualizar el panel se vuelve a tomar la foto de servicios, tareas y programas sin avisar: los reescribe la propia actualización.</li>
+            <li>Si lo has hecho tú, no hay que hacer nada. Si no lo reconoces, el correo trae comandos para empezar a mirar.</li>
+            <li>Algo que cambia a menudo y es normal: <em>Ajustes → Avisos → Cambios del sistema: ignorar</em> (patrón por línea, o <code>servidor:patrón</code>),
+                o MCP <code>alerts_configure</code> con <code>ignore_system_paths</code>. Mejor ignorar rutas concretas que silenciar el tipo entero.</li>
+            <li><strong>Es un cable trampa, no un antivirus:</strong> un intruso que ya es root puede desactivarlo. Avisa pronto de lo más habitual
+                (una carpeta, un servicio, una tarea o una clave SSH nuevos), pero no sustituye a mantener el sistema al día y el acceso cerrado.</li>
+            <li>Aparte, en el master, el aviso <em>Carpetas sin copia al servidor de relevo</em> dice qué apps de <code>/opt</code>, <code>/srv</code> o <code>/var/www</code>
+                no llegarían al otro servidor en un relevo (<a href="/docs/sync-archivos-lsyncd" class="text-info">Sync de archivos</a>).</li>
+        </ul>
+    </div>
+</div>
+
 <div class="card mb-4" style="border-color:rgba(34,197,94,.3);">
     <div class="card-header"><i class="bi bi-bell-slash me-2"></i>Silenciar</div>
     <div class="card-body small">

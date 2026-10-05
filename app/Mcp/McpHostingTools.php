@@ -143,6 +143,8 @@ class McpHostingTools
                     'maintenance_minutes' => ['type' => 'integer', 'description' => 'Mantenimiento programado: durante N minutos (máx. 720) no se envían avisos de "algo no responde" (réplica, nodo caído, correo, testigos…); se apuntan igual. 0 = terminarlo ya. Úsalo antes de reinicios, pruebas de relevo o mudanzas de VM.'],
                     'maintenance_reason' => ['type' => 'string', 'description' => 'Motivo del mantenimiento (se guarda en el registro)'],
                     'outage_after_minutes' => ['type' => 'integer', 'description' => 'Minutos que debe durar una caída de nodo o réplica antes de avisar (por defecto 5)'],
+                    'ignore_system_paths' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Rutas que el vigilante de cambios del sistema (aviso system_changes) no mira: patrón absoluto con comodines ("/opt/miapp/*", "/tmp/build-*"), o solo en un servidor ("servidor2:/var/tmp/*")'],
+                    'unignore_system_paths' => ['type' => 'array', 'items' => ['type' => 'string']],
                     'apply' => $apply,
                 ], []),
             ],
@@ -522,6 +524,10 @@ class McpHostingTools
         }
         if (isset($args['outage_after_minutes'])) {
             $new['outage_after_minutes'] = (int)$args['outage_after_minutes'];
+        }
+        if (isset($args['ignore_system_paths']) || isset($args['unignore_system_paths'])) {
+            $new['system_watch_ignore'] = array_values(array_diff(array_unique(array_merge($cur['system_watch_ignore'] ?? [], (array)($args['ignore_system_paths'] ?? []))),
+                (array)($args['unignore_system_paths'] ?? [])));
         }
         $plan = ['before' => $cur, 'after' => $new, 'nodes' => array_map(static fn($n) => (string)$n['name'], \MuseDockPanel\Services\ClusterService::getNodes())];
         if (empty($args['apply'])) {

@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.312] — 2026-10-05 — Vigilante de cambios del sistema
+
+### Añadido
+- **Vigilante de cambios del sistema (posible intruso).** En todos los servidores, cada 10 min, se compara con la foto anterior lo que hay en los sitios donde se instalan apps o se esconde un intruso, y se avisa **una vez** de cada novedad (la primera vez solo se toma la foto):
+  - carpetas nuevas en `/opt`, `/srv`, `/var/www` y `/etc` que no instala ningún paquete;
+  - carpetas de `/var/www/vhosts` que no son de ningún hosting del panel;
+  - servicios de systemd (y sus `.d/*.conf`) y tareas cron nuevos o cambiados; programas nuevos o cambiados en `/usr/local/bin` y `/usr/local/sbin`;
+  - claves SSH autorizadas de root, de `/home` y de los hostings añadidas o quitadas (dice cuál, por su comentario);
+  - ejecutables en `/tmp`, `/var/tmp` y `/dev/shm`.
+  - Al actualizar el panel se rehace la foto de servicios, cron y programas sin avisar. Tipo de aviso nuevo `system_changes` (no se calla en modo mantenimiento). Rutas que cambian a menudo: *Ajustes → Avisos → Cambios del sistema: ignorar* o MCP `alerts_configure` con `ignore_system_paths` (admite `servidor:patrón`). Explicado en *Docs → Avisos*. Es un cable trampa, no un antivirus: un intruso que ya es root puede desactivarlo.
+- **Carpetas sin copia al servidor de relevo: también `/var/www`** (fuera de `vhosts`, que ya se copia entera). Una app en `/var/www/miapp` no se copiaba ni se avisaba de ella; ahora entra en el aviso, en `sync-add`/`sync-local` y en MCP `filesync_extra_paths`.
+
 ## [1.0.310] — 2026-10-05 — Portal de clientes en el 443
 
 ### Arreglado
@@ -15,7 +27,6 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
   - `sync-status` lo resume; por MCP, `filesync_extra_paths` devuelve `unsynced` y acepta `local_paths`.
   - No se copia `/opt` entero a propósito: la copia es en espejo y borraría en el otro servidor lo que solo tiene él. El panel tampoco: cada servidor lo actualiza con `bin/update.sh`.
   - Nota en *Cluster → Archivos* y sección nueva en *Docs → Sync de archivos* (qué necesita una app para sobrevivir a un relevo: ficheros en la copia, base en una base replicada, servicio en la copia de configuración).
-
 ## [1.0.309] — 2026-10-05 — Comprobación de certificados en bucle cada 30 min
 
 ### Arreglado

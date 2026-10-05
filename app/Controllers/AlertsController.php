@@ -98,6 +98,7 @@ class AlertsController
             'disk_overrides' => $disk,
             'mail_node_after_minutes' => (int)($_POST['mail_node_after_minutes'] ?? 5),
             'outage_after_minutes' => (int)($_POST['outage_after_minutes'] ?? 5),
+            'system_watch_ignore' => array_values(array_filter(array_map('trim', explode("\n", (string)($_POST['system_watch_ignore'] ?? ''))))),
         ];
         if (isset($_POST['maintenance_minutes']) && $_POST['maintenance_minutes'] !== '') {
             $policy['maintenance_minutes'] = (int)$_POST['maintenance_minutes'];

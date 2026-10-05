@@ -59,10 +59,11 @@
 </div>
 
 <div class="card mb-4" style="border-color:rgba(255,193,7,.35);">
-    <div class="card-header"><i class="bi bi-folder-plus me-2 text-warning"></i>Apps fuera de los hostings (/opt, /srv)</div>
+    <div class="card-header"><i class="bi bi-folder-plus me-2 text-warning"></i>Apps fuera de los hostings (/opt, /srv, /var/www)</div>
     <div class="card-body small">
         <p class="mb-2">
-            Una app instalada fuera de <code>/var/www/vhosts</code> (por ejemplo <code>/opt/miapp</code>) <strong>no se copia sola</strong>.
+            Una app instalada fuera de <code>/var/www/vhosts</code> (por ejemplo <code>/opt/miapp</code> o <code>/var/www/miapp</code>) <strong>no se copia sola</strong>.
+            Lo que esta dentro de <code>/var/www/vhosts</code> si se copia entero, aunque no sea de un hosting.
             Si el principal cae, el servidor de relevo no la tendria. Para que una app siga funcionando tras un relevo necesita tres cosas:
         </p>
         <ul class="mb-2">
@@ -71,7 +72,7 @@
             <li><strong>Su servicio</strong> (systemd, cron): lo pasa la copia de configuracion del master.</li>
         </ul>
         <p class="mb-2">
-            Cada 30 minutos el master revisa las carpetas de primer nivel de <code>/opt</code> y <code>/srv</code>. Si encuentra una que no se copia y no esta marcada como
+            Cada 30 minutos el master revisa las carpetas de primer nivel de <code>/opt</code>, <code>/srv</code> y <code>/var/www</code>. Si encuentra una que no se copia y no esta marcada como
             propia de la maquina, envia el aviso <em>"Carpetas sin copia al servidor de relevo"</em> (una vez; vuelve a avisar solo si cambia la lista).
             No cuentan el propio panel, lo que instala un paquete del sistema ni las carpetas vacias.
         </p>
@@ -84,6 +85,7 @@ php bin/cluster-switch.php sync-local /opt/copias      # es solo de esta maquina
             Por MCP: <code>filesync_extra_paths</code> (sin argumentos dice que hay sin copia; <code>paths</code> para copiar, <code>local_paths</code> para marcar como propias).
             <strong>Ojo:</strong> la copia es en espejo; en el nodo de relevo se borra lo que no exista en el master dentro de esa carpeta.
             Por eso no se copia <code>/opt</code> entero: borraria lo propio del otro servidor. El panel tampoco se copia: cada servidor lo actualiza con <code>bin/update.sh</code>.
+            Ademas, en cada servidor, el aviso <a href="/docs/alerts">Cambios del sistema</a> avisa de cualquier carpeta, servicio, tarea o clave SSH nuevos (copiados o no), por si no los pusiste tu.
         </p>
     </div>
 </div>

@@ -366,11 +366,11 @@ final class McpClusterTools
             'filesync_extra_paths' => [
                 'write' => true, 'destructive' => true,
                 'title' => 'Carpetas extra en la copia de ficheros',
-                'description' => 'En el MASTER: además de /var/www/vhosts, copiar con lsyncd carpetas de apps que viven fuera de los hostings (p. ej. /opt/miapp) SOLO a los nodos que se indiquen (normalmente el de relevo). Solo carpetas existentes bajo /opt, /srv o /home; nunca /opt/musedock-panel. Es ESPEJO: en el nodo destino se borra lo que no exista aquí dentro de esas carpetas. Sin argumentos muestra la configuración actual y `unsynced`: carpetas de apps en /opt o /srv que no se copian ni están marcadas como propias de la máquina (no llegarían al relevo); con local_paths se marcan como propias. Requiere "Permitir acciones que modifican".',
+                'description' => 'En el MASTER: además de /var/www/vhosts, copiar con lsyncd carpetas de apps que viven fuera de los hostings (p. ej. /opt/miapp) SOLO a los nodos que se indiquen (normalmente el de relevo). Solo carpetas existentes bajo /opt, /srv, /home o /var/www (menos vhosts, que ya se copia); nunca /opt/musedock-panel. Es ESPEJO: en el nodo destino se borra lo que no exista aquí dentro de esas carpetas. Sin argumentos muestra la configuración actual y `unsynced`: carpetas de apps en /opt, /srv o /var/www que no se copian ni están marcadas como propias de la máquina (no llegarían al relevo); con local_paths se marcan como propias. Requiere "Permitir acciones que modifican".',
                 'inputSchema' => $o([
                     'paths' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Lista completa de carpetas (sustituye a la anterior)'],
                     'target_nodes' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Ids o nombres de los nodos que las reciben'],
-                    'local_paths' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Lista completa de carpetas de /opt o /srv propias de ESTA máquina: no se copian ni se avisa de ellas (sustituye a la anterior)'],
+                    'local_paths' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Lista completa de carpetas de /opt, /srv o /var/www propias de ESTA máquina: no se copian ni se avisa de ellas (sustituye a la anterior)'],
                     'apply' => $apply,
                 ]),
             ],

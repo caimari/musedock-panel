@@ -124,6 +124,18 @@
     </div>
 
     <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-eye me-2"></i>Cambios del sistema: ignorar</div>
+        <div class="card-body small">
+            <p class="text-muted">Cada 10 min cada servidor mira si ha aparecido o cambiado algo donde se instalan apps o se esconde un intruso
+                (carpetas de <code>/opt</code>, <code>/srv</code>, <code>/var/www</code> y <code>/etc</code>, servicios, tareas programadas,
+                <code>/usr/local/bin</code>, claves SSH, ejecutables en <code>/tmp</code>) y avisa una vez de cada cosa.
+                Si algo cambia a menudo y es normal, ponlo aquí: un patrón por línea (<code>/opt/miapp/*</code>, <code>/tmp/build-*</code>),
+                o solo en un servidor (<code>servidor2:/var/tmp/*</code>). <a href="/docs/alerts">Más información</a></p>
+            <textarea name="system_watch_ignore" rows="3" class="form-control form-control-sm" style="font-family:monospace"><?= View::e(implode("\n", $policy['system_watch_ignore'] ?? [])) ?></textarea>
+        </div>
+    </div>
+
+    <div class="card mb-4">
         <div class="card-header"><i class="bi bi-hdd me-2"></i>Discos: umbral propio o sin aviso</div>
         <div class="card-body small">
             <p class="text-muted">Umbral general: <?= View::e((string)$diskDefault) ?> %. Aquí puedes poner otro para un disco concreto de un servidor, o silenciarlo.

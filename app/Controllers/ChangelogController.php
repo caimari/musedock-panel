@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.312',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Vigilante de cambios del sistema (posible intruso), en todos los nodos cada 10 min: avisa una vez de carpetas nuevas en /opt, /srv, /var/www y /etc (no de paquetes), carpetas de /var/www/vhosts que no son de ningun hosting, servicios systemd, tareas cron, programas de /usr/local, claves SSH autorizadas (dice cual) y ejecutables en /tmp, /var/tmp y /dev/shm. Tipo de aviso system_changes; rutas a ignorar en Avisos o MCP alerts_configure ignore_system_paths; Docs > Avisos', 'Carpetas sin copia al servidor de relevo: tambien /var/www fuera de vhosts (aviso, sync-add/sync-local y MCP filesync_extra_paths)'],
+                        'en' => ['System change watch (possible intruder) on every node every 10 min: warns once about new folders in /opt, /srv, /var/www and /etc (not from packages), /var/www/vhosts folders that belong to no hosting, systemd units, cron jobs, /usr/local programs, authorized SSH keys (names which) and executables in /tmp, /var/tmp and /dev/shm. Alert type system_changes; ignore paths in Alerts or MCP alerts_configure ignore_system_paths', 'Folders not copied to the failover server: also /var/www outside vhosts (alert, sync-add/sync-local and MCP filesync_extra_paths)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.310',
                 'date' => '2026-10-05',
                 'badge' => 'info',

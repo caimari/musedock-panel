@@ -1844,7 +1844,7 @@ class FileSyncService
         $out = [];
         foreach (self::parseExcludePatterns($raw ?? Settings::get('filesync_extra_paths', '')) as $p) {
             $real = realpath(rtrim($p, '/'));
-            if ($real === false || !is_dir($real) || !preg_match('#^/(opt|srv|home)/[^/]#', $real)
+            if ($real === false || !is_dir($real) || !self::appPathAllowed($real)
                 || str_starts_with($real . '/', '/opt/musedock-panel/')) {
                 continue;
             }
@@ -1854,7 +1854,17 @@ class FileSyncService
     }
 
     /**
-     * Carpetas de /opt o /srv marcadas como propias de esta máquina (setting
+     * Dónde puede vivir una app que se copie aparte: /opt, /srv, /home o /var/www (menos
+     * /var/www/vhosts, que ya se copia entera).
+     */
+    private static function appPathAllowed(string $p): bool
+    {
+        return (bool)preg_match('#^/(opt|srv|home)/[^/]#', $p)
+            || (bool)preg_match('#^/var/www/(?!vhosts(/|$))[^/]#', $p);
+    }
+
+    /**
+     * Carpetas de /opt, /srv o /var/www marcadas como propias de esta máquina (setting
      * filesync_local_paths): no se copian y no se avisa de ellas. Es de cada nodo (no va
      * en PEER_KEYS): cada servidor marca lo suyo.
      */
@@ -1877,7 +1887,7 @@ class FileSyncService
         $list = array_fill_keys(self::localPaths(), true);
         foreach ($add as $p) {
             $p = $norm($p);
-            if (preg_match('#^/(opt|srv)/[^/]+$#', $p)) {
+            if (preg_match('#^/(opt|srv|var/www)/[^/]+$#', $p) && $p !== '/var/www/vhosts') {
                 $list[$p] = true;
             }
         }
@@ -1891,7 +1901,7 @@ class FileSyncService
     }
 
     /**
-     * Carpetas de primer nivel de /opt y /srv que no se copian a ningún nodo ni están
+     * Carpetas de primer nivel de /opt, /srv y /var/www (menos vhosts) que no se copian a ningún nodo ni están
      * marcadas como propias de la máquina. Es lo que faltaría en el servidor de relevo si
      * este cae: una app nueva instalada fuera de los hostings. Se dejan fuera el propio
      * panel, lo que instala un paquete del sistema (dpkg) y las carpetas vacías u ocultas.
@@ -1904,10 +1914,10 @@ class FileSyncService
         $covered = array_merge(self::extraPaths(), self::localPaths(), [dirname(CardDavService::BAIKAL_DIR)]);
         $panel = realpath(dirname(__DIR__, 2)) ?: '';
         $out = [];
-        foreach (['/opt', '/srv'] as $base) {
+        foreach (['/opt', '/srv', '/var/www'] as $base) {
             foreach (glob($base . '/*', GLOB_ONLYDIR) ?: [] as $dir) {
                 $name = basename($dir);
-                if ($name[0] === '.' || $name === 'lost+found' || is_link($dir)) {
+                if ($name[0] === '.' || $name === 'lost+found' || is_link($dir) || $dir === '/var/www/vhosts') {
                     continue;
                 }
                 $real = realpath($dir);
@@ -1953,7 +1963,7 @@ class FileSyncService
         foreach ($found as $dir => $size) {
             $lines[] = "  - {$dir} ({$size})";
         }
-        $msg = "En {$host} hay carpetas de aplicaciones que NO se copian al servidor de relevo:\n\n"
+        $msg = "En {$host} hay carpetas de aplicaciones (en /opt, /srv o /var/www) que NO se copian al servidor de relevo:\n\n"
             . implode("\n", $lines) . "\n\n"
             . "Si este servidor cae, el otro no las tendría (ni su código ni sus ficheros).\n"
             . "Para cada una, decide:\n"
