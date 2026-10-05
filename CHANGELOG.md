@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.324] — 2026-10-06 — "Reset password" del cliente vuelve a funcionar
+
+### Arreglado
+- **"Reset password" e "Invitar al portal" en la ficha del cliente no hacían nada** (desde la 1.0.319): el token de seguridad se metía en el JavaScript con el escapado de atributos HTML (`&quot;`), el script de la página fallaba entero y el botón no respondía.
+
 ## [1.0.323] — 2026-10-05 — Monitor: avisos que se cierran solos
 
 ### Arreglado

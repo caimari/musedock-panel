@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.324',
+                'date' => '2026-10-06',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Reset password / Invitar al portal en la ficha del cliente no hacian nada (script roto desde la 1.0.319)'],
+                        'en' => ['Reset password / portal invite on the customer page did nothing (broken script since 1.0.319)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.323',
                 'date' => '2026-10-05',
                 'badge' => 'info',

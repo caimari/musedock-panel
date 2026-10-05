@@ -213,7 +213,7 @@ function sendPortalInvitation(customerId, name, email, hasAccess) {
             form.method = 'POST';
             form.action = '/settings/portal/send-invitation';
             // El token va en la propia página: esta vista no siempre tiene otro formulario del que copiarlo.
-            var ci = document.createElement('input'); ci.type = 'hidden'; ci.name = '_csrf_token'; ci.value = <?= View::js(View::csrfToken()) ?>; form.appendChild(ci);
+            var ci = document.createElement('input'); ci.type = 'hidden'; ci.name = '_csrf_token'; ci.value = <?= json_encode(View::csrfToken(), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) ?>; form.appendChild(ci);
             var idI = document.createElement('input'); idI.type = 'hidden'; idI.name = 'customer_id'; idI.value = customerId; form.appendChild(idI);
             document.body.appendChild(form);
             form.submit();
