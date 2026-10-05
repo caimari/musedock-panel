@@ -307,6 +307,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // Hosting Accounts
 \MuseDockPanel\Router::get('/accounts', 'AccountController@index');
 \MuseDockPanel\Router::get('/accounts/create', 'AccountController@create');
+\MuseDockPanel\Router::get('/accounts/sessions-cleanup', 'AccountController@sessionsCleanupPreview');
+\MuseDockPanel\Router::post('/accounts/sessions-cleanup', 'AccountController@sessionsCleanup');
 \MuseDockPanel\Router::post('/accounts/store', 'AccountController@store');
 \MuseDockPanel\Router::post('/accounts/store-async', 'AccountController@storeAsync');
 \MuseDockPanel\Router::get('/accounts/provision-stream', 'AccountController@provisionStream');
@@ -430,6 +432,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/customers/merge-peers', 'CustomerController@mergePeersPreview');
 \MuseDockPanel\Router::post('/customers/merge-peers', 'CustomerController@mergePeers');
 \MuseDockPanel\Router::get('/customers/{id}', 'CustomerController@show');
+\MuseDockPanel\Router::post('/customers/{id}/link', 'CustomerController@link');
+\MuseDockPanel\Router::post('/customers/{id}/portal-toggle', 'CustomerController@portalToggle');
 \MuseDockPanel\Router::get('/customers/{id}/edit', 'CustomerController@edit');
 \MuseDockPanel\Router::post('/customers/{id}/update', 'CustomerController@update');
 \MuseDockPanel\Router::post('/customers/{id}/delete', 'CustomerController@delete');

@@ -85,7 +85,9 @@ function mergePeersOpen() {
                         <td><?= $c['total_disk_used'] ?> MB</td>
                         <td>
                             <?php $hasPortal = !empty($c['password_hash']); ?>
-                            <?php if ($hasPortal): ?>
+                            <?php if (str_starts_with((string)$c['password_hash'], '!')): ?>
+                                <span class="badge" title="Acceso al portal bloqueado" style="background:rgba(239,68,68,0.15);color:#ef4444;font-size:0.65rem;"><i class="bi bi-lock"></i></span>
+                            <?php elseif ($hasPortal): ?>
                                 <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;font-size:0.65rem;"><i class="bi bi-check-circle"></i></span>
                             <?php else: ?>
                                 <button type="button" class="btn py-0 px-1" style="font-size:0.65rem;background:rgba(168,85,247,0.15);color:#a855f7;border:1px solid rgba(168,85,247,0.3);"

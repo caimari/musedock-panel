@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.319] — 2026-10-05 — Vincular hostings y dominios de correo ya creados a un cliente
+
+### Arreglado
+- **"Reset password" / "Invitar al portal" en la ficha del cliente daba "Token CSRF inválido".** El botón monta su formulario con JavaScript y copiaba el token de otro formulario de la página, pero esa página no tenía ninguno. Ahora el token va siempre en la página (plantilla principal), lo que arregla también otras pantallas con botones parecidos.
+
+### Añadido
+- **Vincular a un cliente hostings y dominios de correo ya creados** (ficha del cliente, en el servidor que manda): desplegable con los que aún no tienen cliente y botón para desvincular (con confirmación). Solo cambia a quién pertenece: el hosting o el correo no se tocan. El cliente lo ve en su portal. Antes solo se podía asignar al crear el hosting.
+- En la ficha del cliente, "New Account" pasa a llamarse **Nuevo hosting**, y en una copia no salen los botones de crear ni de vincular.
+- **Bloquear o permitir el acceso de un cliente al portal** (ficha del cliente, en el servidor que manda), reversible: no borra su contraseña. Bloqueado, no puede entrar, su sesión abierta se cierra en un minuto y se anulan los enlaces de invitación o cambio de contraseña pendientes (no puede desbloquearse solo); "Reset password" queda rechazado mientras esté bloqueado. Al permitirlo, entra con su contraseña de siempre. Se ve como "Bloqueado" en *Customers* y en *Portal Clientes*, y llega a las copias.
+- **Sesiones de PHP caducadas de los hostings.** Cada hosting guarda sus sesiones en `sessions/` y la limpieza de PHP de Debian/Ubuntu solo vacía la carpeta del sistema: se acumulaban sin fin (en un servidor, 1,5 millones de ficheros y 3,3 GB). Ahora cada servidor borra cada noche (04:00) **solo** los ficheros `sess_*` de esas carpetas que llevan más de 24 h sin usarse (ajuste `session_cleanup_hours`; `session_cleanup_enabled=0` lo desactiva). Botón **Sesiones caducadas** en *Hosting Accounts*: cuenta primero, por hosting, y pide confirmación.
+
 ## [1.0.318] — 2026-10-05 — update.sh: validación del Caddyfile con el entorno de Caddy
 
 ### Arreglado

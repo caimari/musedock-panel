@@ -320,6 +320,21 @@ if (Settings::get('cluster_fenced', '0') !== '1' && time() - (int)@filemtime($wp
     }
 }
 
+// ─── Sesiones de PHP caducadas de los hostings (cada noche, en todos los nodos) ──
+// La limpieza de PHP no vacía las carpetas sessions/ de los hostings: se acumulaban
+// cientos de miles de ficheros. Solo sess_* sin usar en más de N h (24 por defecto).
+$sessMark = '/var/lib/musedock/session-cleanup.day';
+if (\MuseDockPanel\Services\SessionCleanupService::enabled() && (int)date('G') === 4 && @file_get_contents($sessMark) !== date('Y-m-d')) {
+    @mkdir(dirname($sessMark), 0755, true);
+    @file_put_contents($sessMark, date('Y-m-d'));
+    try {
+        $sc = \MuseDockPanel\Services\SessionCleanupService::run(true);
+        logMsg("Sesiones caducadas borradas: {$sc['files']} ficheros, " . round($sc['bytes'] / 1048576) . ' MB');
+    } catch (\Throwable $e) {
+        logMsg('Limpieza de sesiones error: ' . $e->getMessage());
+    }
+}
+
 // ─── Step 0j: El master reenvía su configuración de relevo cada 30 min ────────
 // Si una copia estuvo caída cuando cambió (p. ej. tras un relevo), el envío pudo agotar
 // sus reintentos; así ninguna se queda con papeles viejos (principal/relevo, modo, titular).

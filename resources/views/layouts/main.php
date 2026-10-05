@@ -138,6 +138,9 @@
     </style>
 </head>
 <body>
+<?php // Token CSRF siempre presente: los botones que montan su formulario con JS lo copian de
+      // input[name=_csrf_token]; sin otro formulario en la página se enviaban sin token. ?>
+<input type="hidden" name="_csrf_token" value="<?= \MuseDockPanel\View::csrfToken() ?>" form="__none" id="globalCsrfToken">
 
 <!-- Sidebar -->
 <div class="sidebar">

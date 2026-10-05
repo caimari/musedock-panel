@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.319',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Reset password / Invitar al portal en la ficha del cliente daba "Token CSRF invalido": el token va siempre en la pagina'],
+                        'en' => ['Reset password / portal invite on the customer page failed with "invalid CSRF token": the token is now always on the page'],
+                    ],
+                    'added' => [
+                        'es' => ['Ficha del cliente: vincular y desvincular hostings y dominios de correo ya creados (solo en el que manda); "Nuevo hosting" en vez de "New Account"', 'Bloquear / permitir el acceso de un cliente al portal sin borrar su contrasena (anula enlaces pendientes)', 'Limpieza nocturna de sesiones de PHP caducadas en sessions/ de cada hosting (solo sess_* de mas de 24 h) y boton "Sesiones caducadas" con recuento previo en Hosting Accounts'],
+                        'en' => ['Customer page: link and unlink existing hostings and mail domains (active server only); "New hosting" instead of "New Account"', 'Block / allow a customer portal access without deleting the password (cancels pending links)', 'Nightly cleanup of expired PHP sessions in each hosting sessions/ (only sess_* older than 24 h) and "Expired sessions" button with a preview in Hosting Accounts'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.318',
                 'date' => '2026-10-05',
                 'badge' => 'info',

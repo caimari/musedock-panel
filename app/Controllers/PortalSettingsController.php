@@ -36,6 +36,7 @@ class PortalSettingsController
         $customers = Database::fetchAll(
             "SELECT c.id, c.name, c.email, c.status, c.company,
                     (c.password_hash IS NOT NULL AND c.password_hash != '') as has_portal_access,
+                    (c.password_hash LIKE '!%') as portal_blocked,
                     COUNT(h.id) as account_count
              FROM customers c
              LEFT JOIN hosting_accounts h ON h.customer_id = c.id
@@ -204,6 +205,12 @@ class PortalSettingsController
         if (!$customer) {
             Flash::set('error', 'Cliente no encontrado.');
             Router::redirect('/settings/portal?tab=access');
+            return;
+        }
+
+        if (str_starts_with((string)($customer['password_hash'] ?? ''), '!')) {
+            Flash::set('error', 'El acceso al portal de este cliente está bloqueado: permítelo antes desde su ficha.');
+            Router::redirect('/customers/' . (int)$customer['id']);
             return;
         }
 

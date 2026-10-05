@@ -28,8 +28,19 @@
                     <tr>
                         <td class="ps-3 text-muted">Portal</td>
                         <td>
-                            <?php $hasPortal = !empty($customer['password_hash']); ?>
-                            <?php if ($hasPortal): ?>
+                            <?php $hasPortal = !empty($customer['password_hash']); $portalBlocked = str_starts_with((string)$customer['password_hash'], '!'); ?>
+                            <?php if ($hasPortal && !$isSlave): ?>
+                            <form method="POST" action="/customers/<?= (int)$customer['id'] ?>/portal-toggle" class="d-inline float-end me-2"
+                                  onsubmit="return confirm(<?= View::js($portalBlocked ? 'Permitir de nuevo el acceso al portal (con su contraseña de siempre)?' : 'Bloquear el acceso al portal? No podrá entrar y su sesión abierta se cerrará en un minuto. Su contraseña se conserva para poder desbloquearlo.') ?>)">
+                                <?= View::csrf() ?><input type="hidden" name="op" value="<?= $portalBlocked ? 'unblock' : 'block' ?>">
+                                <button class="btn btn-sm py-0 px-2 <?= $portalBlocked ? 'btn-outline-success' : 'btn-outline-danger' ?>" style="font-size:0.72rem;">
+                                    <i class="bi bi-<?= $portalBlocked ? 'unlock' : 'lock' ?> me-1"></i><?= $portalBlocked ? 'Permitir acceso' : 'Bloquear acceso' ?>
+                                </button>
+                            </form>
+                            <?php endif; ?>
+                            <?php if ($portalBlocked): ?>
+                                <span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;"><i class="bi bi-lock me-1"></i>Bloqueado</span>
+                            <?php elseif ($hasPortal): ?>
                                 <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;"><i class="bi bi-check-circle me-1"></i>Activo</span>
                                 <button type="button" <?= $isSlave ? 'hidden' : '' ?> class="btn btn-sm py-0 px-2 ms-2" style="font-size:0.72rem;background:rgba(168,85,247,0.15);color:#a855f7;border:1px solid rgba(168,85,247,0.3);"
                                     onclick="sendPortalInvitation(<?= (int)$customer['id'] ?>, <?= View::js($customer['name']) ?>, <?= View::js($customer['email']) ?>, true)">
@@ -52,7 +63,7 @@
         <div class="card">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-server me-2"></i>Hosting Accounts</span>
-                <a href="/accounts/create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i> New Account</a>
+                <?php if (!$isSlave): ?><a href="/accounts/create" class="btn btn-primary btn-sm" title="Crear un hosting nuevo"><i class="bi bi-plus-lg me-1"></i> Nuevo hosting</a><?php endif; ?>
             </div>
             <div class="card-body p-0">
                 <?php if (empty($accounts)): ?>
@@ -66,11 +77,62 @@
                                 <td class="ps-3"><a href="/accounts/<?= $acc['id'] ?>" class="text-info text-decoration-none"><?= View::e($acc['domain']) ?></a></td>
                                 <td><code><?= View::e($acc['username']) ?></code></td>
                                 <td><span class="badge badge-<?= $acc['status'] === 'active' ? 'active' : 'suspended' ?>"><?= $acc['status'] ?></span></td>
-                                <td><a href="/accounts/<?= $acc['id'] ?>" class="btn btn-outline-light btn-sm"><i class="bi bi-eye"></i></a></td>
+                                <td class="text-end pe-3">
+                                    <a href="/accounts/<?= $acc['id'] ?>" class="btn btn-outline-light btn-sm"><i class="bi bi-eye"></i></a>
+                                    <?php if (!$isSlave): ?>
+                                    <form method="POST" action="/customers/<?= (int)$customer['id'] ?>/link" class="d-inline"
+                                          onsubmit="return confirm(<?= View::js('¿Desvincular ' . $acc['domain'] . ' de este cliente? El hosting no se toca; solo deja de verlo en su portal.') ?>)">
+                                        <?= View::csrf() ?><input type="hidden" name="op" value="unlink"><input type="hidden" name="kind" value="hosting"><input type="hidden" name="item_id" value="<?= (int)$acc['id'] ?>">
+                                        <button class="btn btn-outline-warning btn-sm" title="Desvincular"><i class="bi bi-link-45deg"></i><i class="bi bi-x"></i></button>
+                                    </form>
+                                    <?php endif; ?>
+                                </td>
                             </tr>
                             <?php endforeach; ?>
                         </tbody>
                     </table>
+                <?php endif; ?>
+                <?php if (!$isSlave && !empty($freeAccounts)): ?>
+                <form method="POST" action="/customers/<?= (int)$customer['id'] ?>/link" class="d-flex gap-2 p-3 border-top" style="border-color:#1e293b!important;">
+                    <?= View::csrf() ?><input type="hidden" name="kind" value="hosting">
+                    <select name="item_id" class="form-select form-select-sm" required style="max-width:320px;">
+                        <option value="">Vincular un hosting ya creado…</option>
+                        <?php foreach ($freeAccounts as $fa): ?><option value="<?= (int)$fa['id'] ?>"><?= View::e($fa['domain']) ?></option><?php endforeach; ?>
+                    </select>
+                    <button class="btn btn-sm btn-outline-info"><i class="bi bi-link-45deg me-1"></i>Vincular</button>
+                </form>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <!-- Dominios de correo del cliente -->
+        <div class="card mt-3">
+            <div class="card-header"><i class="bi bi-envelope me-2"></i>Dominios de correo</div>
+            <div class="card-body p-0">
+                <?php if (empty($mailDomains)): ?>
+                    <div class="p-3 text-center text-muted">Sin dominios de correo vinculados.</div>
+                <?php else: ?>
+                    <table class="table table-sm mb-0"><tbody>
+                    <?php foreach ($mailDomains as $md): ?>
+                        <tr><td class="ps-3"><?= View::e($md['domain']) ?></td>
+                            <td class="text-end pe-3"><?php if (!$isSlave): ?>
+                                <form method="POST" action="/customers/<?= (int)$customer['id'] ?>/link" class="d-inline"
+                                      onsubmit="return confirm(<?= View::js('¿Desvincular ' . $md['domain'] . ' de este cliente? El correo no se toca.') ?>)">
+                                    <?= View::csrf() ?><input type="hidden" name="op" value="unlink"><input type="hidden" name="kind" value="mail"><input type="hidden" name="item_id" value="<?= (int)$md['id'] ?>">
+                                    <button class="btn btn-outline-warning btn-sm" title="Desvincular"><i class="bi bi-link-45deg"></i><i class="bi bi-x"></i></button>
+                                </form><?php endif; ?></td></tr>
+                    <?php endforeach; ?>
+                    </tbody></table>
+                <?php endif; ?>
+                <?php if (!$isSlave && !empty($freeMailDomains)): ?>
+                <form method="POST" action="/customers/<?= (int)$customer['id'] ?>/link" class="d-flex gap-2 p-3 border-top" style="border-color:#1e293b!important;">
+                    <?= View::csrf() ?><input type="hidden" name="kind" value="mail">
+                    <select name="item_id" class="form-select form-select-sm" required style="max-width:320px;">
+                        <option value="">Vincular un dominio de correo ya creado…</option>
+                        <?php foreach ($freeMailDomains as $fm): ?><option value="<?= (int)$fm['id'] ?>"><?= View::e($fm['domain']) ?></option><?php endforeach; ?>
+                    </select>
+                    <button class="btn btn-sm btn-outline-info"><i class="bi bi-link-45deg me-1"></i>Vincular</button>
+                </form>
                 <?php endif; ?>
             </div>
         </div>
@@ -118,8 +180,8 @@ function sendPortalInvitation(customerId, name, email, hasAccess) {
             var form = document.createElement('form');
             form.method = 'POST';
             form.action = '/settings/portal/send-invitation';
-            var csrf = document.querySelector('input[name=_csrf_token]');
-            if (csrf) { var ci = document.createElement('input'); ci.type = 'hidden'; ci.name = '_csrf_token'; ci.value = csrf.value; form.appendChild(ci); }
+            // El token va en la propia página: esta vista no siempre tiene otro formulario del que copiarlo.
+            var ci = document.createElement('input'); ci.type = 'hidden'; ci.name = '_csrf_token'; ci.value = <?= View::js(View::csrfToken()) ?>; form.appendChild(ci);
             var idI = document.createElement('input'); idI.type = 'hidden'; idI.name = 'customer_id'; idI.value = customerId; form.appendChild(idI);
             document.body.appendChild(form);
             form.submit();

@@ -291,7 +291,11 @@
                         <td><code class="small"><?= View::e($cust['email']) ?></code></td>
                         <td><span class="badge bg-dark"><?= (int)$cust['account_count'] ?></span></td>
                         <td>
-                            <?php if ($cust['has_portal_access']): ?>
+                            <?php if (!empty($cust['portal_blocked'])): ?>
+                                <span class="badge" style="background:rgba(239,68,68,0.15);color:#ef4444;">
+                                    <i class="bi bi-lock me-1"></i>Bloqueado
+                                </span>
+                            <?php elseif ($cust['has_portal_access']): ?>
                                 <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;">
                                     <i class="bi bi-check-circle me-1"></i>Activo
                                 </span>

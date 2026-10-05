@@ -109,6 +109,8 @@ $fmtMb = static function (?int $mb): string {
             <input type="text" id="accountSearch" class="form-control form-control-sm" style="background:#0f172a;border-color:#334155;color:#e2e8f0;" placeholder="Buscar dominio, usuario, cliente...">
         </div>
         <?php endif; ?>
+        <button type="button" class="btn btn-outline-light btn-sm accounts-action-btn" onclick="sessCleanOpen()"
+                title="Sesiones de PHP caducadas que se acumulan en sessions/ de cada hosting (este servidor)"><i class="bi bi-trash3 me-1"></i>Sesiones caducadas</button>
         <?php if ($clusterRole !== 'slave'): ?>
         <form method="POST" action="/accounts/bulk-disable-wp-cron" class="d-inline" id="bulkWpCronForm">
             <?= View::csrf() ?>
@@ -595,5 +597,37 @@ function confirmBulkWpCron() {
             document.getElementById('bulkWpCronForm').submit();
         }
     });
+}
+</script>
+
+<div class="modal fade" id="sessCleanModal" tabindex="-1">
+    <div class="modal-dialog"><div class="modal-content" style="background:#1e293b;color:#e2e8f0;">
+        <div class="modal-header"><h6 class="modal-title"><i class="bi bi-trash3 me-2"></i>Sesiones de PHP caducadas</h6>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body small" id="sessCleanBody">Contando…</div>
+        <div class="modal-footer">
+            <form method="POST" action="/accounts/sessions-cleanup"><?= View::csrf() ?>
+                <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn btn-sm btn-danger" id="sessCleanGo" disabled>Borrarlas</button>
+            </form>
+        </div>
+    </div></div>
+</div>
+<script>
+function sessCleanOpen() {
+    var body = document.getElementById('sessCleanBody'), go = document.getElementById('sessCleanGo');
+    var esc = function (t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; };
+    body.textContent = 'Contando (puede tardar unos segundos)…'; go.disabled = true;
+    new bootstrap.Modal(document.getElementById('sessCleanModal')).show();
+    fetch('/accounts/sessions-cleanup', {headers: {'Accept': 'application/json'}}).then(function (r) { return r.json(); }).then(function (d) {
+        var mb = function (b) { return (b / 1048576).toFixed(0) + ' MB'; };
+        var h = '<p class="text-muted">Cada hosting guarda las sesiones de PHP en su carpeta <code>sessions/</code> y la limpieza de PHP no las borra: se acumulan. '
+            + 'Esto borra <strong>solo</strong> ficheros <code>sess_*</code> que llevan más de ' + d.hours + ' h sin usarse (sesiones caducadas). Nadie pierde una sesión activa. '
+            + 'Además se hace solo cada noche.</p>';
+        if (!d.files) { h += '<p class="text-success mb-0">No hay sesiones caducadas.</p>'; body.innerHTML = h; return; }
+        h += '<p><strong>' + d.files.toLocaleString('es-ES') + '</strong> ficheros, <strong>' + mb(d.bytes) + '</strong> en disco:</p><ul class="mb-0">';
+        Object.keys(d.by_hosting).forEach(function (k) { var v = d.by_hosting[k]; h += '<li>' + esc(k) + ': ' + v.files.toLocaleString('es-ES') + ' (' + mb(v.bytes) + ')</li>'; });
+        body.innerHTML = h + '</ul>'; go.disabled = false;
+    }).catch(function () { body.innerHTML = '<span class="text-danger">No se pudo contar.</span>'; });
 }
 </script>

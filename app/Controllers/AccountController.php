@@ -15,6 +15,23 @@ use MuseDockPanel\Services\SubdomainService;
 
 class AccountController
 {
+    /** GET (JSON): sesiones de PHP caducadas de los hostings de ESTE servidor. Solo cuenta. */
+    public function sessionsCleanupPreview(): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode(\MuseDockPanel\Services\SessionCleanupService::run(false));
+    }
+
+    /** POST: borrar esas sesiones caducadas (solo ficheros sess_* de las carpetas sessions/). */
+    public function sessionsCleanup(): void
+    {
+        $r = \MuseDockPanel\Services\SessionCleanupService::run(true);
+        Flash::set('success', $r['files'] > 0
+            ? 'Sesiones caducadas borradas: ' . number_format($r['files'], 0, ',', '.') . ' ficheros, ' . round($r['bytes'] / 1048576) . ' MB liberados.'
+            : 'No había sesiones caducadas.');
+        Router::redirect('/accounts');
+    }
+
     private function slaveGuard(string $action = 'Esta accion'): bool
     {
         if (Settings::get('cluster_role', 'standalone') === 'slave') {
