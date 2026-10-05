@@ -386,6 +386,42 @@
         </form>
     </div>
 </div>
+
+<?php
+$favB64 = (string)\MuseDockPanel\Settings::get('portal_favicon', '');
+$favType = (string)\MuseDockPanel\Settings::get('portal_favicon_type', '');
+$favDefault = '/opt/musedock-portal/public/favicon.svg';
+$favPreview = $favB64 !== '' && in_array($favType, ['image/svg+xml', 'image/png', 'image/x-icon'], true)
+    ? "data:{$favType};base64,{$favB64}"
+    : (is_file($favDefault) ? 'data:image/svg+xml;base64,' . base64_encode((string)file_get_contents($favDefault)) : '');
+?>
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-app-indicator me-2"></i>Favicon del portal</div>
+    <div class="card-body">
+        <div class="d-flex align-items-center gap-3 mb-3">
+            <?php if ($favPreview !== ''): ?>
+                <img src="<?= View::e($favPreview) ?>" alt="Favicon actual" width="48" height="48" style="border-radius:8px;background:#0f172a;padding:4px;">
+            <?php endif; ?>
+            <div class="small text-muted">
+                <?= $favB64 !== '' ? 'Favicon propio (' . View::e($favType) . ', ' . (int)round(strlen(base64_decode($favB64)) / 1024, 1) . ' KB).' : 'Se usa el favicon por defecto del portal.' ?><br>
+                Sale en la pestaña del navegador en todas las páginas del portal, también en el login.
+            </div>
+        </div>
+        <form action="/settings/portal/favicon" method="POST" enctype="multipart/form-data" class="d-flex flex-wrap gap-2 align-items-center">
+            <?= View::csrf() ?>
+            <input type="file" name="favicon" accept=".svg,.png,.ico,image/svg+xml,image/png,image/x-icon" class="form-control form-control-sm" style="max-width:340px;" required>
+            <button type="submit" class="btn btn-sm" style="background:#a855f7;color:#fff;"><i class="bi bi-upload me-1"></i>Subir</button>
+        </form>
+        <?php if ($favB64 !== ''): ?>
+        <form action="/settings/portal/favicon" method="POST" class="mt-2">
+            <?= View::csrf() ?>
+            <input type="hidden" name="reset" value="1">
+            <button type="submit" class="btn btn-sm btn-outline-light"><i class="bi bi-arrow-counterclockwise me-1"></i>Volver al de por defecto</button>
+        </form>
+        <?php endif; ?>
+        <small class="text-muted d-block mt-2">SVG, PNG (de 16 a 1024 px) o ICO, hasta 64 KB. Por seguridad, un SVG con scripts, eventos o enlaces se rechaza.</small>
+    </div>
+</div>
 <?php endif; ?>
 
 <?php endif; ?>

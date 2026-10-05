@@ -58,6 +58,19 @@
     </div>
 </div>
 
+<div class="card mb-4">
+    <div class="card-header"><i class="bi bi-intersect me-2"></i>Por que los GB no coinciden entre servidores, y espejo 100 %</div>
+    <div class="card-body small">
+        <p class="mb-2">Cada servidor cuenta su propio disco. La copia deja fuera, a proposito, lo que no hace falta para servir las webs
+            (<code>.git</code>, <code>node_modules</code>, carpetas de IDE e IA, registros, caches y sesiones), asi que el servidor de relevo ocupa menos.
+            En <em>Hosting Accounts</em>, pulsa <strong>Estado replica</strong> para ver el desglose (todo, excluido, esperado, real).
+            <strong>Sobran</strong> suele ser restos en carpetas excluidas de cuando ese servidor mandaba: la copia no borra lo excluido y no afecta a las webs.</p>
+        <p class="mb-0">Para un servidor de relevo identico (compilar o usar git alli), en <em>Cluster → Archivos → Exclusiones base</em> usa
+            <strong>Espejo 100 %</strong> (copia todo, tambien sesiones y caches: mas trafico) o <strong>Espejo de codigo</strong> (todo menos lo temporal) y guarda.
+            <strong>Valores por defecto</strong> vuelve a la lista de fabrica.</p>
+    </div>
+</div>
+
 <div class="card mb-4" style="border-color:rgba(255,193,7,.35);">
     <div class="card-header"><i class="bi bi-folder-plus me-2 text-warning"></i>Apps fuera de los hostings (/opt, /srv, /var/www)</div>
     <div class="card-body small">

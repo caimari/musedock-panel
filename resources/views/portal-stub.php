@@ -17,6 +17,7 @@ $t = $lang === 'es'
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= htmlspecialchars($t['title']) ?></title>
     <meta name="robots" content="noindex">
+    <?php if (defined('PORTAL_ROOT')): /* servida por el portal: su favicon */ ?><link rel="icon" href="/favicon"><?php endif; ?>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {

@@ -284,6 +284,16 @@ if (Settings::get('cluster_fenced', '0') !== '1' && time() - (int)@filemtime($wp
     } catch (\Throwable $e) {
         logMsg('Blindar WordPress error: ' . $e->getMessage());
     }
+    // En el principal: recuperar clientes nacidos en otro nodo (p. ej. el principal anterior
+    // tras un cambio de rol). Solo añade; nunca cambia ni borra.
+    try {
+        $mg = \MuseDockPanel\Services\PortalService::mergeFromPeers(true);
+        if (!empty($mg['customers']) || !empty($mg['links'])) {
+            logMsg('Clientes recuperados de otros nodos: ' . implode(', ', $mg['customers']) . ' | hostings: ' . implode(', ', $mg['links']));
+        }
+    } catch (\Throwable $e) {
+        logMsg('Recuperar clientes error: ' . $e->getMessage());
+    }
     // Licencia del portal a punto de caducar o caducada: aviso al administrador (una vez por etapa).
     try {
         \MuseDockPanel\Services\LicenseService::autoRenewPortal();

@@ -1818,6 +1818,12 @@ class FileSyncService
         '*.tmp.*',
     ];
 
+    /** Exclusiones de fábrica (para el botón "Valores por defecto" de Cluster → Archivos). */
+    public static function factoryExcludes(): array
+    {
+        return ['rsync' => self::FALLBACK_RSYNC_DEFAULT_EXCLUDES, 'lsyncd' => self::FALLBACK_LSYNCD_DEFAULT_EXCLUDES];
+    }
+
     /** Ajustes de copia de ficheros que se pasan al otro nodo (ninguno es secreto). */
     public const PEER_KEYS = ['filesync_enabled', 'filesync_method', 'filesync_sync_mode', 'filesync_ssh_user', 'filesync_ssh_port',
         'filesync_ssh_key_path', 'filesync_exclude', 'filesync_bwlimit', 'filesync_interval', 'filesync_lsyncd_auto_heal',

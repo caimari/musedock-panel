@@ -1343,6 +1343,32 @@
                         <label class="form-label mb-0">Exclusiones base editables</label>
                         <span class="badge bg-info text-dark">Aplican antes que las personalizadas</span>
                     </div>
+                    <?php $fx = \MuseDockPanel\Services\FileSyncService::factoryExcludes(); ?>
+                    <div class="d-flex flex-wrap gap-2 mb-2 small">
+                        <span class="text-muted align-self-center">Rellenar con:</span>
+                        <button type="button" class="btn btn-sm btn-outline-warning" onclick="fsExcludesPreset('full')"
+                                title="Copia TODO: .git, node_modules, carpetas de IA/IDE, logs, cachés y sesiones">Espejo 100 % (sin exclusiones)</button>
+                        <button type="button" class="btn btn-sm btn-outline-info" onclick="fsExcludesPreset('code')"
+                                title="Copia código, .git y node_modules; deja fuera solo lo temporal (sesiones, cachés, temporales)">Espejo de código (sin temporales)</button>
+                        <button type="button" class="btn btn-sm btn-outline-light" onclick="fsExcludesPreset('default')">Valores por defecto</button>
+                    </div>
+                    <div class="small text-muted mb-2">Rellena las dos listas; no se aplica hasta pulsar <strong>Guardar</strong>.
+                        "Espejo 100 %" deja el servidor de relevo idéntico (útil para compilar o usar git allí), pero copia también sesiones y cachés:
+                        más tráfico y más trabajo para lsyncd, y la primera pasada puede tardar (p. ej. varios GB de node_modules).</div>
+                    <script>
+                    function fsExcludesPreset(kind) {
+                        var temp = ['sessions', 'storage/framework/sessions', 'storage/framework/cache', 'storage/framework/views', 'storage/cache',
+                            'storage/html-cache', '.glide_cache', 'glide_cache', 'proxy_cache', '*.tmp.*', '.cache'];
+                        var def = <?= json_encode($fx, JSON_UNESCAPED_SLASHES) ?>;
+                        var lists = kind === 'full' ? {rsync: [], lsyncd: []} : (kind === 'code' ? {rsync: temp, lsyncd: temp} : def);
+                        if (kind === 'full' && !confirm('Espejo 100 %: se copiará todo, también sesiones, cachés, .git y node_modules. ¿Rellenar las listas?')) return;
+                        document.querySelector('textarea[name=filesync_rsync_default_excludes]').value = lists.rsync.join('\n');
+                        document.querySelector('textarea[name=filesync_lsyncd_default_excludes]').value = lists.lsyncd.join('\n');
+                        // Las personalizadas también excluyen (p. ej. node_modules): en los espejos se vacían.
+                        var custom = document.querySelector('textarea[name=filesync_exclude]');
+                        if (custom && kind !== 'default') custom.value = '';
+                    }
+                    </script>
                     <div class="row g-3">
                         <div class="col-md-6">
                             <div class="p-3 rounded" style="background:rgba(15,23,42,0.55);border:1px solid rgba(148,163,184,0.18);">

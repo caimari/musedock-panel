@@ -10,6 +10,31 @@ use MuseDockPanel\Services\LogService;
 
 class CustomerController
 {
+    /** GET (JSON): qué clientes de otros nodos del cluster se recuperarían aquí. No cambia nada. */
+    public function mergePeersPreview(): void
+    {
+        header('Content-Type: application/json');
+        try {
+            echo json_encode(\MuseDockPanel\Services\PortalService::mergeFromPeers(false), JSON_UNESCAPED_UNICODE);
+        } catch (\Throwable $e) {
+            echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /** POST: recupera esos clientes (solo añade; nunca cambia ni borra). */
+    public function mergePeers(): void
+    {
+        $r = \MuseDockPanel\Services\PortalService::mergeFromPeers(true);
+        if (empty($r['ok'])) {
+            Flash::set('error', (string)($r['error'] ?? 'No se pudo'));
+        } else {
+            Flash::set('success', ($r['customers'] || $r['links'])
+                ? 'Recuperados: ' . (implode(', ', $r['customers']) ?: 'ningún cliente nuevo') . ($r['links'] ? '. Hostings enlazados: ' . implode(', ', $r['links']) : '') . '.'
+                : 'No había nada que recuperar: este servidor ya tiene todos los clientes de los demás.');
+        }
+        Router::redirect('/customers');
+    }
+
     public function index(): void
     {
         $customers = Database::fetchAll(

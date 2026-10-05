@@ -600,7 +600,7 @@ class ClusterApiController
                 'export-system-config' => \MuseDockPanel\Services\ConfigMirrorService::export(),
                 // Clientes del portal y a quién pertenece cada hosting (la base del panel es
                 // de cada nodo): el slave los pide para poder servir el portal si se promueve.
-                'export-portal-state' => \MuseDockPanel\Services\PortalService::exportState(),
+                'export-portal-state' => \MuseDockPanel\Services\PortalService::exportState(!empty($payload['own_only'])),
                 // Avisos del master copiados a este nodo (notify_configure copy_to_nodes).
                 'set-notify-config' => \MuseDockPanel\Services\NotificationService::importConfig($payload),
                 'set-alert-policy' => \MuseDockPanel\Services\AlertPolicyService::import($payload),

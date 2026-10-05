@@ -176,10 +176,38 @@ $fmtMb = static function (?int $mb): string {
                     <span class="stat-label"><i class="bi bi-bullseye me-1"></i>Esperado slave</span>
                     <span class="stat-value"><?= $expectedMb === null ? 'pendiente' : $expectedStr ?></span>
                 </span>
-                <span class="stat <?= $statusClass ?>" title="Comparativa esperado vs real en slave">
+                <span class="stat <?= $statusClass ?>" role="button" style="cursor:pointer;" title="Pulsa para ver qué significa la diferencia"
+                      data-bs-toggle="modal" data-bs-target="#replicaGapModal-<?= (int)$replica['node_id'] ?>">
                     <span class="stat-label"><i class="bi bi-check2-circle me-1"></i>Estado replica</span>
-                    <span class="stat-value"><?= View::e($statusText) ?></span>
+                    <span class="stat-value"><?= View::e($statusText) ?> <i class="bi bi-info-circle" style="font-size:0.75em;"></i></span>
                 </span>
+                <?php $excludedMb = $expectedMb !== null ? max(0, (int)$totalDiskMb - $expectedMb) : null; ?>
+                <div class="modal fade" id="replicaGapModal-<?= (int)$replica['node_id'] ?>" tabindex="-1">
+                    <div class="modal-dialog modal-lg"><div class="modal-content" style="background:#1e293b;color:#e2e8f0;">
+                        <div class="modal-header"><h6 class="modal-title"><i class="bi bi-hdd-stack me-2"></i>Espacio en <?= View::e($nodeName) ?> frente a este servidor</h6>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+                        <div class="modal-body small">
+                            <table class="table table-sm table-dark mb-3" style="--bs-table-bg:transparent;">
+                                <tr><td>Hostings en este servidor (todo)</td><td class="text-end"><?= $totalDiskStr ?></td></tr>
+                                <tr><td>… de eso, carpetas que la copia no pasa (exclusiones)</td><td class="text-end"><?= $excludedMb === null ? 'pendiente' : $fmtMb($excludedMb) ?></td></tr>
+                                <tr><td><strong>Lo que debería tener <?= View::e($nodeName) ?></strong> (esperado)</td><td class="text-end"><strong><?= $expectedMb === null ? 'pendiente' : $expectedStr ?></strong></td></tr>
+                                <tr><td><strong>Lo que tiene de verdad</strong></td><td class="text-end"><strong><?= $replicaStr ?></strong></td></tr>
+                                <tr><td>Diferencia</td><td class="text-end"><?= View::e($statusText) ?></td></tr>
+                            </table>
+                            <p class="mb-2"><strong>Por qué no coinciden los totales de los dos servidores:</strong> la copia de ficheros deja fuera, a propósito,
+                                lo que no hace falta para servir las webs: <code>.git</code>, <code>node_modules</code>, carpetas de IDE e IA, registros, cachés y sesiones
+                                (lista en <a href="/settings/cluster#archivos">Cluster → Archivos</a>). Cada servidor cuenta su propio disco.</p>
+                            <ul class="mb-2">
+                                <li><strong>OK</strong>: la copia tiene lo esperado (±256 MB).</li>
+                                <li><strong>Sobran</strong>: la copia tiene MÁS de lo esperado. Lo normal es que sean restos en carpetas excluidas de cuando ese servidor mandaba
+                                    (p. ej. <code>node_modules</code> o <code>.git</code> que ya no se actualizan): la copia no borra lo excluido. No afecta a las webs.</li>
+                                <li><strong>Faltan</strong>: la copia tiene MENOS: va retrasada o algo no se copia. Mira el estado de lsyncd en Cluster → Archivos.</li>
+                            </ul>
+                            <p class="mb-0 text-muted">Si quieres que el servidor de relevo sea idéntico (para compilar o usar git allí), en Cluster → Archivos
+                                usa "Espejo 100 %" o "Espejo de código" y guarda.</p>
+                        </div>
+                    </div></div>
+                </div>
             <?php endforeach; ?>
         <?php endif; ?>
         <span class="stat">

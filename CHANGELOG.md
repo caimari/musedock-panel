@@ -2,10 +2,21 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.316] — 2026-10-05 — Clientes que no se pierden en un cambio de rol, espejo 100 % y desglose de GB
+
+### Arreglado
+- **Los clientes creados en el principal anterior se perdían tras un cambio de rol.** Los clientes y a quién pertenece cada hosting se guardan en la base del panel, que es de cada servidor; se copiaban del principal a las copias, pero al cambiar el mando nadie los traía de vuelta. Ahora el principal recupera cada 30 min los clientes **nacidos** en otro nodo (no los que ese nodo recibió copiados) y enlaza sus hostings si aquí no tienen cliente. Solo añade: nunca cambia ni borra. Incluye su acceso al portal (la contraseña viaja cifrada como hash).
+  - Botón **Traer clientes de otros servidores** en *Customers* (en el master): enseña primero qué se traería y pide confirmación.
+
+### Añadido
+- **Espejo 100 %** en *Cluster → Archivos → Exclusiones base*: botones para rellenar las listas con **Espejo 100 %** (sin exclusiones: copia también `.git`, `node_modules`, carpetas de IA/IDE, registros, cachés y sesiones), **Espejo de código** (todo menos lo temporal) o **Valores por defecto**. No se aplica hasta guardar.
+- **Desglose de GB entre servidores** (*Hosting Accounts*, en el master): al pulsar **Estado réplica** se abre una ventana con lo que hay aquí, lo que la copia excluye, lo esperado en la copia, lo que tiene de verdad, y qué significan "Sobran" y "Faltan". Explicado también en *Docs → Sync de archivos*.
+
 ## [1.0.315] — 2026-10-05 — Portal: "Mantener la sesión iniciada"
 
 ### Añadido
 - **Portal de clientes: cuánto dura "Mantener la sesión iniciada"** (*Ajustes → Portal Clientes → Apariencia*, ajuste `portal_session_remember_days`: 1/7/30/60/90/180/365 días o sin caducidad; 30 por defecto). Se copia a las réplicas con el resto de ajustes del portal. Sin marcar la casilla, la sesión del cliente se cierra al cerrar el navegador o tras 30 min sin actividad.
+- **Portal de clientes: favicon propio** (*Ajustes → Portal Clientes → Apariencia*): SVG, PNG o ICO de hasta 64 KB, validado por su contenido (un SVG con scripts, eventos, enlaces o entidades se rechaza), con vista previa y botón para volver al de por defecto. Se guarda como ajuste y llega solo a las réplicas (también cuando se vuelve al de por defecto). La página "Portal no activado" lo muestra cuando la sirve el portal.
 
 ## [1.0.315] — 2026-10-05 — "Renovar ahora" de la licencia del portal
 

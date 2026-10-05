@@ -2,8 +2,45 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div></div>
-    <a href="/customers/create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i> New Customer</a>
+    <div class="d-flex gap-2">
+        <?php if (\MuseDockPanel\Settings::get('cluster_role', 'standalone') === 'master'): ?>
+        <button type="button" class="btn btn-outline-light btn-sm" onclick="mergePeersOpen()" title="Clientes creados en otro servidor del cluster (p. ej. el que mandaba antes)">
+            <i class="bi bi-people me-1"></i> Traer clientes de otros servidores
+        </button>
+        <?php endif; ?>
+        <a href="/customers/create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i> New Customer</a>
+    </div>
 </div>
+
+<div class="modal fade" id="mergePeersModal" tabindex="-1">
+    <div class="modal-dialog"><div class="modal-content" style="background:#1e293b;color:#e2e8f0;">
+        <div class="modal-header"><h6 class="modal-title"><i class="bi bi-people me-2"></i>Traer clientes de otros servidores</h6>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body small" id="mergePeersBody">Consultando los otros servidores…</div>
+        <div class="modal-footer">
+            <form method="POST" action="/customers/merge-peers"><?= View::csrf() ?>
+                <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn btn-sm btn-primary" id="mergePeersGo" disabled>Traerlos</button>
+            </form>
+        </div>
+    </div></div>
+</div>
+<script>
+function mergePeersOpen() {
+    var body = document.getElementById('mergePeersBody'), go = document.getElementById('mergePeersGo');
+    var esc = function (t) { var d = document.createElement('div'); d.textContent = t; return d.innerHTML; };
+    body.textContent = 'Consultando los otros servidores…'; go.disabled = true;
+    new bootstrap.Modal(document.getElementById('mergePeersModal')).show();
+    fetch('/customers/merge-peers', {headers: {'Accept': 'application/json'}}).then(function (r) { return r.json(); }).then(function (d) {
+        if (!d.ok) { body.innerHTML = '<span class="text-danger">' + esc(d.error || 'Error') + '</span>'; return; }
+        var h = '<p class="text-muted">Clientes que se crearon en otro servidor (por ejemplo, el que mandaba antes de un cambio de rol) y aquí no existen. Solo se <strong>añaden</strong>: no se cambia ni se borra nada.</p>';
+        h += '<div class="mb-2"><strong>Servidores:</strong> ' + Object.keys(d.nodes).map(function (k) { return esc(k + ': ' + d.nodes[k]); }).join(' · ') + '</div>';
+        h += '<div><strong>Clientes nuevos:</strong> ' + (d.customers.length ? '<ul class="mb-1">' + d.customers.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>' : 'ninguno') + '</div>';
+        h += '<div><strong>Hostings que se les asignan:</strong> ' + (d.links.length ? '<ul class="mb-0">' + d.links.map(function (c) { return '<li>' + esc(c) + '</li>'; }).join('') + '</ul>' : 'ninguno') + '</div>';
+        body.innerHTML = h; go.disabled = !(d.customers.length || d.links.length);
+    }).catch(function () { body.innerHTML = '<span class="text-danger">No se pudo consultar.</span>'; });
+}
+</script>
 
 <div class="card">
     <div class="card-body p-0">

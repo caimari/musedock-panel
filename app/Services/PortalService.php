@@ -32,7 +32,7 @@ final class PortalService
     /** Ajustes del portal que valen igual en todo el cluster. */
     // portal_instance_id: identificador del clúster ante el servidor de licencias (igual en todos
     // los nodos, para que la licencia siga al que manda sin transferirla).
-    private const SHARED_SETTINGS = ['portal_hostname', 'portal_port', 'portal_theme', 'portal_sidebar_color', 'portal_license_jwt', 'portal_instance_id', 'portal_session_remember_days'];
+    private const SHARED_SETTINGS = ['portal_hostname', 'portal_port', 'portal_theme', 'portal_sidebar_color', 'portal_license_jwt', 'portal_instance_id', 'portal_session_remember_days', 'portal_favicon', 'portal_favicon_type'];
     private const CUSTOMER_COLS = ['name', 'email', 'company', 'phone', 'password_hash', 'status', 'notes',
         'created_at', 'updated_at', 'password_token', 'password_token_expires'];
 
@@ -417,10 +417,15 @@ final class PortalService
 
     // ── Clientes: del master a las copias ─────────────────────────────────
 
-    /** Acción de cluster export-portal-state (la pide la copia al master). */
-    public static function exportState(): array
+    /**
+     * Acción de cluster export-portal-state (la pide la copia al master).
+     * $ownOnly: solo los clientes NACIDOS en este nodo (no los que le copió un master), para
+     * que el principal actual los recupere aunque este nodo ahora sea una copia
+     * (mergeFromPeers). Se permite también en una copia.
+     */
+    public static function exportState(bool $ownOnly = false): array
     {
-        if (self::role() === 'slave') {
+        if (self::role() === 'slave' && !$ownOnly) {
             return ['ok' => false, 'error' => 'este nodo es una copia: los clientes se piden al master'];
         }
         $have = array_column(Database::fetchAll(
@@ -428,6 +433,10 @@ final class PortalService
         ), 'column_name');
         $cols = array_values(array_intersect(self::CUSTOMER_COLS, $have));
         $customers = Database::fetchAll('SELECT ' . implode(', ', $cols) . ' FROM customers ORDER BY id');
+        if ($ownOnly) {
+            $received = json_decode((string)Settings::get(self::SYNCED_KEY, '[]'), true) ?: [];
+            $customers = array_values(array_filter($customers, static fn($c) => !in_array(strtolower((string)$c['email']), $received, true)));
+        }
         $links = [];
         foreach (Database::fetchAll(
             'SELECT h.domain, c.email FROM hosting_accounts h LEFT JOIN customers c ON c.id = h.customer_id'
@@ -610,8 +619,16 @@ final class PortalService
         self::importTickets($data, $counts, $issues);
 
         foreach (self::SHARED_SETTINGS as $k) {
-            if (array_key_exists($k, (array)($data['settings'] ?? [])) && (string)$data['settings'][$k] !== '') {
-                Settings::set($k, (string)$data['settings'][$k]);
+            if (!array_key_exists($k, (array)($data['settings'] ?? []))) {
+                continue;
+            }
+            $v = (string)$data['settings'][$k];
+            // Vacío no pisa (un master que aún no tiene el ajuste), salvo el favicon: vacío =
+            // volver al de por defecto, y eso también debe llegar a las copias.
+            if ($v !== '' || in_array($k, ['portal_favicon', 'portal_favicon_type'], true)) {
+                if (Settings::get($k, '') !== $v) {
+                    Settings::set($k, $v);
+                }
             }
         }
         Settings::set(self::SYNCED_KEY, json_encode($synced));
@@ -621,6 +638,74 @@ final class PortalService
             LogService::log('portal.sync', 'from-master', json_encode($counts) . ($issues ? ' avisos: ' . count($issues) : ''));
         }
         return $result;
+    }
+
+    /**
+     * En el principal: recupera los clientes que nacieron en otro nodo del cluster (p. ej. el
+     * principal anterior, antes de un cambio de rol: la base del panel es de cada nodo y nadie
+     * los traía de vuelta). Solo AÑADE: crea los clientes que aquí no existen (con su acceso
+     * al portal) y enlaza sus hostings si aquí no tienen cliente. Nunca cambia ni borra nada.
+     * Sin $apply solo dice qué haría.
+     */
+    public static function mergeFromPeers(bool $apply = true): array
+    {
+        if (self::role() === 'slave' || self::fenced()) {
+            return ['ok' => false, 'error' => 'solo en el servidor que manda'];
+        }
+        $have = array_column(Database::fetchAll(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'customers'"
+        ), 'column_name');
+        $out = ['ok' => true, 'apply' => $apply, 'customers' => [], 'links' => [], 'nodes' => []];
+        foreach (ClusterService::getNodes() as $n) {
+            $r = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'export-portal-state', 'payload' => ['own_only' => true]]);
+            $data = $r['data'] ?? null;
+            if (empty($r['ok']) || empty($data['ok'])) {
+                $out['nodes'][(string)$n['name']] = 'sin respuesta: ' . ($data['error'] ?? $r['error'] ?? '?');
+                continue;
+            }
+            $out['nodes'][(string)$n['name']] = count((array)$data['customers']) . ' cliente(s) propios';
+            $theirs = [];
+            foreach ((array)$data['customers'] as $c) {
+                $email = strtolower(trim((string)($c['email'] ?? '')));
+                if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    continue;
+                }
+                $theirs[$email] = true;
+                if (Database::fetchOne('SELECT id FROM customers WHERE lower(email) = :e', ['e' => $email])) {
+                    continue;
+                }
+                $row = ['email' => $email];
+                foreach (self::CUSTOMER_COLS as $col) {
+                    if ($col !== 'email' && in_array($col, $have, true) && array_key_exists($col, $c)) {
+                        $row[$col] = $c[$col];
+                    }
+                }
+                $out['customers'][] = "{$email} (de {$n['name']})";
+                if ($apply) {
+                    Database::insert('customers', $row);
+                }
+            }
+            foreach ((array)($data['links'] ?? []) as $domain => $email) {
+                if ($email === null || !isset($theirs[strtolower((string)$email)])) {
+                    continue;
+                }
+                $h = Database::fetchOne('SELECT id, customer_id FROM hosting_accounts WHERE lower(domain) = :d', ['d' => strtolower((string)$domain)]);
+                if (!$h || $h['customer_id'] !== null) {
+                    continue; // no está aquí, o ya tiene cliente: no se toca
+                }
+                $out['links'][] = "{$domain} → {$email}";
+                if ($apply) {
+                    $cid = Database::fetchOne('SELECT id FROM customers WHERE lower(email) = :e', ['e' => strtolower((string)$email)]);
+                    if ($cid) {
+                        Database::update('hosting_accounts', ['customer_id' => (int)$cid['id']], 'id = :wid', ['wid' => (int)$h['id']]);
+                    }
+                }
+            }
+        }
+        if ($apply && ($out['customers'] || $out['links'])) {
+            LogService::log('portal.merge', 'from-peers', 'Clientes recuperados: ' . implode(', ', $out['customers']) . '; hostings: ' . implode(', ', $out['links']));
+        }
+        return $out;
     }
 
     /** En una copia: pide al master sus clientes del portal y los aplica. */

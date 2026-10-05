@@ -20,13 +20,28 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.316',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Clientes creados en el principal anterior se perdian tras un cambio de rol: el principal recupera cada 30 min los clientes nacidos en otros nodos y sus hostings (solo anade, nunca borra); boton "Traer clientes de otros servidores" con confirmacion en Customers'],
+                        'en' => ['Customers created on the previous primary were lost after a role switch: the primary now recovers customers born on other nodes and their hostings every 30 min (add-only); "Bring customers from other servers" button with confirmation in Customers'],
+                    ],
+                    'added' => [
+                        'es' => ['Cluster > Archivos: botones Espejo 100 %, Espejo de codigo y Valores por defecto para las exclusiones', 'Hosting Accounts: Estado replica abre un desglose de GB (todo, excluido, esperado, real) y explica Sobran/Faltan'],
+                        'en' => ['Cluster > Files: 100% mirror, code mirror and factory defaults presets for exclusions', 'Hosting Accounts: replica status opens a GB breakdown (all, excluded, expected, actual) explaining surplus/missing'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.315',
                 'date' => '2026-10-05',
                 'badge' => 'info',
                 'changes' => [
                     'added' => [
-                        'es' => ['Portal de clientes: cuanto dura "Mantener la sesion iniciada" (Ajustes > Portal Clientes > Apariencia; 30 dias por defecto, o sin caducidad). Sin marcarla, la sesion se cierra al cerrar el navegador o tras 30 min sin actividad'],
-                        'en' => ['Customer portal: how long "Keep me signed in" lasts (Settings > Customer Portal > Appearance; 30 days by default, or no expiry). Unchecked, the session ends when the browser closes or after 30 min idle'],
+                        'es' => ['Portal de clientes: cuanto dura "Mantener la sesion iniciada" (Ajustes > Portal Clientes > Apariencia; 30 dias por defecto, o sin caducidad). Sin marcarla, la sesion se cierra al cerrar el navegador o tras 30 min sin actividad', 'Portal de clientes: favicon propio (SVG, PNG o ICO hasta 64 KB, validado por su contenido), copiado a las replicas'],
+                        'en' => ['Customer portal: how long "Keep me signed in" lasts (Settings > Customer Portal > Appearance; 30 days by default, or no expiry). Unchecked, the session ends when the browser closes or after 30 min idle', 'Customer portal: custom favicon (SVG, PNG or ICO up to 64 KB, content-validated), copied to replicas'],
                     ],
                 ],
             ],

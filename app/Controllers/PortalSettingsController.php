@@ -139,6 +139,49 @@ class PortalSettingsController
     }
 
     /**
+     * POST: favicon del portal (subir uno propio o volver al de por defecto). Se valida el
+     * contenido real (SVG/PNG/ICO, 64 KB) y se guarda como ajuste: llega solo a las réplicas.
+     */
+    public function saveFavicon(): void
+    {
+        $back = '/settings/portal?tab=appearance';
+        if (Settings::get('cluster_role', '') === 'slave') {
+            Flash::set('error', 'Este servidor es una copia: cambia el favicon en el principal (se copia aquí solo).');
+            Router::redirect($back);
+            return;
+        }
+        if (!empty($_POST['reset'])) {
+            PortalService::saveFavicon('', '');
+            LogService::log('settings.portal', null, 'Favicon del portal: el de por defecto');
+            Flash::set('success', 'El portal vuelve a usar el favicon por defecto.');
+            Router::redirect($back);
+            return;
+        }
+        $f = $_FILES['favicon'] ?? null;
+        if (!$f || ($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file((string)$f['tmp_name'])) {
+            Flash::set('error', 'No se ha recibido ningún fichero.');
+            Router::redirect($back);
+            return;
+        }
+        if ((int)$f['size'] > PortalService::FAVICON_MAX_BYTES) {
+            Flash::set('error', 'El fichero es demasiado grande (máximo 64 KB).');
+            Router::redirect($back);
+            return;
+        }
+        $bytes = (string)file_get_contents((string)$f['tmp_name']);
+        [$mime, $err] = PortalService::validateFavicon($bytes);
+        if ($mime === null) {
+            Flash::set('error', $err);
+            Router::redirect($back);
+            return;
+        }
+        PortalService::saveFavicon($bytes, $mime);
+        LogService::log('settings.portal', null, "Favicon del portal: {$mime}, " . strlen($bytes) . ' bytes');
+        Flash::set('success', 'Favicon guardado. Puede tardar un poco en verse por la caché del navegador.');
+        Router::redirect($back);
+    }
+
+    /**
      * POST: Set/reset a customer's portal password
      */
     /**

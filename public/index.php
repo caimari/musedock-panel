@@ -427,6 +427,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/customers', 'CustomerController@index');
 \MuseDockPanel\Router::get('/customers/create', 'CustomerController@create');
 \MuseDockPanel\Router::post('/customers/store', 'CustomerController@store');
+\MuseDockPanel\Router::get('/customers/merge-peers', 'CustomerController@mergePeersPreview');
+\MuseDockPanel\Router::post('/customers/merge-peers', 'CustomerController@mergePeers');
 \MuseDockPanel\Router::get('/customers/{id}', 'CustomerController@show');
 \MuseDockPanel\Router::get('/customers/{id}/edit', 'CustomerController@edit');
 \MuseDockPanel\Router::post('/customers/{id}/update', 'CustomerController@update');
@@ -533,6 +535,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // Portal Settings
 \MuseDockPanel\Router::get('/settings/portal', 'PortalSettingsController@index');
 \MuseDockPanel\Router::post('/settings/portal/save', 'PortalSettingsController@save');
+\MuseDockPanel\Router::post('/settings/portal/favicon', 'PortalSettingsController@saveFavicon');
 \MuseDockPanel\Router::post('/settings/portal/address', 'PortalSettingsController@saveAddress');
 \MuseDockPanel\Router::post('/settings/portal/send-invitation', 'PortalSettingsController@sendInvitation');
 \MuseDockPanel\Router::post('/settings/portal/revoke-access', 'PortalSettingsController@revokeAccess');
