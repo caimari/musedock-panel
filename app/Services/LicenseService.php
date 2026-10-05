@@ -257,17 +257,26 @@ class LicenseService
                 'header'  => "Content-Type: application/json\r\n",
                 'content' => $postData,
                 'timeout' => 15,
+                // Sin esto, cualquier respuesta 4xx (licencia transferida, otro servidor…) se
+                // veía como "no se puede contactar" y no se sabía el motivo real.
+                'ignore_errors' => true,
             ],
         ]);
 
         $response = @file_get_contents($apiUrl, false, $ctx);
         if ($response === false) {
-            return ['ok' => false, 'message' => 'Cannot reach license server'];
+            return ['ok' => false, 'message' => 'No se puede contactar con el servidor de licencias'];
         }
 
         $data = json_decode($response, true);
         if (!is_array($data) || empty($data['success'])) {
-            return ['ok' => false, 'message' => $data['error'] ?? 'Renewal failed'];
+            $err = is_array($data) ? (string)($data['error'] ?? '') : '';
+            // Licencia transferida (pendiente) o ligada a otro servidor: se activa aquí con su clave.
+            $key = (string)(self::verifyJwt($currentJwt)['sub'] ?? self::jwtPayloadUnverified($currentJwt)['sub'] ?? '');
+            if ($key !== '' && (str_contains($err, 'not active') || str_contains($err, 'Server changed'))) {
+                return self::activatePortalKey($key);
+            }
+            return ['ok' => false, 'message' => $err !== '' ? "Renovación rechazada: {$err}" : 'Respuesta no válida del servidor de licencias'];
         }
 
         // Save new JWT
@@ -319,6 +328,14 @@ class LicenseService
         $r = self::refreshPortalLicense();
         LogService::log('portal.license', null, 'Renovación automática: ' . $r['message']);
         return $r;
+    }
+
+    /** Contenido de un JWT sin comprobar la firma (solo para leer la clave de uno caducado). */
+    private static function jwtPayloadUnverified(string $jwt): array
+    {
+        $parts = explode('.', $jwt);
+        $p = count($parts) === 3 ? json_decode(self::base64url_decode($parts[1]), true) : null;
+        return is_array($p) ? $p : [];
     }
 
     /** IP pública y nombre de este servidor, como los ve el servidor de licencias. */

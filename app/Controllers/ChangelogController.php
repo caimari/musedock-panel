@@ -20,6 +20,28 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.315',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Portal de clientes: cuanto dura "Mantener la sesion iniciada" (Ajustes > Portal Clientes > Apariencia; 30 dias por defecto, o sin caducidad). Sin marcarla, la sesion se cierra al cerrar el navegador o tras 30 min sin actividad'],
+                        'en' => ['Customer portal: how long "Keep me signed in" lasts (Settings > Customer Portal > Appearance; 30 days by default, or no expiry). Unchecked, the session ends when the browser closes or after 30 min idle'],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.315',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['"Renovar ahora" de la licencia del portal decia "Cannot reach license server" ante cualquier error; ahora muestra el motivo real y, si la licencia esta transferida o en otro servidor, la activa aqui con su clave'],
+                        'en' => ['Portal license "Renew now" showed "Cannot reach license server" for any error; now shows the real reason and, if the license was transferred or bound elsewhere, activates it here with its key'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.314',
                 'date' => '2026-10-05',
                 'badge' => 'info',

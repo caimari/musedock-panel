@@ -129,8 +129,11 @@ class PortalSettingsController
 
         Settings::set('portal_theme', $theme);
         Settings::set('portal_sidebar_color', $sidebarColor);
+        // "Mantener la sesión iniciada" del portal: días (0 = sin caducidad), igual que el panel.
+        $rememberDays = (int)($_POST['portal_session_remember_days'] ?? 30);
+        Settings::set('portal_session_remember_days', (string)(in_array($rememberDays, [0, 1, 7, 30, 60, 90, 180, 365], true) ? $rememberDays : 30));
 
-        LogService::log('settings.portal', null, "Portal theme: {$theme}, sidebar: {$sidebarColor}");
+        LogService::log('settings.portal', null, "Portal theme: {$theme}, sidebar: {$sidebarColor}, recordar sesión: {$rememberDays} días");
         Flash::set('success', 'Configuracion del portal guardada.');
         Router::redirect('/settings/portal');
     }

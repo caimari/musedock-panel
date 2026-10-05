@@ -32,9 +32,63 @@ final class PortalService
     /** Ajustes del portal que valen igual en todo el cluster. */
     // portal_instance_id: identificador del clúster ante el servidor de licencias (igual en todos
     // los nodos, para que la licencia siga al que manda sin transferirla).
-    private const SHARED_SETTINGS = ['portal_hostname', 'portal_port', 'portal_theme', 'portal_sidebar_color', 'portal_license_jwt', 'portal_instance_id'];
+    private const SHARED_SETTINGS = ['portal_hostname', 'portal_port', 'portal_theme', 'portal_sidebar_color', 'portal_license_jwt', 'portal_instance_id', 'portal_session_remember_days'];
     private const CUSTOMER_COLS = ['name', 'email', 'company', 'phone', 'password_hash', 'status', 'notes',
         'created_at', 'updated_at', 'password_token', 'password_token_expires'];
+
+    /** Favicon del portal: como máximo 64 KB, SVG, PNG o ICO (se mira el contenido, no la extensión). */
+    public const FAVICON_MAX_BYTES = 65536;
+
+    /**
+     * Comprueba un favicon subido. Devuelve [tipo MIME, null] o [null, motivo].
+     * SVG: XML con raíz <svg>, sin scripts, eventos, enlaces externos ni contenido incrustado.
+     */
+    public static function validateFavicon(string $bytes): array
+    {
+        $len = strlen($bytes);
+        if ($len === 0) {
+            return [null, 'El fichero está vacío.'];
+        }
+        if ($len > self::FAVICON_MAX_BYTES) {
+            return [null, 'El fichero es demasiado grande (máximo 64 KB).'];
+        }
+        if (str_starts_with($bytes, "\x89PNG\r\n\x1a\n")) {
+            $info = @getimagesizefromstring($bytes);
+            if (!$info || ($info['mime'] ?? '') !== 'image/png' || $info[0] < 16 || $info[0] > 1024 || $info[1] < 16 || $info[1] > 1024) {
+                return [null, 'El PNG no es válido (entre 16 y 1024 píxeles de lado).'];
+            }
+            return ['image/png', null];
+        }
+        if (str_starts_with($bytes, "\x00\x00\x01\x00") && $len >= 22) {
+            $count = unpack('v', substr($bytes, 4, 2))[1] ?? 0;
+            if ($count < 1 || $count > 32 || $len < 6 + 16 * $count) {
+                return [null, 'El ICO no es válido.'];
+            }
+            return ['image/x-icon', null];
+        }
+        $text = ltrim($bytes, "\xEF\xBB\xBF \t\r\n");
+        if (stripos($text, '<svg') !== false && (str_starts_with($text, '<svg') || str_starts_with($text, '<?xml') || str_starts_with($text, '<!--'))) {
+            if (preg_match('/<!DOCTYPE|<!ENTITY|<script|<foreignObject|<iframe|<embed|<object|\son[a-z]+\s*=|javascript:|data:text|(?:xlink:)?href\s*=\s*["\']?\s*(?!#)/i', $text)) {
+                return [null, 'El SVG lleva scripts, eventos o enlaces: no se acepta por seguridad.'];
+            }
+            $prev = libxml_use_internal_errors(true);
+            $xml = simplexml_load_string($text, 'SimpleXMLElement', LIBXML_NONET);
+            libxml_clear_errors();
+            libxml_use_internal_errors($prev);
+            if (!$xml || strtolower($xml->getName()) !== 'svg') {
+                return [null, 'El SVG no es válido.'];
+            }
+            return ['image/svg+xml', null];
+        }
+        return [null, 'Formato no admitido: sube un SVG, PNG o ICO.'];
+    }
+
+    /** Guarda el favicon (ya validado) en los ajustes; se copia a las réplicas. '' = el de por defecto. */
+    public static function saveFavicon(string $bytes, string $mime): void
+    {
+        Settings::set('portal_favicon', $bytes === '' ? '' : base64_encode($bytes));
+        Settings::set('portal_favicon_type', $bytes === '' ? '' : $mime);
+    }
 
     public static function installed(): bool
     {

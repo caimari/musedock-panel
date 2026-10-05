@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.315] — 2026-10-05 — Portal: "Mantener la sesión iniciada"
+
+### Añadido
+- **Portal de clientes: cuánto dura "Mantener la sesión iniciada"** (*Ajustes → Portal Clientes → Apariencia*, ajuste `portal_session_remember_days`: 1/7/30/60/90/180/365 días o sin caducidad; 30 por defecto). Se copia a las réplicas con el resto de ajustes del portal. Sin marcar la casilla, la sesión del cliente se cierra al cerrar el navegador o tras 30 min sin actividad.
+
+## [1.0.315] — 2026-10-05 — "Renovar ahora" de la licencia del portal
+
+### Arreglado
+- **"Renovar ahora" decía "Cannot reach license server" aunque el servidor de licencias respondía.** Cualquier respuesta de error (licencia transferida, ligada a otro servidor, caducada) se mostraba como "no se puede contactar". Ahora se ve el motivo real, y si la licencia está pendiente tras una transferencia o ligada a otro servidor, "Renovar ahora" (y la renovación automática) la activa directamente en este servidor con su clave.
+
 ## [1.0.314] — 2026-10-05 — La licencia del portal sigue al servidor que manda
 
 ### Añadido

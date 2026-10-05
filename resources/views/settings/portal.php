@@ -368,6 +368,18 @@
                 </div>
             </div>
 
+            <label class="form-label small text-muted mb-2">Acceso de los clientes: "Mantener la sesión iniciada"</label>
+            <div class="mb-3">
+                <?php $prd = (int)\MuseDockPanel\Settings::get('portal_session_remember_days', '30'); ?>
+                <select name="portal_session_remember_days" class="form-select form-select-sm" style="max-width:260px;">
+                    <?php foreach ([1 => '1 día', 7 => '7 días', 30 => '30 días', 60 => '2 meses', 90 => '3 meses', 180 => '6 meses', 365 => '1 año', 0 => 'Sin caducidad'] as $d => $lbl): ?>
+                        <option value="<?= $d ?>" <?= $prd === $d ? 'selected' : '' ?>><?= $lbl ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <small class="text-muted d-block mt-1">Si el cliente marca la casilla al entrar, su sesión dura esto aunque cierre el navegador.
+                    Sin marcarla, se cierra al cerrar el navegador o tras 30 min sin actividad. Afecta a los inicios de sesión nuevos.</small>
+            </div>
+
             <button type="submit" class="btn btn-sm" style="background:#a855f7;color:#fff;">
                 <i class="bi bi-check-lg me-1"></i>Guardar apariencia
             </button>
