@@ -97,7 +97,12 @@ class AlertsController
                 array_filter(array_map('trim', explode("\n", (string)($_POST['accepted_extra'] ?? ''))))),
             'disk_overrides' => $disk,
             'mail_node_after_minutes' => (int)($_POST['mail_node_after_minutes'] ?? 5),
+            'outage_after_minutes' => (int)($_POST['outage_after_minutes'] ?? 5),
         ];
+        if (isset($_POST['maintenance_minutes']) && $_POST['maintenance_minutes'] !== '') {
+            $policy['maintenance_minutes'] = (int)$_POST['maintenance_minutes'];
+            $policy['maintenance_reason'] = (string)($_POST['maintenance_reason'] ?? '');
+        }
         if (Settings::get('cluster_role', 'standalone') === 'slave') {
             // Desde una copia: lo guarda el master y lo reparte a todos (también aquí).
             $r = AlertPolicyService::saveViaMaster($policy);

@@ -355,9 +355,31 @@ class FileManagerController
         $escapedDest = escapeshellarg($tmpDest);
         $escapedDir = escapeshellarg($tmpDir);
 
+        // Nombre vacio o solo puntos ("..") no es un fichero valido
+        if (trim($fileName, '.') === '') {
+            Flash::set('error', 'Nombre de archivo no valido.');
+            Router::redirect('/accounts/' . $account['id'] . '/files?path=' . urlencode($uploadPath));
+            return;
+        }
+
         shell_exec("sudo -u {$user} mkdir -p {$escapedDir} 2>/dev/null");
-        shell_exec("cp " . escapeshellarg($tmpFile) . " {$escapedDest} 2>/dev/null");
-        shell_exec("chown {$user}:www-data {$escapedDest} 2>/dev/null");
+
+        // El panel copia como root: un enlace simbolico dentro del hosting no debe
+        // permitir escribir fuera de su directorio. Se resuelve el destino real.
+        $realDir = realpath($tmpDir);
+        $realBase = realpath($account['home_dir']);
+        if (!$realDir || !$realBase
+            || ($realDir !== $realBase && !str_starts_with($realDir, rtrim($realBase, '/') . '/'))
+            || is_link($tmpDest)) {
+            Flash::set('error', 'Ruta de destino no permitida.');
+            Router::redirect('/accounts/' . $account['id'] . '/files?path=' . urlencode($uploadPath));
+            return;
+        }
+        $tmpDest = $realDir . '/' . $fileName;
+        $escapedDest = escapeshellarg($tmpDest);
+
+        shell_exec("cp --no-dereference " . escapeshellarg($tmpFile) . " {$escapedDest} 2>/dev/null");
+        shell_exec("chown -h {$user}:www-data {$escapedDest} 2>/dev/null");
         shell_exec("chmod 644 {$escapedDest} 2>/dev/null");
 
         FileAuditService::log($account, 'upload', $targetPath, [
@@ -384,7 +406,8 @@ class FileManagerController
 
         $resolved = realpath($fullPath);
         $resolvedBase = realpath($account['home_dir']);
-        if (!$resolved || !$resolvedBase || !str_starts_with($resolved, $resolvedBase)) {
+        if (!$resolved || !$resolvedBase
+            || ($resolved !== $resolvedBase && !str_starts_with($resolved, rtrim($resolvedBase, '/') . '/'))) {
             http_response_code(403);
             echo 'Access denied';
             return;

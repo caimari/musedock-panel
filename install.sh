@@ -130,6 +130,16 @@ run_caddy_config_snapshot() {
     fi
 }
 
+# Guard SSH de federacion (valida SSH_ORIGINAL_COMMAND de las claves de peers).
+# Solo copia el fichero; no reinicia nada ni toca authorized_keys.
+install_federation_ssh_guard() {
+    if [ -f "${PANEL_DIR}/bin/federation-ssh-guard" ]; then
+        install -m 0755 -o root -g root "${PANEL_DIR}/bin/federation-ssh-guard" /usr/local/bin/federation-ssh-guard 2>/dev/null \
+            && ok "federation-ssh-guard instalado en /usr/local/bin" \
+            || warn "No se pudo instalar federation-ssh-guard"
+    fi
+}
+
 # Create the helper that writes CLOUDFLARE_API_TOKEN into /etc/default/caddy.
 #
 # The master pushes the token to every slave, but the slave-side handler needs
@@ -3202,6 +3212,7 @@ else
 fi
 install_caddy_runtime_repair_override
 install_caddy_token_helper
+install_federation_ssh_guard
 
 # ============================================================
 # Apply deferred nginx/apache → Caddy site migrations

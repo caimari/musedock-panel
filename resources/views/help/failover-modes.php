@@ -73,6 +73,12 @@
             Si alguno lo ve vivo, no se promueve (sería un corte de red, no una caída). Los testigos que no responden no cuentan:
             para que proteja de verdad, conviene un testigo en <em>otro proveedor</em> que el master
             (<a href="/docs/witnesses" class="text-info">testigos externos: cómo crearlos</a>).
+            <br><strong>¿Cayó el principal o todo su sitio?</strong> Si el principal es una máquina virtual con alta disponibilidad (p. ej. HA de Proxmox),
+            cuando se cae su servidor físico otra máquina del mismo sitio lo vuelve a arrancar en 2-4 min. Tomar el mando en ese rato dejaría
+            <em>dos</em> principales cuando vuelva. Para evitarlo, en <em>Cluster → Failover</em> indica en "Comprobaciones del mismo sitio" otras máquinas de ese
+            sitio que <strong>no dependan del principal</strong> (otro servidor físico, el router, la otra línea de internet). Si el principal no responde pero alguna
+            de ellas sí, la réplica <strong>espera más</strong> (15 min por defecto) antes de tomar el mando, y te avisa de que está esperando. Si no responde nada
+            del sitio (corte de luz o de internet de toda la oficina), actúa con la espera normal.
         </div>
     </div>
 </div>
@@ -109,15 +115,49 @@
     </div>
 </div>
 
+<!-- Qué pasa según lo que caiga -->
+<div class="card mb-4">
+    <div class="card-header"><i class="bi bi-diagram-2 me-2"></i>Qué pasa según lo que caiga, y cuánto dura</div>
+    <div class="card-body small">
+        <p class="text-muted">Ejemplo: el titular <strong>A</strong> es una máquina virtual en una oficina, con alta disponibilidad (si se cae su servidor físico,
+            otro servidor de la oficina la arranca solo) y dos líneas de internet (la normal y una de reserva). <strong>B</strong> es su relevo en otro sitio.
+            En <em>Cluster → Failover</em> están configuradas las "Comprobaciones del mismo sitio" (otro servidor de la oficina, el router y la línea de reserva).
+            Tiempos con los valores por defecto, en semiauto o auto.</p>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle">
+                <thead><tr><th>Qué cae</th><th>Qué pasa</th><th>Webs caídas</th><th>Datos que se pueden perder</th></tr></thead>
+                <tbody>
+                    <tr><td>El servidor físico de A</td><td>La alta disponibilidad arranca A en otro servidor de la oficina. B ve que la oficina responde y <strong>espera</strong> (no toma el mando).</td><td>2-5 min</td><td>los de la última copia de la máquina virtual (p. ej. 1 min)</td></tr>
+                    <tr><td>La línea normal de la oficina</td><td>El vigilante de entrada lleva las webs por la línea de reserva. Nadie cambia de servidor.</td><td>4-5 min</td><td>nada</td></tr>
+                    <tr><td>Toda la oficina (luz, o las dos líneas)</td><td>B no ve nada de la oficina: toma el mando tras la espera normal.</td><td>7-8 min</td><td>lo último que no llegó a la réplica (normalmente segundos)</td></tr>
+                    <tr><td>Los dos servidores físicos de la oficina</td><td>La oficina responde pero A no vuelve: pasada la espera larga (15 min, ajustable), B toma el mando.</td><td>~15-17 min</td><td>lo mismo</td></tr>
+                    <tr><td>El camino entre B y la oficina (no A)</td><td>Los testigos ven a A vivo: B <strong>no</strong> toma el mando.</td><td>ninguno</td><td>nada</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="text-muted"><strong>La regla:</strong> lo que pasa dentro de un sitio lo resuelve el propio sitio (alta disponibilidad, línea de reserva);
+            el relevo a otro sitio solo actúa si cae el sitio entero o si el sitio no consigue levantar a A. Sin "Comprobaciones del mismo sitio", B no puede
+            distinguir los casos y toma el mando a los 5 min en todos: si la alta disponibilidad tarda más, quedarían dos principales al volver A.</p>
+        <p class="mb-0 text-muted"><strong>La vuelta</strong>, cuando B tomó el mando: A vuelve, se aparta solo, se pone al día como copia (unos minutos) y,
+            tras 15 min estable, en semiauto te avisa para que pulses «Pasar el mando a A»; en auto se lo devuelve solo. El cambio corta las webs unos segundos.</p>
+    </div>
+</div>
+
 <!-- Emails de caída -->
 <div class="card mb-4">
     <div class="card-header"><i class="bi bi-envelope-exclamation me-2"></i>Notificaciones de caída (en TODOS los modos)</div>
     <div class="card-body small text-muted">
-        <p>Los avisos por email/Telegram de <strong>«Nodo caído»</strong> (el master detecta que un slave no responde) y
-        <strong>«Master caído»</strong> (un slave detecta que el master no responde) se envían <strong>siempre</strong>,
-        independientemente del modo — hasta en <code>manual</code>. El modo solo controla si el sistema <em>actúa</em>, no si te avisa.</p>
-        <p class="mb-0">El aviso de «Master caído» solo se dispara si el master <strong>de verdad</strong> no responde: antes de alertar,
-        el slave sondea activamente al master, para no dar falsas alarmas cuando quien estuvo caído fue el propio slave.</p>
+        <p>Los avisos de <strong>«Nodo caído»</strong>, <strong>«Réplica parada»</strong> y los de recuperación se envían en todos los modos, también en
+            <code>manual</code>: el modo solo controla si el sistema <em>actúa</em>, no si te avisa.</p>
+        <ul class="mb-2">
+            <li><strong>Solo si la caída dura</strong> (5 min por defecto, en <a href="/settings/alerts" class="text-info">Ajustes → Avisos</a>): un reinicio de 2 minutos no manda correo.
+                El aviso de recuperación solo llega si antes llegó el de caída.</li>
+            <li><strong>Con diagnóstico:</strong> el correo dice si el otro servidor responde por la VPN, por su panel, por su base de datos y por internet, y qué ven los testigos.
+                Así se sabe si está apagado o reiniciándose, si falla la VPN o si el problema es de la propia réplica.</li>
+            <li><strong>Modo mantenimiento:</strong> antes de un reinicio, una prueba de relevo o una mudanza de máquina virtual, actívalo en Ajustes → Avisos
+                (o por MCP, <code>alerts_configure</code> con <code>maintenance_minutes</code>). Durante ese rato no se envían avisos de "algo no responde"; se apuntan igual.</li>
+        </ul>
+        <p class="mb-0">Antes de dar a un servidor por caído, la copia lo sondea activamente, para no dar falsas alarmas cuando quien estuvo caído fue ella.</p>
     </div>
 </div>
 

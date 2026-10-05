@@ -40,6 +40,11 @@ class NotificationService
         if (AlertPolicyService::muted($type)) {
             return;
         }
+        // Mantenimiento programado: los avisos de "algo no responde" se apuntan, no se envían.
+        if (in_array($type, AlertPolicyService::MAINTENANCE_TYPES, true) && AlertPolicyService::inMaintenance()) {
+            LogService::log('notify.maintenance', $type, 'No enviado (mantenimiento programado): ' . $subject);
+            return;
+        }
         $message .= AlertPolicyService::emailFooter($type);
         $subject = self::tagSubject($subject);
         if (Settings::get('monitor_notify_email', '0') === '1') {
@@ -140,6 +145,10 @@ class NotificationService
         if (!self::isEmailConfigured() || AlertPolicyService::muted($eventKey)) {
             return false; // sin correo configurado, o tipo silenciado en Ajustes → Avisos
         }
+        if (in_array($eventKey, AlertPolicyService::MAINTENANCE_TYPES, true) && AlertPolicyService::inMaintenance()) {
+            LogService::log('notify.maintenance', $eventKey, 'No enviado (mantenimiento programado): ' . $subject);
+            return false;
+        }
 
         $cooldownSeconds = max(60, min(86400, $cooldownSeconds));
         $settingKey = 'notify_event_email_last_' . $eventKey;
@@ -197,6 +206,37 @@ class NotificationService
             return self::sendViaPhpMail($to, $from, $subject, $body, $fromName);
         }
 
+        return self::sendViaSmtp($to, $from, $subject, $body, $fromName);
+    }
+
+    /**
+     * Correo a una dirección concreta que no es la del administrador (p. ej. avisar a un
+     * cliente del portal de que su ticket tiene respuesta). Misma configuración de envío
+     * que los avisos, sin etiqueta de servidor en el asunto y con su propio tope diario
+     * (notify_customer_email_daily_cap, 50) para no agotar el cupo de los avisos.
+     */
+    public static function sendToAddress(string $to, string $subject, string $body, string $fromName = ''): bool
+    {
+        $to = trim($to);
+        if (!filter_var($to, FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n]/', $to . $subject . $fromName)) {
+            return false;
+        }
+        if (!self::isEmailConfigured()) {
+            return false;
+        }
+        $cap = max(5, (int)Settings::get('notify_customer_email_daily_cap', '50'));
+        $day = date('Y-m-d');
+        [$capDay, $sent] = array_pad(explode('|', Settings::get('notify_customer_email_daily_count', '')), 2, '0');
+        $sent = $capDay === $day ? (int)$sent : 0;
+        if ($sent >= $cap) {
+            LogService::log('notify.capped', null, "Correo a cliente no enviado (tope diario {$cap}): {$subject}");
+            return false;
+        }
+        Settings::set('notify_customer_email_daily_count', $day . '|' . ($sent + 1));
+        $from = Settings::get('notify_smtp_from', '') ?: self::getAdminEmail();
+        if (Settings::get('notify_email_method', 'smtp') === 'php') {
+            return self::sendViaPhpMail($to, $from, $subject, $body, $fromName);
+        }
         return self::sendViaSmtp($to, $from, $subject, $body, $fromName);
     }
 

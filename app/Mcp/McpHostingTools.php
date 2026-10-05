@@ -130,16 +130,19 @@ class McpHostingTools
             'alerts_configure' => [
                 'write' => true,
                 'title' => 'Cambiar las reglas de avisos',
-                'description' => 'Silencia o reactiva tipos de aviso (solo quita el correo/Telegram; siguen en el monitor), da por buenos controles de hardening (por su título, ver alerts_status), pone umbral propio o silencia un disco de un servidor (host corto p. ej. "nitro" o "*"; threshold 0 = sin aviso, null = quitar la regla) y fija cuántos minutos debe fallar un nodo de correo antes de avisar. Lo que no se indique se deja igual. Se guarda en el master y se copia a todos sus nodos (desde una copia, se envía al master). Primero sin apply. Requiere "Permitir acciones que modifican".',
+                'description' => 'Silencia o reactiva tipos de aviso (solo quita el correo/Telegram; siguen en el monitor), da por buenos controles de hardening (por su título, ver alerts_status), pone umbral propio o silencia un disco de un servidor (host corto p. ej. "servidor2" o "*"; threshold 0 = sin aviso, null = quitar la regla) y fija cuántos minutos debe fallar un nodo de correo antes de avisar. Lo que no se indique se deja igual. Se guarda en el master y se copia a todos sus nodos (desde una copia, se envía al master). Primero sin apply. Requiere "Permitir acciones que modifican".',
                 'inputSchema' => $o([
-                    'mute' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos a silenciar en todos los servidores ("DISK_HIGH") o solo en uno ("nitro:DISK_HIGH"; nombre corto del servidor). Ver alerts_status → types'],
+                    'mute' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos a silenciar en todos los servidores ("DISK_HIGH") o solo en uno ("servidor2:DISK_HIGH"; nombre corto del servidor). Ver alerts_status → types'],
                     'unmute' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos a reactivar'],
                     'accept_hardening' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Títulos de controles a dar por buenos'],
                     'unaccept_hardening' => ['type' => 'array', 'items' => ['type' => 'string']],
                     'disk_rules' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => (object)[
                         'host' => ['type' => 'string'], 'mount' => ['type' => 'string'], 'threshold' => ['type' => ['number', 'null']]]],
-                        'description' => 'p. ej. [{"host":"nitro","mount":"/workspace","threshold":0}]'],
+                        'description' => 'p. ej. [{"host":"servidor2","mount":"/datos","threshold":0}]'],
                     'mail_node_after_minutes' => ['type' => 'integer'],
+                    'maintenance_minutes' => ['type' => 'integer', 'description' => 'Mantenimiento programado: durante N minutos (máx. 720) no se envían avisos de "algo no responde" (réplica, nodo caído, correo, testigos…); se apuntan igual. 0 = terminarlo ya. Úsalo antes de reinicios, pruebas de relevo o mudanzas de VM.'],
+                    'maintenance_reason' => ['type' => 'string', 'description' => 'Motivo del mantenimiento (se guarda en el registro)'],
+                    'outage_after_minutes' => ['type' => 'integer', 'description' => 'Minutos que debe durar una caída de nodo o réplica antes de avisar (por defecto 5)'],
                     'apply' => $apply,
                 ], []),
             ],
@@ -511,6 +514,14 @@ class McpHostingTools
         }
         if (isset($args['mail_node_after_minutes'])) {
             $new['mail_node_after_minutes'] = (int)$args['mail_node_after_minutes'];
+        }
+        if (isset($args['maintenance_minutes'])) {
+            unset($new['maintenance_until_ts']);
+            $new['maintenance_minutes'] = (int)$args['maintenance_minutes'];
+            $new['maintenance_reason'] = (string)($args['maintenance_reason'] ?? '');
+        }
+        if (isset($args['outage_after_minutes'])) {
+            $new['outage_after_minutes'] = (int)$args['outage_after_minutes'];
         }
         $plan = ['before' => $cur, 'after' => $new, 'nodes' => array_map(static fn($n) => (string)$n['name'], \MuseDockPanel\Services\ClusterService::getNodes())];
         if (empty($args['apply'])) {

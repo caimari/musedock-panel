@@ -39,10 +39,34 @@
         </div>
     </div>
 
+    <div class="card mb-4" style="border-color:rgba(251,191,36,.35);">
+        <div class="card-header"><i class="bi bi-cone-striped me-2"></i>Mantenimiento programado</div>
+        <div class="card-body small">
+            <?php if (!empty($policy['maintenance_until'])): ?>
+                <div class="mb-2 text-warning"><strong>En mantenimiento hasta las <?= View::e($policy['maintenance_until']) ?></strong><?= $policy['maintenance_reason'] !== '' ? ': ' . View::e($policy['maintenance_reason']) : '' ?>.
+                    No se envían avisos de réplica, nodo caído, correo, testigos y similares (se apuntan igual).</div>
+            <?php endif; ?>
+            <p class="text-muted">Antes de un reinicio, una prueba de relevo o una mudanza de VM: durante ese rato no te llegarán avisos de "algo no responde". Se copia a todos los servidores. Máximo 12 h.</p>
+            <div class="d-flex flex-wrap align-items-center gap-2">
+                <select name="maintenance_minutes" class="form-select form-select-sm" style="width:auto">
+                    <option value="">— sin cambios —</option>
+                    <option value="30">30 min</option><option value="60">1 hora</option><option value="120">2 horas</option><option value="240">4 horas</option>
+                    <option value="0">Terminar el mantenimiento ya</option>
+                </select>
+                <input name="maintenance_reason" class="form-control form-control-sm" style="max-width:320px" placeholder="Motivo (p. ej. prueba de Proxmox)">
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+                <span>Avisar de una caída (nodo o réplica) solo si dura</span>
+                <input type="number" name="outage_after_minutes" min="1" max="60" value="<?= (int)($policy['outage_after_minutes'] ?? 5) ?>" class="form-control form-control-sm" style="width:80px">
+                <span>minutos (un reinicio de 2 min no avisa).</span>
+            </div>
+        </div>
+    </div>
+
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-pc-display me-2"></i>Silenciar solo en un servidor</div>
         <div class="card-body small">
-            <p class="text-muted">Para no recibir un aviso de una máquina concreta (p. ej. "Disco lleno" de <code>nitro</code>) sin quitarlo en las demás.
+            <p class="text-muted">Para no recibir un aviso de una máquina concreta (p. ej. "Disco lleno" de <code>servidor2</code>) sin quitarlo en las demás.
                 Servidor = nombre corto (el que va entre corchetes al principio del asunto del correo, sin el dominio).</p>
             <table class="table table-sm align-middle small mb-2" id="mute-rules">
                 <thead><tr><th>Servidor</th><th>Aviso</th><th></th></tr></thead>
@@ -52,7 +76,7 @@
                 $mrows[] = ['', ''];
                 foreach ($mrows as [$mh, $mt]): ?>
                     <tr>
-                        <td><input name="mute_host[]" list="host-hints" value="<?= View::e($mh) ?>" class="form-control form-control-sm" placeholder="nitro"></td>
+                        <td><input name="mute_host[]" list="host-hints" value="<?= View::e($mh) ?>" class="form-control form-control-sm" placeholder="servidor2"></td>
                         <td><select name="mute_type[]" class="form-select form-select-sm">
                                 <option value="">—</option>
                                 <?php foreach ($types as $tk => [$tl]): ?><option value="<?= View::e($tk) ?>" <?= $mt === $tk ? 'selected' : '' ?>><?= View::e($tl) ?></option><?php endforeach; ?>
@@ -103,7 +127,7 @@
         <div class="card-header"><i class="bi bi-hdd me-2"></i>Discos: umbral propio o sin aviso</div>
         <div class="card-body small">
             <p class="text-muted">Umbral general: <?= View::e((string)$diskDefault) ?> %. Aquí puedes poner otro para un disco concreto de un servidor, o silenciarlo.
-                Servidor = nombre corto (p. ej. <code>nitro</code>); <code>*</code> = todos.
+                Servidor = nombre corto (p. ej. <code>servidor2</code>); <code>*</code> = todos.
                 Discos de este servidor: <?php foreach ($localDisks as $m => $pct): ?><code><?= View::e($m) ?></code> <?= $pct ?> % <?php endforeach; ?></p>
             <table class="table table-sm align-middle small mb-2" id="disk-rules">
                 <thead><tr><th>Servidor</th><th>Punto de montaje</th><th>Aviso</th><th>Umbral %</th><th></th></tr></thead>
@@ -113,7 +137,7 @@
                 $rows[] = ['', '', ''];
                 foreach ($rows as [$h, $m, $t]): ?>
                     <tr>
-                        <td><input name="disk_host[]" list="host-hints" value="<?= View::e($h) ?>" class="form-control form-control-sm" placeholder="nitro"></td>
+                        <td><input name="disk_host[]" list="host-hints" value="<?= View::e($h) ?>" class="form-control form-control-sm" placeholder="servidor2"></td>
                         <td><input name="disk_mount[]" value="<?= View::e($m) ?>" class="form-control form-control-sm" placeholder="/workspace"></td>
                         <td><select name="disk_mode[]" class="form-select form-select-sm">
                                 <option value="threshold" <?= ($t === '' || (float)$t > 0) ? 'selected' : '' ?>>con umbral</option>

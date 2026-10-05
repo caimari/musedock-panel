@@ -452,8 +452,8 @@ class DatabaseController
 
             if (!empty($newDbPass)) {
                 $sql = 'ALTER USER "' . str_replace('"', '""', $effectiveUser) . '" WITH PASSWORD \'' . str_replace("'", "''", $newDbPass) . '\';';
-                $cmd = 'sudo -u postgres psql -c ' . escapeshellarg($sql) . ' 2>&1';
-                $output = shell_exec($cmd);
+                // SQL con la contraseña por stdin (no en la línea de comandos, visible con ps)
+                $output = \MuseDockPanel\Services\DatabaseService::runWithStdin('sudo -u postgres psql 2>&1', $sql . "\n");
                 if ($output !== null && stripos($output, 'ERROR') !== false) {
                     Flash::set('error', 'Error al cambiar contrasena PostgreSQL: ' . $output);
                     Router::redirect($redirectTo);
@@ -493,7 +493,8 @@ class DatabaseController
                     $this->quoteLiteral($effectiveUser),
                     $this->quoteLiteral($newDbPass)
                 );
-                $output = shell_exec($mysqlCmd . ' -e ' . escapeshellarg($sql) . ' 2>&1');
+                // SQL con la contraseña por stdin (no en la línea de comandos, visible con ps)
+                $output = \MuseDockPanel\Services\DatabaseService::runWithStdin($mysqlCmd . ' 2>&1', $sql . "\n");
                 if ($output !== null && stripos($output, 'ERROR') !== false) {
                     Flash::set('error', 'Error al cambiar contrasena MySQL: ' . $output);
                     Router::redirect($redirectTo);
@@ -1331,7 +1332,7 @@ class DatabaseController
         if ($authMethod === 'password') {
             $pass = Env::get('MYSQL_ROOT_PASS', '');
             if (empty($pass)) return null;
-            return 'mysql -u root -p' . escapeshellarg($pass);
+            return 'mysql ' . \MuseDockPanel\Services\DatabaseService::mysqlDefaultsFileArg($pass) . ' -u root';
         }
         return null;
     }
@@ -1345,7 +1346,7 @@ class DatabaseController
         if ($authMethod === 'password') {
             $pass = Env::get('MYSQL_ROOT_PASS', '');
             if (empty($pass)) return null;
-            return 'mysqldump -u root -p' . escapeshellarg($pass);
+            return 'mysqldump ' . \MuseDockPanel\Services\DatabaseService::mysqlDefaultsFileArg($pass) . ' -u root';
         }
         return null;
     }

@@ -20,6 +20,47 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.309',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Avisos de replica parada y nodo caido: esperan a que la caida dure (5 min), dan un diagnostico (VPN, panel, base de datos, internet, testigos) y el de recuperacion dice cuanto duro', 'Modo mantenimiento: durante un trabajo programado no se envian avisos de "algo no responde" (Avisos o MCP maintenance_minutes)', 'Instalaciones de clientes: la cuenta de Let\'s Encrypt ya no usa admin@musedock.com ni CardDAV propone dav.musedock.com (se usan los datos del propio panel)', 'Relevo: comprobaciones del mismo sitio del principal; si el sitio responde (una sola maquina caida, p. ej. HA de Proxmox recuperandola) la replica espera mas antes de tomar el mando', 'La comprobacion de certificados en bucle se ejecutaba cada minuto en vez de cada 30', 'Las reglas de avisos llegan en cascada a las copias que cuelgan de otra copia (p. ej. Nitro de mortadelo)', 'Controles de hardening aceptados por servidor (nitro:Titulo)', 'Ficheros secretos (.env, wp-config.php) legibles por otros hostings: bin/secure-secrets.php los cierra (600, o root+grupo propio 640 en strict)', 'Blindar WordPress strict ya no deja wp-config.php con grupo www-data ni depende de ACL', 'Portal de clientes en el relevo: nombre publico propio (Ajustes > Portal Clientes), encendido solo en el servidor que manda (servicio + ruta de Caddy) y apagado en las copias; las copias reciben del principal los clientes y a quien pertenece cada hosting', 'Apoyo al portal (fase 4): contrasena nueva de una base (DatabaseService::changePassword), aviso por correo al cliente (NotificationService::sendToAddress), pantallas de modulos en el panel (View::renderFile, tickets en /portal-admin/tickets) y tickets copiados a las replicas'],
+                        'en' => ['ACME failure-loop check ran every minute instead of every 30', 'Customer portal in failover: own public hostname, served only by the active node (service + Caddy route) and stopped on replicas; replicas receive customers and hosting ownership from the primary', 'Customer portal phase 4 support: database password reset, customer email notice, module screens inside the panel (portal tickets) and tickets copied to replicas'],
+                    ],
+                    'security' => [
+                        'es' => [
+                            'CRITICO: rutas acabadas en .png/.css/.js se saltaban el login y mostraban paginas del panel; ahora solo los ficheros reales de public/',
+                            'Sesiones: cookie Secure detras de Caddy, caducidad por inactividad, admin desactivado pierde el acceso en 1 minuto',
+                            'Login: limite de intentos por usuario, MFA se anula tras 5 errores, log de acceso sin lineas falsificables',
+                            'WordPress: el filtro fail2ban solo cree Cf-Connecting-Ip si viene de Cloudflare (copiar el filtro y recargar la jaula); wp-harden ban rechaza IPs locales y de Cloudflare; el analisis detecta PHP dentro de imagenes',
+                            'API cluster/federacion: backup_name con .. ya no borra storage/, salto de ruta bloqueado, token de peer federado ya no vale para el cluster, freno de tokens erroneos, secretos enmascarados en panel_log',
+                            'Federacion y hostings: inyeccion de comandos con contrasenas MySQL y borrado en rollback corregidos; validacion de dominio, usuario y rutas al crear o importar hostings',
+                            'Gestor de ficheros y portal: la subida ya no sigue enlaces simbolicos fuera del hosting',
+                            'Migracion por URL solo a IP publica, hosts SSH con guion rechazados; XSS en botones (View::js) y CSP minima',
+                            'Clave SSH de federacion: federation-ssh-guard sustituye a la regex de shell (rsync; cmd daba root); las claves ya instaladas se migran a mano',
+                            'Contrasenas fuera de la linea de comandos (migraciones, copias de BD, replica, correo, webmail, carddav): entorno, stdin o ficheros 0600',
+                            'Visor y vaciado de logs: en /var/www/vhosts solo carpetas logs, nunca .env ni wp-config',
+                            'XSS: unos 70 onclick/onsubmit mas pasan a View::js() en 20 vistas',
+                        ],
+                        'en' => [
+                            'CRITICAL: paths ending in .png/.css/.js bypassed login and served panel pages; now only real files in public/',
+                            'Sessions: Secure cookie behind Caddy, idle expiry, deactivated admins lose access within a minute',
+                            'Login: per-user rate limit, MFA cancelled after 5 failures, log lines can no longer be forged',
+                            'WordPress: fail2ban filter trusts Cf-Connecting-Ip only from Cloudflare; wp-harden ban rejects local/Cloudflare IPs; scan detects PHP inside images',
+                            'Cluster/federation API: path traversal fixes, federated peer token no longer valid for cluster API, bad-token throttle, secrets masked in panel_log',
+                            'Federation and hostings: command injection and rollback deletion fixed; domain/user/path validation',
+                            'File manager and portal uploads no longer follow symlinks out of the hosting',
+                            'URL migration only to public IPs, SSH hosts starting with a dash rejected, XSS in buttons (View::js), minimal CSP',
+                            'Federation SSH key: federation-ssh-guard replaces the shell regex (rsync; cmd gave root); existing keys must be migrated by hand',
+                            'Passwords out of the command line (migrations, DB dumps, replication, mail, webmail, carddav): env, stdin or 0600 files',
+                            'Log viewer/truncate: only logs folders under /var/www/vhosts, never .env or wp-config',
+                            'XSS: about 70 more onclick/onsubmit handlers moved to View::js() in 20 views',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.308',
                 'date' => '2026-10-05',
                 'badge' => 'warning',

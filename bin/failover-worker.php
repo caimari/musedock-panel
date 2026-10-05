@@ -399,6 +399,51 @@ function autoPromoteIfNeeded(array $checks, array $foConfig): bool
         return false;
     }
 
+    // ── ¿Cayó solo el principal o todo su sitio? ──
+    // Si otras máquinas de su sitio que no dependen de él responden (otro servidor, el
+    // router, la otra línea), el sitio está vivo: lo normal es que el principal vuelva
+    // solo (p. ej. HA de Proxmox lo arranca en otra máquina en 2-4 min). Tomar el mando
+    // entonces dejaría DOS principales cuando vuelva. Se espera más; si no vuelve, se toma.
+    $probes = array_values(array_filter(array_map('trim', preg_split('/[\r\n,]+/', (string)Settings::get('failover_site_probes', '')) ?: [])));
+    if ($probes) {
+        $alive = [];
+        foreach ($probes as $p) {
+            if (str_starts_with($p, 'ping:')) {
+                exec('ping -c 2 -W 2 ' . escapeshellarg(substr($p, 5)) . ' >/dev/null 2>&1', $o, $rc);
+                $ok = $rc === 0;
+            } elseif (preg_match('/^\[?([^\]]+?)\]?:(\d+)$/', $p, $m)) {
+                $fp = @fsockopen($m[1], (int)$m[2], $e, $s, 4);
+                $ok = (bool)$fp;
+                if ($fp) {
+                    fclose($fp);
+                }
+            } else {
+                continue;
+            }
+            if ($ok) {
+                $alive[] = $p;
+            }
+        }
+        $counters = json_decode((string)Settings::get('failover_health_counters', '{}'), true) ?: [];
+        $downMin = (int)round((int)($counters[$downPrimary['id']]['fail_count'] ?? 0) * max(30, (int)($foConfig['failover_check_interval'] ?? 60)) / 60);
+        $wait = max(5, (int)Settings::get('failover_site_alive_wait_minutes', '15'));
+        if ($alive && $downMin < $wait) {
+            logMsg("Auto-promote: ESPERA — {$downPrimary['name']} no responde ({$downMin} min) pero su sitio sí (" . implode(', ', $alive)
+                . "): probable caída de una sola máquina que se recupera sola; se espera hasta {$wait} min");
+            if (Settings::get('failover_site_wait_notified', '') !== (string)$downPrimary['id']) {
+                Settings::set('failover_site_wait_notified', (string)$downPrimary['id']);
+                NotificationService::send("Relevo en espera: {$downPrimary['name']} no responde, pero su sitio sí",
+                    "{$downPrimary['name']} no responde desde hace {$downMin} min, pero otras máquinas de su sitio sí (" . implode(', ', $alive) . ").\n\n"
+                    . "Lo normal es que sea una sola máquina caída y que vuelva sola (p. ej. Proxmox la arranca en otro servidor). "
+                    . "Este servidor espera hasta {$wait} min antes de tomar el mando; si vuelve antes, no se hace nada.");
+            }
+            return false;
+        }
+        logMsg($alive ? "Auto-promote: el sitio responde pero {$downPrimary['name']} lleva {$downMin} min caído (más de {$wait}): se sigue"
+            : 'Auto-promote: no responde nada de su sitio (' . implode(', ', $probes) . '): caída del sitio entero');
+    }
+    Settings::set('failover_site_wait_notified', '');
+
     // El master en el cluster (IP de la VPN), para el testigo y para apartarlo.
     $masterVpn = (string)Settings::get('cluster_master_ip', '');
 

@@ -16,8 +16,9 @@ class AuthMiddleware
         $uri = strtok($_SERVER['REQUEST_URI'], '?');
         $uri = rtrim($uri, '/') ?: '/';
 
-        // Allow static assets
-        if (preg_match('/\.(css|js|png|jpg|svg|ico|woff2?)$/', $uri)) {
+        // Allow static assets: solo si es un fichero real de public/ (antes bastaba con que la
+        // ruta acabase en .css/.png... y /mail/domains/1.png se servía sin iniciar sesión).
+        if (preg_match('/\.(css|js|png|jpg|svg|ico|woff2?)$/', $uri) && self::isPublicFile($uri)) {
             return true;
         }
 
@@ -69,5 +70,15 @@ class AuthMiddleware
         }
 
         return true;
+    }
+
+    private static function isPublicFile(string $uri): bool
+    {
+        $publicDir = realpath(dirname(__DIR__, 2) . '/public');
+        $file = $publicDir !== false ? realpath($publicDir . $uri) : false;
+        return $file !== false
+            && is_file($file)
+            && str_starts_with($file, $publicDir . '/')
+            && !str_ends_with($file, '.php');
     }
 }

@@ -36,13 +36,23 @@ class AlertPolicyService
         'cert'               => ['Certificados', 'Una web sin certificado válido o que no se ha renovado (con proxy en strict, error 526).'],
         'config_mirror'      => ['Copia de configuración del master', 'En una copia: algo de la configuración del master no se pudo copiar (avisa solo cuando cambia la lista).'],
         'witness'            => ['Testigos', 'Un testigo externo no responde o vuelve.'],
+        'node_down'          => ['Nodo caído / recuperado', 'Un servidor del cluster deja de responder a los demás (o vuelve).'],
     ];
 
     /**
      * Qué significa cada aviso y qué hacer, para el final del correo. Escrito para quien
      * lo recibe, no para quien programa el panel.
      */
+    /**
+     * Avisos de "algo no responde" que se callan durante un mantenimiento programado
+     * (reinicios, pruebas de relevo, mudanzas de VM): se apuntan, pero no se envían.
+     */
+    public const MAINTENANCE_TYPES = ['replication', 'node_down', 'mail_node', 'mail_queue', 'witness', 'lsyncd', 'cert',
+        'config_mirror', 'monitor_gap', 'server_reboot'];
+
     public const EXPLAIN = [
+        'node_down' => ['Un servidor del cluster ha dejado de responder a los demás (o ha vuelto).',
+            'El correo dice qué responde y qué no (VPN, panel, webs, testigos). Si todo falla, está apagado o reiniciándose. Si es un trabajo programado, activa antes el modo mantenimiento para no recibir estos avisos.'],
         'CPU_HIGH' => ['El procesador de este servidor lleva varios minutos seguidos por encima del límite.',
             'Mira en el correo qué procesos gastan más. Si es una tarea puntual (copia, compilación), no hay que hacer nada. Si se repite cada día, conviene revisar ese proceso o subir el límite.'],
         'RAM_HIGH' => ['La memoria de este servidor lleva varios minutos casi llena.',
@@ -70,7 +80,7 @@ class AlertPolicyService
         'mail_queue' => ['Hay cambios de correo (buzones, alias, dominios) que llevan más de un día sin poder llegar a otro servidor.',
             'Comprueba que ese servidor está encendido y conectado. Mientras tanto, esos buzones no existen allí: en un relevo no funcionarían.'],
         'replication' => ['Las bases de datos de este servidor no se están copiando bien desde el principal (o se han recuperado).',
-            'Mientras dure, un relevo podría perder datos. Revisa Ajustes → Replicación o pide failover_preflight por MCP.'],
+            'Mira el diagnóstico del correo: si el principal está caído o reiniciándose, la réplica se reengancha sola al volver. Si el principal responde, revisa Ajustes → Replicación o pide failover_preflight por MCP. Para trabajos programados, activa antes el modo mantenimiento.'],
         'lsyncd' => ['La copia de ficheros de las webs hacia el otro servidor va mal (o se ha recuperado).',
             'Mientras dure, el otro servidor no tiene los últimos cambios de las webs. Revisa Cluster → Archivos.'],
         'witness' => ['Un testigo externo (el servidor que confirma las caídas antes de un relevo) no responde, o vuelve.',
@@ -115,8 +125,29 @@ class AlertPolicyService
         return in_array($type, $list, true) || in_array(self::shortHost() . ':' . $type, $list, true);
     }
 
-    /** Títulos de controles de hardening dados por buenos. */
+    /**
+     * Títulos de controles de hardening dados por buenos EN ESTE servidor. En la lista:
+     * "Título" (en todos) o "servidor:Título" (solo en ese, nombre corto; p. ej.
+     * "nitro:SSHD PermitRootLogin").
+     */
     public static function hardeningAccepted(): array
+    {
+        $me = self::shortHost();
+        $out = [];
+        foreach (array_map('strval', self::json('alerts_hardening_accepted', [])) as $e) {
+            if (preg_match('/^([a-z0-9][a-z0-9-]*):(.+)$/', $e, $m)) {
+                if ($m[1] === $me) {
+                    $out[] = $m[2];
+                }
+            } else {
+                $out[] = $e;
+            }
+        }
+        return array_values(array_unique($out));
+    }
+
+    /** La lista tal cual está guardada (con las entradas "servidor:Título"), para exportar y editar. */
+    public static function hardeningAcceptedRaw(): array
     {
         return array_values(array_map('strval', self::json('alerts_hardening_accepted', [])));
     }
@@ -148,11 +179,27 @@ class AlertPolicyService
         return max(1, min(120, (int)Settings::get('alerts_mail_node_after_minutes', '5')));
     }
 
+    /** ¿Hay un mantenimiento programado en curso? */
+    public static function inMaintenance(): bool
+    {
+        return (int)Settings::get('alerts_maintenance_until', '0') > time();
+    }
+
+    /** Minutos que debe durar una caída (nodo, réplica) antes de avisar. */
+    public static function outageAfterMinutes(): int
+    {
+        return max(1, min(60, (int)Settings::get('alerts_outage_after_minutes', '5')));
+    }
+
     public static function export(): array
     {
         return [
+            'maintenance_until' => (int)Settings::get('alerts_maintenance_until', '0') > time() ? date('Y-m-d H:i', (int)Settings::get('alerts_maintenance_until', '0')) : null,
+            'maintenance_reason' => (string)Settings::get('alerts_maintenance_reason', ''),
+            'maintenance_until_ts' => (int)Settings::get('alerts_maintenance_until', '0'),
+            'outage_after_minutes' => self::outageAfterMinutes(),
             'muted' => self::json('alerts_muted', []),
-            'hardening_accepted' => self::hardeningAccepted(),
+            'hardening_accepted' => self::hardeningAcceptedRaw(),
             'disk_overrides' => self::json('alerts_disk_overrides', []),
             'mail_node_after_minutes' => self::mailNodeAfterMinutes(),
         ];
@@ -191,6 +238,19 @@ class AlertPolicyService
             }
             Settings::set('alerts_disk_overrides', json_encode($out, JSON_UNESCAPED_SLASHES));
         }
+        if (array_key_exists('maintenance_minutes', $p)) {
+            // 0 = terminar ahora. Máximo 12 h: que no se quede olvidado.
+            $min = max(0, min(720, (int)$p['maintenance_minutes']));
+            Settings::set('alerts_maintenance_until', (string)($min > 0 ? time() + $min * 60 : 0));
+            Settings::set('alerts_maintenance_reason', $min > 0 ? mb_substr(trim((string)($p['maintenance_reason'] ?? '')), 0, 200) : '');
+        } elseif (array_key_exists('maintenance_until_ts', $p)) {
+            // Copia desde el master: la misma hora de fin.
+            Settings::set('alerts_maintenance_until', (string)(int)$p['maintenance_until_ts']);
+            Settings::set('alerts_maintenance_reason', mb_substr((string)($p['maintenance_reason'] ?? ''), 0, 200));
+        }
+        if (array_key_exists('outage_after_minutes', $p)) {
+            Settings::set('alerts_outage_after_minutes', (string)max(1, min(60, (int)$p['outage_after_minutes'])));
+        }
         if (array_key_exists('mail_node_after_minutes', $p)) {
             Settings::set('alerts_mail_node_after_minutes', (string)max(1, min(120, (int)$p['mail_node_after_minutes'])));
         }
@@ -227,12 +287,29 @@ class AlertPolicyService
         return ['ok' => true, 'policy' => $policy, 'copied' => self::pushToNodes()];
     }
 
-    /** Acción de cluster set-alert-policy (en el nodo). */
+    /**
+     * Acción de cluster set-alert-policy (en el nodo). Si este nodo tiene a su vez copias
+     * colgando de él (p. ej. Nitro de mortadelo tras un relevo), se las pasa: en cascada,
+     * como mucho 3 saltos, para que lleguen a todos aunque no estén registrados en el master.
+     */
     public static function import(array $p): array
     {
+        $depth = (int)($p['_depth'] ?? 0);
+        unset($p['_depth']);
         $r = self::save($p);
         LogService::log('cluster.notify', 'alerts', 'Reglas de avisos recibidas del master');
-        return ['ok' => true, 'policy' => $r];
+        $cascade = [];
+        if ($depth < 3) {
+            foreach (ClusterService::getNodes() as $n) {
+                if (($n['role'] ?? '') !== 'slave') {
+                    continue;
+                }
+                $c = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action',
+                    ['action' => 'set-alert-policy', 'payload' => self::export() + ['_depth' => $depth + 1]]);
+                $cascade[(string)$n['name']] = !empty($c['ok']) && !empty($c['data']['ok']) ? 'copiadas' : 'ERROR: ' . ($c['data']['error'] ?? $c['error'] ?? '?');
+            }
+        }
+        return ['ok' => true, 'policy' => $r, 'cascade' => $cascade];
     }
 
     /** En el master: copia las reglas a todos sus nodos. Devuelve el resultado por nodo. */
@@ -243,8 +320,11 @@ class AlertPolicyService
             return $out;
         }
         foreach (ClusterService::getNodes() as $n) {
-            $r = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'set-alert-policy', 'payload' => self::export()]);
+            $r = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'set-alert-policy', 'payload' => self::export() + ['_depth' => 1]]);
             $out[(string)$n['name']] = !empty($r['ok']) && !empty($r['data']['ok']) ? 'copiadas' : 'ERROR: ' . ($r['data']['error'] ?? $r['error'] ?? '?');
+            foreach ((array)($r['data']['cascade'] ?? []) as $sub => $st) {
+                $out["{$sub} (vía {$n['name']})"] = $st;
+            }
         }
         return $out;
     }

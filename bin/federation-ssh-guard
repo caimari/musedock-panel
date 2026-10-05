@@ -1,0 +1,144 @@
+#!/bin/bash
+# federation-ssh-guard — validador de comandos SSH para claves de peers federados.
+#
+# Se usa como command="/usr/local/bin/federation-ssh-guard" en authorized_keys.
+# Lee SSH_ORIGINAL_COMMAND, lo valida de forma estricta y lo ejecuta con exec
+# SIN shell (array de argumentos). Cualquier otra cosa se rechaza.
+#
+# Comandos permitidos (los unicos que el peer ejecuta en este nodo):
+#   echo OK
+#   which rsync
+#   rsync --server [opciones permitidas] . /var/www/vhosts/<ruta>   (solo recepcion, no --sender)
+#   psql -U <usuario> <base>
+#   mysql -u <usuario> <base>
+#   sudo -u postgres psql -d <base> -c '<REASSIGN/GRANT con la plantilla exacta del panel>'
+#
+# Variable GUARD_DRY_RUN=1: imprime los argumentos que ejecutaria en vez de ejecutar (pruebas).
+
+set -u
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+ALLOWED_ROOT="/var/www/vhosts/"
+
+deny() {
+    echo "Federation: comando no permitido" >&2
+    command -v logger >/dev/null 2>&1 && logger -t federation-ssh-guard -p auth.warning "rechazado: $1" 2>/dev/null
+    exit 126
+}
+
+run() {
+    if [ "${GUARD_DRY_RUN:-0}" = "1" ]; then
+        printf 'EXEC:'
+        printf ' [%s]' "$@"
+        printf '\n'
+        exit 0
+    fi
+    exec "$@"
+}
+
+CMD="${SSH_ORIGINAL_COMMAND:-}"
+[ -n "$CMD" ] || deny "vacio (sesion interactiva)"
+[ "${#CMD}" -le 4096 ] || deny "demasiado largo"
+
+# Saltos de linea / retornos / NUL nunca.
+case "$CMD" in
+    *$'\n'*|*$'\r'*|*$'\t'*) deny "caracter de control" ;;
+esac
+
+# --- Caso especial: arreglo de propietario PostgreSQL (plantilla exacta) ---
+if [[ "$CMD" =~ ^sudo\ -u\ postgres\ psql\ -d\ \'?([A-Za-z0-9_]+)\'?\ -c\ \'(.*)\'$ ]]; then
+    DB="${BASH_REMATCH[1]}"
+    SQL="${BASH_REMATCH[2]}"
+    if [[ "$SQL" =~ ^REASSIGN\ OWNED\ BY\ postgres\ TO\ \\?\"([A-Za-z0-9_]+)\\?\"\; ]]; then
+        U="${BASH_REMATCH[1]}"
+        for Q in '\"' '"'; do
+            EXP="REASSIGN OWNED BY postgres TO ${Q}${U}${Q}; GRANT ALL ON SCHEMA public TO ${Q}${U}${Q}; GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO ${Q}${U}${Q}; GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO ${Q}${U}${Q}; GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO ${Q}${U}${Q}; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO ${Q}${U}${Q}; ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO ${Q}${U}${Q};"
+            if [ "$SQL" = "$EXP" ]; then
+                run sudo -u postgres psql -d "$DB" -c "$SQL"
+            fi
+        done
+    fi
+    deny "SQL no coincide con la plantilla"
+fi
+
+# --- Tokenizado estricto: solo tokens simples, opcionalmente entre comillas simples ---
+SAFE='A-Za-z0-9_./=,@:+-'
+ARGS=()
+REST="$CMD"
+TOKEN_RE="^[[:space:]]*(['](["$SAFE"]*)[']|(["$SAFE"]+))"
+while [ -n "${REST//[[:space:]]/}" ]; do
+    if [[ "$REST" =~ $TOKEN_RE ]]; then
+        if [ -n "${BASH_REMATCH[3]}" ]; then
+            ARGS+=("${BASH_REMATCH[3]}")
+        else
+            ARGS+=("${BASH_REMATCH[2]}")
+        fi
+        REST="${REST:${#BASH_REMATCH[0]}}"
+        # Tras un token debe venir espacio o fin
+        if [ -n "$REST" ] && [[ "$REST" != [[:space:]]* ]]; then
+            deny "token mal formado"
+        fi
+    else
+        deny "metacaracteres o sintaxis no permitida"
+    fi
+done
+
+[ "${#ARGS[@]}" -ge 1 ] || deny "sin argumentos"
+
+# Ninguna ruta con '..'
+for a in "${ARGS[@]}"; do
+    case "$a" in
+        *..*) deny "ruta con .." ;;
+    esac
+done
+
+IDENT_RE='^[A-Za-z0-9_][A-Za-z0-9_.-]*$'
+
+case "${ARGS[0]}" in
+    echo)
+        [ "${#ARGS[@]}" -eq 2 ] && [ "${ARGS[1]}" = "OK" ] || deny "echo"
+        run echo OK
+        ;;
+    which)
+        [ "${#ARGS[@]}" -eq 2 ] && [ "${ARGS[1]}" = "rsync" ] || deny "which"
+        run which rsync
+        ;;
+    psql)
+        [ "${#ARGS[@]}" -eq 4 ] && [ "${ARGS[1]}" = "-U" ] \
+            && [[ "${ARGS[2]}" =~ $IDENT_RE ]] && [[ "${ARGS[3]}" =~ $IDENT_RE ]] || deny "psql"
+        run psql -U "${ARGS[2]}" "${ARGS[3]}"
+        ;;
+    mysql)
+        [ "${#ARGS[@]}" -eq 4 ] && [ "${ARGS[1]}" = "-u" ] \
+            && [[ "${ARGS[2]}" =~ $IDENT_RE ]] && [[ "${ARGS[3]}" =~ $IDENT_RE ]] || deny "mysql"
+        run mysql -u "${ARGS[2]}" "${ARGS[3]}"
+        ;;
+    rsync)
+        [ "${#ARGS[@]}" -ge 4 ] && [ "${ARGS[1]}" = "--server" ] || deny "rsync sin --server"
+        N=${#ARGS[@]}
+        # Ultimos dos argumentos: "." y destino bajo ALLOWED_ROOT
+        [ "${ARGS[$((N-2))]}" = "." ] || deny "rsync: origen distinto de '.'"
+        DEST="${ARGS[$((N-1))]}"
+        case "$DEST" in
+            "$ALLOWED_ROOT"?*) ;;
+            *) deny "rsync: destino fuera de $ALLOWED_ROOT" ;;
+        esac
+        for ((i = 2; i < N - 2; i++)); do
+            o="${ARGS[$i]}"
+            case "$o" in
+                --delete|--partial|--progress|--numeric-ids|--ignore-errors|--delete-during|--delete-before|--delete-after|--delete-delay|--inplace|--no-implicit-dirs) ;;
+                --log-format=*|--timeout=*|--bwlimit=*|--modify-window=*|--compress-level=*|--protect-args) ;;
+                --*) deny "rsync: opcion larga no permitida ($o)" ;;
+                -[A-Za-z0-9.]*)
+                    [[ "$o" =~ ^-[A-Za-z0-9.]+$ ]] || deny "rsync: opcion corta invalida"
+                    ;;
+                *) deny "rsync: argumento inesperado ($o)" ;;
+            esac
+        done
+        # --sender (el peer leyendo de este nodo) no esta permitido: cae en '--*'.
+        run rsync "${ARGS[@]:1}"
+        ;;
+    *)
+        deny "comando ${ARGS[0]}"
+        ;;
+esac

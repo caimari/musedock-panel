@@ -151,7 +151,7 @@
                     </td>
                     <td class="text-end pe-3">
                         <?php if (!$cron['valid']): ?>
-                            <form method="POST" action="/settings/health/repair-cron" class="d-inline" onsubmit="return confirmRepair(event, this, '<?= View::e($cron['name']) ?>')">
+                            <form method="POST" action="/settings/health/repair-cron" class="d-inline" onsubmit="return confirmRepair(event, this, <?= View::js($cron['name']) ?>)">
                                 <?= View::csrf() ?>
                                 <input type="hidden" name="cron" value="<?= View::e($cron['name']) ?>">
                                 <button type="submit" class="btn btn-outline-success btn-sm">
@@ -214,7 +214,7 @@
                             $phpVer = PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;
                             $extPkg = "php{$phpVer}-{$ext['name']}";
                             ?>
-                            <button type="button" class="btn btn-outline-success btn-sm py-0 px-2 ms-1" onclick="installPackage('<?= $extPkg ?>', '<?= View::e($ext['name']) ?>', this)" title="apt install <?= $extPkg ?>">
+                            <button type="button" class="btn btn-outline-success btn-sm py-0 px-2 ms-1" onclick="installPackage(<?= View::js($extPkg) ?>, <?= View::js($ext['name']) ?>, this)" title="apt install <?= $extPkg ?>">
                                 <i class="bi bi-download" style="font-size:0.7rem;"></i>
                             </button>
                         <?php endif; ?>
@@ -253,7 +253,7 @@
                         <?php else: ?>
                             <span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;"><i class="bi bi-exclamation-triangle me-1"></i>Not found</span>
                             <?php if (!empty($bin['package'])): ?>
-                            <button type="button" class="btn btn-outline-success btn-sm py-0 px-2 ms-1" onclick="installPackage('<?= View::e($bin['package']) ?>', '<?= View::e($bin['name']) ?>', this)">
+                            <button type="button" class="btn btn-outline-success btn-sm py-0 px-2 ms-1" onclick="installPackage(<?= View::js($bin['package']) ?>, <?= View::js($bin['name']) ?>, this)">
                                 <i class="bi bi-download" style="font-size:0.7rem;"></i>
                             </button>
                             <?php endif; ?>

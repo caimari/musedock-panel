@@ -60,6 +60,18 @@ class SystemService
     {
         $errors = [];
 
+        // 0. Validación central (todos los puntos de entrada: panel, API cluster, federación, MCP).
+        // Dominio, rutas y versión PHP acaban en comandos, Caddy y ficheros de configuración.
+        if (strlen($domain) > 253
+            || !preg_match('/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/i', $domain)) {
+            return ['success' => false, 'error' => 'Dominio no válido.'];
+        }
+        foreach ([$homeDir, $documentRoot] as $p) {
+            if (!preg_match('#^/[A-Za-z0-9._/-]+$#', $p) || str_contains($p, '..')) {
+                return ['success' => false, 'error' => 'Ruta no válida.'];
+            }
+        }
+
         // 1. Create Linux system user (with forced UID for cluster sync)
         $uid = self::createSystemUser($username, $homeDir, $shell, $forceUid);
         if ($uid === null) {
@@ -223,12 +235,11 @@ class SystemService
      */
     public static function setUserPassword(string $username, string $password): bool
     {
-        $cmd = sprintf(
-            'echo %s:%s | chpasswd 2>&1',
-            escapeshellarg($username),
-            escapeshellarg($password)
+        // usuario:contraseña por stdin de chpasswd (no en la línea de comandos, visible con ps)
+        DatabaseService::runWithStdin(
+            'chpasswd 2>&1',
+            str_replace(["\r", "\n"], '', $username) . ':' . str_replace(["\r", "\n"], '', $password) . "\n"
         );
-        shell_exec($cmd);
         return true;
     }
 
@@ -418,6 +429,11 @@ HTML;
         if (empty($homeDir)) {
             $homeDir = "/var/www/vhosts/{$username}";
         }
+        // Usuario y ruta se interpolan en el fichero del pool: sin saltos de línea ni caracteres raros
+        if (!preg_match('/^[a-z][a-z0-9_-]{0,31}$/i', $username)
+            || !preg_match('#^/[A-Za-z0-9._/-]+$#', $homeDir) || str_contains($homeDir, '..')) {
+            return null;
+        }
         $socketPath = "/run/php/php{$phpVersion}-fpm-{$username}.sock";
         $poolConfig = <<<CONF
 [{$username}]
@@ -572,7 +588,7 @@ CONF;
     {
         if (!empty($subjects)) {
             // Per-account policy: DNS-01 only (domains behind Cloudflare proxy)
-            $acmeIssuer = ['email' => 'admin@musedock.com', 'module' => 'acme'];
+            $acmeIssuer = ['email' => self::acmeEmail(), 'module' => 'acme'];
             if ($allowDns && $cfToken) {
                 $acmeIssuer['challenges'] = [
                     'dns' => [
@@ -585,12 +601,12 @@ CONF;
         }
 
         // Catch-all policy: HTTP-01 first (direct domains), then DNS-01 as fallback
-        $httpIssuer = ['email' => 'admin@musedock.com', 'module' => 'acme'];
+        $httpIssuer = ['email' => self::acmeEmail(), 'module' => 'acme'];
         $issuers = [$httpIssuer];
 
         if ($allowDns && $cfToken) {
             $dnsIssuer = [
-                'email' => 'admin@musedock.com',
+                'email' => self::acmeEmail(),
                 'module' => 'acme',
                 'challenges' => [
                     'dns' => [
@@ -1181,7 +1197,7 @@ CONF;
         if (empty($result)) {
             $result[] = [
                 'issuers' => [[
-                    'email' => 'admin@musedock.com',
+                    'email' => self::acmeEmail(),
                     'module' => 'acme',
                 ]],
             ];
@@ -1932,7 +1948,7 @@ CONF;
             $mode = 'self_signed';
         }
 
-        $email = trim((string)\MuseDockPanel\Settings::get('panel_acme_email', 'admin@musedock.com'));
+        $email = trim((string)\MuseDockPanel\Settings::get('panel_acme_email', ''));
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
             $email = self::resolvePanelAcmeEmail('');
         }
@@ -2134,7 +2150,6 @@ CONF;
             (string)\MuseDockPanel\Settings::get('notify_email_to', ''),
             (string)\MuseDockPanel\Settings::get('mail_from_address', ''),
             \MuseDockPanel\Services\NotificationService::getAdminEmail(),
-            'admin@musedock.com',
         ];
 
         foreach ($candidates as $email) {
@@ -2144,7 +2159,16 @@ CONF;
             }
         }
 
-        return 'admin@musedock.com';
+        // Sin correo configurado: Let's Encrypt lo permite. Antes caía en admin@musedock.com,
+        // y en la instalación de un cliente sus certificados quedaban a nombre de MuseDock.
+        return '';
+    }
+
+    /** Correo de la cuenta ACME (Let's Encrypt) de ESTE panel: el suyo, nunca uno fijo. */
+    public static function acmeEmail(): string
+    {
+        static $email = null;
+        return $email ??= self::resolvePanelAcmeEmail('');
     }
 
     private static function removePanelTlsPolicy(string $caddyApi, string $hostname): bool

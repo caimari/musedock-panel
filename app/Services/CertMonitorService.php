@@ -35,6 +35,9 @@ class CertMonitorService
      */
     public static function checkAndAlert(): array
     {
+        // La hora se guarda SIEMPRE: antes solo si había fallos, y sin fallos se volvía a
+        // revisar el journal de Caddy cada minuto en vez de cada 30.
+        Settings::set('cert_monitor_last_run', date('Y-m-d H:i:s'));
         $failures = static::recentAcmeFailures();
         if (empty($failures)) {
             return ['ok' => true, 'checked' => 0, 'alerted' => []];

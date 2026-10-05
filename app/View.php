@@ -43,11 +43,53 @@ class View
     }
 
     /**
+     * Como render(), pero con una vista de fuera del panel (ruta absoluta), para los
+     * módulos que añaden pantallas al panel (p. ej. el portal de clientes: tickets).
+     * Usa el layout y los datos compartidos del panel. La ruta la pone el código, nunca
+     * el usuario.
+     */
+    public static function renderFile(string $file, array $data = []): void
+    {
+        if (!is_file($file) || !str_ends_with($file, '.php')) {
+            http_response_code(500);
+            echo "Error interno del servidor.";
+            error_log("View file not found: {$file}");
+            return;
+        }
+        $data = array_merge(self::$shared, $data);
+        extract($data);
+        ob_start();
+        require $file;
+        $__content = ob_get_clean();
+        if (isset($layout)) {
+            $layoutFile = self::$viewsPath . '/layouts/' . $layout . '.php';
+            if (file_exists($layoutFile)) {
+                $content = $__content;
+                require $layoutFile;
+                return;
+            }
+        }
+        echo $__content;
+    }
+
+    /**
      * Escape HTML
      */
     public static function e(?string $value): string
     {
         return htmlspecialchars($value ?? '', ENT_QUOTES, 'UTF-8');
+    }
+
+    /**
+     * Valor para usar como argumento JS dentro de un atributo HTML (onclick="f(<?= View::js($x) ?>)").
+     * Devuelve un literal JS entre comillas, ya escapado también para HTML (sin ' ni " ni < sin escapar).
+     */
+    public static function js(mixed $value): string
+    {
+        return htmlspecialchars(
+            json_encode($value, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE),
+            ENT_QUOTES, 'UTF-8'
+        );
     }
 
     /**

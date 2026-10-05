@@ -171,7 +171,7 @@
                     </div>
                     <?php if ($r['id']): ?>
                     <div>
-                        <form method="POST" action="/settings/caddy/delete-route" class="d-inline" onsubmit="return caddyDeleteConfirm(event, this, '<?= View::e(addslashes($r['id'])) ?>', '<?= View::e(addslashes(implode(', ', $r['hosts']))) ?>')">
+                        <form method="POST" action="/settings/caddy/delete-route" class="d-inline" onsubmit="return caddyDeleteConfirm(event, this, <?= View::js($r['id']) ?>, <?= View::js(implode(', ', $r['hosts'])) ?>)">
                     <?= \MuseDockPanel\View::csrf() ?>
                             <input type="hidden" name="route_id" value="<?= View::e($r['id']) ?>">
                             <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-1" title="Eliminar ruta">

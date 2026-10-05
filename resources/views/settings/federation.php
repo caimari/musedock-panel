@@ -62,7 +62,7 @@
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label small">Nombre</label>
-                        <input type="text" name="name" class="form-control form-control-sm bg-dark text-light border-secondary" required placeholder="asterisk">
+                        <input type="text" name="name" class="form-control form-control-sm bg-dark text-light border-secondary" required placeholder="servidor2">
                     </div>
                     <div class="mb-3">
                         <label class="form-label small">API URL</label>
@@ -88,7 +88,7 @@
                     <div class="row">
                         <div class="col-8 mb-3">
                             <label class="form-label small">SSH Host</label>
-                            <input type="text" name="ssh_host" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="10.10.70.156">
+                            <input type="text" name="ssh_host" class="form-control form-control-sm bg-dark text-light border-secondary" placeholder="10.10.70.20">
                         </div>
                         <div class="col-4 mb-3">
                             <label class="form-label small">Puerto</label>
@@ -192,7 +192,7 @@
                                     </button>
                                 <?php endif; ?>
                                 <form method="post" action="/settings/federation/remove-peer/<?= $peer['id'] ?>" class="d-inline"
-                                      onsubmit="return confirm('Eliminar peer <?= View::e($peer['name']) ?>?')">
+                                      onsubmit="return confirm('Eliminar peer ' + <?= View::js($peer['name']) ?> + '?')">
                                     <?= View::csrf() ?>
                                     <button class="btn btn-outline-danger btn-sm" title="Eliminar"><i class="bi bi-trash"></i></button>
                                 </form>

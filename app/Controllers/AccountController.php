@@ -204,6 +204,14 @@ class AccountController
             return;
         }
 
+        $domain = strtolower($domain);
+        if (strlen($domain) > 253 || !preg_match('/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/', $domain)
+            || !preg_match('/^\d\.\d$/', (string)$phpVersion)) {
+            Flash::set('error', 'El dominio o la versión de PHP no son válidos (el dominio solo admite letras, números, guiones y puntos).');
+            Router::redirect('/accounts/create');
+            return;
+        }
+
         // Check unique
         $existing = Database::fetchOne("SELECT id FROM hosting_accounts WHERE domain = :d OR username = :u", ['d' => $domain, 'u' => $username]);
         if ($existing) {
@@ -370,6 +378,15 @@ class AccountController
         }
         if (!preg_match('/^[a-z][a-z0-9_]{2,30}$/', $username)) {
             echo json_encode(['ok' => false, 'error' => 'El usuario debe empezar por letra minuscula, solo a-z, 0-9 y _ (3-31 caracteres).']);
+            return;
+        }
+        $domain = strtolower($domain);
+        if (strlen($domain) > 253 || !preg_match('/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/', $domain)) {
+            echo json_encode(['ok' => false, 'error' => 'El dominio no es válido (solo letras, números, guiones y puntos).']);
+            return;
+        }
+        if (!preg_match('/^\d\.\d$/', (string)$phpVersion)) {
+            echo json_encode(['ok' => false, 'error' => 'Versión de PHP no válida.']);
             return;
         }
         $existing = Database::fetchOne("SELECT id FROM hosting_accounts WHERE domain = :d OR username = :u", ['d' => $domain, 'u' => $username]);
@@ -1955,9 +1972,14 @@ class AccountController
 
     public function importStore(): void
     {
-        $domain = trim($_POST['domain'] ?? '');
+        $domain = strtolower(trim($_POST['domain'] ?? ''));
         if (empty($domain)) {
             Flash::set('error', 'Dominio no especificado.');
+            Router::redirect('/accounts/import');
+            return;
+        }
+        if (strlen($domain) > 253 || !preg_match('/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/', $domain)) {
+            Flash::set('error', 'El dominio no es válido.');
             Router::redirect('/accounts/import');
             return;
         }
@@ -1990,6 +2012,12 @@ class AccountController
 
         if (!$username) {
             Flash::set('error', "No se pudo detectar el usuario propietario de {$homeDir}.");
+            Router::redirect('/accounts/import');
+            return;
+        }
+        // Nunca importar directorios de root ni de usuarios del sistema, ni rutas con caracteres raros
+        if ((int)$uid < 1000 || !preg_match('#^/[A-Za-z0-9._/-]+$#', $homeDir) || str_contains($homeDir, '..')) {
+            Flash::set('error', 'Directorio no permitido: debe pertenecer a un usuario de hosting (UID 1000 o superior) y tener una ruta sin caracteres especiales.');
             Router::redirect('/accounts/import');
             return;
         }

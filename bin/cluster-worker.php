@@ -204,6 +204,28 @@ if (time() - (int)Settings::get('route_guard_run_at', '0') >= 300) {
     }
 }
 
+// ─── Step 0p: Portal de clientes (cada 5 min, si está instalado) ─────────────
+// Encendido (servicio + ruta de Caddy con su nombre propio) solo en el que manda y
+// apagado en las copias; repone la ruta tras una recarga de Caddy. En una copia,
+// además, trae del master sus clientes y a quién pertenece cada hosting.
+if (\MuseDockPanel\Services\PortalService::installed()
+    && time() - (int)Settings::get('portal_guard_run_at', '0') >= 300) {
+    Settings::set('portal_guard_run_at', (string)time());
+    try {
+        foreach (\MuseDockPanel\Services\PortalService::apply() as $line) {
+            logMsg($line);
+        }
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            $ps = \MuseDockPanel\Services\PortalService::pullFromMaster();
+            if (empty($ps['ok'])) {
+                logMsg('Portal: clientes del master no copiados: ' . ($ps['error'] ?? implode('; ', $ps['issues'] ?? [])));
+            }
+        }
+    } catch (\Throwable $e) {
+        logMsg('Portal guard error: ' . $e->getMessage());
+    }
+}
+
 // ─── Step 0k: ¿Responden los testigos externos? (cada 5 min) ──────────────────
 // Uno caído no afecta (decide el otro); los dos caídos tampoco bloquean (se decide con la
 // vista de este nodo), pero se pierde la protección contra cortes de red: se avisa.
@@ -843,24 +865,28 @@ try {
 
             $elapsed = $now - $lastAlert;
 
-            if ($elapsed >= $requiredInterval) {
+            // Una caída corta (un reinicio de 2 min, una mudanza de VM) no avisa: solo si dura.
+            $graceOk = ($now - (int)$state['first_seen']) >= 60 * \MuseDockPanel\Services\AlertPolicyService::outageAfterMinutes();
+            if ($graceOk && $elapsed >= $requiredInterval) {
                 // Time to send alert
                 $downSince = date('Y-m-d H:i:s', (int)$state['first_seen']);
                 $downMinutes = round(($now - (int)$state['first_seen']) / 60);
                 $nextIdx = min($alertCount + 1, count($escalationIntervals) - 1);
                 $nextMinutes = round($escalationIntervals[$nextIdx] / 60);
+                $vpnIp = (string)parse_url((string)$node['api_url'], PHP_URL_HOST);
+                $pubIp = ($node['role'] ?? '') === 'master' ? \MuseDockPanel\Services\OutageDiagnosisService::primaryPublicIp() : '';
+                $diag = \MuseDockPanel\Services\OutageDiagnosisService::diagnose($node['name'], $vpnIp, $pubIp);
 
-                $alertMsg = "Nodo caido: {$node['name']} ({$node['api_url']})\n"
-                    . "Caido desde: {$downSince} ({$downMinutes} min)\n"
-                    . "Alerta #{$state['alert_count']}+1\n"
-                    . "Proxima alerta en: {$nextMinutes} min\n\n"
-                    . "Silenciar alertas desde el dashboard:\n"
-                    . panelAccessUrl('/') . "\n\n"
+                $alertMsg = "{$node['name']} no responde a este servidor desde hace {$downMinutes} min (desde las {$downSince}).\n\n"
+                    . "DIAGNÓSTICO: {$diag['text']}\n" . implode("\n", $diag['checks']) . "\n\n"
+                    . "Si es un reinicio o un trabajo programado, no hay que hacer nada: al volver llega \"Nodo recuperado\".\n"
+                    . "Siguiente aviso, si sigue caído: en {$nextMinutes} min. Silenciarlo desde el dashboard: " . panelAccessUrl('/') . "\n"
                     . "Fecha: " . date('Y-m-d H:i:s');
 
                 ClusterService::sendAlert(
-                    "[MuseDock Cluster] Nodo caido: {$node['name']}",
-                    $alertMsg
+                    "[MuseDock Cluster] Nodo caído: {$node['name']} ({$downMinutes} min)",
+                    $alertMsg,
+                    'node_down'
                 );
 
                 $state['last_alert'] = $now;
@@ -891,12 +917,15 @@ try {
             $nodeName = $recoveredNode ? $recoveredNode['name'] : "#{$nid}";
             $downMinutes = round(($now - (int)$alertState[$nid]['first_seen']) / 60);
 
-            ClusterService::sendAlert(
-                "[MuseDock Cluster] Nodo recuperado: {$nodeName}",
-                "El nodo {$nodeName} ha vuelto a estar online.\n"
-                . "Estuvo caido {$downMinutes} minutos.\n"
-                . "Fecha: " . date('Y-m-d H:i:s')
-            );
+            // Solo si antes se avisó de la caída (una caída corta que no avisó, tampoco avisa al volver).
+            if ((int)($alertState[$nid]['alert_count'] ?? 0) > 0) {
+                ClusterService::sendAlert(
+                    "[MuseDock Cluster] Nodo recuperado: {$nodeName}",
+                    "{$nodeName} vuelve a responder. Estuvo sin responder unos {$downMinutes} minutos.\n"
+                    . "Fecha: " . date('Y-m-d H:i:s'),
+                    'node_down'
+                );
+            }
 
             // Clear mute if was muted
             Settings::set("cluster_node_{$nid}_muted_until", '');

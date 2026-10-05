@@ -351,7 +351,7 @@
             </div>
             <?php endif; ?>
             <p class="text-muted">Es una acción de arranque/reparación. La sincronización continua (archivos vía lsyncd, bases por dumps) funciona por su cuenta. Ejecuta todos los pasos en secuencia: provisionar hostings &rarr; sincronizar metadatos &rarr; copiar archivos web &rarr; copiar certificados SSL</p>
-            <button class="btn btn-success btn-lg" onclick="fullSync(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+            <button class="btn btn-success btn-lg" onclick="fullSync(<?= (int)$node['id'] ?>, <?= View::js($node['name']) ?>)">
                 <i class="bi bi-play-circle me-1"></i>Sincronización Completa a <?= View::e($node['name']) ?>
             </button>
             <div class="mt-3 mb-3 p-3 rounded text-start mx-auto" style="max-width:600px;background:rgba(25,135,84,0.08);border:1px solid rgba(25,135,84,0.2);">
@@ -620,43 +620,43 @@
                                     <div class="d-flex flex-wrap gap-2 justify-content-end">
                                     <?php if (!empty($node['alerts_muted'])): ?>
                                     <button type="button" class="btn btn-outline-warning btn-sm"
-                                            onclick="toggleNodeAlerts(<?= (int)$node['id'] ?>, 'unmute', '<?= View::e($node['name']) ?>')"
+                                            onclick="toggleNodeAlerts(<?= (int)$node['id'] ?>, 'unmute', <?= View::js($node['name']) ?>)"
                                             title="Reactivar alertas para este nodo">
                                         <i class="bi bi-bell me-1"></i>Reactivar
                                     </button>
                                     <?php else: ?>
                                     <button type="button" class="btn btn-outline-secondary btn-sm"
-                                            onclick="toggleNodeAlerts(<?= (int)$node['id'] ?>, 'mute', '<?= View::e($node['name']) ?>')"
+                                            onclick="toggleNodeAlerts(<?= (int)$node['id'] ?>, 'mute', <?= View::js($node['name']) ?>)"
                                             title="Silenciar alertas (mantenimiento programado)">
                                         <i class="bi bi-bell-slash me-1"></i>Silenciar
                                     </button>
                                     <?php endif; ?>
                                     <?php if ($clusterRole === 'master'): ?>
                                     <button type="button" class="btn btn-outline-success btn-sm"
-                                            onclick="confirmSyncAll(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')"
+                                            onclick="confirmSyncAll(<?= (int)$node['id'] ?>, <?= View::js($node['name']) ?>)"
                                             title="Sincronizar todos los hostings existentes a este nodo">
                                         <i class="bi bi-arrow-repeat me-1"></i>Sync Todo
                                     </button>
                                     <?php endif; ?>
                                     <button type="button" class="btn btn-outline-info btn-sm"
-                                            onclick="viewNodeStatus(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                                            onclick="viewNodeStatus(<?= (int)$node['id'] ?>, <?= View::js($node['name']) ?>)">
                                         <i class="bi bi-eye me-1"></i>Ver Estado
                                     </button>
                                     <?php if ($isStandby): ?>
                                     <button type="button" class="btn btn-outline-success btn-sm"
-                                            onclick="toggleStandby(<?= (int)$node['id'] ?>, 'deactivate', '<?= View::e($node['name']) ?>')"
+                                            onclick="toggleStandby(<?= (int)$node['id'] ?>, 'deactivate', <?= View::js($node['name']) ?>)"
                                             title="Reactivar nodo — reanudar sync, cola y alertas">
                                         <i class="bi bi-play-circle me-1"></i>Reactivar
                                     </button>
                                     <?php else: ?>
                                     <button type="button" class="btn btn-outline-warning btn-sm"
-                                            onclick="toggleStandby(<?= (int)$node['id'] ?>, 'activate', '<?= View::e($node['name']) ?>')"
+                                            onclick="toggleStandby(<?= (int)$node['id'] ?>, 'activate', <?= View::js($node['name']) ?>)"
                                             title="Poner en standby — pausar sync, cola y alertas">
                                         <i class="bi bi-pause-circle me-1"></i>Standby
                                     </button>
                                     <?php endif; ?>
                                     <button type="button" class="btn btn-outline-danger btn-sm"
-                                            onclick="confirmRemoveNode(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                                            onclick="confirmRemoveNode(<?= (int)$node['id'] ?>, <?= View::js($node['name']) ?>)">
                                         <i class="bi bi-trash me-1"></i>Eliminar
                                     </button>
                                     </div>
@@ -1280,10 +1280,10 @@
                         <div class="d-flex flex-wrap gap-2">
                             <?php foreach ($nodes as $node): ?>
                             <div class="btn-group btn-group-sm">
-                                <button type="button" class="btn btn-outline-info" onclick="installSshKeyOnNode(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                                <button type="button" class="btn btn-outline-info" onclick="installSshKeyOnNode(<?= (int)$node['id'] ?>, <?= View::js($node['name']) ?>)">
                                     <i class="bi bi-key me-1"></i><?= View::e($node['name']) ?>: Instalar clave
                                 </button>
-                                <button type="button" class="btn btn-outline-success" onclick="testSshNode(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')">
+                                <button type="button" class="btn btn-outline-success" onclick="testSshNode(<?= (int)$node['id'] ?>, <?= View::js($node['name']) ?>)">
                                     <i class="bi bi-plug me-1"></i>Test SSH
                                 </button>
                             </div>
@@ -1528,7 +1528,7 @@
                 <div class="d-flex flex-wrap gap-2 mb-3">
                     <?php foreach ($nodes as $node): ?>
                     <?php $nodeStandby = !empty($node['standby']); ?>
-                    <button type="button" class="btn btn-outline-success btn-sm" onclick="syncFilesNow(<?= (int)$node['id'] ?>, '<?= View::e($node['name']) ?>')"
+                    <button type="button" class="btn btn-outline-success btn-sm" onclick="syncFilesNow(<?= (int)$node['id'] ?>, <?= View::js($node['name']) ?>)"
                             <?= $nodeStandby ? 'disabled title="Nodo en standby"' : '' ?>>
                         <i class="bi bi-arrow-repeat me-1"></i>Sync archivos a <?= View::e($node['name']) ?>
                         <?php if ($nodeStandby): ?><span class="badge bg-warning text-dark ms-1">standby</span><?php endif; ?>
@@ -1794,10 +1794,10 @@
             </div>
             <div class="d-flex flex-wrap gap-2">
                 <?php if ($foState === 'normal'): ?>
-                    <button class="btn btn-warning btn-sm" onclick="foExecute('failover_degraded', 'Esto cambiará los DNS de los primarios caídos a sus failover asignados.\n\nPrimarios: <?= View::e($foPrimaryNames) ?>\nFailover: <?= View::e($foFailoverNames) ?>')">
+                    <button class="btn btn-warning btn-sm" onclick="foExecute('failover_degraded', 'Esto cambiará los DNS de los primarios caídos a sus failover asignados.\n\nPrimarios: ' + <?= View::js($foPrimaryNames) ?> + '\nFailover: ' + <?= View::js($foFailoverNames) ?>)">
                         <i class="bi bi-exclamation-triangle me-1"></i>Failover Parcial
                     </button>
-                    <button class="btn btn-danger btn-sm" onclick="foExecute('failover_primary', 'Esto cambiará TODOS los DNS en Cloudflare y promoverá los slaves a master.\n\n✓ DNS: <?= View::e($foPrimaryNames) ?> → <?= View::e($foFailoverNames) ?>\n✓ Cluster: promote slave a master')">
+                    <button class="btn btn-danger btn-sm" onclick="foExecute('failover_primary', 'Esto cambiará TODOS los DNS en Cloudflare y promoverá los slaves a master.\n\n✓ DNS: ' + <?= View::js($foPrimaryNames) ?> + ' → ' + <?= View::js($foFailoverNames) ?> + '\n✓ Cluster: promote slave a master')">
                         <i class="bi bi-exclamation-octagon me-1"></i>Primarios Caídos
                     </button>
                     <button class="btn btn-danger btn-sm" onclick="foExecute('failover_emergency', 'EMERGENCIA: Todo el tráfico irá al servidor Backup vía caddy-l4.\n\n✓ DNS: todas las IPs → IP backup\n✓ Cluster: promote slave a master\n✓ caddy-l4: activado como proxy SNI')">
@@ -2213,6 +2213,20 @@
                         </div>
                         <div class="form-text" style="color:#94a3b8;">Ej: 5 = recuperado tras 5 minutos</div>
                     </div>
+                    <div class="col-md-8">
+                        <label class="form-label small">¿Cayó el principal o todo su sitio? Comprobaciones del mismo sitio</label>
+                        <textarea name="failover_site_probes" rows="3" class="form-control form-control-sm" style="font-family:monospace" placeholder="203.0.113.6:443&#10;ping:203.0.113.1&#10;linea2.ejemplo.com:443"><?= View::e((string)($fc['failover_site_probes'] ?? '')) ?></textarea>
+                        <div class="form-text" style="color:#94a3b8;">Otras máquinas del sitio del principal que <strong>no dependen de él</strong> (otro servidor físico, el router, la otra línea). Una por línea: <code>host:puerto</code> o <code>ping:host</code>.
+                            Si el principal no responde pero alguna de estas sí, el sitio sigue vivo y lo normal es que vuelva solo (p. ej. Proxmox lo arranca en otra máquina): se espera más antes de tomar el mando. Vacío = sin esta comprobación.</div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small">Espera si el sitio sigue vivo</label>
+                        <div class="input-group input-group-sm">
+                            <input type="number" name="failover_site_alive_wait_minutes" class="form-control form-control-sm" value="<?= (int)($fc['failover_site_alive_wait_minutes'] ?? 15) ?>" min="5" max="120">
+                            <span class="input-group-text">min</span>
+                        </div>
+                        <div class="form-text" style="color:#94a3b8;">Más que lo que tarda tu HA en levantar el principal en otra máquina (def: 15)</div>
+                    </div>
                 </div>
                 <div class="row g-2 mb-3">
                     <div class="col-md-3">
@@ -2382,7 +2396,7 @@
                         <label class="form-label small">IP esperada</label>
                         <input type="text" name="failover_iface_primary_ip" id="fo-iface-primary-ip" class="form-control form-control-sm font-monospace"
                                value="<?= View::e($fc['failover_iface_primary_ip'] ?? '') ?>"
-                               placeholder="ej: 213.201.21.154">
+                               placeholder="ej: 203.0.113.10">
                         <div class="form-text" style="color:#94a3b8;">IP que debe tener la interfaz principal</div>
                     </div>
                     <div class="col-md-3">

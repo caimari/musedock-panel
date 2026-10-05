@@ -1045,7 +1045,7 @@ class BackupController
             if (empty($pass)) {
                 return null;
             }
-            return 'mysqldump -u root -p' . escapeshellarg($pass);
+            return 'mysqldump ' . \MuseDockPanel\Services\DatabaseService::mysqlDefaultsFileArg($pass) . ' -u root';
         }
 
         return null;
@@ -1064,7 +1064,7 @@ class BackupController
             if (empty($pass)) {
                 return null;
             }
-            return 'mysql -u root -p' . escapeshellarg($pass);
+            return 'mysql ' . \MuseDockPanel\Services\DatabaseService::mysqlDefaultsFileArg($pass) . ' -u root';
         }
 
         return null;

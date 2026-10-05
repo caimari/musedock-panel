@@ -1624,7 +1624,6 @@ class SettingsController
             (string)\MuseDockPanel\Settings::get('notify_email_to', ''),
             (string)\MuseDockPanel\Settings::get('mail_from_address', ''),
             NotificationService::getAdminEmail(),
-            'admin@musedock.com',
         ];
 
         foreach ($candidates as $email) {
@@ -3028,16 +3027,7 @@ class SettingsController
             if ($realPath === false) {
                 $logContent = 'Archivo no encontrado';
             } else {
-                $allowed = false;
-                foreach ($allowedPrefixes as $prefix) {
-                    $realPrefix = realpath($prefix);
-                    if ($realPrefix !== false && str_starts_with($realPath, $realPrefix . '/')) {
-                        $allowed = true;
-                        break;
-                    }
-                }
-
-                if (!$allowed) {
+                if (!$this->isAllowedLogPath($realPath, $allowedPrefixes)) {
                     $logContent = 'Acceso denegado: ruta no permitida';
                 } elseif (!is_file($realPath) || !is_readable($realPath)) {
                     $logContent = 'Archivo no encontrado';
@@ -3091,16 +3081,7 @@ class SettingsController
             exit;
         }
 
-        $allowed = false;
-        foreach ($allowedPrefixes as $prefix) {
-            $realPrefix = realpath($prefix);
-            if ($realPrefix !== false && str_starts_with($realPath, $realPrefix . '/')) {
-                $allowed = true;
-                break;
-            }
-        }
-
-        if (!$allowed) {
+        if (!$this->isAllowedLogPath($realPath, $allowedPrefixes)) {
             Flash::set('error', 'No tienes permiso para modificar este archivo.');
             header('Location: /settings/logs');
             exit;
@@ -3123,6 +3104,39 @@ class SettingsController
         Flash::set('success', 'Archivo de log vaciado: ' . basename($realPath));
         header('Location: /settings/logs?' . http_build_query(['file' => $filePath]));
         exit;
+    }
+
+    /**
+     * Ruta real de un log permitida para ver/vaciar. Dentro de /var/www/vhosts solo vale
+     * lo que esté en una carpeta "logs" y nunca un .env, wp-config.php ni ficheros de claves.
+     */
+    private function isAllowedLogPath(string $realPath, array $allowedPrefixes): bool
+    {
+        $vhosts = realpath('/var/www/vhosts');
+        $inVhosts = $vhosts !== false && str_starts_with($realPath, $vhosts . '/');
+        $name = strtolower(basename($realPath));
+
+        if ($inVhosts) {
+            if (!str_contains($realPath, '/logs/')) {
+                return false;
+            }
+        }
+        if ($name === '.env' || str_starts_with($name, '.env.') || str_starts_with($name, 'wp-config')
+            || preg_match('/\.(php|pem|key|crt|sql)$/', $name)) {
+            return false;
+        }
+
+        foreach ($allowedPrefixes as $prefix) {
+            if ($prefix === '/var/www/vhosts') {
+                continue; // tratado arriba: solo */logs/*
+            }
+            $realPrefix = realpath($prefix);
+            if ($realPrefix !== false && str_starts_with($realPath, $realPrefix . '/')) {
+                return true;
+            }
+        }
+
+        return $inVhosts && in_array('/var/www/vhosts', $allowedPrefixes, true);
     }
 
     private function extractCaddyRouteInfo(array $handlers, ?string &$docRoot, ?string &$upstream): void

@@ -102,7 +102,7 @@
                     <label class="form-label">Nombre remitente</label>
                     <input type="text" name="notify_smtp_from_name" class="form-control"
                            value="<?= View::e($settings['notify_smtp_from_name'] ?? '') ?>" placeholder="MuseDock Panel">
-                    <small class="text-muted">Ej: "Mortadelo Master", "Filemon Slave"</small>
+                    <small class="text-muted">Ej: "Servidor principal", "Servidor de reserva"</small>
                 </div>
             </div>
 

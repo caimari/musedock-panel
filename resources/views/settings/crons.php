@@ -75,7 +75,7 @@
                             <button type="button" class="btn btn-outline-light btn-sm py-0 px-1" onclick="cronEdit(<?= $i ?>)" title="Editar">
                                 <i class="bi bi-pencil"></i>
                             </button>
-                            <form method="POST" action="/settings/crons/delete" class="d-inline" onsubmit="return cronDeleteConfirm(event, this, '<?= View::e(addslashes($cron['user'])) ?>', '<?= View::e(addslashes($cron['command'])) ?>')">
+                            <form method="POST" action="/settings/crons/delete" class="d-inline" onsubmit="return cronDeleteConfirm(event, this, <?= View::js($cron['user']) ?>, <?= View::js($cron['command']) ?>)">
                     <?= \MuseDockPanel\View::csrf() ?>
                                 <input type="hidden" name="user" value="<?= View::e($cron['user']) ?>">
                                 <input type="hidden" name="line_index" value="<?= $cron['line_index'] ?>">

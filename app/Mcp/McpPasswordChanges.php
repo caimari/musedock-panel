@@ -133,7 +133,7 @@ class McpPasswordChanges
         $d = Database::fetchOne("SELECT db_type FROM hosting_databases WHERE db_user = :u LIMIT 1", ['u' => $user]);
         if (($d['db_type'] ?? 'mysql') === 'pgsql') {
             $sql = sprintf("ALTER USER \"%s\" WITH PASSWORD '%s';", str_replace('"', '""', $user), $pass);
-            $out = (string)shell_exec('sudo -u postgres psql -v ON_ERROR_STOP=1 -c ' . escapeshellarg($sql) . ' 2>&1');
+            $out = (string)DatabaseService::runWithStdin('sudo -u postgres psql -v ON_ERROR_STOP=1 2>&1', $sql . "\n");
         } else {
             $mysql = DatabaseService::mysqlCommand();
             if ($mysql === null) {
@@ -141,7 +141,7 @@ class McpPasswordChanges
             }
             $lit = static fn(string $v) => "'" . str_replace("'", "\\'", $v) . "'";
             $sql = "ALTER USER {$lit($user)}@'localhost' IDENTIFIED BY {$lit($pass)}; FLUSH PRIVILEGES;";
-            $out = (string)shell_exec($mysql . ' -e ' . escapeshellarg($sql) . ' 2>&1');
+            $out = (string)DatabaseService::runWithStdin($mysql . ' 2>&1', $sql . "\n");
         }
         if (stripos($out, 'ERROR') !== false) {
             throw new \RuntimeException('El motor de base de datos rechazó el cambio: ' . trim($out));

@@ -1818,11 +1818,11 @@ class ClusterController
                      . "ELSE ALTER ROLE musedock_mail WITH LOGIN PASSWORD '{$escapedPass}'; END IF; END \$\$;";
 
                 $runPsql = function (string $statement) use ($panelPort, $panelDb): array {
+                    // SQL por stdin (puede llevar la contraseña): no debe verse en la línea de comandos (ps)
                     $cmd = 'sudo -u postgres psql -p ' . $panelPort . ' -d ' . escapeshellarg($panelDb)
-                         . ' -v ON_ERROR_STOP=1 -c ' . escapeshellarg($statement) . ' 2>&1';
-                    $out = []; $code = 0;
-                    exec($cmd, $out, $code);
-                    return ['ok' => $code === 0, 'output' => trim(implode("\n", $out))];
+                         . ' -v ON_ERROR_STOP=1 2>&1';
+                    $res = \MuseDockPanel\Services\DatabaseService::runWithStdinEx($cmd, $statement . "\n");
+                    return ['ok' => $res['code'] === 0, 'output' => trim($res['out'])];
                 };
 
                 foreach ([
@@ -2080,12 +2080,11 @@ class ClusterController
                      . "ELSE ALTER ROLE musedock_mail WITH LOGIN PASSWORD '{$escapedPass}'; END IF; END \$\$;";
 
                 $runPsql = function (string $statement) use ($panelPort, $panelDb): array {
+                    // SQL por stdin (puede llevar la contraseña): no debe verse en la línea de comandos (ps)
                     $cmd = 'sudo -u postgres psql -p ' . $panelPort . ' -d ' . escapeshellarg($panelDb)
-                         . ' -v ON_ERROR_STOP=1 -c ' . escapeshellarg($statement) . ' 2>&1';
-                    $out = [];
-                    $code = 0;
-                    exec($cmd, $out, $code);
-                    return ['ok' => $code === 0, 'output' => trim(implode("\n", $out))];
+                         . ' -v ON_ERROR_STOP=1 2>&1';
+                    $res = \MuseDockPanel\Services\DatabaseService::runWithStdinEx($cmd, $statement . "\n");
+                    return ['ok' => $res['code'] === 0, 'output' => trim($res['out'])];
                 };
 
                 $steps = [

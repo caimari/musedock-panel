@@ -34,10 +34,13 @@ if ($portalLicensed) {
     // Portal is installed and licensed — the portal has its own PHP server on its own port.
     // If we got here, the user is hitting the panel's portal.php directly.
     // Redirect to the portal's actual URL.
-    $portalPort = \MuseDockPanel\Env::get('PORTAL_PORT', '8446');
-    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-    $hostWithoutPort = preg_replace('/:\d+$/', '', $host);
-    header("Location: https://{$hostWithoutPort}:{$portalPort}/");
+    $portalUrl = \MuseDockPanel\Services\PortalService::url();
+    if ($portalUrl === '') {
+        $portalPort = \MuseDockPanel\Env::get('PORTAL_PORT', '8446');
+        $hostWithoutPort = preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? 'localhost');
+        $portalUrl = "https://{$hostWithoutPort}:{$portalPort}";
+    }
+    header("Location: {$portalUrl}/");
     exit;
 }
 

@@ -30,7 +30,7 @@
                             <td><code><?= View::e($w['url']) ?></code></td>
                             <td><code class="small"><?= View::e(substr(chunk_split(strtoupper($w['fingerprint']), 2, ':'), 0, 23)) ?>…</code></td>
                             <td class="text-end">
-                                <form method="POST" action="/settings/witnesses/remove" class="d-inline" onsubmit="return askPass(this, 'Quitar el testigo <?= View::e($w['name']) ?> de este panel');">
+                                <form method="POST" action="/settings/witnesses/remove" class="d-inline" onsubmit="return askPass(this, 'Quitar el testigo ' + <?= View::js($w['name']) ?> + ' de este panel');">
                                     <?= View::csrf() ?>
                                     <input type="hidden" name="name" value="<?= View::e($w['name']) ?>">
                                     <input type="hidden" name="admin_password" value="">

@@ -160,7 +160,7 @@ $wmRemaining = max(0, $wmExpires - time());
                         <a href="/accounts/<?= $accountId ?>/files/download?path=<?= urlencode($filePath) ?>" class="btn btn-sm py-0 px-1 me-1" style="font-size:0.7rem;border:1px solid #94a3b8;color:#0891b2;" title="Descargar"><i class="bi bi-download"></i></a>
                         <?php endif; ?>
                         <?php if ($wm): ?>
-                        <form method="POST" action="/accounts/<?= $accountId ?>/files/delete" style="display:inline;" onsubmit="return confirm('Eliminar <?= View::e($item['name']) ?>?')">
+                        <form method="POST" action="/accounts/<?= $accountId ?>/files/delete" style="display:inline;" onsubmit="return confirm('Eliminar ' + <?= View::js($item['name']) ?> + '?')">
                             <?= View::csrf() ?>
                             <input type="hidden" name="path" value="<?= View::e($filePath) ?>">
                             <button type="submit" class="btn btn-sm py-0 px-1" style="font-size:0.7rem;border:1px solid #fca5a5;color:#ef4444;" title="Eliminar"><i class="bi bi-trash"></i></button>

@@ -317,7 +317,9 @@ CONF;
                 $secret = $dec !== '' ? $dec : $secret;
             }
         }
+        $oldUmask = umask(0077);
         @file_put_contents(self::SECRET_FILE, "doveadm_password = {$secret}\n");
+        umask($oldUmask);
         @chmod(self::SECRET_FILE, 0600);
         // Dovecot reads its config as root but drops privileges; the secret file is
         // 0600 root-owned and included from the drop-in, which is fine since the

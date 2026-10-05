@@ -14,7 +14,7 @@
                     <tr><td class="text-muted">Kernel</td><td><?= View::e($os) ?></td></tr>
                     <tr><td class="text-muted">IP del servidor</td><td>
                         <strong><?= View::e($serverIp) ?></strong>
-                        <button class="btn btn-sm btn-outline-light ms-2 py-0" onclick="navigator.clipboard.writeText('<?= View::e($serverIp) ?>')"><i class="bi bi-clipboard"></i></button>
+                        <button class="btn btn-sm btn-outline-light ms-2 py-0" onclick="navigator.clipboard.writeText(<?= View::js($serverIp) ?>)"><i class="bi bi-clipboard"></i></button>
                     </td></tr>
                     <tr><td class="text-muted">Uptime</td><td><?= View::e($uptime) ?></td></tr>
                     <tr><td class="text-muted">PHP</td><td><?= PHP_VERSION ?></td></tr>
@@ -285,7 +285,7 @@
                         ?>
                         <div class="input-group">
                             <input type="text" class="form-control" value="<?= View::e($panelUrl) ?>" disabled>
-                            <button class="btn btn-outline-light" type="button" onclick="navigator.clipboard.writeText('<?= View::e($panelUrl) ?>')"><i class="bi bi-clipboard"></i></button>
+                            <button class="btn btn-outline-light" type="button" onclick="navigator.clipboard.writeText(<?= View::js($panelUrl) ?>)"><i class="bi bi-clipboard"></i></button>
                         </div>
                         <small class="text-muted d-block mt-1">Fallback emergencia: <?= View::e($fallbackUrl) ?>.</small>
                     </div>

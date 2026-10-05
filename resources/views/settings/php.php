@@ -170,7 +170,7 @@
                 <div class="mt-2 p-2 rounded small" style="background:rgba(251,191,36,0.05);border:1px solid rgba(251,191,36,0.15);color:#94a3b8;">
                     <i class="bi bi-lightbulb me-1" style="color:#fbbf24;"></i>
                     <strong>Produccion recomendado:</strong> enable=1, memory=192, strings=16, files=10000, revalidate=60, jit=1255, jit_buffer=64M
-                    <button type="button" class="btn btn-outline-warning btn-sm py-0 px-2 ms-2" style="font-size:0.7rem;" onclick="applyOpcachePreset('<?= View::e($ver) ?>')">Aplicar preset</button>
+                    <button type="button" class="btn btn-outline-warning btn-sm py-0 px-2 ms-2" style="font-size:0.7rem;" onclick="applyOpcachePreset(<?= View::js($ver) ?>)">Aplicar preset</button>
                 </div>
 
                 <div class="mt-3">

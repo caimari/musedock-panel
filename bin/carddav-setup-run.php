@@ -67,7 +67,7 @@ try {
     cd_state('running', 'start');
 
     // ── Inputs ────────────────────────────────────────────────────────────
-    $host     = strtolower(trim((string)($payload['host'] ?? 'dav.musedock.com')));
+    $host     = strtolower(trim((string)($payload['host'] ?? \MuseDockPanel\Services\CardDavService::host())));
     $imapHost = trim((string)($payload['imap_host'] ?? '')) ?: '127.0.0.1';
     $imapPort = (int)($payload['imap_port'] ?? 143);
     $phpVer   = preg_replace('/[^0-9.]/', '', (string)($payload['php_version'] ?? '8.3')) ?: '8.3';
@@ -123,7 +123,15 @@ try {
             . ' -d ' . escapeshellarg($target)
             . ' -v ON_ERROR_STOP=1 -c ' . escapeshellarg($sql);
     };
-    cd_run($psql("DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='{$dbUser}') THEN CREATE ROLE {$dbUser} WITH LOGIN PASSWORD '{$escPass}'; ELSE ALTER ROLE {$dbUser} WITH LOGIN PASSWORD '{$escPass}'; END IF; END \$\$;"), true);
+    // El SQL con la contraseña va por stdin desde un fichero 0600 (ni en argv/ps ni en el log de comandos).
+    $roleSqlFile = tempnam(sys_get_temp_dir(), 'mdsql_');
+    @chmod($roleSqlFile, 0600);
+    file_put_contents($roleSqlFile, "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='{$dbUser}') THEN CREATE ROLE {$dbUser} WITH LOGIN PASSWORD '{$escPass}'; ELSE ALTER ROLE {$dbUser} WITH LOGIN PASSWORD '{$escPass}'; END IF; END \$\$;\n");
+    try {
+        cd_run('sudo -u postgres psql -p ' . escapeshellarg($dbPort) . ' -d postgres -v ON_ERROR_STOP=1 < ' . escapeshellarg($roleSqlFile), true);
+    } finally {
+        @unlink($roleSqlFile);
+    }
     $exists = cd_run($psql("SELECT 1 FROM pg_database WHERE datname='{$dbName}'"), true);
     if (!str_contains($exists, '1')) {
         cd_run($psql("CREATE DATABASE {$dbName} OWNER {$dbUser}"));

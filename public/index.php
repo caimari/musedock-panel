@@ -116,19 +116,39 @@ if (!empty($allowedIps) && rtrim($requestPath, '/') !== '/api/ingress/domains') 
 
 // Session (hardened)
 ini_set('session.save_path', $config['session']['path']);
-ini_set('session.cookie_secure', (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? '1' : '0');
+// Detrás de Caddy, PHP no ve HTTPS: se cree X-Forwarded-Proto solo si la conexión es local.
+$sessionIsHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+    || (in_array($_SERVER['REMOTE_ADDR'] ?? '', ['127.0.0.1', '::1'], true)
+        && strtolower((string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')) === 'https');
+$sessionLifetime = max(300, (int)($config['session']['lifetime'] ?? 7200));
+ini_set('session.cookie_secure', $sessionIsHttps ? '1' : '0');
 ini_set('session.cookie_httponly', '1');
 ini_set('session.cookie_samesite', 'Strict');
 ini_set('session.use_strict_mode', '1');
 ini_set('session.use_only_cookies', '1');
+ini_set('session.gc_maxlifetime', (string)($sessionLifetime * 2));
 session_name($config['session']['name']);
 session_start();
+
+// Caducidad por inactividad (SESSION_LIFETIME, 2 h por defecto) para sesiones con login.
+if (isset($_SESSION['panel_user'])) {
+    $lastSeen = (int)($_SESSION['_last_seen'] ?? 0);
+    if ($lastSeen > 0 && (time() - $lastSeen) > $sessionLifetime) {
+        $_SESSION = [];
+        session_regenerate_id(true);
+    } else {
+        $_SESSION['_last_seen'] = time();
+    }
+}
 
 // Security headers
 header('X-Frame-Options: DENY');
 header('X-Content-Type-Options: nosniff');
 header('X-XSS-Protection: 1; mode=block');
 header('Referrer-Policy: strict-origin-when-cross-origin');
+// CSP mínima compatible con los scripts/estilos en línea de las vistas: sin marcos ajenos, sin <base> ni plugins.
+header("Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; object-src 'none'");
+header('Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=()');
 
 // HSTS is intentionally disabled by default for the admin panel port (8444),
 // to avoid browser lockouts when cert mode changes (ACME/internal fallback).
@@ -506,6 +526,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // Portal Settings
 \MuseDockPanel\Router::get('/settings/portal', 'PortalSettingsController@index');
 \MuseDockPanel\Router::post('/settings/portal/save', 'PortalSettingsController@save');
+\MuseDockPanel\Router::post('/settings/portal/address', 'PortalSettingsController@saveAddress');
 \MuseDockPanel\Router::post('/settings/portal/send-invitation', 'PortalSettingsController@sendInvitation');
 \MuseDockPanel\Router::post('/settings/portal/revoke-access', 'PortalSettingsController@revokeAccess');
 \MuseDockPanel\Router::post('/settings/portal/activate', 'PortalSettingsController@activate');

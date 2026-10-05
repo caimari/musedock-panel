@@ -103,38 +103,69 @@ final class ReplicationHealthService
         return $issues;
     }
 
-    /** Lo llama cluster-worker: avisa de lo nuevo, repite lo que sigue cada 6 h y avisa de lo arreglado. */
+    /**
+     * Lo llama cluster-worker. Avisa de un problema solo si dura (por defecto 5 min:
+     * un reinicio del principal de 2 min no debe mandar correo), salvo los graves
+     * (slot perdido, a punto de perderse). Explica por qué, con un diagnóstico del
+     * principal. Repite cada 6 h si sigue y avisa cuando se arregla, con lo que duró.
+     * Durante un mantenimiento programado no se envía (NotificationService).
+     */
     public static function checkAndNotify(): array
     {
         $issues = self::issues();
         $state = self::state();
         $now = time();
         $notified = $state['notified'] ?? [];
+        $firstSeen = array_intersect_key($state['first_seen'] ?? [], $issues);
+        $grace = 60 * AlertPolicyService::outageAfterMinutes();
         $new = [];
         foreach ($issues as $k => $text) {
+            $firstSeen[$k] = $firstSeen[$k] ?? $now;
+            $urgent = str_ends_with($k, ':lost') || str_ends_with($k, ':unreserved');
+            if (!$urgent && $now - $firstSeen[$k] < $grace) {
+                continue; // aún no: puede ser un reinicio
+            }
             if (!isset($notified[$k]) || $now - (int)$notified[$k] >= self::REPEAT_SECONDS) {
                 $new[$k] = $text;
                 $notified[$k] = $now;
             }
         }
         $fixed = array_diff_key($notified, $issues);
+        $fixedSince = [];
         foreach (array_keys($fixed) as $k) {
+            $fixedSince[$k] = (int)($state['first_seen'][$k] ?? $fixed[$k]);
             unset($notified[$k]);
         }
         $state['notified'] = $notified;
+        $state['first_seen'] = $firstSeen;
         $state['last'] = ['at' => date('Y-m-d H:i:s'), 'issues' => array_values($issues)];
         self::saveState($state);
 
         $host = gethostname();
         if ($new) {
-            NotificationService::send("[{$host}] Réplica con problemas",
-                "Este servidor ({$host}) ha detectado problemas de réplica:\n\n- " . implode("\n- ", $new)
-                . "\n\nMientras no se arregle, un relevo podría perder datos o no funcionar.", 'replication');
+            // ¿Por qué? Si la réplica no recibe, mirar si el principal responde.
+            $diag = '';
+            $noConn = array_filter(array_keys($new), static fn($k) => str_ends_with($k, ':receiver') || $k === 'mysql:replica' || $k === 'redis:link');
+            $masterIp = (string)Settings::get('repl_remote_ip', '');
+            if ($noConn && filter_var($masterIp, FILTER_VALIDATE_IP)) {
+                $d = OutageDiagnosisService::diagnose('El servidor principal (' . $masterIp . ')', $masterIp, OutageDiagnosisService::primaryPublicIp(), 5432);
+                $diag = "\n\nDIAGNÓSTICO: {$d['text']}\n" . implode("\n", $d['checks']);
+                $diag .= $d['verdict'] === 'down'
+                    ? "\n\nNo hay que hacer nada en este servidor: cuando el principal vuelva, la réplica se pondrá al día sola y te llegará el aviso \"Réplica recuperada\"."
+                    : '';
+            }
+            $mins = round(($now - min(array_intersect_key($firstSeen, $new))) / 60);
+            NotificationService::send("[{$host}] Réplica parada desde hace {$mins} min",
+                "Las bases de datos de este servidor ({$host}) han dejado de copiarse desde el principal:\n\n- " . implode("\n- ", $new)
+                . $diag
+                . "\n\nMientras dure, si hubiera que pasar el mando a este servidor podría faltar lo último que se guardó en el principal.", 'replication');
             LogService::log('cluster.replication', 'alert', implode(' | ', $new));
         }
         if ($fixed) {
+            $mins = round(($now - min($fixedSince)) / 60);
             NotificationService::send("[{$host}] Réplica recuperada",
-                "Se han resuelto " . count($fixed) . " problema(s) de réplica en {$host}.", 'replication');
+                "La réplica de {$host} vuelve a copiarse con normalidad (estuvo parada unos {$mins} min). Se ha puesto al día sola: no hay que hacer nada.\n\n"
+                . 'Lo que se arregló: ' . implode(', ', array_map(static fn($k) => strtok($k, ':') . ' ' . (explode(':', $k)[1] ?? ''), array_keys($fixed))) . '.', 'replication');
             LogService::log('cluster.replication', 'recovered', implode(', ', array_keys($fixed)));
         }
         return ['issues' => $issues, 'notified_now' => array_keys($new), 'recovered' => array_keys($fixed)];

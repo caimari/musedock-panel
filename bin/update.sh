@@ -669,6 +669,17 @@ CRONEOF
     ok "Panel backup cron hardened and staggered to :02/:07"
 fi
 
+# Guard SSH de federacion (valida SSH_ORIGINAL_COMMAND de las claves de peers).
+# Solo copia el fichero; no reinicia nada ni toca authorized_keys.
+install_federation_ssh_guard() {
+    if [ -f "${PANEL_DIR}/bin/federation-ssh-guard" ]; then
+        install -m 0755 -o root -g root "${PANEL_DIR}/bin/federation-ssh-guard" /usr/local/bin/federation-ssh-guard 2>/dev/null \
+            && ok "federation-ssh-guard instalado en /usr/local/bin" \
+            || warn "No se pudo instalar federation-ssh-guard"
+    fi
+}
+
+install_federation_ssh_guard
 install_caddy_backup_cron
 install_caddy_runtime_repair_override
 install_stale_master_check

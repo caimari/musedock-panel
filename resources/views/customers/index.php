@@ -43,7 +43,7 @@
                                 <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;font-size:0.65rem;"><i class="bi bi-check-circle"></i></span>
                             <?php else: ?>
                                 <button type="button" class="btn py-0 px-1" style="font-size:0.65rem;background:rgba(168,85,247,0.15);color:#a855f7;border:1px solid rgba(168,85,247,0.3);"
-                                    onclick="sendPortalInvitation(<?= $c['id'] ?>, '<?= View::e(addslashes($c['name'])) ?>', '<?= View::e($c['email']) ?>', false)">
+                                    onclick="sendPortalInvitation(<?= (int)$c['id'] ?>, <?= View::js($c['name']) ?>, <?= View::js($c['email']) ?>, false)">
                                     <i class="bi bi-send"></i>
                                 </button>
                             <?php endif; ?>

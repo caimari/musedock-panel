@@ -30,13 +30,23 @@ class ClusterApiController
         'token',
     ];
 
+    /** Nombre de copia seguro (una sola carpeta, sin "." ni ".."); '' si no vale. */
+    private static function safeBackupName(mixed $name): string
+    {
+        $name = basename((string)$name);
+        return preg_match('/^[A-Za-z0-9][A-Za-z0-9._@+-]{0,200}$/', $name) && !str_contains($name, '..') ? $name : '';
+    }
+
     /** Return a copy of $payload with secret values masked, recursively. */
     private static function redactSecrets(array $payload): array
     {
         foreach ($payload as $k => $v) {
             if (is_array($v)) {
                 $payload[$k] = self::redactSecrets($v);
-            } elseif (in_array((string)$k, self::SECRET_KEYS, true) && $v !== '' && $v !== null) {
+            } elseif ((in_array((string)$k, self::SECRET_KEYS, true)
+                    // Cualquier otra clave que por su nombre parezca un secreto (p. ej. caddy_token).
+                    || preg_match('/pass|secret|token|private|api_?key|enc_key|hash/i', (string)$k))
+                && $v !== '' && $v !== null) {
                 $payload[$k] = '***';
             }
         }
@@ -588,6 +598,9 @@ class ClusterApiController
                 // Configuración del sistema (supervisor, cron, Caddyfile, pools PHP) que
                 // el slave copia y adapta (ConfigMirrorService). Solo lectura aquí.
                 'export-system-config' => \MuseDockPanel\Services\ConfigMirrorService::export(),
+                // Clientes del portal y a quién pertenece cada hosting (la base del panel es
+                // de cada nodo): el slave los pide para poder servir el portal si se promueve.
+                'export-portal-state' => \MuseDockPanel\Services\PortalService::exportState(),
                 // Avisos del master copiados a este nodo (notify_configure copy_to_nodes).
                 'set-notify-config' => \MuseDockPanel\Services\NotificationService::importConfig($payload),
                 'set-alert-policy' => \MuseDockPanel\Services\AlertPolicyService::import($payload),
@@ -674,9 +687,9 @@ class ClusterApiController
      */
     private function handleRestoreDbDumps(array $payload): array
     {
-        $dumpPath = $payload['dump_path'] ?? '/tmp/musedock-dumps';
-        // Security: only allow known dump paths
-        if (!str_starts_with($dumpPath, '/tmp/musedock-dumps')) {
+        $dumpPath = (string)($payload['dump_path'] ?? '/tmp/musedock-dumps');
+        // Security: only allow known dump paths (sin ".." para no salir de la carpeta)
+        if (!str_starts_with($dumpPath, '/tmp/musedock-dumps') || str_contains($dumpPath, '..')) {
             return ['ok' => false, 'error' => 'Ruta de dumps no permitida'];
         }
         return \MuseDockPanel\Services\FileSyncService::restoreDatabaseDumps($dumpPath);
@@ -1222,7 +1235,7 @@ class ClusterApiController
     {
         $backupDir = PANEL_ROOT . '/storage/backups';
         $uploadedFile = $_FILES['backup'] ?? null;
-        $backupName = basename($payload['backup_name'] ?? '');
+        $backupName = self::safeBackupName($payload['backup_name'] ?? '');
 
         if (!$backupName) {
             return ['ok' => false, 'error' => 'Missing backup_name parameter'];
@@ -1377,7 +1390,7 @@ class ClusterApiController
     private function handleDownloadBackup(array $payload): array
     {
         $backupDir = PANEL_ROOT . '/storage/backups';
-        $backupName = basename($payload['backup_name'] ?? '');
+        $backupName = self::safeBackupName($payload['backup_name'] ?? '');
 
         if (!$backupName) {
             return ['ok' => false, 'error' => 'Missing backup_name'];
@@ -1412,7 +1425,7 @@ class ClusterApiController
     private function handleDeleteBackup(array $payload): array
     {
         $backupDir = PANEL_ROOT . '/storage/backups';
-        $backupName = basename($payload['backup_name'] ?? '');
+        $backupName = self::safeBackupName($payload['backup_name'] ?? '');
 
         if (!$backupName) {
             return ['ok' => false, 'error' => 'Missing backup_name'];
@@ -1422,7 +1435,7 @@ class ClusterApiController
         $realPath = realpath($backupPath);
         $realBackupDir = realpath($backupDir);
 
-        if (!$realPath || !$realBackupDir || !str_starts_with($realPath, $realBackupDir) || $realPath === $realBackupDir) {
+        if (!$realPath || !$realBackupDir || !str_starts_with($realPath, $realBackupDir . '/') || $realPath === $realBackupDir) {
             return ['ok' => false, 'error' => 'Invalid backup path'];
         }
 

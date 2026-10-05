@@ -435,6 +435,10 @@ final class McpTools
         if ($target === 'public' && $addr === $host) {
             throw new \RuntimeException("No se pudo resolver {$host}.");
         }
+        // Que no sirva para sondear la red interna: la IP pública no puede ser privada/reservada.
+        if ($target === 'public' && filter_var($addr, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+            throw new \RuntimeException("{$host} resuelve a una IP privada o reservada ({$addr}): usa target=local.");
+        }
         $ctx = stream_context_create(['ssl' => [
             'SNI_enabled' => true, 'peer_name' => $host, 'verify_peer' => false,
             'verify_peer_name' => false, 'capture_peer_cert' => true,

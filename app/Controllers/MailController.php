@@ -1432,7 +1432,7 @@ class MailController
         if (!$this->verifyAdminPassword($adminPassword)) { $fail('Password de admin incorrecta.'); return; }
 
         $result = \MuseDockPanel\Services\CardDavService::startInstall(
-            (string)($_POST['host'] ?? 'dav.musedock.com'),
+            (string)($_POST['host'] ?? \MuseDockPanel\Services\CardDavService::host()),
             (string)($_POST['imap_host'] ?? '127.0.0.1')
         );
         if ($isXhr) {

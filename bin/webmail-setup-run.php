@@ -204,7 +204,15 @@ try {
     };
     $escPass = str_replace("'", "''", $rcPass);
     // Role (idempotent).
-    webmail_run($psql("DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='{$rcUser}') THEN CREATE ROLE {$rcUser} WITH LOGIN PASSWORD '{$escPass}'; ELSE ALTER ROLE {$rcUser} WITH LOGIN PASSWORD '{$escPass}'; END IF; END \$\$;"), true);
+    // El SQL con la contraseña va por stdin desde un fichero 0600 (ni en argv/ps ni en el log de comandos).
+    $roleSqlFile = tempnam(sys_get_temp_dir(), 'mdsql_');
+    @chmod($roleSqlFile, 0600);
+    file_put_contents($roleSqlFile, "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='{$rcUser}') THEN CREATE ROLE {$rcUser} WITH LOGIN PASSWORD '{$escPass}'; ELSE ALTER ROLE {$rcUser} WITH LOGIN PASSWORD '{$escPass}'; END IF; END \$\$;\n");
+    try {
+        webmail_run('sudo -u postgres psql -p ' . (int)$dbPort . ' -d postgres -v ON_ERROR_STOP=1 < ' . escapeshellarg($roleSqlFile), true);
+    } finally {
+        @unlink($roleSqlFile);
+    }
     // Database (CREATE DATABASE can't run in a DO block; guard with a check).
     $exists = trim((string)shell_exec('sudo -u postgres psql -p ' . (int)$dbPort . " -tAc \"SELECT 1 FROM pg_database WHERE datname='{$rcDb}'\" 2>/dev/null"));
     if ($exists !== '1') {

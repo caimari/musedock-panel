@@ -39,8 +39,20 @@ if ((int)$fromPort === $toPort) {
     echo "OK: Roundcube ya usa el puerto {$toPort}.\n";
     exit(0);
 }
-$pg = static fn(int $port, string $sql) => trim((string)shell_exec(
-    'cd /tmp && runuser -u postgres -- psql -p ' . $port . ' -X -At -v ON_ERROR_STOP=1 -c ' . escapeshellarg($sql) . ' 2>&1'));
+// El SQL va por stdin (puede llevar contraseñas): no debe quedar en argv (visible con ps)
+$pg = static function (int $port, string $sql): string {
+    $proc = proc_open(['/bin/sh', '-c', 'cd /tmp && runuser -u postgres -- psql -p ' . $port . ' -X -At -v ON_ERROR_STOP=1 2>&1'],
+        [0 => ['pipe', 'r'], 1 => ['pipe', 'w']], $pipes);
+    if (!is_resource($proc)) {
+        return '';
+    }
+    fwrite($pipes[0], $sql . "\n");
+    fclose($pipes[0]);
+    $out = (string)stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    proc_close($proc);
+    return trim($out);
+};
 $q = static fn(string $s) => str_replace("'", "''", $s);
 
 $inRecovery = $pg($toPort, 'SELECT pg_is_in_recovery()');

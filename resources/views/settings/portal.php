@@ -146,6 +146,51 @@
 
 <?php if ($portalInstalled): ?>
 
+<!-- Dirección pública del portal y estado en el cluster -->
+<?php $ps = $portalState ?? []; ?>
+<div class="card mb-3">
+    <div class="card-header"><i class="bi bi-globe2 me-2"></i>Dirección del portal</div>
+    <div class="card-body">
+        <form action="/settings/portal/address" method="POST" class="row g-2 align-items-end">
+            <?= View::csrf() ?>
+            <div class="col-md-6">
+                <label class="form-label small text-muted mb-1">Nombre público (p. ej. portal.tudominio.com)</label>
+                <input type="text" name="portal_hostname" class="form-control form-control-sm" maxlength="253"
+                       value="<?= View::e($ps['hostname'] ?? '') ?>" placeholder="portal.tudominio.com">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small text-muted mb-1">Puerto</label>
+                <input type="number" name="portal_port" class="form-control form-control-sm" min="1" max="65534"
+                       value="<?= (int)($ps['port'] ?? 8446) ?>">
+            </div>
+            <div class="col-md-4">
+                <button type="submit" class="btn btn-sm" style="background:#a855f7;color:#fff;">
+                    <i class="bi bi-check-lg me-1"></i>Guardar y aplicar
+                </button>
+            </div>
+        </form>
+        <div class="small text-muted mt-2">
+            Usa un nombre propio del portal, no el de una máquina. En un relevo el DNS de ese nombre se mueve
+            con el resto y el portal sigue en la misma dirección. El nombre debe apuntar (registro A o CNAME)
+            al servidor que manda. Recomendado: puerto 443 (dirección sin puerto, ya abierta al público y
+            compatible con el proxy de Cloudflare). Con otro puerto hay que abrirlo en el cortafuegos de cada servidor.
+        </div>
+        <div class="d-flex flex-wrap gap-4 mt-3 pt-3" style="border-top:1px solid #1e293b;font-size:0.8rem;">
+            <div><span class="text-muted">Este servidor:</span>
+                <strong style="color:#e2e8f0;"><?= View::e(($ps['role'] ?? '') === 'slave' ? 'copia' : (($ps['role'] ?? '') === 'master' ? 'principal' : 'sin cluster')) ?><?= !empty($ps['fenced']) ? ' (apartado)' : '' ?></strong></div>
+            <div><span class="text-muted">Debe servir el portal:</span>
+                <strong style="color:<?= !empty($ps['should_serve']) ? '#22c55e' : '#94a3b8' ?>;"><?= !empty($ps['should_serve']) ? 'sí' : 'no (lo sirve el principal)' ?></strong></div>
+            <div><span class="text-muted">Servicio:</span> <strong style="color:#e2e8f0;"><?= View::e($ps['service'] ?? '?') ?></strong></div>
+            <div><span class="text-muted">Ruta en Caddy:</span>
+                <strong style="color:<?= !empty($ps['route']) ? '#22c55e' : '#94a3b8' ?>;"><?= !empty($ps['route']) ? 'puesta' : 'no' ?></strong></div>
+            <?php if (!empty($ps['last_sync'])): ?>
+            <div><span class="text-muted">Clientes copiados del principal:</span>
+                <strong style="color:#e2e8f0;"><?= View::e($ps['last_sync']['at'] ?? '') ?></strong></div>
+            <?php endif; ?>
+        </div>
+    </div>
+</div>
+
 <!-- Sub-tabs for portal sections -->
 <?php $portalTab = $_GET['tab'] ?? 'access'; ?>
 <div class="mb-3 d-flex gap-2">
@@ -155,8 +200,14 @@
     <a href="/settings/portal?tab=appearance" class="btn btn-sm <?= $portalTab === 'appearance' ? 'btn-light' : 'btn-outline-light' ?>">
         <i class="bi bi-palette me-1"></i>Apariencia
     </a>
+    <?php if (class_exists(\MuseDockPortal\Services\TicketService::class)): ?>
+    <?php $openTickets = 0; try { $openTickets = \MuseDockPortal\Services\TicketService::countOpen(); } catch (\Throwable) {} ?>
+    <a href="/portal-admin/tickets" class="btn btn-sm btn-outline-light">
+        <i class="bi bi-life-preserver me-1"></i>Tickets de soporte<?php if ($openTickets > 0): ?> <span class="badge bg-warning text-dark ms-1"><?= (int)$openTickets ?></span><?php endif; ?>
+    </a>
+    <?php endif; ?>
     <?php if ($portalServiceActive): ?>
-    <a href="https://<?= preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? 'localhost') ?>:<?= View::e($portalPort) ?>/"
+    <a href="<?= View::e(($ps['url'] ?? '') !== '' ? $ps['url'] . '/' : 'https://' . preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? 'localhost') . ':' . $portalPort . '/') ?>"
        target="_blank" class="btn btn-sm btn-outline-light ms-auto" style="border-color:#a855f7;color:#a855f7;">
         <i class="bi bi-box-arrow-up-right me-1"></i>Abrir portal
     </a>
@@ -231,12 +282,12 @@
                         </td>
                         <td class="text-end pe-3">
                             <button type="button" class="btn btn-sm py-0 px-2 ms-1" style="font-size:0.75rem;background:rgba(168,85,247,0.15);color:#a855f7;border:1px solid rgba(168,85,247,0.3);"
-                                onclick="sendInvitation(<?= $cust['id'] ?>, '<?= View::e(addslashes($cust['name'])) ?>', '<?= View::e($cust['email']) ?>', <?= $cust['has_portal_access'] ? 'true' : 'false' ?>)">
+                                onclick="sendInvitation(<?= $cust['id'] ?>, <?= View::js($cust['name']) ?>, <?= View::js($cust['email']) ?>, <?= $cust['has_portal_access'] ? 'true' : 'false' ?>)">
                                 <i class="bi bi-<?= $cust['has_portal_access'] ? 'arrow-clockwise' : 'send' ?> me-1"></i><?= $cust['has_portal_access'] ? 'Reset password' : 'Invitar' ?>
                             </button>
                             <?php if ($cust['has_portal_access']): ?>
                             <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2 ms-1" style="font-size:0.75rem;"
-                                onclick="revokePortalAccess(<?= $cust['id'] ?>, '<?= View::e(addslashes($cust['name'])) ?>')">
+                                onclick="revokePortalAccess(<?= $cust['id'] ?>, <?= View::js($cust['name']) ?>)">
                                 <i class="bi bi-x-circle me-1"></i>Revocar
                             </button>
                             <?php endif; ?>

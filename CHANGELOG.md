@@ -2,6 +2,51 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.309] — 2026-10-05 — Comprobación de certificados en bucle cada 30 min
+
+### Arreglado
+- **La comprobación de certificados en bucle se ejecutaba cada minuto** en vez de cada 30: solo guardaba la hora de la última revisión si encontraba fallos. Revisaba el registro de Caddy (journalctl) sesenta veces por hora sin necesidad.
+- **Los avisos "Réplica con problemas" y "Nodo caído" saltaban al primer minuto y no decían por qué.** Un reinicio del principal de 2 minutos (una prueba de Proxmox) mandaba "Réplica con problemas", "Nodo caído" y "Nodo recuperado". Ahora:
+  - **esperan** a que la caída dure (5 min por defecto, ajustable en Avisos);
+  - **dan un diagnóstico** en llano: si el otro servidor responde por la VPN, por su panel, por su base de datos y por internet, y qué ven los testigos. Así se sabe si está apagado o reiniciándose, si falla la VPN o si el problema es de la propia réplica;
+  - "Réplica recuperada" dice cuánto duró y que no hay que hacer nada;
+  - "Nodo recuperado" solo llega si antes llegó "Nodo caído".
+- **El relevo no distinguía "se cayó una máquina" de "se cayó todo el sitio".** Con el principal en una VM con HA (Proxmox), si se cae su servidor físico, otra máquina lo arranca en 2-4 min; con el margen de 5 min, si tardaba algo más la réplica tomaba el mando y quedaban dos principales. Nuevo en *Cluster → Failover*: "Comprobaciones del mismo sitio" (otras máquinas que no dependen del principal: otro servidor, el router, la otra línea). Si alguna responde, la réplica espera más (15 min por defecto, ajustable) y avisa de que espera; si no responde nada del sitio, actúa como siempre. Se copia a las réplicas con la configuración del relevo.
+- **Docs → Failover:** nueva sección "Qué pasa según lo que caiga, y cuánto dura" (una máquina con alta disponibilidad, la línea, el sitio entero, el camino entre sitios) y avisos de caída actualizados (espera, diagnóstico, modo mantenimiento).
+- **Valores propios de MuseDock en instalaciones de clientes:**
+  - la cuenta de Let's Encrypt usaba `admin@musedock.com` si el panel no tenía correo (los certificados del cliente quedaban a nombre de MuseDock); ahora usa el correo del propio panel o ninguno;
+  - CardDAV proponía `dav.musedock.com`; ahora `dav.<dominio del correo del panel>`;
+  - los ejemplos en pantalla ya no usan nombres ni IPs de los servidores de MuseDock.
+- **Modo mantenimiento** (Ajustes → Avisos o MCP `alerts_configure` con `maintenance_minutes`): durante un trabajo programado (reinicios, pruebas de relevo, mudanzas de VM) no se envían los avisos de "algo no responde" (se apuntan igual). Se copia a todos los nodos; máximo 12 h.
+- **Ficheros secretos de los hostings legibles por otros hostings.** Todos los usuarios de hosting están en el grupo `www-data` y había `.env` y `wp-config.php` en 644, 664, 755 e incluso 777: cualquier hosting podía leer las claves de otro. Nuevo `php bin/secure-secrets.php` (sin `--apply` solo enseña qué cambiaría): los deja en 600 para su dueño, o en root más el grupo propio del hosting y 640 si están cerrados por "Blindar WordPress". Lo que tiene un dueño inesperado no se toca y se avisa. Nada se borra.
+- **"Blindar WordPress" (strict) dejaba el `wp-config.php` con el grupo `www-data`**, legible por cualquier otro hosting, y daba la lectura al usuario por ACL, que no se copia a la réplica (tras un relevo la web podía no leer su configuración). Ahora usa el grupo propio del hosting y permisos normales. Al desbloquear, el `wp-config.php` queda en 600.
+- **Aceptar un control de hardening valía para todos los servidores.** Ahora se puede aceptar solo en uno: `nitro:SSHD PermitRootLogin` (en Avisos, en "otros controles aceptados", o por MCP `alerts_configure` → `accept_hardening`). Sin prefijo sigue valiendo para todos.
+- **El portal de clientes no respondía en ningún servidor tras el cambio de rol.** Su ruta de Caddy era un bloque escrito a mano en el Caddyfile, atado al nombre de una máquina, y la copia de configuración (con razón) solo pasa las webs del 443; nadie encendía ni apagaba el portal en un relevo, y los clientes (la base del panel es de cada nodo) no llegaban a la copia. Ahora:
+  - **nombre público propio** del portal (*Ajustes → Portal Clientes → Dirección del portal*, ajuste `portal_hostname`, p. ej. `portal.<dominio>`), nunca el de una máquina; las invitaciones usan ese nombre;
+  - **solo lo sirve el servidor que manda**: servicio `musedock-portal` y ruta de Caddy `portal-domain-route` en el puerto del portal (8446) encendidos en el principal, apagados en las copias y en un nodo apartado. Se aplica al promover, al degradar y al apartarse, y cada 5 min el `cluster-worker` lo repone (tras una recarga de Caddy o si una copia pasa a mandar por un relevo automático). El certificado sigue la misma política que el nombre del panel;
+  - **las copias reciben del principal** (acción `export-portal-state`, cada 5 min) los clientes del portal, a quién pertenece cada hosting y los ajustes del portal. Se empareja por email y por dominio (los ids no coinciden entre nodos). No se borra nada: un cliente que desaparece del principal queda desactivado en la copia, y los clientes propios de la copia no se tocan;
+  - la copia de configuración ya no copia la unidad `musedock-portal.service` (la gestiona cada nodo).
+- **Apoyo al portal de clientes (fase 4), sin cambiar nada de lo existente:**
+  - `DatabaseService::changePassword()`: contraseña nueva generada para el usuario de una base (la devuelve una vez; mismo SQL que la solicitud de cambio por MCP);
+  - `NotificationService::sendToAddress()`: correo a una dirección concreta (avisar al cliente de que su ticket tiene respuesta), con su propio tope diario (`notify_customer_email_daily_cap`, 50);
+  - `View::renderFile()`: pantallas de un módulo dentro del diseño del panel (los tickets del portal en `/portal-admin/tickets`, con el login y el CSRF del panel). En *Ajustes → Portal Clientes* aparece el botón **Tickets de soporte** con los pendientes;
+  - las copias reciben también los tickets de soporte del portal (mismos ids; cliente por email y hosting por dominio).
+- **Las reglas de avisos no llegaban a las copias que cuelgan de otra copia** (Nitro, que sigue colgado de mortadelo tras el relevo). Ahora cada nodo que las recibe se las pasa a sus propias copias, en cascada y con un máximo de 3 saltos.
+
+### Seguridad (auditoría)
+- **CRÍTICO: páginas del panel accesibles sin iniciar sesión.** Cualquier ruta acabada en `.png`, `.css`, `.js`… (p. ej. `/mail/domains/1.png`) se saltaba el login. Ahora solo se saltan el login los ficheros que existen de verdad en `public/`.
+- **Sesiones:** la cookie de sesión lleva `Secure` aunque el panel vaya detrás de Caddy; las sesiones caducan por inactividad (`SESSION_LIFETIME`); un admin desactivado o con otro rol lo nota en menos de 1 minuto.
+- **Login:** límite de intentos también por usuario (fuerza bruta repartida entre IPs); el MFA se anula tras 5 códigos erróneos; el usuario se limpia antes de escribirlo en el log de acceso (se podían falsificar líneas que lee fail2ban).
+- **WordPress / fail2ban:** el filtro `musedock-wordpress` solo cree `Cf-Connecting-Ip` si la conexión viene de Cloudflare (antes se podía banear a un tercero o librarse del ban con una cabecera falsa). **Hay que copiar el filtro a `/etc/fail2ban/filter.d/` y recargar la jaula** (lo hace `bin/update.sh`). `wp-harden ban` rechaza IPs locales, privadas y de Cloudflare. El análisis detecta imágenes e iconos con PHP dentro.
+- **API de cluster/federación:** `backup_name` con `..` ya no puede borrar `storage/`; bloqueado el salto de ruta en `receive-files` y `restore-db-dumps` y validados los datos del manifest; el token de un peer federado ya no vale para la API del cluster ni mientras esté pendiente de aprobar; el handshake de un peer pendiente no instala clave SSH ni entrega el token; freno de 30 fallos de token / 10 min por IP; `panel_log` enmascara tokens y claves; las claves SSH deben ser de una sola línea; `tls_check public` rechaza IPs privadas.
+- **Federación y hostings:** corregida una inyección de comandos con contraseñas de MySQL y un borrado de rutas en el rollback; se validan dominio, usuario, rutas, shell y versión de PHP al crear, importar o recibir hostings (también al generar el pool PHP-FPM).
+- **Gestor de ficheros y portal de clientes:** la subida ya no sigue enlaces simbólicos fuera del hosting (en el panel y en el portal) y se corrigió la comprobación de prefijo en las descargas.
+- **Migración:** las descargas por URL solo aceptan http/https hacia IP pública; los usuarios y hosts SSH que empiezan por `-` se rechazan; ficheros temporales con permisos 0600.
+- **Clave SSH de federación:** la regex de shell que permitía `rsync; cualquier-comando` (root) se sustituye por `bin/federation-ssh-guard` (se copia a `/usr/local/bin` con `update.sh` e `install.sh`), que solo admite `rsync --server` bajo `/var/www/vhosts`, `psql`/`mysql` con usuario y base, y `echo OK`, sin shell. Si el guard falta, la clave no se instala. **Las claves ya instaladas hay que migrarlas a mano** (ver plan en el informe de auditoría).
+- **Contraseñas fuera de la línea de comandos:** migraciones, copias de BD, réplica, correo, webmail/carddav y `chpasswd` pasan las contraseñas por variables de entorno, stdin o ficheros temporales 0600; ya no se ven con `ps`. Los instaladores de webmail y carddav no las escriben en su log.
+- **Visor y vaciado de logs:** dentro de `/var/www/vhosts` solo se permiten ficheros de carpetas `logs`, y nunca `.env`, `wp-config*`, `.php`, `.pem`, `.key`, `.crt` ni `.sql`.
+- **XSS:** unos 70 sitios más con datos dentro de `onclick`/`onsubmit` pasan a `View::js()` (20 vistas). Antes: nuevo `View::js()` y corregidos los botones con datos de cliente, copias, rutas proxy y panel inicial. Cabeceras: CSP mínima (`frame-ancestors`, `base-uri`, `object-src`) y Permissions-Policy.
+
 ## [1.0.308] — 2026-10-05 — Vigilancia de certificados de todas las webs
 
 ### Arreglado

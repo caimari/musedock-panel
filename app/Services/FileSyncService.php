@@ -141,7 +141,8 @@ class FileSyncService
     public static function installPublicKey(string $publicKey): array
     {
         $publicKey = trim($publicKey);
-        if (empty($publicKey) || !str_starts_with($publicKey, 'ssh-')) {
+        // Una sola línea y con formato de clave: sin saltos para no colar opciones (command=...) ni más claves.
+        if (empty($publicKey) || !preg_match('/^ssh-[a-z0-9-]+ [A-Za-z0-9+\/=]+( [^\r\n]*)?$/', $publicKey)) {
             return ['ok' => false, 'error' => 'Clave publica invalida'];
         }
 
@@ -478,6 +479,10 @@ class FileSyncService
         // Security: validate remote_path is under allowed directories
         $allowedPrefixes = ['/var/www/vhosts/', '/var/lib/caddy/', '/tmp/musedock-dumps'];
         $pathAllowed = false;
+        // Sin ".." ni saltos de línea: "/var/www/vhosts/../../etc" empezaría por un prefijo válido.
+        if (str_contains($remotePath, '..') || preg_match('/[\x00-\x1f]/', $remotePath)) {
+            return ['ok' => false, 'error' => 'Ruta destino no permitida'];
+        }
         foreach ($allowedPrefixes as $prefix) {
             if (str_starts_with($remotePath, $prefix)) {
                 $pathAllowed = true;
@@ -1068,7 +1073,7 @@ class FileSyncService
         if ($authMethod === 'socket') return 'mysqldump -u root';
         if ($authMethod === 'password') {
             $pass = \MuseDockPanel\Env::get('MYSQL_ROOT_PASS', '');
-            return $pass ? 'mysqldump -u root -p' . escapeshellarg($pass) : null;
+            return $pass ? 'mysqldump ' . \MuseDockPanel\Services\DatabaseService::mysqlDefaultsFileArg($pass) . ' -u root' : null;
         }
         return null;
     }
@@ -1082,7 +1087,7 @@ class FileSyncService
         if ($authMethod === 'socket') return 'mysql -u root';
         if ($authMethod === 'password') {
             $pass = \MuseDockPanel\Env::get('MYSQL_ROOT_PASS', '');
-            return $pass ? 'mysql -u root -p' . escapeshellarg($pass) : null;
+            return $pass ? 'mysql ' . \MuseDockPanel\Services\DatabaseService::mysqlDefaultsFileArg($pass) . ' -u root' : null;
         }
         return null;
     }
@@ -1260,10 +1265,16 @@ class FileSyncService
 
         $results = [];
         foreach ($manifest as $entry) {
-            $dbName = $entry['db_name'];
-            $dbUser = $entry['db_user'];
-            $dbType = $entry['db_type'];
-            $file = $dumpPath . '/' . $entry['file'];
+            $dbName = (string)($entry['db_name'] ?? '');
+            $dbUser = (string)($entry['db_user'] ?? '');
+            $dbType = (string)($entry['db_type'] ?? '');
+            // Los nombres acaban en comandos de shell/SQL: solo caracteres de identificador.
+            if (!preg_match('/^[A-Za-z0-9_-]{1,64}$/', $dbName) || !preg_match('/^[A-Za-z0-9_.-]{1,64}$/', $dbUser)
+                || !in_array($dbType, ['pgsql', 'mysql', 'mariadb'], true)) {
+                $results[] = ['db_name' => $dbName, 'ok' => false, 'error' => 'Nombre de base de datos o usuario no válido en el manifest'];
+                continue;
+            }
+            $file = $dumpPath . '/' . basename((string)($entry['file'] ?? ''));
 
             if (!file_exists($file) || filesize($file) < 20) {
                 $results[] = ['db_name' => $dbName, 'ok' => false, 'error' => 'Dump vacío o no encontrado'];

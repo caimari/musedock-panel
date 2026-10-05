@@ -215,7 +215,7 @@
                                             $ipv6Enabled = (bool)($iface['ipv6_enabled'] ?? false);
                                         ?>
                                         <?php if ($canToggleIpv6): ?>
-                                            <form method="POST" action="/settings/firewall/toggle-ipv6-interface" class="d-inline" onsubmit="return confirmToggleIpv6Interface(this, '<?= View::e($iface['interface']) ?>', '<?= $ipv6Enabled ? 'disable' : 'enable' ?>')">
+                                            <form method="POST" action="/settings/firewall/toggle-ipv6-interface" class="d-inline" onsubmit="return confirmToggleIpv6Interface(this, <?= View::js($iface['interface']) ?>, '<?= $ipv6Enabled ? 'disable' : 'enable' ?>')">
                                                 <?= View::csrf() ?>
                                                 <input type="hidden" name="interface" value="<?= View::e($iface['interface']) ?>">
                                                 <input type="hidden" name="mode" value="<?= $ipv6Enabled ? 'disable' : 'enable' ?>">
@@ -948,7 +948,7 @@
                                     <td><?= View::e(strtoupper($s['protocol'])) ?></td>
                                     <td class="text-end">
                                         <button type="button" class="btn btn-outline-success btn-sm"
-                                            onclick="fillRule('<?= View::e($s['action']) ?>', '<?= View::e($s['from']) ?>', '<?= View::e($s['port']) ?>', '<?= View::e($s['protocol']) ?>', '<?= View::e($s['comment']) ?>')">
+                                            onclick="fillRule(<?= View::js($s['action']) ?>, <?= View::js($s['from']) ?>, <?= View::js($s['port']) ?>, <?= View::js($s['protocol']) ?>, <?= View::js($s['comment']) ?>)">
                                             <i class="bi bi-arrow-down-circle me-1"></i>Aplicar
                                         </button>
                                     </td>
@@ -978,7 +978,7 @@
                                         <td><code><?= View::e($s['port']) ?></code></td>
                                         <td class="text-end">
                                             <button type="button" class="btn btn-outline-success btn-sm"
-                                                onclick="fillRule('<?= View::e($s['action']) ?>', '<?= View::e($s['from']) ?>', '<?= View::e($s['port']) ?>', '<?= View::e($s['protocol']) ?>', '<?= View::e($s['comment']) ?>')">
+                                                onclick="fillRule(<?= View::js($s['action']) ?>, <?= View::js($s['from']) ?>, <?= View::js($s['port']) ?>, <?= View::js($s['protocol']) ?>, <?= View::js($s['comment']) ?>)">
                                                 <i class="bi bi-arrow-down-circle me-1"></i>Aplicar
                                             </button>
                                         </td>

@@ -254,6 +254,15 @@ class FailoverSafetyService
             $steps[] = ['name' => 'Detener el correo (no recibe ni sirve buzones)', 'ok' => true, 'output' => implode(', ', $mail)];
         }
 
+        // El portal de clientes escribe en la base del panel: un nodo apartado no lo sirve.
+        try {
+            $portal = PortalService::stop();
+            if ($portal) {
+                $steps[] = ['name' => 'Detener el portal de clientes', 'ok' => true, 'output' => implode(', ', $portal)];
+            }
+        } catch (\Throwable) {
+        }
+
         // Make every PostgreSQL cluster read-only (defense in depth) — menos el del
         // propio panel: es de este nodo (no se replica) y, en solo lectura, el panel no
         // podría ni guardar su rol al reconstruirse como slave del nuevo master.
@@ -395,6 +404,12 @@ class FailoverSafetyService
         $steps[] = 'Caddy detenido (no sirve webs con datos viejos)';
         if ($mail = self::stopMailIntake()) {
             $steps[] = 'Correo detenido (no recibe ni sirve buzones): ' . implode(', ', $mail);
+        }
+        try {
+            if ($portal = PortalService::stop()) {
+                $steps[] = 'Portal de clientes detenido: ' . implode(', ', $portal);
+            }
+        } catch (\Throwable) {
         }
         $steps[] = trim((string)shell_exec('php ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/panel-rescue.php') . ' start 2>&1'));
 
@@ -553,6 +568,30 @@ class FailoverSafetyService
     }
 
     /**
+     * shell_exec con variables de entorno extra (p. ej. PGPASSWORD) y/o stdin, pasados al proceso
+     * hijo fuera de la línea de comandos (que es visible con `ps`). Devuelve la salida ('' si vacía).
+     */
+    private static function shellEnv(string $cmd, array $env = [], ?string $stdin = null): string
+    {
+        $full = [];
+        foreach (array_merge(getenv() ?: [], $env) as $k => $v) {
+            $full[(string)$k] = (string)$v;
+        }
+        $proc = @proc_open(['/bin/sh', '-c', $cmd], [0 => ['pipe', 'r'], 1 => ['pipe', 'w']], $pipes, null, $full);
+        if (!is_resource($proc)) {
+            return '';
+        }
+        if ($stdin !== null && $stdin !== '') {
+            @fwrite($pipes[0], $stdin);
+        }
+        fclose($pipes[0]);
+        $out = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        proc_close($proc);
+        return $out === false ? '' : $out;
+    }
+
+    /**
      * PostgreSQL: ¿escribió este antiguo master algo DESPUÉS de que el nuevo tomara el
      * relevo? Se compara su posición actual de WAL con el punto en que el nuevo master
      * abrió su línea de tiempo (historial del nuevo timeline, por el protocolo de
@@ -568,9 +607,9 @@ class FailoverSafetyService
         }
         $myLsn = $local('select pg_current_wal_lsn()');
         $myTli = (int)$local('select timeline_id from pg_control_checkpoint()');
-        $env = 'PGPASSWORD=' . escapeshellarg($pass) . ' PGCONNECT_TIMEOUT=5 ';
+        $env = ['PGPASSWORD' => $pass, 'PGCONNECT_TIMEOUT' => '5'];
         $conn = escapeshellarg("host={$masterIp} port={$port} user={$user} dbname=postgres replication=database");
-        $ident = trim((string)shell_exec($env . 'psql ' . $conn . ' -XAt -c "IDENTIFY_SYSTEM" 2>/dev/null'));
+        $ident = trim(self::shellEnv('psql ' . $conn . ' -XAt -c "IDENTIFY_SYSTEM" 2>/dev/null', $env));
         $theirTli = (int)(explode('|', $ident)[1] ?? 0);
         if ($myLsn === '' || $myTli < 1 || $theirTli < 1) {
             return ['diverged' => true, 'reason' => 'no se pudo leer la posición de WAL o el timeline'];
@@ -578,7 +617,7 @@ class FailoverSafetyService
         if ($theirTli <= $myTli) {
             return ['diverged' => true, 'reason' => "el nuevo master no tiene un timeline posterior ({$theirTli} vs {$myTli})"];
         }
-        $hist = (string)shell_exec($env . 'psql ' . $conn . ' -XAt -c ' . escapeshellarg("TIMELINE_HISTORY {$theirTli}") . ' 2>/dev/null');
+        $hist = self::shellEnv('psql ' . $conn . ' -XAt -c ' . escapeshellarg("TIMELINE_HISTORY {$theirTli}") . ' 2>/dev/null', $env);
         $switch = null;
         foreach (preg_split('/\R/', $hist) as $line) {
             if (preg_match('/^\s*(\d+)\s+([0-9A-F]+\/[0-9A-F]+)/i', $line, $m) && (int)$m[1] === $myTli) {

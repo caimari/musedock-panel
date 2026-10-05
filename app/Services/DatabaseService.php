@@ -72,7 +72,7 @@ class DatabaseService
                 'crear la base de datos' => sprintf('CREATE DATABASE %s OWNER %s;', $id($dbName), $id($dbUser)),
                 'asignar privilegios' => sprintf('GRANT ALL PRIVILEGES ON DATABASE %s TO %s;', $id($dbName), $id($dbUser)),
             ] as $what => $sql) {
-                $out = (string)shell_exec('sudo -u postgres psql -v ON_ERROR_STOP=1 -c ' . escapeshellarg($sql) . ' 2>&1');
+                $out = (string)self::runWithStdin('sudo -u postgres psql -v ON_ERROR_STOP=1 2>&1', $sql . "\n");
                 if (stripos($out, 'ERROR') !== false) {
                     LogService::log('database.create.error', $dbName, "PostgreSQL error ({$what}): {$out}");
                     return ['ok' => false, 'error' => "Error al {$what} en PostgreSQL: {$out}"];
@@ -89,7 +89,7 @@ class DatabaseService
             $sql = "CREATE DATABASE IF NOT EXISTS {$ident} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; "
                  . "CREATE USER IF NOT EXISTS {$lit($dbUser)}@'localhost' IDENTIFIED BY {$lit($pass)}; "
                  . "GRANT ALL PRIVILEGES ON {$ident}.* TO {$lit($dbUser)}@'localhost'; FLUSH PRIVILEGES;";
-            $out = (string)shell_exec($mysql . ' -e ' . escapeshellarg($sql) . ' 2>&1');
+            $out = (string)self::runWithStdin($mysql . ' 2>&1', $sql . "\n");
             if (stripos($out, 'ERROR') !== false) {
                 LogService::log('database.create.error', $dbName, "MySQL error: {$out}");
                 return ['ok' => false, 'error' => 'Error al crear la base de datos en MySQL: ' . $out];
@@ -110,6 +110,39 @@ class DatabaseService
         return ['ok' => true, 'db_name' => $dbName, 'db_user' => $dbUser, 'db_pass' => $pass, 'db_host' => 'localhost', 'db_type' => $type];
     }
 
+    /**
+     * Contraseña nueva (generada aquí) para el usuario de una base de un hosting. La
+     * devuelve al llamante para enseñarla UNA vez. Las réplicas la reciben por la
+     * replicación del propio motor. $db = fila de hosting_databases.
+     * Devuelve ['ok'=>true, 'db_user', 'db_pass'] o ['ok'=>false, 'error'].
+     */
+    public static function changePassword(array $db): array
+    {
+        $user = (string)($db['db_user'] ?? '');
+        if ($user === '' || !preg_match('/^[a-zA-Z0-9_]+$/', $user)) {
+            return ['ok' => false, 'error' => 'Usuario de base de datos no válido.'];
+        }
+        $pass = bin2hex(random_bytes(12));
+        if (($db['db_type'] ?? 'mysql') === 'pgsql') {
+            $sql = sprintf("ALTER USER \"%s\" WITH PASSWORD '%s';", str_replace('"', '""', $user), $pass);
+            $out = (string)self::runWithStdin('sudo -u postgres psql -v ON_ERROR_STOP=1 2>&1', $sql . "\n");
+        } else {
+            $mysql = self::mysqlCommand();
+            if ($mysql === null) {
+                return ['ok' => false, 'error' => 'No se pudo determinar el acceso root a MySQL (MYSQL_AUTH_METHOD).'];
+            }
+            $lit = static fn(string $v) => "'" . str_replace("'", "\\'", $v) . "'";
+            $sql = "ALTER USER {$lit($user)}@'localhost' IDENTIFIED BY {$lit($pass)}; FLUSH PRIVILEGES;";
+            $out = (string)self::runWithStdin($mysql . ' 2>&1', $sql . "\n");
+        }
+        if (stripos($out, 'ERROR') !== false) {
+            LogService::log('database.password.error', (string)($db['db_name'] ?? $user), 'Cambio de contraseña rechazado por el motor');
+            return ['ok' => false, 'error' => 'El servidor de bases de datos rechazó el cambio.'];
+        }
+        LogService::log('database.password', (string)($db['db_name'] ?? $user), "Contraseña nueva para el usuario {$user}");
+        return ['ok' => true, 'db_user' => $user, 'db_pass' => $pass];
+    }
+
     public static function mysqlCommand(): ?string
     {
         $auth = Env::get('MYSQL_AUTH_METHOD', 'socket');
@@ -118,9 +151,64 @@ class DatabaseService
         }
         if ($auth === 'password') {
             $pass = Env::get('MYSQL_ROOT_PASS', '');
-            return $pass === '' ? null : 'mysql -u root -p' . escapeshellarg($pass);
+            return $pass === '' ? null : 'mysql ' . self::mysqlDefaultsFileArg($pass) . ' -u root';
         }
         return null;
+    }
+
+    /**
+     * Como shell_exec, pero la entrada (SQL con contraseñas) va por stdin y no por argv, para que no
+     * sea visible con `ps`. Devuelve la salida estándar o null si está vacía (igual que shell_exec).
+     */
+    public static function runWithStdin(string $cmd, string $stdin): ?string
+    {
+        $r = self::runWithStdinEx($cmd, $stdin);
+        return $r['out'] === '' ? null : $r['out'];
+    }
+
+    /** Igual que runWithStdin, pero devuelve también el código de salida: ['code' => int, 'out' => string]. */
+    public static function runWithStdinEx(string $cmd, string $stdin): array
+    {
+        $proc = @proc_open(['/bin/sh', '-c', $cmd], [0 => ['pipe', 'r'], 1 => ['pipe', 'w']], $pipes);
+        if (!is_resource($proc)) {
+            return ['code' => 127, 'out' => ''];
+        }
+        @fwrite($pipes[0], $stdin);
+        fclose($pipes[0]);
+        $out = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        $code = proc_close($proc);
+        return ['code' => (int)$code, 'out' => $out === false ? '' : $out];
+    }
+
+    /**
+     * Argumento `--defaults-extra-file=...` (ya escapado para shell) con la contraseña de root
+     * de MySQL, para NO pasarla en la línea de comandos (visible con `ps`).
+     * El fichero se crea con permisos 0600 (umask 077), se reutiliza dentro del mismo proceso
+     * y se borra al terminar el proceso. Debe ir SIEMPRE como primera opción del cliente.
+     * Los clientes que lo reciban deben ejecutarse mientras el proceso PHP esté vivo.
+     */
+    public static function mysqlDefaultsFileArg(string $pass): string
+    {
+        static $files = [];
+        $key = hash('sha256', $pass);
+        if (!isset($files[$key]) || !is_file($files[$key])) {
+            $old = umask(077);
+            $path = tempnam(sys_get_temp_dir(), 'mdp_my_');
+            umask($old);
+            if ($path === false) {
+                throw new \RuntimeException('No se pudo crear el fichero temporal de credenciales MySQL.');
+            }
+            @chmod($path, 0600);
+            $escaped = str_replace(['\\', '"', "\n", "\r"], ['\\\\', '\\"', '', ''], $pass);
+            file_put_contents($path, "[client]\npassword=\"" . $escaped . "\"\n");
+            @chmod($path, 0600);
+            $files[$key] = $path;
+            register_shutdown_function(static function () use ($path): void {
+                @unlink($path);
+            });
+        }
+        return '--defaults-extra-file=' . escapeshellarg($files[$key]);
     }
 
     /** Registra en los slaves las bases de un hosting (sin contraseñas). */

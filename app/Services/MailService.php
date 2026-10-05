@@ -4294,8 +4294,9 @@ class MailService
         $sql = "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='musedock_mail') THEN "
              . "CREATE ROLE musedock_mail WITH LOGIN PASSWORD '{$escaped}'; "
              . "ELSE ALTER ROLE musedock_mail WITH LOGIN PASSWORD '{$escaped}'; END IF; END \$\$;";
-        shell_exec('sudo -u postgres psql -p ' . $port . ' -d ' . escapeshellarg($db)
-            . ' -v ON_ERROR_STOP=1 -c ' . escapeshellarg($sql) . ' 2>&1');
+        // SQL con la contraseña por stdin: no debe verse en la línea de comandos (ps)
+        DatabaseService::runWithStdin('sudo -u postgres psql -p ' . $port . ' -d ' . escapeshellarg($db)
+            . ' -v ON_ERROR_STOP=1 2>&1', $sql . "\n");
         foreach ([
             "GRANT CONNECT ON DATABASE {$db} TO musedock_mail",
             'GRANT USAGE ON SCHEMA public TO musedock_mail',

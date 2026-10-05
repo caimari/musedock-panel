@@ -192,7 +192,7 @@
                                         <i class="bi bi-<?= $r['enabled'] ? 'pause' : 'play' ?>-fill"></i>
                                     </button>
                                 </form>
-                                <button type="button" class="btn btn-outline-danger" onclick="proxyDelete(<?= (int)$r['id'] ?>, '<?= View::e($r['domain']) ?>')" title="Eliminar">
+                                <button type="button" class="btn btn-outline-danger" onclick="proxyDelete(<?= (int)$r['id'] ?>, <?= View::js($r['domain']) ?>)" title="Eliminar">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </div>

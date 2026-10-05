@@ -234,7 +234,7 @@
                                                     <?= View::csrf() ?>
                                                     <input type="hidden" name="action" value="remove">
                                                     <input type="hidden" name="ip" value="<?= View::e($wip) ?>">
-                                                    <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-1" title="Eliminar" onclick="return confirmWhitelistRemove(this.form, '<?= View::e($wip) ?>')">
+                                                    <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-1" title="Eliminar" onclick="return confirmWhitelistRemove(this.form, <?= View::js($wip) ?>)">
                                                         <i class="bi bi-x-lg"></i>
                                                     </button>
                                                 </form>
@@ -339,7 +339,7 @@
                     <div class="d-flex align-items-center gap-2">
                         <span class="text-muted small"><?= $jail['currently_banned'] ?> baneadas ahora</span>
                         <button type="button" class="btn btn-outline-warning btn-sm py-0 px-2"
-                                onclick="confirmToggleJail('<?= View::e($jail['name']) ?>', '<?= View::e($jailLabels[$jail['name']] ?? $jail['name']) ?>')"
+                                onclick="confirmToggleJail(<?= View::js($jail['name']) ?>, <?= View::js($jailLabels[$jail['name']] ?? $jail['name']) ?>)"
                                 title="Desactivar esta proteccion temporalmente">
                             <i class="bi bi-power me-1"></i>Desactivar
                         </button>
@@ -350,7 +350,7 @@
                         <div class="col-md-4">
                             <div class="p-2 rounded text-center" style="background:rgba(255,255,255,0.05);<?= $jail['currently_banned'] > 0 ? 'cursor:pointer;' : '' ?>"
                                  <?php if ($jail['currently_banned'] > 0): ?>
-                                 role="button" onclick="showBannedIps('<?= View::e($jail['name']) ?>', '<?= View::e($jailLabels[$jail['name']] ?? $jail['name']) ?>', <?= View::e(json_encode($jail['banned_ips'])) ?>)"
+                                 role="button" onclick="showBannedIps(<?= View::js($jail['name']) ?>, <?= View::js($jailLabels[$jail['name']] ?? $jail['name']) ?>, <?= View::js($jail['banned_ips']) ?>)"
                                  title="Click para ver IPs baneadas"
                                  <?php endif; ?>>
                                 <div class="text-muted small">IPs baneadas ahora</div>
@@ -396,7 +396,7 @@
                                             <td><code><?= View::e($ip) ?></code></td>
                                             <td class="text-end align-middle">
                                                 <div class="d-inline-flex flex-nowrap align-items-center gap-1">
-                                                    <form method="POST" action="/settings/fail2ban/unban" class="d-inline-block mb-0" onsubmit="return confirmUnban(this, '<?= View::e($ip) ?>', '<?= View::e($jail['name']) ?>')">
+                                                    <form method="POST" action="/settings/fail2ban/unban" class="d-inline-block mb-0" onsubmit="return confirmUnban(this, <?= View::js($ip) ?>, <?= View::js($jail['name']) ?>)">
                                                         <?= View::csrf() ?>
                                                         <input type="hidden" name="jail" value="<?= View::e($jail['name']) ?>">
                                                         <input type="hidden" name="ip" value="<?= View::e($ip) ?>">
@@ -408,7 +408,7 @@
                                                         <?= View::csrf() ?>
                                                         <input type="hidden" name="action" value="add">
                                                         <input type="hidden" name="ip" value="<?= View::e($ip) ?>">
-                                                        <button type="submit" class="btn btn-outline-success btn-sm text-nowrap" title="Desbanear y anadir a whitelist" onclick="return confirmWhitelistAddFromBan(this.form, '<?= View::e($ip) ?>')">
+                                                        <button type="submit" class="btn btn-outline-success btn-sm text-nowrap" title="Desbanear y anadir a whitelist" onclick="return confirmWhitelistAddFromBan(this.form, <?= View::js($ip) ?>)">
                                                             <i class="bi bi-shield-plus me-1"></i>Whitelist
                                                         </button>
                                                     </form>

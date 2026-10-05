@@ -30,7 +30,24 @@ class CardDavService
 
     public static function host(): string
     {
-        return strtolower(trim((string) Settings::get('carddav_host', 'dav.musedock.com')));
+        $h = strtolower(trim((string) Settings::get('carddav_host', '')));
+        return $h !== '' ? $h : self::defaultHost();
+    }
+
+    /**
+     * Nombre DAV por defecto: dav.<dominio del correo de ESTE panel> (mail.ejemplo.com →
+     * dav.ejemplo.com). Antes era dav.musedock.com fijo, que en la instalación de un
+     * cliente no es suyo.
+     */
+    public static function defaultHost(): string
+    {
+        foreach (['mail_hostname', 'mail_local_hostname', 'panel_hostname'] as $k) {
+            $h = strtolower(trim((string) Settings::get($k, '')));
+            if (substr_count($h, '.') >= 2) {
+                return 'dav.' . substr($h, strpos($h, '.') + 1);
+            }
+        }
+        return '';
     }
 
     public static function status(): array
@@ -58,7 +75,7 @@ class CardDavService
      */
     public static function startInstall(string $host, string $imapHost = '', int $imapPort = 143): array
     {
-        $host = strtolower(trim($host)) ?: 'dav.musedock.com';
+        $host = strtolower(trim($host)) ?: self::defaultHost();
         if (!filter_var($host, FILTER_VALIDATE_DOMAIN, FILTER_FLAG_HOSTNAME)) {
             return ['ok' => false, 'error' => 'Host DAV inválido: ' . $host];
         }
@@ -541,7 +558,7 @@ class CardDavService
      */
     public static function nodeSetupReplica(array $payload): array
     {
-        $host   = strtolower(trim((string)($payload['host'] ?? 'dav.musedock.com')));
+        $host   = strtolower(trim((string)($payload['host'] ?? self::host())));
         $dbPass = (string)($payload['db_pass'] ?? '');
         if ($dbPass === '') return ['ok' => false, 'error' => 'Sin db_pass del master.'];
 

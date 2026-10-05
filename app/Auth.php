@@ -63,7 +63,30 @@ class Auth
 
     public static function check(): bool
     {
-        return isset($_SESSION['panel_user']);
+        if (!isset($_SESSION['panel_user'])) {
+            return false;
+        }
+
+        // Cada 60 s se comprueba que el admin sigue activo y se refresca su rol:
+        // un admin desactivado o degradado pierde el acceso sin esperar a que caduque la sesión.
+        if (time() - (int)($_SESSION['_user_checked'] ?? 0) > 60) {
+            try {
+                $row = Database::fetchOne(
+                    "SELECT role FROM panel_admins WHERE id = :id AND is_active = true",
+                    ['id' => $_SESSION['panel_user']['id'] ?? 0]
+                );
+                if (!$row) {
+                    unset($_SESSION['panel_user'], $_SESSION['_user_checked']);
+                    return false;
+                }
+                $_SESSION['panel_user']['role'] = $row['role'];
+                $_SESSION['_user_checked'] = time();
+            } catch (\Throwable) {
+                // Sin base de datos no se cierra la sesión (evita quedarse fuera del panel).
+            }
+        }
+
+        return true;
     }
 
     public static function user(): ?array

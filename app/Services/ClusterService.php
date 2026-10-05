@@ -2415,6 +2415,19 @@ class ClusterService
             $errors[] = 'Config mirror (activar): ' . $e->getMessage();
         }
 
+        // Portal de clientes: el que manda lo sirve (servicio + ruta de Caddy con su
+        // nombre propio). Si falla, se avisa pero no deshace la promoción.
+        try {
+            $results['portal'] = PortalService::apply();
+            foreach ($results['portal'] as $line) {
+                if (str_contains((string)$line, 'NO ')) {
+                    $errors[] = 'Portal de clientes: ' . $line;
+                }
+            }
+        } catch (\Throwable $e) {
+            $errors[] = 'Portal de clientes: ' . $e->getMessage();
+        }
+
         // Scripts de relevo del administrador (/etc/musedock/hooks/promote.d): lo que
         // el panel no gestiona (IP flotante, supervisor, crons, dominios de apps).
         // Van DESPUÉS de promover PostgreSQL/Redis, para que las apps arranquen ya
@@ -2700,6 +2713,13 @@ class ClusterService
             $errors[] = 'Config mirror (desactivar): ' . $e->getMessage();
         }
 
+        // Portal de clientes: solo lo sirve el que manda (servicio y ruta de Caddy fuera).
+        try {
+            $results['portal'] = PortalService::stop();
+        } catch (\Throwable $e) {
+            $errors[] = 'Portal de clientes (parar): ' . $e->getMessage();
+        }
+
         // Ya es slave legítimo: fuera la marca de apartado y el panel de rescate, y Caddy
         // arrancado como en cualquier slave (antes quedaba parado y el panel sin web).
         if (is_file(FailoverSafetyService::FENCE_FLAG)) {
@@ -2961,8 +2981,8 @@ class ClusterService
      * Send alert via all configured notification channels.
      * Delegates to the unified NotificationService.
      */
-    public static function sendAlert(string $subject, string $message): void
+    public static function sendAlert(string $subject, string $message, string $type = ''): void
     {
-        NotificationService::send($subject, $message);
+        NotificationService::send($subject, $message, $type);
     }
 }

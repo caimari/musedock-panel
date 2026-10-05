@@ -283,13 +283,20 @@ class WordPressHardenService
             file_put_contents(self::LOCK_DIR . "/{$user}.json", json_encode(['group' => $grp, 'root' => $root, 'since' => date('c')]));
         }
         $r = escapeshellarg($root);
-        $u = escapeshellarg($user);
-        $g = escapeshellarg($grp);
+        // Grupo PROPIO del usuario del hosting, no www-data: todos los usuarios de hosting
+        // están en www-data, así que con ese grupo cualquier otro hosting podía leer el
+        // wp-config.php. Y con permisos normales (no ACL), que lsyncd sí copia a la réplica.
+        $own = escapeshellarg((string)(posix_getgrgid((int)posix_getpwnam($user)['gid'])['name'] ?? $user));
         self::writeMuPlugin($root);
-        shell_exec("chown -R root:{$g} {$r} 2>&1; chmod -R go-w {$r} 2>&1");
-        // Lo que no era legible por todos (p. ej. wp-config.php 600) lo sigue leyendo el usuario por ACL.
-        shell_exec("find {$r} -type f ! -perm -o=r -exec setfacl -m u:{$u}:r {} + 2>&1");
-        shell_exec("find {$r} -type d ! -perm -o=rx -exec setfacl -m u:{$u}:rx {} + 2>&1");
+        shell_exec("chown -R root:{$own} {$r} 2>&1; chmod -R go-w {$r} 2>&1");
+        // Lo que no era legible por todos (p. ej. wp-config.php 600) lo lee el usuario por su grupo.
+        shell_exec("find {$r} -type f ! -perm -o=r -exec chmod g+r {} + 2>&1");
+        shell_exec("find {$r} -type d ! -perm -o=rx -exec chmod g+rx {} + 2>&1");
+        foreach (["{$root}/wp-config.php", dirname($root) . '/wp-config.php'] as $cfg) {
+            if (is_file($cfg) && fileowner($cfg) === 0) {
+                @chmod($cfg, 0640); // root:grupo-del-hosting; nadie más
+            }
+        }
         $open = [];
         foreach (self::WRITABLE as $w) {
             if (is_dir("{$root}/{$w}")) {
@@ -315,6 +322,12 @@ class WordPressHardenService
         // Mientras dure el desbloqueo, el mu-plugin no pone DISALLOW_FILE_MODS.
         @file_put_contents("{$root}/wp-content/mu-plugins/.musedock-unlock-until", (string)($minutes > 0 ? time() + $minutes * 60 : PHP_INT_MAX));
         shell_exec('chown -R ' . escapeshellarg("{$user}:{$grp}") . ' ' . escapeshellarg($root) . ' 2>&1');
+        // El wp-config.php, solo para su dueño: con el grupo www-data lo leería cualquier hosting.
+        foreach (["{$root}/wp-config.php", dirname($root) . '/wp-config.php'] as $cfg) {
+            if (is_file($cfg)) {
+                @chmod($cfg, 0600);
+            }
+        }
         return $minutes > 0 ? "abierto {$minutes} min" : 'abierto';
     }
 
@@ -404,11 +417,14 @@ class WordPressHardenService
     /** fail2ban: banea una IP (la del visitante real, que llega en Cf-Connecting-Ip). */
     public static function ban(string $ip, int $seconds = 7200): bool
     {
-        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+        // Solo IPs públicas válidas: nunca la propia máquina, la red interna ni los nodos de Cloudflare
+        // (una cabecera Cf-Connecting-Ip falsificada no puede servir para cortar el acceso a esas IPs).
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)
+            || CloudflareService::isCloudflareIp($ip)) {
             return false;
         }
         self::banlist(static function ($l) use ($ip, $seconds) {
-            $l[$ip] = time() + max(60, $seconds);
+            $l[$ip] = time() + min(max(60, $seconds), 7 * 86400);
             return $l;
         });
         return self::syncBanRoute();
@@ -680,6 +696,16 @@ class WordPressHardenService
         ];
     }
 
+    /** Imágenes/iconos (.ico, .jpg, .png, .gif, .webp) que en realidad llevan código PHP dentro (puerta trasera disfrazada). */
+    public static function phpInImages(string $root): array
+    {
+        $inc = '--include=*.ico --include=*.jpg --include=*.jpeg --include=*.png --include=*.gif --include=*.webp --include=*.bmp';
+        $out = trim((string)shell_exec('timeout 60 grep -rlaE ' . $inc . ' ' . escapeshellarg('<\?php|<\?=') . ' '
+            . escapeshellarg(rtrim($root, '/') . '/wp-content') . ' 2>/dev/null | head -30'));
+        $files = array_values(array_filter(explode("\n", $out)));
+        return array_map(static fn($f) => substr($f, strlen(rtrim($root, '/')) + 1), $files);
+    }
+
     /** Ficheros PHP sueltos en wp-content: drop-ins conocidos (con su origen) y los que no deberían estar. */
     public static function dropins(string $root, array $obf = []): array
     {
@@ -825,6 +851,7 @@ class WordPressHardenService
             'mu_plugins' => array_map('basename', glob("{$root}/wp-content/mu-plugins/*.php") ?: []),
             'php_changed_14d' => count($find("-name '*.php' -mtime -14 -not -path '*/cache/*'")),
             'php_in_languages' => $rel($find("-path '*/wp-content/languages/*' -type f -name '*.php' ! -name '*.l10n.php'")),
+            'php_in_images' => self::phpInImages($root),
             'unknown_dirs_with_php' => array_values(array_column(array_filter(self::unknownDirs($root), static fn($d) => $d['php'] > 0), 'dir')),
             'odd_dropins' => array_values(array_map('basename', array_filter(glob("{$root}/wp-content/*.php") ?: [],
                 static fn($f) => basename($f) !== 'index.php' && !in_array(basename($f), self::DROPINS, true)))),
@@ -862,6 +889,7 @@ class WordPressHardenService
             'signature_hits' => self::signatureHits($root),
             'obfuscation' => $obf = self::obfuscation($root),
             'php_in_languages' => $rel($find("-path '*/wp-content/languages/*' -type f -name '*.php' ! -name '*.l10n.php'")),
+            'php_in_images' => self::phpInImages($root),
             'unknown_wp_content_dirs' => self::unknownDirs($root),
             'dropins' => self::dropins($root, $obf),
             'wp_config' => [
@@ -903,7 +931,7 @@ class WordPressHardenService
             + count(array_filter($r['plugins'] ?? [], static fn($p) => str_starts_with((string)($p['verdict'] ?? ''), 'MALWARE') || str_starts_with((string)($p['verdict'] ?? ''), 'MODIFICADO')))
             + (int)($r['core']['changed_count'] ?? 0) + (int)($r['core']['extra_count'] ?? 0)
             + count($obf['sc_markers']) + count($obf['long_lines']) + count($obf['cookie_exec'] ?? [])
-            + count($r['php_in_languages']) + count(array_filter($r['unknown_wp_content_dirs'], static fn($d) => $d['php'] > 0))
+            + count($r['php_in_languages']) + count($r['php_in_images']) + count(array_filter($r['unknown_wp_content_dirs'], static fn($d) => $d['php'] > 0))
             + count(array_filter($r['dropins'], static fn($d) => $d['flags']))
             + count(array_filter($r['themes'] ?? [], static fn($t) => str_starts_with((string)$t['verdict'], 'MODIFICADO') || str_contains((string)$t['verdict'], 'OFUSCACIÓN')));
         $r['verdict'] = $bad ? "{$bad} indicios: revisar y limpiar (quarantine / reinstall)" : 'sin indicios';

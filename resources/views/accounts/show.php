@@ -520,7 +520,7 @@ use MuseDockPanel\Services\CloudflareService;
                             <?php if (!($isSlave ?? false)): ?>
                             <td class="text-end">
                                 <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2"
-                                    onclick="confirmDeleteAlias(<?= (int)$account['id'] ?>, <?= (int)$alias['id'] ?>, '<?= View::e($alias['domain']) ?>', 'aliases')">
+                                    onclick="confirmDeleteAlias(<?= (int)$account['id'] ?>, <?= (int)$alias['id'] ?>, <?= View::js($alias['domain']) ?>, 'aliases')">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </td>
@@ -571,7 +571,7 @@ use MuseDockPanel\Services\CloudflareService;
                             <?php if (!($isSlave ?? false)): ?>
                             <td class="text-end">
                                 <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2"
-                                    onclick="confirmDeleteAlias(<?= (int)$account['id'] ?>, <?= (int)$redir['id'] ?>, '<?= View::e($redir['domain']) ?>', 'redirects')">
+                                    onclick="confirmDeleteAlias(<?= (int)$account['id'] ?>, <?= (int)$redir['id'] ?>, <?= View::js($redir['domain']) ?>, 'redirects')">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </td>
@@ -637,20 +637,20 @@ use MuseDockPanel\Services\CloudflareService;
                                 </a>
                                 <?php if ($sub['status'] === 'active'): ?>
                                 <button type="button" class="btn btn-outline-warning btn-sm py-0 px-2 me-1" title="Suspender subdominio"
-                                    onclick="confirmToggleSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, '<?= View::e($sub['subdomain']) ?>', 'suspend')">
+                                    onclick="confirmToggleSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, <?= View::js($sub['subdomain']) ?>, 'suspend')">
                                     <i class="bi bi-pause-circle"></i>
                                 </button>
                                 <button type="button" class="btn btn-outline-info btn-sm py-0 px-2" title="Promover a cuenta independiente"
-                                    onclick="confirmPromoteSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, '<?= View::e($sub['subdomain']) ?>')">
+                                    onclick="confirmPromoteSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, <?= View::js($sub['subdomain']) ?>)">
                                     <i class="bi bi-box-arrow-up"></i>
                                 </button>
                                 <?php else: ?>
                                 <button type="button" class="btn btn-outline-success btn-sm py-0 px-2 me-1" title="Activar subdominio"
-                                    onclick="confirmToggleSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, '<?= View::e($sub['subdomain']) ?>', 'activate')">
+                                    onclick="confirmToggleSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, <?= View::js($sub['subdomain']) ?>, 'activate')">
                                     <i class="bi bi-play-circle"></i>
                                 </button>
                                 <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2"
-                                    onclick="confirmDeleteSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, '<?= View::e($sub['subdomain']) ?>')">
+                                    onclick="confirmDeleteSubdomain(<?= (int)$account['id'] ?>, <?= (int)$sub['id'] ?>, <?= View::js($sub['subdomain']) ?>)">
                                     <i class="bi bi-trash"></i>
                                 </button>
                                 <?php endif; ?>
@@ -682,7 +682,7 @@ use MuseDockPanel\Services\CloudflareService;
                             <span class="badge badge-<?= $adoptable['status'] === 'active' ? 'active' : 'suspended' ?> ms-1"><?= View::e($adoptable['status']) ?></span>
                         </span>
                         <button type="button" class="btn btn-outline-info btn-sm py-0 px-2"
-                            onclick="confirmAdoptSubdomain(<?= (int)$account['id'] ?>, <?= (int)$adoptable['id'] ?>, '<?= View::e($adoptable['domain']) ?>', '<?= View::e($account['domain']) ?>')">
+                            onclick="confirmAdoptSubdomain(<?= (int)$account['id'] ?>, <?= (int)$adoptable['id'] ?>, <?= View::js($adoptable['domain']) ?>, <?= View::js($account['domain']) ?>)">
                             <i class="bi bi-box-arrow-in-down me-1"></i>Adoptar
                         </button>
                     </div>

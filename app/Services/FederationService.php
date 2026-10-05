@@ -405,12 +405,14 @@ class FederationService
         return ['ok' => true, 'local_key' => $publicKey, 'peer_key' => $peerKey];
     }
 
+    public const SSH_GUARD_PATH = '/usr/local/bin/federation-ssh-guard';
+
     /**
      * Install an SSH public key in authorized_keys.
      *
      * Security:
      * - Validates key format before installing
-     * - Restricts key to rsync-only via command= prefix (prevents arbitrary command execution)
+     * - Restringe la clave con command=federation-ssh-guard (validador estricto, sin shell)
      * - Logs installation for audit trail
      */
     public static function installSshKey(string $publicKey): bool
@@ -436,13 +438,22 @@ class FederationService
             return true; // Already installed
         }
 
-        // Install with restriction: only allow rsync, scp, pg_dump, psql, mysql
-        // command= forces the server to run only the specified command pattern
-        $restrictedKey = 'command="'
-            . 'if [[ \"$SSH_ORIGINAL_COMMAND\" =~ ^(rsync|scp|pg_dump|psql|mysql|mysqldump|echo\\ OK|cat|dd|tar) ]]; '
-            . 'then $SSH_ORIGINAL_COMMAND; '
-            . 'else echo \"Federation: command not allowed\"; exit 1; fi'
-            . '",no-port-forwarding,no-X11-forwarding,no-agent-forwarding '
+        // Clave restringida: SSH_ORIGINAL_COMMAND lo valida federation-ssh-guard
+        // (solo rsync --server hacia /var/www/vhosts, psql/mysql con usuario y base, echo OK).
+        // Si el guard no esta instalado NO se instala la clave (nunca volver a una regex con shell).
+        $guard = self::SSH_GUARD_PATH;
+        if (!is_file($guard) || !is_executable($guard)) {
+            LogService::log('federation.ssh.install_failed', null, 'federation-ssh-guard no instalado en ' . $guard . '; ejecuta bin/update.sh');
+            error_log('[federation] federation-ssh-guard no esta instalado en ' . $guard . ': clave federada NO instalada. Ejecuta bin/update.sh.');
+            return false;
+        }
+
+        // Una clave publica va en una sola linea: sin saltos ni comillas que rompan las opciones.
+        if (preg_match('/[\r\n"]/', $publicKey)) {
+            return false;
+        }
+
+        $restrictedKey = 'command="' . $guard . '",no-pty,no-port-forwarding,no-agent-forwarding,no-X11-forwarding '
             . $publicKey;
 
         file_put_contents($authKeysFile, "\n" . $restrictedKey . "\n", FILE_APPEND);

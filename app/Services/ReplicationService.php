@@ -515,7 +515,7 @@ class ReplicationService
         $safeUser = preg_replace('/[^a-zA-Z0-9_]/', '', $replUser);
         $safePass = escapeshellarg($replPass);
         $sql = "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{$safeUser}') THEN CREATE ROLE {$safeUser} WITH REPLICATION LOGIN PASSWORD {$safePass}; END IF; END \$\$;";
-        $output = shell_exec("sudo -u postgres psql -c " . escapeshellarg($sql) . " 2>&1");
+        $output = DatabaseService::runWithStdin("sudo -u postgres psql 2>&1", $sql . "\n"); // SQL con la contraseña por stdin, no por argv
         $steps[] = ['name' => 'Crear usuario replicacion', 'ok' => true, 'output' => trim($output ?? 'OK')];
 
         $output = static::restartPanelCluster("restart");
@@ -658,7 +658,7 @@ class ReplicationService
 
             $safePass = escapeshellarg($replPass);
             $sql = "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{$replUser}') THEN CREATE ROLE {$replUser} WITH REPLICATION LOGIN PASSWORD {$safePass}; END IF; END \$\$;";
-            $output = shell_exec("sudo -u postgres psql -c " . escapeshellarg($sql) . " 2>&1");
+            $output = DatabaseService::runWithStdin("sudo -u postgres psql 2>&1", $sql . "\n"); // SQL con la contraseña por stdin, no por argv
             $steps[] = ['name' => "Crear usuario PG: {$replUser}", 'ok' => true, 'output' => trim($output ?? 'OK')];
             $createdUsers[] = $replUser;
         }
@@ -872,8 +872,9 @@ class ReplicationService
             $pubName = "pub_{$safeDb}";
             $connInfo = "host={$masterIp} port={$port} user={$user} password={$pass} dbname={$safeDb}";
             $sql = "CREATE SUBSCRIPTION {$subName} CONNECTION " . escapeshellarg($connInfo) . " PUBLICATION {$pubName}";
-            $cmd = "sudo -u postgres psql -d " . escapeshellarg($safeDb) . " -c " . escapeshellarg($sql) . " 2>&1";
-            $output = trim((string)shell_exec($cmd));
+            // SQL por stdin: la contraseña del conninfo no debe aparecer en la línea de comandos (ps)
+            $cmd = "sudo -u postgres psql -d " . escapeshellarg($safeDb) . " 2>&1";
+            $output = trim(self::shellEnv($cmd, [], $sql . "\n"));
             $subOk = !str_contains(strtolower($output), 'error') || str_contains($output, 'already exists');
             $steps[] = ['name' => "Suscripcion: {$subName}", 'ok' => $subOk, 'output' => $output ?: 'OK'];
         }
@@ -1591,12 +1592,36 @@ class ReplicationService
         return '/var/lib/musedock/pg-streaming-' . preg_replace('/[^a-z0-9]/i', '_', (string)$cluster['key']);
     }
 
+    /**
+     * shell_exec con variables de entorno extra (p. ej. PGPASSWORD) y/o stdin, pasados al proceso
+     * hijo fuera de la línea de comandos (que es visible con `ps`). Devuelve la salida ('' si vacía).
+     */
+    private static function shellEnv(string $cmd, array $env = [], ?string $stdin = null): string
+    {
+        $full = [];
+        foreach (array_merge(getenv() ?: [], $env) as $k => $v) {
+            $full[(string)$k] = (string)$v;
+        }
+        $proc = @proc_open(['/bin/sh', '-c', $cmd], [0 => ['pipe', 'r'], 1 => ['pipe', 'w']], $pipes, null, $full);
+        if (!is_resource($proc)) {
+            return '';
+        }
+        if ($stdin !== null && $stdin !== '') {
+            @fwrite($pipes[0], $stdin);
+        }
+        fclose($pipes[0]);
+        $out = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        proc_close($proc);
+        return $out === false ? '' : $out;
+    }
+
     /** Crea (si no existe) un slot físico con WAL reservado en el master, por el protocolo de réplica. */
     public static function ensureSlotOnMaster(string $ip, int $port, string $user, string $pass, string $slot): array
     {
-        $env = 'PGPASSWORD=' . escapeshellarg($pass) . ' PGCONNECT_TIMEOUT=8 ';
+        $env = ['PGPASSWORD' => $pass, 'PGCONNECT_TIMEOUT' => '8'];
         $conn = escapeshellarg("host={$ip} port={$port} user={$user} dbname=postgres replication=database");
-        $out = trim((string)shell_exec($env . 'psql ' . $conn . ' -XAt -c ' . escapeshellarg("CREATE_REPLICATION_SLOT {$slot} PHYSICAL RESERVE_WAL") . ' 2>&1'));
+        $out = trim(self::shellEnv('psql ' . $conn . ' -XAt -c ' . escapeshellarg("CREATE_REPLICATION_SLOT {$slot} PHYSICAL RESERVE_WAL") . ' 2>&1', $env));
         if ($out !== '' && stripos($out, 'already exists') === false && stripos($out, 'ya existe') === false && stripos($out, 'error') !== false) {
             return ['ok' => false, 'message' => "no se pudo crear el slot {$slot}: {$out}"];
         }
@@ -3143,7 +3168,7 @@ class ReplicationService
         if ($engine === 'pg') {
             $safePass = escapeshellarg($password);
             $sql = "DO \$\$ BEGIN IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '{$safeUser}') THEN CREATE ROLE {$safeUser} WITH REPLICATION LOGIN PASSWORD {$safePass}; ELSE ALTER ROLE {$safeUser} WITH PASSWORD {$safePass}; END IF; END \$\$;";
-            $output = shell_exec("sudo -u postgres psql -c " . escapeshellarg($sql) . " 2>&1");
+            $output = DatabaseService::runWithStdin("sudo -u postgres psql 2>&1", $sql . "\n"); // SQL con la contraseña por stdin, no por argv
             if ($output !== null && stripos($output, 'error') !== false && stripos($output, 'DO') === false) {
                 return ['ok' => false, 'error' => trim($output)];
             }

@@ -36,7 +36,7 @@
                 <div class="d-flex gap-1 mt-3">
                     <?php if ($svc['status'] === 'active'): ?>
                         <?php if ($svc['id'] === 'caddy'): ?>
-                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'restart', '<?= View::e($svc['name']) ?>')">
+                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'restart', <?= View::js($svc['name']) ?>)">
                     <?= \MuseDockPanel\View::csrf() ?>
                                 <input type="hidden" name="service" value="<?= View::e($svc['id']) ?>">
                                 <input type="hidden" name="action" value="restart">
@@ -44,7 +44,7 @@
                                     <i class="bi bi-arrow-repeat me-1"></i>Reiniciar
                                 </button>
                             </form>
-                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'stop', '<?= View::e($svc['name']) ?>')">
+                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'stop', <?= View::js($svc['name']) ?>)">
                     <?= \MuseDockPanel\View::csrf() ?>
                                 <input type="hidden" name="service" value="<?= View::e($svc['id']) ?>">
                                 <input type="hidden" name="action" value="stop">
@@ -53,7 +53,7 @@
                                 </button>
                             </form>
                         <?php else: ?>
-                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'restart', '<?= View::e($svc['name']) ?>')">
+                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'restart', <?= View::js($svc['name']) ?>)">
                     <?= \MuseDockPanel\View::csrf() ?>
                                 <input type="hidden" name="service" value="<?= View::e($svc['id']) ?>">
                                 <input type="hidden" name="action" value="restart">
@@ -61,7 +61,7 @@
                                     <i class="bi bi-arrow-repeat me-1"></i>Reiniciar
                                 </button>
                             </form>
-                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'reload', '<?= View::e($svc['name']) ?>')">
+                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'reload', <?= View::js($svc['name']) ?>)">
                     <?= \MuseDockPanel\View::csrf() ?>
                                 <input type="hidden" name="service" value="<?= View::e($svc['id']) ?>">
                                 <input type="hidden" name="action" value="reload">
@@ -69,7 +69,7 @@
                                     <i class="bi bi-arrow-clockwise me-1"></i>Reload
                                 </button>
                             </form>
-                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'stop', '<?= View::e($svc['name']) ?>')">
+                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'stop', <?= View::js($svc['name']) ?>)">
                     <?= \MuseDockPanel\View::csrf() ?>
                                 <input type="hidden" name="service" value="<?= View::e($svc['id']) ?>">
                                 <input type="hidden" name="action" value="stop">
@@ -79,7 +79,7 @@
                             </form>
                         <?php endif; ?>
                     <?php else: ?>
-                        <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'start', '<?= View::e($svc['name']) ?>')">
+                        <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'start', <?= View::js($svc['name']) ?>)">
                     <?= \MuseDockPanel\View::csrf() ?>
                             <input type="hidden" name="service" value="<?= View::e($svc['id']) ?>">
                             <input type="hidden" name="action" value="start">
@@ -192,7 +192,7 @@ if ($supervisorInstalled) {
                         <?php if ($ss['critical']): ?>
                             <span class="badge" style="background:rgba(251,191,36,0.15);color:#fbbf24;"><i class="bi bi-lock-fill"></i></span>
                         <?php elseif ($ss['enabled'] === 'enabled'): ?>
-                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'disable', '<?= View::e($ss['name']) ?>')">
+                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'disable', <?= View::js($ss['name']) ?>)">
                                 <?= View::csrf() ?>
                                 <input type="hidden" name="service" value="<?= View::e($ss['id']) ?>">
                                 <input type="hidden" name="action" value="disable">
@@ -201,7 +201,7 @@ if ($supervisorInstalled) {
                                 </button>
                             </form>
                         <?php else: ?>
-                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'enable', '<?= View::e($ss['name']) ?>')">
+                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'enable', <?= View::js($ss['name']) ?>)">
                                 <?= View::csrf() ?>
                                 <input type="hidden" name="service" value="<?= View::e($ss['id']) ?>">
                                 <input type="hidden" name="action" value="enable">
@@ -216,13 +216,13 @@ if ($supervisorInstalled) {
                             <small class="text-muted">Protegido</small>
                         <?php elseif ($ss['status'] === 'active'): ?>
                             <div class="d-flex gap-1 justify-content-end">
-                                <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'restart', '<?= View::e($ss['name']) ?>')">
+                                <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'restart', <?= View::js($ss['name']) ?>)">
                                     <?= View::csrf() ?>
                                     <input type="hidden" name="service" value="<?= View::e($ss['id']) ?>">
                                     <input type="hidden" name="action" value="restart">
                                     <button type="submit" class="btn btn-outline-warning btn-sm py-0 px-1" title="Reiniciar"><i class="bi bi-arrow-repeat"></i></button>
                                 </form>
-                                <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'stop', '<?= View::e($ss['name']) ?>')">
+                                <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'stop', <?= View::js($ss['name']) ?>)">
                                     <?= View::csrf() ?>
                                     <input type="hidden" name="service" value="<?= View::e($ss['id']) ?>">
                                     <input type="hidden" name="action" value="stop">
@@ -230,7 +230,7 @@ if ($supervisorInstalled) {
                                 </form>
                             </div>
                         <?php else: ?>
-                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'start', '<?= View::e($ss['name']) ?>')">
+                            <form method="POST" action="/settings/services/action" class="d-inline" onsubmit="return svcConfirm(event, this, 'start', <?= View::js($ss['name']) ?>)">
                                 <?= View::csrf() ?>
                                 <input type="hidden" name="service" value="<?= View::e($ss['id']) ?>">
                                 <input type="hidden" name="action" value="start">

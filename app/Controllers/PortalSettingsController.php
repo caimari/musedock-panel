@@ -8,6 +8,7 @@ use MuseDockPanel\Settings;
 use MuseDockPanel\View;
 use MuseDockPanel\Services\LicenseService;
 use MuseDockPanel\Services\LogService;
+use MuseDockPanel\Services\PortalService;
 
 class PortalSettingsController
 {
@@ -61,7 +62,56 @@ class PortalSettingsController
             'customers' => $customers,
             'portalServiceActive' => $portalServiceActive,
             'sidebarColor' => $sidebarColor,
+            'portalState' => $portalInstalled ? PortalService::status() : [],
         ]);
+    }
+
+    /**
+     * POST: Nombre público y puerto del portal. Se aplica al momento en este nodo
+     * (servicio + ruta de Caddy si manda; apagado si es una copia) y las copias lo
+     * reciben del principal en su siguiente pasada (cluster-worker, 5 min).
+     */
+    public function saveAddress(): void
+    {
+        $host = PortalService::normalizeHostname((string)($_POST['portal_hostname'] ?? ''));
+        $port = (int)($_POST['portal_port'] ?? 8446);
+        if ($host !== '' && !PortalService::validHostname($host)) {
+            Flash::set('error', 'El nombre público no es válido (ejemplo: portal.tudominio.com).');
+            Router::redirect('/settings/portal');
+            return;
+        }
+        $panelPort = (int)(Settings::get('panel_port', '8444') ?: 8444);
+        // 443 vale (recomendado: sin puerto en la dirección, ya abierto en el principal y
+        // compatible con el proxy de Cloudflare); la ruta va en el servidor de las webs.
+        if ($port < 1 || $port > 65534 || in_array($port, [80, $panelPort, $panelPort + 1], true)) {
+            Flash::set('error', 'Puerto no válido para el portal.');
+            Router::redirect('/settings/portal');
+            return;
+        }
+        if (Settings::get('cluster_role', '') === 'slave') {
+            Flash::set('error', 'Este servidor es una copia: cambia la dirección del portal en el principal (se copia aquí sola).');
+            Router::redirect('/settings/portal');
+            return;
+        }
+
+        $oldHost = PortalService::hostname();
+        Settings::set('portal_hostname', $host);
+        Settings::set('portal_port', (string)$port);
+        if ($oldHost !== $host || $host === '') {
+            PortalService::removeRoute();
+        }
+        $done = PortalService::apply();
+        LogService::log('settings.portal', $host ?: '(sin nombre)', "Dirección del portal: {$host}:{$port}" . ($done ? ' — ' . implode('; ', $done) : ''));
+
+        $failed = array_filter($done, static fn($l) => str_contains($l, 'NO '));
+        if ($failed) {
+            Flash::set('error', 'Guardado, pero: ' . implode(' · ', $failed));
+        } else {
+            Flash::set('success', $host !== ''
+                ? 'Dirección guardada. El portal queda en ' . PortalService::url() . ' (el nombre debe apuntar a este servidor).'
+                : 'Dirección quitada: el portal no se publica con nombre propio.');
+        }
+        Router::redirect('/settings/portal');
     }
 
     /**
@@ -120,9 +170,11 @@ class PortalSettingsController
         );
 
         // Build the setup URL
+        // Con el nombre propio del portal (sigue valiendo tras un relevo); si no hay, el del panel.
         $portalPort = Settings::get('portal_port', '8446');
         $host = preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? 'localhost');
-        $setupUrl = "https://{$host}:{$portalPort}/setup-password?token={$token}&email=" . urlencode($customer['email']);
+        $base = PortalService::url() ?: "https://{$host}:{$portalPort}";
+        $setupUrl = "{$base}/setup-password?token={$token}&email=" . urlencode($customer['email']);
 
         // Send email
         $isNew = empty($customer['password_hash']);

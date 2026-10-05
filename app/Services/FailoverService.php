@@ -74,6 +74,13 @@ class FailoverService
         // failover_return_stable_minutes respondiendo bien y es copia al día.
         'failover_preferred_ip'           => '',
         'failover_return_stable_minutes'  => '15',
+        // ¿Ha caído el principal o todo su sitio? Comprobaciones de OTRAS máquinas del
+        // mismo sitio que no dependen del principal (una por línea: host:puerto o
+        // ping:host). Si alguna responde, el sitio sigue vivo: lo normal es que el
+        // principal vuelva solo (p. ej. HA de Proxmox lo arranca en otra máquina), así
+        // que se espera failover_site_alive_wait_minutes antes de tomar el mando.
+        'failover_site_probes'               => '',
+        'failover_site_alive_wait_minutes'   => '15',
 
         // Health severity thresholds (configurable by admin)
         'failover_disk_critical_pct'  => '5',   // <5% free → critical (failover)
@@ -1322,6 +1329,7 @@ class FailoverService
             'failover_mysql_severity', 'failover_caddy_severity',
             'failover_dns_exclude', 'failover_dns_exclude_auto',
             'failover_preferred_ip', 'failover_return_stable_minutes',
+            'failover_site_probes', 'failover_site_alive_wait_minutes',
             'filesync_snapshot',
         ];
     }

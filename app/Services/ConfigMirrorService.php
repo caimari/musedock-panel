@@ -35,8 +35,9 @@ final class ConfigMirrorService
     private const BLOCK_END = '# <<< musedock-mirror <<<';
     private const BACKUP_DIR = '/var/backups/musedock-mirror';
     private const CRON_SKIP = ['e2scrub_all', 'php', 'sysstat', 'certbot', '.placeholder', 'popularity-contest'];
-    /** Unidades que cada nodo tiene por sí mismo (del panel) y no se copian. */
-    private const UNIT_SKIP = ['musedock-panel.service', 'musedock-stale-master-check.service'];
+    /** Unidades que cada nodo tiene por sí mismo (del panel) y no se copian. El portal de
+     *  clientes lo enciende y apaga PortalService según quién manda. */
+    private const UNIT_SKIP = ['musedock-panel.service', 'musedock-stale-master-check.service', 'musedock-portal.service'];
 
     // ── MASTER: exportar ─────────────────────────────────────────────────
 
@@ -97,7 +98,13 @@ final class ConfigMirrorService
     {
         $defaults = ['supervisor' => [], 'cron_d' => [], 'crontabs' => [], 'systemd' => [], 'caddy_pending' => false];
         $s = json_decode(Settings::get('cluster_config_mirror_state', '{}'), true);
-        return is_array($s) ? $s + $defaults : $defaults;
+        $s = is_array($s) ? $s + $defaults : $defaults;
+        // Una unidad que antes se copiaba y ahora gestiona el propio nodo (UNIT_SKIP) sale
+        // del estado sin tocarla: si no, se pararía o apartaría como "ya no está en el master".
+        foreach (self::UNIT_SKIP as $u) {
+            unset($s['systemd'][$u]);
+        }
+        return $s;
     }
 
     private static function saveState(array $s): void
@@ -114,7 +121,7 @@ final class ConfigMirrorService
         @copy($path, self::BACKUP_DIR . '/' . str_replace('/', '_', ltrim($path, '/')) . '.' . date('Ymd-His'));
     }
 
-    private static function masterNode(): ?array
+    public static function masterNode(): ?array
     {
         foreach (ClusterService::getNodes() as $n) {
             if (($n['role'] ?? '') === 'master') {

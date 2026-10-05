@@ -21,6 +21,69 @@ use MuseDockPanel\Security\TlsClient;
 class FederationApiController
 {
     /**
+     * Valida los identificadores que llegan del otro nodo (dominio, usuario, versión PHP,
+     * rutas, shell y bases de datos) antes de usarlos en comandos, rutas o configuración.
+     * Devuelve true y responde con error si algo no es válido.
+     */
+    /** Ejecuta una sentencia SQL en MySQL/MariaDB pasándola como argumento escapado. */
+    private function mysqlRun(string $sql, ?array &$out = null): int
+    {
+        $out = $out ?? [];
+        exec('mysql -e ' . escapeshellarg($sql) . ' 2>&1', $out, $rc);
+        return $rc;
+    }
+
+    private function rejectInvalidIdentity(array $input): bool
+    {
+        $err = null;
+        $domain = $input['domain'] ?? null;
+        $username = $input['username'] ?? null;
+
+        if ($domain !== null && $domain !== '' &&
+            (!is_string($domain) || strlen($domain) > 253
+                || !preg_match('/^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$/i', $domain))) {
+            $err = 'Dominio no válido';
+        } elseif ($username !== null && $username !== '' &&
+            (!is_string($username) || !preg_match('/^[a-z][a-z0-9_-]{0,31}$/i', $username))) {
+            $err = 'Usuario no válido';
+        } elseif (isset($input['php_version']) && (!is_string($input['php_version']) || !preg_match('/^\d\.\d$/', $input['php_version']))) {
+            $err = 'Versión de PHP no válida';
+        } elseif (isset($input['home_dir']) && $input['home_dir'] !== ''
+            && (!is_string($input['home_dir']) || !preg_match('#^/var/www/vhosts/[A-Za-z0-9._-]+$#', $input['home_dir']) || str_contains($input['home_dir'], '..'))) {
+            $err = 'Directorio home no válido';
+        } elseif (isset($input['document_root']) && $input['document_root'] !== ''
+            && (!is_string($input['document_root']) || !preg_match('#^/var/www/vhosts/[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$#', $input['document_root']) || str_contains($input['document_root'], '..'))) {
+            $err = 'Document root no válido';
+        } elseif (isset($input['shell']) && $input['shell'] !== '') {
+            $shells = @file('/etc/shells', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+            $shells[] = '/usr/sbin/nologin';
+            $shells[] = '/bin/false';
+            if (!is_string($input['shell']) || !in_array($input['shell'], $shells, true)) {
+                $err = 'Shell no válida';
+            }
+        }
+
+        if ($err === null) {
+            foreach (($input['databases'] ?? []) as $db) {
+                if (!is_array($db)
+                    || !preg_match('/^[A-Za-z0-9_-]{1,64}$/', (string)($db['db_name'] ?? ''))
+                    || !preg_match('/^[A-Za-z0-9_.-]{0,64}$/', (string)($db['db_user'] ?? ''))
+                    || !in_array($db['db_type'] ?? 'pgsql', ['pgsql', 'mysql', 'mariadb'], true)) {
+                    $err = 'Nombre o usuario de base de datos no válido';
+                    break;
+                }
+            }
+        }
+
+        if ($err !== null) {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'error' => $err]);
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * GET /api/federation/health
      * Lightweight health check for federation peers.
      */
@@ -71,6 +134,8 @@ class FederationApiController
     {
         header('Content-Type: application/json');
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
+
+        if ($this->rejectInvalidIdentity($input)) return;
 
         $conflicts = [];
 
@@ -125,6 +190,8 @@ class FederationApiController
     {
         header('Content-Type: application/json');
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
+
+        if ($this->rejectInvalidIdentity($input)) return;
 
         $migrationId = $input['migration_id'] ?? '';
         $domain      = $input['domain'] ?? '';
@@ -218,23 +285,24 @@ class FederationApiController
                 }
             } else {
                 $out = [];
-                $safeUser = addslashes($dbUser);
-                $safePass = addslashes($dbPass);
+                $safeUser = str_replace(['\\', "'"], ['\\\\', "\\'"], $dbUser);
+                $safePass = str_replace(['\\', "'"], ['\\\\', "\\'"], $dbPass);
+                $safeDb   = str_replace('`', '``', $dbName);
 
-                exec("mysql -e 'CREATE DATABASE IF NOT EXISTS `" . addslashes($dbName) . "`' 2>&1", $out, $rc1);
+                $rc1 = $this->mysqlRun("CREATE DATABASE IF NOT EXISTS `{$safeDb}`", $out);
 
                 if (!empty($dbPass)) {
-                    exec("mysql -e \"CREATE USER IF NOT EXISTS '{$safeUser}'@'localhost' IDENTIFIED BY '{$safePass}'\" 2>&1", $out, $rc2);
-                    exec("mysql -e \"ALTER USER '{$safeUser}'@'localhost' IDENTIFIED BY '{$safePass}'\" 2>&1", $out);
+                    $rc2 = $this->mysqlRun("CREATE USER IF NOT EXISTS '{$safeUser}'@'localhost' IDENTIFIED BY '{$safePass}'", $out);
+                    $this->mysqlRun("ALTER USER '{$safeUser}'@'localhost' IDENTIFIED BY '{$safePass}'", $out);
                 } else {
-                    exec("mysql -e \"CREATE USER IF NOT EXISTS '{$safeUser}'@'localhost'\" 2>&1", $out, $rc2);
+                    $rc2 = $this->mysqlRun("CREATE USER IF NOT EXISTS '{$safeUser}'@'localhost'", $out);
                 }
 
-                exec("mysql -e \"GRANT ALL ON \`" . addslashes($dbName) . "\`.* TO '{$safeUser}'@'localhost'\" 2>&1", $out, $rc3);
-                exec("mysql -e 'FLUSH PRIVILEGES' 2>&1", $out);
+                $rc3 = $this->mysqlRun("GRANT ALL ON `{$safeDb}`.* TO '{$safeUser}'@'localhost'", $out);
+                $this->mysqlRun('FLUSH PRIVILEGES', $out);
 
                 // Verify DB exists
-                exec("mysql -e 'USE `" . addslashes($dbName) . "`' 2>&1", $out, $rcVerify);
+                $rcVerify = $this->mysqlRun("USE `{$safeDb}`", $out);
                 if ($rcVerify !== 0) {
                     $dbErrors[] = "{$dbName} (mysql): creation failed";
                 } else {
@@ -271,6 +339,8 @@ class FederationApiController
         header('Content-Type: application/json');
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
 
+        if ($this->rejectInvalidIdentity($input)) return;
+
         $migrationId = $input['migration_id'] ?? '';
         $domain      = $input['domain'] ?? '';
         $username    = $input['username'] ?? '';
@@ -295,6 +365,28 @@ class FederationApiController
             $poolFile = "/etc/php/{$phpVersion}/fpm/pool.d/{$username}.conf";
             if (file_exists($poolFile)) {
                 $poolContent = file_get_contents($poolFile);
+
+                // Descartar claves/valores con saltos de línea o caracteres de control
+                // (evita inyectar directivas arbitrarias en el pool de PHP-FPM)
+                $cleanCfg = static function ($cfg): array {
+                    $r = [];
+                    foreach ((array)$cfg as $k => $v) {
+                        if (is_scalar($v) && preg_match('/^[A-Za-z0-9_.]{1,64}$/', (string)$k)
+                            && !preg_match('/[\x00-\x1f\x7f]/', (string)$v)) {
+                            $r[$k] = $v;
+                        }
+                    }
+                    return $r;
+                };
+                $fpmConfig = $cleanCfg($fpmConfig);
+                $phpConfig = $cleanCfg($phpConfig);
+                // Estas directivas fijan el aislamiento del hosting: no se aceptan del otro nodo
+                foreach (['user', 'group', 'listen', 'listen.owner', 'listen.group', 'listen.mode', 'chroot', 'chdir'] as $locked) {
+                    unset($fpmConfig[$locked]);
+                }
+                foreach (['open_basedir', 'disable_functions', 'sys_temp_dir', 'upload_tmp_dir', 'session.save_path', 'auto_prepend_file', 'extension', 'zend_extension'] as $locked) {
+                    unset($phpConfig[$locked]);
+                }
 
                 // Apply FPM settings
                 foreach ($fpmConfig as $key => $value) {
@@ -598,9 +690,23 @@ class FederationApiController
         header('Content-Type: application/json');
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
 
+        if ($this->rejectInvalidIdentity($input)) return;
+
         $migrationId = $input['migration_id'] ?? '';
         $domain      = $input['domain'] ?? '';
         $username    = $input['username'] ?? '';
+        // Nunca borrar usuarios del sistema (UID < 1000) ni con dominio vacío (evita rm -rf del directorio padre)
+        if ($domain === '') {
+            echo json_encode(['ok' => false, 'error' => 'domain is required']);
+            return;
+        }
+        if ($username !== '') {
+            $rbUid = trim((string)shell_exec('id -u ' . escapeshellarg($username) . ' 2>/dev/null'));
+            if ($rbUid !== '' && (int)$rbUid < 1000) {
+                echo json_encode(['ok' => false, 'error' => 'Usuario del sistema protegido']);
+                return;
+            }
+        }
 
         FederationMigrationService::log($migrationId, 'rollback', 'info', "Rolling back destination: {$domain}");
 
@@ -637,8 +743,8 @@ class FederationApiController
                     exec("sudo -u postgres dropdb --if-exists " . escapeshellarg($db['db_name']) . " 2>&1", $out, $rc);
                     exec("sudo -u postgres dropuser --if-exists " . escapeshellarg($db['db_user']) . " 2>&1", $out, $rc);
                 } else {
-                    exec("mysql -e 'DROP DATABASE IF EXISTS `" . addslashes($db['db_name']) . "`' 2>&1", $out, $rc);
-                    exec("mysql -e \"DROP USER IF EXISTS '" . addslashes($db['db_user']) . "'@'localhost'\" 2>&1", $out, $rc);
+                    $rc = $this->mysqlRun('DROP DATABASE IF EXISTS `' . str_replace('`', '``', (string)$db['db_name']) . '`', $out);
+                    $rc = $this->mysqlRun("DROP USER IF EXISTS '" . str_replace(['\\', "'"], ['\\\\', "\\'"], (string)$db['db_user']) . "'@'localhost'", $out);
                 }
                 FederationMigrationService::log($migrationId, 'rollback', 'info',
                     "Dropped database: {$db['db_name']} (rc: " . ($rc ?? '?') . ")");
@@ -678,6 +784,8 @@ class FederationApiController
     {
         header('Content-Type: application/json');
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
+
+        if ($this->rejectInvalidIdentity($input)) return;
 
         $migrationId = $input['migration_id'] ?? '';
         $domain = $input['domain'] ?? '';
@@ -748,7 +856,9 @@ class FederationApiController
         $autoAccept = Settings::get('federation_auto_accept_peers', '0') === '1';
 
         // Check if this peer is already registered
-        $existing = Database::fetchOne('SELECT id FROM federation_peers WHERE api_url = :url', ['url' => rtrim($peerApiUrl, '/')]);
+        $existing = Database::fetchOne('SELECT id, status FROM federation_peers WHERE api_url = :url', ['url' => rtrim($peerApiUrl, '/')]);
+        // Mientras el admin no lo apruebe: ni clave SSH instalada ni token del cluster devuelto.
+        $isPending = !$autoAccept && (!$existing || ($existing['status'] ?? '') === 'pending_approval');
         if ($existing) {
             // Update existing peer (already approved)
             FederationService::updatePeer($existing['id'], [
@@ -792,7 +902,7 @@ class FederationApiController
         }
 
         // Install SSH key if provided
-        if (!empty($publicKey)) {
+        if (!empty($publicKey) && !$isPending) {
             FederationService::installSshKey($publicKey);
         }
 
@@ -806,7 +916,7 @@ class FederationApiController
         // Return our local token for the remote peer to use when calling us
         $localToken = '';
         $rawToken = Settings::get('cluster_local_token', '');
-        if ($rawToken) {
+        if ($rawToken && !$isPending) {
             $localToken = \MuseDockPanel\Services\ReplicationService::decryptPassword($rawToken);
         }
 
@@ -836,6 +946,8 @@ class FederationApiController
     {
         header('Content-Type: application/json');
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
+
+        if ($this->rejectInvalidIdentity($input)) return;
 
         $migrationId = $input['migration_id'] ?? '';
         $domain = $input['domain'] ?? '';
@@ -903,6 +1015,16 @@ class FederationApiController
     private const BACKUP_DIR = '/opt/musedock-panel/storage/backups';
 
     /**
+     * Nombre de copia seguro: una sola carpeta, sin "." ni "..". Antes basename('..') pasaba y
+     * backups/delete o un receive-upload fallido hacían rm -rf de la carpeta storage/.
+     */
+    private static function safeBackupName(mixed $name): string
+    {
+        $name = basename((string)$name);
+        return preg_match('/^[A-Za-z0-9][A-Za-z0-9._@+-]{0,200}$/', $name) && !str_contains($name, '..') ? $name : '';
+    }
+
+    /**
      * GET /api/federation/backups/list
      * List all backups on this panel.
      */
@@ -954,7 +1076,7 @@ class FederationApiController
         header('Content-Type: application/json');
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
 
-        $backupName = basename($input['backup_name'] ?? '');
+        $backupName = self::safeBackupName($input['backup_name'] ?? '');
         if (empty($backupName)) {
             echo json_encode(['ok' => false, 'error' => 'backup_name is required']);
             return;
@@ -975,7 +1097,7 @@ class FederationApiController
      */
     public function backupsDownload(): void
     {
-        $backupName = basename($_GET['backup_name'] ?? '');
+        $backupName = self::safeBackupName($_GET['backup_name'] ?? '');
         if (empty($backupName)) {
             header('Content-Type: application/json');
             echo json_encode(['ok' => false, 'error' => 'backup_name is required']);
@@ -1003,7 +1125,7 @@ class FederationApiController
     {
         header('Content-Type: application/json');
 
-        $backupName = basename($_POST['backup_name'] ?? '');
+        $backupName = self::safeBackupName($_POST['backup_name'] ?? '');
         if (empty($backupName) || !isset($_FILES['backup'])) {
             echo json_encode(['ok' => false, 'error' => 'backup_name and backup file are required']);
             return;
@@ -1040,7 +1162,7 @@ class FederationApiController
         header('Content-Type: application/json');
         $input = json_decode(file_get_contents('php://input'), true) ?? [];
 
-        $backupName = basename($input['backup_name'] ?? '');
+        $backupName = self::safeBackupName($input['backup_name'] ?? '');
         if (empty($backupName)) {
             echo json_encode(['ok' => false, 'error' => 'backup_name is required']);
             return;

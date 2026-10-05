@@ -25,13 +25,13 @@
                             <?php if ($hasPortal): ?>
                                 <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;"><i class="bi bi-check-circle me-1"></i>Activo</span>
                                 <button type="button" class="btn btn-sm py-0 px-2 ms-2" style="font-size:0.72rem;background:rgba(168,85,247,0.15);color:#a855f7;border:1px solid rgba(168,85,247,0.3);"
-                                    onclick="sendPortalInvitation(<?= $customer['id'] ?>, '<?= View::e(addslashes($customer['name'])) ?>', '<?= View::e($customer['email']) ?>', true)">
+                                    onclick="sendPortalInvitation(<?= (int)$customer['id'] ?>, <?= View::js($customer['name']) ?>, <?= View::js($customer['email']) ?>, true)">
                                     <i class="bi bi-arrow-clockwise me-1"></i>Reset password
                                 </button>
                             <?php else: ?>
                                 <span class="badge" style="background:rgba(100,116,139,0.15);color:#64748b;"><i class="bi bi-dash-circle me-1"></i>Sin acceso</span>
                                 <button type="button" class="btn btn-sm py-0 px-2 ms-2" style="font-size:0.72rem;background:rgba(168,85,247,0.15);color:#a855f7;border:1px solid rgba(168,85,247,0.3);"
-                                    onclick="sendPortalInvitation(<?= $customer['id'] ?>, '<?= View::e(addslashes($customer['name'])) ?>', '<?= View::e($customer['email']) ?>', false)">
+                                    onclick="sendPortalInvitation(<?= (int)$customer['id'] ?>, <?= View::js($customer['name']) ?>, <?= View::js($customer['email']) ?>, false)">
                                     <i class="bi bi-send me-1"></i>Invitar al portal
                                 </button>
                             <?php endif; ?>

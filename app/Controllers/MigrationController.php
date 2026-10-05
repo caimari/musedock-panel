@@ -55,10 +55,30 @@ class MigrationController
             return;
         }
 
-        $filename = basename(parse_url($url, PHP_URL_PATH));
+        // Solo http/https hacia direcciones públicas: evita pedir al panel que descargue
+        // servicios internos (API de Caddy, metadatos de nube, red local) y los deje en la web.
+        $uHost = strtolower((string)parse_url($url, PHP_URL_HOST));
+        $uScheme = strtolower((string)parse_url($url, PHP_URL_SCHEME));
+        $uIps = $uHost === '' ? [] : (filter_var(trim($uHost, '[]'), FILTER_VALIDATE_IP)
+            ? [trim($uHost, '[]')]
+            : array_merge(array_column(@dns_get_record($uHost, DNS_A) ?: [], 'ip'), array_column(@dns_get_record($uHost, DNS_AAAA) ?: [], 'ipv6')));
+        $uPublic = $uIps !== [];
+        foreach ($uIps as $uIp) {
+            if (!filter_var($uIp, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                $uPublic = false;
+            }
+        }
+        if (!in_array($uScheme, ['http', 'https'], true) || !$uPublic) {
+            Flash::set('error', 'URL no permitida: debe ser http/https y apuntar a una dirección pública.');
+            Router::redirect('/accounts/' . $params['id'] . '/migrate');
+            return;
+        }
+
+        $filename = preg_replace('/[^A-Za-z0-9._-]/', '_', basename((string)parse_url($url, PHP_URL_PATH)));
+        $filename = ltrim($filename, '.') ?: 'descarga';
         $tmpFile = "/tmp/migration_{$account['username']}_{$filename}";
 
-        shell_exec(sprintf('wget -q -O %s %s 2>&1', escapeshellarg($tmpFile), escapeshellarg($url)));
+        shell_exec(sprintf('wget -q -O %s -- %s 2>&1', escapeshellarg($tmpFile), escapeshellarg($url)));
 
         if (!file_exists($tmpFile) || filesize($tmpFile) === 0) {
             Flash::set('error', 'Descarga fallida. Verifica la URL.');
@@ -96,13 +116,77 @@ class MigrationController
     // SSH Helpers
     // ================================================================
 
-    private function sshExec(string $password, string $user, string $host, int $port, string $remoteCmd, int $timeout = 30): string
+    /**
+     * Host/usuario SSH sin guion inicial ni caracteres raros: evita que se interpreten
+     * como opciones de ssh/scp (p. ej. -oProxyCommand=...). Devuelve '' si no es válido.
+     */
+    private static function sshSafe(string $v, string $kind): string
+    {
+        $v = trim($v);
+        $re = $kind === 'host' ? '/^[A-Za-z0-9][A-Za-z0-9._:-]{0,252}$/' : '/^[A-Za-z0-9_][A-Za-z0-9._@-]{0,63}$/';
+        return preg_match($re, $v) ? $v : '';
+    }
+
+    private function sshExec(string $password, string $user, string $host, int $port, string $remoteCmd, int $timeout = 30, ?string $stdin = null): string
     {
         $cmd = sprintf(
-            'timeout %d sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=5 -p %d %s@%s %s 2>&1',
-            $timeout, escapeshellarg($password), $port, escapeshellarg($user), escapeshellarg($host), escapeshellarg($remoteCmd)
+            'timeout %d sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=5 -p %d %s@%s %s 2>&1',
+            $timeout, $port, escapeshellarg($user), escapeshellarg($host), escapeshellarg($remoteCmd)
         );
-        return shell_exec($cmd) ?? '';
+        return self::runSecret($cmd, ['SSHPASS' => $password], $stdin) ?? '';
+    }
+
+    /**
+     * Ejecuta una línea de shell (como shell_exec) pasando secretos por entorno y/o stdin,
+     * para que NUNCA aparezcan en la línea de comandos (visible con `ps`).
+     * Devuelve la salida estándar, o null si está vacía (igual que shell_exec).
+     * El stderr se hereda salvo que la propia línea lo redirija.
+     */
+    private static function runSecret(string $cmd, array $env = [], ?string $stdin = null): ?string
+    {
+        $fullEnv = [];
+        foreach (array_merge(getenv() ?: [], $env) as $k => $v) {
+            $fullEnv[(string)$k] = (string)$v;
+        }
+        $desc = [0 => ['pipe', 'r'], 1 => ['pipe', 'w']];
+        $proc = @proc_open(['/bin/sh', '-c', $cmd], $desc, $pipes, null, $fullEnv);
+        if (!is_resource($proc)) {
+            return null;
+        }
+        if ($stdin !== null && $stdin !== '') {
+            @fwrite($pipes[0], $stdin);
+        }
+        fclose($pipes[0]);
+        $out = stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+        proc_close($proc);
+        return ($out === false || $out === '') ? null : $out;
+    }
+
+    /** Prefijo de shell que lee un secreto de stdin (1ª línea) y lo exporta en la variable indicada. */
+    private static function readSecretPrefix(string $var): string
+    {
+        return 'IFS= read -r ' . $var . '; export ' . $var . '; ';
+    }
+
+    /** Secreto + salto de línea para alimentar a readSecretPrefix por stdin. */
+    private static function secretLine(string $secret): string
+    {
+        return str_replace(["\r", "\n"], '', $secret) . "\n";
+    }
+
+    /** Ejecuta SQL de PostgreSQL como postgres leyéndolo de stdin (no queda en argv). */
+    private static function pgSqlStdin(string $sql, ?string $db = null, ?string $port = null): ?string
+    {
+        $cmd = 'sudo -u postgres psql' . ($port !== null ? ' -p ' . escapeshellarg($port) : '')
+            . ($db !== null ? ' -d ' . escapeshellarg($db) : '') . ' 2>&1';
+        return self::runSecret($cmd, [], $sql . "\n");
+    }
+
+    /** Ejecuta SQL de MySQL/MariaDB (socket root) leyéndolo de stdin (no queda en argv). */
+    private static function mysqlSqlStdin(string $sql): ?string
+    {
+        return self::runSecret('mysql 2>&1', [], $sql . "\n");
     }
 
     /**
@@ -115,11 +199,9 @@ class MigrationController
         $port = '5432'; // Hosting DBs go to cluster main
 
         // Create user (ignore "already exists")
-        shell_exec(sprintf("sudo -u postgres psql -p %s -c %s 2>&1", $port,
-            escapeshellarg("CREATE USER \"{$dbUser}\" WITH PASSWORD '{$dbPass}'")));
+        self::pgSqlStdin("CREATE USER \"{$dbUser}\" WITH PASSWORD '{$dbPass}'", null, $port);
         // Always update password (in case user already existed with different password)
-        shell_exec(sprintf("sudo -u postgres psql -p %s -c %s 2>&1", $port,
-            escapeshellarg("ALTER USER \"{$dbUser}\" WITH PASSWORD '{$dbPass}'")));
+        self::pgSqlStdin("ALTER USER \"{$dbUser}\" WITH PASSWORD '{$dbPass}'", null, $port);
 
         // Create database (ignore "already exists")
         shell_exec(sprintf("sudo -u postgres psql -p %s -c %s 2>&1", $port,
@@ -181,10 +263,10 @@ class MigrationController
 
         // Verify connection with the actual user/password
         $verifyCmd = sprintf(
-            'PGPASSWORD=%s psql -h 127.0.0.1 -p %s -U %s -d %s -c "SELECT COUNT(*) FROM pg_tables WHERE schemaname=\'public\';" -t 2>&1',
-            escapeshellarg($dbPass), $port, escapeshellarg($dbUser), escapeshellarg($dbName)
+            'psql -h 127.0.0.1 -p %s -U %s -d %s -c "SELECT COUNT(*) FROM pg_tables WHERE schemaname=\'public\';" -t 2>&1',
+            $port, escapeshellarg($dbUser), escapeshellarg($dbName)
         );
-        $verifyOut = trim(shell_exec($verifyCmd) ?? '');
+        $verifyOut = trim(self::runSecret($verifyCmd, ['PGPASSWORD' => $dbPass]) ?? '');
         $tableCount = (int)$verifyOut;
 
         if ($tableCount > 0) {
@@ -320,8 +402,8 @@ class MigrationController
     {
         header('Content-Type: application/json');
 
-        $sshHost = trim($_POST['ssh_host'] ?? '');
-        $sshUser = trim($_POST['ssh_user'] ?? '');
+        $sshHost = self::sshSafe($_POST['ssh_host'] ?? '', 'host');
+        $sshUser = self::sshSafe($_POST['ssh_user'] ?? '', 'user');
         $sshPassword = $_POST['ssh_password'] ?? '';
         $sshPort = (int) ($_POST['ssh_port'] ?? 22);
         $remotePath = rtrim(trim($_POST['remote_path'] ?? ''), '/');
@@ -502,8 +584,9 @@ class MigrationController
         $targetDir = trim($_POST['local_target'] ?? '') ?: $account['document_root'];
 
         // Security: ensure target is within the hosting home directory
-        $homeDir = $account['home_dir'];
-        if (strpos(realpath($targetDir) ?: $targetDir, $homeDir) !== 0) {
+        $homeDir = rtrim($account['home_dir'], '/');
+        $chkDir = realpath($targetDir) ?: $targetDir;
+        if (str_contains($targetDir, '..') || ($chkDir !== $homeDir && !str_starts_with($chkDir, $homeDir . '/'))) {
             $targetDir = $account['document_root'];
         }
 
@@ -525,8 +608,8 @@ class MigrationController
 
         $data = [
             'account_id' => (int) $params['id'],
-            'ssh_host' => trim($_POST['ssh_host'] ?? ''),
-            'ssh_user' => trim($_POST['ssh_user'] ?? ''),
+            'ssh_host' => self::sshSafe($_POST['ssh_host'] ?? '', 'host'),
+            'ssh_user' => self::sshSafe($_POST['ssh_user'] ?? '', 'user'),
             'ssh_password' => $_POST['ssh_password'] ?? '',
             'ssh_port' => (int) ($_POST['ssh_port'] ?? 22),
             'remote_path' => rtrim(trim($_POST['remote_path'] ?? ''), '/'),
@@ -551,6 +634,7 @@ class MigrationController
      */
     private function statusFilePath(string $token): string
     {
+        $token = preg_replace('/[^A-Za-z0-9_-]/', '', $token);
         return "/tmp/migration_status_{$token}.json";
     }
 
@@ -559,7 +643,11 @@ class MigrationController
      */
     private function writeStatus(string $token, array $status): void
     {
-        file_put_contents($this->statusFilePath($token), json_encode($status, JSON_UNESCAPED_UNICODE));
+        $f = $this->statusFilePath($token);
+        $old = umask(0077);
+        file_put_contents($f, json_encode($status, JSON_UNESCAPED_UNICODE));
+        umask($old);
+        @chmod($f, 0600);
     }
 
     /**
@@ -814,8 +902,9 @@ class MigrationController
         $targetDir = !empty($data['local_target']) ? $data['local_target'] : $account['document_root'];
 
         // Security: ensure target is within the hosting home directory
-        $homeDir = $account['home_dir'];
-        if (strpos(realpath($targetDir) ?: $targetDir, $homeDir) !== 0) {
+        $homeDir = rtrim($account['home_dir'], '/');
+        $chkDir = realpath($targetDir) ?: $targetDir;
+        if (str_contains($targetDir, '..') || ($chkDir !== $homeDir && !str_starts_with($chkDir, $homeDir . '/'))) {
             $targetDir = $account['document_root'];
         }
 
@@ -1094,12 +1183,12 @@ class MigrationController
         $this->sendSSE('progress', json_encode(['type' => 'download', 'total' => $remoteSizeBytes, 'current' => 0]), $st);
 
         $scpCmd = sprintf(
-            'sshpass -p %s scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -P %d %s@%s:%s %s 2>&1',
-            escapeshellarg($sshPassword), $sshPort,
+            'sshpass -e scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -P %d %s@%s:%s %s 2>&1',
+            $sshPort,
             escapeshellarg($sshUser), escapeshellarg($sshHost),
             escapeshellarg($remoteBackupPath), escapeshellarg($localBackup)
         );
-        shell_exec("timeout 900 {$scpCmd}");
+        self::runSecret("timeout 900 {$scpCmd}", ['SSHPASS' => $sshPassword]);
         clearstatcache(true, $localBackup);
         $downloaded = file_exists($localBackup) && filesize($localBackup) > 0;
         if ($downloaded) {
@@ -1156,12 +1245,12 @@ class MigrationController
 
             // Force SCP retry for incomplete downloads
             $scpCmd = sprintf(
-                'sshpass -p %s scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -P %d %s@%s:%s %s 2>&1',
-                escapeshellarg($sshPassword), $sshPort,
+                'sshpass -e scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -P %d %s@%s:%s %s 2>&1',
+                $sshPort,
                 escapeshellarg($sshUser), escapeshellarg($sshHost),
                 escapeshellarg($remoteBackupPath), escapeshellarg($localBackup)
             );
-            shell_exec("timeout 900 {$scpCmd}");
+            self::runSecret("timeout 900 {$scpCmd}", ['SSHPASS' => $sshPassword]);
             clearstatcache(true, $localBackup);
 
             if (file_exists($localBackup) && filesize($localBackup) >= $remoteSizeBytes * 0.95) {
@@ -1338,48 +1427,50 @@ class MigrationController
             }
 
             if ($isPostgres) {
-                $remoteDumpCmd = sprintf('PGPASSWORD=%s pg_dump -h %s -p %s -U %s %s',
-                    escapeshellarg($dbCredentials['password']),
+                $dumpSecretVar = 'PGPASSWORD';
+                $remoteDumpCmd = sprintf('pg_dump -h %s -p %s -U %s %s',
                     escapeshellarg($dumpHost), escapeshellarg($dumpPort),
                     escapeshellarg($dbCredentials['username']),
                     escapeshellarg($dbCredentials['database'])
                 );
             } else {
-                $remoteDumpCmd = sprintf('mysqldump -h %s -P %s -u %s -p%s %s',
+                $dumpSecretVar = 'MYSQL_PWD';
+                $remoteDumpCmd = sprintf('mysqldump -h %s -P %s -u %s %s',
                     escapeshellarg($dumpHost), escapeshellarg($dumpPort),
-                    escapeshellarg($dbCredentials['username']), escapeshellarg($dbCredentials['password']),
+                    escapeshellarg($dbCredentials['username']),
                     escapeshellarg($dbCredentials['database'])
                 );
             }
 
             // Execute dump remotely: dump SQL to stdout, stderr to temp file on remote
             $remoteErrFile = '/tmp/mdp_dump_err_' . bin2hex(random_bytes(4));
-            $fullRemoteCmd = $remoteDumpCmd . ' 2>' . escapeshellarg($remoteErrFile);
+            // La contraseña de la BD viaja por stdin del ssh (no en la línea de comandos local ni remota)
+            $fullRemoteCmd = self::readSecretPrefix($dumpSecretVar) . $remoteDumpCmd . ' 2>' . escapeshellarg($remoteErrFile);
 
-            shell_exec(sprintf(
-                'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=30 -p %d %s@%s %s > %s 2>%s',
-                escapeshellarg($sshPassword), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+            self::runSecret(sprintf(
+                'sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=30 -p %d %s@%s %s > %s 2>%s',
+                $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
                 escapeshellarg($fullRemoteCmd),
                 escapeshellarg($dumpFile), escapeshellarg($dumpErrFile)
-            ));
+            ), ['SSHPASS' => $sshPassword], self::secretLine((string)$dbCredentials['password']));
 
             // Fetch remote error log if dump failed
             if (!file_exists($dumpFile) || filesize($dumpFile) < 50) {
-                $remoteErr = shell_exec(sprintf(
-                    'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d %s@%s %s 2>/dev/null',
-                    escapeshellarg($sshPassword), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                $remoteErr = self::runSecret(sprintf(
+                    'sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d %s@%s %s 2>/dev/null',
+                    $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
                     escapeshellarg('cat ' . escapeshellarg($remoteErrFile) . ' 2>/dev/null; rm -f ' . escapeshellarg($remoteErrFile))
-                ));
+                ), ['SSHPASS' => $sshPassword]);
                 if ($remoteErr) {
                     file_put_contents($dumpErrFile, trim($remoteErr));
                 }
             } else {
                 // Cleanup remote error file
-                shell_exec(sprintf(
-                    'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p %d %s@%s %s 2>/dev/null &',
-                    escapeshellarg($sshPassword), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                self::runSecret(sprintf(
+                    'sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p %d %s@%s %s 2>/dev/null &',
+                    $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
                     escapeshellarg('rm -f ' . escapeshellarg($remoteErrFile))
-                ));
+                ), ['SSHPASS' => $sshPassword]);
             }
 
             // Check for errors — also detect dump files that contain error text instead of SQL
@@ -1461,23 +1552,18 @@ class MigrationController
 
                     // Verify the user can actually connect with the new password
                     $verifyCmd = sprintf(
-                        'mysql -u %s -p%s -e "SELECT 1" %s 2>&1',
+                        'mysql -u %s -e "SELECT 1" %s 2>&1',
                         escapeshellarg($localDbUser),
-                        escapeshellarg($localDbPass),
                         escapeshellarg($localDbName)
                     );
-                    $verifyOutput = shell_exec($verifyCmd);
+                    $verifyOutput = self::runSecret($verifyCmd, ['MYSQL_PWD' => (string)$localDbPass]);
                     if ($verifyOutput !== null && (stripos($verifyOutput, 'ERROR') !== false || stripos($verifyOutput, 'Access denied') !== false)) {
                         $this->sendSSE('log', 'WARN: Verificacion de credenciales fallo, reintentando ALTER USER...', $st);
-                        $retryCmd = sprintf(
-                            "mysql -e %s 2>&1",
-                            escapeshellarg(sprintf(
-                                "ALTER USER '%s'@'localhost' IDENTIFIED BY '%s'; FLUSH PRIVILEGES;",
-                                str_replace("'", "''", $localDbUser),
-                                str_replace("'", "''", $localDbPass)
-                            ))
-                        );
-                        shell_exec($retryCmd);
+                        self::mysqlSqlStdin(sprintf(
+                            "ALTER USER '%s'@'localhost' IDENTIFIED BY '%s'; FLUSH PRIVILEGES;",
+                            str_replace("'", "''", $localDbUser),
+                            str_replace("'", "''", $localDbPass)
+                        ));
                     }
                 }
 
@@ -1681,12 +1767,12 @@ class MigrationController
                 // Download via SCP (most reliable for subdomains)
                 $this->sendSSE('log', "Descargando archivos de {$subName}...", $st);
                 $subScpCmd = sprintf(
-                    'sshpass -p %s scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -P %d %s@%s:%s %s 2>&1',
-                    escapeshellarg($sshPassword), $sshPort,
+                    'sshpass -e scp -o StrictHostKeyChecking=no -o ConnectTimeout=30 -P %d %s@%s:%s %s 2>&1',
+                    $sshPort,
                     escapeshellarg($sshUser), escapeshellarg($sshHost),
                     escapeshellarg($subRemoteBackupPath), escapeshellarg($subLocalBackup)
                 );
-                shell_exec("timeout 600 {$subScpCmd}");
+                self::runSecret("timeout 600 {$subScpCmd}", ['SSHPASS' => $sshPassword]);
 
                 // Clean remote backup
                 $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
@@ -1766,8 +1852,7 @@ class MigrationController
                         $subDumpFile = "/tmp/mdp_sub_db_{$subFileToken}.sql";
                         if ($subIsPostgres) {
                             $subDumpCmd = sprintf(
-                                'PGPASSWORD=%s pg_dump -h %s -p %s -U %s %s',
-                                escapeshellarg($subDbCreds['password'] ?? ''),
+                                'pg_dump -h %s -p %s -U %s %s',
                                 escapeshellarg($subDbCreds['host'] ?? '127.0.0.1'),
                                 escapeshellarg($subDbCreds['port'] ?? '5432'),
                                 escapeshellarg($subDbCreds['username'] ?? ''),
@@ -1775,26 +1860,29 @@ class MigrationController
                             );
                         } else {
                             $subDumpCmd = sprintf(
-                                'mysqldump -h%s -u%s -p%s %s',
+                                'mysqldump -h%s -u%s %s',
                                 escapeshellarg($subDbCreds['host'] ?? '127.0.0.1'),
                                 escapeshellarg($subDbCreds['username'] ?? ''),
-                                escapeshellarg($subDbCreds['password'] ?? ''),
                                 escapeshellarg($subDbCreds['database'])
                             );
                         }
+                        // Contraseña de la BD por stdin del ssh (no en argv local ni remoto)
                         $subDumpOutput = $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
-                            "{$subDumpCmd} > /tmp/{$subBackupName}.sql 2>&1; echo DUMP_EXIT_\$?; wc -c < /tmp/{$subBackupName}.sql"
+                            self::readSecretPrefix($subIsPostgres ? 'PGPASSWORD' : 'MYSQL_PWD')
+                                . "{$subDumpCmd} > /tmp/{$subBackupName}.sql 2>&1; echo DUMP_EXIT_\$?; wc -c < /tmp/{$subBackupName}.sql",
+                            30,
+                            self::secretLine((string)($subDbCreds['password'] ?? ''))
                         );
 
                         if (str_contains($subDumpOutput, 'DUMP_EXIT_0')) {
                             // Download dump
                             $subDumpScpCmd = sprintf(
-                                'sshpass -p %s scp -o StrictHostKeyChecking=no -P %d %s@%s:/tmp/%s.sql %s 2>&1',
-                                escapeshellarg($sshPassword), $sshPort,
+                                'sshpass -e scp -o StrictHostKeyChecking=no -P %d %s@%s:/tmp/%s.sql %s 2>&1',
+                                $sshPort,
                                 escapeshellarg($sshUser), escapeshellarg($sshHost),
                                 escapeshellarg($subBackupName), escapeshellarg($subDumpFile)
                             );
-                            shell_exec("timeout 300 {$subDumpScpCmd}");
+                            self::runSecret("timeout 300 {$subDumpScpCmd}", ['SSHPASS' => $sshPassword]);
 
                             // Clean remote dump
                             $this->sshExec($sshPassword, $sshUser, $sshHost, $sshPort,
@@ -1812,13 +1900,13 @@ class MigrationController
                                 $this->sendSSE('log', "Creando BD local ({$subLocalDbType}): {$subLocalDbName}...", $st);
 
                                 if ($subIsPostgres) {
-                                    shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE USER \"{$subLocalDbUser}\" WITH PASSWORD '{$subLocalDbPass}'")));
-                                    shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("ALTER USER \"{$subLocalDbUser}\" WITH PASSWORD '{$subLocalDbPass}'")));
+                                    self::pgSqlStdin("CREATE USER \"{$subLocalDbUser}\" WITH PASSWORD '{$subLocalDbPass}'");
+                                    self::pgSqlStdin("ALTER USER \"{$subLocalDbUser}\" WITH PASSWORD '{$subLocalDbPass}'");
                                     shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$subLocalDbName}\" OWNER \"{$subLocalDbUser}\"")));
                                     shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$subLocalDbName}\" TO \"{$subLocalDbUser}\"")));
                                 } else {
                                     shell_exec("mysql -u root -e " . escapeshellarg("CREATE DATABASE IF NOT EXISTS `{$subLocalDbName}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci") . " 2>&1");
-                                    shell_exec("mysql -u root -e " . escapeshellarg("CREATE USER IF NOT EXISTS '{$subLocalDbUser}'@'localhost' IDENTIFIED BY '{$subLocalDbPass}'") . " 2>&1");
+                                    self::mysqlSqlStdin("CREATE USER IF NOT EXISTS '{$subLocalDbUser}'@'localhost' IDENTIFIED BY '{$subLocalDbPass}'");
                                     shell_exec("mysql -u root -e " . escapeshellarg("GRANT ALL PRIVILEGES ON `{$subLocalDbName}`.* TO '{$subLocalDbUser}'@'localhost'") . " 2>&1");
                                     shell_exec("mysql -u root -e 'FLUSH PRIVILEGES' 2>&1");
                                 }
@@ -2154,8 +2242,8 @@ class MigrationController
         }
 
         // SSH mode: execute mysqldump remotely (needed when MySQL only listens on localhost)
-        $sshHost = trim($_POST['ssh_host'] ?? '');
-        $sshUser = trim($_POST['ssh_user'] ?? '');
+        $sshHost = self::sshSafe($_POST['ssh_host'] ?? '', 'host');
+        $sshUser = self::sshSafe($_POST['ssh_user'] ?? '', 'user');
         $sshPass = $_POST['ssh_password'] ?? '';
         $sshPort = (int) ($_POST['ssh_port'] ?? 22) ?: 22;
         $useSSH = !empty($sshHost) && !empty($sshUser) && !empty($sshPass);
@@ -2202,11 +2290,11 @@ class MigrationController
             $configFileName = $configFileNames[$dbSource] ?? '.env';
             $remoteConfigPath = rtrim($sshRemotePath, '/') . '/' . $configFileName;
 
-            $content = shell_exec(sprintf(
-                'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -p %d %s@%s %s 2>/dev/null',
-                escapeshellarg($sshPass), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+            $content = self::runSecret(sprintf(
+                'sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -p %d %s@%s %s 2>/dev/null',
+                $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
                 escapeshellarg('cat ' . escapeshellarg($remoteConfigPath))
-            ));
+            ), ['SSHPASS' => $sshPass]);
 
             if (empty($content)) {
                 Flash::set('error', "No se pudo leer {$configFileName} del servidor remoto ({$remoteConfigPath}). Verifica la ruta y credenciales SSH.");
@@ -2366,16 +2454,17 @@ class MigrationController
         $dumpErrFile = "/tmp/mdpdb_{$dumpToken}.err";
 
         if ($isPostgresDb) {
-            $remoteDumpCmd = sprintf('PGPASSWORD=%s pg_dump -h %s -p %s -U %s %s',
-                escapeshellarg($remotePass),
+            $dumpSecretVar = 'PGPASSWORD';
+            $remoteDumpCmd = sprintf('pg_dump -h %s -p %s -U %s %s',
                 escapeshellarg($remoteHost), escapeshellarg($remotePort),
                 escapeshellarg($remoteUser),
                 escapeshellarg($remoteDb)
             );
         } else {
-            $remoteDumpCmd = sprintf('mysqldump -h %s -P %s -u %s -p%s %s',
+            $dumpSecretVar = 'MYSQL_PWD';
+            $remoteDumpCmd = sprintf('mysqldump -h %s -P %s -u %s %s',
                 escapeshellarg($remoteHost), escapeshellarg($remotePort),
-                escapeshellarg($remoteUser), escapeshellarg($remotePass),
+                escapeshellarg($remoteUser),
                 escapeshellarg($remoteDb)
             );
         }
@@ -2383,36 +2472,38 @@ class MigrationController
         if ($useSSH) {
             // Execute dump remotely via SSH — stderr goes to remote temp file
             $remoteErrFile = '/tmp/mdp_dump_err_' . bin2hex(random_bytes(4));
-            $fullRemoteCmd = $remoteDumpCmd . ' 2>' . escapeshellarg($remoteErrFile);
+            // La contraseña de la BD viaja por stdin del ssh (no en la línea de comandos local ni remota)
+            $fullRemoteCmd = self::readSecretPrefix($dumpSecretVar) . $remoteDumpCmd . ' 2>' . escapeshellarg($remoteErrFile);
 
-            shell_exec(sprintf(
-                'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=30 -p %d %s@%s %s > %s 2>%s',
-                escapeshellarg($sshPass), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+            self::runSecret(sprintf(
+                'sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -o ServerAliveInterval=30 -p %d %s@%s %s > %s 2>%s',
+                $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
                 escapeshellarg($fullRemoteCmd),
                 escapeshellarg($dumpFile), escapeshellarg($dumpErrFile)
-            ));
+            ), ['SSHPASS' => $sshPass], self::secretLine((string)$remotePass));
 
             // Fetch remote error log if dump failed
             if (!file_exists($dumpFile) || filesize($dumpFile) < 50) {
-                $remoteErr = shell_exec(sprintf(
-                    'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d %s@%s %s 2>/dev/null',
-                    escapeshellarg($sshPass), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                $remoteErr = self::runSecret(sprintf(
+                    'sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d %s@%s %s 2>/dev/null',
+                    $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
                     escapeshellarg('cat ' . escapeshellarg($remoteErrFile) . ' 2>/dev/null; rm -f ' . escapeshellarg($remoteErrFile))
-                ));
+                ), ['SSHPASS' => $sshPass]);
                 if ($remoteErr) {
                     file_put_contents($dumpErrFile, trim($remoteErr));
                 }
             } else {
                 // Cleanup remote error file in background
-                shell_exec(sprintf(
-                    'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p %d %s@%s %s 2>/dev/null &',
-                    escapeshellarg($sshPass), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                self::runSecret(sprintf(
+                    'sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 -p %d %s@%s %s 2>/dev/null &',
+                    $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
                     escapeshellarg('rm -f ' . escapeshellarg($remoteErrFile))
-                ));
+                ), ['SSHPASS' => $sshPass]);
             }
         } else {
             // Direct dump connection (only works if remote DB allows external connections)
-            shell_exec(sprintf('%s > %s 2>%s', $remoteDumpCmd, escapeshellarg($dumpFile), escapeshellarg($dumpErrFile)));
+            self::runSecret(sprintf('%s > %s 2>%s', $remoteDumpCmd, escapeshellarg($dumpFile), escapeshellarg($dumpErrFile)),
+                [$dumpSecretVar => (string)$remotePass]);
         }
 
         // Validate dump
@@ -2449,8 +2540,8 @@ class MigrationController
             $safePass = str_replace("'", "''", $localDbPass);
             $safeDbName = str_replace('"', '""', $localDbName);
 
-            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'")));
-            shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("ALTER USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'")));
+            self::pgSqlStdin("CREATE USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'");
+            self::pgSqlStdin("ALTER USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'");
             shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$safeDbName}\" OWNER \"{$safeUser}\"")));
             shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$safeDbName}\" TO \"{$safeUser}\"")));
             shell_exec(sprintf('sudo -u postgres psql -d %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));
@@ -2579,8 +2670,8 @@ class MigrationController
         }
 
         $scope = $_POST['sub_migrate_scope'] ?? 'all'; // all, files, db
-        $sshHost = trim($_POST['ssh_host'] ?? '');
-        $sshUser = trim($_POST['ssh_user'] ?? '');
+        $sshHost = self::sshSafe($_POST['ssh_host'] ?? '', 'host');
+        $sshUser = self::sshSafe($_POST['ssh_user'] ?? '', 'user');
         $sshPass = $_POST['ssh_password'] ?? '';
         $sshPort = (int)($_POST['ssh_port'] ?? 22) ?: 22;
         $remotePath = rtrim(trim($_POST['remote_subdomain_path'] ?? ''), '/');
@@ -2620,8 +2711,7 @@ class MigrationController
             }
 
             $cmd = sprintf(
-                'sshpass -p %s rsync -azP --partial -e "ssh -o StrictHostKeyChecking=no -p %d" %s@%s:%s/ %s/ 2>&1',
-                escapeshellarg($sshPass),
+                'sshpass -e rsync -azP --partial -e "ssh -o StrictHostKeyChecking=no -p %d" %s@%s:%s/ %s/ 2>&1',
                 $sshPort,
                 escapeshellarg($sshUser),
                 escapeshellarg($sshHost),
@@ -2630,7 +2720,13 @@ class MigrationController
             );
 
             $output = [];
-            exec($cmd, $output, $rc);
+            // SSHPASS por entorno (no por argv); se retira justo después del exec.
+            putenv('SSHPASS=' . $sshPass);
+            try {
+                exec($cmd, $output, $rc);
+            } finally {
+                putenv('SSHPASS');
+            }
 
             if ($rc !== 0 && $rc !== 24) {
                 $logs[] = "ERROR rsync (exit {$rc}): " . implode("\n", array_slice($output, -5));
@@ -2664,11 +2760,11 @@ class MigrationController
 
             if ($autoDetectDb) {
                 // Read .env from remote
-                $remoteEnvContent = shell_exec(sprintf(
-                    'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -p %d %s@%s %s 2>/dev/null',
-                    escapeshellarg($sshPass), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                $remoteEnvContent = self::runSecret(sprintf(
+                    'sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -p %d %s@%s %s 2>/dev/null',
+                    $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
                     escapeshellarg('cat ' . escapeshellarg($remoteEnvPath . '/.env'))
-                ));
+                ), ['SSHPASS' => $sshPass]);
 
                 if (empty($remoteEnvContent)) {
                     $logs[] = "AVISO: No se pudo leer .env remoto. Intentando con .env local...";
@@ -2702,20 +2798,22 @@ class MigrationController
                         $dumpFile = "/tmp/subdomain_db_" . bin2hex(random_bytes(4)) . ".sql";
 
                         if ($isPostgres) {
-                            $dumpCmd = sprintf('PGPASSWORD=%s pg_dump -h %s -p %s -U %s %s',
-                                escapeshellarg($remotePass), escapeshellarg($remoteHost),
+                            $dumpSecretVar = 'PGPASSWORD';
+                            $dumpCmd = sprintf('pg_dump -h %s -p %s -U %s %s',
+                                escapeshellarg($remoteHost),
                                 escapeshellarg($remotePort), escapeshellarg($remoteUser), escapeshellarg($remoteDb));
                         } else {
-                            $dumpCmd = sprintf('mysqldump -h %s -P %s -u %s -p%s %s',
+                            $dumpSecretVar = 'MYSQL_PWD';
+                            $dumpCmd = sprintf('mysqldump -h %s -P %s -u %s %s',
                                 escapeshellarg($remoteHost), escapeshellarg($remotePort),
-                                escapeshellarg($remoteUser), escapeshellarg($remotePass), escapeshellarg($remoteDb));
+                                escapeshellarg($remoteUser), escapeshellarg($remoteDb));
                         }
 
-                        shell_exec(sprintf(
-                            'sshpass -p %s ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -p %d %s@%s %s > %s 2>/dev/null',
-                            escapeshellarg($sshPass), $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
-                            escapeshellarg($dumpCmd), escapeshellarg($dumpFile)
-                        ));
+                        self::runSecret(sprintf(
+                            'sshpass -e ssh -o StrictHostKeyChecking=no -o ConnectTimeout=15 -p %d %s@%s %s > %s 2>/dev/null',
+                            $sshPort, escapeshellarg($sshUser), escapeshellarg($sshHost),
+                            escapeshellarg(self::readSecretPrefix($dumpSecretVar) . $dumpCmd), escapeshellarg($dumpFile)
+                        ), ['SSHPASS' => $sshPass], self::secretLine((string)$remotePass));
 
                         if (file_exists($dumpFile) && filesize($dumpFile) > 50) {
                             $dumpSize = round(filesize($dumpFile) / 1048576, 1);
@@ -2741,8 +2839,8 @@ class MigrationController
                                 $safeUser = str_replace('"', '""', $localDbUser);
                                 $safePass = str_replace("'", "''", $localDbPass);
                                 $safeDbName = str_replace('"', '""', $localDbName);
-                                shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'")));
-                                shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("ALTER USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'")));
+                                self::pgSqlStdin("CREATE USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'");
+                                self::pgSqlStdin("ALTER USER \"{$safeUser}\" WITH PASSWORD '{$safePass}'");
                                 shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("CREATE DATABASE \"{$safeDbName}\" OWNER \"{$safeUser}\"")));
                                 shell_exec(sprintf("sudo -u postgres psql -c %s 2>&1", escapeshellarg("GRANT ALL PRIVILEGES ON DATABASE \"{$safeDbName}\" TO \"{$safeUser}\"")));
                                 shell_exec(sprintf('sudo -u postgres psql -d %s < %s 2>&1', escapeshellarg($localDbName), escapeshellarg($dumpFile)));

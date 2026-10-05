@@ -798,7 +798,7 @@
     // ── Contactos y calendarios (CardDAV/CalDAV) ──
     $cardDav = \MuseDockPanel\Services\CardDavService::status();
     $cardDavInstalled = !empty($cardDav['installed']);
-    $cardDavHost = (string)($cardDav['host'] ?? 'dav.musedock.com');
+    $cardDavHost = (string)($cardDav['host'] ?? \MuseDockPanel\Services\CardDavService::host());
     $cardDavSt = \MuseDockPanel\Services\CardDavService::installStatus();
     $cardDavRunning = (($cardDavSt['status'] ?? 'idle') === 'running');
 ?>
@@ -828,7 +828,7 @@
                 <?= View::csrf() ?>
                 <div class="col-md-5">
                     <label class="form-label small text-muted mb-1">Host DAV</label>
-                    <input type="text" name="host" id="carddavHost" class="form-control form-control-sm" value="<?= View::e($cardDavHost) ?>" placeholder="dav.musedock.com">
+                    <input type="text" name="host" id="carddavHost" class="form-control form-control-sm" value="<?= View::e($cardDavHost) ?>" placeholder="dav.tudominio.com">
                 </div>
                 <div class="col-md-4">
                     <label class="form-label small text-muted mb-1">Contraseña de admin</label>

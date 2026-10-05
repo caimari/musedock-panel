@@ -104,15 +104,15 @@
                             </td>
                             <td class="text-end pe-3">
                                 <?php if ($isStandby): ?>
-                                    <button class="btn btn-outline-success btn-sm py-0 px-2" onclick="reactivateNode(<?= $oNode['id'] ?>, '<?= View::e($oNode['name']) ?>')" title="Reactivar nodo">
+                                    <button class="btn btn-outline-success btn-sm py-0 px-2" onclick="reactivateNode(<?= (int)$oNode['id'] ?>, <?= View::js($oNode['name']) ?>)" title="Reactivar nodo">
                                         <i class="bi bi-play-fill me-1"></i>Reactivar
                                     </button>
                                 <?php elseif ($oNode['muted']): ?>
-                                    <button class="btn btn-outline-warning btn-sm py-0 px-2" onclick="toggleNodeAlerts(<?= $oNode['id'] ?>, 'unmute', '<?= View::e($oNode['name']) ?>')" title="Reactivar alertas">
+                                    <button class="btn btn-outline-warning btn-sm py-0 px-2" onclick="toggleNodeAlerts(<?= $oNode['id'] ?>, 'unmute', <?= View::js($oNode['name']) ?>)" title="Reactivar alertas">
                                         <i class="bi bi-bell me-1"></i>Reactivar alertas
                                     </button>
                                 <?php else: ?>
-                                    <button class="btn btn-outline-secondary btn-sm py-0 px-2" onclick="toggleNodeAlerts(<?= $oNode['id'] ?>, 'mute', '<?= View::e($oNode['name']) ?>')" title="Silenciar alertas">
+                                    <button class="btn btn-outline-secondary btn-sm py-0 px-2" onclick="toggleNodeAlerts(<?= $oNode['id'] ?>, 'mute', <?= View::js($oNode['name']) ?>)" title="Silenciar alertas">
                                         <i class="bi bi-bell-slash me-1"></i>Silenciar
                                     </button>
                                 <?php endif; ?>

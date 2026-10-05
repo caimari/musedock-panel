@@ -121,7 +121,7 @@ $hasRemoteTargets = $hasNodes || $hasFederationPeers;
                             <?php $bkNotes = $backup['notes'] ?? ''; ?>
                             <span class="backup-notes" data-dir="<?= View::e($backup['dir_name'] ?? '') ?>"
                                   style="cursor:pointer;" title="Click para editar nota"
-                                  onclick="editBackupNotes('<?= View::e($backup['dir_name'] ?? '') ?>', this)">
+                                  onclick="editBackupNotes(<?= View::js($backup['dir_name'] ?? '') ?>, this)">
                                 <?php if ($bkNotes): ?>
                                     <small><i class="bi bi-sticky me-1" style="color:#fbbf24;"></i><?= View::e($bkNotes) ?></small>
                                 <?php else: ?>
@@ -141,7 +141,7 @@ $hasRemoteTargets = $hasNodes || $hasFederationPeers;
 
                             <?php if ($hasRemoteTargets): ?>
                             <button type="button" class="btn btn-outline-info btn-sm" title="Transferir a nodo remoto"
-                                    onclick="transferBackup('<?= $dirName ?>')">
+                                    onclick="transferBackup(<?= View::js($backup['dir_name'] ?? '') ?>)">
                                 <i class="bi bi-cloud-upload"></i>
                             </button>
                             <?php endif; ?>
@@ -156,7 +156,7 @@ $hasRemoteTargets = $hasNodes || $hasFederationPeers;
                                 <?= View::csrf() ?>
                                 <input type="hidden" name="admin_password" id="delete-pass-<?= $dirName ?>">
                                 <button type="button" class="btn btn-outline-danger btn-sm" title="Eliminar"
-                                        onclick="deleteBackup('<?= $dirName ?>', '<?= View::e($backup['username'] ?? '') ?>', '<?= date('d/m/Y H:i', strtotime($backup['date'] ?? 'now')) ?>')">
+                                        onclick="deleteBackup(<?= View::js($backup['dir_name'] ?? '') ?>, <?= View::js($backup['username'] ?? '') ?>, '<?= date('d/m/Y H:i', strtotime($backup['date'] ?? 'now')) ?>')">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </form>

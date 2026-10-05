@@ -34,6 +34,7 @@ class FailoverController
             'failover_load_critical_mult', 'failover_load_warning_mult',
             'failover_pg_panel_severity', 'failover_pg_hosting_severity',
             'failover_mysql_severity', 'failover_caddy_severity',
+            'failover_site_probes', 'failover_site_alive_wait_minutes',
         ];
 
         foreach ($fields as $f) {
@@ -531,6 +532,10 @@ class FailoverController
                 continue;
             }
 
+            if (!preg_match('#^https?://[^\s/]+#i', $url)) {
+                $results[] = ['name' => $name, 'ok' => false, 'error' => 'La URL debe empezar por http:// o https://', 'count' => 0];
+                continue;
+            }
             $endpoint = $url . '/api/domains';
             $ch = curl_init($endpoint);
             $opts = [

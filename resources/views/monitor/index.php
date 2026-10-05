@@ -77,7 +77,7 @@
 <div class="row g-3 mb-4">
     <?php foreach ($interfaces as $iface): ?>
     <div class="col-md-3 d-flex">
-        <div class="stat-card w-100 d-flex flex-column" role="button" onclick="openNetworkModal('<?= View::e($iface) ?>')" title="Ver detalle de <?= View::e($iface) ?>" style="cursor:pointer">
+        <div class="stat-card w-100 d-flex flex-column" role="button" onclick="openNetworkModal(<?= View::js($iface) ?>)" title="Ver detalle de <?= View::e($iface) ?>" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value" id="card-<?= View::e($iface) ?>-rx">--</div>
@@ -159,7 +159,7 @@
         $freeH = $freeB >= 1099511627776 ? round($freeB/1099511627776,1).'T' : round($freeB/1073741824,1).'G';
     ?>
     <div class="col-md-3 d-flex">
-        <div class="stat-card w-100 d-flex flex-column" role="button" onclick="openDiskModal('<?= View::e($disk['mount']) ?>')" title="Ver detalle de <?= View::e($disk['mount']) ?>" style="cursor:pointer">
+        <div class="stat-card w-100 d-flex flex-column" role="button" onclick="openDiskModal(<?= View::js($disk['mount']) ?>)" title="Ver detalle de <?= View::e($disk['mount']) ?>" style="cursor:pointer">
             <div class="d-flex justify-content-between align-items-start">
                 <div>
                     <div class="stat-value" style="color:<?= $diskColor ?>"><?= $disk['percent'] ?>%</div>

@@ -313,7 +313,7 @@ function renderDnsBadge(array $dns): string {
                     <td><small class="text-muted"><?= date('d/m/Y', strtotime($item['created_at'])) ?></small></td>
                     <td class="text-end">
                         <button type="button" class="btn btn-outline-danger btn-sm py-0 px-1" style="font-size:0.7rem;" title="Eliminar"
-                            onclick="confirmDeleteRedirect(<?= (int)$item['id'] ?>, '<?= View::e($item['domain']) ?>')">
+                            onclick="confirmDeleteRedirect(<?= (int)$item['id'] ?>, <?= View::js($item['domain']) ?>)">
                             <i class="bi bi-trash"></i>
                         </button>
                     </td>

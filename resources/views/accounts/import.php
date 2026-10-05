@@ -91,7 +91,7 @@
                                 <?php endif; ?>
                             </div>
                             <div class="ms-3">
-                                <form method="POST" action="/accounts/import" onsubmit="return importConfirm(event, this, '<?= View::e(addslashes($o['domain'])) ?>')">
+                                <form method="POST" action="/accounts/import" onsubmit="return importConfirm(event, this, <?= View::js($o['domain']) ?>)">
                     <?= \MuseDockPanel\View::csrf() ?>
                                     <input type="hidden" name="domain" value="<?= View::e($o['domain']) ?>">
                                     <input type="hidden" name="home_dir" value="<?= View::e($o['home_dir']) ?>">

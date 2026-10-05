@@ -636,7 +636,9 @@ logLine($logFile, 'OK', "PostgreSQL responde en {$dbHost}:{$dbPort}" . ($localMo
 
 // Check musedock_mail user can connect and read mail tables
 $dbTestOut = [];
-exec("PGPASSWORD=" . escapeshellarg($dbPass) . " psql -h {$dbHost} -p {$dbPort} -U {$dbUser} -d {$dbName} -c 'SELECT COUNT(*) FROM mail_domains' 2>&1", $dbTestOut, $dbTestCode);
+putenv('PGPASSWORD=' . $dbPass); // por entorno, no por argv (visible con ps)
+exec("psql -h {$dbHost} -p {$dbPort} -U {$dbUser} -d {$dbName} -c 'SELECT COUNT(*) FROM mail_domains' 2>&1", $dbTestOut, $dbTestCode);
+putenv('PGPASSWORD');
 if ($dbTestCode !== 0) {
     $dbErr = implode("\n", $dbTestOut);
     $msg = $localMode
@@ -1139,7 +1141,9 @@ foreach ([25 => 'smtp', 587 => 'submission', 993 => 'imaps'] as $port => $name) 
 // DB connectivity test
 $dbOk = false;
 $dbTestOut = [];
-exec("PGPASSWORD=" . escapeshellarg($dbPass) . " psql -h {$dbHost} -p {$dbPort} -U {$dbUser} -d {$dbName} -c 'SELECT 1' 2>&1", $dbTestOut, $dbTestCode);
+putenv('PGPASSWORD=' . $dbPass); // por entorno, no por argv (visible con ps)
+exec("psql -h {$dbHost} -p {$dbPort} -U {$dbUser} -d {$dbName} -c 'SELECT 1' 2>&1", $dbTestOut, $dbTestCode);
+putenv('PGPASSWORD');
 $dbOk = $dbTestCode === 0;
 logLine($logFile, $dbOk ? 'OK' : 'WARN', 'Database connectivity: ' . ($dbOk ? 'OK' : 'FAILED — mail delivery will fail until DB is accessible'));
 

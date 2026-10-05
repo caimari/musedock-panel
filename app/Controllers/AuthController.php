@@ -51,6 +51,14 @@ class AuthController
             return;
         }
 
+        // Límite también por usuario: frena la fuerza bruta repartida entre muchas IPs.
+        if (!RateLimiter::check(strtolower($username), 'panel-login-user', 10)) {
+            self::writeAuthLog($ip, $username, false, 'USER_THROTTLED');
+            Flash::set('error', 'Demasiados intentos. Espera un minuto.');
+            Router::redirect('/login');
+            return;
+        }
+
         $user = Auth::verifyCredentials($username, $password);
         if (!$user) {
             SecurityService::recordAdminLoginEvent(null, $username, $ip, false, [], false, '', $userAgent);
@@ -163,6 +171,15 @@ class AuthController
         $secret = \MuseDockPanel\Services\ReplicationService::decryptPassword($secret);
         $code = trim((string)($_POST['mfa_code'] ?? ''));
         if (!MfaService::verifyCode($secret, $code, 1)) {
+            // Máximo 5 códigos erróneos por inicio de sesión: después hay que volver a poner la contraseña.
+            $_SESSION['mfa_pending']['fails'] = (int)($pending['fails'] ?? 0) + 1;
+            if ($_SESSION['mfa_pending']['fails'] >= 5) {
+                unset($_SESSION['mfa_pending']);
+                self::writeAuthLog($ip, (string)$pending['username'], false, 'MFA_LOCKED');
+                Flash::set('error', 'Demasiados códigos MFA incorrectos. Inicia sesión de nuevo.');
+                Router::redirect('/login');
+                return;
+            }
             self::writeAuthLog($ip, (string)$pending['username'], false, 'MFA_FAIL');
             Flash::set('error', 'Codigo MFA incorrecto.');
             Router::redirect('/login/mfa');
@@ -206,6 +223,8 @@ class AuthController
         if ($tag !== '') {
             $status .= ':' . $tag;
         }
+        // Sin saltos de línea ni caracteres de control: evita falsificar líneas del registro.
+        $username = substr(preg_replace('/[^\x20-\x7E]/', '?', $username), 0, 100);
         $line = date('Y-m-d H:i:s') . " {$status} login from {$ip} user {$username}\n";
         @file_put_contents('/var/log/musedock-panel-auth.log', $line, FILE_APPEND | LOCK_EX);
     }

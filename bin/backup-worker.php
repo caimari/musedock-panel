@@ -286,7 +286,7 @@ function buildMysqlDumpCmd(): ?string
     }
     if ($authMethod === 'password') {
         $pass = MuseDockPanel\Env::get('MYSQL_ROOT_PASS', '');
-        return $pass ? 'mysqldump -u root -p' . escapeshellarg($pass) : null;
+        return $pass ? 'mysqldump ' . \MuseDockPanel\Services\DatabaseService::mysqlDefaultsFileArg($pass) . ' -u root' : null;
     }
     return null;
 }

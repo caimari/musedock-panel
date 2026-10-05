@@ -279,7 +279,7 @@
                     $isOnline = ($node['status'] ?? '') === 'online';
                 ?>
                 <?php if ($isOnline): ?>
-                <button type="button" class="btn btn-outline-primary btn-sm mb-2 w-100" onclick="autoConfigureRepl(<?= (int)$node['id'] ?>, 'pg', '<?= View::e($node['name']) ?>', '<?= View::e($nodeHost) ?>')">
+                <button type="button" class="btn btn-outline-primary btn-sm mb-2 w-100" onclick="autoConfigureRepl(<?= (int)$node['id'] ?>, 'pg', <?= View::js($node['name']) ?>, <?= View::js($nodeHost) ?>)">
                     <i class="bi bi-arrow-down-circle me-1"></i>Convertir este nodo en Slave de <?= View::e($node['name']) ?> (<?= View::e($nodeHost) ?>)
                 </button>
                 <?php else: ?>
@@ -359,7 +359,7 @@
                         <td><code><?= View::e($u['username']) ?></code></td>
                         <td>
                             <span class="text-muted">********</span>
-                            <button class="btn btn-outline-light btn-sm ms-1 py-0 px-1" onclick="navigator.clipboard.writeText('<?= View::e($u['password']) ?>').then(()=>toastOk('Password copiado'))" title="Copiar password">
+                            <button class="btn btn-outline-light btn-sm ms-1 py-0 px-1" onclick="navigator.clipboard.writeText(<?= View::js($u['password']) ?>).then(()=>toastOk('Password copiado'))" title="Copiar password">
                                 <i class="bi bi-clipboard"></i>
                             </button>
                         </td>
@@ -575,7 +575,7 @@
                     $isOnline = ($node['status'] ?? '') === 'online';
                 ?>
                 <?php if ($isOnline): ?>
-                <button type="button" class="btn btn-outline-primary btn-sm mb-2 w-100" onclick="autoConfigureRepl(<?= (int)$node['id'] ?>, 'mysql', '<?= View::e($node['name']) ?>', '<?= View::e($nodeHost) ?>')">
+                <button type="button" class="btn btn-outline-primary btn-sm mb-2 w-100" onclick="autoConfigureRepl(<?= (int)$node['id'] ?>, 'mysql', <?= View::js($node['name']) ?>, <?= View::js($nodeHost) ?>)">
                     <i class="bi bi-arrow-down-circle me-1"></i>Convertir este nodo en Slave de <?= View::e($node['name']) ?> (<?= View::e($nodeHost) ?>)
                 </button>
                 <?php else: ?>
@@ -643,7 +643,7 @@
                         <td><code><?= View::e($u['username']) ?></code></td>
                         <td>
                             <span class="text-muted">********</span>
-                            <button class="btn btn-outline-light btn-sm ms-1 py-0 px-1" onclick="navigator.clipboard.writeText('<?= View::e($u['password']) ?>').then(()=>toastOk('Password copiado'))" title="Copiar password">
+                            <button class="btn btn-outline-light btn-sm ms-1 py-0 px-1" onclick="navigator.clipboard.writeText(<?= View::js($u['password']) ?>).then(()=>toastOk('Password copiado'))" title="Copiar password">
                                 <i class="bi bi-clipboard"></i>
                             </button>
                         </td>

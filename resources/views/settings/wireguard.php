@@ -177,7 +177,7 @@
                                 <tr data-pubkey="<?= View::e($pk) ?>">
                                     <td>
                                         <code title="<?= View::e($pk) ?>"><?= View::e($pkShort) ?></code>
-                                        <button class="btn btn-link btn-sm p-0 ms-1" onclick="copyText('<?= View::e($pk) ?>')" title="Copiar clave completa">
+                                        <button class="btn btn-link btn-sm p-0 ms-1" onclick="copyText(<?= View::js($pk) ?>)" title="Copiar clave completa">
                                             <i class="bi bi-clipboard small"></i>
                                         </button>
                                     </td>
@@ -194,7 +194,7 @@
                                     </td>
                                     <td>
                                         <?php if ($peerIp): ?>
-                                            <button class="btn btn-outline-light btn-sm" onclick="pingPeer('<?= View::e($peerIp) ?>', this)">
+                                            <button class="btn btn-outline-light btn-sm" onclick="pingPeer(<?= View::js($peerIp) ?>, this)">
                                                 <i class="bi bi-broadcast me-1"></i>Ping
                                             </button>
                                         <?php else: ?>
@@ -203,17 +203,17 @@
                                     </td>
                                     <td>
                                         <div class="d-flex gap-1">
-                                            <button class="btn btn-outline-warning btn-sm" onclick="editPeer('<?= View::e($pk) ?>', '<?= View::e($peer['allowed_ips']) ?>', '<?= View::e($peer['endpoint'] ?? '') ?>')" title="Editar">
+                                            <button class="btn btn-outline-warning btn-sm" onclick="editPeer(<?= View::js($pk) ?>, <?= View::js($peer['allowed_ips']) ?>, <?= View::js($peer['endpoint'] ?? '') ?>)" title="Editar">
                                                 <i class="bi bi-pencil"></i>
                                             </button>
                                             <form method="post" action="/settings/wireguard/remove-peer" class="d-inline">
                                                 <?= View::csrf() ?>
                                                 <input type="hidden" name="public_key" value="<?= View::e($pk) ?>">
-                                                <button type="button" class="btn btn-outline-danger btn-sm" onclick="confirmRemovePeer(this.form, '<?= View::e($pkShort) ?>')" title="Eliminar">
+                                                <button type="button" class="btn btn-outline-danger btn-sm" onclick="confirmRemovePeer(this.form, <?= View::js($pkShort) ?>)" title="Eliminar">
                                                     <i class="bi bi-trash"></i>
                                                 </button>
                                             </form>
-                                            <button class="btn btn-outline-success btn-sm" onclick="openRemoteConfigModal('<?= View::e($pk) ?>', '<?= View::e($peer['allowed_ips']) ?>')" title="Generar Config Remota">
+                                            <button class="btn btn-outline-success btn-sm" onclick="openRemoteConfigModal(<?= View::js($pk) ?>, <?= View::js($peer['allowed_ips']) ?>)" title="Generar Config Remota">
                                                 <i class="bi bi-file-earmark-code"></i>
                                             </button>
                                         </div>
