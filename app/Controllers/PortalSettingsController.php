@@ -236,6 +236,16 @@ class PortalSettingsController
     }
 
 
+    /** POST: renovar la licencia del portal ahora, o activar/reactivar una clave en este servidor (sin reinstalar). */
+    public function license(): void
+    {
+        $key = trim((string)($_POST['license_key'] ?? ''));
+        $r = ($_POST['op'] ?? '') === 'renew' ? LicenseService::refreshPortalLicense() : LicenseService::activatePortalKey($key);
+        LogService::log('portal.license', null, (($_POST['op'] ?? '') === 'renew' ? 'Renovar' : "Activar {$key}") . ': ' . $r['message']);
+        Flash::set($r['ok'] ? 'success' : 'error', $r['message']);
+        Router::redirect('/settings/portal');
+    }
+
     /**
      * POST: Activate Portal with a license key.
      * Calls license.musedock.com API, downloads and installs the Portal.

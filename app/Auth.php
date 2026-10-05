@@ -32,7 +32,18 @@ class Auth
         return $user;
     }
 
-    public static function loginUser(array $user): void
+    /** Días que dura "Mantener la sesión iniciada" (Ajustes → Seguridad). 0 = sin caducidad (5 años). */
+    public static function rememberDays(): int
+    {
+        $d = (int)Settings::get('session_remember_days', '30');
+        return $d <= 0 ? 1825 : min(1825, $d);
+    }
+
+    /**
+     * $remember: la sesión dura rememberDays() aunque se cierre el navegador y no caduca
+     * por inactividad. Sin marcar: cookie de navegador y caducidad por inactividad.
+     */
+    public static function loginUser(array $user, bool $remember = false): void
     {
         // Update last login
         Database::update('panel_admins', [
@@ -48,6 +59,24 @@ class Auth
             'username' => $user['username'],
             'role' => $user['role'],
         ];
+        unset($_SESSION['_remember_until']);
+        if ($remember) {
+            $until = time() + self::rememberDays() * 86400;
+            $_SESSION['_remember_until'] = $until;
+            $p = session_get_cookie_params();
+            setcookie(session_name(), session_id(), [
+                'expires' => $until, 'path' => $p['path'] ?: '/', 'domain' => $p['domain'],
+                'secure' => $p['secure'], 'httponly' => true, 'samesite' => $p['samesite'] ?: 'Lax',
+            ]);
+        }
+    }
+
+    /** Tras entrar, volver a la página que se pidió (p. ej. el enlace de un correo de aviso). */
+    public static function intendedUrl(): string
+    {
+        $u = (string)($_SESSION['_intended'] ?? '');
+        unset($_SESSION['_intended']);
+        return preg_match('#^/(?!/)[^\s]*$#', $u) && !str_starts_with($u, '/login') ? $u : '/';
     }
 
     public static function attempt(string $username, string $password): bool
@@ -107,6 +136,9 @@ class Auth
     public static function requireAuth(): void
     {
         if (!self::check()) {
+            if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && !str_starts_with((string)($_SERVER['REQUEST_URI'] ?? '/'), '/api/')) {
+                $_SESSION['_intended'] = substr((string)($_SERVER['REQUEST_URI'] ?? '/'), 0, 500);
+            }
             Router::redirect('/login');
         }
     }

@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.313',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Abrir un enlace del panel desde un correo mandaba al login y cerraba la sesion (cookie SameSite=Strict); ahora Lax y, tras entrar, se vuelve a la pagina pedida', 'La pagina publica "Portal no activado" ya no muestra la direccion ni el puerto del panel: "Portal temporalmente no disponible" en espanol o ingles segun el navegador', 'Pestanas del portal: la activa se ve como pestana seleccionada'],
+                        'en' => ['Opening a panel link from an email sent you to login and dropped the session (SameSite=Strict cookie); now Lax and after login you return to the requested page', 'The public "Portal not activated" page no longer shows the panel address and port: neutral page in Spanish or English by browser language', 'Portal sub-tabs: the active one looks selected'],
+                    ],
+                    'added' => [
+                        'es' => ['"Mantener la sesion iniciada" en el login; duracion en Ajustes > Seguridad (1 dia a 1 año o sin caducidad, 30 dias por defecto)', 'Licencia del portal desde Ajustes > Portal Clientes: activar la clave en este servidor sin reinstalar (tras transferirla) y renovar ahora', 'Aviso por correo de la licencia del portal: caduca en 14/7/3/1 dias, periodo de gracia y caducada (tipo license)'],
+                        'en' => ['"Keep me signed in" on login; duration in Settings > Security (1 day to 1 year or no expiry, 30 days by default)', 'Portal license from Settings > Customer Portal: activate the key on this server without reinstalling (after a transfer) and renew now', 'Email alert for the portal license: expires in 14/7/3/1 days, grace period and expired (type license)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.312',
                 'date' => '2026-10-05',
                 'badge' => 'info',

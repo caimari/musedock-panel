@@ -123,17 +123,24 @@ $sessionIsHttps = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
 $sessionLifetime = max(300, (int)($config['session']['lifetime'] ?? 7200));
 ini_set('session.cookie_secure', $sessionIsHttps ? '1' : '0');
 ini_set('session.cookie_httponly', '1');
-ini_set('session.cookie_samesite', 'Strict');
+// Lax y no Strict: con Strict el navegador no manda la cookie al abrir un enlace del panel
+// desde otro sitio (un correo de aviso en Gmail) y parecía que se cerraba la sesión. Los POST
+// de otros sitios siguen sin cookie y además llevan token CSRF.
+ini_set('session.cookie_samesite', 'Lax');
 ini_set('session.use_strict_mode', '1');
 ini_set('session.use_only_cookies', '1');
-ini_set('session.gc_maxlifetime', (string)($sessionLifetime * 2));
+// Las sesiones con "Mantener la sesión iniciada" duran días: el limpiador no debe borrarlas antes.
+$rememberMax = (int)($config['session']['remember_max_days'] ?? 1825) * 86400;
+ini_set('session.gc_maxlifetime', (string)max($sessionLifetime * 2, $rememberMax));
 session_name($config['session']['name']);
 session_start();
 
 // Caducidad por inactividad (SESSION_LIFETIME, 2 h por defecto) para sesiones con login.
+// Con "Mantener la sesión iniciada" no caduca por inactividad, sino en la fecha fijada al entrar.
 if (isset($_SESSION['panel_user'])) {
     $lastSeen = (int)($_SESSION['_last_seen'] ?? 0);
-    if ($lastSeen > 0 && (time() - $lastSeen) > $sessionLifetime) {
+    $rememberUntil = (int)($_SESSION['_remember_until'] ?? 0);
+    if ($rememberUntil > 0 ? time() > $rememberUntil : ($lastSeen > 0 && (time() - $lastSeen) > $sessionLifetime)) {
         $_SESSION = [];
         session_regenerate_id(true);
     } else {
@@ -530,6 +537,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/portal/send-invitation', 'PortalSettingsController@sendInvitation');
 \MuseDockPanel\Router::post('/settings/portal/revoke-access', 'PortalSettingsController@revokeAccess');
 \MuseDockPanel\Router::post('/settings/portal/activate', 'PortalSettingsController@activate');
+\MuseDockPanel\Router::post('/settings/portal/license', 'PortalSettingsController@license');
 \MuseDockPanel\Router::get('/settings/portal/install-status', 'PortalSettingsController@installStatus');
 
 // Updates

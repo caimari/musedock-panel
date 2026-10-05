@@ -30,6 +30,19 @@
                         <small class="text-muted">Se usa para alertas de exposicion inesperada en monitor (puertos escuchando fuera de esta lista).</small>
                     </div>
 
+                    <div class="mb-3">
+                        <label class="form-label">"Mantener la sesión iniciada": cuánto dura</label>
+                        <?php $rd = (int)\MuseDockPanel\Settings::get('session_remember_days', '30'); ?>
+                        <select name="session_remember_days" class="form-select" style="max-width:260px;">
+                            <?php foreach ([1 => '1 día', 7 => '7 días', 30 => '30 días', 60 => '2 meses', 90 => '3 meses', 180 => '6 meses', 365 => '1 año', 0 => 'Sin caducidad'] as $d => $lbl): ?>
+                                <option value="<?= $d ?>" <?= $rd === $d ? 'selected' : '' ?>><?= $lbl ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="text-muted">Si al entrar se marca la casilla, la sesión dura esto aunque se cierre el navegador. Sin marcarla, se cierra al cerrar el navegador
+                            o tras <?= (int)round(max(300, (int)\MuseDockPanel\Env::get('SESSION_LIFETIME', '7200')) / 60) ?> min sin actividad. Afecta a los inicios de sesión nuevos.
+                            "Sin caducidad" es cómodo pero arriesgado si te roban el ordenador: actívalo solo con MFA.</small>
+                    </div>
+
                     <div class="form-check form-switch mb-3">
                         <input class="form-check-input" type="checkbox" role="switch" id="securityMfaRequired" name="security_mfa_required" value="1" <?= $mfaRequired ? 'checked' : '' ?>>
                         <label class="form-check-label" for="securityMfaRequired">

@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.313] — 2026-10-05 — Sesión que no se pierde al abrir un enlace, "Mantener la sesión iniciada" y licencia del portal
+
+### Arreglado
+- **Al abrir un enlace del panel desde un correo (p. ej. un aviso en Gmail) mandaba al login y cerraba la sesión.** La cookie de sesión era `SameSite=Strict`: el navegador no la envía cuando se llega desde otro sitio. Ahora es `Lax` (se envía al abrir enlaces; los envíos de formularios desde otros sitios siguen sin cookie y además llevan token CSRF).
+- **Tras iniciar sesión se vuelve a la página que se pidió** (la del enlace del correo), no al inicio.
+- **La página pública "Portal no activado" enseñaba la dirección y el puerto del panel** (`portal.dominio:8444/settings/portal`) a cualquiera que entrase al portal. Ahora dice solo "Portal temporalmente no disponible", sin enlaces al panel, en español o inglés según el navegador, y con `noindex`.
+- **Pestañas del portal** (*Acceso Clientes* / *Apariencia*): la activa se veía como un botón blanco que "no hacía nada"; ahora se ve como pestaña seleccionada.
+
+### Añadido
+- **"Mantener la sesión iniciada"** en el login. Sin marcar: la sesión se cierra al cerrar el navegador o tras 2 h sin actividad (como hasta ahora). Marcada: dura lo que diga *Ajustes → Seguridad* (1 día, 7 o 30 días —por defecto—, 2, 3 o 6 meses, 1 año o sin caducidad) aunque se cierre el navegador. Vale también con MFA.
+- **Licencia del portal desde el panel** (*Ajustes → Portal Clientes*, debajo del estado de la licencia): campo con la clave, **Activar en este servidor** (activa o reactiva la clave aquí sin reinstalar el portal; p. ej. tras transferirla desde el servidor de licencias por un cambio de rol) y **Renovar ahora**. Antes solo se podía poner la clave al instalar.
+- **Aviso de licencia del portal** (tipo de aviso `license`): el servidor que sirve el portal avisa por correo cuando su licencia caduca en 14, 7, 3 y 1 días, al entrar en el periodo de gracia y al caducar (una vez por etapa), con qué hacer en cada caso (renovar, transferir y activar, o alargarla).
+
 ## [1.0.312] — 2026-10-05 — Vigilante de cambios del sistema
 
 ### Añadido

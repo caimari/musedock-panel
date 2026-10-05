@@ -60,6 +60,12 @@
                     </button>
                 </div>
             </div>
+            <div class="form-check mb-3">
+                <input class="form-check-input" type="checkbox" name="remember" value="1" id="remember">
+                <label class="form-check-label small" for="remember" style="color:#94a3b8;">Mantener la sesión iniciada<?php
+                    $rd = (int)\MuseDockPanel\Settings::get('session_remember_days', '30');
+                    echo $rd > 0 ? ' (' . $rd . ' días)' : ''; ?></label>
+            </div>
             <button type="submit" class="btn btn-login btn-primary">
                 <i class="bi bi-box-arrow-in-right me-1"></i> Acceder
             </button>

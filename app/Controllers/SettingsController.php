@@ -1943,6 +1943,8 @@ class SettingsController
 
         Settings::set('security_expected_public_tcp_ports', implode(',', $ports));
         Settings::set('security_mfa_required', $mfaRequired ? '1' : '0');
+        $rememberDays = (int)($_POST['session_remember_days'] ?? 30);
+        Settings::set('session_remember_days', (string)(in_array($rememberDays, [0, 1, 7, 30, 60, 90, 180, 365], true) ? $rememberDays : 30));
 
         LogService::log(
             'settings.security',

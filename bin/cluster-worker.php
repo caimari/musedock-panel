@@ -284,6 +284,12 @@ if (Settings::get('cluster_fenced', '0') !== '1' && time() - (int)@filemtime($wp
     } catch (\Throwable $e) {
         logMsg('Blindar WordPress error: ' . $e->getMessage());
     }
+    // Licencia del portal a punto de caducar o caducada: aviso al administrador (una vez por etapa).
+    try {
+        \MuseDockPanel\Services\LicenseService::checkExpiryAndAlert();
+    } catch (\Throwable $e) {
+        logMsg('Aviso de licencia error: ' . $e->getMessage());
+    }
     // En el master: ¿hay apps nuevas en /opt o /srv que no llegarían al servidor de relevo?
     try {
         $unsynced = \MuseDockPanel\Services\FileSyncService::checkUnsyncedAndAlert();

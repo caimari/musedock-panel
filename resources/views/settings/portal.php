@@ -140,6 +140,18 @@
                 </div>
             </div>
             <?php endif; ?>
+            <!-- Clave de licencia: renovar, o activarla en este servidor (p. ej. tras transferirla) sin reinstalar -->
+            <form action="/settings/portal/license" method="POST" class="mt-3 pt-3 d-flex flex-wrap gap-2 align-items-center" style="border-top:1px solid #1e293b;">
+                <?= View::csrf() ?>
+                <span class="small text-muted"><i class="bi bi-key me-1"></i>Clave de licencia:</span>
+                <input type="text" name="license_key" class="form-control form-control-sm" style="max-width:220px;font-family:monospace;text-transform:uppercase;"
+                       value="<?= View::e($licenseStatus['license_key'] ?? '') ?>" placeholder="MDCK-XXXX-XXXX-XXXX" maxlength="19" autocomplete="off">
+                <button type="submit" name="op" value="activate" class="btn btn-sm btn-outline-light"><i class="bi bi-check2-circle me-1"></i>Activar en este servidor</button>
+                <?php if (!empty($licenseStatus['license_key'])): ?>
+                <button type="submit" name="op" value="renew" class="btn btn-sm btn-outline-info"><i class="bi bi-arrow-repeat me-1"></i>Renovar ahora</button>
+                <?php endif; ?>
+                <small class="text-muted w-100">La licencia queda ligada a un servidor. Si estaba en otro (p. ej. tras un cambio de rol), primero hay que transferirla en el servidor de licencias y luego pulsar "Activar en este servidor".</small>
+            </form>
         <?php endif; ?>
     </div>
 </div>
@@ -201,11 +213,12 @@
 
 <!-- Sub-tabs for portal sections -->
 <?php $portalTab = $_GET['tab'] ?? 'access'; ?>
+<style>.portal-subtab.active{background:#a855f7;border-color:#a855f7;color:#fff;}</style>
 <div class="mb-3 d-flex gap-2">
-    <a href="/settings/portal?tab=access" class="btn btn-sm <?= $portalTab === 'access' ? 'btn-light' : 'btn-outline-light' ?>">
+    <a href="/settings/portal?tab=access" class="btn btn-sm btn-outline-light portal-subtab <?= $portalTab === 'access' ? 'active' : '' ?>" <?= $portalTab === 'access' ? 'aria-current="page"' : '' ?>>
         <i class="bi bi-key me-1"></i>Acceso Clientes
     </a>
-    <a href="/settings/portal?tab=appearance" class="btn btn-sm <?= $portalTab === 'appearance' ? 'btn-light' : 'btn-outline-light' ?>">
+    <a href="/settings/portal?tab=appearance" class="btn btn-sm btn-outline-light portal-subtab <?= $portalTab === 'appearance' ? 'active' : '' ?>" <?= $portalTab === 'appearance' ? 'aria-current="page"' : '' ?>>
         <i class="bi bi-palette me-1"></i>Apariencia
     </a>
     <?php if (class_exists(\MuseDockPortal\Services\TicketService::class)): ?>

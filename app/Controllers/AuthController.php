@@ -79,6 +79,7 @@ class AuthController
             }
 
             $_SESSION['mfa_pending'] = [
+                'remember' => !empty($_POST['remember']),
                 'id' => (int)$user['id'],
                 'username' => (string)$user['username'],
                 'ip' => $ip,
@@ -90,11 +91,11 @@ class AuthController
             return;
         }
 
-        Auth::loginUser($user);
+        Auth::loginUser($user, !empty($_POST['remember']));
         self::writeAuthLog($ip, $username, true);
         $this->handleSuccessfulLoginSecurity((int)$user['id'], (string)$user['username'], $ip, $userAgent);
         Flash::set('success', 'Bienvenido al panel.');
-        Router::redirect('/');
+        Router::redirect(Auth::intendedUrl());
     }
 
     public function mfaForm(): void
@@ -186,12 +187,12 @@ class AuthController
             return;
         }
 
-        Auth::loginUser($user);
+        Auth::loginUser($user, !empty($pending['remember']));
         unset($_SESSION['mfa_pending']);
         self::writeAuthLog($ip, (string)$pending['username'], true, 'MFA_OK');
         $this->handleSuccessfulLoginSecurity((int)$user['id'], (string)$user['username'], $ip, (string)($pending['ua'] ?? ''));
         Flash::set('success', 'Bienvenido al panel.');
-        Router::redirect('/');
+        Router::redirect(Auth::intendedUrl());
     }
 
     private function isMfaRequiredForUser(array $user): bool

@@ -44,6 +44,10 @@ class AuthMiddleware
                 echo json_encode(['ok' => false, 'error' => 'Sesión expirada. Recarga la página.']);
                 exit;
             }
+            if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+                // Tras entrar, volver aquí (p. ej. el enlace de un correo de aviso).
+                $_SESSION['_intended'] = substr((string)$_SERVER['REQUEST_URI'], 0, 500);
+            }
             Router::redirect('/login');
             return false;
         }

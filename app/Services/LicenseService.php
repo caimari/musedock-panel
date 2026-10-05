@@ -272,14 +272,7 @@ class LicenseService
         // Save new JWT
         $newJwt = $data['jwt'] ?? '';
         if (!empty($newJwt)) {
-            Settings::set('portal_license_jwt', $newJwt);
-
-            // Also update .license file
-            $licenseFile = '/opt/musedock-portal/.license';
-            if (is_dir(dirname($licenseFile))) {
-                @file_put_contents($licenseFile, $newJwt);
-                @chmod($licenseFile, 0600);
-            }
+            self::storePortalJwt($newJwt);
         }
 
         $message = 'License renewed successfully';
@@ -288,6 +281,95 @@ class LicenseService
         }
 
         return ['ok' => true, 'message' => $message];
+    }
+
+    /** IP pública y nombre de este servidor, como los ve el servidor de licencias. */
+    private static function serverIdentity(): array
+    {
+        $ip = trim((string)@file_get_contents('https://ifconfig.me', false, stream_context_create(['http' => ['timeout' => 5]])));
+        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            $ip = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
+        }
+        return [$ip, trim((string)(gethostname() ?: ''))];
+    }
+
+    /** Guarda la licencia del portal donde la leen el panel y el portal (.license). */
+    private static function storePortalJwt(string $jwt): void
+    {
+        Settings::set('portal_license_jwt', $jwt);
+        $file = '/opt/musedock-portal/.license';
+        if (is_dir(dirname($file))) {
+            @file_put_contents($file, $jwt);
+            @chmod($file, 0600);
+        }
+    }
+
+    /**
+     * Activa (o reactiva tras una transferencia) la clave del portal en ESTE servidor, sin
+     * reinstalar el portal. Si la clave sigue asignada a otro servidor, el servidor de
+     * licencias lo rechaza: hay que transferirla antes desde su administración.
+     *
+     * @return array{ok:bool, message:string}
+     */
+    public static function activatePortalKey(string $key): array
+    {
+        $key = strtoupper(trim($key));
+        if (!preg_match('/^MDCK-[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/', $key)) {
+            return ['ok' => false, 'message' => 'Formato de clave inválido. Esperado: MDCK-XXXX-XXXX-XXXX'];
+        }
+        [$ip, $hostname] = self::serverIdentity();
+        $response = @file_get_contents('https://license.musedock.com/api/v1/activate', false, stream_context_create(['http' => [
+            'method' => 'POST', 'header' => "Content-Type: application/json\r\n", 'timeout' => 20, 'ignore_errors' => true,
+            'content' => json_encode(['key' => $key, 'server_ip' => $ip, 'hostname' => $hostname]),
+        ]]));
+        $data = json_decode((string)$response, true);
+        if (!is_array($data) || empty($data['success']) || empty($data['jwt'])) {
+            return ['ok' => false, 'message' => is_array($data) ? (string)($data['error'] ?? 'Activación rechazada') : 'No se puede contactar con el servidor de licencias'];
+        }
+        self::storePortalJwt((string)$data['jwt']);
+        return ['ok' => true, 'message' => "Licencia activada en {$hostname} ({$ip})" . (!empty($data['valid_until']) ? ', válida hasta ' . $data['valid_until'] : '')];
+    }
+
+    /**
+     * Aviso al administrador antes de que caduque la licencia del portal (14, 7, 3 y 1 días),
+     * al entrar en el periodo de gracia y al caducar. Una vez por etapa. Solo en el servidor
+     * que sirve el portal (en las copias está parado y no renueva).
+     */
+    public static function checkExpiryAndAlert(): ?string
+    {
+        if (!PortalService::shouldServe()) {
+            return null;
+        }
+        $st = self::getPortalStatus();
+        $exp = (int)($st['expires'] ?? 0);
+        if ($exp <= 0) {
+            return null;
+        }
+        $days = (int)floor(($exp - time()) / 86400);
+        $stage = $exp <= time() ? (($st['status'] ?? '') === 'grace' ? 'grace' : 'expired')
+            : ($days < 1 ? 'd1' : ($days < 3 ? 'd3' : ($days < 7 ? 'd7' : ($days < 14 ? 'd14' : ''))));
+        $prev = Settings::get('portal_license_alert_stage', '');
+        if ($stage === $prev) {
+            return $stage;
+        }
+        Settings::set('portal_license_alert_stage', $stage);
+        if ($stage === '') {
+            return $stage; // renovada: se reinician las etapas
+        }
+        $key = (string)($st['license_key'] ?? '');
+        $when = date('d/m/Y H:i', $exp);
+        $what = match ($stage) {
+            'expired' => "La licencia del portal de clientes CADUCÓ el {$when} y ya pasó el periodo de gracia: los clientes no pueden entrar al portal.",
+            'grace' => "La licencia del portal de clientes caducó el {$when}. El portal sigue funcionando unos días de gracia (15 desde la caducidad); después los clientes no podrán entrar.",
+            default => "La licencia del portal de clientes caduca el {$when} (en {$days} día(s)).",
+        };
+        $msg = $what . "\n\nClave: {$key}\nServidor al que está ligada: " . ($st['hostname'] ?? '?')
+            . "\n\nNormalmente se renueva sola cada semana. Si no lo ha hecho:\n"
+            . "  - Ajustes → Portal Clientes → \"Renovar ahora\".\n"
+            . "  - Si dice \"Server changed\" (la licencia está ligada a otro servidor, p. ej. tras un cambio de rol): transfiérela en el servidor de licencias y pulsa \"Activar en este servidor\".\n"
+            . "  - Si dice \"License expired\": hay que renovar la licencia (alargar su fecha) en el servidor de licencias o con tu proveedor.";
+        NotificationService::send('Licencia del portal: ' . match ($stage) { 'expired' => 'caducada', 'grace' => 'en periodo de gracia', default => "caduca en {$days} día(s)" }, $msg, 'license');
+        return $stage;
     }
 
     /**

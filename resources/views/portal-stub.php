@@ -1,16 +1,22 @@
 <?php
-$panelPort = \MuseDockPanel\Env::get('PANEL_PORT', '8444');
-$host = preg_replace('/:\d+$/', '', $_SERVER['HTTP_HOST'] ?? 'localhost');
-$panelUrl = "https://{$host}:{$panelPort}/settings/portal";
-$faviconUrl = "https://{$host}:{$panelPort}/favicon.svg";
+// Página pública: la ven los clientes (y cualquiera) si el portal no tiene licencia.
+// No enlaza al panel ni muestra su puerto. Español o inglés según el navegador.
+$lang = str_starts_with(strtolower((string)($_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? 'es')), 'es') ? 'es' : 'en';
+$t = $lang === 'es'
+    ? ['title' => 'Portal no disponible', 'h1' => 'Portal temporalmente no disponible',
+       'p1' => 'El área de clientes no está disponible en este momento.',
+       'p2' => 'Tus webs, correo y bases de datos siguen funcionando con normalidad. Si necesitas algo, contacta con tu proveedor de hosting.']
+    : ['title' => 'Portal unavailable', 'h1' => 'Portal temporarily unavailable',
+       'p1' => 'The customer area is not available right now.',
+       'p2' => 'Your websites, email and databases keep working normally. If you need anything, please contact your hosting provider.'];
 ?>
 <!DOCTYPE html>
-<html lang="es">
+<html lang="<?= $lang ?>">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Portal — MuseDock</title>
-    <link rel="icon" type="image/svg+xml" href="<?= htmlspecialchars($faviconUrl) ?>">
+    <title><?= htmlspecialchars($t['title']) ?></title>
+    <meta name="robots" content="noindex">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -38,19 +44,9 @@ $faviconUrl = "https://{$host}:{$panelPort}/favicon.svg";
 <body>
     <div class="card">
         <div class="icon">&#128274;</div>
-        <h1>Portal no activado</h1>
-        <p>
-            El portal de clientes no esta instalado o no tiene una licencia activa.
-        </p>
-        <p>
-            Para activar el portal, instala el modulo <strong>MuseDock Portal</strong>
-            y configura tu clave de licencia en
-            <a href="<?= htmlspecialchars($panelUrl) ?>">Panel &gt; Settings &gt; Portal</a>.
-        </p>
-        <p style="font-size:0.8rem;">
-            <a href="https://musedock.com/portal" target="_blank">Mas informacion sobre MuseDock Portal</a>
-        </p>
-        <div class="badge">MuseDock Portal</div>
+        <h1><?= htmlspecialchars($t['h1']) ?></h1>
+        <p><?= htmlspecialchars($t['p1']) ?></p>
+        <p><?= htmlspecialchars($t['p2']) ?></p>
     </div>
 </body>
 </html>
