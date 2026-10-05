@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.314',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['La licencia del portal sigue al servidor que manda: identificador del cluster compartido y renovacion automatica en el principal; tras un relevo pasa sola al nuevo servidor (servidor de licencias 0.2.4). Solo hay que transferirla una vez'],
+                        'en' => ['Portal license follows the active server: shared cluster id and automatic renewal on the primary; after a failover it moves to the new server by itself (license server 0.2.4). Only one manual transfer needed'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.313',
                 'date' => '2026-10-05',
                 'badge' => 'info',

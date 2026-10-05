@@ -286,6 +286,7 @@ if (Settings::get('cluster_fenced', '0') !== '1' && time() - (int)@filemtime($wp
     }
     // Licencia del portal a punto de caducar o caducada: aviso al administrador (una vez por etapa).
     try {
+        \MuseDockPanel\Services\LicenseService::autoRenewPortal();
         \MuseDockPanel\Services\LicenseService::checkExpiryAndAlert();
     } catch (\Throwable $e) {
         logMsg('Aviso de licencia error: ' . $e->getMessage());

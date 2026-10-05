@@ -245,9 +245,10 @@ class LicenseService
         // Call renewal API
         $apiUrl = 'https://license.musedock.com/api/v1/renew';
         $postData = json_encode([
-            'jwt'       => $currentJwt,
-            'server_ip' => $serverIp,
-            'hostname'  => $hostname,
+            'jwt'         => $currentJwt,
+            'server_ip'   => $serverIp,
+            'hostname'    => $hostname,
+            'instance_id' => self::instanceId(),
         ]);
 
         $ctx = stream_context_create([
@@ -281,6 +282,43 @@ class LicenseService
         }
 
         return ['ok' => true, 'message' => $message];
+    }
+
+    /**
+     * Identificador de esta instalación (el clúster entero) ante el servidor de licencias.
+     * Se crea una vez en el que manda y se copia a las réplicas con los ajustes del portal:
+     * así la licencia se renueva desde cualquier servidor del clúster tras un relevo.
+     */
+    public static function instanceId(): string
+    {
+        $id = (string)Settings::get('portal_instance_id', '');
+        if (!preg_match('/^[a-f0-9]{32,64}$/', $id)) {
+            $id = bin2hex(random_bytes(16));
+            Settings::set('portal_instance_id', $id);
+        }
+        return $id;
+    }
+
+    /**
+     * En el servidor que sirve el portal: renueva la licencia si le quedan menos de 23 días
+     * (como mucho cada 6 h). Tras un cambio de rol, el nuevo principal la renueva él mismo y
+     * el servidor de licencias se la pasa (mismo clúster), sin transferirla a mano.
+     */
+    public static function autoRenewPortal(): ?array
+    {
+        if (!PortalService::shouldServe() || time() - (int)Settings::get('portal_license_renew_at', '0') < 21600) {
+            return null;
+        }
+        $st = self::getPortalStatus();
+        $exp = (int)($st['expires'] ?? 0);
+        $boundHere = ($st['hostname'] ?? '') === '' || ($st['hostname'] ?? '') === trim((string)gethostname());
+        if ($exp > time() + 23 * 86400 && $boundHere) {
+            return null;
+        }
+        Settings::set('portal_license_renew_at', (string)time());
+        $r = self::refreshPortalLicense();
+        LogService::log('portal.license', null, 'Renovación automática: ' . $r['message']);
+        return $r;
     }
 
     /** IP pública y nombre de este servidor, como los ve el servidor de licencias. */
@@ -320,7 +358,7 @@ class LicenseService
         [$ip, $hostname] = self::serverIdentity();
         $response = @file_get_contents('https://license.musedock.com/api/v1/activate', false, stream_context_create(['http' => [
             'method' => 'POST', 'header' => "Content-Type: application/json\r\n", 'timeout' => 20, 'ignore_errors' => true,
-            'content' => json_encode(['key' => $key, 'server_ip' => $ip, 'hostname' => $hostname]),
+            'content' => json_encode(['key' => $key, 'server_ip' => $ip, 'hostname' => $hostname, 'instance_id' => self::instanceId()]),
         ]]));
         $data = json_decode((string)$response, true);
         if (!is_array($data) || empty($data['success']) || empty($data['jwt'])) {

@@ -30,7 +30,9 @@ final class PortalService
     /** Emails de clientes recibidos del master (los únicos que la copia puede desactivar). */
     private const SYNCED_KEY = 'portal_sync_customer_emails';
     /** Ajustes del portal que valen igual en todo el cluster. */
-    private const SHARED_SETTINGS = ['portal_hostname', 'portal_port', 'portal_theme', 'portal_sidebar_color', 'portal_license_jwt'];
+    // portal_instance_id: identificador del clúster ante el servidor de licencias (igual en todos
+    // los nodos, para que la licencia siga al que manda sin transferirla).
+    private const SHARED_SETTINGS = ['portal_hostname', 'portal_port', 'portal_theme', 'portal_sidebar_color', 'portal_license_jwt', 'portal_instance_id'];
     private const CUSTOMER_COLS = ['name', 'email', 'company', 'phone', 'password_hash', 'status', 'notes',
         'created_at', 'updated_at', 'password_token', 'password_token_expires'];
 

@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.314] — 2026-10-05 — La licencia del portal sigue al servidor que manda
+
+### Añadido
+- **La licencia del portal sigue al servidor que manda, sin transferirla a mano.** El panel tiene un identificador del clúster (`portal_instance_id`, el mismo en todos los nodos: se copia con los ajustes del portal) y lo envía al activar y renovar. El servidor de licencias (0.2.4) acepta la renovación desde cualquier servidor del mismo clúster y le pasa la licencia. Además, el servidor que sirve el portal la renueva él mismo (cada 6 h como mucho, si le quedan menos de 23 días o está ligada a otro servidor): tras un relevo o cambio de rol, en menos de 30 min queda a su nombre. Solo hace falta transferirla una vez, para que la licencia aprenda el identificador del clúster.
+
 ## [1.0.313] — 2026-10-05 — Sesión que no se pierde al abrir un enlace, "Mantener la sesión iniciada" y licencia del portal
 
 ### Arreglado
