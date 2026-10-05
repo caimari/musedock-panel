@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.310',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Portal de clientes en el puerto 443 daba error 502: la ruta de Caddy apuntaba al puerto publico + 1 (444) en vez de al del proceso del portal (8447). Se corrige sola al actualizar', 'Direccion del portal: 443 por defecto y campos bloqueados con candado una vez guardada (pulsar Editar para cambiarla)'],
+                        'en' => ['Customer portal on port 443 returned 502: the Caddy route pointed to public port + 1 (444) instead of the portal process port (8447); self-heals after update', 'Portal address: 443 by default and fields locked once saved (click Edit to change)'],
+                    ],
+                    'added' => [
+                        'es' => ['Aviso de carpetas de apps sin copia al servidor de relevo: cada 30 min el master revisa /opt y /srv y avisa (una vez por cambio) de las que no se copian ni estan marcadas como propias de la maquina. Nuevas ordenes cluster-switch sync-status, sync-add (con --apply) y sync-local/sync-unlocal; MCP filesync_extra_paths devuelve unsynced y acepta local_paths; nota en Cluster > Archivos y en Docs > Sync de archivos'],
+                        'en' => ['Alert for app folders not copied to the failover server: every 30 min the master checks /opt and /srv and warns (once per change) about folders neither synced nor marked as machine-local. New cluster-switch commands sync-status, sync-add (--apply) and sync-local/sync-unlocal; MCP filesync_extra_paths returns unsynced and accepts local_paths; notice in Cluster > Files and in the sync docs'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.309',
                 'date' => '2026-10-05',
                 'badge' => 'info',

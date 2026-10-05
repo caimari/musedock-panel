@@ -284,6 +284,15 @@ if (Settings::get('cluster_fenced', '0') !== '1' && time() - (int)@filemtime($wp
     } catch (\Throwable $e) {
         logMsg('Blindar WordPress error: ' . $e->getMessage());
     }
+    // En el master: ¿hay apps nuevas en /opt o /srv que no llegarían al servidor de relevo?
+    try {
+        $unsynced = \MuseDockPanel\Services\FileSyncService::checkUnsyncedAndAlert();
+        if ($unsynced) {
+            logMsg('Carpetas sin copia al relevo: ' . implode(', ', array_keys($unsynced)));
+        }
+    } catch (\Throwable $e) {
+        logMsg('Carpetas sin copia error: ' . $e->getMessage());
+    }
 }
 
 // ─── Step 0j: El master reenvía su configuración de relevo cada 30 min ────────

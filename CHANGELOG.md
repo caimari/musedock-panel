@@ -2,6 +2,20 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.310] — 2026-10-05 — Portal de clientes en el 443
+
+### Arreglado
+- **El portal de clientes publicado en el puerto 443 daba error 502.** La ruta de Caddy apuntaba al "puerto público + 1" (444) en vez de al puerto en el que escucha de verdad el proceso del portal (8447, el `-S 127.0.0.1:NNNN` de su unidad). Al actualizar se corrige sola: el panel ve que la ruta apunta a otro puerto y la rehace (como mucho en 5 min, o al momento con "Guardar y aplicar").
+- **Dirección del portal** (*Ajustes → Portal Clientes*): el puerto propone 443 por defecto, y una vez guardada los campos quedan bloqueados con un candado (botón **Editar**) para no cambiarlos sin querer.
+
+### Añadido
+- **Aviso de apps que no llegarían al servidor de relevo.** Una app instalada fuera de los hostings (p. ej. `/opt/miapp`) no se copia sola, y su base de datos puede estar en la del panel, que es de cada servidor. Pasó con el servidor de licencias: tras el cambio de rol el nuevo principal tenía el programa pero no la base. Ahora, cada 30 min, el master revisa las carpetas de primer nivel de `/opt` y `/srv` y avisa (una vez; vuelve a avisar solo si cambia la lista) de las que no se copian ni están marcadas como propias de la máquina. No cuentan el propio panel, lo que instala un paquete del sistema ni las carpetas vacías. Para cada una:
+  - `php bin/cluster-switch.php sync-add <carpeta>` (enseña el plan; `--apply` la añade a la copia en espejo hacia el nodo de relevo);
+  - `php bin/cluster-switch.php sync-local <carpeta>` si es solo de esa máquina (copias, herramientas): no se copia ni se avisa;
+  - `sync-status` lo resume; por MCP, `filesync_extra_paths` devuelve `unsynced` y acepta `local_paths`.
+  - No se copia `/opt` entero a propósito: la copia es en espejo y borraría en el otro servidor lo que solo tiene él. El panel tampoco: cada servidor lo actualiza con `bin/update.sh`.
+  - Nota en *Cluster → Archivos* y sección nueva en *Docs → Sync de archivos* (qué necesita una app para sobrevivir a un relevo: ficheros en la copia, base en una base replicada, servicio en la copia de configuración).
+
 ## [1.0.309] — 2026-10-05 — Comprobación de certificados en bucle cada 30 min
 
 ### Arreglado

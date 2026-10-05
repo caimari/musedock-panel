@@ -1083,6 +1083,22 @@
                     </div>
                 </div>
 
+                <?php
+                // Apps en /opt o /srv que no llegarían al servidor de relevo (solo tiene sentido en el master).
+                $unsyncedApps = [];
+                if (($settings['cluster_role'] ?? \MuseDockPanel\Settings::get('cluster_role', '')) === 'master' && $fsEnabled) {
+                    try { $unsyncedApps = \MuseDockPanel\Services\FileSyncService::unsyncedAppFolders(false); } catch (\Throwable) {}
+                }
+                ?>
+                <?php if ($unsyncedApps): ?>
+                <div class="alert alert-warning small py-2">
+                    <i class="bi bi-folder-plus me-1"></i><strong>Carpetas de apps sin copia al servidor de relevo:</strong>
+                    <?= View::e(implode(', ', array_keys($unsyncedApps))) ?>.
+                    Si este servidor cae, el otro no las tendría. Añádelas a la copia (<code>php bin/cluster-switch.php sync-add &lt;carpeta&gt;</code>)
+                    o márcalas como propias de esta máquina (<code>sync-local</code>).
+                    <a href="/docs/sync-archivos-lsyncd" class="alert-link">Cómo hacerlo</a>
+                </div>
+                <?php endif; ?>
                 <!-- lsyncd panel (always visible to inspect service state) -->
                 <?php $lsyncdStatus = \MuseDockPanel\Services\FileSyncService::getLsyncdStatus(); ?>
                 <div id="lsyncdPanel">

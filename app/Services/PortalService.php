@@ -66,11 +66,24 @@ final class PortalService
         return ($p > 0 && $p < 65535) ? $p : 8446;
     }
 
-    /** Puerto interno del proceso PHP del portal (el instalador usa público + 1). */
+    /**
+     * Puerto interno del proceso PHP del portal: el que escucha de verdad su unidad
+     * (`-S 127.0.0.1:NNNN`). NUNCA se deduce del puerto público elegido para la ruta
+     * (con 443 daba 444 y Caddy respondía 502). Sin unidad: PORTAL_INTERNAL_PORT o el
+     * del instalador (PORTAL_PORT + 1 = 8447).
+     */
     public static function internalPort(): int
     {
+        $unit = (string)@file_get_contents('/etc/systemd/system/' . self::UNIT);
+        if (preg_match('/-S\s+127\.0\.0\.1:(\d{2,5})\b/', $unit, $m) && (int)$m[1] > 0 && (int)$m[1] < 65536) {
+            return (int)$m[1];
+        }
         $p = (int)\MuseDockPanel\Env::get('PORTAL_INTERNAL_PORT', 0);
-        return $p > 0 ? $p : self::publicPort() + 1;
+        if ($p > 0) {
+            return $p;
+        }
+        $installerPort = (int)\MuseDockPanel\Env::get('PORTAL_PORT', '8446');
+        return ($installerPort > 0 ? $installerPort : 8446) + 1;
     }
 
     /** URL pública del portal, o '' si no tiene nombre propio. */

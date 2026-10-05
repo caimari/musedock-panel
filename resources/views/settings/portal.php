@@ -151,20 +151,28 @@
 <div class="card mb-3">
     <div class="card-header"><i class="bi bi-globe2 me-2"></i>Dirección del portal</div>
     <div class="card-body">
-        <form action="/settings/portal/address" method="POST" class="row g-2 align-items-end">
+        <?php $addrLocked = ($ps['hostname'] ?? '') !== ''; ?>
+        <form action="/settings/portal/address" method="POST" class="row g-2 align-items-end" id="portal-address-form">
             <?= View::csrf() ?>
             <div class="col-md-6">
                 <label class="form-label small text-muted mb-1">Nombre público (p. ej. portal.tudominio.com)</label>
-                <input type="text" name="portal_hostname" class="form-control form-control-sm" maxlength="253"
-                       value="<?= View::e($ps['hostname'] ?? '') ?>" placeholder="portal.tudominio.com">
+                <input type="text" name="portal_hostname" class="form-control form-control-sm portal-addr-field" maxlength="253"
+                       value="<?= View::e($ps['hostname'] ?? '') ?>" placeholder="portal.tudominio.com" <?= $addrLocked ? 'readonly' : '' ?>>
             </div>
             <div class="col-md-2">
                 <label class="form-label small text-muted mb-1">Puerto</label>
-                <input type="number" name="portal_port" class="form-control form-control-sm" min="1" max="65534"
-                       value="<?= (int)($ps['port'] ?? 8446) ?>">
+                <input type="number" name="portal_port" class="form-control form-control-sm portal-addr-field" min="1" max="65534"
+                       value="<?= (int)($addrLocked ? ($ps['port'] ?? 443) : 443) ?>" <?= $addrLocked ? 'readonly' : '' ?>>
             </div>
-            <div class="col-md-4">
-                <button type="submit" class="btn btn-sm" style="background:#a855f7;color:#fff;">
+            <div class="col-md-4 d-flex gap-2">
+                <?php if ($addrLocked): ?>
+                <button type="button" class="btn btn-sm btn-outline-light" id="portal-addr-lock" title="Desbloquear para editar"
+                        onclick="document.querySelectorAll('.portal-addr-field').forEach(function(f){f.readOnly=false;});document.getElementById('portal-addr-save').disabled=false;this.style.display='none';document.querySelector('.portal-addr-field').focus();">
+                    <i class="bi bi-lock me-1"></i>Editar
+                </button>
+                <?php endif; ?>
+                <button type="submit" class="btn btn-sm" id="portal-addr-save" style="background:#a855f7;color:#fff;" <?= $addrLocked ? 'disabled' : '' ?>
+                        onclick="return <?= $addrLocked ? "confirm('Cambiar la dirección del portal deja de servir la anterior. ¿Continuar?')" : 'true' ?>;">
                     <i class="bi bi-check-lg me-1"></i>Guardar y aplicar
                 </button>
             </div>

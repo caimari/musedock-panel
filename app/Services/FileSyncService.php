@@ -1853,6 +1853,120 @@ class FileSyncService
         return array_keys($out);
     }
 
+    /**
+     * Carpetas de /opt o /srv marcadas como propias de esta máquina (setting
+     * filesync_local_paths): no se copian y no se avisa de ellas. Es de cada nodo (no va
+     * en PEER_KEYS): cada servidor marca lo suyo.
+     */
+    public static function localPaths(): array
+    {
+        $out = [];
+        foreach (self::parseExcludePatterns(Settings::get('filesync_local_paths', '')) as $p) {
+            $out[rtrim($p, '/')] = true;
+        }
+        return array_keys($out);
+    }
+
+    /** Añade o quita carpetas propias de la máquina. Devuelve la lista resultante. */
+    public static function setLocalPaths(array $add, array $remove = []): array
+    {
+        $norm = static function ($p): string {
+            $p = rtrim(trim((string)$p), '/');
+            return realpath($p) ?: $p;
+        };
+        $list = array_fill_keys(self::localPaths(), true);
+        foreach ($add as $p) {
+            $p = $norm($p);
+            if (preg_match('#^/(opt|srv)/[^/]+$#', $p)) {
+                $list[$p] = true;
+            }
+        }
+        foreach ($remove as $p) {
+            unset($list[$norm($p)]);
+        }
+        $list = array_keys($list);
+        sort($list);
+        Settings::set('filesync_local_paths', implode("\n", $list));
+        return $list;
+    }
+
+    /**
+     * Carpetas de primer nivel de /opt y /srv que no se copian a ningún nodo ni están
+     * marcadas como propias de la máquina. Es lo que faltaría en el servidor de relevo si
+     * este cae: una app nueva instalada fuera de los hostings. Se dejan fuera el propio
+     * panel, lo que instala un paquete del sistema (dpkg) y las carpetas vacías u ocultas.
+     *
+     * @return array<string,string> carpeta => tamaño ('' si $sizes es false)
+     */
+    public static function unsyncedAppFolders(bool $sizes = true): array
+    {
+        // CardDAV lo instala el propio panel en cada nodo (sus datos van en base replicada).
+        $covered = array_merge(self::extraPaths(), self::localPaths(), [dirname(CardDavService::BAIKAL_DIR)]);
+        $panel = realpath(dirname(__DIR__, 2)) ?: '';
+        $out = [];
+        foreach (['/opt', '/srv'] as $base) {
+            foreach (glob($base . '/*', GLOB_ONLYDIR) ?: [] as $dir) {
+                $name = basename($dir);
+                if ($name[0] === '.' || $name === 'lost+found' || is_link($dir)) {
+                    continue;
+                }
+                $real = realpath($dir);
+                if ($real === false || $real === $panel || count(@scandir($real) ?: []) <= 2) {
+                    continue;
+                }
+                foreach ($covered as $c) {
+                    if ($c === $real || str_starts_with($c, $real . '/')) {
+                        continue 2;
+                    }
+                }
+                exec('dpkg-query -S ' . escapeshellarg($real) . ' >/dev/null 2>&1', $o, $rc);
+                if ($rc === 0) {
+                    continue;
+                }
+                $out[$real] = $sizes ? (trim((string)shell_exec('timeout 20 du -sh ' . escapeshellarg($real) . ' 2>/dev/null | cut -f1')) ?: '?') : '';
+            }
+        }
+        ksort($out);
+        return $out;
+    }
+
+    /**
+     * En el master con copia de ficheros activa: avisa (una vez por cambio de la lista)
+     * de las carpetas de apps que no llegarían al servidor de relevo.
+     */
+    public static function checkUnsyncedAndAlert(): array
+    {
+        if (Settings::get('cluster_role', '') !== 'master' || Settings::get('filesync_enabled', '0') !== '1') {
+            return [];
+        }
+        $found = self::unsyncedAppFolders();
+        $hash = $found ? md5(implode("\n", array_keys($found))) : '';
+        if ($hash === Settings::get('filesync_unsynced_hash', '')) {
+            return $found;
+        }
+        Settings::set('filesync_unsynced_hash', $hash);
+        if (!$found) {
+            return $found;
+        }
+        $host = trim((string)gethostname());
+        $lines = [];
+        foreach ($found as $dir => $size) {
+            $lines[] = "  - {$dir} ({$size})";
+        }
+        $msg = "En {$host} hay carpetas de aplicaciones que NO se copian al servidor de relevo:\n\n"
+            . implode("\n", $lines) . "\n\n"
+            . "Si este servidor cae, el otro no las tendría (ni su código ni sus ficheros).\n"
+            . "Para cada una, decide:\n"
+            . "  - Es una app que debe seguir funcionando tras un relevo: añádela a la copia\n"
+            . "    (MCP filesync_extra_paths, o en este servidor: php bin/cluster-switch.php sync-add <carpeta>).\n"
+            . "    Si tiene base de datos, debe estar en una base replicada, no en la del panel.\n"
+            . "  - Es algo solo de esta máquina (copias, herramientas, pruebas): márcala como propia\n"
+            . "    (MCP filesync_extra_paths con local_paths, o: php bin/cluster-switch.php sync-local <carpeta>).\n\n"
+            . "No se vuelve a avisar hasta que cambie la lista.";
+        NotificationService::send("Carpetas sin copia al servidor de relevo en {$host}", $msg, 'filesync_unsynced');
+        return $found;
+    }
+
     public static function generateLsyncdConfig(): array
     {
         $config = self::getConfig();

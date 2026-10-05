@@ -74,7 +74,7 @@ class PortalSettingsController
     public function saveAddress(): void
     {
         $host = PortalService::normalizeHostname((string)($_POST['portal_hostname'] ?? ''));
-        $port = (int)($_POST['portal_port'] ?? 8446);
+        $port = (int)($_POST['portal_port'] ?? 443);
         if ($host !== '' && !PortalService::validHostname($host)) {
             Flash::set('error', 'El nombre público no es válido (ejemplo: portal.tudominio.com).');
             Router::redirect('/settings/portal');

@@ -28,6 +28,10 @@
  *   php bin/cluster-switch.php apply-master-caddyfile [--apply]   (master) enseña / pone las webs del Caddyfile del master anterior
  *   php bin/cluster-switch.php failover-normalize   (master) este servidor principal y TITULAR del relevo, estado normal
  *   php bin/cluster-switch.php pg-rebuild <ip-master> <clúster|all> [--max-rate=20M]   copia completa con avance
+ *   php bin/cluster-switch.php sync-status     (master) carpetas de /opt y /srv: copiadas, propias y sin copia
+ *   php bin/cluster-switch.php sync-add <carpeta>... [--apply]   (master) añadir carpetas de apps a la copia (ESPEJO)
+ *   php bin/cluster-switch.php sync-local <carpeta>...   marcar carpetas como propias de esta máquina (no avisa)
+ *   php bin/cluster-switch.php sync-unlocal <carpeta>... quitar esa marca
  */
 
 require_once dirname(__DIR__) . '/app/bootstrap.php';
@@ -142,6 +146,53 @@ switch ($cmd) {
             ? \MuseDockPanel\Services\ConfigMirrorService::setExcluded($items)
             : \MuseDockPanel\Services\ConfigMirrorService::setExcluded([], $items);
         echo 'Excluidos de la copia: ' . (implode(', ', $list) ?: 'ninguno') . "\n";
+        break;
+
+    case 'sync-status':
+        // En el master: carpetas de /opt y /srv que se copian, las propias de la máquina y
+        // las que no están en ninguna lista (no llegarían al servidor de relevo).
+        $fs = \MuseDockPanel\Services\FileSyncService::class;
+        $out(['copied' => $fs::extraPaths(), 'local' => $fs::localPaths(), 'unsynced' => $fs::unsyncedAppFolders()]);
+        break;
+
+    case 'sync-local':
+    case 'sync-unlocal':
+        // Carpetas propias de esta máquina: no se copian y no se avisa de ellas.
+        $items = array_slice($argv, 2);
+        $list = $cmd === 'sync-local'
+            ? \MuseDockPanel\Services\FileSyncService::setLocalPaths($items)
+            : \MuseDockPanel\Services\FileSyncService::setLocalPaths([], $items);
+        echo 'Propias de esta máquina: ' . (implode(', ', $list) ?: 'ninguna') . "\n";
+        break;
+
+    case 'sync-add':
+        // En el master: añadir carpetas a la copia hacia los nodos que ya reciben las extra.
+        // Es ESPEJO: en el destino se borra lo que no exista aquí dentro de esa carpeta.
+        $fs = \MuseDockPanel\Services\FileSyncService::class;
+        if (Settings::get('cluster_role', '') !== 'master') {
+            echo "sync-add se ejecuta en el MASTER.\n";
+            exit(1);
+        }
+        $items = array_values(array_filter(array_slice($argv, 2), static fn($a) => $a !== '--apply'));
+        $new = $fs::extraPaths(implode("\n", $items));
+        $nodes = $fs::parseExcludePatterns(Settings::get('filesync_extra_nodes', ''));
+        if (!$new || !$nodes) {
+            echo $new ? "No hay nodos que reciban carpetas extra: configúralo una vez por MCP filesync_extra_paths (target_nodes).\n"
+                : "Ninguna carpeta válida (solo existentes bajo /opt, /srv o /home, nunca el panel).\n";
+            exit(1);
+        }
+        $paths = array_values(array_unique(array_merge($fs::extraPaths(), $new)));
+        if (!in_array('--apply', $argv, true)) {
+            echo "Se copiarían (ESPEJO: en el nodo destino se borra lo que no exista aquí dentro de esas carpetas):\n  "
+                . implode("\n  ", $new) . "\nA los nodos: " . implode(', ', array_map(static fn($id) => (ClusterService::getNode((int)$id)['name'] ?? "#{$id}"), $nodes))
+                . "\nRepite con --apply para hacerlo.\n";
+            break;
+        }
+        Settings::set('filesync_extra_paths', implode("\n", $paths));
+        $fs::setLocalPaths([], $new);
+        $r = $fs::reloadLsyncd();
+        echo 'Copiadas: ' . implode(', ', $paths) . "\nlsyncd " . (!empty($r['ok']) ? 'reiniciado' : 'NO arrancó: ' . ($r['error'] ?? '')) . "\n";
+        $ok = !empty($r['ok']);
         break;
 
     case 'apply-master-caddyfile':

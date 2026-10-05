@@ -366,10 +366,11 @@ final class McpClusterTools
             'filesync_extra_paths' => [
                 'write' => true, 'destructive' => true,
                 'title' => 'Carpetas extra en la copia de ficheros',
-                'description' => 'En el MASTER: además de /var/www/vhosts, copiar con lsyncd carpetas de apps que viven fuera de los hostings (p. ej. /opt/miapp) SOLO a los nodos que se indiquen (normalmente el de relevo). Solo carpetas existentes bajo /opt, /srv o /home; nunca /opt/musedock-panel. Es ESPEJO: en el nodo destino se borra lo que no exista aquí dentro de esas carpetas. Sin argumentos muestra la configuración actual. Requiere "Permitir acciones que modifican".',
+                'description' => 'En el MASTER: además de /var/www/vhosts, copiar con lsyncd carpetas de apps que viven fuera de los hostings (p. ej. /opt/miapp) SOLO a los nodos que se indiquen (normalmente el de relevo). Solo carpetas existentes bajo /opt, /srv o /home; nunca /opt/musedock-panel. Es ESPEJO: en el nodo destino se borra lo que no exista aquí dentro de esas carpetas. Sin argumentos muestra la configuración actual y `unsynced`: carpetas de apps en /opt o /srv que no se copian ni están marcadas como propias de la máquina (no llegarían al relevo); con local_paths se marcan como propias. Requiere "Permitir acciones que modifican".',
                 'inputSchema' => $o([
                     'paths' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Lista completa de carpetas (sustituye a la anterior)'],
                     'target_nodes' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Ids o nombres de los nodos que las reciben'],
+                    'local_paths' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Lista completa de carpetas de /opt o /srv propias de ESTA máquina: no se copian ni se avisa de ellas (sustituye a la anterior)'],
                     'apply' => $apply,
                 ]),
             ],
@@ -2215,7 +2216,21 @@ final class McpClusterTools
             $n = ClusterService::getNode($id);
             return $n ? (string)$n['name'] : "#{$id}";
         };
-        $info = ['paths' => $curPaths, 'target_nodes' => array_map($nodeName, $curNodes)];
+        $info = ['paths' => $curPaths, 'target_nodes' => array_map($nodeName, $curNodes), 'local_paths' => $fs::localPaths(),
+            // Carpetas de apps que no se copian ni son propias: no llegarían al servidor de relevo.
+            'unsynced' => $fs::unsyncedAppFolders()];
+        if (array_key_exists('local_paths', $args)) {
+            $want = (array)$args['local_paths'];
+            $plan = ['local_paths' => $want, 'effect' => 'no se copian ni se avisa de ellas; no se borra nada'];
+            if (empty($args['apply'])) {
+                return ['applied' => false, 'plan' => $plan, 'next' => 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.'];
+            }
+            $list = $fs::setLocalPaths($want, array_diff($fs::localPaths(), $want));
+            LogService::log('mcp.filesync', 'local-paths', 'Carpetas propias: ' . implode(', ', $list));
+            if (!array_key_exists('paths', $args) && !array_key_exists('target_nodes', $args)) {
+                return ['applied' => true, 'local_paths' => $list, 'unsynced' => $fs::unsyncedAppFolders()];
+            }
+        }
         if (!array_key_exists('paths', $args) && !array_key_exists('target_nodes', $args)) {
             return $info;
         }
