@@ -33,7 +33,7 @@ final class PortalService
     // portal_instance_id: identificador del clúster ante el servidor de licencias (igual en todos
     // los nodos, para que la licencia siga al que manda sin transferirla).
     private const SHARED_SETTINGS = ['portal_hostname', 'portal_port', 'portal_theme', 'portal_sidebar_color', 'portal_license_jwt', 'portal_instance_id', 'portal_session_remember_days', 'portal_favicon', 'portal_favicon_type'];
-    private const CUSTOMER_COLS = ['name', 'email', 'company', 'phone', 'password_hash', 'status', 'notes',
+    private const CUSTOMER_COLS = ['uid', 'name', 'email', 'company', 'phone', 'password_hash', 'status', 'notes',
         'created_at', 'updated_at', 'password_token', 'password_token_expires'];
 
     /** Favicon del portal: como máximo 64 KB, SVG, PNG o ICO (se mira el contenido, no la extensión). */
@@ -566,7 +566,10 @@ final class PortalService
             }
             $row['email'] = $email;
             try {
-                $local = Database::fetchOne('SELECT id FROM customers WHERE lower(email) = :e', ['e' => $email]);
+                // Primero por uid (estable aunque cambie el correo); si no, por correo, y el local
+                // adopta el uid del master.
+                $local = !empty($row['uid']) ? Database::fetchOne('SELECT id FROM customers WHERE uid = :u', ['u' => (string)$row['uid']]) : null;
+                $local = $local ?: Database::fetchOne('SELECT id FROM customers WHERE lower(email) = :e', ['e' => $email]);
                 if ($local) {
                     $changed = Database::fetchOne('SELECT id FROM customers WHERE id = :id AND ('
                         . implode(' OR ', array_map(static fn($k) => "{$k} IS DISTINCT FROM :{$k}", array_keys($row))) . ')',
@@ -589,7 +592,9 @@ final class PortalService
             $n = Database::execute("UPDATE customers SET status = 'inactive', updated_at = NOW() WHERE lower(email) = :e AND status <> 'inactive'", ['e' => $gone]);
             $counts['customers_deactivated'] += $n;
         }
-        $synced = array_values(array_unique($masterEmails));
+        // Una vez recibido del master, un cliente ya no es "propio" de esta copia (aunque el
+        // master lo renombre o lo quite): así mergeFromPeers no lo devuelve como nuevo.
+        $synced = array_values(array_unique(array_merge($prevSynced, $masterEmails)));
         // Clientes que vinieron del master (ahora o antes): sus enlaces los decide el master.
         $fromMaster = array_values(array_unique(array_merge($prevSynced, $masterEmails)));
 
@@ -671,8 +676,10 @@ final class PortalService
                     continue;
                 }
                 $theirs[$email] = true;
-                if (Database::fetchOne('SELECT id FROM customers WHERE lower(email) = :e', ['e' => $email])) {
-                    continue;
+                $uid = in_array('uid', $have, true) ? (string)($c['uid'] ?? '') : '';
+                if (($uid !== '' && Database::fetchOne('SELECT id FROM customers WHERE uid = :u', ['u' => $uid]))
+                    || Database::fetchOne('SELECT id FROM customers WHERE lower(email) = :e', ['e' => $email])) {
+                    continue; // ya está aquí (quizá con otro correo): no se duplica
                 }
                 $row = ['email' => $email];
                 foreach (self::CUSTOMER_COLS as $col) {

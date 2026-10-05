@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.320] — 2026-10-05 — Clientes: identificador estable entre servidores
+
+### Arreglado
+- **Cambiar el correo de un cliente en el principal hacía que volviera duplicado.** La copia de clientes entre nodos los reconocía por el correo: si el principal cambiaba el correo de un cliente recuperado de otro nodo antes de que ese nodo se enterase, la recuperación automática volvía a traer el "viejo" como si fuera otro. Ahora cada cliente tiene un **identificador estable** (`uid`, migración nueva; los existentes se rellenan solos) que viaja entre nodos y no cambia con el correo: la copia y la recuperación reconocen primero por ese identificador, y solo si no lo tienen, por correo. Además, un cliente que una copia recibió del principal ya nunca cuenta como "propio" de esa copia (aunque el principal lo renombre o lo quite), así que no se recupera de vuelta.
+
 ## [1.0.319] — 2026-10-05 — Vincular hostings y dominios de correo ya creados a un cliente
 
 ### Arreglado

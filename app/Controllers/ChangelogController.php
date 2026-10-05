@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.320',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Cambiar el correo de un cliente en el principal lo hacia volver duplicado desde otro nodo: identificador estable de cliente (uid) que viaja entre nodos; se reconoce primero por uid y un cliente recibido del principal ya nunca cuenta como propio de la copia'],
+                        'en' => ['Changing a customer email on the primary made it come back duplicated from another node: stable customer id (uid) shared across nodes; matched by uid first, and a customer received from the primary never counts as replica-owned again'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.319',
                 'date' => '2026-10-05',
                 'badge' => 'info',

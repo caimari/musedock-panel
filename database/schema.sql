@@ -47,6 +47,8 @@ CREATE TABLE IF NOT EXISTS customers (
     password_hash VARCHAR(255),
     status VARCHAR(20) NOT NULL DEFAULT 'active',
     notes TEXT,
+    -- Identificador estable entre nodos (no cambia al cambiar el correo).
+    uid VARCHAR(32) UNIQUE DEFAULT md5(random()::text || clock_timestamp()::text),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
