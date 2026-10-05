@@ -54,6 +54,7 @@ class NotificationController
         Settings::set('notify_smtp_user', trim($_POST['notify_smtp_user'] ?? ''));
         Settings::set('notify_smtp_from', trim($_POST['notify_smtp_from'] ?? ''));
         Settings::set('notify_smtp_from_name', trim($_POST['notify_smtp_from_name'] ?? ''));
+        Settings::set('notify_brand', mb_substr(trim((string)($_POST['notify_brand'] ?? '')), 0, 60));
 
         $encryption = in_array($_POST['notify_smtp_encryption'] ?? '', ['tls', 'ssl', 'none']) ? $_POST['notify_smtp_encryption'] : 'tls';
         Settings::set('notify_smtp_encryption', $encryption);
@@ -62,6 +63,16 @@ class NotificationController
         $smtpPass = $_POST['notify_smtp_pass'] ?? '';
         if ($smtpPass !== '') {
             Settings::set('notify_smtp_pass', ReplicationService::encryptPassword($smtpPass));
+        }
+
+        // SMTP secundario (opcional): host vacío = sin reserva.
+        Settings::set('notify_smtp2_host', trim($_POST['notify_smtp2_host'] ?? ''));
+        Settings::set('notify_smtp2_port', (string)max(1, (int)($_POST['notify_smtp2_port'] ?? 587)));
+        Settings::set('notify_smtp2_user', trim($_POST['notify_smtp2_user'] ?? ''));
+        Settings::set('notify_smtp2_from', trim($_POST['notify_smtp2_from'] ?? ''));
+        Settings::set('notify_smtp2_encryption', in_array($_POST['notify_smtp2_encryption'] ?? '', ['tls', 'ssl', 'none'], true) ? $_POST['notify_smtp2_encryption'] : 'tls');
+        if (($_POST['notify_smtp2_pass'] ?? '') !== '') {
+            Settings::set('notify_smtp2_pass', ReplicationService::encryptPassword((string)$_POST['notify_smtp2_pass']));
         }
 
         // Recipient email (manual override)

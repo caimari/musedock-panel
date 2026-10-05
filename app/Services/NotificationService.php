@@ -65,7 +65,7 @@ class NotificationService
         'notify_smtp_from', 'notify_smtp_encryption', 'notify_telegram_chat_id',
         'monitor_notify_email', 'monitor_notify_telegram',
         'notify_smtp2_host', 'notify_smtp2_port', 'notify_smtp2_user', 'notify_smtp2_from', 'notify_smtp2_encryption',
-        'notify_email_daily_cap',
+        'notify_email_daily_cap', 'notify_brand',
     ];
 
     /**
@@ -215,7 +215,7 @@ class NotificationService
      * que los avisos, sin etiqueta de servidor en el asunto y con su propio tope diario
      * (notify_customer_email_daily_cap, 50) para no agotar el cupo de los avisos.
      */
-    public static function sendToAddress(string $to, string $subject, string $body, string $fromName = ''): bool
+    public static function sendToAddress(string $to, string $subject, string $body, string $fromName = '', string $html = ''): bool
     {
         $to = trim($to);
         if (!filter_var($to, FILTER_VALIDATE_EMAIL) || preg_match('/[\r\n]/', $to . $subject . $fromName)) {
@@ -237,7 +237,43 @@ class NotificationService
         if (Settings::get('notify_email_method', 'smtp') === 'php') {
             return self::sendViaPhpMail($to, $from, $subject, $body, $fromName);
         }
-        return self::sendViaSmtp($to, $from, $subject, $body, $fromName);
+        return self::sendViaSmtp($to, $from, $subject, $body, $fromName, $html);
+    }
+
+    /**
+     * HTML sencillo para correos a clientes (invitación, cambio de contraseña, tickets):
+     * título, texto, un botón y un pie con quién envía. Sin imágenes externas ni scripts
+     * (lo que más penaliza en los filtros). La marca sale del dominio del remitente.
+     */
+    public static function customerHtml(string $greeting, array $paragraphs, string $buttonText = '', string $buttonUrl = '', string $note = ''): string
+    {
+        $e = static fn(string $t) => htmlspecialchars($t, ENT_QUOTES, 'UTF-8');
+        $from = Settings::get('notify_smtp_from', '') ?: self::getAdminEmail();
+        $domain = strtolower(substr(strrchr($from, '@') ?: '@', 1));
+        // Marca en los correos a clientes (Ajustes → Notificaciones); si no, la del dominio.
+        $brand = trim((string)Settings::get('notify_brand', '')) ?: ucfirst(explode('.', $domain)[0] ?? '');
+        $p = '';
+        foreach ($paragraphs as $t) {
+            $p .= '<p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#334155;">' . $e($t) . '</p>';
+        }
+        $btn = $buttonUrl !== ''
+            ? '<p style="margin:22px 0;"><a href="' . $e($buttonUrl) . '" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;'
+              . 'padding:12px 22px;border-radius:8px;font-weight:600;font-size:15px;">' . $e($buttonText) . '</a></p>'
+              . '<p style="margin:0 0 14px;font-size:12px;line-height:1.5;color:#64748b;">Si el botón no funciona, copia este enlace en el navegador:<br>'
+              . '<span style="word-break:break-all;color:#4f46e5;">' . $e($buttonUrl) . '</span></p>'
+            : '';
+        $noteHtml = $note !== '' ? '<p style="margin:14px 0 0;font-size:13px;line-height:1.5;color:#64748b;">' . $e($note) . '</p>' : '';
+        return '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+            . '<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">'
+            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 12px;"><tr><td align="center">'
+            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;padding:28px;">'
+            . '<tr><td>'
+            . ($brand !== '' ? '<p style="margin:0 0 18px;font-size:18px;font-weight:700;color:#0f172a;">' . $e($brand) . '</p>' : '')
+            . '<p style="margin:0 0 14px;font-size:15px;color:#0f172a;">' . $e($greeting) . '</p>'
+            . $p . $btn . $noteHtml
+            . '</td></tr></table>'
+            . '<p style="margin:14px 0 0;font-size:12px;color:#94a3b8;">' . $e($brand !== '' ? "{$brand} · {$domain}" : '') . '</p>'
+            . '</td></tr></table></body></html>';
     }
 
     /**
@@ -283,7 +319,7 @@ class NotificationService
      * al día) ni se guardaba el motivo: el aviso se perdía sin rastro.
      * El último error y el último envío correcto quedan en notify_email_last_*.
      */
-    private static function sendViaSmtp(string $to, string $from, string $subject, string $body, string $fromName = ''): bool
+    private static function sendViaSmtp(string $to, string $from, string $subject, string $body, string $fromName = '', string $html = ''): bool
     {
         $errors = [];
         foreach (['notify_smtp_' => 'principal', 'notify_smtp2_' => 'secundario'] as $prefix => $label) {
@@ -294,7 +330,7 @@ class NotificationService
             // El secundario usa su propio remitente si lo tiene (otro proveedor puede
             // no aceptar el dominio del principal).
             $sender = $prefix === 'notify_smtp2_' && $cfg['from'] !== '' ? $cfg['from'] : $from;
-            $r = self::smtpSendOnce($cfg, $to, $sender, $subject, $body, $fromName);
+            $r = self::smtpSendOnce($cfg, $to, $sender, $subject, $body, $fromName, $html);
             if ($r['ok']) {
                 Settings::set('notify_email_last_ok', json_encode(['at' => date('Y-m-d H:i:s'), 'server' => $label . ' ' . $cfg['host']], JSON_UNESCAPED_UNICODE));
                 if ($errors) {
@@ -330,7 +366,7 @@ class NotificationService
     }
 
     /** Una conversación SMTP comprobando el código de cada paso. */
-    private static function smtpSendOnce(array $c, string $to, string $from, string $subject, string $body, string $fromName): array
+    private static function smtpSendOnce(array $c, string $to, string $from, string $subject, string $body, string $fromName, string $html = ''): array
     {
         $socket = null;
         $step = static function (string $cmd, array $okCodes, string $what) use (&$socket): ?string {
@@ -344,6 +380,15 @@ class NotificationService
             }
             return null;
         };
+        // Nombre con el que se presenta al servidor de envío: uno real del propio servidor
+        // (nombre de envío/DNS inverso, nombre del panel o de la máquina). Antes era
+        // "musedock-panel", que no es un nombre válido y queda en las cabeceras (Received)
+        // como señal de spam.
+        $ehlo = MailHeloService::name() ?: (string)Settings::get('panel_hostname', '');
+        if (!preg_match('/^[a-z0-9.-]+\.[a-z]{2,}$/i', $ehlo)) {
+            $ehlo = (string)gethostname();
+            $ehlo = str_contains($ehlo, '.') ? $ehlo : 'localhost.localdomain';
+        }
         try {
             $prefix = $c['encryption'] === 'ssl' ? 'ssl://' : '';
             $socket = @fsockopen($prefix . $c['host'], $c['port'], $errno, $errstr, 10);
@@ -352,13 +397,13 @@ class NotificationService
             }
             stream_set_timeout($socket, 15);
             $fail = $step('', [220], 'saludo')
-                ?? $step('EHLO musedock-panel', [250], 'EHLO');
+                ?? $step('EHLO ' . $ehlo, [250], 'EHLO');
             if ($fail === null && $c['encryption'] === 'tls') {
                 $fail = $step('STARTTLS', [220], 'STARTTLS');
                 if ($fail === null && !stream_socket_enable_crypto($socket, true, STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT)) {
                     $fail = 'TLS: no se pudo negociar';
                 }
-                $fail = $fail ?? $step('EHLO musedock-panel', [250], 'EHLO tras TLS');
+                $fail = $fail ?? $step('EHLO ' . $ehlo, [250], 'EHLO tras TLS');
             }
             if ($fail === null && $c['user'] !== '') {
                 $fail = $step('AUTH LOGIN', [334], 'AUTH')
@@ -373,9 +418,19 @@ class NotificationService
                 $enc = static fn(string $t) => preg_match('/[^\x20-\x7E]/', $t) ? '=?UTF-8?B?' . base64_encode($t) . '?=' : $t;
                 $fromHeader = $fromName !== '' ? $enc($fromName) . " <{$from}>" : $from;
                 $headers = "From: {$fromHeader}\r\nTo: {$to}\r\nSubject: " . $enc($subject) . "\r\nDate: " . date('r')
-                    . "\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n";
-                // CRLF y "dot-stuffing": una línea que empieza por "." no debe cortar el mensaje.
-                $text = preg_replace('/^\./m', '..', str_replace(["\r\n", "\r", "\n"], ["\n", "\n", "\r\n"], $body));
+                    . "\r\nMessage-ID: <" . bin2hex(random_bytes(12)) . '@' . (substr(strrchr($from, '@') ?: '@localhost', 1)) . ">\r\nMIME-Version: 1.0\r\n";
+                if ($html !== '') {
+                    // Texto + HTML (multipart/alternative), cada parte en base64 (sin líneas largas).
+                    $b = 'b' . bin2hex(random_bytes(12));
+                    $headers .= "Content-Type: multipart/alternative; boundary=\"{$b}\"\r\n";
+                    $part = static fn(string $type, string $content) => "--{$b}\r\nContent-Type: {$type}; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n"
+                        . rtrim(chunk_split(base64_encode($content), 76, "\r\n")) . "\r\n";
+                    $text = $part('text/plain', $body) . $part('text/html', $html) . "--{$b}--";
+                } else {
+                    $headers .= "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: 8bit\r\n";
+                    // CRLF y "dot-stuffing": una línea que empieza por "." no debe cortar el mensaje.
+                    $text = preg_replace('/^\./m', '..', str_replace(["\r\n", "\r", "\n"], ["\n", "\n", "\r\n"], $body));
+                }
                 fwrite($socket, $headers . "\r\n" . $text . "\r\n.\r\n");
                 $fail = $step('', [250], 'envío del mensaje');
             }

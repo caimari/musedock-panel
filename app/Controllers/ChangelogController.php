@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.326',
+                'date' => '2026-10-06',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['El envio SMTP del panel se presenta con un nombre real del servidor (antes "musedock-panel", senal de spam en las cabeceras)'],
+                        'en' => ['Panel SMTP sending now uses a real hostname in EHLO (was "musedock-panel", a spam signal in headers)'],
+                    ],
+                    'added' => [
+                        'es' => ['Correos a clientes (invitacion y cambio de contrasena del portal) en HTML con marca y boton, mas version texto', 'Marca en los correos a clientes (Ajustes > Notificaciones)', 'Servidor SMTP secundario opcional en Ajustes > Notificaciones (se usa si el principal falla)'],
+                        'en' => ['Customer emails (portal invitation and password reset) in HTML with brand and button, plus text version', 'Brand name for customer emails (Settings > Notifications)', 'Optional secondary SMTP server in Settings > Notifications (used when the primary fails)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.325',
                 'date' => '2026-10-06',
                 'badge' => 'info',

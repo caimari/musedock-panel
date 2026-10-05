@@ -104,6 +104,53 @@
                            value="<?= View::e($settings['notify_smtp_from_name'] ?? '') ?>" placeholder="MuseDock Panel">
                     <small class="text-muted">Ej: "Servidor principal", "Servidor de reserva"</small>
                 </div>
+                <div class="col-md-4">
+                    <label class="form-label">Marca en los correos a clientes</label>
+                    <input type="text" name="notify_brand" class="form-control" maxlength="60"
+                           value="<?= View::e(\MuseDockPanel\Settings::get('notify_brand', '')) ?>" placeholder="Tu empresa">
+                    <small class="text-muted">Sale arriba en las invitaciones y avisos del portal. Vacío = el nombre del dominio del remitente.</small>
+                </div>
+            </div>
+
+            <hr class="border-secondary">
+
+            <!-- SMTP secundario (opcional): se usa solo si el principal falla o rechaza -->
+            <?php $s2 = static fn(string $k, string $d = '') => \MuseDockPanel\Settings::get('notify_smtp2_' . $k, $d); $enc2 = $s2('encryption', 'tls'); ?>
+            <h6 class="text-muted mb-1">Servidor SMTP secundario <span class="badge bg-secondary">opcional</span></h6>
+            <p class="small text-muted mb-2">Solo se usa si el principal falla o rechaza el envío (caído, sin cupo…). Vacío = sin reserva.</p>
+            <div class="row mb-3">
+                <div class="col-md-5">
+                    <label class="form-label">Host SMTP</label>
+                    <input type="text" name="notify_smtp2_host" class="form-control" value="<?= View::e($s2('host')) ?>" placeholder="mail.tudominio.com">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Puerto</label>
+                    <input type="number" name="notify_smtp2_port" class="form-control" value="<?= (int)($s2('port', '587') ?: 587) ?>">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Cifrado</label>
+                    <select name="notify_smtp2_encryption" class="form-select">
+                        <option value="tls" <?= $enc2 === 'tls' ? 'selected' : '' ?>>STARTTLS</option>
+                        <option value="ssl" <?= $enc2 === 'ssl' ? 'selected' : '' ?>>SSL/TLS</option>
+                        <option value="none" <?= $enc2 === 'none' ? 'selected' : '' ?>>Sin cifrado</option>
+                    </select>
+                </div>
+            </div>
+            <div class="row mb-3">
+                <div class="col-md-4">
+                    <label class="form-label">Usuario SMTP</label>
+                    <input type="text" name="notify_smtp2_user" class="form-control" value="<?= View::e($s2('user')) ?>" autocomplete="off">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Password SMTP</label>
+                    <input type="password" name="notify_smtp2_pass" class="form-control" autocomplete="new-password" placeholder="<?= $s2('pass') !== '' ? '••••••••' : '' ?>">
+                    <?php if ($s2('pass') !== ''): ?><small class="text-muted">Dejar vacío para mantener la actual</small><?php endif; ?>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Remitente (From) del secundario</label>
+                    <input type="email" name="notify_smtp2_from" class="form-control" value="<?= View::e($s2('from')) ?>" placeholder="vacío = el del principal">
+                    <small class="text-muted">Por si este servidor no acepta el remitente del principal.</small>
+                </div>
             </div>
 
             <hr class="border-secondary">

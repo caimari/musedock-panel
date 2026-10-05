@@ -249,13 +249,20 @@ class PortalSettingsController
         }
         $body .= "{$setupUrl}\n\n";
         $body .= "Este enlace caduca en 48 horas.\n\n";
-        $body .= "Si no solicitaste esto, ignora este mensaje.\n\n";
-        $body .= "— MuseDock Panel";
+        $body .= "Si no lo has solicitado tú, ignora este mensaje: tu contraseña actual sigue funcionando.\n";
 
         // Por el SMTP de avisos del panel (p. ej. Sweego, con el secundario de reserva) y con su
         // remitente: antes salía con mail() por el Postfix local y desde noreply@<servidor>, sin
         // SPF/DKIM ni DNS inverso, y Gmail lo descartaba sin dejarlo ni en spam.
-        $sent = \MuseDockPanel\Services\NotificationService::sendToAddress($customer['email'], $subject, $body, 'Portal de clientes');
+        $html = \MuseDockPanel\Services\NotificationService::customerHtml(
+            "Hola {$customer['name']},",
+            $isNew ? ['Te hemos dado acceso al portal de clientes, donde puedes gestionar tus webs, correo y bases de datos.', 'Para empezar, crea tu contraseña:']
+                   : ['Hemos recibido una solicitud para cambiar la contraseña de tu acceso al portal de clientes.', 'Para elegir una nueva:'],
+            $isNew ? 'Crear mi contraseña' : 'Cambiar mi contraseña',
+            $setupUrl,
+            'El enlace caduca en 48 horas. Si no lo has solicitado tú, ignora este mensaje: tu contraseña actual sigue funcionando.'
+        );
+        $sent = \MuseDockPanel\Services\NotificationService::sendToAddress($customer['email'], $subject, $body, 'Portal de clientes', $html);
 
         LogService::log('portal.invitation', $customer['email'],
             ($isNew ? 'Invitation' : 'Password reset') . " sent to: {$customer['name']}");

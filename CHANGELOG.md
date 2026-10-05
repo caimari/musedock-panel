@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.326] — 2026-10-06 — Correos a clientes en HTML y envío SMTP con un nombre real
+
+### Arreglado
+- **El panel se presentaba al servidor de envío (p. ej. Sweego) como `musedock-panel`**, que no es un nombre válido y queda en las cabeceras del correo (`Received`) como señal de spam. Ahora usa un nombre real del servidor: su nombre de envío o DNS inverso, el nombre del panel o el de la máquina.
+
+### Añadido
+- **Correos a clientes en formato enriquecido** (invitación y cambio de contraseña del portal): HTML sencillo con la marca, saludo, un botón y el enlace de reserva, más la versión en texto (`multipart/alternative`), sin imágenes externas ni scripts. Cada correo lleva su propio `Message-ID`. El texto ya no parece un correo de "phishing" (explica qué es y que la contraseña actual sigue valiendo si no lo pidió).
+- **Marca en los correos a clientes** (*Ajustes → Notificaciones*, `notify_brand`); vacía = el nombre del dominio del remitente. Se copia a los nodos con el resto de ajustes de avisos.
+- **Servidor SMTP secundario en la pantalla** (*Ajustes → Notificaciones*, opcional): host, puerto, cifrado, usuario, contraseña y remitente propio. Solo se usa si el principal falla o rechaza el envío. Antes el panel ya sabía usarlo, pero solo se podía configurar por MCP.
+
 ## [1.0.325] — 2026-10-06 — Las invitaciones del portal salen por el SMTP del panel
 
 ### Arreglado
