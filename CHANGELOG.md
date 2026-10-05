@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.318] — 2026-10-05 — update.sh: validación del Caddyfile con el entorno de Caddy
+
+### Arreglado
+- **`update.sh` decía "Generated Caddyfile failed validation" en los servidores que sacan certificados por DNS de Cloudflare.** La validación se hacía sin el entorno del servicio de Caddy (`EnvironmentFile`, donde está el token), así que `{env.CLOUDFLARE_API_TOKEN}` llegaba vacío y fallaba siempre ("API token '' appears invalid"); se restauraba el fichero anterior y la reparación del bloque del panel nunca se aplicaba. Ahora valida con ese entorno. Además, si el Caddyfile generado es igual al que había, no reinicia Caddy.
+- **Nodos con el nombre de reserva del cambio de rol.** Al registrar el principal anterior se le pide su nombre de máquina; si en ese momento no contesta (en mitad del cambio), queda como "Antiguo master (IP)". Ahora, cuando ya contesta, se le pone su nombre (p. ej. "mortadelo (10.10.70.1)"). Solo cambia el nombre que se ve.
+
 ## [1.0.317] — 2026-10-05 — Acceso de clientes al portal solo desde el servidor que manda
 
 ### Arreglado

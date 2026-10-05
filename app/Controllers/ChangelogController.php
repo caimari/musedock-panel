@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.318',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['update.sh: "Generated Caddyfile failed validation" en servidores con certificados por DNS de Cloudflare (validaba sin el token del servicio de Caddy); ahora valida con su entorno y no reinicia Caddy si el Caddyfile no cambia', 'Nodos registrados como "Antiguo master (IP)" en un cambio de rol reciben su nombre de maquina en cuanto contestan'],
+                        'en' => ['update.sh: "Generated Caddyfile failed validation" on servers using Cloudflare DNS certificates (validated without the Caddy service token); now validates with its environment and skips the Caddy restart when unchanged', 'Nodes registered as "Antiguo master (IP)" during a role switch get their machine name once they answer'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.317',
                 'date' => '2026-10-05',
                 'badge' => 'info',

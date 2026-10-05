@@ -284,6 +284,14 @@ if (Settings::get('cluster_fenced', '0') !== '1' && time() - (int)@filemtime($wp
     } catch (\Throwable $e) {
         logMsg('Blindar WordPress error: ' . $e->getMessage());
     }
+    // Nodos con el nombre de reserva del cambio de rol: ponerles su nombre de máquina.
+    try {
+        foreach (\MuseDockPanel\Services\ClusterService::renameFallbackNodes() as $rn) {
+            logMsg("Nodo renombrado: {$rn}");
+        }
+    } catch (\Throwable $e) {
+        logMsg('Renombrar nodos error: ' . $e->getMessage());
+    }
     // En el principal: recuperar clientes nacidos en otro nodo (p. ej. el principal anterior
     // tras un cambio de rol). Solo añade; nunca cambia ni borra.
     try {

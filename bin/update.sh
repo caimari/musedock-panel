@@ -853,15 +853,29 @@ CADDYEOF
     # Validar como el usuario caddy y con SU almacén (el mismo que usa el servicio):
     # como root, `caddy validate` usa /root/.local/share/caddy, cuya CA interna puede
     # estar dañada o no existir, y rechazaba un Caddyfile correcto ("no PEM block found").
+    # Con el entorno del servicio (EnvironmentFile de caddy.service, p. ej. el token de
+    # Cloudflare para DNS-01): sin él, un Caddyfile con {env.CLOUDFLARE_API_TOKEN} fallaba
+    # siempre con "API token '' appears invalid" y nunca se aplicaba.
     caddy_validate() {
-        if id caddy >/dev/null 2>&1 && [ -d /var/lib/caddy ]; then
-            runuser -u caddy -- env HOME=/var/lib/caddy caddy validate --config "$1"
-        else
-            caddy validate --config "$1"
-        fi
+        (
+            set -a
+            for envf in $(systemctl show caddy -p EnvironmentFiles --value 2>/dev/null | grep -o '/[^ ]*'); do
+                [ -r "$envf" ] && . "$envf"
+            done
+            set +a
+            if id caddy >/dev/null 2>&1 && [ -d /var/lib/caddy ]; then
+                runuser -u caddy -- env HOME=/var/lib/caddy caddy validate --config "$1"
+            else
+                caddy validate --config "$1"
+            fi
+        )
     }
 
-    if caddy_validate "$caddy_file" >/dev/null 2>&1; then
+    if cmp -s "$caddy_file" "$backup_file"; then
+        # Igual que el que había: no hace falta reiniciar Caddy (ni arriesgar sus rutas).
+        rm -f "$backup_file" 2>/dev/null || true
+        ok "Panel TLS Caddy block already up to date"
+    elif caddy_validate "$caddy_file" >/dev/null 2>&1; then
         systemctl daemon-reload 2>/dev/null || true
         systemctl restart caddy 2>/dev/null || true
         ok "Panel TLS Caddy block repaired for https://${server_ip}:${panel_port}"

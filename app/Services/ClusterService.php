@@ -2180,6 +2180,37 @@ class ClusterService
      */
     public static function adoptPeerAsFileSyncTarget(string $peerIp): array
     {
+        return self::adoptPeerAsFileSyncTargetInner($peerIp);
+    }
+
+    /**
+     * Nodos que se registraron con el nombre de reserva ("Antiguo master (IP)") porque en ese
+     * momento no contestaron (p. ej. en mitad de un cambio de rol): cuando ya contestan, se
+     * les pone su nombre de máquina. Solo cambia el nombre que se ve; nada más.
+     */
+    public static function renameFallbackNodes(): array
+    {
+        $done = [];
+        foreach (self::getNodes() as $n) {
+            if (!preg_match('/^Antiguo master \(([^)]+)\)$/', (string)$n['name'], $m)) {
+                continue;
+            }
+            try {
+                $st = self::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'query-local-state', 'payload' => []]);
+                $host = (string)($st['data']['state']['hostname'] ?? $st['data']['state']['panel_hostname'] ?? '');
+                $short = preg_replace('/[^A-Za-z0-9_-]/', '', explode('.', $host)[0]);
+                if ($short !== '') {
+                    Database::update('cluster_nodes', ['name' => "{$short} ({$m[1]})"], 'id = :id', ['id' => (int)$n['id']]);
+                    $done[] = "{$n['name']} → {$short} ({$m[1]})";
+                }
+            } catch (\Throwable) {
+            }
+        }
+        return $done;
+    }
+
+    private static function adoptPeerAsFileSyncTargetInner(string $peerIp): array
+    {
         $steps = [];
         if (!filter_var($peerIp, FILTER_VALIDATE_IP)) {
             return ['ok' => false, 'error' => 'IP del otro nodo no válida', 'steps' => $steps];
