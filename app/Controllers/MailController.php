@@ -47,6 +47,23 @@ class MailController
     // ─── Dashboard / Overview ────────────────────────────────
     // ═══════════════════════════════════════════════════════════
 
+    /** GET (JSON): IP de salida, DNS inverso y nombre de envío de ESTE servidor. Solo lee. */
+    public function heloCheck(): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode(\MuseDockPanel\Services\MailHeloService::check() + ['configured' => \MuseDockPanel\Services\MailHeloService::name()]);
+    }
+
+    /** POST: nombre de envío (smtp_helo_name) de ESTE servidor. No se copia a los demás. */
+    public function heloSave(): void
+    {
+        $r = \MuseDockPanel\Services\MailHeloService::set((string)($_POST['mail_helo_name'] ?? ''));
+        Flash::set(!empty($r['ok']) ? 'success' : 'error', !empty($r['ok'])
+            ? 'Nombre de envío guardado' . (!empty($r['changed']) ? ' y aplicado en Postfix.' : '.')
+            : (string)$r['error']);
+        Router::redirect('/mail?tab=antispam');
+    }
+
     public function index(): void
     {
         if (!isset($_GET['tab']) && empty($_GET['setup'])) {

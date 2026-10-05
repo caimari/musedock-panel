@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.322] — 2026-10-05 — Eliminar cliente desde una ventana de confirmación
+
+### Cambiado
+- **Eliminar cliente** ya no pide la contraseña en la propia ficha: el botón abre una ventana que dice qué cliente se elimina y pide ahí la contraseña del administrador.
+- **Los cambios de clientes llegan a las copias al momento.** Al crear, editar, eliminar, vincular o bloquear un cliente, el principal avisa a sus copias y estas lo traen enseguida (antes, hasta 5 min).
+- **Un cliente eliminado en el principal se elimina también en las copias** (antes solo quedaba inactivo). Si en la copia aún tuviera hostings o dominios de correo, se desactiva y se elimina en cuanto el principal los desvincule.
+- **A quién pertenece cada dominio de correo ahora también viaja entre servidores** (antes solo el de los hostings): las copias reciben los cambios del principal y la recuperación de clientes de otro nodo trae también sus dominios de correo. Una copia ya no conserva enlaces de correo viejos que le impedían eliminar un cliente que el principal ya había quitado.
+
+### Añadido
+- **Nombre de envío y DNS inverso por servidor** (*Correo → pestaña anti-abuso*): comprueba las tres cosas que miran Gmail y compañía (la IP de salida tiene DNS inverso, ese nombre apunta de vuelta a la IP y Postfix se presenta con él) y dice qué falta. Campo **nombre de envío** (`smtp_helo_name`) propio de cada servidor (no se copia): se aplica en Postfix al guardar y el cluster-worker lo mantiene. **Vacío = automático:** usa el DNS inverso de la IP de salida si apunta de vuelta a ella (y lo sigue si cambia); si no se puede comprobar, no toca nada. Lo normal es el nombre de cada máquina, distinto en cada una: no depende de quién mande, porque cada servidor envía por su IP. Un nombre que se mueve en los relevos (como el del correo) no sirve como DNS inverso de dos IPs. El correo que se recibe (MX, IMAP, certificado) no cambia.
+
 ## [1.0.321] — 2026-10-05 — Eliminar clientes con contraseña y buscador al vincular
 
 ### Añadido

@@ -442,6 +442,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/mail', 'MailController@index');
 \MuseDockPanel\Router::get('/mail/domains/create', 'MailController@domainCreate');
 \MuseDockPanel\Router::post('/mail/domains/store', 'MailController@domainStore');
+\MuseDockPanel\Router::get('/mail/helo', 'MailController@heloCheck');
+\MuseDockPanel\Router::post('/mail/helo', 'MailController@heloSave');
 \MuseDockPanel\Router::get('/mail/domains/{id}', 'MailController@domainShow');
 \MuseDockPanel\Router::post('/mail/domains/{id}/delete', 'MailController@domainDelete');
 \MuseDockPanel\Router::post('/mail/domains/{id}/regenerate-dkim', 'MailController@domainRegenerateDkim');

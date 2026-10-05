@@ -601,6 +601,8 @@ class ClusterApiController
                 // Clientes del portal y a quién pertenece cada hosting (la base del panel es
                 // de cada nodo): el slave los pide para poder servir el portal si se promueve.
                 'export-portal-state' => \MuseDockPanel\Services\PortalService::exportState(!empty($payload['own_only'])),
+                // El principal avisa de un cambio de clientes: la copia los trae ya.
+                'portal-sync-now' => \MuseDockPanel\Services\PortalService::pullFromMaster(),
                 // Avisos del master copiados a este nodo (notify_configure copy_to_nodes).
                 'set-notify-config' => \MuseDockPanel\Services\NotificationService::importConfig($payload),
                 'set-alert-policy' => \MuseDockPanel\Services\AlertPolicyService::import($payload),

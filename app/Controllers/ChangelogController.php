@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.322',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Correo: nombre de envio (smtp_helo_name) por servidor y comprobacion de DNS inverso (IP, PTR que apunta de vuelta y nombre de Postfix), con consejo de que falta'],
+                        'en' => ['Mail: per-server sending name (smtp_helo_name) and reverse DNS check (IP, PTR pointing back and Postfix name) with advice'],
+                    ],
+                    'changed' => [
+                        'es' => ['Eliminar cliente: el boton abre una ventana de confirmacion con la contrasena del administrador', 'Los cambios de clientes llegan a las copias al momento (antes hasta 5 min) y un cliente eliminado en el principal se elimina tambien en las copias si alli no tiene nada vinculado', 'A quien pertenece cada dominio de correo tambien se copia entre servidores (antes solo los hostings)'],
+                        'en' => ['Delete customer: the button opens a confirmation dialog asking for the admin password', 'Customer changes reach replicas immediately (was up to 5 min) and a customer deleted on the primary is deleted on replicas too when nothing is linked there', 'Mail domain ownership is now copied between servers too (before only hostings)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.321',
                 'date' => '2026-10-05',
                 'badge' => 'info',

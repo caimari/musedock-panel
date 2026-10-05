@@ -336,6 +336,43 @@
 <!-- ═══════════════════════════════════════════════════ -->
 <div class="mail-tab-pane<?= $activeTab === 'antispam' ? '' : ' d-none' ?>" data-mail-tab="antispam">
     <div class="card bg-dark border-secondary mb-4">
+        <div class="card-header border-secondary"><i class="bi bi-signpost-split me-2"></i>Nombre de envío y DNS inverso (este servidor)</div>
+        <div class="card-body small">
+            <p class="text-muted mb-2">Para que Gmail y compañía no manden el correo a spam deben cuadrar tres cosas: la IP de salida tiene DNS inverso (PTR),
+                ese nombre apunta de vuelta a la misma IP, y Postfix se presenta con ese nombre al enviar. Es de <strong>cada servidor</strong> (no se copia):
+                lo normal es el nombre de la máquina (<code>servidor1.tudominio.com</code>), distinto en cada una. <strong>Vacío = automático</strong>:
+                el panel usa el DNS inverso de la IP de salida si apunta de vuelta a ella, y lo sigue si cambia. Así no depende de quién mande:
+                cada servidor envía por su IP y se presenta con su nombre. El correo que se recibe (MX, IMAP, certificado) no cambia.</p>
+            <div id="helo-status" class="mb-3"><span class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Comprobando…</span></div>
+            <form method="POST" action="/mail/helo" class="d-flex flex-wrap gap-2 align-items-center">
+                <?= View::csrf() ?>
+                <input type="text" name="mail_helo_name" id="helo-name" class="form-control form-control-sm" style="max-width:320px;"
+                       value="<?= View::e(\MuseDockPanel\Services\MailHeloService::name()) ?>" placeholder="vacío = automático (su DNS inverso)" autocomplete="off">
+                <button class="btn btn-sm btn-outline-info"><i class="bi bi-check2 me-1"></i>Guardar y aplicar</button>
+                <button type="button" class="btn btn-sm btn-outline-light d-none" id="helo-use-ptr">Usar el DNS inverso</button>
+            </form>
+        </div>
+    </div>
+    <script>
+    (function () {
+        var box = document.getElementById('helo-status');
+        var esc = function (t) { var d = document.createElement('div'); d.textContent = t == null ? '' : t; return d.innerHTML; };
+        fetch('/mail/helo', {headers: {'Accept': 'application/json'}}).then(function (r) { return r.json(); }).then(function (d) {
+            var mark = function (ok) { return ok ? '<i class="bi bi-check-circle text-success"></i>' : '<i class="bi bi-x-circle text-danger"></i>'; };
+            box.innerHTML = '<div>' + mark(!!d.ip) + ' IP de salida: <code>' + esc(d.ip || '?') + '</code></div>'
+                + '<div>' + mark(!!d.ptr) + ' DNS inverso: <code>' + esc(d.ptr || 'ninguno') + '</code></div>'
+                + '<div>' + mark(d.ptr_points_back) + ' El DNS inverso apunta de vuelta a la IP</div>'
+                + '<div>' + mark(d.helo_matches) + ' Postfix se presenta como <code>' + esc(d.helo || '?') + '</code></div>'
+                + '<div class="mt-2 ' + (d.ok ? 'text-success' : 'text-warning') + '">' + esc(d.advice) + '</div>';
+            if (d.ptr && !d.helo_matches) {
+                var b = document.getElementById('helo-use-ptr');
+                b.classList.remove('d-none');
+                b.onclick = function () { document.getElementById('helo-name').value = d.ptr; };
+            }
+        }).catch(function () { box.innerHTML = '<span class="text-danger">No se pudo comprobar.</span>'; });
+    })();
+    </script>
+    <div class="card bg-dark border-secondary mb-4">
         <div class="card-header border-secondary"><i class="bi bi-shield-lock me-2"></i>Políticas de envío (anti-abuso)</div>
         <div class="card-body">
             <p class="small text-muted mb-3">

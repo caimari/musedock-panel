@@ -443,11 +443,20 @@ final class PortalService
         ) as $row) {
             $links[strtolower((string)$row['domain'])] = $row['email'] !== null ? strtolower((string)$row['email']) : null;
         }
+        // A quién pertenece cada dominio de correo (antes no viajaba: una copia conservaba
+        // enlaces viejos y no podía eliminar al cliente que el principal ya había quitado).
+        $mailLinks = [];
+        try {
+            foreach (Database::fetchAll('SELECT m.domain, c.email FROM mail_domains m LEFT JOIN customers c ON c.id = m.customer_id') as $row) {
+                $mailLinks[strtolower((string)$row['domain'])] = $row['email'] !== null ? strtolower((string)$row['email']) : null;
+            }
+        } catch (\Throwable) {
+        }
         $settings = [];
         foreach (self::SHARED_SETTINGS as $k) {
             $settings[$k] = (string)Settings::get($k, '');
         }
-        return ['ok' => true, 'customers' => $customers, 'links' => $links, 'settings' => $settings] + self::exportTickets();
+        return ['ok' => true, 'customers' => $customers, 'links' => $links, 'mail_links' => $mailLinks, 'settings' => $settings] + self::exportTickets();
     }
 
     private static function tableExists(string $table): bool
@@ -588,9 +597,24 @@ final class PortalService
         }
 
         $prevSynced = json_decode((string)Settings::get(self::SYNCED_KEY, '[]'), true) ?: [];
+        // Clientes que vinieron del master y allí ya no están (los eliminó): la copia es espejo,
+        // así que se eliminan también si aquí no tienen nada vinculado; si tienen hostings o
+        // dominios de correo, solo se desactivan (cuando el master los desvincule, se eliminan).
         foreach (array_diff($prevSynced, $masterEmails) as $gone) {
-            $n = Database::execute("UPDATE customers SET status = 'inactive', updated_at = NOW() WHERE lower(email) = :e AND status <> 'inactive'", ['e' => $gone]);
-            $counts['customers_deactivated'] += $n;
+            $row = Database::fetchOne('SELECT id FROM customers WHERE lower(email) = :e', ['e' => $gone]);
+            if (!$row) {
+                continue;
+            }
+            $linked = (int)(Database::fetchOne('SELECT COUNT(*) AS c FROM hosting_accounts WHERE customer_id = :id', ['id' => (int)$row['id']])['c'] ?? 0);
+            try {
+                $linked += (int)(Database::fetchOne('SELECT COUNT(*) AS c FROM mail_domains WHERE customer_id = :id', ['id' => (int)$row['id']])['c'] ?? 0);
+            } catch (\Throwable) {
+            }
+            if ($linked === 0) {
+                $counts['customers_deleted'] = ($counts['customers_deleted'] ?? 0) + Database::execute('DELETE FROM customers WHERE id = :id', ['id' => (int)$row['id']]);
+            } else {
+                $counts['customers_deactivated'] += Database::execute("UPDATE customers SET status = 'inactive', updated_at = NOW() WHERE id = :id AND status <> 'inactive'", ['id' => (int)$row['id']]);
+            }
         }
         // Una vez recibido del master, un cliente ya no es "propio" de esta copia (aunque el
         // master lo renombre o lo quite): así mergeFromPeers no lo devuelve como nuevo.
@@ -603,10 +627,20 @@ final class PortalService
             $idByEmail[$r['email']] = (int)$r['id'];
         }
         $emailById = array_flip($idByEmail);
-        foreach ((array)($data['links'] ?? []) as $domain => $email) {
-            $h = Database::fetchOne('SELECT id, customer_id FROM hosting_accounts WHERE lower(domain) = :d', ['d' => strtolower((string)$domain)]);
+        // Hostings y dominios de correo. Si el master no manda 'mail_links' (versión anterior),
+        // los enlaces de correo de aquí no se tocan.
+        foreach (['links' => 'hosting_accounts', 'mail_links' => 'mail_domains'] as $key => $table) {
+        if (!array_key_exists($key, $data)) {
+            continue;
+        }
+        foreach ((array)$data[$key] as $domain => $email) {
+            try {
+                $h = Database::fetchOne("SELECT id, customer_id FROM {$table} WHERE lower(domain) = :d", ['d' => strtolower((string)$domain)]);
+            } catch (\Throwable) {
+                break; // la tabla no existe aquí
+            }
             if (!$h) {
-                continue; // ese hosting aún no está en esta copia
+                continue; // aún no está en esta copia
             }
             $current = $h['customer_id'] !== null ? (int)$h['customer_id'] : null;
             if ($email !== null) {
@@ -616,9 +650,10 @@ final class PortalService
                 $want = ($current !== null && in_array($emailById[$current] ?? '', $fromMaster, true)) ? null : $current;
             }
             if ($want !== $current) {
-                Database::update('hosting_accounts', ['customer_id' => $want], 'id = :wid', ['wid' => (int)$h['id']]);
+                Database::update($table, ['customer_id' => $want], 'id = :wid', ['wid' => (int)$h['id']]);
                 $counts['links_changed']++;
             }
+        }
         }
 
         self::importTickets($data, $counts, $issues);
@@ -692,27 +727,54 @@ final class PortalService
                     Database::insert('customers', $row);
                 }
             }
-            foreach ((array)($data['links'] ?? []) as $domain => $email) {
+            foreach (['links' => 'hosting_accounts', 'mail_links' => 'mail_domains'] as $key => $table) {
+            foreach ((array)($data[$key] ?? []) as $domain => $email) {
                 if ($email === null || !isset($theirs[strtolower((string)$email)])) {
                     continue;
                 }
-                $h = Database::fetchOne('SELECT id, customer_id FROM hosting_accounts WHERE lower(domain) = :d', ['d' => strtolower((string)$domain)]);
+                try {
+                    $h = Database::fetchOne("SELECT id, customer_id FROM {$table} WHERE lower(domain) = :d", ['d' => strtolower((string)$domain)]);
+                } catch (\Throwable) {
+                    break;
+                }
                 if (!$h || $h['customer_id'] !== null) {
                     continue; // no está aquí, o ya tiene cliente: no se toca
                 }
-                $out['links'][] = "{$domain} → {$email}";
+                $out['links'][] = ($table === 'mail_domains' ? 'correo ' : '') . "{$domain} → {$email}";
                 if ($apply) {
                     $cid = Database::fetchOne('SELECT id FROM customers WHERE lower(email) = :e', ['e' => strtolower((string)$email)]);
                     if ($cid) {
-                        Database::update('hosting_accounts', ['customer_id' => (int)$cid['id']], 'id = :wid', ['wid' => (int)$h['id']]);
+                        Database::update($table, ['customer_id' => (int)$cid['id']], 'id = :wid', ['wid' => (int)$h['id']]);
                     }
                 }
+            }
             }
         }
         if ($apply && ($out['customers'] || $out['links'])) {
             LogService::log('portal.merge', 'from-peers', 'Clientes recuperados: ' . implode(', ', $out['customers']) . '; hostings: ' . implode(', ', $out['links']));
         }
         return $out;
+    }
+
+    /**
+     * En el principal: pide a las copias que traigan YA los clientes (tras crear, editar,
+     * eliminar, vincular o bloquear uno), en vez de esperar a su copia de cada 5 min.
+     * Si una copia no contesta, la recoge en su siguiente vuelta.
+     */
+    public static function notifyReplicas(): void
+    {
+        if (self::role() === 'slave') {
+            return;
+        }
+        foreach (ClusterService::getNodes() as $n) {
+            if (($n['role'] ?? '') !== 'slave') {
+                continue;
+            }
+            try {
+                ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'portal-sync-now', 'payload' => []]);
+            } catch (\Throwable) {
+            }
+        }
     }
 
     /** En una copia: pide al master sus clientes del portal y los aplica. */

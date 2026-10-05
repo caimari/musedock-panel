@@ -284,6 +284,14 @@ if (Settings::get('cluster_fenced', '0') !== '1' && time() - (int)@filemtime($wp
     } catch (\Throwable $e) {
         logMsg('Blindar WordPress error: ' . $e->getMessage());
     }
+    // Nombre de envío de Postfix (smtp_helo_name) de este servidor: que siga el guardado.
+    try {
+        if (!empty(\MuseDockPanel\Services\MailHeloService::ensure()['changed'])) {
+            logMsg('Postfix: nombre de envío aplicado (' . (\MuseDockPanel\Services\MailHeloService::name() ?: 'por defecto') . ')');
+        }
+    } catch (\Throwable $e) {
+        logMsg('Nombre de envío error: ' . $e->getMessage());
+    }
     // Nodos con el nombre de reserva del cambio de rol: ponerles su nombre de máquina.
     try {
         foreach (\MuseDockPanel\Services\ClusterService::renameFallbackNodes() as $rn) {

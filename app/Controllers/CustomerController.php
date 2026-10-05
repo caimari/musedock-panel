@@ -110,6 +110,7 @@ class CustomerController
         ]);
 
         LogService::log('customer.create', $email, "Created customer: {$name}");
+        \MuseDockPanel\Services\PortalService::notifyReplicas(); // las copias, al momento
         Flash::set('success', "Cliente creado: {$name}");
         Router::redirect('/customers');
     }
@@ -179,11 +180,13 @@ class CustomerController
             if ((int)$item['customer_id'] === $cid) {
                 Database::update($table, ['customer_id' => null], 'id = :wid', ['wid' => $itemId]);
                 LogService::log('customer.unlink', $item['domain'], "Desvinculado de {$customer['name']}");
+                \MuseDockPanel\Services\PortalService::notifyReplicas(); // las copias, al momento
                 Flash::set('success', "{$item['domain']} ya no está vinculado a {$customer['name']}.");
             }
         } elseif ($item['customer_id'] === null) {
             Database::update($table, ['customer_id' => $cid], 'id = :wid', ['wid' => $itemId]);
             LogService::log('customer.link', $item['domain'], "Vinculado a {$customer['name']}");
+            \MuseDockPanel\Services\PortalService::notifyReplicas(); // las copias, al momento
             Flash::set('success', "{$item['domain']} vinculado a {$customer['name']}. Lo verá en su portal.");
         } else {
             Flash::set('error', "{$item['domain']} ya pertenece a otro cliente: desvincúlalo antes desde ese cliente.");
@@ -224,6 +227,7 @@ class CustomerController
             Database::update('customers', $upd, 'id = :wid', ['wid' => $cid]);
             LogService::log($block ? 'portal.customer_block' : 'portal.customer_unblock', $c['name'], $block ? 'Acceso al portal bloqueado' : 'Acceso al portal permitido');
         }
+        \MuseDockPanel\Services\PortalService::notifyReplicas(); // las copias, al momento
         Flash::set('success', $block
             ? "Acceso al portal bloqueado para {$c['name']}: no puede entrar y su sesión abierta se cierra en un minuto. Su contraseña se conserva."
             : "Acceso al portal permitido otra vez para {$c['name']}: entra con su contraseña de siempre.");
@@ -299,6 +303,7 @@ class CustomerController
         ], 'id = :id', ['id' => $params['id']]);
 
         LogService::log('customer.update', $email, "Updated customer: {$name}");
+        \MuseDockPanel\Services\PortalService::notifyReplicas(); // las copias, al momento
         Flash::set('success', 'Cliente actualizado.');
         Router::redirect('/customers/' . $params['id']);
     }
@@ -342,6 +347,7 @@ class CustomerController
 
         Database::delete('customers', 'id = :id', ['id' => $params['id']]);
         LogService::log('customer.delete', $customer['email'], "Deleted customer: {$customer['name']}");
+        \MuseDockPanel\Services\PortalService::notifyReplicas(); // las copias, al momento
         Flash::set('success', "Cliente {$customer['name']} eliminado.");
         Router::redirect('/customers');
     }

@@ -142,13 +142,26 @@
             <div class="card-body d-flex flex-wrap align-items-center gap-2 small">
                 <i class="bi bi-trash3 text-danger"></i>
                 <?php if ($canDelete): ?>
-                    <form method="POST" action="/customers/<?= (int)$customer['id'] ?>/delete" class="d-flex flex-wrap gap-2 align-items-center"
-                          onsubmit="return confirm(<?= View::js('¿Eliminar al cliente ' . $customer['name'] . ' (' . $customer['email'] . ')? No se puede deshacer.') ?>)">
-                        <?= View::csrf() ?>
-                        <span>Eliminar este cliente. Confirma con tu contraseña de administrador:</span>
-                        <input type="password" name="admin_password" required class="form-control form-control-sm" style="max-width:220px;" autocomplete="current-password" placeholder="Tu contraseña">
-                        <button class="btn btn-sm btn-outline-danger">Eliminar cliente</button>
-                    </form>
+                    <span>Este cliente no tiene hostings ni dominios de correo: se puede eliminar.</span>
+                    <button type="button" class="btn btn-sm btn-outline-danger ms-auto" data-bs-toggle="modal" data-bs-target="#deleteCustomerModal">Eliminar cliente</button>
+                    <div class="modal fade" id="deleteCustomerModal" tabindex="-1">
+                        <div class="modal-dialog"><div class="modal-content" style="background:#1e293b;color:#e2e8f0;">
+                            <form method="POST" action="/customers/<?= (int)$customer['id'] ?>/delete">
+                                <?= View::csrf() ?>
+                                <div class="modal-header"><h6 class="modal-title text-danger"><i class="bi bi-trash3 me-2"></i>Eliminar cliente</h6>
+                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+                                <div class="modal-body small">
+                                    <p>Vas a eliminar a <strong><?= View::e($customer['name']) ?></strong> (<?= View::e($customer['email']) ?>). No se puede deshacer.</p>
+                                    <label class="form-label">Confirma con tu contraseña de administrador</label>
+                                    <input type="password" name="admin_password" required class="form-control form-control-sm" autocomplete="current-password">
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-sm btn-outline-light" data-bs-dismiss="modal">Cancelar</button>
+                                    <button class="btn btn-sm btn-danger">Eliminar</button>
+                                </div>
+                            </form>
+                        </div></div>
+                    </div>
                 <?php else: ?>
                     <span class="text-muted">Para eliminar este cliente, primero desvincula (o elimina) sus hostings y dominios de correo.</span>
                 <?php endif; ?>
