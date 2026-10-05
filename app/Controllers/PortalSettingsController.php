@@ -191,6 +191,13 @@ class PortalSettingsController
      */
     public function sendInvitation(): void
     {
+        // En una copia no: los clientes los manda el master (lo de aquí se pisaría en la
+        // siguiente copia) y el portal lo sirve el master (un enlace creado aquí no valdría).
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es una copia: el acceso de los clientes al portal se gestiona en el servidor que manda.');
+            Router::redirect(parse_url((string)($_SERVER['HTTP_REFERER'] ?? ''), PHP_URL_PATH) ?: '/customers');
+            return;
+        }
         $customerId = (int)($_POST['customer_id'] ?? 0);
 
         $customer = Database::fetchOne("SELECT * FROM customers WHERE id = :id", ['id' => $customerId]);
@@ -257,6 +264,13 @@ class PortalSettingsController
      */
     public function revokeAccess(): void
     {
+        // En una copia no: los clientes los manda el master (lo de aquí se pisaría en la
+        // siguiente copia) y el portal lo sirve el master (un enlace creado aquí no valdría).
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es una copia: el acceso de los clientes al portal se gestiona en el servidor que manda.');
+            Router::redirect(parse_url((string)($_SERVER['HTTP_REFERER'] ?? ''), PHP_URL_PATH) ?: '/customers');
+            return;
+        }
         // Verify admin password
         $adminPassword = $_POST['admin_password'] ?? '';
         $adminId = $_SESSION['admin_id'] ?? $_SESSION['panel_user']['id'] ?? 0;

@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.317] — 2026-10-05 — Acceso de clientes al portal solo desde el servidor que manda
+
+### Arreglado
+- **En una copia (slave) se podía "Invitar al portal", "Reset password" y revocar el acceso de un cliente**, aunque crear, editar y borrar clientes ya estaba bloqueado. Lo hecho en la copia se perdía (el master la vuelve a copiar) y el enlace del correo no valía (el portal lo sirve el master). Ahora se rechaza en la copia, los botones no salen y *Customers* explica que los clientes se gestionan en el servidor que manda y llegan solos.
+
 ## [1.0.316] — 2026-10-05 — Clientes que no se pierden en un cambio de rol, espejo 100 % y desglose de GB
 
 ### Arreglado
@@ -11,10 +16,6 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 ### Añadido
 - **Espejo 100 %** en *Cluster → Archivos → Exclusiones base*: botones para rellenar las listas con **Espejo 100 %** (sin exclusiones: copia también `.git`, `node_modules`, carpetas de IA/IDE, registros, cachés y sesiones), **Espejo de código** (todo menos lo temporal) o **Valores por defecto**. No se aplica hasta guardar.
 - **Desglose de GB entre servidores** (*Hosting Accounts*, en el master): al pulsar **Estado réplica** se abre una ventana con lo que hay aquí, lo que la copia excluye, lo esperado en la copia, lo que tiene de verdad, y qué significan "Sobran" y "Faltan". Explicado también en *Docs → Sync de archivos*.
-
-## [1.0.315] — 2026-10-05 — Portal: "Mantener la sesión iniciada"
-
-### Añadido
 - **Portal de clientes: cuánto dura "Mantener la sesión iniciada"** (*Ajustes → Portal Clientes → Apariencia*, ajuste `portal_session_remember_days`: 1/7/30/60/90/180/365 días o sin caducidad; 30 por defecto). Se copia a las réplicas con el resto de ajustes del portal. Sin marcar la casilla, la sesión del cliente se cierra al cerrar el navegador o tras 30 min sin actividad.
 - **Portal de clientes: favicon propio** (*Ajustes → Portal Clientes → Apariencia*): SVG, PNG o ICO de hasta 64 KB, validado por su contenido (un SVG con scripts, eventos, enlaces o entidades se rechaza), con vista previa y botón para volver al de por defecto. Se guarda como ajuste y llega solo a las réplicas (también cuando se vuelve al de por defecto). La página "Portal no activado" lo muestra cuando la sirve el portal.
 

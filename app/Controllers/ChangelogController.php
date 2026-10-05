@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.317',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['En una copia ya no se puede invitar, reiniciar la contrasena del portal ni revocar el acceso de un cliente (se perdia y el enlace no valia): se gestiona en el servidor que manda; aviso en Customers'],
+                        'en' => ['Replicas can no longer invite, reset portal password or revoke a customer (it was lost and the link did not work): managed on the active server; notice in Customers'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.316',
                 'date' => '2026-10-05',
                 'badge' => 'info',
@@ -29,19 +40,8 @@ class ChangelogController
                         'en' => ['Customers created on the previous primary were lost after a role switch: the primary now recovers customers born on other nodes and their hostings every 30 min (add-only); "Bring customers from other servers" button with confirmation in Customers'],
                     ],
                     'added' => [
-                        'es' => ['Cluster > Archivos: botones Espejo 100 %, Espejo de codigo y Valores por defecto para las exclusiones', 'Hosting Accounts: Estado replica abre un desglose de GB (todo, excluido, esperado, real) y explica Sobran/Faltan'],
-                        'en' => ['Cluster > Files: 100% mirror, code mirror and factory defaults presets for exclusions', 'Hosting Accounts: replica status opens a GB breakdown (all, excluded, expected, actual) explaining surplus/missing'],
-                    ],
-                ],
-            ],
-            [
-                'version' => '1.0.315',
-                'date' => '2026-10-05',
-                'badge' => 'info',
-                'changes' => [
-                    'added' => [
-                        'es' => ['Portal de clientes: cuanto dura "Mantener la sesion iniciada" (Ajustes > Portal Clientes > Apariencia; 30 dias por defecto, o sin caducidad). Sin marcarla, la sesion se cierra al cerrar el navegador o tras 30 min sin actividad', 'Portal de clientes: favicon propio (SVG, PNG o ICO hasta 64 KB, validado por su contenido), copiado a las replicas'],
-                        'en' => ['Customer portal: how long "Keep me signed in" lasts (Settings > Customer Portal > Appearance; 30 days by default, or no expiry). Unchecked, the session ends when the browser closes or after 30 min idle', 'Customer portal: custom favicon (SVG, PNG or ICO up to 64 KB, content-validated), copied to replicas'],
+                        'es' => ['Cluster > Archivos: botones Espejo 100 %, Espejo de codigo y Valores por defecto para las exclusiones', 'Hosting Accounts: Estado replica abre un desglose de GB (todo, excluido, esperado, real) y explica Sobran/Faltan', 'Portal de clientes: cuanto dura "Mantener la sesion iniciada" (Ajustes > Portal Clientes > Apariencia; 30 dias por defecto, o sin caducidad). Sin marcarla, la sesion se cierra al cerrar el navegador o tras 30 min sin actividad', 'Portal de clientes: favicon propio (SVG, PNG o ICO hasta 64 KB, validado por su contenido), copiado a las replicas'],
+                        'en' => ['Cluster > Files: 100% mirror, code mirror and factory defaults presets for exclusions', 'Hosting Accounts: replica status opens a GB breakdown (all, excluded, expected, actual) explaining surplus/missing', 'Customer portal: how long "Keep me signed in" lasts (Settings > Customer Portal > Appearance; 30 days by default, or no expiry). Unchecked, the session ends when the browser closes or after 30 min idle', 'Customer portal: custom favicon (SVG, PNG or ICO up to 64 KB, content-validated), copied to replicas'],
                     ],
                 ],
             ],

@@ -1,11 +1,18 @@
 <?php use MuseDockPanel\View; ?>
+<?php $isSlave = \MuseDockPanel\Settings::get('cluster_role', 'standalone') === 'slave'; ?>
+<?php if ($isSlave): ?>
+<div class="alert d-flex align-items-center mb-3" style="background:rgba(13,202,240,0.1);border:1px solid rgba(13,202,240,0.3);color:#0dcaf0;">
+    <i class="bi bi-lock me-2"></i>
+    Este servidor es una copia (Slave): los clientes y su acceso al portal se gestionan en el servidor que manda y llegan aquí solos. Aquí solo se consultan.
+</div>
+<?php endif; ?>
 
 <div class="row g-3">
     <div class="col-md-8">
         <div class="card mb-3">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <span><i class="bi bi-person me-2"></i>Customer Details</span>
-                <a href="/customers/<?= $customer['id'] ?>/edit" class="btn btn-outline-light btn-sm"><i class="bi bi-pencil"></i> Edit</a>
+                <?php if (!$isSlave): ?><a href="/customers/<?= $customer['id'] ?>/edit" class="btn btn-outline-light btn-sm"><i class="bi bi-pencil"></i> Edit</a><?php endif; ?>
             </div>
             <div class="card-body p-0">
                 <table class="table table-sm mb-0">
@@ -24,13 +31,13 @@
                             <?php $hasPortal = !empty($customer['password_hash']); ?>
                             <?php if ($hasPortal): ?>
                                 <span class="badge" style="background:rgba(34,197,94,0.15);color:#22c55e;"><i class="bi bi-check-circle me-1"></i>Activo</span>
-                                <button type="button" class="btn btn-sm py-0 px-2 ms-2" style="font-size:0.72rem;background:rgba(168,85,247,0.15);color:#a855f7;border:1px solid rgba(168,85,247,0.3);"
+                                <button type="button" <?= $isSlave ? 'hidden' : '' ?> class="btn btn-sm py-0 px-2 ms-2" style="font-size:0.72rem;background:rgba(168,85,247,0.15);color:#a855f7;border:1px solid rgba(168,85,247,0.3);"
                                     onclick="sendPortalInvitation(<?= (int)$customer['id'] ?>, <?= View::js($customer['name']) ?>, <?= View::js($customer['email']) ?>, true)">
                                     <i class="bi bi-arrow-clockwise me-1"></i>Reset password
                                 </button>
                             <?php else: ?>
                                 <span class="badge" style="background:rgba(100,116,139,0.15);color:#64748b;"><i class="bi bi-dash-circle me-1"></i>Sin acceso</span>
-                                <button type="button" class="btn btn-sm py-0 px-2 ms-2" style="font-size:0.72rem;background:rgba(168,85,247,0.15);color:#a855f7;border:1px solid rgba(168,85,247,0.3);"
+                                <button type="button" <?= $isSlave ? 'hidden' : '' ?> class="btn btn-sm py-0 px-2 ms-2" style="font-size:0.72rem;background:rgba(168,85,247,0.15);color:#a855f7;border:1px solid rgba(168,85,247,0.3);"
                                     onclick="sendPortalInvitation(<?= (int)$customer['id'] ?>, <?= View::js($customer['name']) ?>, <?= View::js($customer['email']) ?>, false)">
                                     <i class="bi bi-send me-1"></i>Invitar al portal
                                 </button>

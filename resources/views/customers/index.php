@@ -8,9 +8,18 @@
             <i class="bi bi-people me-1"></i> Traer clientes de otros servidores
         </button>
         <?php endif; ?>
+        <?php if (\MuseDockPanel\Settings::get('cluster_role', 'standalone') !== 'slave'): ?>
         <a href="/customers/create" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i> New Customer</a>
+        <?php endif; ?>
     </div>
 </div>
+<?php if (\MuseDockPanel\Settings::get('cluster_role', 'standalone') === 'slave'): ?>
+<div class="alert d-flex align-items-center mb-3" style="background:rgba(13,202,240,0.1);border:1px solid rgba(13,202,240,0.3);color:#0dcaf0;">
+    <i class="bi bi-lock me-2"></i>
+    Este servidor es una copia (Slave): los clientes se gestionan en el servidor que manda y llegan aquí solos. Los que se crearon aquí cuando mandaba
+    este servidor los recupera el que manda (cada 30 min, o con "Traer clientes de otros servidores" en su panel).
+</div>
+<?php endif; ?>
 
 <div class="modal fade" id="mergePeersModal" tabindex="-1">
     <div class="modal-dialog"><div class="modal-content" style="background:#1e293b;color:#e2e8f0;">
