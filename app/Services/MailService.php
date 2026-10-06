@@ -2391,6 +2391,168 @@ class MailService
         };
     }
 
+    // ── Relay privado de reserva ─────────────────────────────────────────
+    // El relay escucha en la IP flotante de la VPN (la que tiene el que manda). En el nodo
+    // de relevo se instala igual pero PARADO; el panel lo arranca cuando ese nodo manda y
+    // tiene la IP flotante, y lo para cuando deja de mandar. Dominios (con su clave DKIM) y
+    // usuarios SMTP (con su contraseña) los envía el que manda por el canal del cluster.
+
+    public static function isRelayStandby(): bool
+    {
+        return Settings::get('mail_relay_standby', '0') === '1';
+    }
+
+    /** ¿Deben estar en marcha Postfix/OpenDKIM del relay en ESTE nodo? */
+    public static function relayServicesShouldRun(): bool
+    {
+        if (!self::isRelayStandby()) {
+            return true; // relay normal (sin reserva): como siempre
+        }
+        if (Settings::get('cluster_role', 'standalone') === 'slave' || Settings::get('cluster_fenced', '0') === '1') {
+            return false;
+        }
+        $ip = Settings::get('mail_relay_wireguard_ip', '');
+        return $ip !== '' && str_contains((string)shell_exec('ip -4 -o addr show 2>/dev/null'), ' ' . $ip . '/');
+    }
+
+    /**
+     * Cada minuto (cluster-worker), en un nodo con relay de reserva: Postfix y OpenDKIM en
+     * marcha solo si este nodo manda y tiene la IP flotante; parados (y sin arranque al
+     * iniciar) si no. Devuelve lo hecho ('' si nada).
+     */
+    public static function ensureRelayStandbyState(): string
+    {
+        if (!self::isRelayStandby() || !is_file('/etc/postfix/main.cf')) {
+            return '';
+        }
+        $want = self::relayServicesShouldRun();
+        $active = trim((string)shell_exec('systemctl is-active postfix 2>/dev/null')) === 'active';
+        if ($want && !$active) {
+            shell_exec('systemctl enable --now opendkim 2>&1; systemctl enable --now postfix 2>&1');
+            LogService::log('mail.relay', 'standby-start', 'Relay privado arrancado: este nodo manda y tiene la IP flotante');
+            return 'relay arrancado (este nodo manda)';
+        }
+        if (!$want && $active) {
+            shell_exec('systemctl disable --now postfix 2>&1; systemctl disable --now opendkim 2>&1');
+            LogService::log('mail.relay', 'standby-stop', 'Relay privado parado: este nodo no manda o no tiene la IP flotante');
+            return 'relay parado (este nodo no manda)';
+        }
+        return '';
+    }
+
+    /**
+     * En el nodo de relevo (acción del cluster mail_relay_standby_setup): instala el relay
+     * con la configuración del que manda (nombre, IP flotante, red, dominio), parado.
+     */
+    public static function nodeRelayStandbySetup(array $payload): array
+    {
+        if (Settings::get('cluster_role', 'standalone') !== 'slave') {
+            return ['ok' => false, 'error' => 'el relay de reserva se instala en un nodo de relevo (slave)'];
+        }
+        if (!in_array(Settings::get('mail_mode', ''), ['', 'relay'], true) && Settings::get('mail_node_configured', '0') === '1') {
+            return ['ok' => false, 'error' => 'este nodo ya tiene correo en modo ' . Settings::get('mail_mode') . ': no se toca'];
+        }
+        $token = self::nodeGenerateSetupToken([])['setup_token'] ?? '';
+        return self::nodeSetupMail([
+            'mail_mode' => 'relay',
+            'standby' => true,
+            'mail_hostname' => (string)($payload['mail_hostname'] ?? ''),
+            'wireguard_ip' => (string)($payload['wireguard_ip'] ?? ''),
+            'wireguard_cidr' => (string)($payload['wireguard_cidr'] ?? '10.10.70.0/24'),
+            'outbound_domain' => (string)($payload['outbound_domain'] ?? ''),
+            'relay_public_ip' => '',
+            'setup_token' => $token,
+        ]);
+    }
+
+    /**
+     * En el nodo de relevo (acción mail_relay_standby_import): aplica dominios y usuarios
+     * que manda el que manda. Los usuarios que el sync puso antes y ya no vienen, se quitan.
+     */
+    public static function nodeRelayStandbyImport(array $payload): array
+    {
+        if (!self::isRelayStandby()) {
+            return ['ok' => false, 'error' => 'este nodo no tiene relay de reserva'];
+        }
+        if (!is_file('/etc/postfix/main.cf') || !is_dir('/etc/opendkim')) {
+            return ['ok' => false, 'error' => 'relay de reserva aún instalándose'];
+        }
+        $out = ['ok' => true, 'domains' => 0, 'users' => 0, 'removed' => 0, 'errors' => []];
+        foreach ((array)($payload['domains'] ?? []) as $d) {
+            $r = self::nodeRelayImportDomain($d);
+            empty($r['ok']) ? $out['errors'][] = ($d['domain'] ?? '?') . ': ' . ($r['error'] ?? '?') : $out['domains']++;
+        }
+        $names = [];
+        foreach ((array)($payload['users'] ?? []) as $u) {
+            $r = self::nodeRelayCreateUser($u);
+            $names[] = strtolower((string)($u['username'] ?? ''));
+            empty($r['ok']) ? $out['errors'][] = ($u['username'] ?? '?') . ': ' . ($r['error'] ?? '?') : $out['users']++;
+        }
+        $prev = json_decode(Settings::get('mail_relay_standby_users', '[]'), true) ?: [];
+        foreach (array_diff($prev, $names) as $gone) {
+            if (!empty(self::nodeRelayDeleteUser(['username' => $gone])['ok'])) {
+                $out['removed']++;
+            }
+        }
+        Settings::set('mail_relay_standby_users', json_encode(array_values($names)));
+        if (self::relayServicesShouldRun()) {
+            shell_exec('systemctl reload opendkim 2>&1; systemctl reload postfix 2>&1');
+        }
+        $out['ok'] = !$out['errors'];
+        return $out;
+    }
+
+    /**
+     * En el que manda con relay (cada 5 min, cluster-worker): envía dominios y usuarios a los
+     * nodos con relay de reserva, solo cuando cambian. Los usuarios sin contraseña
+     * recuperable no se pueden enviar y se avisa.
+     */
+    public static function syncRelayStandbyNodes(bool $force = false): array
+    {
+        if (Settings::get('mail_mode', '') !== 'relay' || Settings::get('cluster_role', 'standalone') === 'slave' || !self::relayServicesShouldRun()) {
+            return [];
+        }
+        $domains = [];
+        foreach (self::getRelayDomains() as $d) {
+            $priv = ReplicationService::decryptPassword((string)($d['dkim_private_key'] ?? ''));
+            if ($priv !== '') {
+                $domains[] = ['domain' => $d['domain'], 'selector' => $d['dkim_selector'] ?: 'default', 'dkim_private_key' => $priv, 'dkim_public_key' => (string)($d['dkim_public_key'] ?? '')];
+            }
+        }
+        $users = [];
+        $skipped = [];
+        foreach (Database::fetchAll("SELECT username, password_encrypted FROM mail_relay_users WHERE enabled = true ORDER BY username") as $u) {
+            $pw = ReplicationService::decryptPassword((string)($u['password_encrypted'] ?? ''));
+            if ($pw === '') {
+                $skipped[] = $u['username'];
+                continue;
+            }
+            $users[] = ['username' => $u['username'], 'password' => $pw];
+        }
+        $hash = hash('sha256', json_encode([$domains, $users]));
+        $sent = json_decode(Settings::get('mail_relay_standby_sent', '{}'), true) ?: [];
+        $result = [];
+        foreach (ClusterService::getNodes() as $n) {
+            $nid = (string)$n['id'];
+            if (!$force && ($sent[$nid] ?? '') === $hash) {
+                continue;
+            }
+            $r = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'mail_relay_standby_import', 'payload' => ['domains' => $domains, 'users' => $users]]);
+            $d = $r['data'] ?? [];
+            if (!empty($r['ok']) && !empty($d['ok'])) {
+                $sent[$nid] = $hash;
+                $result[(string)$n['name']] = "dominios {$d['domains']}, usuarios {$d['users']}" . (!empty($d['removed']) ? ", quitados {$d['removed']}" : '');
+            } elseif (($d['error'] ?? '') !== 'este nodo no tiene relay de reserva') {
+                $result[(string)$n['name']] = 'ERROR ' . ($d['error'] ?? $r['error'] ?? implode('; ', (array)($d['errors'] ?? [])));
+            }
+        }
+        Settings::set('mail_relay_standby_sent', json_encode($sent));
+        if ($skipped) {
+            $result['_sin_contraseña'] = 'usuarios sin contraseña recuperable (no se pueden copiar; regenérala en Correo → Relay): ' . implode(', ', $skipped);
+        }
+        return $result;
+    }
+
     public static function nodeRelayCreateDomain(array $payload): array
     {
         $domain = self::normalizeDomain((string)($payload['domain'] ?? ''));
@@ -2492,7 +2654,9 @@ class MailService
         self::ensureRelayOpenDkimFiles(Settings::get('mail_relay_wireguard_cidr', WireGuardService::vpnCidr('10.10.70.0/24')));
         self::upsertLine('/etc/opendkim/signing.table', "*@{$domain} {$selector}._domainkey.{$domain}", "*@{$domain}");
         self::upsertLine('/etc/opendkim/key.table', "{$selector}._domainkey.{$domain} {$domain}:{$selector}:{$dkimDir}/{$selector}.private", "{$selector}._domainkey.{$domain}");
-        shell_exec('systemctl reload opendkim 2>&1 || systemctl restart opendkim 2>&1 || true');
+        if (self::relayServicesShouldRun()) {
+            shell_exec('systemctl reload opendkim 2>&1 || systemctl restart opendkim 2>&1 || true');
+        }
 
         return ['ok' => true, 'domain' => $domain, 'selector' => $selector];
     }
@@ -2512,7 +2676,9 @@ class MailService
         if ($code !== 0) return ['ok' => false, 'error' => implode("\n", $out)];
         shell_exec('usermod -aG sasl postfix 2>/dev/null || true');
         shell_exec('chown root:postfix /etc/sasldb2 2>/dev/null || chgrp postfix /etc/sasldb2 2>/dev/null || true; chmod 0640 /etc/sasldb2 2>/dev/null || true');
-        shell_exec('systemctl restart postfix 2>&1 || true');
+        if (self::relayServicesShouldRun()) {
+            shell_exec('systemctl restart postfix 2>&1 || true');
+        }
         return ['ok' => true, 'username' => $username, 'realm' => $realm];
     }
 

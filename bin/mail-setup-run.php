@@ -447,11 +447,21 @@ if ($mailMode === 'relay') {
     $step = 4;
     writeProgress($progressFile, $relaySteps[$step], $step, $totalSteps, 'running', $errors);
     run('systemctl disable --now dovecot rspamd 2>/dev/null || true', $logFile, $errors, 'disable-unused-mail-services');
-    run('systemctl enable postfix opendkim saslauthd 2>&1 || true', $logFile, $errors, 'systemd-enable-relay');
-    prepareOpenDkimRuntime('/run/opendkim', $logFile, $errors);
-    run('systemctl reset-failed opendkim 2>&1 || true', $logFile, $errors, 'reset-failed-opendkim');
-    run('systemctl restart opendkim 2>&1', $logFile, $errors, 'restart-opendkim');
-    run('systemctl restart postfix 2>&1', $logFile, $errors, 'restart-postfix');
+    // Relay de RESERVA (en un nodo de relevo): misma configuración, pero parado. La IP de
+    // escucha es la flotante, que este nodo solo tiene cuando manda; el panel lo arranca al
+    // tomar el mando (MailService::ensureRelayStandbyState) y lo para al dejarlo.
+    $standby = !empty($payload['standby']);
+    if ($standby) {
+        prepareOpenDkimRuntime('/run/opendkim', $logFile, $errors);
+        run('systemctl disable --now postfix opendkim 2>&1 || true', $logFile, $errors, 'relay-standby-stopped');
+        Settings::set('mail_relay_standby', '1');
+    } else {
+        run('systemctl enable postfix opendkim saslauthd 2>&1 || true', $logFile, $errors, 'systemd-enable-relay');
+        prepareOpenDkimRuntime('/run/opendkim', $logFile, $errors);
+        run('systemctl reset-failed opendkim 2>&1 || true', $logFile, $errors, 'reset-failed-opendkim');
+        run('systemctl restart opendkim 2>&1', $logFile, $errors, 'restart-opendkim');
+        run('systemctl restart postfix 2>&1', $logFile, $errors, 'restart-postfix');
+    }
 
     $step = 5;
     writeProgress($progressFile, $relaySteps[$step], $step, $totalSteps, 'running', $errors);
@@ -461,7 +471,9 @@ if ($mailMode === 'relay') {
         $serviceStatus[$svc] = $svcCode === 0 ? 'running' : 'failed';
     }
     $listenOut = [];
-    exec("ss -tlnp 2>/dev/null | grep ':587 ' | grep " . escapeshellarg($wireguardIp) . " || true", $listenOut);
+    if (!$standby) {
+        exec("ss -tlnp 2>/dev/null | grep ':587 ' | grep " . escapeshellarg($wireguardIp) . " || true", $listenOut);
+    }
 
     Settings::set('mail_mode', 'relay');
     Settings::set('mail_node_configured', '1');
@@ -481,7 +493,8 @@ if ($mailMode === 'relay') {
         'services' => $serviceStatus,
         'wireguard_ip' => $wireguardIp,
         'relay_public_ip' => $relayPublicIp,
-        'submission_wireguard_only' => !empty($listenOut),
+        'submission_wireguard_only' => $standby ? null : !empty($listenOut),
+        'standby' => $standby,
         'finished_at' => date('Y-m-d H:i:s'),
     ]);
     exit(0);

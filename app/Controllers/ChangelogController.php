@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.331',
+                'date' => '2026-10-06',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Relay privado de reserva en el servidor de relevo: se instala parado (cluster-switch relay-standby), recibe dominios con DKIM y usuarios SMTP cada 5 min por el canal del cluster y arranca solo cuando ese nodo manda y tiene la IP flotante'],
+                        'en' => ['Private relay standby on the failover server: installed stopped (cluster-switch relay-standby), receives domains with DKIM and SMTP users every 5 min over the cluster channel and starts only when that node is primary and holds the floating IP'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.330',
                 'date' => '2026-10-06',
                 'badge' => 'info',

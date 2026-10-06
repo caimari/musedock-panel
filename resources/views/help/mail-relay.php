@@ -100,4 +100,19 @@ MAIL_BACKUP_PASSWORD=backup-password</pre>
     </div>
 </div>
 
+<div class="card mb-4" style="border-color:rgba(34,197,94,.3);">
+    <div class="card-header"><i class="bi bi-arrow-repeat me-2"></i>Relay de reserva en el servidor de relevo</div>
+    <div class="card-body small">
+        <p class="mb-2">Las aplicaciones envían a la <strong>IP flotante</strong> de la VPN (p. ej. <code>10.10.70.2:587</code>), que en un relevo pasa al servidor que toma el mando.
+            Para que ese servidor también tenga relay, se instala en él una <strong>reserva</strong>: misma configuración (nombre, IP flotante, red, dominio), pero <strong>parada</strong> mientras es copia.</p>
+        <ul class="mb-2">
+            <li><strong>Instalar:</strong> en el que manda, como root: <code>php bin/cluster-switch.php relay-standby &lt;nodo&gt;</code> (enseña el plan) y luego con <code>--apply</code>. La instalación sigue 1-2 min en el nodo.</li>
+            <li><strong>Datos:</strong> cada 5 min el que manda envía los dominios (con su clave DKIM) y los usuarios SMTP (con su contraseña) por el canal autenticado del cluster, solo si han cambiado. Un usuario quitado en el que manda se quita también en la reserva. Los usuarios sin contraseña recuperable no se pueden copiar (se avisa): regenera su contraseña.</li>
+            <li><strong>Arranque y parada:</strong> cada minuto el panel comprueba el papel del nodo: si manda y tiene la IP flotante, arranca Postfix y OpenDKIM; si es copia o está apartado, los para.</li>
+            <li><strong>DNS:</strong> la IP pública del nodo de relevo tiene que estar en el SPF de cada dominio (una sola línea SPF por dominio) y, para la entregabilidad, su DNS inverso cuadrar con su nombre (Correo → anti-abuso).</li>
+        </ul>
+        <p class="text-muted mb-0">No sustituye al cambio de rol: el relay sigue al servidor que manda. La cola que quedara en el anterior se entrega cuando vuelva.</p>
+    </div>
+</div>
+
 <div class="card"><div class="card-header"><i class="bi bi-exclamation-triangle me-2"></i>Errores tipicos</div><div class="card-body"><ul class="small text-muted mb-0"><li>DKIM no publicado o selector incorrecto.</li><li>SPF sin IP de salida real.</li><li>Cliente SMTP apuntando a host/puerto equivocado.</li><li>WireGuard sin ruta hacia el relay.</li></ul></div></div>

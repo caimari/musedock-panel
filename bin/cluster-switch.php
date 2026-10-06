@@ -28,6 +28,8 @@
  *   php bin/cluster-switch.php apply-master-caddyfile [--apply]   (master) enseña / pone las webs del Caddyfile del master anterior
  *   php bin/cluster-switch.php failover-normalize   (master) este servidor principal y TITULAR del relevo, estado normal
  *   php bin/cluster-switch.php pg-rebuild <ip-master> <clúster|all> [--max-rate=20M]   copia completa con avance
+ *   php bin/cluster-switch.php relay-standby <nodo> [--apply]   (master con relay privado) instala en ese nodo
+ *                                              el relay de reserva, parado, y le envía dominios y usuarios
  *   php bin/cluster-switch.php sync-status     (master) carpetas de /opt y /srv: copiadas, propias y sin copia
  *   php bin/cluster-switch.php sync-add <carpeta>... [--apply]   (master) añadir carpetas de apps a la copia (ESPEJO)
  *   php bin/cluster-switch.php sync-local <carpeta>...   marcar carpetas como propias de esta máquina (no avisa)
@@ -146,6 +148,39 @@ switch ($cmd) {
             ? \MuseDockPanel\Services\ConfigMirrorService::setExcluded($items)
             : \MuseDockPanel\Services\ConfigMirrorService::setExcluded([], $items);
         echo 'Excluidos de la copia: ' . (implode(', ', $list) ?: 'ninguno') . "\n";
+        break;
+
+    case 'relay-standby':
+        // En el master con relay privado: relay de reserva en un nodo de relevo.
+        $who = (string)($argv[2] ?? '');
+        $node = null;
+        foreach (ClusterService::getNodes() as $n) {
+            if ((string)$n['id'] === $who || strcasecmp((string)$n['name'], $who) === 0) {
+                $node = $n;
+            }
+        }
+        if (!$node || Settings::get('mail_mode', '') !== 'relay') {
+            echo $node ? "Este servidor no tiene relay privado (mail_mode=relay).\n" : "Nodo no encontrado: usa su id o nombre (php bin/cluster-switch.php status).\n";
+            exit(1);
+        }
+        $cfg = [
+            'mail_hostname' => Settings::get('mail_relay_host', '') ?: Settings::get('mail_hostname', ''),
+            'wireguard_ip' => Settings::get('mail_relay_wireguard_ip', ''),
+            'wireguard_cidr' => Settings::get('mail_relay_wireguard_cidr', '10.10.70.0/24'),
+            'outbound_domain' => Settings::get('mail_outbound_domain', ''),
+        ];
+        echo "Relay de reserva en {$node['name']}: instalar Postfix + OpenDKIM + SASL con la configuración de este relay\n"
+            . "  (nombre {$cfg['mail_hostname']}, escucha en la IP flotante {$cfg['wireguard_ip']}:587, red {$cfg['wireguard_cidr']}),\n"
+            . "  PARADO mientras ese nodo sea copia; el panel lo arranca si toma el mando y tiene la IP flotante.\n"
+            . "  Después se le envían los dominios (con su clave DKIM) y los usuarios SMTP. No se borra nada.\n";
+        if (!in_array('--apply', $argv, true)) {
+            echo "Repite con --apply para hacerlo.\n";
+            break;
+        }
+        $r = ClusterService::callNode((int)$node['id'], 'POST', 'api/cluster/action', ['action' => 'mail_relay_standby_setup', 'payload' => $cfg]);
+        $out($r['data'] ?? $r);
+        echo "La instalación sigue en segundo plano en el nodo (1-2 min). Los dominios y usuarios se envían solos en cuanto termine (cada 5 min).\n";
+        $ok = !empty($r['ok']) && (!empty($r['data']['ok']) || !empty($r['data']['task_id']));
         break;
 
     case 'sync-status':

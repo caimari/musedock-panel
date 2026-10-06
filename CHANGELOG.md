@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.331] — 2026-10-06 — Relay privado de reserva
+
+### Añadido
+- **Relay privado de reserva en el servidor de relevo.** Las aplicaciones envían a la IP flotante de la VPN, que en un relevo pasa al que toma el mando, pero ese servidor no tenía relay. Ahora se puede instalar en él una reserva con la misma configuración (nombre, IP flotante, red, dominio), **parada** mientras es copia:
+  - `php bin/cluster-switch.php relay-standby <nodo> [--apply]` en el que manda (el instalador del relay tiene un modo reserva: configura todo y deja Postfix y OpenDKIM parados);
+  - cada 5 min el que manda envía los dominios con su clave DKIM y los usuarios SMTP con su contraseña, por el canal del cluster y solo si cambian; los usuarios quitados se quitan también en la reserva;
+  - cada minuto el panel arranca el relay si el nodo manda y tiene la IP flotante, y lo para si es copia o está apartado;
+  - en una reserva parada, importar dominios o usuarios ya no arranca Postfix ni OpenDKIM.
+  - Explicado en *Docs → Relay*.
+
 ## [1.0.330] — 2026-10-06 — Textos de los correos a clientes, ventana propia al traer cuentas de Cloudflare y tope de avisos
 
 ### Añadido

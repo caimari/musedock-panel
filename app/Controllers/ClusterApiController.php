@@ -547,6 +547,9 @@ class ClusterApiController
                 'mail_relay_delete_user'   => MailService::nodeRelayDeleteUser($payload),
                 'mail_migration_preflight' => MailService::nodeMailMigrationPreflight($payload),
                 'mail_relay_import_domain' => MailService::nodeRelayImportDomain($payload),
+                // Relay privado de reserva (nodo de relevo): instalar parado y recibir datos.
+                'mail_relay_standby_setup'  => MailService::nodeRelayStandbySetup($payload),
+                'mail_relay_standby_import' => MailService::nodeRelayStandbyImport($payload),
                 'mail_relay_import_user'   => MailService::nodeRelayImportUser($payload),
 
                 // ── Standby management ─────────────────────

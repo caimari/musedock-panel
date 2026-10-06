@@ -343,6 +343,24 @@ if (\MuseDockPanel\Services\SessionCleanupService::enabled() && (int)date('G') =
     }
 }
 
+// ─── Relay privado de reserva ───────────────────────────────────────────────
+// Cada minuto: en un nodo con relay de reserva, en marcha solo si manda y tiene la IP
+// flotante. Cada 5 min, en el que manda con relay: dominios y usuarios a los nodos de reserva.
+try {
+    $rs = \MuseDockPanel\Services\MailService::ensureRelayStandbyState();
+    if ($rs !== '') {
+        logMsg('Relay de reserva: ' . $rs);
+    }
+    if (time() - (int)Settings::get('mail_relay_standby_sync_at', '0') >= 300) {
+        Settings::set('mail_relay_standby_sync_at', (string)time());
+        foreach (\MuseDockPanel\Services\MailService::syncRelayStandbyNodes() as $node => $res) {
+            logMsg("Relay de reserva → {$node}: {$res}");
+        }
+    }
+} catch (\Throwable $e) {
+    logMsg('Relay de reserva error: ' . $e->getMessage());
+}
+
 // ─── Step 0j: El master reenvía su configuración de relevo cada 30 min ────────
 // Si una copia estuvo caída cuando cambió (p. ej. tras un relevo), el envío pudo agotar
 // sus reintentos; así ninguna se queda con papeles viejos (principal/relevo, modo, titular).
