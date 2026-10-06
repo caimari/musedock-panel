@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.336] — 2026-10-06 — Relay de reserva con la IP propia de cada servidor
+
+### Cambiado
+- **Relay privado de reserva: cada servidor con su IP.** La reserva escuchaba en la IP flotante del master y solo arrancaba si el nodo de relevo se la "prestaba" al tomar el mando (en WireGuard los demás nodos siguen enviando esa IP al master caído). Ahora escucha en su propia IP de la VPN y en `127.0.0.1`, y arranca cuando el nodo manda, sin necesitar la flotante. Las reservas ya instaladas se pasan solas en el primer minuto tras actualizar (copia de `main.cf` y `master.cf`). Las aplicaciones deben enviar a `127.0.0.1:587` desde el mismo servidor.
+
 ## [1.0.335] — 2026-10-06 — Avisos por correo en HTML y crons de las webs en el slave
 
 ### Corregido

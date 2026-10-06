@@ -347,6 +347,10 @@ if (\MuseDockPanel\Services\SessionCleanupService::enabled() && (int)date('G') =
 // Cada minuto: en un nodo con relay de reserva, en marcha solo si manda y tiene la IP
 // flotante. Cada 5 min, en el que manda con relay: dominios y usuarios a los nodos de reserva.
 try {
+    $rl0 = \MuseDockPanel\Services\MailService::ensureRelayStandbyListen();
+    if ($rl0 !== '') {
+        logMsg('Relay de reserva: ' . $rl0);
+    }
     $rs = \MuseDockPanel\Services\MailService::ensureRelayStandbyState();
     if ($rs !== '') {
         logMsg('Relay de reserva: ' . $rs);

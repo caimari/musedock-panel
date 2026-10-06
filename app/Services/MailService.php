@@ -2427,8 +2427,79 @@ class MailService
         if (Settings::get('cluster_role', 'standalone') === 'slave' || Settings::get('cluster_fenced', '0') === '1') {
             return false;
         }
-        $ip = Settings::get('mail_relay_wireguard_ip', '');
-        return $ip !== '' && str_contains((string)shell_exec('ip -4 -o addr show 2>/dev/null'), ' ' . $ip . '/');
+        // Manda: en marcha si este nodo tiene todas las IPs en las que escucha Postfix
+        // (con la IP propia del nodo, ensureRelayStandbyListen, no hace falta la flotante).
+        $local = (string)shell_exec('ip -4 -o addr show 2>/dev/null');
+        foreach (preg_split('/[\s,]+/', trim((string)shell_exec('/usr/sbin/postconf -h inet_interfaces 2>/dev/null'))) ?: [] as $ip) {
+            if ($ip === '' || in_array($ip, ['all', 'loopback-only', 'localhost'], true) || str_starts_with($ip, '127.')) {
+                continue;
+            }
+            if (!str_contains($local, ' ' . $ip . '/')) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** IP propia de este nodo en la red del relay (VPN), que no sea la flotante del master. */
+    private static function ownRelayNetIp(): string
+    {
+        $float = trim((string)Settings::get('mail_relay_wireguard_ip', ''));
+        $cidr = trim((string)Settings::get('mail_relay_wireguard_cidr', ''));
+        if (!preg_match('#^([\d.]+)/(\d{1,2})$#', $cidr, $c)) {
+            return '';
+        }
+        $mask = $c[2] === '0' ? 0 : (~0 << (32 - (int)$c[2])) & 0xFFFFFFFF;
+        $net = ip2long($c[1]) & $mask;
+        foreach (preg_split('/\R/', trim((string)shell_exec('ip -4 -o addr show 2>/dev/null'))) ?: [] as $l) {
+            if (preg_match('#^\d+:\s+(\S+)\s+inet\s+([\d.]+)/\d+#', $l, $m) && $m[1] !== 'lo' && $m[2] !== $float
+                && (ip2long($m[2]) & $mask) === $net) {
+                return $m[2];
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Cada minuto (cluster-worker), en un nodo con relay de reserva: que escuche en SU IP
+     * de la VPN (y 127.0.0.1), no en la flotante del master. Así cada servidor conserva su
+     * IP, no hace falta "prestarle" la del master al tomar el mando, y la reserva arranca
+     * igual. Copia previa de main.cf y master.cf. Devuelve lo hecho ('' si nada).
+     */
+    public static function ensureRelayStandbyListen(): string
+    {
+        if (!self::isRelayStandby() || !is_file('/etc/postfix/main.cf') || !is_file('/etc/postfix/master.cf')) {
+            return '';
+        }
+        $float = trim((string)Settings::get('mail_relay_wireguard_ip', ''));
+        $own = self::ownRelayNetIp();
+        $local = (string)shell_exec('ip -4 -o addr show 2>/dev/null');
+        if ($float === '' || $own === '' || str_contains($local, ' ' . $float . '/')) {
+            return ''; // sin datos, o la flotante es de este nodo: no se toca
+        }
+        $ifaces = array_values(array_filter(preg_split('/[\s,]+/', trim((string)shell_exec('/usr/sbin/postconf -h inet_interfaces 2>/dev/null'))) ?: []));
+        $masterCf = (string)file_get_contents('/etc/postfix/master.cf');
+        $needIf = in_array($float, $ifaces, true);
+        $needSvc = (bool)preg_match('/^' . preg_quote($float, '/') . ':587\s+inet/m', $masterCf);
+        if (!$needIf && !$needSvc) {
+            return '';
+        }
+        $stamp = date('Ymd-His');
+        @copy('/etc/postfix/main.cf', "/etc/postfix/main.cf.bak-{$stamp}");
+        @copy('/etc/postfix/master.cf', "/etc/postfix/master.cf.bak-{$stamp}");
+        if ($needIf) {
+            $new = array_values(array_unique(array_map(static fn($i) => $i === $float ? $own : $i, $ifaces)));
+            shell_exec('/usr/sbin/postconf -e ' . escapeshellarg('inet_interfaces = ' . implode(', ', $new)) . ' 2>&1');
+        }
+        if ($needSvc) {
+            $masterCf = preg_replace('/^' . preg_quote($float, '/') . ':587(\s+inet)/m', $own . ':587$1', $masterCf);
+            file_put_contents('/etc/postfix/master.cf', $masterCf);
+        }
+        if (trim((string)shell_exec('systemctl is-active postfix 2>/dev/null')) === 'active') {
+            shell_exec('systemctl restart postfix 2>&1');
+        }
+        LogService::log('mail.relay', 'standby-listen', "Relay de reserva: escucha en {$own} (IP propia) en vez de {$float}");
+        return "escucha en {$own} (IP propia) en vez de la flotante {$float}";
     }
 
     /**

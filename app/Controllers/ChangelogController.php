@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.336',
+                'date' => '2026-10-06',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'es' => ['Relay privado de reserva: escucha en la IP propia del nodo en la VPN y en 127.0.0.1, y arranca cuando el nodo manda sin necesitar la IP flotante del master (las reservas instaladas se pasan solas)'],
+                        'en' => ['Private relay standby: listens on the node\'s own VPN IP and 127.0.0.1 and starts when the node is primary without needing the master\'s floating IP (existing standbys migrate automatically)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.335',
                 'date' => '2026-10-06',
                 'badge' => 'warning',
