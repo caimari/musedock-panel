@@ -601,6 +601,12 @@ class ClusterApiController
                 // Clientes del portal y a quién pertenece cada hosting (la base del panel es
                 // de cada nodo): el slave los pide para poder servir el portal si se promueve.
                 'export-portal-state' => \MuseDockPanel\Services\PortalService::exportState(!empty($payload['own_only'])),
+                // El master pide las cuentas de Cloudflare de este nodo (con el token en claro,
+                // como cuando él las envía): misma confianza que ese envío (token del cluster;
+                // los peers federados no llegan a esta API) y solo si este nodo no manda.
+                'export-cf-accounts' => Settings::get('cluster_role', '') === 'slave'
+                    ? ['ok' => true, 'accounts' => \MuseDockPanel\Services\CloudflareService::accountsForTransfer()]
+                    : ['ok' => false, 'error' => 'solo lo responde una copia (slave)'],
                 // El principal avisa de un cambio de clientes: la copia los trae ya.
                 'portal-sync-now' => \MuseDockPanel\Services\PortalService::pullFromMaster(),
                 // Avisos del master copiados a este nodo (notify_configure copy_to_nodes).

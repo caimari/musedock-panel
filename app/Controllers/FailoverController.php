@@ -427,6 +427,21 @@ class FailoverController
         echo json_encode(['ok' => true, 'domains' => $domains, 'count' => count($domains)]);
     }
 
+    /** POST (AJAX): traer de otros nodos las cuentas de Cloudflare que aquí faltan. Solo en el que manda. */
+    public function pullCfAccounts(): void
+    {
+        header('Content-Type: application/json');
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            echo json_encode(['ok' => false, 'error' => 'Este servidor es una copia: las cuentas se gestionan en el que manda.']);
+            return;
+        }
+        try {
+            echo json_encode(\MuseDockPanel\Services\FailoverService::pullCfAccountsFromPeers(!empty($_POST['apply'])), JSON_UNESCAPED_UNICODE);
+        } catch (\Throwable $e) {
+            echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
     // ─── caddy-l4 installation ─────────────────────────────
 
     /**

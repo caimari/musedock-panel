@@ -1339,6 +1339,46 @@ class FailoverService
      * Called after any config save on the master.
      * If a slave is unreachable, the action is enqueued with 3 retries.
      */
+    /**
+     * En el master: traer las cuentas de Cloudflare que tengan otros nodos y aquí falten
+     * (por nombre), p. ej. si se configuraron cuando otro nodo mandaba. Viajan por el
+     * canal autenticado del cluster, igual que cuando el master las envía; nunca pasan
+     * por la pantalla. Solo añade: las cuentas de aquí no se tocan. Sin $apply, solo dice
+     * cuáles traería.
+     */
+    public static function pullCfAccountsFromPeers(bool $apply = false): array
+    {
+        $local = json_decode(Settings::get('failover_cf_accounts', '[]'), true) ?: [];
+        $have = array_map(static fn($a) => strtolower((string)($a['name'] ?? '')), $local);
+        $new = [];
+        $nodes = [];
+        foreach (ClusterService::getNodes() as $n) {
+            $r = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'export-cf-accounts', 'payload' => []]);
+            $d = $r['data'] ?? null;
+            if (empty($r['ok']) || empty($d['ok'])) {
+                $nodes[(string)$n['name']] = 'sin respuesta: ' . ($d['error'] ?? $r['error'] ?? '?');
+                continue;
+            }
+            $names = [];
+            foreach ((array)($d['accounts'] ?? []) as $acct) {
+                $name = strtolower((string)($acct['name'] ?? ''));
+                if ($name === '' || in_array($name, $have, true) || trim((string)($acct['token'] ?? '')) === '') {
+                    continue;
+                }
+                $have[] = $name;
+                $new[] = $acct;
+                $names[] = (string)$acct['name'];
+            }
+            $nodes[(string)$n['name']] = $names ? 'trae ' . implode(', ', $names) : 'nada nuevo';
+        }
+        if ($apply && $new) {
+            $kept = CloudflareService::storeIncomingAccounts(array_merge($local, $new));
+            LogService::log('failover.cf', 'pull', 'Cuentas de Cloudflare traídas de otros nodos: ' . implode(', ', array_map(static fn($a) => (string)$a['name'], $new))
+                . ($kept ? ' (token no válido en: ' . implode(', ', $kept) . ')' : ''));
+        }
+        return ['ok' => true, 'apply' => $apply, 'accounts' => array_map(static fn($a) => (string)$a['name'], $new), 'nodes' => $nodes];
+    }
+
     public static function pushConfigToSlaves(bool $updateCaddyToken = false, ?string $caddyToken = null): array
     {
         $clusterRole = Settings::get('cluster_role', '');
@@ -1526,7 +1566,11 @@ class FailoverService
             Settings::set('failover_servers', json_encode($response['servers']));
         }
 
-        if (isset($response['cf_accounts']) && is_array($response['cf_accounts'])) {
+        // Igual que al recibir el envío del master: una lista vacía no borra las cuentas
+        // propias de este nodo (puede ser el único que las tiene).
+        $incomingEmpty = isset($response['cf_accounts']) && $response['cf_accounts'] === [];
+        $haveLocal = (json_decode(Settings::get('failover_cf_accounts', '[]'), true) ?: []) !== [];
+        if (isset($response['cf_accounts']) && is_array($response['cf_accounts']) && !($incomingEmpty && $haveLocal)) {
             $kept = CloudflareService::storeIncomingAccounts($response['cf_accounts']);
             if ($kept) {
                 LogService::log('failover.sync', 'cf-kept', 'Token de Cloudflare recibido no válido; se conserva el local en: ' . implode(', ', $kept));

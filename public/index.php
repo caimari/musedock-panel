@@ -578,6 +578,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/notifications/save', 'NotificationController@save');
 \MuseDockPanel\Router::post('/settings/notifications/test-email', 'NotificationController@testEmail');
 \MuseDockPanel\Router::post('/settings/notifications/test-telegram', 'NotificationController@testTelegram');
+\MuseDockPanel\Router::post('/settings/notifications/reveal', 'NotificationController@reveal');
 
 // Replication
 \MuseDockPanel\Router::get('/settings/replication', 'ReplicationController@index');
@@ -688,6 +689,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/failover/save-config', 'FailoverController@saveConfig');
 \MuseDockPanel\Router::post('/settings/failover/save-servers', 'FailoverController@saveServers');
 \MuseDockPanel\Router::post('/settings/failover/save-cf-accounts', 'FailoverController@saveCfAccounts');
+\MuseDockPanel\Router::post('/settings/failover/pull-cf-accounts', 'FailoverController@pullCfAccounts');
 \MuseDockPanel\Router::post('/settings/failover/verify-cf-token', 'FailoverController@verifyCfToken');
 \MuseDockPanel\Router::get('/settings/failover/check-health', 'FailoverController@checkHealth');
 \MuseDockPanel\Router::post('/settings/failover/execute', 'FailoverController@execute');

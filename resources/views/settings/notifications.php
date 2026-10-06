@@ -428,3 +428,41 @@ function testTelegram() {
     });
 }
 </script>
+
+<script>
+// Botón copiar junto al Chat ID, los usuarios SMTP y las contraseñas SMTP (para ponerlos en
+// otro servidor). Las contraseñas no están en la página: si no se ha escrito una nueva, se
+// piden al panel al pulsar (queda apuntado en el registro).
+(function () {
+    var csrf = function () { return (document.querySelector('input[name=_csrf_token]') || {}).value || ''; };
+    var flash = function (b, ok) { var i = b.firstElementChild; i.className = ok ? 'bi bi-check2' : 'bi bi-x-lg'; setTimeout(function () { i.className = 'bi bi-clipboard'; }, 1500); };
+    var addBtn = function (name, getter) {
+        var inp = document.querySelector('input[name="' + name + '"]');
+        if (!inp || inp.closest('.input-group')) return;
+        var g = document.createElement('div'); g.className = 'input-group';
+        inp.parentNode.insertBefore(g, inp); g.appendChild(inp);
+        var b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-outline-secondary'; b.title = 'Copiar';
+        b.innerHTML = '<i class="bi bi-clipboard"></i>';
+        b.onclick = function () {
+            Promise.resolve(getter(inp)).then(function (v) {
+                if (!v) { flash(b, false); return; }
+                return navigator.clipboard.writeText(v).then(function () { flash(b, true); });
+            }).catch(function () { flash(b, false); });
+        };
+        g.appendChild(b);
+    };
+    var plain = function (inp) { return inp.value; };
+    var secret = function (field) {
+        return function (inp) {
+            if (inp.value) return inp.value;
+            var fd = new FormData(); fd.append('_csrf_token', csrf()); fd.append('field', field);
+            return fetch('/settings/notifications/reveal', {method: 'POST', body: fd}).then(function (r) { return r.json(); }).then(function (d) { return d.ok ? d.value : ''; });
+        };
+    };
+    addBtn('notify_telegram_chat_id', plain);
+    addBtn('notify_smtp_user', plain);
+    addBtn('notify_smtp2_user', plain);
+    addBtn('notify_smtp_pass', secret('smtp_pass'));
+    addBtn('notify_smtp2_pass', secret('smtp2_pass'));
+})();
+</script>

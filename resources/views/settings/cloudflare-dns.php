@@ -15,6 +15,12 @@
 </div>
 <?php else: ?>
 
+<div class="d-flex justify-content-end mb-2">
+    <a href="/settings/cluster#failover" class="btn btn-outline-light btn-sm" title="Donde se añaden o cambian las cuentas y sus tokens">
+        <i class="bi bi-key me-1"></i>Cuentas y tokens de Cloudflare
+    </a>
+</div>
+
 <?= View::csrf() ?>
 
 <div class="row g-3">

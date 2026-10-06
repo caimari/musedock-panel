@@ -116,7 +116,8 @@ class View
      */
     public static function verifyCsrf(): bool
     {
-        $token = $_POST['_csrf_token'] ?? '';
-        return !empty($token) && hash_equals($_SESSION['_csrf_token'] ?? '', $token);
+        // En el formulario o, para peticiones con cuerpo JSON, en la cabecera X-CSRF-Token.
+        $token = (string)($_POST['_csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '');
+        return $token !== '' && hash_equals((string)($_SESSION['_csrf_token'] ?? ''), $token);
     }
 }

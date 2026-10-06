@@ -193,6 +193,28 @@ class NotificationController
     /**
      * POST /settings/notifications/test-telegram (JSON)
      */
+    /**
+     * POST (AJAX): una contraseña guardada (SMTP principal o secundario), para el botón
+     * copiar (p. ej. ponerla en otro servidor). Solo con sesión de administrador y token
+     * CSRF; queda apuntado en el registro. No está en la página: se pide al pulsar.
+     */
+    public function reveal(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $keys = ['smtp_pass' => 'notify_smtp_pass', 'smtp2_pass' => 'notify_smtp2_pass'];
+        $field = (string)($_POST['field'] ?? '');
+        if (!isset($keys[$field])) {
+            echo json_encode(['ok' => false, 'error' => 'campo no válido']);
+            exit;
+        }
+        $enc = Settings::get($keys[$field], '');
+        $value = $enc !== '' ? ReplicationService::decryptPassword($enc) : '';
+        LogService::log('notify.reveal', $field, 'Contraseña copiada desde Notificaciones');
+        echo json_encode(['ok' => $value !== '', 'value' => $value, 'error' => $value === '' ? 'no hay contraseña guardada' : null]);
+        exit;
+    }
+
     public function testTelegram(): void
     {
         View::verifyCsrf();

@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.329',
+                'date' => '2026-10-06',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Instalar caddy-l4 no hacia nada (faltaba el token CSRF); ahora con progreso y motivo del fallo. Igual en Probar fuentes remotas', 'En una copia, Cluster > Configuracion salia vacia', 'Una copia que pide la configuracion del relevo ya no pierde sus cuentas de Cloudflare si el principal no tiene'],
+                        'en' => ['Install caddy-l4 did nothing (missing CSRF token); now with progress and failure reason. Same for remote sources test', 'On a replica, Cluster > Configuration was empty', 'A replica pulling failover config no longer loses its Cloudflare accounts when the primary has none'],
+                    ],
+                    'added' => [
+                        'es' => ['Traer cuentas de Cloudflare de otro nodo por el canal del cluster', 'Enlace directo a las cuentas y tokens desde Cloudflare DNS', 'Botones de copiar en Notificaciones (Chat ID, usuarios y contrasenas SMTP)'],
+                        'en' => ['Pull Cloudflare accounts from another node over the cluster channel', 'Direct link to accounts and tokens from Cloudflare DNS', 'Copy buttons in Notifications (Chat ID, SMTP users and passwords)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.328',
                 'date' => '2026-10-06',
                 'badge' => 'info',

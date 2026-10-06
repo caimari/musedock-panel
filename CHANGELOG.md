@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.329] — 2026-10-06 — Cuentas de Cloudflare entre nodos, caddy-l4 y botones de copiar
+
+### Arreglado
+- **El botón "Instalar caddy-l4" no hacía nada** (ni progreso): la petición no llevaba el token CSRF y el panel la rechazaba al momento. Ahora lo lleva, muestra los segundos que lleva compilando y, si falla, el motivo. Lo mismo pasaba con "Probar fuentes remotas" del relevo. El panel acepta ahora el token también en la cabecera `X-CSRF-Token` (peticiones con cuerpo JSON).
+- **En una copia (slave), la pestaña Cluster → Configuración salía vacía**: el cierre de la pestaña Failover estaba dentro del bloque que solo se pinta en el principal, y Configuración quedaba dentro de Failover, oculta.
+- **Una copia que pide la configuración del relevo al principal ya no pierde sus cuentas de Cloudflare** si el principal no tiene ninguna (al recibir el envío del principal ya era así; al pedirla, no).
+
+### Añadido
+- **Traer cuentas de Cloudflare de otro nodo** (*Cluster → Failover → Cuentas Cloudflare*, en el principal): las que tiene otro nodo y aquí faltan, por nombre. El token viaja por el canal autenticado del cluster (como cuando el principal las envía), nunca por pantalla. Primero dice cuáles traería y pide confirmación; las de aquí no se tocan.
+- **Cloudflare DNS**: botón directo a *Cuentas y tokens de Cloudflare*.
+- **Notificaciones: botones de copiar** junto al Chat ID de Telegram, los usuarios SMTP y las contraseñas SMTP (principal y secundario). Las contraseñas no están en la página: se piden al panel al pulsar (con sesión y token CSRF) y queda apuntado en el registro.
+
 ## [1.0.328] — 2026-10-06 — Token de Telegram oculto y guía de notificaciones
 
 ### Añadido

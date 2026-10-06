@@ -1977,6 +1977,10 @@
                 <button type="button" class="btn btn-outline-secondary btn-sm" onclick="showCfHelp()">
                     <i class="bi bi-question-circle me-1"></i>Instrucciones
                 </button>
+                <button type="button" class="btn btn-outline-light btn-sm" onclick="foPullCfAccounts()"
+                        title="Cuentas que tiene otro nodo del cluster y aquí faltan (el token viaja por el canal del cluster, nunca por pantalla)">
+                    <i class="bi bi-cloud-download me-1"></i>Traer de otro nodo
+                </button>
                 <button type="button" class="btn btn-outline-info btn-sm" onclick="foAddCfAccount()">
                     <i class="bi bi-plus me-1"></i>Añadir cuenta
                 </button>
@@ -2854,6 +2858,23 @@ function bindRemoveButtons() {
 // Bind on page load
 document.addEventListener('DOMContentLoaded', bindRemoveButtons);
 
+// Traer cuentas de Cloudflare de otros nodos: primero dice cuáles, luego pide confirmación.
+function foPullCfAccounts() {
+    const send = (apply) => {
+        const fd = new FormData();
+        fd.append('_csrf_token', (document.querySelector('input[name=_csrf_token]') || {}).value || '');
+        if (apply) fd.append('apply', '1');
+        return fetch('/settings/failover/pull-cf-accounts', {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}, body: fd}).then(r => r.json());
+    };
+    send(false).then(d => {
+        if (!d.ok) { alert('No se pudo consultar: ' + (d.error || '?')); return; }
+        const detail = Object.keys(d.nodes || {}).map(k => '- ' + k + ': ' + d.nodes[k]).join('\n');
+        if (!(d.accounts || []).length) { alert('No hay cuentas nuevas que traer.\n\n' + detail); return; }
+        if (!confirm('Se añadirán estas cuentas (las de aquí no se tocan):\n' + d.accounts.join(', ') + '\n\n' + detail + '\n\n¿Traerlas?')) return;
+        send(true).then(r => { alert(r.ok ? 'Cuentas traídas: ' + (r.accounts || []).join(', ') : 'Error: ' + (r.error || '?')); location.reload(); });
+    }).catch(() => alert('Error de red.'));
+}
+
 function foInstallCaddyL4() {
     const btn = document.getElementById('btn-install-caddy-l4');
     const status = document.getElementById('caddy-l4-install-status');
@@ -2861,11 +2882,19 @@ function foInstallCaddyL4() {
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Instalando... (puede tardar 1-2 min)';
     status.textContent = 'Compilando caddy con módulo layer4...';
 
+    // Con el token CSRF (sin él el panel la rechazaba al momento y parecía que no hacía nada).
+    const fd = new FormData();
+    fd.append('_csrf_token', (document.querySelector('input[name=_csrf_token]') || {}).value || '');
+    const t0 = Date.now();
+    const tick = setInterval(() => {
+        status.textContent = 'Compilando caddy con módulo layer4... ' + Math.round((Date.now() - t0) / 1000) + ' s';
+    }, 1000);
     fetch('/settings/failover/install-caddy-l4', {
         method: 'POST',
-        headers: {'X-Requested-With': 'XMLHttpRequest'}
+        headers: {'X-Requested-With': 'XMLHttpRequest'},
+        body: fd
     })
-    .then(r => r.json())
+    .then(r => { clearInterval(tick); return r.json(); })
     .then(data => {
         if (data.installed) {
             const badge = document.getElementById('caddy-l4-badge');
@@ -2876,11 +2905,14 @@ function foInstallCaddyL4() {
         } else {
             btn.disabled = false;
             btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar instalación';
-            status.innerHTML = '<span style="color:#ef4444;">Error en la instalación. Revisa los logs.</span>';
+            const why = (data.error || (data.output || '').trim().split('\n').slice(-3).join(' · ') || 'sin detalle');
+            status.innerHTML = '<span style="color:#ef4444;"></span>';
+            status.firstChild.textContent = 'Error en la instalación: ' + why;
             console.error('caddy-l4 install output:', data.output);
         }
     })
     .catch(err => {
+        clearInterval(tick);
         btn.disabled = false;
         btn.innerHTML = '<i class="bi bi-download me-1"></i>Reintentar';
         status.innerHTML = '<span style="color:#ef4444;">Error de red: ' + err.message + '</span>';
@@ -2980,7 +3012,8 @@ function foTestRemoteSources() {
 
     fetch('/settings/failover/test-remote-sources', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest',
+                  'X-CSRF-Token': (document.querySelector('input[name=_csrf_token]') || {}).value || ''},
         body: JSON.stringify({sources})
     })
     .then(r => r.json())
@@ -3100,6 +3133,7 @@ function foTestRemoteSources() {
 })();
 </script>
 <?php endif; /* !$foIsSlave */ ?>
+<?php if ($foIsSlave): ?></div><!-- cierra #tab-failover en una copia: el cierre del principal va dentro del bloque de arriba (sin esto, la pestaña Configuración quedaba dentro de Failover y se veía vacía) --><?php endif; ?>
 
 <!-- ═══════════════════════════════════════════════════════════ -->
 <!-- TAB 5 — Configuración                                       -->
