@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.328] — 2026-10-06 — Token de Telegram oculto y guía de notificaciones
+
+### Añadido
+- **Token de Telegram oculto** en *Ajustes → Notificaciones*: sale con asteriscos, con botón para verlo y otro para copiarlo (para ponerlo en otro servidor). Antes se veía entero.
+- **Docs → Notificaciones: correo y Telegram** (nueva): servidor principal y de reserva, remitente y marca, cómo crear el bot de Telegram para una persona o un grupo, y qué puede (y no puede) hacer otra persona con el bot. Enlace desde *Ajustes → Notificaciones*.
+
+### Arreglado
+- **Los botones de prueba de correo y Telegram usaban lo guardado**, no lo escrito: fallaban si aún no se había pulsado Guardar, y solo decían "revisa la configuración". Ahora prueban lo que hay en el formulario (si la contraseña o el token están vacíos, los guardados), el de correo prueba el principal y el secundario por separado, y los dos dicen el motivo real del fallo (p. ej. Telegram "chat not found": hay que abrir el bot y pulsar Iniciar).
+
 ## [1.0.326] — 2026-10-06 — Correos a clientes en HTML y envío SMTP con un nombre real
 
 ### Arreglado

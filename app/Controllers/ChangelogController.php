@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.328',
+                'date' => '2026-10-06',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Token de Telegram oculto con botones de ver y copiar', 'Docs: Notificaciones (correo, SMTP de reserva y bot de Telegram paso a paso, persona o grupo, y que puede hacer otra persona con el bot)'],
+                        'en' => ['Telegram token masked with show and copy buttons', 'Docs: Notifications (mail, backup SMTP and Telegram bot step by step, person or group, and what others can do with the bot)'],
+                    ],
+                    'fixed' => [
+                        'es' => ['Pruebas de correo y Telegram con lo escrito en el formulario (sin guardar), correo principal y secundario por separado y motivo real del fallo'],
+                        'en' => ['Mail and Telegram tests use the form values (unsaved), primary and secondary SMTP separately, with the real failure reason'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.326',
                 'date' => '2026-10-06',
                 'badge' => 'info',

@@ -198,9 +198,15 @@
             <div class="row mb-3">
                 <div class="col-md-5">
                     <label class="form-label">Bot Token</label>
-                    <input type="text" name="notify_telegram_token" class="form-control"
-                           value="<?= View::e($settings['notify_telegram_token'] ?? '') ?>" placeholder="123456:ABC-DEF...">
-                    <small class="text-muted">Obtenlo desde <a href="https://t.me/BotFather" target="_blank" class="text-info">@BotFather</a></small>
+                    <div class="input-group">
+                        <input type="password" name="notify_telegram_token" id="tgToken" class="form-control" autocomplete="off"
+                               value="<?= View::e($settings['notify_telegram_token'] ?? '') ?>" placeholder="123456:ABC-DEF...">
+                        <button type="button" class="btn btn-outline-secondary" title="Ver / ocultar"
+                                onclick="var i=document.getElementById('tgToken');i.type=i.type==='password'?'text':'password';this.firstElementChild.className=i.type==='password'?'bi bi-eye':'bi bi-eye-slash';"><i class="bi bi-eye"></i></button>
+                        <button type="button" class="btn btn-outline-secondary" title="Copiar (para pegarlo en otro servidor)"
+                                onclick="var b=this;navigator.clipboard.writeText(document.getElementById('tgToken').value).then(function(){b.firstElementChild.className='bi bi-check2';setTimeout(function(){b.firstElementChild.className='bi bi-clipboard';},1500);});"><i class="bi bi-clipboard"></i></button>
+                    </div>
+                    <small class="text-muted">Obtenlo desde <a href="https://t.me/BotFather" target="_blank" class="text-info">@BotFather</a> · <a href="/docs/notifications" class="text-info">Guía paso a paso</a></small>
                 </div>
                 <div class="col-md-4">
                     <label class="form-label">Chat ID</label>

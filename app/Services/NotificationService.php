@@ -347,6 +347,13 @@ class NotificationService
         return false;
     }
 
+    /** Prueba un servidor SMTP con una configuración dada (la del formulario, sin guardar). */
+    public static function testSmtp(array $cfg, string $to, string $from, string $fromName = ''): array
+    {
+        return self::smtpSendOnce($cfg, $to, $from, 'Test - MuseDock Panel',
+            'Este es un email de prueba enviado desde MuseDock Panel. Si recibes este mensaje, este servidor de envío funciona correctamente.', $fromName);
+    }
+
     /** Configuración de un servidor SMTP de avisos, o null si no está configurado. */
     public static function smtpConfig(string $prefix): ?array
     {
@@ -465,15 +472,20 @@ class NotificationService
 
     // ─── Telegram ───────────────────────────────────────────
 
-    public static function sendTelegram(string $message): bool
+    /** $token/$chatId: para probar lo escrito en el formulario antes de guardarlo. */
+    public static function sendTelegram(string $message, ?string $token = null, ?string $chatId = null, ?string &$error = null): bool
     {
-        $botTokenEnc = Settings::get('notify_telegram_token', '');
-        $chatId      = Settings::get('notify_telegram_chat_id', '');
-
-        if (!$botTokenEnc || !$chatId) return false;
-
-        $botToken = ReplicationService::decryptPassword($botTokenEnc);
-        if (!$botToken) return false;
+        $chatId = $chatId ?? Settings::get('notify_telegram_chat_id', '');
+        if ($token !== null) {
+            $botToken = $token;
+        } else {
+            $botTokenEnc = Settings::get('notify_telegram_token', '');
+            $botToken = $botTokenEnc ? ReplicationService::decryptPassword($botTokenEnc) : '';
+        }
+        if (!$botToken || !$chatId) {
+            $error = 'falta el Bot Token o el Chat ID';
+            return false;
+        }
 
         $url = "https://api.telegram.org/bot{$botToken}/sendMessage";
         $ch = curl_init($url);
@@ -489,6 +501,12 @@ class NotificationService
         $result = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
+        if ($httpCode !== 200) {
+            // Motivo que da Telegram (p. ej. "chat not found": el bot aún no tiene permiso para
+            // escribirte; "Unauthorized": token incorrecto). Nunca incluye el token.
+            $desc = (string)(json_decode((string)$result, true)['description'] ?? '');
+            $error = $desc !== '' ? $desc : ($httpCode ? "HTTP {$httpCode}" : 'sin conexión con Telegram');
+        }
 
         return $httpCode === 200;
     }

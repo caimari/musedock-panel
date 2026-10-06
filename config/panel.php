@@ -17,7 +17,7 @@ $panelCfgRoot = dirname(__DIR__);
 
 return [
     'name' => \MuseDockPanel\Env::get('PANEL_NAME', 'MuseDock Panel'),
-    'version' => '1.0.327',
+    'version' => '1.0.328',
     'port' => \MuseDockPanel\Env::int('PANEL_PORT', 8444),
     'debug' => \MuseDockPanel\Env::bool('PANEL_DEBUG', false),
 

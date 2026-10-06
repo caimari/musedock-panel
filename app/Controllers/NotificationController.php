@@ -136,6 +136,41 @@ class NotificationController
             exit;
         }
 
+        // SMTP: probar lo escrito en el formulario (aunque no esté guardado), principal y, si
+        // tiene host, secundario, cada uno por separado y con el motivo real si falla.
+        $method = in_array($_POST['notify_email_method'] ?? '', ['smtp', 'php'], true) ? $_POST['notify_email_method'] : $method;
+        if ($method === 'smtp' && trim((string)($_POST['notify_smtp_host'] ?? '')) !== '') {
+            $to = trim((string)($_POST['notify_email_to'] ?? '')) ?: NotificationService::getAdminEmail();
+            $from = trim((string)($_POST['notify_smtp_from'] ?? '')) ?: $to;
+            $fromName = trim((string)($_POST['notify_smtp_from_name'] ?? ''));
+            $lines = [];
+            $okAll = true;
+            foreach (['notify_smtp_' => 'principal', 'notify_smtp2_' => 'secundario'] as $pfx => $label) {
+                $host = trim((string)($_POST[$pfx . 'host'] ?? ''));
+                if ($host === '') {
+                    continue;
+                }
+                $saved = NotificationService::smtpConfig($pfx);
+                $pass = (string)($_POST[$pfx . 'pass'] ?? '');
+                $cfg = [
+                    'host' => $host,
+                    'port' => (int)($_POST[$pfx . 'port'] ?? 587) ?: 587,
+                    'user' => trim((string)($_POST[$pfx . 'user'] ?? '')),
+                    'pass' => $pass !== '' ? $pass : (string)($saved['pass'] ?? ''),
+                    'encryption' => in_array($_POST[$pfx . 'encryption'] ?? '', ['tls', 'ssl', 'none'], true) ? $_POST[$pfx . 'encryption'] : 'tls',
+                ];
+                $sender = $pfx === 'notify_smtp2_' && trim((string)($_POST['notify_smtp2_from'] ?? '')) !== '' ? trim((string)$_POST['notify_smtp2_from']) : $from;
+                $r = NotificationService::testSmtp($cfg, $to, $sender, $fromName);
+                $okAll = $okAll && !empty($r['ok']);
+                $lines[] = ucfirst($label) . ' (' . $host . '): ' . (!empty($r['ok']) ? 'enviado' : 'ERROR ' . ($r['error'] ?? '?'));
+            }
+            echo json_encode([
+                'ok' => $okAll,
+                'message' => htmlspecialchars(implode(' · ', $lines) . " → {$to}", ENT_QUOTES, 'UTF-8') . ($okAll ? ' (con lo escrito; recuerda Guardar)' : ''),
+            ]);
+            exit;
+        }
+
         $result = NotificationService::sendEmail(
             'Test - MuseDock Panel',
             'Este es un email de prueba enviado desde MuseDock Panel. Si recibes este mensaje, la configuracion de email funciona correctamente.'
@@ -163,15 +198,29 @@ class NotificationController
         View::verifyCsrf();
         header('Content-Type: application/json');
 
+        // Prueba con lo escrito en el formulario (aunque no esté guardado); si un campo está
+        // vacío, con lo guardado.
+        $token = trim((string)($_POST['notify_telegram_token'] ?? ''));
+        $chat = trim((string)($_POST['notify_telegram_chat_id'] ?? ''));
+        $err = null;
         $result = NotificationService::sendTelegram(
-            "Test - MuseDock Panel\n\nEste es un mensaje de prueba. Si recibes esto, la configuracion de Telegram funciona correctamente."
+            "Test - MuseDock Panel\n\nEste es un mensaje de prueba. Si recibes esto, la configuracion de Telegram funciona correctamente.",
+            $token !== '' ? $token : null,
+            $chat !== '' ? $chat : null,
+            $err
         );
 
+        $hint = '';
+        if (!$result && $err !== null && stripos($err, 'chat not found') !== false) {
+            $hint = ' Abre el bot en Telegram y pulsa Iniciar (sin eso no puede escribirte), o revisa el Chat ID.';
+        } elseif (!$result && $err !== null && stripos($err, 'unauthorized') !== false) {
+            $hint = ' El Bot Token no es válido.';
+        }
         echo json_encode([
             'ok' => $result,
             'message' => $result
-                ? 'Mensaje de Telegram enviado correctamente'
-                : 'Error al enviar mensaje. Revisa el Bot Token y el Chat ID.',
+                ? 'Mensaje de Telegram enviado correctamente' . ($token !== '' ? ' (con lo escrito; recuerda Guardar)' : '')
+                : 'No se pudo enviar: ' . htmlspecialchars((string)$err, ENT_QUOTES, 'UTF-8') . '.' . $hint,
         ]);
         exit;
     }

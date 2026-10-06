@@ -421,6 +421,14 @@ class DocsController
                 'keywords' => 'avisos alertas correo email silenciar mute hardening disco disk_high nodo de correo mail node degraded cpu ram firewall telegram tope diario sweego',
             ],
             [
+                'title' => 'Notificaciones: correo y Telegram',
+                'description' => 'Por dónde salen los avisos y los correos a clientes, el SMTP de reserva, cómo crear el bot de Telegram (persona o grupo) y qué puede hacer otra persona con él.',
+                'url' => '/docs/notifications',
+                'category' => 'Guia especial',
+                'icon' => 'bi-telegram',
+                'keywords' => 'notificaciones telegram bot botfather chat id grupo token smtp secundario reserva sweego remitente notify marca correo clientes spam',
+            ],
+            [
                 'title' => 'Blindar WordPress',
                 'description' => 'Niveles standard y strict por hosting, baneos detrás de Cloudflare, cómo detectar una infección y limpiarla sin borrar nada (cuarentena, reinstalar desde wordpress.org).',
                 'url' => '/docs/wordpress-security',
@@ -533,6 +541,10 @@ class DocsController
 
         if ($url === '/docs/alerts') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'alerts.php');
+        }
+
+        if ($url === '/docs/notifications') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'notifications.php');
         }
 
         if ($url === '/docs/wordpress-security') {
@@ -1462,6 +1474,14 @@ class DocsController
         View::render('help/alerts', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Avisos',
+        ]);
+    }
+
+    public function notifications(): void
+    {
+        View::render('help/notifications', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Notificaciones',
         ]);
     }
 
