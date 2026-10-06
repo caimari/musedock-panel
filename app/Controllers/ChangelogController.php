@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.333',
+                'date' => '2026-10-06',
+                'badge' => 'warning',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Certificados de Caddy copiados del master al nodo de relevo cada 6 h (solo si cambian): al tomar el mando ya los tiene y no hay minutos de error de certificado; nunca sustituye uno por otro que caduque antes. A mano: cluster-switch certs-sync'],
+                        'en' => ['Caddy certificates copied from the master to the failover node every 6 h (only when changed): on takeover they are already there, no minutes of certificate errors; never replaced by one expiring sooner. Manual: cluster-switch certs-sync'],
+                    ],
+                    'fixed' => [
+                        'es' => ['La reposicion de rutas de hostings ya no crea en un slave la ruta de una web que el master sirve desde su Caddyfile (quedan aparte hasta el relevo)', 'Si la API de Caddy no responde, la comprobacion de rutas no bloquea al worker (limite de 5 s)', 'El reparador de Caddy fallaba al arrancar sin el puerto del panel: creaba el servidor del panel con tls_connection_policies [[]] en vez de [{}]; ahora solo las pone si faltan o no son validas'],
+                        'en' => ['Hosting route restore no longer creates, on a slave, a route for a site the master serves from its Caddyfile (kept aside until failover)', 'If the Caddy API hangs, the route check no longer blocks the worker (5 s limit)', 'Caddy repair failed on start when nothing listened on the panel port: it created the panel server with tls_connection_policies [[]] instead of [{}]; now only set when missing or invalid'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.332',
                 'date' => '2026-10-06',
                 'badge' => 'warning',

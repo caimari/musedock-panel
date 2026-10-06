@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.333] — 2026-10-06 — Certificados listos en el relevo y reparador de Caddy
+
+### Añadido
+- **Certificados de Caddy copiados al nodo de relevo.** Al tomar el mando, el relevo pone las webs del master, pero solo podía sacar el certificado cuando el DNS ya apuntaba a él: unos minutos de error de certificado tras cada relevo. Ahora el master copia a sus nodos los certificados de lo que sirve (Caddyfile y hostings) cada 6 h, solo si han cambiado, por el canal del cluster; Caddy los encuentra al momento y, cuando el master renueva, la copia siguiente trae el nuevo. En el nodo que recibe: solo si es slave, nunca cambia un certificado por otro que caduque antes, comprueba que la clave casa, guarda copia del anterior en `/var/backups/musedock-caddy-certs` y no recarga Caddy. A mano: `php bin/cluster-switch.php certs-sync` en el master.
+
+### Corregido
+- **La reposición de rutas de hostings (1.0.332) creaba en un slave la ruta de una web que el master sirve desde su Caddyfile** (muserelay.com en obelix). Esas webs quedan aparte en el slave hasta el relevo; ahora se saltan los dominios que aparecen en el Caddyfile del master (`/var/lib/musedock/Caddyfile.from-master`).
+- **El reparador de Caddy fallaba al arrancar si nadie escuchaba en el puerto del panel** ("no se pudo preparar srv0/listeners"; Caddy: *cannot unmarshal array into ... tls_connection_policies*). Creaba el servidor del panel con `tls_connection_policies` = `[[]]` (una lista dentro de la lista) en vez de `[{}]`. Pasó en obelix al reiniciar con `--resume` sin el 8444. Corregido, y las políticas TLS del servidor del panel ya solo se ponen si faltan o no son válidas (antes se reescribían en cada pasada).
+- **Si la API de Caddy no responde, la comprobación de rutas ya no bloquea al worker** (límite de 5 s; antes podía esperar 60 s en cada vuelta).
+
 ## [1.0.332] — 2026-10-06 — Webs de hostings que desaparecían de Caddy y envío local en el relay privado
 
 ### Añadido

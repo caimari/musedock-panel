@@ -550,6 +550,8 @@ class ClusterApiController
                 // Relay privado de reserva (nodo de relevo): instalar parado y recibir datos.
                 'mail_relay_standby_setup'  => MailService::nodeRelayStandbySetup($payload),
                 'mail_relay_standby_import' => MailService::nodeRelayStandbyImport($payload),
+                // Certificados de Caddy del master (el relevo los tiene listos al tomar el mando).
+                'caddy_certs_import' => \MuseDockPanel\Services\CaddyCertSyncService::nodeImport($payload),
                 'mail_relay_import_user'   => MailService::nodeRelayImportUser($payload),
 
                 // ── Standby management ─────────────────────

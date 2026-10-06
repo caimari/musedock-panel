@@ -219,11 +219,16 @@ class DomainAliasService
     {
         $config = require PANEL_ROOT . '/config/panel.php';
         $api = $config['caddy']['api_url'] ?? 'http://localhost:2019';
-        $raw = @file_get_contents("{$api}/config/apps/http/servers");
+        // Límite corto: si la API de Caddy no responde, no bloquear al que llama (worker).
+        $ctx = stream_context_create(['http' => ['timeout' => 5]]);
+        $raw = @file_get_contents("{$api}/config/apps/http/servers", false, $ctx);
         $servers = json_decode((string)$raw, true);
         if (!is_array($servers)) {
             return [];
         }
+        // En un slave, las webs que el master sirve desde su Caddyfile quedan aparte
+        // (ConfigMirrorService) y se ponen al tomar el mando: no crearles ruta del panel.
+        $masterCaddyfile = (string)@file_get_contents('/var/lib/musedock/Caddyfile.from-master');
         $served = [];
         foreach ($servers as $srv) {
             foreach ((is_array($srv) ? ($srv['routes'] ?? []) : []) as $route) {
@@ -236,7 +241,7 @@ class DomainAliasService
         }
         $routeExists = static function (string $id) use ($api): bool {
             $ch = curl_init("{$api}/id/" . rawurlencode($id));
-            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5, CURLOPT_CONNECTTIMEOUT => 3]);
             $body = curl_exec($ch);
             $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
             curl_close($ch);
@@ -248,6 +253,10 @@ class DomainAliasService
         foreach ($accounts as $acc) {
             $domain = strtolower(trim((string)$acc['domain']));
             if ($domain === '' || empty($acc['document_root']) || !is_dir((string)$acc['document_root'])) {
+                continue;
+            }
+            if ($masterCaddyfile !== ''
+                && preg_match('/(^|[\s,\/])' . preg_quote($domain, '/') . '(:\d+)?[\s,{]/m', $masterCaddyfile)) {
                 continue;
             }
             $routeId = (string)($acc['caddy_route_id'] ?: SystemService::caddyRouteId($domain));

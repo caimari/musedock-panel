@@ -28,6 +28,7 @@
  *   php bin/cluster-switch.php apply-master-caddyfile [--apply]   (master) enseña / pone las webs del Caddyfile del master anterior
  *   php bin/cluster-switch.php failover-normalize   (master) este servidor principal y TITULAR del relevo, estado normal
  *   php bin/cluster-switch.php pg-rebuild <ip-master> <clúster|all> [--max-rate=20M]   copia completa con avance
+ *   php bin/cluster-switch.php certs-sync                      (master) copia ya a los nodos los certificados de Caddy
  *   php bin/cluster-switch.php relay-standby <nodo> [--apply]   (master con relay privado) instala en ese nodo
  *                                              el relay de reserva, parado, y le envía dominios y usuarios
  *   php bin/cluster-switch.php sync-status     (master) carpetas de /opt y /srv: copiadas, propias y sin copia
@@ -148,6 +149,18 @@ switch ($cmd) {
             ? \MuseDockPanel\Services\ConfigMirrorService::setExcluded($items)
             : \MuseDockPanel\Services\ConfigMirrorService::setExcluded([], $items);
         echo 'Excluidos de la copia: ' . (implode(', ', $list) ?: 'ninguno') . "\n";
+        break;
+
+    case 'certs-sync':
+        // En el master: copia ya a los nodos los certificados de Caddy de lo que sirve.
+        $res = \MuseDockPanel\Services\CaddyCertSyncService::syncToNodes(true);
+        if (!$res) {
+            echo "Nada que copiar (este servidor no es master, está apartado o no tiene certificados).\n";
+            break;
+        }
+        foreach ($res as $node => $r) {
+            echo "{$node}: {$r}\n";
+        }
         break;
 
     case 'relay-standby':

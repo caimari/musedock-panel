@@ -380,6 +380,21 @@ if (Settings::get('cluster_fenced', '0') !== '1'
     }
 }
 
+// ─── Step 0i3: Certificados de Caddy al relevo (cada 6 h, solo si cambian) ─────
+// Al tomar el mando, el relevo los encuentra ya en su Caddy y no hay minutos de error
+// de certificado esperando a que el DNS apunte a él.
+if (Settings::get('cluster_role', '') === 'master' && Settings::get('cluster_fenced', '0') !== '1'
+    && time() - (int)Settings::get('caddy_certs_sync_at', '0') >= 21600) {
+    Settings::set('caddy_certs_sync_at', (string)time());
+    try {
+        foreach (\MuseDockPanel\Services\CaddyCertSyncService::syncToNodes() as $node => $res) {
+            logMsg("Certificados de Caddy → {$node}: {$res}");
+        }
+    } catch (\Throwable $e) {
+        logMsg('Certificados de Caddy error: ' . $e->getMessage());
+    }
+}
+
 // ─── Step 0j: El master reenvía su configuración de relevo cada 30 min ────────
 // Si una copia estuvo caída cuando cambió (p. ej. tras un relevo), el envío pudo agotar
 // sus reintentos; así ninguna se queda con papeles viejos (principal/relevo, modo, titular).

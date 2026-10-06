@@ -1839,7 +1839,9 @@ CONF;
             $initialServer = [
                 "listen" => [$panelListen],
                 "automatic_https" => ["disable_redirects" => true],
-                "tls_connection_policies" => [[]],
+                // [{}] y no [[]]: json_encode de [[]] da una lista dentro de la lista y
+                // Caddy la rechaza ("cannot unmarshal array into ... ConnectionPolicy").
+                "tls_connection_policies" => [new \stdClass()],
                 "routes" => [],
             ];
             [$created] = self::caddyCreatePath($caddyApi, $serverPath, $initialServer);
@@ -1869,11 +1871,26 @@ CONF;
         $existingListen = array_values(array_unique($existingListen));
 
         // Hoja a hoja (antes: PATCH del objeto server entero → borraba sus rutas).
-        foreach ([
+        $leaves = [
             "listen" => $existingListen,
             "automatic_https/disable_redirects" => true,
-            "tls_connection_policies" => [[]],
-        ] as $leaf => $value) {
+        ];
+        // Políticas TLS: solo si faltan o no son una lista de objetos; si ya hay unas
+        // válidas (p. ej. del Caddyfile) no se tocan. Antes se enviaba [[]] en cada
+        // pasada, que Caddy rechaza: el reparador fallaba al arrancar Caddy
+        // ("no se pudo preparar srv0/listeners", obelix 2026-10-06).
+        $policies = is_array($decodedServer) ? ($decodedServer["tls_connection_policies"] ?? null) : null;
+        $policiesOk = is_array($policies) && $policies !== [] && array_is_list($policies);
+        foreach ($policiesOk ? $policies : [] as $policy) {
+            if (!is_array($policy) || ($policy !== [] && array_is_list($policy))) {
+                $policiesOk = false;
+                break;
+            }
+        }
+        if (!$policiesOk) {
+            $leaves["tls_connection_policies"] = [new \stdClass()];
+        }
+        foreach ($leaves as $leaf => $value) {
             [$ok] = self::caddySetLeaf($caddyApi, "{$serverPath}/{$leaf}", $value);
             if (!$ok) {
                 return false;
