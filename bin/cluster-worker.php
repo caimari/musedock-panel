@@ -351,6 +351,10 @@ try {
     if ($rs !== '') {
         logMsg('Relay de reserva: ' . $rs);
     }
+    $rl = \MuseDockPanel\Services\MailService::ensureRelayLocalSubmission();
+    if ($rl !== '') {
+        logMsg('Relay privado: ' . $rl);
+    }
     if (time() - (int)Settings::get('mail_relay_standby_sync_at', '0') >= 300) {
         Settings::set('mail_relay_standby_sync_at', (string)time());
         foreach (\MuseDockPanel\Services\MailService::syncRelayStandbyNodes() as $node => $res) {
@@ -359,6 +363,21 @@ try {
     }
 } catch (\Throwable $e) {
     logMsg('Relay de reserva error: ' . $e->getMessage());
+}
+
+// ─── Step 0i2: Rutas de hostings perdidas en Caddy (cada 10 min) ──────────────
+// Un "caddy reload" desde el Caddyfile o un arranque sin --resume borra las rutas que el
+// panel puso por la API; la web se queda sin servir hasta que alguien las rehace.
+if (Settings::get('cluster_fenced', '0') !== '1'
+    && time() - (int)Settings::get('caddy_routes_check_at', '0') >= 600) {
+    Settings::set('caddy_routes_check_at', (string)time());
+    try {
+        foreach (\MuseDockPanel\Services\DomainAliasService::ensureRuntimeRoutes() as $d => $res) {
+            logMsg("Caddy: {$d}: {$res}");
+        }
+    } catch (\Throwable $e) {
+        logMsg('Caddy rutas de hostings error: ' . $e->getMessage());
+    }
 }
 
 // ─── Step 0j: El master reenvía su configuración de relevo cada 30 min ────────

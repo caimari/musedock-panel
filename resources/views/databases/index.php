@@ -497,10 +497,10 @@ function formatDbSize(int $bytes): string {
             <button type="button" class="btn btn-outline-secondary btn-sm" id="btnBackupSettings" title="Configurar directorio">
                 <i class="bi bi-gear"></i>
             </button>
-            <form method="POST" action="/databases/backups/cleanup" class="d-inline">
+            <form method="POST" action="/databases/backups/cleanup" class="d-inline" id="backupCleanupForm">
                 <?= View::csrf() ?>
-                <button type="submit" class="btn btn-outline-warning btn-sm" title="Sincroniza la tabla de registros con los archivos reales: elimina registros de archivos borrados y detecta archivos huerfanos no registrados">
-                    <i class="bi bi-arrow-repeat"></i> Cleanup
+                <button type="submit" class="btn btn-outline-warning btn-sm" title="Ordena la lista con los archivos reales. No borra ningún archivo de backup.">
+                    <i class="bi bi-arrow-repeat"></i> Ordenar lista
                 </button>
             </form>
         </div>
@@ -1217,6 +1217,26 @@ function formatDbSize(int $bytes): string {
                     form.submit();
                 }
             });
+        });
+    });
+})();
+
+// "Ordenar lista": confirmar antes, explicando que no borra archivos.
+(function () {
+    const form = document.getElementById('backupCleanupForm');
+    if (!form || !window.Swal) return;
+    form.addEventListener('submit', function (e) {
+        if (form.dataset.confirmed === '1') return;
+        e.preventDefault();
+        Swal.fire({
+            icon: 'question',
+            title: 'Ordenar la lista de backups',
+            html: '<div class="text-start small">Compara la lista con la carpeta de backups:<ul class="mb-1"><li>quita de la lista los backups cuyo archivo ya no existe;</li><li>añade los archivos de la carpeta que no estaban en la lista.</li></ul><strong>No borra ningún archivo de backup.</strong><br><span class="text-muted">Aquí solo salen los backups hechos desde esta página; las copias automáticas de otras aplicaciones (scripts propios) tienen su carpeta.</span></div>',
+            showCancelButton: true,
+            confirmButtonText: 'Ordenar',
+            cancelButtonText: 'Cancelar'
+        }).then(function (r) {
+            if (r.isConfirmed) { form.dataset.confirmed = '1'; form.submit(); }
         });
     });
 })();

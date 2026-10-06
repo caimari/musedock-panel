@@ -99,7 +99,7 @@ class MailController
             $relayLogPerPage = 25;
         }
         $relayLogPage = ($mailMode === 'relay')
-            ? MailService::getRelayLogPage((int)($_GET['relay_log_page'] ?? 1), $relayLogPerPage)
+            ? MailService::getRelayLogPage((int)($_GET['relay_log_page'] ?? 1), $relayLogPerPage, !empty($_GET['relay_log_all']))
             : ['entries' => [], 'total' => 0, 'page' => 1, 'per_page' => $relayLogPerPage, 'pages' => 1];
         $relayLogs = $relayLogPage['entries'];
         $relayQueue = ($mailMode === 'relay') ? MailService::getMailQueueEntries(200) : [];
@@ -1320,7 +1320,7 @@ class MailController
         $result = MailService::clearRelayLog();
         if ($result['ok'] ?? false) {
             $archived = (int)($result['archived'] ?? 0);
-            Flash::set('success', 'mail.log/maillog vaciado. Historico persistente en BD conservado' . ($archived > 0 ? " ({$archived} eventos archivados antes de vaciar)." : '.'));
+            Flash::set('success', 'Histórico vaciado: la tabla empieza de cero desde ahora. Lo anterior sigue guardado (enlace "ver también lo anterior")' . ($archived > 0 ? "; {$archived} eventos de mail.log archivados antes de vaciarlo." : '.'));
         } else {
             Flash::set('error', $result['error'] ?? 'No se pudo vaciar el historico del relay.');
         }

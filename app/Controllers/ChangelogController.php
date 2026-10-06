@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.332',
+                'date' => '2026-10-06',
+                'badge' => 'warning',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Relay privado: envio autenticado tambien en 127.0.0.1:587, para que una app en el mismo servidor funcione igual en el que manda y en su relevo sin depender de la IP flotante'],
+                        'en' => ['Private relay: authenticated submission also on 127.0.0.1:587, so an app on the same server works the same on the primary and its failover without relying on the floating IP'],
+                    ],
+                    'fixed' => [
+                        'es' => ['Webs de hostings que se quedaban sin servir ni certificado tras reiniciar o recargar Caddy: el panel repone las rutas que falten (al arrancar Caddy, al actualizar y cada 10 min) sin tocar las que existen', 'Caddy arranca con --resume en todos los nodos (los montados sin install.sh no lo tenian); se aplica en el proximo arranque, sin reiniciar', 'Vaciar el historico del relay ahora vacia de verdad la tabla desde ese momento (lo anterior sigue en la BD, con enlace para verlo)', 'Tarjeta del cluster: el relevo de un relay privado muestra su reserva del relay en vez de "no lleva correo"', 'Backups de BD: "Cleanup" pasa a "Ordenar lista" con confirmacion que explica que nunca borra archivos'],
+                        'en' => ['Hosting sites left without routes or certificates after a Caddy restart or reload: the panel restores missing routes (on Caddy start, on update and every 10 min) without touching existing ones', 'Caddy starts with --resume on every node (nodes not set up with install.sh lacked it); applies on next start, no restart', 'Clearing the relay history now really empties the table from that moment (older events stay in the DB, link to show them)', 'Cluster card: failover node of a private relay shows its relay standby state instead of "no mail"', 'Database backups: "Cleanup" renamed to "Tidy list" with a confirmation explaining it never deletes files'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.331',
                 'date' => '2026-10-06',
                 'badge' => 'info',

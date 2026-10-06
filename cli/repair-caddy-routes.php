@@ -280,6 +280,15 @@ if (is_file('/etc/postfix/main.cf') && is_file('/etc/dovecot/dovecot.conf')) {
     }
 }
 
+// Rutas de los hostings del panel y sus redirecciones: también viven solo en el runtime
+// y se pierden igual. Solo se añaden las que faltan (vocal9.com, asterisk 2026-10-05).
+try {
+    foreach (\MuseDockPanel\Services\DomainAliasService::ensureRuntimeRoutes() as $d => $res) {
+        echo "[repair-caddy] hosting {$d}: {$res}\n";
+    }
+} catch (\Throwable $e) {
+    fwrite(STDERR, "[repair-caddy] WARNING hostings: " . $e->getMessage() . "\n");
+}
 
 // ── SAFETY GUARD post-check (ver cabecera + incidente TLS 2026-09-14) ──
 if ($guardArmed) {

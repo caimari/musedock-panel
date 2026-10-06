@@ -208,6 +208,79 @@ class DomainAliasService
     }
 
     /**
+     * Repone en Caddy las rutas de los hostings activos (y sus redirecciones) que falten.
+     * Esas rutas solo viven en el runtime de Caddy: un arranque sin --resume o un
+     * "caddy reload" desde el Caddyfile las borra y la web se queda sin servir ni
+     * certificado (vocal9.com en asterisk, 2026-10-05). Solo AÑADE lo que falta: no toca
+     * una ruta que ya existe ni un dominio que ya sirve otra ruta (p. ej. un bloque fijo
+     * del Caddyfile). Devuelve [dominio => resultado] de lo que ha hecho o fallado.
+     */
+    public static function ensureRuntimeRoutes(): array
+    {
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $api = $config['caddy']['api_url'] ?? 'http://localhost:2019';
+        $raw = @file_get_contents("{$api}/config/apps/http/servers");
+        $servers = json_decode((string)$raw, true);
+        if (!is_array($servers)) {
+            return [];
+        }
+        $served = [];
+        foreach ($servers as $srv) {
+            foreach ((is_array($srv) ? ($srv['routes'] ?? []) : []) as $route) {
+                foreach (($route['match'] ?? []) as $m) {
+                    foreach (($m['host'] ?? []) as $h) {
+                        $served[strtolower((string)$h)] = true;
+                    }
+                }
+            }
+        }
+        $routeExists = static function (string $id) use ($api): bool {
+            $ch = curl_init("{$api}/id/" . rawurlencode($id));
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 5]);
+            $body = curl_exec($ch);
+            $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            return $code === 200 && trim((string)$body) !== '' && trim((string)$body) !== 'null';
+        };
+
+        $out = [];
+        $accounts = Database::fetchAll("SELECT * FROM hosting_accounts WHERE status = 'active' ORDER BY id");
+        foreach ($accounts as $acc) {
+            $domain = strtolower(trim((string)$acc['domain']));
+            if ($domain === '' || empty($acc['document_root']) || !is_dir((string)$acc['document_root'])) {
+                continue;
+            }
+            $routeId = (string)($acc['caddy_route_id'] ?: SystemService::caddyRouteId($domain));
+            if (!$routeExists($routeId) && !isset($served[$domain])) {
+                $ok = SystemService::rebuildCaddyRouteWithAliases(
+                    $domain,
+                    self::getAliasDomains((int)$acc['id']),
+                    (string)$acc['document_root'],
+                    (string)$acc['username'],
+                    (string)($acc['php_version'] ?? '8.3') ?: '8.3',
+                    (string)($acc['hosting_type'] ?? 'php') ?: 'php'
+                ) !== null;
+                $out[$domain] = $ok ? 'ruta repuesta' : 'FALLO al reponer la ruta';
+            }
+            foreach (self::getRedirects((int)$acc['id']) as $r) {
+                $from = strtolower(trim((string)$r['domain']));
+                if ($from === '' || isset($served[$from]) || $routeExists('redirect-' . str_replace('.', '-', $from))) {
+                    continue;
+                }
+                $ok = SystemService::addCaddyRedirectRoute($from, $domain, (int)$r['redirect_code'], (bool)$r['preserve_path']) !== null;
+                $out[$from] = $ok ? "redirección a {$domain} repuesta" : 'FALLO al reponer la redirección';
+            }
+        }
+        foreach ($out as $d => $res) {
+            try {
+                LogService::log('caddy.routes', $d, 'Ruta de Caddy que faltaba: ' . $res);
+            } catch (\Throwable) {
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Rebuild all Caddy redirect routes for an account.
      */
     public static function rebuildRedirects(array $account): void

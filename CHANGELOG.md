@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.332] — 2026-10-06 — Webs de hostings que desaparecían de Caddy y envío local en el relay privado
+
+### Añadido
+- **Relay privado: envío también en `127.0.0.1:587`** (TLS obligatorio y usuario SMTP, igual que en la IP de la VPN). Una aplicación que vive en el mismo servidor que el relay puede enviar a `127.0.0.1:587` y funciona igual en el que manda y en su relevo, sin depender de la IP flotante. Se añade solo a los relays ya instalados (y a las reservas) en el primer minuto tras actualizar; copia de `master.cf` antes de tocarlo.
+
+### Corregido
+- **Hostings sin web ni certificado tras reiniciar o recargar Caddy.** Las rutas de los hostings solo viven en la memoria de Caddy: un arranque sin `--resume` o un `caddy reload` desde el Caddyfile las borraba y nadie las reponía (vocal9.com en asterisk, desde el 05-10; tampoco estaba en su relevo). Ahora el panel repone las rutas de hostings activos y sus redirecciones que falten: al arrancar Caddy, en cada actualización y cada 10 min desde el cluster-worker. Solo añade: no toca una ruta que existe ni un dominio que ya sirve otra ruta (p. ej. un bloque fijo del Caddyfile).
+- **"Vaciar" el histórico del relay no vaciaba la tabla.** Solo vaciaba `mail.log`, pero la tabla se lee del histórico guardado en la base de datos, así que todo volvía a salir. Ahora la tabla empieza de cero desde que se vacía; lo anterior sigue guardado (estadísticas) y se ve con "ver también lo anterior". Botón renombrado a *Vaciar histórico*.
+- **Tarjeta del cluster: "Correo — no lleva correo" en el relevo de un relay privado.** Con un master relay (sin buzones) ahora sale **Relay de correo**: "reserva lista (parada hasta que mande)" o "sin reserva".
+- **Backups de bases de datos: "Cleanup" pasa a "Ordenar lista"** y pide confirmación explicando qué hace: quita de la lista los backups cuyo archivo ya no existe y añade los archivos que faltaban. Nunca borró ni borra archivos.
+- **Caddy con `--resume` en todos los nodos.** `install.sh` ya lo ponía, pero los nodos montados de otra forma no lo tenían. `update.sh` lo añade (`caddy.service.d/zz-musedock-resume.conf`) partiendo del arranque actual; vale desde el próximo arranque, sin reiniciar Caddy.
+
 ## [1.0.331] — 2026-10-06 — Relay privado de reserva
 
 ### Añadido

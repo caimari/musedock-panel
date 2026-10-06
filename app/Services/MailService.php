@@ -1844,25 +1844,37 @@ class MailService
         return $page['entries'];
     }
 
-    public static function getRelayLogPage(int $page = 1, int $perPage = 25): array
+    public static function getRelayLogPage(int $page = 1, int $perPage = 25, bool $all = false): array
     {
         $page = max(1, $page);
         $perPage = max(5, min(1000, $perPage));
         // La importación de mail.log la hace el cron bin/mail-log-ingest.php
         // (incremental, cada minuto); aquí solo se lee de BD para no bloquear la página.
+        // "Vaciar" no borra el histórico: guarda la hora y aquí solo se ve lo posterior
+        // (salvo $all). Antes vaciaba solo el fichero y la tabla seguía igual.
+        $clearedAt = $all ? '' : (string)Settings::get('mail_relay_log_cleared_at', '');
+        $where = $clearedAt !== '' ? 'WHERE event_at > :cut' : '';
+        $params = $clearedAt !== '' ? ['cut' => $clearedAt] : [];
 
         try {
             self::ensureRelayEventsTable();
-            $totalRow = Database::fetchOne("SELECT COUNT(*) AS cnt FROM mail_relay_events");
+            $totalRow = Database::fetchOne("SELECT COUNT(*) AS cnt FROM mail_relay_events {$where}", $params);
             $total = (int)($totalRow['cnt'] ?? 0);
+            $hidden = 0;
+            if ($clearedAt !== '') {
+                $allRow = Database::fetchOne("SELECT COUNT(*) AS cnt FROM mail_relay_events");
+                $hidden = max(0, (int)($allRow['cnt'] ?? 0) - $total);
+            }
             $pages = max(1, (int)ceil($total / $perPage));
             $page = min($page, $pages);
             $offset = ($page - 1) * $perPage;
             $rows = Database::fetchAll(
                 "SELECT log_timestamp, domain, sender, recipient, status, relay, dsn, detail, raw_line
                  FROM mail_relay_events
+                 {$where}
                  ORDER BY event_at DESC, id DESC
-                 LIMIT {$perPage} OFFSET {$offset}"
+                 LIMIT {$perPage} OFFSET {$offset}",
+                $params
             );
 
             return [
@@ -1878,12 +1890,14 @@ class MailService
                     'line' => (string)($row['raw_line'] ?? ''),
                 ], $rows),
                 'total' => $total,
+                'hidden' => $hidden,
+                'cleared_at' => $clearedAt,
                 'page' => $page,
                 'per_page' => $perPage,
                 'pages' => $pages,
             ];
         } catch (\Throwable) {
-            return ['entries' => [], 'total' => 0, 'page' => 1, 'per_page' => $perPage, 'pages' => 1];
+            return ['entries' => [], 'total' => 0, 'hidden' => 0, 'cleared_at' => '', 'page' => 1, 'per_page' => $perPage, 'pages' => 1];
         }
     }
 
@@ -1957,6 +1971,8 @@ class MailService
         if (!empty($errors)) {
             return ['ok' => false, 'error' => implode(' | ', $errors)];
         }
+        // La tabla del panel empieza de cero desde ahora (el histórico sigue en la BD).
+        Settings::set('mail_relay_log_cleared_at', date('Y-m-d H:i:s'));
 
         return ['ok' => true, 'files' => $cleared, 'archived' => $archived];
     }
@@ -2438,6 +2454,41 @@ class MailService
             return 'relay parado (este nodo no manda)';
         }
         return '';
+    }
+
+    /**
+     * Relay privado: además de la IP de la VPN, envío autenticado (587, TLS obligatorio y
+     * usuario SMTP) en 127.0.0.1. Así una aplicación que vive en el mismo servidor que el
+     * relay envía a 127.0.0.1:587 y funciona igual en el nodo que manda y en su relevo, sin
+     * depender de la IP flotante. Idempotente: solo añade el servicio a master.cf si falta
+     * y recarga Postfix si está en marcha. Devuelve lo hecho ('' si nada).
+     */
+    public static function ensureRelayLocalSubmission(?string $wgIp = null): string
+    {
+        $wgIp = trim((string)($wgIp ?? Settings::get('mail_relay_wireguard_ip', '')));
+        $masterCf = '/etc/postfix/master.cf';
+        if ($wgIp === '' || !is_file($masterCf)) {
+            return '';
+        }
+        $master = (string)file_get_contents($masterCf);
+        if (!str_contains($master, "{$wgIp}:587 inet") || preg_match('/^127\.0\.0\.1:587\s+inet/m', $master)) {
+            return '';
+        }
+        $block = "\n127.0.0.1:587 inet n - n - - smtpd\n" .
+            "  -o syslog_name=postfix/submission-local\n" .
+            "  -o smtpd_tls_security_level=encrypt\n" .
+            "  -o smtpd_sasl_auth_enable=yes\n" .
+            "  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject\n" .
+            "  -o milter_macro_daemon_name=ORIGINATING\n";
+        @copy($masterCf, $masterCf . '.bak-' . date('Ymd-His'));
+        if (file_put_contents($masterCf, rtrim($master, "\n") . "\n" . $block) === false) {
+            return 'no se pudo escribir master.cf';
+        }
+        if (trim((string)shell_exec('systemctl is-active postfix 2>/dev/null')) === 'active') {
+            shell_exec('postfix reload 2>&1');
+        }
+        LogService::log('mail.relay', 'local-submission', 'Relay privado: envío autenticado también en 127.0.0.1:587');
+        return 'envío local en 127.0.0.1:587 añadido';
     }
 
     /**

@@ -989,7 +989,7 @@ class DatabaseController
             }
         }
 
-        $msg = "Cleanup completado. {$removed} registro(s) huérfano(s) eliminados, {$orphans} archivo(s) huérfano(s) registrados.";
+        $msg = "Lista ordenada: {$removed} entrada(s) sin archivo quitadas de la lista, {$orphans} archivo(s) añadidos. No se ha borrado ningún archivo.";
         LogService::log('database.backup.cleanup', 'all', $msg);
         Flash::set('success', $msg);
         Router::redirect('/databases');

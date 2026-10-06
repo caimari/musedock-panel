@@ -111,6 +111,10 @@ class RoleSwitchService
             'pg'        => $pg,
             'mysql'     => $my,
             'redis'     => $redis,
+            'mail_relay' => [
+                'mode'    => Settings::get('mail_mode', 'full') === 'relay' && is_file('/etc/postfix/main.cf'),
+                'standby' => Settings::get('mail_relay_standby', '0') === '1' && is_file('/etc/postfix/main.cf'),
+            ],
         ];
     }
 
@@ -190,7 +194,15 @@ class RoleSwitchService
                     'detail' => ($tr['role'] ?? '') === 'slave' ? 'réplica, enlace ' . ($tr['link'] ?? '?') : 'independiente'];
             }
             $hasMail = in_array('mail', $services, true);
-            $items[] = ['name' => 'Correo', 'ok' => $hasMail, 'detail' => $hasMail ? 'nodo de correo' : 'no lleva correo'];
+            if (!$hasMail && !empty($me['mail_relay']['mode'])) {
+                // Este master es relay privado (sin buzones): lo que cuenta es si el nodo
+                // tiene la reserva del relay (parada mientras es copia).
+                $standby = !empty($t['mail_relay']['standby']);
+                $items[] = ['name' => 'Relay de correo', 'ok' => $standby,
+                    'detail' => $standby ? 'reserva lista (parada hasta que mande)' : 'sin reserva (cluster-switch relay-standby)'];
+            } else {
+                $items[] = ['name' => 'Correo', 'ok' => $hasMail, 'detail' => $hasMail ? 'nodo de correo' : 'no lleva correo'];
+            }
             $pubOk = self::publicIpFor((array)($t['local_ips'] ?? [])) !== '';
 
             if ($dbTotal > 0 && $dbOk === $dbTotal && $pubOk) {

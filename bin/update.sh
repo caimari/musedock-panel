@@ -249,6 +249,25 @@ ExecStartPost=-/bin/sleep 5
 ExecStartPost=-+${PHP_BIN} ${PANEL_DIR}/cli/repair-caddy-routes.php
 OVERRIDEEOF
     chmod 644 /etc/systemd/system/caddy.service.d/zz-musedock-panel-repair.conf
+
+    # --resume: al arrancar, Caddy recupera su última config (autosave) con las rutas que
+    # el panel puso por la API. Sin él, cada reinicio deja sin web a los hostings
+    # (vocal9.com en asterisk, 2026-10-05). install.sh ya lo pone; los nodos montados de
+    # otra forma no lo tenían. Se parte del ExecStart efectivo y solo se añade la opción;
+    # no se reinicia Caddy (vale desde el próximo arranque).
+    local caddy_start
+    caddy_start="$(systemctl show caddy -p ExecStart --no-pager 2>/dev/null | sed -n 's/.*argv\[\]=\([^;]*\);.*/\1/p' | head -1 | sed 's/[[:space:]]*$//')"
+    if [ -n "$caddy_start" ] && [ "$(systemctl show caddy -p ExecStart --no-pager 2>/dev/null | grep -c 'argv\[\]=')" = "1" ] \
+        && echo "$caddy_start" | grep -qE '^[^ ]*caddy run( |$)' && ! echo "$caddy_start" | grep -q -- '--resume'; then
+        cat > /etc/systemd/system/caddy.service.d/zz-musedock-resume.conf << RESUMEEOF
+[Service]
+# MuseDock: recuperar la config de Caddy (rutas de hostings) en cada arranque.
+ExecStart=
+ExecStart=$(echo "$caddy_start" | sed -E 's/ run( |$)/ run --resume\1/')
+RESUMEEOF
+        chmod 644 /etc/systemd/system/caddy.service.d/zz-musedock-resume.conf
+        ok "Caddy --resume enabled (applies on next Caddy start)"
+    fi
     systemctl daemon-reload 2>/dev/null || true
     ok "Caddy runtime repair hook installed/updated"
 }

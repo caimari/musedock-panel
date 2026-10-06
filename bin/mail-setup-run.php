@@ -431,6 +431,8 @@ if ($mailMode === 'relay') {
             "  -o milter_macro_daemon_name=ORIGINATING\n";
         file_put_contents('/etc/postfix/master.cf', $master);
     }
+    // Lo mismo en 127.0.0.1:587, para apps en este servidor (no dependen de la IP flotante).
+    \MuseDockPanel\Services\MailService::ensureRelayLocalSubmission($wireguardIp);
 
     $step = 3;
     writeProgress($progressFile, $relaySteps[$step], $step, $totalSteps, 'running', $errors);

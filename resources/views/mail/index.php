@@ -1412,10 +1412,11 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
     <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
         <span><i class="bi bi-activity me-2"></i>Historico reciente del relay</span>
         <div class="d-flex flex-wrap align-items-center gap-2">
-            <span class="text-muted small"><?= (int)($relayLogPage['total'] ?? 0) ?> eventos guardados en BD</span>
+            <span class="text-muted small"><?= (int)($relayLogPage['total'] ?? 0) ?> eventos<?php if (!empty($relayLogPage['cleared_at'])): ?> desde que se vació (<?= View::e(substr((string)$relayLogPage['cleared_at'], 0, 16)) ?>)<?php if ((int)($relayLogPage['hidden'] ?? 0) > 0): ?> · <a href="/mail?tab=queue&relay_log_all=1&relay_log_per_page=<?= $relayCurrentPerPage ?>">ver también lo anterior (<?= (int)$relayLogPage['hidden'] ?>)</a><?php endif; ?><?php elseif (!empty($_GET['relay_log_all'])): ?> (todo el histórico) · <a href="/mail?tab=queue&relay_log_per_page=<?= $relayCurrentPerPage ?>">ver solo desde que se vació</a><?php endif; ?></span>
             <form method="get" action="/mail" class="d-flex align-items-center gap-2">
                 <input type="hidden" name="tab" value="queue">
                 <input type="hidden" name="relay_log_page" value="1">
+                <?php if (!empty($_GET['relay_log_all'])): ?><input type="hidden" name="relay_log_all" value="1"><?php endif; ?>
                 <label class="small text-muted mb-0" for="relayLogPerPage">Mostrar</label>
                 <select id="relayLogPerPage" name="relay_log_per_page" class="form-select form-select-sm" style="min-width:100px;" onchange="this.form.submit()">
                     <?php foreach ($relayPerPageOptions as $opt): ?>
@@ -1429,7 +1430,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                 <input type="hidden" name="relay_log_page" value="<?= (int)($relayLogPage['page'] ?? 1) ?>">
                 <input type="hidden" name="relay_log_per_page" value="<?= $relayCurrentPerPage ?>">
                 <button type="submit" class="btn btn-outline-danger btn-sm">
-                    <i class="bi bi-trash3 me-1"></i>Vaciar mail.log
+                    <i class="bi bi-trash3 me-1"></i>Vaciar histórico
                 </button>
             </form>
             <?php endif; ?>
@@ -3061,9 +3062,9 @@ initWebmailConfigLock();
         },
         'clear-log': {
             icon: 'warning',
-            title: 'Vaciar mail.log del relay',
-            html: '<div class="text-start small">Antes de vaciar <code>mail.log</code>/<code>maillog</code>, el panel archivara los eventos detectados en la base de datos. El historico BD se conserva.</div>',
-            confirmButtonText: 'Si, vaciar mail.log',
+            title: 'Vaciar el histórico del relay',
+            html: '<div class="text-start small">La tabla empezará de cero desde ahora y se vacía <code>mail.log</code>. No se pierde nada: lo anterior queda guardado en la base de datos (estadísticas) y se puede ver con el enlace "ver también lo anterior".</div>',
+            confirmButtonText: 'Sí, vaciar',
             confirmButtonColor: '#ef4444',
             requirePassword: true
         }
