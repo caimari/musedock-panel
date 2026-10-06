@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.330',
+                'date' => '2026-10-06',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Textos personalizables de los correos a clientes del portal (invitacion y cambio de contrasena) con {nombre} y {empresa}; "Nombre de tu empresa" con explicacion clara'],
+                        'en' => ['Customizable texts for portal customer emails (invitation and password reset) with {nombre} and {empresa}; clearer "company name" setting'],
+                    ],
+                    'changed' => [
+                        'es' => ['Traer cuentas de Cloudflare de otro nodo con la ventana del panel (espera, lista, confirmacion y resultado)'],
+                        'en' => ['Pull Cloudflare accounts from another node with the panel dialog (wait, list, confirmation and result)'],
+                    ],
+                    'fixed' => [
+                        'es' => ['Tope diario de avisos vacio o 0 = 25 (antes quedaba en 5)'],
+                        'en' => ['Empty or 0 daily alert cap = 25 (was 5)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.329',
                 'date' => '2026-10-06',
                 'badge' => 'info',

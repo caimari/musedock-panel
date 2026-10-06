@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.330] — 2026-10-06 — Textos de los correos a clientes, ventana propia al traer cuentas de Cloudflare y tope de avisos
+
+### Añadido
+- **Textos de los correos a tus clientes del portal** (*Ajustes → Notificaciones*): asunto y texto de la invitación al portal y del cambio de contraseña, con `{nombre}` y `{empresa}`; párrafos separados por una línea en blanco. El saludo, el botón con el enlace y el aviso de caducidad se añaden solos. Vacío = el texto de por defecto (se ve en gris). Se copian a los nodos con el resto de avisos.
+- "Marca en los correos a clientes" pasa a llamarse **Nombre de tu empresa**, con una explicación clara (solo afecta a los correos a tus clientes del portal, no a los avisos que te llegan a ti).
+
+### Cambiado
+- **"Traer de otro nodo"** (cuentas de Cloudflare) usa la ventana del panel en vez de la del navegador: consulta con indicador de espera, lista de cuentas y nodos, confirmación y resultado.
+
+### Arreglado
+- **Tope diario de correos de aviso vacío o 0** (p. ej. copiado a un nodo desde otro que no lo tenía guardado) = el de por defecto (25); antes se quedaba en 5.
+
 ## [1.0.329] — 2026-10-06 — Cuentas de Cloudflare entre nodos, caddy-l4 y botones de copiar
 
 ### Arreglado

@@ -1146,7 +1146,7 @@ final class McpClusterTools
                     [$d, $n] = array_pad(explode('|', Settings::get('notify_email_daily_count', '')), 2, '0');
                     return $d === date('Y-m-d') ? (int)$n : 0;
                 })(),
-                'daily_cap' => (int)Settings::get('notify_email_daily_cap', '25'),
+                'daily_cap' => (int)Settings::get('notify_email_daily_cap', '25') > 0 ? max(5, (int)Settings::get('notify_email_daily_cap', '25')) : 25,
             ],
             'telegram' => ['active' => $tgOn, 'configured' => $tgReady, 'chat_id' => Settings::get('notify_telegram_chat_id', '')],
             'replication_health' => is_array($health) ? ($health['last'] ?? null) : null,

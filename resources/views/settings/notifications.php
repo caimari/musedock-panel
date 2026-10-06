@@ -105,11 +105,29 @@
                     <small class="text-muted">Ej: "Servidor principal", "Servidor de reserva"</small>
                 </div>
                 <div class="col-md-4">
-                    <label class="form-label">Marca en los correos a clientes</label>
+                    <label class="form-label">Nombre de tu empresa</label>
                     <input type="text" name="notify_brand" class="form-control" maxlength="60"
-                           value="<?= View::e(\MuseDockPanel\Settings::get('notify_brand', '')) ?>" placeholder="Tu empresa">
-                    <small class="text-muted">Sale arriba en las invitaciones y avisos del portal. Vacío = el nombre del dominio del remitente.</small>
+                           value="<?= View::e(\MuseDockPanel\Settings::get('notify_brand', '')) ?>" placeholder="<?= View::e(\MuseDockPanel\Services\NotificationService::brandName()) ?>">
+                    <small class="text-muted">Para los correos que el panel envía <strong>a tus clientes del portal</strong> (invitación y cambio de contraseña): sale arriba y en <code>{empresa}</code>. No afecta a los avisos que te llegan a ti. Vacío = el nombre del dominio del remitente.</small>
                 </div>
+            </div>
+
+            <!-- Textos de los correos a clientes del portal -->
+            <?php $pm = \MuseDockPanel\Services\NotificationService::PORTAL_MAIL_DEFAULTS; $g = static fn($k) => \MuseDockPanel\Settings::get($k, ''); ?>
+            <h6 class="text-muted mb-1">Correos a tus clientes del portal</h6>
+            <p class="small text-muted mb-2">Lo que reciben tus clientes al invitarles al portal o al pedir un cambio de contraseña. Puedes usar <code>{nombre}</code> (el cliente) y <code>{empresa}</code>.
+                Separa los párrafos con una línea en blanco. El saludo, el botón con el enlace y el aviso de caducidad se añaden solos. Vacío = el texto de por defecto (el que ves en gris).</p>
+            <div class="row mb-3">
+                <?php foreach (['invite' => 'Invitación al portal', 'reset' => 'Cambio de contraseña'] as $k => $lbl): ?>
+                <div class="col-md-6">
+                    <label class="form-label"><?= $lbl ?>: asunto</label>
+                    <input type="text" name="portal_mail_<?= $k ?>_subject" class="form-control mb-2" maxlength="150"
+                           value="<?= View::e($g("portal_mail_{$k}_subject")) ?>" placeholder="<?= View::e($pm[$k]['subject']) ?>">
+                    <label class="form-label"><?= $lbl ?>: texto</label>
+                    <textarea name="portal_mail_<?= $k ?>_text" class="form-control" rows="4" maxlength="2000"
+                              placeholder="<?= View::e($pm[$k]['text']) ?>"><?= View::e($g("portal_mail_{$k}_text")) ?></textarea>
+                </div>
+                <?php endforeach; ?>
             </div>
 
             <hr class="border-secondary">

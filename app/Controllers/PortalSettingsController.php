@@ -238,15 +238,10 @@ class PortalSettingsController
 
         // Send email
         $isNew = empty($customer['password_hash']);
-        $subject = $isNew ? 'Invitacion al Portal de Clientes' : 'Restablecer contraseña del Portal';
-        $body = "Hola {$customer['name']},\n\n";
-        if ($isNew) {
-            $body .= "Se te ha dado acceso al portal de clientes.\n\n";
-            $body .= "Haz clic en el siguiente enlace para crear tu contraseña:\n";
-        } else {
-            $body .= "Se ha solicitado un cambio de contraseña para tu cuenta del portal.\n\n";
-            $body .= "Haz clic en el siguiente enlace para crear una nueva contraseña:\n";
-        }
+        // Textos personalizables en Ajustes → Notificaciones (o los de por defecto).
+        $mail = \MuseDockPanel\Services\NotificationService::portalMail($isNew ? 'invite' : 'reset', (string)$customer['name']);
+        $subject = $mail['subject'];
+        $body = "Hola {$customer['name']},\n\n" . implode("\n\n", $mail['paragraphs']) . "\n";
         $body .= "{$setupUrl}\n\n";
         $body .= "Este enlace caduca en 48 horas.\n\n";
         $body .= "Si no lo has solicitado tú, ignora este mensaje: tu contraseña actual sigue funcionando.\n";
@@ -256,9 +251,8 @@ class PortalSettingsController
         // SPF/DKIM ni DNS inverso, y Gmail lo descartaba sin dejarlo ni en spam.
         $html = \MuseDockPanel\Services\NotificationService::customerHtml(
             "Hola {$customer['name']},",
-            $isNew ? ['Te hemos dado acceso al portal de clientes, donde puedes gestionar tus webs, correo y bases de datos.', 'Para empezar, crea tu contraseña:']
-                   : ['Hemos recibido una solicitud para cambiar la contraseña de tu acceso al portal de clientes.', 'Para elegir una nueva:'],
-            $isNew ? 'Crear mi contraseña' : 'Cambiar mi contraseña',
+            $mail['paragraphs'],
+            $mail['button'],
             $setupUrl,
             'El enlace caduca en 48 horas. Si no lo has solicitado tú, ignora este mensaje: tu contraseña actual sigue funcionando.'
         );

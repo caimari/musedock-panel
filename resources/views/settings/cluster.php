@@ -2860,19 +2860,36 @@ document.addEventListener('DOMContentLoaded', bindRemoveButtons);
 
 // Traer cuentas de Cloudflare de otros nodos: primero dice cuáles, luego pide confirmación.
 function foPullCfAccounts() {
+    const esc = (t) => { const d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; };
     const send = (apply) => {
         const fd = new FormData();
         fd.append('_csrf_token', (document.querySelector('input[name=_csrf_token]') || {}).value || '');
         if (apply) fd.append('apply', '1');
         return fetch('/settings/failover/pull-cf-accounts', {method: 'POST', headers: {'X-Requested-With': 'XMLHttpRequest'}, body: fd}).then(r => r.json());
     };
+    Swal.fire({title: 'Traer cuentas de otro nodo', html: '<span class="text-muted">Consultando los otros nodos del cluster…</span>', showConfirmButton: false, allowOutsideClick: false,
+               didOpen: () => Swal.showLoading()});
     send(false).then(d => {
-        if (!d.ok) { alert('No se pudo consultar: ' + (d.error || '?')); return; }
-        const detail = Object.keys(d.nodes || {}).map(k => '- ' + k + ': ' + d.nodes[k]).join('\n');
-        if (!(d.accounts || []).length) { alert('No hay cuentas nuevas que traer.\n\n' + detail); return; }
-        if (!confirm('Se añadirán estas cuentas (las de aquí no se tocan):\n' + d.accounts.join(', ') + '\n\n' + detail + '\n\n¿Traerlas?')) return;
-        send(true).then(r => { alert(r.ok ? 'Cuentas traídas: ' + (r.accounts || []).join(', ') : 'Error: ' + (r.error || '?')); location.reload(); });
-    }).catch(() => alert('Error de red.'));
+        if (!d.ok) { Swal.fire({icon: 'error', title: 'No se pudo consultar', text: d.error || '?'}); return; }
+        const nodes = Object.keys(d.nodes || {}).map(k => '<li><strong>' + esc(k) + '</strong>: ' + esc(d.nodes[k]) + '</li>').join('');
+        if (!(d.accounts || []).length) {
+            Swal.fire({icon: 'info', title: 'Nada que traer', html: '<p>Este servidor ya tiene todas las cuentas de los demás.</p><ul class="text-start small mb-0">' + nodes + '</ul>'});
+            return;
+        }
+        Swal.fire({
+            icon: 'question', title: 'Traer cuentas de Cloudflare',
+            html: '<p>Se añadirán estas cuentas (las de aquí no se tocan):</p><p><strong>' + d.accounts.map(esc).join(', ') + '</strong></p>'
+                + '<ul class="text-start small">' + nodes + '</ul>'
+                + '<p class="small text-muted mb-0">El token viaja por el canal autenticado del cluster; no se muestra en ningún momento.</p>',
+            showCancelButton: true, confirmButtonText: 'Traerlas', cancelButtonText: 'Cancelar'
+        }).then(res => {
+            if (!res.isConfirmed) return;
+            send(true).then(r => {
+                Swal.fire({icon: r.ok ? 'success' : 'error', title: r.ok ? 'Cuentas traídas' : 'Error',
+                           text: r.ok ? (r.accounts || []).join(', ') : (r.error || '?')}).then(() => location.reload());
+            });
+        });
+    }).catch(() => Swal.fire({icon: 'error', title: 'Error de red'}));
 }
 
 function foInstallCaddyL4() {

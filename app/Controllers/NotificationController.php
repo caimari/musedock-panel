@@ -55,6 +55,10 @@ class NotificationController
         Settings::set('notify_smtp_from', trim($_POST['notify_smtp_from'] ?? ''));
         Settings::set('notify_smtp_from_name', trim($_POST['notify_smtp_from_name'] ?? ''));
         Settings::set('notify_brand', mb_substr(trim((string)($_POST['notify_brand'] ?? '')), 0, 60));
+        foreach (['invite', 'reset'] as $k) {
+            Settings::set("portal_mail_{$k}_subject", mb_substr(trim((string)($_POST["portal_mail_{$k}_subject"] ?? '')), 0, 150));
+            Settings::set("portal_mail_{$k}_text", mb_substr(trim((string)($_POST["portal_mail_{$k}_text"] ?? '')), 0, 2000));
+        }
 
         $encryption = in_array($_POST['notify_smtp_encryption'] ?? '', ['tls', 'ssl', 'none']) ? $_POST['notify_smtp_encryption'] : 'tls';
         Settings::set('notify_smtp_encryption', $encryption);

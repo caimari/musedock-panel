@@ -66,7 +66,45 @@ class NotificationService
         'monitor_notify_email', 'monitor_notify_telegram',
         'notify_smtp2_host', 'notify_smtp2_port', 'notify_smtp2_user', 'notify_smtp2_from', 'notify_smtp2_encryption',
         'notify_email_daily_cap', 'notify_brand',
+        'portal_mail_invite_subject', 'portal_mail_invite_text', 'portal_mail_reset_subject', 'portal_mail_reset_text',
     ];
+
+    /** Textos por defecto de los correos a clientes del portal ({nombre}, {empresa}). */
+    public const PORTAL_MAIL_DEFAULTS = [
+        'invite' => [
+            'subject' => 'Tu acceso al portal de clientes de {empresa}',
+            'text' => "Te hemos dado acceso al portal de clientes de {empresa}, donde puedes gestionar tus webs, correo y bases de datos.\n\nPara empezar, crea tu contraseña:",
+            'button' => 'Crear mi contraseña',
+        ],
+        'reset' => [
+            'subject' => 'Cambio de contraseña del portal de {empresa}',
+            'text' => "Hemos recibido una solicitud para cambiar la contraseña de tu acceso al portal de clientes de {empresa}.\n\nPara elegir una nueva:",
+            'button' => 'Cambiar mi contraseña',
+        ],
+    ];
+
+    /** Nombre de la empresa en los correos a clientes: el configurado o el del dominio del remitente. */
+    public static function brandName(): string
+    {
+        $from = Settings::get('notify_smtp_from', '') ?: self::getAdminEmail();
+        $domain = strtolower(substr(strrchr($from, '@') ?: '@', 1));
+        return trim((string)Settings::get('notify_brand', '')) ?: ucfirst(explode('.', $domain)[0] ?? '');
+    }
+
+    /**
+     * Asunto, párrafos y texto del botón de un correo a cliente del portal ('invite' o
+     * 'reset'), con los textos personalizados (Ajustes → Notificaciones) o los de por defecto.
+     * Párrafos separados por una línea en blanco. {nombre} = cliente, {empresa} = brandName().
+     */
+    public static function portalMail(string $kind, string $customerName): array
+    {
+        $d = self::PORTAL_MAIL_DEFAULTS[$kind] ?? self::PORTAL_MAIL_DEFAULTS['invite'];
+        $subject = trim((string)Settings::get("portal_mail_{$kind}_subject", '')) ?: $d['subject'];
+        $text = trim((string)Settings::get("portal_mail_{$kind}_text", '')) ?: $d['text'];
+        $rep = ['{nombre}' => $customerName, '{empresa}' => self::brandName()];
+        $paragraphs = array_values(array_filter(array_map('trim', preg_split('/\R\s*\R/', strtr($text, $rep)) ?: [])));
+        return ['subject' => strtr($subject, $rep), 'paragraphs' => $paragraphs, 'button' => $d['button']];
+    }
 
     /**
      * Configuración de avisos para enviar a un nodo. Los secretos van en claro
@@ -178,7 +216,9 @@ class NotificationService
         // proveedor (Sweego gratis = 100/día para TODOS los paneles) y dejar sin
         // correo el aviso que de verdad importa. Al llegar al tope se manda uno
         // último diciéndolo y se calla hasta mañana (lo demás queda en el log).
-        $cap = max(5, (int)Settings::get('notify_email_daily_cap', '25'));
+        // Vacío o 0 (p. ej. copiado de un nodo que no lo tenía guardado) = el de por defecto.
+        $capRaw = (int)Settings::get('notify_email_daily_cap', '25');
+        $cap = $capRaw > 0 ? max(5, $capRaw) : 25;
         $day = date('Y-m-d');
         [$capDay, $sent] = array_pad(explode('|', Settings::get('notify_email_daily_count', '')), 2, '0');
         $sent = $capDay === $day ? (int)$sent : 0;
@@ -250,8 +290,8 @@ class NotificationService
         $e = static fn(string $t) => htmlspecialchars($t, ENT_QUOTES, 'UTF-8');
         $from = Settings::get('notify_smtp_from', '') ?: self::getAdminEmail();
         $domain = strtolower(substr(strrchr($from, '@') ?: '@', 1));
-        // Marca en los correos a clientes (Ajustes → Notificaciones); si no, la del dominio.
-        $brand = trim((string)Settings::get('notify_brand', '')) ?: ucfirst(explode('.', $domain)[0] ?? '');
+        // Nombre de la empresa (Ajustes → Notificaciones); si no, el del dominio del remitente.
+        $brand = self::brandName();
         $p = '';
         foreach ($paragraphs as $t) {
             $p .= '<p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#334155;">' . $e($t) . '</p>';
