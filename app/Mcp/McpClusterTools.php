@@ -1270,7 +1270,7 @@ final class McpClusterTools
         if (!empty($args['test'])) {
             $host = gethostname();
             $test = [
-                'email' => Settings::get('monitor_notify_email', '0') === '1' ? \MuseDockPanel\Services\NotificationService::sendEmail("[{$host}] Prueba de avisos", "Aviso de prueba del panel de {$host}.") : null,
+                'email' => Settings::get('monitor_notify_email', '0') === '1' ? \MuseDockPanel\Services\NotificationService::sendEmail('Prueba de avisos por correo', \MuseDockPanel\Services\NotificationService::testBody()) : null,
                 'telegram' => Settings::get('monitor_notify_telegram', '0') === '1' ? \MuseDockPanel\Services\NotificationService::sendTelegram("[{$host}] Prueba de avisos del panel") : null,
             ];
         }

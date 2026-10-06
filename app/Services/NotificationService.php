@@ -246,7 +246,7 @@ class NotificationService
             return self::sendViaPhpMail($to, $from, $subject, $body, $fromName);
         }
 
-        return self::sendViaSmtp($to, $from, $subject, $body, $fromName);
+        return self::sendViaSmtp($to, $from, $subject, $body, $fromName, self::alertHtml($subject, $body));
     }
 
     /**
@@ -314,6 +314,47 @@ class NotificationService
             . '</td></tr></table>'
             . '<p style="margin:14px 0 0;font-size:12px;color:#94a3b8;">' . $e($brand !== '' ? "{$brand} · {$domain}" : '') . '</p>'
             . '</td></tr></table></body></html>';
+    }
+
+    /**
+     * HTML de los avisos al administrador (va junto al texto plano, multipart). Un correo
+     * de una sola línea en texto plano puntúa peor en los filtros que uno con estructura;
+     * aquí: de qué servidor viene, el asunto, el texto (párrafos y saltos de línea tal
+     * cual) y un pie con qué es y dónde se cambia. Sin imágenes externas ni scripts.
+     */
+    public static function alertHtml(string $subject, string $body): string
+    {
+        $e = static fn(string $t) => htmlspecialchars($t, ENT_QUOTES, 'UTF-8');
+        $host = (string)(Settings::get('panel_hostname', '') ?: gethostname() ?: 'servidor');
+        $paras = '';
+        foreach (preg_split("/\n\s*\n/", trim($body)) ?: [] as $p) {
+            if (trim($p) === '') {
+                continue;
+            }
+            $paras .= '<p style="margin:0 0 14px;font-size:14px;line-height:1.55;color:#334155;">' . nl2br($e(trim($p))) . '</p>';
+        }
+        return '<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>'
+            . '<body style="margin:0;padding:0;background:#f1f5f9;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">'
+            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f5f9;padding:24px 12px;"><tr><td align="center">'
+            . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:12px;padding:24px 28px;">'
+            . '<tr><td>'
+            . '<p style="margin:0 0 4px;font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:#64748b;">Aviso del servidor ' . $e($host) . '</p>'
+            . '<p style="margin:0 0 18px;font-size:17px;font-weight:700;color:#0f172a;">' . $e($subject) . '</p>'
+            . $paras
+            . '</td></tr></table>'
+            . '<p style="margin:14px 0 0;font-size:12px;line-height:1.5;color:#94a3b8;max-width:600px;">Aviso automático de MuseDock Panel en ' . $e($host) . ', '
+            . $e(date('Y-m-d H:i T')) . '. Se configura en Ajustes → Notificaciones de ese panel.</p>'
+            . '</td></tr></table></body></html>';
+    }
+
+    /** Texto de las pruebas de aviso: qué servidor, cuándo y por dónde ha salido. */
+    public static function testBody(string $via = ''): string
+    {
+        $host = (string)(Settings::get('panel_hostname', '') ?: gethostname() ?: 'servidor');
+        return "Este es un correo de prueba de los avisos del panel de {$host}.\n\n"
+            . "Si lo estás leyendo, los avisos por correo de este servidor funcionan" . ($via !== '' ? " por {$via}" : '') . ". "
+            . "Por aquí te llegarán las incidencias: un servicio caído, una réplica parada, un certificado a punto de caducar o un disco lleno.\n\n"
+            . 'Enviado el ' . date('Y-m-d H:i T') . '. No hace falta responder.';
     }
 
     /**
@@ -390,8 +431,9 @@ class NotificationService
     /** Prueba un servidor SMTP con una configuración dada (la del formulario, sin guardar). */
     public static function testSmtp(array $cfg, string $to, string $from, string $fromName = ''): array
     {
-        return self::smtpSendOnce($cfg, $to, $from, 'Test - MuseDock Panel',
-            'Este es un email de prueba enviado desde MuseDock Panel. Si recibes este mensaje, este servidor de envío funciona correctamente.', $fromName);
+        $subject = self::tagSubject('Prueba de avisos por correo');
+        $body = self::testBody((string)($cfg['host'] ?? ''));
+        return self::smtpSendOnce($cfg, $to, $from, $subject, $body, $fromName, self::alertHtml($subject, $body));
     }
 
     /** Configuración de un servidor SMTP de avisos, o null si no está configurado. */

@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.335',
+                'date' => '2026-10-06',
+                'badge' => 'warning',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['El antiguo master, al pasar a copia, seguia ejecutando los crons de sus webs contra la base de solo lectura: ahora las tareas del crontab de un hosting que tambien tiene el master se apagan en el slave y se encienden al promover (root, cron.d y tareas de la maquina no se tocan)'],
+                        'en' => ['The former master kept running its sites\' crons against the read-only DB after becoming a copy: hosting crontab jobs that the master also has are now turned off on the slave and back on at promotion (root, cron.d and machine jobs untouched)'],
+                    ],
+                    'changed' => [
+                        'es' => ['Avisos por correo al administrador tambien en HTML (junto al texto): servidor, asunto, texto y pie; puntuan mejor en los filtros de spam', 'Pruebas de aviso con texto completo (que servidor, por donde ha salido) en vez de una sola linea; la del MCP ya no repite el servidor en el asunto'],
+                        'en' => ['Admin alert emails now also in HTML (alongside plain text): server, subject, body and footer; better spam-filter scores', 'Test alerts with full text (which server, which route) instead of one line; the MCP test no longer repeats the server in the subject'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.334',
                 'date' => '2026-10-06',
                 'badge' => 'info',

@@ -419,6 +419,7 @@ final class ConfigMirrorService
 
     private static function mirrorCrontabs(array $tabs, array &$state, bool $apply, array &$actions, array &$issues): void
     {
+        $hostingUsers = null;
         foreach ($tabs as $user => $content) {
             if (!preg_match('/^[A-Za-z0-9_.-]+$/', (string)$user)) {
                 continue;
@@ -429,19 +430,49 @@ final class ConfigMirrorService
                 continue;
             }
             $current = self::readCrontab((string)$user);
-            // Lo que ya tiene el slave FUERA del bloque (activo o desactivado) no se duplica.
             [$outside, $insideOld] = self::splitBlock($current);
-            $have = [];
-            foreach ($outside as $l) {
-                $have[self::normCron($l)] = true;
-            }
-            $block = [];
+            $masterLines = [];
             foreach (preg_split('/\r?\n/', (string)$content) as $l) {
                 $t = trim($l);
                 if ($t === '' || (str_starts_with($t, '#') && !str_starts_with($t, self::OFF)) || preg_match('/^[A-Z_]+=/', $t)) {
                     continue;
                 }
-                $n = self::normCron($t);
+                $masterLines[self::normCron($t)] = true;
+            }
+            // Crontab de un HOSTING del panel: una tarea ACTIVA aquí fuera del bloque que
+            // también tiene el master es la de la web del master (p. ej. el antiguo master
+            // que ahora es copia): corre contra la base de la web, que en el slave es de solo
+            // lectura. Se apaga y pasa al bloque; al promover vuelve a encenderse. Solo
+            // usuarios de hostings: root, cron.d y las tareas propias de la máquina no se
+            // tocan (en servidores clonados son iguales en los dos y deben seguir).
+            $adopted = 0;
+            if ($hostingUsers === null) {
+                $hostingUsers = [];
+                try {
+                    foreach (\MuseDockPanel\Database::fetchAll("SELECT username FROM hosting_accounts") as $r) {
+                        $hostingUsers[(string)$r['username']] = true;
+                    }
+                } catch (\Throwable) {
+                }
+            }
+            if (isset($hostingUsers[(string)$user])) {
+                $keep = [];
+                foreach ($outside as $l) {
+                    $t = trim($l);
+                    if ($t !== '' && !str_starts_with($t, '#') && !preg_match('/^[A-Z_]+=/', $t) && isset($masterLines[self::normCron($t)])) {
+                        $adopted++;
+                        continue;
+                    }
+                    $keep[] = $l;
+                }
+                $outside = $keep;
+            }
+            $have = [];
+            foreach ($outside as $l) {
+                $have[self::normCron($l)] = true;
+            }
+            $block = [];
+            foreach (array_keys($masterLines) as $n) {
                 if (isset($have[$n])) {
                     continue;
                 }
@@ -451,15 +482,20 @@ final class ConfigMirrorService
                 }
                 $block[] = self::OFF . ' ' . $n;
             }
-            if (implode("\n", $block) === implode("\n", $insideOld)) {
+            if (!$adopted && implode("\n", $block) === implode("\n", $insideOld)) {
                 $actions[] = ['what' => "crontab:{$user}", 'result' => 'igual'];
                 if ($block) {
                     $state['crontabs'][$user] = true;
                 }
                 continue;
             }
-            $actions[] = ['what' => "crontab:{$user}", 'result' => ($block ? count($block) . ' tareas en el bloque copiado (desactivadas)' : 'bloque copiado vacío')];
+            $actions[] = ['what' => "crontab:{$user}", 'result' => ($block ? count($block) . ' tareas en el bloque copiado (desactivadas)' : 'bloque copiado vacío')
+                . ($adopted ? "; {$adopted} de la web que estaban activas aquí, apagadas (se encienden al promover)" : '')];
             if ($apply) {
+                if ($adopted) {
+                    @mkdir(self::BACKUP_DIR, 0700, true);
+                    @file_put_contents(self::BACKUP_DIR . "/crontab_{$user}." . date('YmdHis'), $current);
+                }
                 $new = rtrim(implode("\n", $outside)) . "\n";
                 if ($block) {
                     $new .= self::BLOCK_BEGIN . "\n" . implode("\n", $block) . "\n" . self::BLOCK_END . "\n";

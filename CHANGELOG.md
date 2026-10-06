@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.335] — 2026-10-06 — Avisos por correo en HTML y crons de las webs en el slave
+
+### Corregido
+- **El antiguo master, al pasar a copia, seguía ejecutando los crons de sus webs** contra una base de solo lectura (picalias en mortadelo: un `schedule:run` por minuto, más de 50 000 errores desde el relevo). La copia de configuración solo apagaba lo que ella misma había copiado; las tareas que el slave ya tenía de antes, iguales que las del master, quedaban activas. Ahora, en el crontab de un **hosting del panel**, una tarea activa en el slave que también tiene el master se apaga y pasa al bloque copiado (copia previa en `/var/backups/musedock-mirror`); al promover se vuelve a encender. root, `/etc/cron.d` y las tareas propias de la máquina no se tocan (en servidores clonados son iguales en los dos y deben seguir).
+
+### Cambiado
+- **Los avisos por correo al administrador van también en HTML** (multipart, junto al texto de siempre): de qué servidor vienen, el asunto, el texto con sus párrafos y un pie con qué es y dónde se configura. Un correo de una sola línea en texto plano puntúa peor en los filtros de spam. Sin imágenes externas ni scripts.
+- **Pruebas de aviso con texto completo** (botón de prueba, prueba de cada servidor SMTP y MCP `notify_configure test`): qué servidor, por dónde ha salido y qué avisos llegarán. Antes eran una línea ("Test - MuseDock Panel"), y la del MCP repetía el nombre del servidor en el asunto.
+
 ## [1.0.334] — 2026-10-06 — Copiar testigos a otro panel
 
 ### Añadido

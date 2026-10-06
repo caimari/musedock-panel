@@ -175,10 +175,7 @@ class NotificationController
             exit;
         }
 
-        $result = NotificationService::sendEmail(
-            'Test - MuseDock Panel',
-            'Este es un email de prueba enviado desde MuseDock Panel. Si recibes este mensaje, la configuracion de email funciona correctamente.'
-        );
+        $result = NotificationService::sendEmail('Prueba de avisos por correo', NotificationService::testBody());
 
         $errorMsg = 'Error al enviar email.';
         if (!$result && $method === 'smtp') {
