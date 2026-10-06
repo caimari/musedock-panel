@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.334] — 2026-10-06 — Copiar testigos a otro panel
+
+### Añadido
+- **`php bin/witness.php export-key <nombre>`**: da de alta en otro panel un testigo que este ya tiene, sin ver la clave. La clave solo sale por una tubería hacia `witness.php add` del otro panel; si la salida es la pantalla, se niega. Ejemplo: `php bin/witness.php export-key paquito | ssh root@otro "cd /opt/musedock-panel && php bin/witness.php add paquito <url> <huella>"`.
+
 ## [1.0.333] — 2026-10-06 — Certificados listos en el relevo y reparador de Caddy
 
 ### Añadido

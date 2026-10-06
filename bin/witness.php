@@ -6,6 +6,9 @@
  *   php bin/witness.php list
  *   php bin/witness.php test [nombre]
  *   php bin/witness.php remove <nombre>
+ *   php bin/witness.php export-key <nombre> | ssh root@otro "cd /opt/musedock-panel && php bin/witness.php add <nombre> <url> <huella>"
+ *       (dar de alta en otro panel un testigo que este ya tiene; la clave solo sale por
+ *        una tubería, nunca a la pantalla)
  *
  * La clave se escribe en la terminal (no se ve) o se pasa por la entrada estándar
  * (p. ej. desde un fichero de root): nunca como argumento, para que no salga en `ps`.
@@ -56,10 +59,31 @@ switch ($argv[1] ?? '') {
             }
         }
         exit(0);
+    case 'export-key':
+        // Solo hacia otro comando (tubería): si la salida es la pantalla, se niega.
+        if (function_exists('posix_isatty') && posix_isatty(STDOUT)) {
+            fwrite(STDERR, "La clave no se muestra en pantalla: úsalo con una tubería hacia 'witness.php add' en el otro panel.\n");
+            exit(1);
+        }
+        $name = (string)($argv[2] ?? '');
+        foreach (WitnessService::all() as $w) {
+            if ($w['name'] === $name) {
+                $key = \MuseDockPanel\Services\ReplicationService::decryptPassword((string)($w['key'] ?? ''));
+                if ($key === '') {
+                    fwrite(STDERR, "No se pudo descifrar la clave de {$name}.\n");
+                    exit(1);
+                }
+                fwrite(STDERR, "Testigo {$name}: url {$w['url']} huella {$w['fingerprint']}\n");
+                echo $key;
+                exit(0);
+            }
+        }
+        fwrite(STDERR, "No hay ningún testigo llamado {$name} en este panel.\n");
+        exit(1);
     case 'remove':
         echo WitnessService::remove((string)($argv[2] ?? '')) ? "Quitado.\n" : "No estaba.\n";
         exit(0);
     default:
-        fwrite(STDERR, "Uso: php bin/witness.php add <nombre> <https://IP:puerto> <huella> | list | test [nombre] | remove <nombre>\n");
+        fwrite(STDERR, "Uso: php bin/witness.php add <nombre> <https://IP:puerto> <huella> | list | test [nombre] | remove <nombre> | export-key <nombre>\n");
         exit(1);
 }

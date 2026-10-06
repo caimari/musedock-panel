@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.334',
+                'date' => '2026-10-06',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['witness.php export-key: dar de alta en otro panel un testigo que este ya tiene sin ver la clave (solo sale por tuberia hacia witness.php add)'],
+                        'en' => ['witness.php export-key: register on another panel a witness this one already has without seeing the key (pipe-only into witness.php add)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.333',
                 'date' => '2026-10-06',
                 'badge' => 'warning',
