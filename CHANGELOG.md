@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.348] — 2026-10-07 — Correo entrante por la línea alternativa y subdominios en la copia
+
+### Añadido
+- **Correo entrante también por la entrada alternativa.** Cuando cae la línea normal de un servidor y el vigilante de entradas mueve sus webs a la alternativa, ahora mueve también los nombres a los que apuntan los MX, si por la alternativa responde el mismo servidor de correo. Lo comprueba con el saludo SMTP del puerto 25, comparado con el que da por la línea normal cuando va bien. Si no responde, o responde otro servidor, el MX no se mueve: así no se rebota correo. El aviso dice qué ha pasado con el correo. Al volver la línea normal se devuelve todo.
+- **Entrada SMTP para un proxy con PROXY protocol.** En los nodos que reciben correo, Postfix escucha además en `<IP de la VPN>:2525` con PROXY protocol, para que un proxy TCP (p. ej. caddy-l4 en la oficina, como ya se hace con 80/443) pueda llevar el puerto 25 de otra línea conservando la IP real del remitente (antispam, SPF). Solo escucha en la IP de la VPN, y el cortafuegos lo abre solo para la red de la VPN. Exige la cabecera del proxy: sin ella no da ni el saludo. Copia previa de master.cf y `postfix check` antes de recargar; si falla, se deja como estaba. Mismas reglas de recepción que el puerto 25.
+
+
+### Corregido
+- **«Sincronizar Todo» no enviaba los subdominios a la copia.** Mandaba los hostings, sus alias y redirecciones, y sus bases de datos, pero no los subdominios (api., portal.…). La copia no los tenía en su panel, así que la reparación de rutas tampoco podía reponerlos y, al tomar el mando, esas webs daban error 525. Ahora también se envían.
+- **Al importar subdominios del master, la copia ya no borra ninguno.** Antes quitaba los que el master no tuviera; ahora solo lo apunta en el registro. Como el resto de la sincronización: nunca borra nada en la copia.
+
 ## [1.0.347] — 2026-10-07 — Oficina sin conexión: un aviso, no una ráfaga
 
 ### Añadido

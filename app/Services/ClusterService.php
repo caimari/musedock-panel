@@ -1384,6 +1384,19 @@ class ClusterService
                 ], 6); // Lower priority than create_hosting (5) — runs after
             }
 
+            // Y sus subdominios (api., portal.…): antes no se enviaban y la copia se
+            // quedaba sin ellos (sin ruta ni certificado al tomar el mando).
+            $subdomains = SubdomainService::exportForSync((int)$acc['id']);
+            if (!empty($subdomains)) {
+                self::enqueue($nodeId, 'sync-hosting', [
+                    'hosting_action' => 'sync_subdomains',
+                    'hosting_data' => [
+                        'main_domain' => $acc['domain'],
+                        'subdomains'  => $subdomains,
+                    ],
+                ], 6);
+            }
+
             // Also sync database registrations for this account
             $databases = Database::fetchAll(
                 "SELECT db_name, db_user, db_type, created_at FROM hosting_databases WHERE account_id = :aid",

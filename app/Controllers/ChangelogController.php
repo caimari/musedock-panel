@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.348',
+                'date' => '2026-10-07',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Correo entrante por la entrada alternativa: si cae la línea normal y por la alternativa responde el mismo servidor de correo (saludo SMTP comparado), el vigilante de entradas mueve también los nombres de los MX; si no, no los toca (sin rebotes)',
+                        'Entrada SMTP con PROXY protocol en <IP de la VPN>:2525 en los nodos que reciben correo, para que un proxy TCP lleve el puerto 25 de otra línea conservando la IP real. Solo VPN (escucha y cortafuegos), con postfix check y marcha atrás',
+                    ],
+                    'fixed' => [
+                        '«Sincronizar Todo» envía también los subdominios de cada hosting (api., portal.…): la copia no los tenía y al tomar el mando daban error 525',
+                        'Al importar subdominios del master, la copia ya no borra los que el master no tenga: solo lo apunta en el registro',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.347',
                 'date' => '2026-10-07',
                 'badge' => 'info',

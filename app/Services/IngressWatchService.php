@@ -120,6 +120,13 @@ class IngressWatchService
             $altIp = self::resolve($altHost);
             $altOk = $altIp !== '' && (self::probe($health, $altIp)['ok'] || in_array('up', self::altVerdicts($health, $altIp, $answers), true));
 
+            // Correo: cómo se presenta este servidor por su entrada normal (saludo SMTP),
+            // para reconocerlo por la alternativa. Se apunta mientras la normal va bien.
+            if ($primaryGood && time() - (int)($st['smtp_at'] ?? 0) >= 3600) {
+                $st['smtp_banner'] = self::smtpBanner($ip);
+                $st['smtp_at'] = time();
+            }
+
             $st['bad'] = $primaryBad ? ($st['bad'] ?? 0) + 1 : 0;
             $st['good'] = $primaryGood ? ($st['good'] ?? 0) + 1 : 0;
             $line = "{$health} ({$ip}): normal " . ($primaryBad ? 'MAL' : ($primaryGood ? 'bien' : 'dudosa'))
@@ -127,25 +134,29 @@ class IngressWatchService
                 . ", alternativa " . ($altOk ? "bien ({$altIp})" : 'MAL') . ", modo {$st['mode']}";
 
             if ($st['mode'] === 'primary' && $st['bad'] >= (int)$c['fail_minutes'] && $altOk) {
-                $r = self::moveAll($ip, $altIp, false);
+                $mailAlt = ($st['smtp_banner'] ?? '') !== '' && self::smtpBanner($altIp) === $st['smtp_banner'];
+                $r = self::moveAll($ip, $altIp, false, $mailAlt);
                 if ($r['moved'] === 0 && !$r['failed']) {
                     // Nada apunta a esa IP (p. ej. el servidor es copia y no sirve webs): no hay entrada que cambiar.
                     $state[$ip] = $st;
                     $log[] = $line . ' → nada que mover (ningún registro apunta a esa IP)';
                     continue;
                 }
-                $st = ['mode' => 'alternate', 'bad' => 0, 'good' => 0, 'alt_ip' => $altIp, 'since' => date('Y-m-d H:i:s')];
+                $st = ['mode' => 'alternate', 'bad' => 0, 'good' => 0, 'alt_ip' => $altIp, 'since' => date('Y-m-d H:i:s'),
+                    'smtp_banner' => $st['smtp_banner'] ?? '', 'smtp_at' => $st['smtp_at'] ?? 0, 'mail_moved' => $mailAlt];
                 $line .= " → ENTRADA CAMBIADA a la alternativa: {$r['moved']} registros";
                 LogService::log('ingress.watch', 'to-alternate', "{$health}: entrada {$ip} → {$altIp} ({$r['moved']} registros)");
                 self::notify("Entrada cambiada: {$health} por la alternativa",
                     "La entrada normal ({$ip}) no responde o va muy lenta" . ($wv ? ' (testigos: ' . json_encode($wv) . ')' : '') . ".\n"
                     . "El servidor sigue bien por la entrada alternativa ({$altHost} = {$altIp}), así que se han movido {$r['moved']} registros DNS allí.\n"
+                    . ($mailAlt ? "El correo entrante (MX) también va por la alternativa: allí responde el mismo servidor de correo.\n"
+                        : "El correo entrante (MX) NO se ha movido: por la alternativa no responde el mismo servidor de correo (puerto 25). Mientras dure, el correo espera en los servidores que lo envían y llega al volver.\n")
                     . "No se ha cambiado de servidor. Se devolverá sola cuando la entrada normal lleve {$c['recover_minutes']} min estable."
                     . ($r['failed'] ? "\n\nNo se pudieron mover: " . implode(', ', $r['failed']) : ''));
             } elseif ($st['mode'] === 'alternate') {
                 // La IP alternativa puede cambiar (línea dinámica): seguirla.
                 if ($altIp !== '' && $altIp !== ($st['alt_ip'] ?? '')) {
-                    $r = self::moveAll((string)$st['alt_ip'], $altIp, true);
+                    $r = self::moveAll((string)$st['alt_ip'], $altIp, true, true);
                     $line .= " → IP alternativa cambiada {$st['alt_ip']} → {$altIp} ({$r['moved']} registros)";
                     $st['alt_ip'] = $altIp;
                 }
@@ -155,7 +166,8 @@ class IngressWatchService
                     LogService::log('ingress.watch', 'to-primary', "{$health}: entrada devuelta a {$ip} ({$r['updated']} registros)");
                     self::notify("Entrada devuelta: {$health} por la normal",
                         "La entrada normal ({$ip}) lleva {$c['recover_minutes']} min estable: se han devuelto {$r['updated']} registros DNS.");
-                    $st = ['mode' => 'primary', 'bad' => 0, 'good' => 0, 'alt_ip' => '', 'since' => date('Y-m-d H:i:s')];
+                    $st = ['mode' => 'primary', 'bad' => 0, 'good' => 0, 'alt_ip' => '', 'since' => date('Y-m-d H:i:s'),
+                        'smtp_banner' => $st['smtp_banner'] ?? '', 'smtp_at' => $st['smtp_at'] ?? 0];
                 }
             }
             $state[$ip] = $st;
@@ -186,12 +198,13 @@ class IngressWatchService
 
     /**
      * Mueve los registros A de $from a $to en todas las zonas, menos nombres de máquina y
-     * destinos de MX. $followJournal: cambio de la IP alternativa (también se actualiza el
-     * diario, para que la vuelta los encuentre).
+     * destinos de MX ($withMail: también los MX, porque por la alternativa responde el
+     * mismo servidor de correo). $followJournal: cambio de la IP alternativa (también se
+     * actualiza el diario, para que la vuelta los encuentre).
      */
-    private static function moveAll(string $from, string $to, bool $followJournal): array
+    private static function moveAll(string $from, string $to, bool $followJournal, bool $withMail = false): array
     {
-        $mx = self::mxTargets();
+        $mx = $withMail ? [] : self::mxTargets();
         $moved = 0;
         $failed = [];
         $ttl = 60;
@@ -272,6 +285,27 @@ class IngressWatchService
         $ms = (int)round((float)curl_getinfo($ch, CURLINFO_TOTAL_TIME) * 1000);
         curl_close($ch);
         return ['ok' => $code >= 200 && $code < 400 && str_starts_with($body, 'ok-'), 'ms' => $ms];
+    }
+
+    /**
+     * Saludo SMTP (puerto 25) de una IP, sin la parte variable: «220 mail.ejemplo.com ESMTP».
+     * Vacío si no responde. Sirve para saber que por otra IP contesta el MISMO servidor de
+     * correo (si contestara otro, el correo se rebotaría: mejor no mover el MX).
+     */
+    private static function smtpBanner(string $ip): string
+    {
+        $fp = @fsockopen($ip, 25, $e, $s, 6);
+        if (!$fp) {
+            return '';
+        }
+        stream_set_timeout($fp, 8);
+        $line = (string)fgets($fp, 512);
+        @fwrite($fp, "QUIT\r\n");
+        fclose($fp);
+        if (!preg_match('/^220[ -](\S+)/', $line, $m)) {
+            return '';
+        }
+        return '220 ' . strtolower($m[1]);
     }
 
     private static function resolve(string $host): string

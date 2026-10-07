@@ -376,6 +376,10 @@ try {
     if ($rs !== '') {
         logMsg('Relay de reserva: ' . $rs);
     }
+    $px = \MuseDockPanel\Services\MailService::ensureProxiedSmtpListener();
+    if ($px !== '') {
+        logMsg('Correo: ' . $px);
+    }
     $rl = \MuseDockPanel\Services\MailService::ensureRelayLocalSubmission();
     if ($rl !== '') {
         logMsg('Relay privado: ' . $rl);

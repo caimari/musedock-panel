@@ -746,7 +746,8 @@ class SubdomainService
 
     /**
      * Import subdomains from master (cluster sync).
-     * Adds missing, removes stale.
+     * Añade los que faltan. NUNCA quita: uno que el master no tenga se apunta en el
+     * registro (puede ser de la copia, o el master puede estar a medias).
      */
     public static function importFromMaster(int $accountId, array $account, array $subdomainData): void
     {
@@ -754,10 +755,9 @@ class SubdomainService
         $existingDomains = array_column($existing, 'subdomain');
         $incomingDomains = array_column($subdomainData, 'subdomain');
 
-        // Remove stale
         foreach ($existing as $e) {
             if (!in_array($e['subdomain'], $incomingDomains, true)) {
-                self::delete((int)$e['id'], false);
+                LogService::log('cluster.sync', $e['subdomain'], 'Subdominio que el master no tiene: se deja (no se borra nada en la copia)');
             }
         }
 
