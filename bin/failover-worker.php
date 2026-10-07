@@ -509,6 +509,23 @@ function autoPromoteIfNeeded(array $checks, array $foConfig): bool
         return false;
     }
     if ($answered === 0) {
+        // Ningún testigo responde: quizá la aislada sea ESTA réplica (su línea caída). Sin
+        // salida a Internet tampoco podría mover el DNS: promoverse solo dejaría dos masters
+        // al volver la red. Se comprueba la salida (la API de Cloudflare, que es lo que hace
+        // falta para el relevo) y, si no hay, no se promueve.
+        $out = false;
+        foreach (['api.cloudflare.com', '1.1.1.1'] as $h) {
+            $fp = @fsockopen($h, 443, $e, $s, 5);
+            if ($fp) {
+                fclose($fp);
+                $out = true;
+                break;
+            }
+        }
+        if (!$out) {
+            logMsg('Auto-promote: ABORTADO — ningún testigo responde y este nodo no tiene salida a Internet: el aislado es este nodo, no el principal');
+            return false;
+        }
         logMsg('Auto-promote: sin testigo que responda — se decide con la vista de este nodo (configura un testigo en otro proveedor)');
     }
 

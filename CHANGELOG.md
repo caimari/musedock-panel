@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.340] — 2026-10-07 — La copia aislada no se promueve
+
+### Corregido
+- **Una copia que se queda sin Internet ya no se promueve sola.** Si no respondía ningún testigo, la copia decidía con lo que veía ella; pero si la aislada era ella (sus líneas caídas), veía el principal "caído" y se promovía, sin poder mover el DNS: al volver la red había dos masters. Ahora, sin ningún testigo que responda, antes de promoverse comprueba su propia salida a Internet (la API de Cloudflare, que es lo que hace falta para el relevo); si no la tiene, no hace nada.
+
 ## [1.0.337] — 2026-10-07 — Pantalla de Failover más clara y vecinos por servidor
 
 ### Añadido

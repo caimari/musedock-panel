@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.340',
+                'date' => '2026-10-07',
+                'badge' => 'warning',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Una copia sin salida a Internet ya no se promueve sola cuando no responde ningun testigo (el aislado era ella): evita dos masters al volver la red'],
+                        'en' => ['A replica without Internet access no longer promotes itself when no witness answers (it was the isolated one): avoids two masters when the network returns'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.337',
                 'date' => '2026-10-07',
                 'badge' => 'warning',
