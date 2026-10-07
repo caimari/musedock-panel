@@ -75,10 +75,14 @@
             (<a href="/docs/witnesses" class="text-info">testigos externos: cómo crearlos</a>).
             <br><strong>¿Cayó el principal o todo su sitio?</strong> Si el principal es una máquina virtual con alta disponibilidad (p. ej. HA de Proxmox),
             cuando se cae su servidor físico otra máquina del mismo sitio lo vuelve a arrancar en 2-4 min. Tomar el mando en ese rato dejaría
-            <em>dos</em> principales cuando vuelva. Para evitarlo, en <em>Cluster → Failover</em> indica en "Comprobaciones del mismo sitio" otras máquinas de ese
-            sitio que <strong>no dependan del principal</strong> (otro servidor físico, el router, la otra línea de internet). Si el principal no responde pero alguna
-            de ellas sí, la réplica <strong>espera más</strong> (15 min por defecto) antes de tomar el mando, y te avisa de que está esperando. Si no responde nada
-            del sitio (corte de luz o de internet de toda la oficina), actúa con la espera normal.
+            un relevo innecesario (y el que vuelve se apartaría solo al arrancar). Para evitarlo, en <em>Cluster → Failover → Servidores</em> rellena la columna
+            <strong>«Vecinos»</strong> de ese servidor: otras máquinas de <strong>su</strong> sitio que <strong>no dependan de él</strong> (otro servidor físico, el router, la otra línea de internet),
+            una por línea, <code>ping:IP</code> o <code>IP:puerto</code>, comprobables desde el otro sitio. Si ese servidor no responde pero algún vecino sí, la réplica
+            <strong>espera más</strong> (15 min por defecto, ajustable en <em>Detección de caídas</em>) antes de tomar el mando, y te avisa de que está esperando. Si no responde
+            nada de su sitio (corte de luz o de internet de toda la oficina), actúa con la espera normal.
+            <br>Los vecinos <strong>viajan con cada servidor</strong>: si un día manda el que está en la oficina y otro día el de un VPS, cada uno se comprueba con los suyos.
+            Un VPS sin alta disponibilidad (si cae, nadie lo arranca en otra máquina) no necesita vecinos. La lista general de <em>Detección de caídas</em> solo se usa
+            para los servidores que no tienen los suyos.
         </div>
     </div>
 </div>

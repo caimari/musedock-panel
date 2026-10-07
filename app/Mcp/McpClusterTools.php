@@ -1653,6 +1653,16 @@ final class McpClusterTools
                 'port' => $port, 'failover_to' => '', 'dyndns' => false, 'failover_priority' => 1, 'enabled' => true],
         ];
 
+        // Conservar los vecinos (comprobaciones del mismo sitio) de cada servidor por su IP.
+        foreach ($new as &$ns) {
+            foreach ($current as $cs) {
+                if ((string)($cs['ip'] ?? '') === (string)$ns['ip'] && !empty($cs['site_probes'])) {
+                    $ns['site_probes'] = (string)$cs['site_probes'];
+                }
+            }
+        }
+        unset($ns);
+
         $warnings = [];
         if ($mode === 'auto') {
             $warnings[] = 'Modo auto: el slave promueve Y la vuelta también es automática. Recomendado semiauto (vuelta manual).';

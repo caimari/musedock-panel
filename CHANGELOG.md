@@ -2,7 +2,10 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [1.0.337] — 2026-10-07 — Pantalla de Failover más clara
+## [1.0.337] — 2026-10-07 — Pantalla de Failover más clara y vecinos por servidor
+
+### Añadido
+- **«Vecinos» de cada servidor del relevo** (Cluster → Failover → Servidores): las comprobaciones del mismo sitio (router, otro servidor físico, la otra línea) ahora son de cada servidor. Antes había una sola lista que se aplicaba a quien mandara: si los papeles se invertían entre una oficina con alta disponibilidad y un VPS, el VPS caído hacía esperar 15 min sin motivo, o la máquina de la oficina que Proxmox estaba moviendo provocaba un relevo innecesario. Ahora el relevo mira los vecinos del servidor que ha caído; la lista general queda para los servidores sin vecinos propios. Se validan las líneas (`ping:IP` o `IP:puerto`), viajan a los nodos con la configuración y se conservan al configurar el relevo por MCP.
 
 ### Cambiado
 - **Configuración de Failover en tarjetas separadas** (Cluster → Failover), cada una con su botón Guardar: *Modo de operación*, *DNS*, *Detección de caídas* (con las comprobaciones del mismo sitio) y, plegadas como avanzadas, *Umbrales y severidad*, *Dos líneas de Internet en este servidor* y *Emergencia con caddy-l4*. Antes era un solo bloque largo con todos los campos.

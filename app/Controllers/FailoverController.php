@@ -94,6 +94,7 @@ class FailoverController
         $failTo    = $_POST['srv_failover_to'] ?? [];
         $dyndns    = $_POST['srv_dyndns'] ?? [];
         $priorities = $_POST['srv_priority'] ?? [];
+        $siteProbes = $_POST['srv_site_probes'] ?? [];
 
         for ($i = 0; $i < count($names); $i++) {
             $name = trim($names[$i] ?? '');
@@ -109,6 +110,7 @@ class FailoverController
                 'failover_to'       => trim($failTo[$i] ?? ''),
                 'dyndns'            => ($dyndns[$i] ?? '0') === '1',
                 'failover_priority' => (int)($priorities[$i] ?? 99) ?: 99,
+                'site_probes'       => FailoverService::normalizeSiteProbes((string)($siteProbes[$i] ?? '')),
                 'enabled'           => true,
             ];
         }

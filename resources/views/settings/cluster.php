@@ -1903,6 +1903,7 @@
                                 <th style="width:70px;" title="Prioridad de election (1=más alta). Solo para Failover.">Prio</th>
                                 <th>Failover a</th>
                                 <th>DynDNS</th>
+                                <th title="Otras máquinas de SU sitio que no dependen de él (router, otro servidor físico, la otra línea). Si este servidor no responde pero alguna de ellas sí, se espera a que vuelva solo antes de tomar el mando.">Vecinos <i class="bi bi-question-circle text-muted"></i></th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -1941,6 +1942,10 @@
                                     <input type="checkbox" value="1" class="form-check-input fo-dyndns-check" <?= !empty($srv['dyndns']) ? 'checked' : '' ?>
                                            onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
                                 </td>
+                                <td style="min-width:190px;">
+                                    <textarea name="srv_site_probes[]" rows="<?= max(1, min(4, substr_count((string)($srv['site_probes'] ?? ''), "\n") + 1)) ?>" class="form-control form-control-sm font-monospace" style="font-size:.75rem;"
+                                              placeholder="ping:203.0.113.1&#10;203.0.113.6:443"><?= View::e((string)($srv['site_probes'] ?? '')) ?></textarea>
+                                </td>
                                 <td>
                                     <button type="button" class="btn btn-outline-danger btn-sm btn-remove-fo-server" data-name="<?= View::e($srv['name'] ?? '') ?>">
                                         <i class="bi bi-trash"></i>
@@ -1964,7 +1969,11 @@
                     <b>Backup</b> = último recurso (caddy-l4, IP dinámica).
                     <b>Replica</b> = replica pasiva de BD, nunca se promueve ni sirve tráfico.<br>
                     <i class="bi bi-sort-numeric-up me-1"></i>
-                    <strong>Prioridad (Prio):</strong> Solo aplica a servidores <b>Failover</b>. El de menor número (1 = más alta) se promueve primero. Si hay un solo Failover, dejar en 1.
+                    <strong>Prioridad (Prio):</strong> Solo aplica a servidores <b>Failover</b>. El de menor número (1 = más alta) se promueve primero. Si hay un solo Failover, dejar en 1.<br>
+                    <i class="bi bi-diagram-3 me-1"></i>
+                    <strong>Vecinos:</strong> otras máquinas del <b>mismo sitio</b> que ese servidor y que no dependen de él (el router, otro servidor físico, la otra línea), una por línea: <code>ping:IP</code> o <code>IP:puerto</code>, comprobables desde el otro sitio.
+                    Si ese servidor deja de responder pero algún vecino sí, el sitio sigue vivo (p. ej. Proxmox lo está arrancando en otra máquina): se espera antes de tomar el mando. Si no responde nada, se toma enseguida.
+                    Vacío = sin esta comprobación (lo normal en un VPS sin alta disponibilidad). Viaja con el servidor: sirve igual cuando los papeles se invierten.
                 </div>
                 <button type="submit" class="btn btn-success btn-sm mt-2">
                     <i class="bi bi-check-circle me-1"></i>Guardar Servidores
@@ -2277,10 +2286,11 @@
                         <div class="form-text" style="color:#94a3b8;">Ej: 5 = recuperado tras 5 minutos</div>
                     </div>
                     <div class="col-md-8">
-                        <label class="form-label small">¿Cayó el principal o todo su sitio? Comprobaciones del mismo sitio</label>
+                        <label class="form-label small">Comprobaciones del mismo sitio — para todos <span class="text-muted">(mejor: «Vecinos» de cada servidor en Servidores)</span></label>
                         <textarea name="failover_site_probes" rows="3" class="form-control form-control-sm" style="font-family:monospace" placeholder="203.0.113.6:443&#10;ping:203.0.113.1&#10;linea2.ejemplo.com:443"><?= View::e((string)($fc['failover_site_probes'] ?? '')) ?></textarea>
                         <div class="form-text" style="color:#94a3b8;">Otras máquinas del sitio del principal que <strong>no dependen de él</strong> (otro servidor físico, el router, la otra línea). Una por línea: <code>host:puerto</code> o <code>ping:host</code>.
-                            Si el principal no responde pero alguna de estas sí, el sitio sigue vivo y lo normal es que vuelva solo (p. ej. Proxmox lo arranca en otra máquina): se espera más antes de tomar el mando. Vacío = sin esta comprobación.</div>
+                            Si el principal no responde pero alguna de estas sí, el sitio sigue vivo y lo normal es que vuelva solo (p. ej. Proxmox lo arranca en otra máquina): se espera más antes de tomar el mando. Vacío = sin esta comprobación.
+                            <strong>Solo se usa para un servidor que no tenga sus propios «Vecinos»</strong>: esta lista se aplica a quien mande, así que si los papeles se invierten entre sitios distintos, conviene ponerlo por servidor.</div>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label small">Espera si el sitio sigue vivo</label>
@@ -2885,6 +2895,9 @@ function foAddServer() {
             <input type="hidden" name="srv_dyndns[]" value="0">
             <input type="checkbox" value="1" class="form-check-input fo-dyndns-check"
                    onchange="this.previousElementSibling.value = this.checked ? '1' : '0'">
+        </td>
+        <td style="min-width:190px;">
+            <textarea name="srv_site_probes[]" rows="1" class="form-control form-control-sm font-monospace" style="font-size:.75rem;" placeholder="ping:203.0.113.1&#10;203.0.113.6:443"></textarea>
         </td>
         <td>
             <button type="button" class="btn btn-outline-danger btn-sm btn-remove-fo-server" data-name="Nuevo servidor">

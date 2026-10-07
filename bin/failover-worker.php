@@ -404,7 +404,11 @@ function autoPromoteIfNeeded(array $checks, array $foConfig): bool
     // router, la otra línea), el sitio está vivo: lo normal es que el principal vuelva
     // solo (p. ej. HA de Proxmox lo arranca en otra máquina en 2-4 min). Tomar el mando
     // entonces dejaría DOS principales cuando vuelva. Se espera más; si no vuelve, se toma.
-    $probes = array_values(array_filter(array_map('trim', preg_split('/[\r\n,]+/', (string)Settings::get('failover_site_probes', '')) ?: [])));
+    // Los vecinos propios del servidor caído (viajan con él: valen igual si los papeles se
+    // invierten entre sitios); si no tiene, la lista general de Detección de caídas.
+    $probeList = trim((string)($downPrimary['site_probes'] ?? '')) !== ''
+        ? (string)$downPrimary['site_probes'] : (string)Settings::get('failover_site_probes', '');
+    $probes = array_values(array_filter(array_map('trim', preg_split('/[\r\n,]+/', $probeList) ?: [])));
     if ($probes) {
         $alive = [];
         foreach ($probes as $p) {

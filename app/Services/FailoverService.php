@@ -145,6 +145,22 @@ class FailoverService
     }
 
     /**
+     * Vecinos de un servidor (comprobaciones del mismo sitio): una por línea, "ping:host" o
+     * "host:puerto" ([v6]:puerto). Se quitan las líneas que no tienen ese formato.
+     */
+    public static function normalizeSiteProbes(string $raw): string
+    {
+        $out = [];
+        foreach (preg_split('/[\r\n,]+/', $raw) ?: [] as $l) {
+            $l = trim($l);
+            if ($l !== '' && (preg_match('/^ping:[A-Za-z0-9.:\-]+$/', $l) || preg_match('/^\[?[A-Za-z0-9.:\-]+\]?:\d{1,5}$/', $l))) {
+                $out[$l] = true;
+            }
+        }
+        return implode("\n", array_keys($out));
+    }
+
+    /**
      * Get server by id.
      */
     public static function getServer(string $id): ?array
