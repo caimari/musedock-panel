@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.341',
+                'date' => '2026-10-07',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Nombre de esta maquina (hostname) editable en Ajustes > Servidor, tambien en slaves: hostnamectl, /etc/hosts a juego y cloud-init para que se conserve; sugiere el DNS inverso'],
+                        'en' => ['Machine name (hostname) editable in Settings > Server, also on slaves: hostnamectl, matching /etc/hosts and cloud-init so it persists; suggests the reverse DNS'],
+                    ],
+                    'changed' => [
+                        'es' => ['Zona horaria de la maquina: explicado que cambia la hora de todo el servidor y con confirmacion'],
+                        'en' => ['Machine timezone: explained that it changes the whole server clock, with confirmation'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.340',
                 'date' => '2026-10-07',
                 'badge' => 'warning',

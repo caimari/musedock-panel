@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.341] — 2026-10-07 — Nombre de cada máquina y zona horaria más clara
+
+### Añadido
+- **Ajustes → Servidor → «Nombre de esta máquina»**: cambia el hostname (el que sale arriba a la izquierda, en los avisos y en la terminal) de cada servidor, también en los slaves, con la contraseña de administrador. Deja `/etc/hosts` a juego (copia previa) y, en VPS con cloud-init (Contabo y similares), le indica que lo conserve tras reiniciar. Sugiere el DNS inverso de la máquina si apunta de vuelta a ella. No cambia el correo (Postfix usa su propio nombre).
+
+### Cambiado
+- **«Zona horaria del servidor» pasa a «Zona horaria de la máquina»** con la explicación de que cambia la hora de todo el servidor (tareas programadas, registros), no solo la vista, y pide confirmación antes de cambiarla.
+
 ## [1.0.340] — 2026-10-07 — La copia aislada no se promueve
 
 ### Corregido

@@ -38,6 +38,33 @@
                 </table>
             </div>
         </div>
+
+        <!-- Nombre de la máquina (de cada servidor, también en los slaves) -->
+        <div class="card mt-3">
+            <div class="card-header"><i class="bi bi-pc-display me-1"></i> Nombre de esta máquina</div>
+            <div class="card-body">
+                <p class="small text-muted mb-2">
+                    Es el que sale arriba a la izquierda del panel, en los avisos y en la terminal. Es de <strong>esta</strong> máquina
+                    (cada servidor del cluster tiene el suyo), no el dominio del panel. Recomendado: su nombre completo fijo, el mismo
+                    que su DNS inverso (p. ej. <code>servidor1.ejemplo.com</code>). No cambia el correo (Postfix usa su propio nombre).
+                </p>
+                <form method="POST" action="/settings/server/hostname" id="machine-hostname-form" class="d-flex gap-2 flex-wrap align-items-start">
+                    <?= View::csrf() ?>
+                    <input type="hidden" name="admin_password" value="">
+                    <input type="text" name="machine_hostname" id="machine_hostname" class="form-control" style="max-width:320px;"
+                           value="<?= View::e($hostname) ?>" data-current="<?= View::e($hostname) ?>" readonly
+                           autocomplete="off" spellcheck="false">
+                    <button type="button" class="btn btn-outline-light" id="machine-hostname-edit"><i class="bi bi-pencil me-1"></i>Editar</button>
+                    <button type="submit" class="btn btn-success d-none" id="machine-hostname-save"><i class="bi bi-check-circle me-1"></i>Cambiar nombre</button>
+                </form>
+                <?php if (!empty($suggestedHostname)): ?>
+                    <div class="small mt-2">
+                        <i class="bi bi-lightbulb text-warning me-1"></i>El DNS inverso de esta máquina es <code><?= View::e($suggestedHostname) ?></code>:
+                        <a href="#" id="machine-hostname-use-ptr" data-name="<?= View::e($suggestedHostname) ?>" class="text-info">usarlo</a>
+                    </div>
+                <?php endif; ?>
+            </div>
+        </div>
     </div>
 
     <!-- Panel URL & Timezone (editable) -->
@@ -51,13 +78,15 @@
                     <input type="hidden" name="admin_password" id="panel_acme_admin_password" value="">
 
                     <div class="mb-3">
-                        <label class="form-label">Zona horaria del servidor</label>
-                        <select name="timezone" class="form-select">
+                        <label class="form-label">Zona horaria de la máquina</label>
+                        <select name="timezone" class="form-select" id="server-timezone" data-current="<?= View::e($currentTz) ?>">
                             <?php foreach ($timezones as $tz): ?>
                             <option value="<?= View::e($tz) ?>" <?= $tz === $currentTz ? 'selected' : '' ?>><?= View::e($tz) ?></option>
                             <?php endforeach; ?>
                         </select>
-                        <small class="text-muted">Actual: <?= View::e($currentTz) ?> — <?= date('H:i:s T') ?></small>
+                        <small class="text-muted">Actual: <?= View::e($currentTz) ?> — <?= date('H:i:s T') ?>.
+                            Cambia la hora de <strong>esta máquina</strong> (tareas programadas, registros), no solo la de la vista.
+                            En un cluster conviene la misma en todos los servidores; recomendado UTC.</small>
                     </div>
 
                     <div class="mb-3">
@@ -473,4 +502,63 @@
     });
 })();
 
+
+// Nombre de la máquina: desbloquear, sugerencia del DNS inverso y confirmación con contraseña.
+(function () {
+    const form = document.getElementById('machine-hostname-form');
+    if (!form) return;
+    const input = document.getElementById('machine_hostname');
+    const edit = document.getElementById('machine-hostname-edit');
+    const save = document.getElementById('machine-hostname-save');
+    const unlock = () => { input.readOnly = false; input.focus(); edit.classList.add('d-none'); save.classList.remove('d-none'); };
+    edit.addEventListener('click', unlock);
+    const ptr = document.getElementById('machine-hostname-use-ptr');
+    if (ptr) ptr.addEventListener('click', (e) => { e.preventDefault(); unlock(); input.value = ptr.dataset.name; });
+    form.addEventListener('submit', function (e) {
+        if (form.dataset.confirmed === '1') return;
+        e.preventDefault();
+        const name = input.value.trim().toLowerCase();
+        if (!name || name === input.dataset.current.toLowerCase()) return;
+        const esc = (t) => { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; };
+        Swal.fire({
+            icon: 'question',
+            title: 'Cambiar el nombre de esta máquina',
+            html: '<div class="text-start small"><p><code>' + esc(input.dataset.current) + '</code> → <code>' + esc(name) + '</code></p>'
+                + '<p class="mb-2">Se cambia el nombre del sistema y la línea de <code>/etc/hosts</code> (con copia). No reinicia nada ni cambia el correo.</p></div>'
+                + '<input type="password" id="mh-pwd" class="swal2-input" placeholder="Contraseña de administrador" autocomplete="current-password">',
+            showCancelButton: true, confirmButtonText: 'Cambiar', cancelButtonText: 'Cancelar',
+            preConfirm: () => { const v = document.getElementById('mh-pwd').value; if (!v) { Swal.showValidationMessage('Escribe la contraseña'); return false; } return v; }
+        }).then((r) => {
+            if (!r.isConfirmed) return;
+            form.querySelector('input[name=admin_password]').value = r.value;
+            input.value = name;
+            form.dataset.confirmed = '1';
+            form.submit();
+        });
+    });
+})();
+
+// Zona horaria de la máquina: avisar antes de cambiarla (mueve la hora de las tareas programadas).
+(function () {
+    const form = document.getElementById('server-settings-form');
+    const sel = document.getElementById('server-timezone');
+    if (!form || !sel) return;
+    form.addEventListener('submit', function (e) {
+        if (form.dataset.tzConfirmed === '1' || sel.value === sel.dataset.current) return;
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        Swal.fire({
+            icon: 'warning',
+            title: 'Cambiar la zona horaria de la máquina',
+            html: '<div class="text-start small"><p><code>' + sel.dataset.current + '</code> → <code>' + sel.value + '</code></p>'
+                + '<p class="mb-0">Cambia la hora de <strong>todo el servidor</strong>: las tareas programadas (cron) pasarán a ejecutarse a otra hora y los registros cambiarán de hora. '
+                + 'En un cluster, todos los servidores deberían tener la misma.</p></div>',
+            showCancelButton: true, confirmButtonText: 'Sí, cambiarla', cancelButtonText: 'Cancelar'
+        }).then((r) => {
+            if (!r.isConfirmed) return;
+            form.dataset.tzConfirmed = '1';
+            form.requestSubmit();
+        });
+    }, true);
+})();
 </script>

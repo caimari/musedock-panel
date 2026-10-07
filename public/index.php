@@ -505,6 +505,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/caddy/import', 'SettingsController@caddyImport');
 \MuseDockPanel\Router::get('/settings/server', 'SettingsController@server');
 \MuseDockPanel\Router::post('/settings/server/save', 'SettingsController@serverSave');
+\MuseDockPanel\Router::post('/settings/server/hostname', 'SettingsController@serverHostname');
 \MuseDockPanel\Router::post('/settings/server/acme-assist', 'SettingsController@serverAcmeAssist');
 \MuseDockPanel\Router::post('/settings/server/dns-provider/install', 'SettingsController@serverInstallDnsProvider');
 \MuseDockPanel\Router::get('/settings/dns', 'SettingsController@dns');

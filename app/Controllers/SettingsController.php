@@ -1084,6 +1084,22 @@ class SettingsController
         $currentTz = trim(shell_exec('timedatectl show --property=Timezone --value 2>/dev/null') ?? date_default_timezone_get());
         $serverIp = trim(shell_exec("hostname -I | awk '{print \$1}'") ?? '');
 
+        // Nombre sugerido: el DNS inverso de una IP pública de esta máquina, si apunta de
+        // vuelta a ella (solo DNS: sin llamar a servicios de fuera en cada carga).
+        $suggestedHostname = '';
+        foreach (preg_split('/\s+/', trim((string)shell_exec('hostname -I 2>/dev/null'))) ?: [] as $ip) {
+            if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4 | FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+                continue;
+            }
+            $ptr = strtolower(rtrim((string)@gethostbyaddr($ip), '.'));
+            if ($ptr !== '' && $ptr !== $ip && in_array($ip, gethostbynamel($ptr) ?: [], true)) {
+                if ($ptr !== strtolower($hostname)) {
+                    $suggestedHostname = $ptr;
+                }
+                break;
+            }
+        }
+
         // Get all timezones
         $timezones = \DateTimeZone::listIdentifiers();
 
@@ -1108,6 +1124,7 @@ class SettingsController
             'pageTitle' => 'Servidor',
             'settings' => $settings,
             'hostname' => $hostname,
+            'suggestedHostname' => $suggestedHostname,
             'os' => $os,
             'distro' => $distro,
             'uptime' => $uptime,
@@ -1258,6 +1275,24 @@ class SettingsController
         LogService::log('settings.dns', $provider, 'Updated panel DNS-01 provider settings');
         Flash::set('success', implode(' ', $messages));
         Router::redirect('/settings/dns');
+    }
+
+    /** POST /settings/server/hostname — nombre de esta máquina (con contraseña de administrador). */
+    public function serverHostname(): void
+    {
+        $name = trim((string)($_POST['machine_hostname'] ?? ''));
+        if (!$this->verifyAdminPasswordOrRedirect((string)($_POST['admin_password'] ?? ''), 'cambiar el nombre de la máquina', '/settings/server')) {
+            return;
+        }
+        $r = SystemService::setMachineHostname($name);
+        if (empty($r['ok'])) {
+            Flash::set('error', $r['error'] ?? 'No se pudo cambiar el nombre.');
+        } else {
+            LogService::log('settings.hostname', $r['hostname'], "Nombre de la máquina: {$r['previous']} → {$r['hostname']}");
+            Flash::set('success', "Nombre de la máquina: {$r['previous']} → {$r['hostname']}. /etc/hosts actualizado (copia guardada)."
+                . (!empty($r['note']) ? ' ' . $r['note'] . '.' : ''));
+        }
+        Router::redirect('/settings/server');
     }
 
     public function serverSave(): void

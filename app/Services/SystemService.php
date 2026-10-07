@@ -32,6 +32,49 @@ class SystemService
      * Generate a unique Caddy route ID for a domain.
      * Uses domain-based IDs to avoid collisions when subdomains share a username.
      */
+    /**
+     * Nombre de esta máquina (hostname): el que sale en la barra del panel, en los avisos y
+     * en el prompt. Lo cambia con hostnamectl y deja /etc/hosts con la línea 127.0.1.1 a
+     * juego (sin ella, sudo y otros avisan de que no resuelven el nombre). Copia previa de
+     * /etc/hosts. No toca Postfix (usa su propio nombre de correo) ni nada del cluster.
+     */
+    public static function setMachineHostname(string $name): array
+    {
+        $name = strtolower(trim($name));
+        if (strlen($name) > 253 || !preg_match('/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*$/', $name)) {
+            return ['ok' => false, 'error' => 'Nombre no válido: letras, números, guiones y puntos (p. ej. servidor1.ejemplo.com).'];
+        }
+        $previous = (string)gethostname();
+        $out = trim((string)shell_exec('hostnamectl set-hostname ' . escapeshellarg($name) . ' 2>&1'));
+        if (strtolower((string)gethostname()) !== $name && strtolower(trim((string)shell_exec('hostname 2>/dev/null'))) !== $name) {
+            return ['ok' => false, 'error' => 'hostnamectl no lo aplicó: ' . ($out ?: 'sin detalle')];
+        }
+        $short = explode('.', $name)[0];
+        $line = "127.0.1.1\t" . $name . ($short !== $name ? ' ' . $short : '');
+        $hosts = (string)@file_get_contents('/etc/hosts');
+        if ($hosts !== '') {
+            @copy('/etc/hosts', '/etc/hosts.bak-musedock-' . date('Ymd-His'));
+            if (preg_match('/^127\.0\.1\.1\s.*$/m', $hosts)) {
+                $hosts = preg_replace('/^127\.0\.1\.1\s.*$/m', $line, $hosts, 1);
+            } else {
+                $hosts = preg_replace('/^(127\.0\.0\.1\s.*)$/m', "$1\n" . $line, $hosts, 1, $n);
+                if (!$n) {
+                    $hosts = rtrim($hosts, "\n") . "\n" . $line . "\n";
+                }
+            }
+            @file_put_contents('/etc/hosts', $hosts);
+        }
+        // VPS con cloud-init (Contabo y similares): en cada arranque volvería a poner el
+        // nombre del proveedor y a rehacer /etc/hosts. Que conserve lo que hay.
+        $cloudNote = '';
+        if (is_dir('/etc/cloud/cloud.cfg.d')) {
+            @file_put_contents('/etc/cloud/cloud.cfg.d/99-musedock-hostname.cfg',
+                "# MuseDock Panel: conservar el nombre de la máquina y /etc/hosts tras reiniciar.\npreserve_hostname: true\nmanage_etc_hosts: false\n");
+            $cloudNote = 'cloud-init: se conserva tras reiniciar (/etc/cloud/cloud.cfg.d/99-musedock-hostname.cfg)';
+        }
+        return ['ok' => true, 'previous' => $previous, 'hostname' => $name, 'note' => $cloudNote];
+    }
+
     public static function caddyRouteId(string $domain): string
     {
         return 'hosting-' . preg_replace('/[^a-z0-9]/', '', strtolower($domain));
