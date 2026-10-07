@@ -430,11 +430,17 @@ final class ConfigMirrorService
                 continue;
             }
             $current = self::readCrontab((string)$user);
+            $varsAdded = 0;
             [$outside, $insideOld] = self::splitBlock($current);
             $masterLines = [];
+            $masterVars = [];
             foreach (preg_split('/\r?\n/', (string)$content) as $l) {
                 $t = trim($l);
-                if ($t === '' || (str_starts_with($t, '#') && !str_starts_with($t, self::OFF)) || preg_match('/^[A-Z_]+=/', $t)) {
+                if (preg_match('/^([A-Z_][A-Z0-9_]*)=/', $t, $vm)) {
+                    $masterVars[$vm[1]] = $t;   // MAILTO, PATH, SHELL… (la última manda, como en cron)
+                    continue;
+                }
+                if ($t === '' || (str_starts_with($t, '#') && !str_starts_with($t, self::OFF))) {
                     continue;
                 }
                 $masterLines[self::normCron($t)] = true;
@@ -466,6 +472,21 @@ final class ConfigMirrorService
                     $keep[] = $l;
                 }
                 $outside = $keep;
+                // Variables del crontab del master (p. ej. MAILTO="" para que una tarea no
+                // mande su salida por correo): antes no se copiaban y, al promover, la copia
+                // ejecutaba las tareas sin ellas. Se añaden arriba las que falten; si la
+                // copia ya tiene esa variable, se respeta la suya.
+                $haveVars = [];
+                foreach ($outside as $l) {
+                    if (preg_match('/^\s*([A-Z_][A-Z0-9_]*)=/', $l, $vm)) {
+                        $haveVars[$vm[1]] = true;
+                    }
+                }
+                $addVars = array_values(array_diff_key($masterVars, $haveVars));
+                if ($addVars) {
+                    $outside = array_merge($addVars, $outside);
+                    $varsAdded = count($addVars);
+                }
             }
             $have = [];
             foreach ($outside as $l) {
@@ -482,7 +503,7 @@ final class ConfigMirrorService
                 }
                 $block[] = self::OFF . ' ' . $n;
             }
-            if (!$adopted && implode("\n", $block) === implode("\n", $insideOld)) {
+            if (!$adopted && empty($varsAdded) && implode("\n", $block) === implode("\n", $insideOld)) {
                 $actions[] = ['what' => "crontab:{$user}", 'result' => 'igual'];
                 if ($block) {
                     $state['crontabs'][$user] = true;
@@ -490,9 +511,10 @@ final class ConfigMirrorService
                 continue;
             }
             $actions[] = ['what' => "crontab:{$user}", 'result' => ($block ? count($block) . ' tareas en el bloque copiado (desactivadas)' : 'bloque copiado vacío')
-                . ($adopted ? "; {$adopted} de la web que estaban activas aquí, apagadas (se encienden al promover)" : '')];
+                . ($adopted ? "; {$adopted} de la web que estaban activas aquí, apagadas (se encienden al promover)" : '')
+                . (!empty($varsAdded) ? "; {$varsAdded} variable(s) del master añadidas (p. ej. MAILTO)" : '')];
             if ($apply) {
-                if ($adopted) {
+                if ($adopted || $varsAdded) {
                     @mkdir(self::BACKUP_DIR, 0700, true);
                     @file_put_contents(self::BACKUP_DIR . "/crontab_{$user}." . date('YmdHis'), $current);
                 }

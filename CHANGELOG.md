@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.352] — 2026-10-07 — Variables del crontab también en la copia
+
+### Corregido
+- **La copia de configuración no pasaba las variables de los crontabs** (`MAILTO`, `PATH`, `SHELL`…), solo las tareas. Así, un `MAILTO=""` puesto en el master para que una tarea no mande su salida por correo no llegaba a la copia, y al promover esta volvía a mandar un correo en cada ejecución. Ahora, en los crontabs de los hostings, las variables del master que falten en la copia se añaden arriba (antes de las tareas). Si la copia ya tiene esa variable, se respeta la suya. Copia previa del crontab en `/var/backups/musedock-mirror/`.
+
 ## [1.0.351] — 2026-10-07 — Cifras de buzones por MCP y copia de ficheros con identidad comprobada
 
 ### Añadido

@@ -20,6 +20,16 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.352',
+                'date' => '2026-10-07',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Copia de configuración: las variables de los crontabs de los hostings (MAILTO, PATH, SHELL…) también pasan a la copia; antes solo las tareas, y un MAILTO="" del master no llegaba',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.351',
                 'date' => '2026-10-07',
                 'badge' => 'info',
