@@ -572,7 +572,7 @@ class ClusterApiController
                 'role-switch-health'  => ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::health()],
                 'role-switch-promote' => ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::startPromoteHere(
                     (string)($payload['old_vpn_ip'] ?? ''), (string)($payload['old_public_ip'] ?? ''), (string)($payload['new_public_ip'] ?? ''),
-                    (string)($payload['orchestrator_task'] ?? ''))],
+                    (string)($payload['orchestrator_task'] ?? ''), (array)($payload['dns_zones'] ?? []))],
                 // Un nodo que acaba de ponerse como copia pide al master su configuración de
                 // relevo (si estuvo caído, el envío normal pudo agotar sus reintentos).
                 'push-failover-config' => \MuseDockPanel\Settings::get('cluster_role', '') === 'master'

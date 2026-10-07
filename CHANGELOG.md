@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.347] — 2026-10-07 — «Pasar el mando» casi sin corte para los visitantes
+
+### Cambiado
+- **Antes de apartarse, el TTL del DNS baja a 60 s** en los registros que se van a mover (sin proxy de Cloudflare: con la nube naranja el cambio ya es instantáneo) y se espera a que caduque el anterior, **con las webs funcionando**. Tras el cambio, las cachés de los visitantes apuntan al nuevo servidor en 1 min y no en 5.
+- **El servidor que pasa el mando reenvía las visitas al nuevo** (80/443, tal cual, por la VPN, sin descifrar) en cuanto éste sirve las webs, durante el tiempo que tardan en caducar las cachés; luego se quita solo. Antes, quien llegaba con la caché antigua veía la web caída o servida desde la copia con la base en solo lectura (errores 500). Probado: una web pedida a la IP antigua responde 200 desde el nuevo; el panel y la VPN no se tocan; al quitarlo, `ip_forward` vuelve a su valor.
+- **El DNS se mueve solo en las zonas que cambian** (las del plan calculado antes), no en todas las de todas las cuentas: de ~84 s a pocos segundos.
+
+## [1.0.346] — 2026-10-07 — Sin falsos avisos de buzones atrasados
+
+### Corregido
+- **El aviso de buzones sin sincronizar podía saltar en falso en la copia**: cada nodo solo anota las sincronizaciones que lanza él, y tras una copia completa lanzada desde la pareja seguía viéndolas "antiguas". Ahora, antes de avisar, el panel pide una sincronización completa de esos buzones (como mucho una vez por hora) y solo avisa si en la siguiente pasada siguen atrasados.
+
 ## [1.0.345] — 2026-10-07 — La réplica de buzones no sincronizaba
 
 ### Corregido

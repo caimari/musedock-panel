@@ -143,7 +143,7 @@
             el relevo a otro sitio solo actúa si cae el sitio entero o si el sitio no consigue levantar a A. Sin "Comprobaciones del mismo sitio", B no puede
             distinguir los casos y toma el mando a los 5 min en todos: si la alta disponibilidad tarda más, quedarían dos principales al volver A.</p>
         <p class="mb-0 text-muted"><strong>La vuelta</strong>, cuando B tomó el mando: A vuelve, se aparta solo, se pone al día como copia (unos minutos) y,
-            tras 15 min estable, en semiauto te avisa para que pulses «Pasar el mando a A»; en auto se lo devuelve solo. El cambio corta las webs unos segundos.</p>
+            tras 15 min estable, en semiauto te avisa para que pulses «Pasar el mando a A»; en auto se lo devuelve solo. El cambio corta las webs unos segundos: antes baja el tiempo de vida del DNS a 60 s (con las webs funcionando), y mientras caducan las cachés de los visitantes el servidor que deja el mando les reenvía las visitas al nuevo.</p>
     </div>
 </div>
 

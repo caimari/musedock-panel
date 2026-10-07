@@ -453,6 +453,24 @@ class RoleSwitchService
         } catch (\Throwable $e) {
             self::step($task, $st, 'No se pudo calcular el plan DNS (' . $e->getMessage() . '); el cambio sigue igual.', false);
         }
+        // Zonas que de verdad cambian: el otro nodo solo toca esas (antes recorría todas las
+        // zonas de todas las cuentas: 84 s con ~90 zonas para mover 8 registros).
+        $dnsZones = array_values(array_filter(array_map(static fn($z) => (string)($z['zone'] ?? ''), (array)($plan['zones'] ?? []))));
+
+        // TTL a 60 s en los registros que se van a mover y esperar a que caduque el que
+        // tenían, CON las webs funcionando aquí: así, tras el cambio, las cachés de los
+        // visitantes apuntan al nuevo servidor en 1 min y no en 5.
+        $prevTtl = 300;
+        if ($plan) {
+            $t = self::lowerTtlForPlan($plan, $ips['my_public']);
+            if ($t['lowered'] > 0) {
+                self::step($task, $st, "Tiempo de vida del DNS bajado a 60 s en {$t['lowered']} registros; esperando " . $t['wait']
+                    . ' s a que caduquen las cachés (las webs siguen funcionando aquí)…');
+                sleep($t['wait']);
+                self::step($task, $st, 'Cachés de DNS listas para un cambio rápido.', true);
+            }
+            $prevTtl = $t['lowered'] > 0 ? 60 : max(60, $t['max_ttl']);
+        }
 
         // 1) Apartarse: ya no escribe nadie aquí.
         self::step($task, $st, 'Apartando este servidor (sin webs, bases en solo lectura, panel de rescate)…');
@@ -489,7 +507,7 @@ class RoleSwitchService
         // 2) Que el otro se promueva (en segundo plano allí) y esperarle.
         $r = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'role-switch-promote', 'payload' => [
             'old_vpn_ip' => $ips['my_vpn'], 'old_public_ip' => $ips['my_public'], 'new_public_ip' => $ips['their_public'],
-            'orchestrator_task' => $task,
+            'orchestrator_task' => $task, 'dns_zones' => $dnsZones,
         ]]);
         $remoteTask = (string)($r['data']['result']['task'] ?? $r['data']['task'] ?? '');
         if (empty($r['ok']) || $remoteTask === '') {
@@ -500,6 +518,9 @@ class RoleSwitchService
         self::step($task, $st, "{$pre['node']} se está promoviendo…");
         $seen = 0;
         $remote = [];
+        $forwarding = false;
+        // Plazo del reenvío: lo que tarden en caducar las cachés (dos veces su TTL) y margen.
+        $fwdMinutes = max(5, min(30, (int)ceil($prevTtl * 2 / 60) + 3));
         for ($i = 0; $i < 360; $i++) {   // hasta 30 min
             sleep(5);
             $q = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'role-switch-status', 'payload' => ['task' => $remoteTask]]);
@@ -508,6 +529,15 @@ class RoleSwitchService
                 self::step($task, $st, "[{$pre['node']}] " . ($s['msg'] ?? ''), $s['ok'] ?? null);
             }
             $seen = count((array)($remote['steps'] ?? []));
+            // En cuanto el otro sirve las webs: quien llegue aquí con la caché de DNS antigua
+            // se reenvía a él (sin esto veía la web caída unos minutos).
+            if (!$forwarding && !empty($remote['serving'])) {
+                $f = TrafficForwardService::start($ips['their_vpn'], $fwdMinutes);
+                $forwarding = !empty($f['ok']);
+                self::step($task, $st, $forwarding
+                    ? "Las visitas que aún lleguen aquí se reenvían a {$pre['node']} durante {$fwdMinutes} min (cachés de DNS antiguas)."
+                    : 'No se pudo poner el reenvío de visitas (' . ($f['error'] ?? '?') . '); las cachés de DNS antiguas verán la web caída unos minutos.', $forwarding);
+            }
             if (in_array($remote['state'] ?? '', ['done', 'failed'], true)) {
                 break;
             }
@@ -516,6 +546,7 @@ class RoleSwitchService
             // Si el otro no llegó a promover nada, volver atrás es seguro; si promovió
             // algo, no: dos masters. Se para y se avisa.
             if (empty($remote['promoted'])) {
+                TrafficForwardService::stop();
                 FailoverSafetyService::unfenceSelf();
                 $fail("{$pre['node']} no se promovió (" . ($remote['error'] ?? 'tiempo agotado') . '). Este servidor se ha reactivado: todo sigue como antes.');
             } elseif (empty($remote['dns_done'])) {
@@ -524,6 +555,7 @@ class RoleSwitchService
                 // (sus bases en solo lectura) y reactivar éste. Luego hay que rehacer su copia.
                 self::step($task, $st, "{$pre['node']} se promovió a medias y el DNS no se movió: se aparta y este servidor vuelve a servir las webs…", false);
                 $fr = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'fence-self', 'payload' => ['reason' => 'cambio de rol revertido']]);
+                TrafficForwardService::stop();
                 FailoverSafetyService::unfenceSelf();
                 $fail("{$pre['node']} se promovió a medias (" . ($remote['error'] ?? '?') . '). Revertido: este servidor sirve las webs de nuevo'
                     . (!empty($fr['ok']) ? " y {$pre['node']} está apartado" : " (OJO: no se pudo apartar {$pre['node']}: " . ($fr['error'] ?? '?') . ')')
@@ -558,6 +590,52 @@ class RoleSwitchService
                 . "── Pasos ──\n" . implode("\n", array_map(static fn($s) => "{$s['at']} {$s['msg']}", $st['steps'])));
         } catch (\Throwable) {
         }
+    }
+
+    /**
+     * TTL a 60 s en los registros A del plan que apuntan a $myPublic (sin proxy: con la nube
+     * naranja Cloudflare cambia el destino al instante y el TTL es automático).
+     * @return array{lowered:int, wait:int, max_ttl:int}
+     */
+    public static function lowerTtlForPlan(array $plan, string $myPublic): array
+    {
+        $lowered = 0;
+        $maxTtl = 0;
+        $byZone = [];
+        foreach ((array)($plan['zones'] ?? []) as $z) {
+            foreach ((array)($z['records'] ?? []) as $name) {
+                $byZone[strtolower((string)$z['zone'])][strtolower(trim(str_replace('(proxy)', '', (string)$name)))] = true;
+            }
+        }
+        if (!$byZone) {
+            return ['lowered' => 0, 'wait' => 0, 'max_ttl' => 300];
+        }
+        foreach (CloudflareService::getConfiguredAccounts() as $acct) {
+            foreach (($acct['zones'] ?? []) as $zone) {
+                $zn = strtolower((string)($zone['name'] ?? ''));
+                if (!isset($byZone[$zn])) {
+                    continue;
+                }
+                $r = CloudflareService::listARecordsByIp((string)$acct['token'], (string)$zone['id'], $myPublic);
+                foreach ((array)($r['result'] ?? []) as $rec) {
+                    if (!isset($byZone[$zn][strtolower((string)$rec['name'])]) || !empty($rec['proxied'])) {
+                        continue;
+                    }
+                    $ttl = (int)($rec['ttl'] ?? 1);
+                    $ttl = $ttl <= 1 ? 300 : $ttl;   // 1 = automático (300 s sin proxy)
+                    $maxTtl = max($maxTtl, $ttl);
+                    if ($ttl <= 60) {
+                        continue;
+                    }
+                    $u = CloudflareService::updateRecord((string)$acct['token'], (string)$zone['id'], (string)$rec['id'],
+                        ['type' => 'A', 'name' => $rec['name'], 'content' => $rec['content'], 'ttl' => 60, 'proxied' => false]);
+                    if (!empty($u['ok'])) {
+                        $lowered++;
+                    }
+                }
+            }
+        }
+        return ['lowered' => $lowered, 'wait' => $lowered ? min(300, $maxTtl) : 0, 'max_ttl' => $maxTtl ?: 300];
     }
 
     /**
@@ -699,8 +777,10 @@ class RoleSwitchService
 
     // ── En el nodo elegido ─────────────────────────────────────────────────
 
-    public static function startPromoteHere(string $oldVpn, string $oldPub, string $newPub, string $orchestratorTask = ''): array
+    public static function startPromoteHere(string $oldVpn, string $oldPub, string $newPub, string $orchestratorTask = '', array $dnsZones = []): array
     {
+        $dnsZones = array_values(array_filter(array_map(static fn($z) => strtolower(trim((string)$z)), $dnsZones),
+            static fn($z) => (bool)preg_match('/^[a-z0-9.-]+$/', $z)));
         foreach ([$oldVpn, $oldPub, $newPub] as $ip) {
             if (!filter_var($ip, FILTER_VALIDATE_IP)) {
                 return ['ok' => false, 'error' => 'IP no válida'];
@@ -711,7 +791,7 @@ class RoleSwitchService
         }
         $task = 'promote-' . gmdate('YmdHis') . '-' . bin2hex(random_bytes(3));
         self::write($task, ['state' => 'running', 'role' => 'target', 'promoted' => false, 'started_at' => gmdate('c'), 'steps' => [],
-            'old_vpn' => $oldVpn, 'orchestrator_task' => preg_replace('/[^a-zA-Z0-9_-]/', '', $orchestratorTask)]);
+            'old_vpn' => $oldVpn, 'orchestrator_task' => preg_replace('/[^a-zA-Z0-9_-]/', '', $orchestratorTask), 'dns_zones' => $dnsZones]);
         shell_exec(sprintf('setsid nohup php %s promote %s %s %s %s > /dev/null 2>&1 &',
             escapeshellarg(PANEL_ROOT . '/bin/role-switch-run.php'), escapeshellarg($task),
             escapeshellarg($oldVpn), escapeshellarg($oldPub), escapeshellarg($newPub)));
@@ -734,6 +814,7 @@ class RoleSwitchService
             self::alert('Cambio de rol: la promoción de ' . gethostname() . ' falló', $st['error'] . "\n\nEl nodo que pasaba el mando decidirá: si el DNS no se movió, vuelve a servir las webs él.");
             return;
         }
+        $st['serving'] = true;   // el que pasa el mando empieza a reenviarle las visitas
         self::step($task, $st, 'Promovido: bases de datos con escritura, Caddy con las webs.', true);
 
         // DNS: de la IP pública del antiguo master a la mía (los nombres de máquina se quedan).
@@ -742,8 +823,13 @@ class RoleSwitchService
         $ttl = (int)($c['failover_ttl_normal'] ?? 300) ?: 300;
         $moved = 0;
         $st['dns_moved'] = $st['dns_failed'] = [];
+        // Solo las zonas del plan, si llegó (vacío = todas, como antes).
+        $onlyZones = array_flip((array)($st['dns_zones'] ?? []));
         foreach (CloudflareService::getConfiguredAccounts() as $acct) {
             foreach (($acct['zones'] ?? []) as $zone) {
+                if ($onlyZones && !isset($onlyZones[strtolower((string)($zone['name'] ?? ''))])) {
+                    continue;
+                }
                 $r = CloudflareService::batchUpdateIp((string)$acct['token'], (string)$zone['id'], $oldPub, $newPub, $ttl, 'role_switch');
                 $moved += (int)($r['updated'] ?? 0);
                 foreach ((array)($r['details'] ?? []) as $d) {

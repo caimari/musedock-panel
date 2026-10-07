@@ -118,6 +118,16 @@ final class ReplicationHealthService
                     $stale[] = $c[0] . ($failed ? ' (fallido)' : " ({$h} h)");
                 }
             }
+            // Cada nodo solo anota las sincronizaciones que lanza él: tras una copia lanzada
+            // desde la pareja, aquí puede seguir viéndose "antigua". Antes de avisar, pedir
+            // una sincronización completa de esos buzones (como mucho una vez por hora); si
+            // funciona, en la siguiente pasada ya no salen y no se avisa.
+            if ($stale && $now - (int)($state['mail_kick_at'] ?? 0) >= 3600) {
+                foreach ($stale as $s) {
+                    shell_exec('timeout 10 doveadm replicator replicate -f ' . escapeshellarg(strtok($s, ' ')) . ' >/dev/null 2>&1');
+                }
+                $state['mail_kick_at'] = $now;
+            }
             if ($stale) {
                 $issues['mail:stale'] = 'Réplica de buzones: ' . count($stale) . ' sin sincronizar bien con la pareja: '
                     . implode(', ', array_slice($stale, 0, 8)) . (count($stale) > 8 ? '…' : '')

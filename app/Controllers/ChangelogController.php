@@ -20,6 +20,28 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.347',
+                'date' => '2026-10-07',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'es' => ['Pasar el mando: TTL a 60 s antes de apartarse (con las webs funcionando), reenvio de visitas del servidor viejo al nuevo mientras caducan las caches, y DNS solo en las zonas que cambian (de ~84 s a segundos)'],
+                        'en' => ['Planned handover: TTL lowered to 60 s before fencing (sites still up), old server forwards visitors to the new one while caches expire, and DNS only in the zones that change (from ~84 s to seconds)'],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.346',
+                'date' => '2026-10-07',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Aviso de buzones atrasados en falso en la copia: antes de avisar se pide una sincronizacion completa de esos buzones y solo se avisa si siguen atrasados'],
+                        'en' => ['False stale-mailbox alert on the replica: a full sync of those mailboxes is requested first and only reported if still behind'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.345',
                 'date' => '2026-10-07',
                 'badge' => 'danger',

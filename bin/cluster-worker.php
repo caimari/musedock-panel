@@ -1242,6 +1242,16 @@ if ($hour === 3 && $minute < 2) {
     }
 }
 
+// ─── Reenvío web temporal tras un «Pasar el mando»: quitarlo al cumplir el plazo ──
+try {
+    $fw = \MuseDockPanel\Services\TrafficForwardService::expire();
+    if ($fw !== '') {
+        logMsg($fw);
+    }
+} catch (\Throwable $e) {
+    logMsg('Reenvío web error: ' . $e->getMessage());
+}
+
 // ─── Step 6: Regenerate lsyncd config if flag file exists ─────
 $regenFlag = PANEL_ROOT . '/storage/lsyncd-regen.flag';
 // Configuración generada por una versión anterior (delete = true borraba en la copia,
