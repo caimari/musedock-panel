@@ -18,6 +18,38 @@ class FileSyncService
     // Configuration helpers
     // ═══════════════════════════════════════════════════════════════
 
+    /** Fichero de huellas SSH de las máquinas a las que copia el panel. */
+    public const KNOWN_HOSTS = '/etc/musedock/filesync_known_hosts';
+
+    /**
+     * Opciones SSH de identidad de la otra máquina: la primera vez se guarda su huella
+     * (accept-new) y después se exige la misma. Antes no se comprobaba
+     * (StrictHostKeyChecking=no + /dev/null): otra máquina que se hiciera pasar por la
+     * copia habría recibido los ficheros. Si la huella cambia (máquina reinstalada) la
+     * copia se para y se avisa; se olvida al volver a configurar o emparejar el destino.
+     */
+    public static function hostKeyOpts(): string
+    {
+        if (!is_dir(dirname(self::KNOWN_HOSTS))) {
+            @mkdir(dirname(self::KNOWN_HOSTS), 0700, true);
+        }
+        return '-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=' . self::KNOWN_HOSTS;
+    }
+
+    /** Olvida la huella guardada de una máquina (destino reconfigurado o reinstalado). */
+    public static function forgetHostKey(string $host): void
+    {
+        $host = trim($host);
+        if ($host === '' || !is_file(self::KNOWN_HOSTS)) {
+            return;
+        }
+        exec('ssh-keygen -R ' . escapeshellarg($host) . ' -f ' . escapeshellarg(self::KNOWN_HOSTS) . ' 2>&1', $o, $rc);
+        @unlink(self::KNOWN_HOSTS . '.old');
+        if ($rc === 0) {
+            LogService::log('filesync.ssh', $host, 'Huella SSH olvidada (destino reconfigurado): se guardará la nueva en la próxima conexión');
+        }
+    }
+
     public static function getConfig(): array
     {
         return [
@@ -179,7 +211,7 @@ class FileSyncService
         $user = preg_replace('/[^a-zA-Z0-9_.-]/', '', (string)$user) ?: 'root';
 
         $cmd = sprintf(
-            'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o BatchMode=yes -o PasswordAuthentication=no -o PreferredAuthentications=publickey -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0 -p %d -i %s %s@%s "echo OK" 2>&1',
+            'ssh ' . self::hostKeyOpts() . ' -o ConnectTimeout=8 -o BatchMode=yes -o PasswordAuthentication=no -o PreferredAuthentications=publickey -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0 -p %d -i %s %s@%s "echo OK" 2>&1',
             $port,
             escapeshellarg($keyPath),
             escapeshellarg($user),
@@ -204,6 +236,11 @@ class FileSyncService
             }
         }
 
+        if (stripos($output, 'IDENTIFICATION HAS CHANGED') !== false || stripos($output, 'Host key verification failed') !== false) {
+            return ['ok' => false, 'host_key_changed' => true,
+                'error' => "La identidad SSH de {$host} ha cambiado desde la última conexión: la copia de ficheros no se conecta por seguridad. "
+                    . 'Si has reinstalado esa máquina, vuelve a emparejarla (Cluster → Nodos) y se guardará la nueva. Si no, alguien podría estar haciéndose pasar por ella.'];
+        }
         return ['ok' => false, 'error' => 'SSH falló: ' . ($output !== '' ? $output : 'sin salida')];
     }
 
@@ -272,7 +309,7 @@ class FileSyncService
 
         // SSH options
         $sshCmd = sprintf(
-            'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -o BatchMode=yes -o PasswordAuthentication=no -o PreferredAuthentications=publickey -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0 -p %d -i %s',
+            'ssh ' . self::hostKeyOpts() . ' -o ConnectTimeout=15 -o BatchMode=yes -o PasswordAuthentication=no -o PreferredAuthentications=publickey -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0 -p %d -i %s',
             $port,
             escapeshellarg($keyPath)
         );
@@ -832,7 +869,7 @@ class FileSyncService
                 $cmd .= ' --bwlimit=' . $bwLimit;
             }
             $sshCmd = sprintf(
-                'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=30 -p %d -i %s',
+                'ssh ' . self::hostKeyOpts() . ' -o ConnectTimeout=30 -p %d -i %s',
                 $port, escapeshellarg($keyPath)
             );
             $cmd .= ' -e ' . escapeshellarg($sshCmd);
@@ -889,7 +926,7 @@ class FileSyncService
             . '--data-binary @"$f" http://localhost:2019/load; rc=$?; rm -f "$f"; '
             . '[ $rc -eq 0 ] && echo reloaded-running-config || echo "caddy load failed rc=$rc"';
         $sshCmd = sprintf(
-            'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d -i %s %s@%s %s 2>&1',
+            'ssh ' . self::hostKeyOpts() . ' -o ConnectTimeout=10 -p %d -i %s %s@%s %s 2>&1',
             $port,
             escapeshellarg($keyPath),
             escapeshellarg($user),
@@ -1455,7 +1492,7 @@ class FileSyncService
 
         $duCmd = 'nice -n 19 ionice -c3 du -sm ' . implode(' ', $dirs) . ' 2>/dev/null';
         $sshCmd = sprintf(
-            'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d -i %s %s@%s %s 2>/dev/null',
+            'ssh ' . self::hostKeyOpts() . ' -o ConnectTimeout=10 -p %d -i %s %s@%s %s 2>/dev/null',
             $port, escapeshellarg($keyPath), escapeshellarg($user),
             escapeshellarg($host), escapeshellarg($duCmd)
         );
@@ -1495,7 +1532,7 @@ class FileSyncService
         if (!empty($sqlParts)) {
             $sql = implode(' ', $sqlParts);
             $remotePsql = sprintf(
-                'ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -p %d -i %s %s@%s %s 2>/dev/null',
+                'ssh ' . self::hostKeyOpts() . ' -o ConnectTimeout=10 -p %d -i %s %s@%s %s 2>/dev/null',
                 $port, escapeshellarg($keyPath), escapeshellarg($user),
                 escapeshellarg($host),
                 escapeshellarg("psql -U musedock_panel -d musedock_panel -c " . escapeshellarg($sql))
@@ -2047,7 +2084,7 @@ class FileSyncService
             // carpeta, cada `delay` s: sin reutilizar la conexión eran ~13 logins de
             // root por minuto en el nodo (Filemon, 2026-10-01), cada uno con su
             // sesión de systemd y su línea en auth.log.
-            $sshRsh = "ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=8 -o BatchMode=yes -o PasswordAuthentication=no -o PreferredAuthentications=publickey -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0"
+            $sshRsh = "ssh " . self::hostKeyOpts() . " -o ConnectTimeout=8 -o BatchMode=yes -o PasswordAuthentication=no -o PreferredAuthentications=publickey -o IdentitiesOnly=yes -o NumberOfPasswordPrompts=0"
                 . " -o ControlMaster=auto -o ControlPath=/run/musedock-lsyncd-%C -o ControlPersist=600 -o ServerAliveInterval=30"
                 . " -p {$port} -i {$keyPath}";
 

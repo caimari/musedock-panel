@@ -20,6 +20,19 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.351',
+                'date' => '2026-10-07',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'MCP mail_mailbox_stats: por buzón, número de correos, sin leer, tamaño, cuota, porcentaje y fecha del último recibido. Sin asuntos, remitentes ni contenido; cada consulta queda registrada en el log',
+                    ],
+                    'security' => [
+                        'La copia de ficheros comprueba la identidad SSH de la otra máquina (accept-new con fichero de huellas propio) en vez de no comprobarla; al emparejar de nuevo un nodo se olvida la huella vieja. lsyncd se regenera solo',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.350',
                 'date' => '2026-10-07',
                 'badge' => 'info',

@@ -110,6 +110,15 @@ final class McpMailTools
                     'apply' => $apply,
                 ], ['target_node']),
             ],
+            'mail_mailbox_stats' => [
+                'write' => false,
+                'title' => 'Cifras de uso de los buzones (sin contenido)',
+                'description' => 'Solo lectura y SOLO CIFRAS por buzón: cuántos correos tiene, cuántos sin leer, cuánto ocupa, su cuota y el porcentaje usado, y la fecha del último correo recibido. Nunca asuntos, remitentes, destinatarios ni contenido (protección de datos: solo lo necesario para mantener el servicio). Cada consulta queda registrada en el log del panel. Opcional: un dominio o un buzón concreto.',
+                'inputSchema' => $o([
+                    'domain' => ['type' => 'string', 'description' => 'Opcional: solo los buzones de este dominio'],
+                    'email' => ['type' => 'string', 'description' => 'Opcional: solo este buzón'],
+                ], []),
+            ],
             'mail_domain_verify' => [
                 'write' => false,
                 'title' => 'Verificar correo de un dominio',
@@ -136,8 +145,73 @@ final class McpMailTools
             'mail_replication_status' => self::replicationStatus($args),
             'mail_resync_node'    => self::resyncNode($args),
             'mail_dkim_selector'  => self::dkimSelector($args),
+            'mail_mailbox_stats'  => self::mailboxStats($args),
             default               => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
         };
+    }
+
+    // ── Cifras de los buzones ─────────────────────────────────────────────
+
+    /**
+     * Solo cifras por buzón (Dovecot): correos, sin leer, tamaño, cuota y fecha del último
+     * recibido. Nada de asuntos, remitentes ni contenido. Cada consulta se registra.
+     */
+    private static function mailboxStats(array $args): array
+    {
+        $domain = strtolower(trim((string)($args['domain'] ?? '')));
+        $email = strtolower(trim((string)($args['email'] ?? '')));
+        $where = "a.status = 'active'";
+        $params = [];
+        if ($email !== '') {
+            $where .= ' AND lower(a.email) = :e';
+            $params['e'] = $email;
+        } elseif ($domain !== '') {
+            $where .= ' AND lower(d.domain) = :d';
+            $params['d'] = $domain;
+        }
+        $rows = \MuseDockPanel\Database::fetchAll(
+            "SELECT a.email, a.quota_mb, d.domain FROM mail_accounts a JOIN mail_domains d ON d.id = a.mail_domain_id WHERE {$where} ORDER BY d.domain, a.email",
+            $params
+        );
+        if (trim((string)shell_exec('command -v doveadm 2>/dev/null')) === '') {
+            return ['ok' => false, 'error' => 'Dovecot (doveadm) no está en este servidor'];
+        }
+        $out = [];
+        $tot = ['mailboxes' => 0, 'messages' => 0, 'unseen' => 0, 'size_mb' => 0.0];
+        foreach ($rows as $r) {
+            $u = escapeshellarg((string)$r['email']);
+            $st = trim((string)shell_exec("doveadm -f tab mailbox status -u {$u} -t 'messages unseen vsize' '*' 2>/dev/null"));
+            $lines = preg_split('/\R/', $st) ?: [];
+            $vals = count($lines) >= 2 ? array_combine(explode("\t", $lines[0]), explode("\t", $lines[1]) + [0, 0, 0]) : null;
+            $last = '';
+            $uids = trim((string)shell_exec("doveadm -f tab search -u {$u} mailbox INBOX all 2>/dev/null | tail -1"));
+            if (preg_match('/\s(\d+)$/', $uids, $m)) {
+                $f = trim((string)shell_exec("doveadm -f tab fetch -u {$u} date.received mailbox INBOX uid {$m[1]} 2>/dev/null | tail -1"));
+                $last = preg_match('/^\d{4}-\d\d-\d\d/', $f) ? $f : '';
+            }
+            $sizeMb = $vals ? round((int)$vals['vsize'] / 1048576, 1) : null;
+            $quota = (int)($r['quota_mb'] ?? 0);
+            $out[] = [
+                'mailbox' => (string)$r['email'],
+                'messages' => $vals ? (int)$vals['messages'] : null,
+                'unread' => $vals ? (int)$vals['unseen'] : null,
+                'size_mb' => $sizeMb,
+                'quota_mb' => $quota ?: 'sin límite',
+                'used_pct' => ($quota > 0 && $sizeMb !== null) ? round($sizeMb * 100 / $quota, 1) : null,
+                'last_received' => $last ?: null,
+            ] + ($vals ? [] : ['note' => 'Dovecot no devolvió datos (¿buzón aún sin crear en disco?)']);
+            if ($vals) {
+                $tot['mailboxes']++;
+                $tot['messages'] += (int)$vals['messages'];
+                $tot['unseen'] += (int)$vals['unseen'];
+                $tot['size_mb'] += (float)$sizeMb;
+            }
+        }
+        $tot['size_mb'] = round($tot['size_mb'], 1);
+        $scope = $email !== '' ? $email : ($domain !== '' ? $domain : 'todos');
+        LogService::log('mcp.mail-stats', $scope, 'Consulta por MCP de cifras de uso de buzones (sin contenido): ' . count($out) . ' buzón(es)');
+        return ['scope' => $scope, 'totals' => $tot, 'mailboxes' => $out,
+            'note' => 'Solo cifras (sin asuntos, remitentes ni contenido). Esta consulta queda registrada en el log del panel.'];
     }
 
     // ── Guardas y utilidades ─────────────────────────────────────────────

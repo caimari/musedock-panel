@@ -281,6 +281,12 @@ class ClusterService
         array $metadata = []
     ): int
     {
+        // Nodo nuevo o emparejado otra vez (p. ej. reinstalado): su huella SSH antigua ya
+        // no vale; la copia de ficheros guardará la nueva en la primera conexión.
+        $host = (string)parse_url($apiUrl, PHP_URL_HOST);
+        if ($host !== '') {
+            FileSyncService::forgetHostKey($host);
+        }
         $encryptedToken = ReplicationService::encryptPassword($authToken);
         $cleanMeta = array_filter([
             'tls_pin' => trim((string)($metadata['tls_pin'] ?? '')),

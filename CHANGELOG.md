@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.351] — 2026-10-07 — Cifras de buzones por MCP y copia de ficheros con identidad comprobada
+
+### Añadido
+- **MCP `mail_mailbox_stats`: cifras de uso de los buzones, sin contenido.** Por buzón (o por dominio, o todos): cuántos correos tiene, cuántos sin leer, cuánto ocupa, su cuota y el porcentaje usado, y la fecha del último correo recibido. Nunca asuntos, remitentes, destinatarios ni contenido (protección de datos: solo lo necesario para mantener el servicio). Cada consulta queda registrada en el log del panel (`mcp.mail-stats`).
+
+### Seguridad
+- **La copia de ficheros (lsyncd, rsync, certificados) comprueba la identidad SSH de la otra máquina.** Antes conectaba sin comprobarla (`StrictHostKeyChecking=no` y `UserKnownHostsFile=/dev/null`): otra máquina que se hiciera pasar por la copia dentro de la red habría recibido los ficheros. Ahora la primera conexión guarda su huella (`accept-new`, en `/etc/musedock/filesync_known_hosts`) y después se exige la misma. Si cambia, la copia no se conecta y el panel explica por qué. Al dar de alta o volver a emparejar un nodo (p. ej. reinstalado) se olvida la huella vieja y se guarda la nueva. Las configuraciones de lsyncd anteriores se regeneran solas.
+
 ## [1.0.350] — 2026-10-07 — Nombre de envío y fin de los correos «SECURITY information»
 
 ### Corregido
