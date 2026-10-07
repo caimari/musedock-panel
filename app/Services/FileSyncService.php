@@ -2026,7 +2026,11 @@ class FileSyncService
             $lua .= "    source = \"{$src}/\",\n";
             $lua .= "    target = \"{$user}@{$host}:{$src}/\",\n";
             $lua .= "    delay  = 15,\n";
-            $lua .= "    delete = true,\n";
+            // "running": se copian los borrados que ocurren con lsyncd en marcha, pero NO en
+            // la sincronización inicial al arrancar. Si el origen vuelve con un disco más
+            // antiguo (p. ej. Proxmox lo arranca en otra máquina con la réplica de hace un
+            // minuto), antes se borraban en la copia los ficheros de ese último minuto.
+            $lua .= "    delete = \"running\",\n";
 
             // Merge built-in excludes + user pattern excludes + specific path exclusions
             $specificExclusions = self::parseExcludePatterns(Settings::get('filesync_exclusions_list', ''));

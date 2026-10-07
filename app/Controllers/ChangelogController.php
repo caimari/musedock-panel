@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.343',
+                'date' => '2026-10-07',
+                'badge' => 'warning',
+                'changes' => [
+                    'added' => [
+                        'es' => ['Reparacion automatica de replicas PostgreSQL y MariaDB rotas con el principal sano (p. ej. principal vuelto con un disco mas antiguo), sin borrar nada: PG aparta los datos antiguos, MariaDB guarda antes una copia completa; un intento cada 6 h, con avisos'],
+                        'en' => ['Automatic repair of broken PostgreSQL and MariaDB replicas while the primary is healthy (e.g. primary back with an older disk), deleting nothing: PG moves old data aside, MariaDB dumps the replica first; one attempt every 6 h, with alerts'],
+                    ],
+                    'fixed' => [
+                        'es' => ['lsyncd ya no borra en la copia al arrancar lo que no tenga el origen (delete = "running"): un principal vuelto con un disco antiguo no borra los ficheros del ultimo minuto'],
+                        'en' => ['lsyncd no longer deletes on the copy at startup what the source lacks (delete = "running"): a primary back with an older disk no longer wipes the last minute of files'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.342',
                 'date' => '2026-10-07',
                 'badge' => 'warning',

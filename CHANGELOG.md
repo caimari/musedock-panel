@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.343] — 2026-10-07 — Que una caída del principal no rompa ni borre nada
+
+### Añadido
+- **Reparación automática de las réplicas** (PostgreSQL y MariaDB/MySQL) en el slave. Caso típico: el principal es una máquina virtual con alta disponibilidad y, al caer su servidor físico, arranca en otro con el disco de hace ~1 min; la réplica ya había recibido ese minuto, queda "por delante" y se para. Antes había que rehacerla a mano. Ahora, si una réplica lleva 15 min rota y el principal está sano (si el caído es él, se espera como siempre), el panel la rehace solo, aparte del cluster-worker (`bin/replication-auto-repair.php`, `--check` para ver qué haría). **Sin borrar nada**: PostgreSQL copia a un directorio temporal y aparta el antiguo (`.old.<fecha>`); MariaDB guarda antes una copia completa de lo que tiene la réplica en `/var/backups/musedock-replica-repair/` (puede contener ese último minuto que el principal perdió). Comprueba el espacio libre, un intento cada 6 h por réplica, aviso al empezar y al terminar. Se desactiva con el ajuste `replication_auto_repair = 0`.
+
+### Corregido
+- **lsyncd ya no borra en la copia, al arrancar, lo que el origen no tenga.** Con `delete = true`, si el principal volvía con un disco más antiguo, la sincronización inicial borraba en la copia los ficheros de ese último minuto. Ahora `delete = "running"`: los borrados se copian mientras lsyncd está en marcha, pero no en la sincronización inicial. Las configuraciones existentes se regeneran solas tras actualizar.
+
 ## [1.0.342] — 2026-10-07 — Sin bombardeo de avisos al caer una línea
 
 ### Corregido
