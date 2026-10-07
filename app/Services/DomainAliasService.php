@@ -279,6 +279,29 @@ class DomainAliasService
                 $ok = SystemService::addCaddyRedirectRoute($from, $domain, (int)$r['redirect_code'], (bool)$r['preserve_path']) !== null;
                 $out[$from] = $ok ? "redirección a {$domain} repuesta" : 'FALLO al reponer la redirección';
             }
+            // Subdominios del hosting (api., portal.…): antes no se reponían y, tras un
+            // cambio de mando, se quedaban sin ruta ni certificado (error 525 con proxy).
+            foreach (Database::fetchAll("SELECT * FROM hosting_subdomains WHERE account_id = :id AND status = 'active'", ['id' => (int)$acc['id']]) as $sub) {
+                $host = strtolower(trim((string)$sub['subdomain']));
+                if ($host === '' || isset($served[$host]) || empty($sub['document_root']) || !is_dir((string)$sub['document_root'])) {
+                    continue;
+                }
+                if ($masterCaddyfile !== ''
+                    && preg_match('/(^|[\s,\/])' . preg_quote($host, '/') . '(:\d+)?[\s,{]/m', $masterCaddyfile)) {
+                    continue;
+                }
+                if ($routeExists((string)($sub['caddy_route_id'] ?: SystemService::caddyRouteId($host)))) {
+                    continue;
+                }
+                $ok = SystemService::addCaddyRoute(
+                    $host,
+                    (string)$sub['document_root'],
+                    (string)$acc['username'],
+                    (string)($sub['php_version'] ?? '') ?: ((string)($acc['php_version'] ?? '8.3') ?: '8.3'),
+                    (string)($sub['hosting_type'] ?? 'php') ?: 'php'
+                ) !== null;
+                $out[$host] = $ok ? 'ruta del subdominio repuesta' : 'FALLO al reponer la ruta del subdominio';
+            }
         }
         foreach ($out as $d => $res) {
             try {

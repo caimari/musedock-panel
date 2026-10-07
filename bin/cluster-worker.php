@@ -236,6 +236,17 @@ if (\MuseDockPanel\Services\PortalService::installed()
     }
 }
 
+// ─── Step 0j2: ¿Se ha quedado sin conexión el sitio entero de algún nodo? ────────
+// Antes de los demás avisos: si la copia y todo su sitio (oficina) están sin Internet y el
+// que manda está fuera, las webs siguen: un aviso informativo y el resto en silencio.
+try {
+    foreach (\MuseDockPanel\Services\SiteOutageService::evaluate(ClusterService::getUnreachableNodes(2)) as $line) {
+        logMsg('Sitio: ' . $line);
+    }
+} catch (\Throwable $e) {
+    logMsg('Site outage check error: ' . $e->getMessage());
+}
+
 // ─── Step 0k: ¿Responden los testigos externos? (cada 5 min) ──────────────────
 // Uno caído no afecta (decide el otro); los dos caídos tampoco bloquean (se decide con la
 // vista de este nodo), pero se pierde la protección contra cortes de red: se avisa.

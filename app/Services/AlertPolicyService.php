@@ -40,6 +40,7 @@ class AlertPolicyService
         'config_mirror'      => ['Copia de configuración del master', 'En una copia: algo de la configuración del master no se pudo copiar (avisa solo cuando cambia la lista).'],
         'witness'            => ['Testigos', 'Un testigo externo no responde o vuelve.'],
         'node_down'          => ['Nodo caído / recuperado', 'Un servidor del cluster deja de responder a los demás (o vuelve).'],
+        'site_outage'        => ['Sitio sin conexión (webs no afectadas)', 'Un servidor que no manda se queda sin conexión junto con todo su sitio (p. ej. la oficina sin Internet): un único aviso informativo, sin sonido en Telegram, y otro al volver. Mientras dura, los avisos de nodo caído, réplica, ficheros y correo de esas máquinas no se envían.'],
     ];
 
     /**
@@ -82,7 +83,7 @@ class AlertPolicyService
             'Si en el correo pone que la API no respondió, suele ser la red o la VPN entre servidores, no el correo. Si dura, comprueba que puedes enviar y recibir. Al recuperarse llega otro aviso.'],
         'mail_queue' => ['Hay cambios de correo (buzones, alias, dominios) que llevan más de un día sin poder llegar a otro servidor.',
             'Comprueba que ese servidor está encendido y conectado. Mientras tanto, esos buzones no existen allí: en un relevo no funcionarían.'],
-        'replication' => ['Las bases de datos de este servidor no se están copiando bien desde el principal (o se han recuperado).',
+        'replication' => ['Las bases de datos o los buzones de correo de este servidor no se están copiando bien con el principal (o se han recuperado).',
             'Mira el diagnóstico del correo: si el principal está caído o reiniciándose, la réplica se reengancha sola al volver. Si el principal responde, revisa Ajustes → Replicación o pide failover_preflight por MCP. Para trabajos programados, activa antes el modo mantenimiento.'],
         'lsyncd' => ['La copia de ficheros de las webs hacia el otro servidor va mal (o se ha recuperado).',
             'Mientras dure, el otro servidor no tiene los últimos cambios de las webs. Revisa Cluster → Archivos.'],

@@ -45,6 +45,11 @@ class NotificationService
             LogService::log('notify.maintenance', $type, 'No enviado (mantenimiento programado): ' . $subject);
             return;
         }
+        // Corte de un sitio entero que no afecta a las webs (SiteOutageService): ya se avisó una vez.
+        if (SiteOutageService::quiet($type, $subject . "\n" . $message)) {
+            LogService::log('notify.site-outage', $type, 'No enviado (sitio sin conexión, webs no afectadas): ' . $subject);
+            return;
+        }
         $message .= AlertPolicyService::emailFooter($type);
         $subject = self::tagSubject($subject);
         if (Settings::get('monitor_notify_email', '0') === '1') {
@@ -555,7 +560,8 @@ class NotificationService
     // ─── Telegram ───────────────────────────────────────────
 
     /** $token/$chatId: para probar lo escrito en el formulario antes de guardarlo. */
-    public static function sendTelegram(string $message, ?string $token = null, ?string $chatId = null, ?string &$error = null): bool
+    /** $silent: llega sin sonido (avisos informativos). */
+    public static function sendTelegram(string $message, ?string $token = null, ?string $chatId = null, ?string &$error = null, bool $silent = false): bool
     {
         $chatId = $chatId ?? Settings::get('notify_telegram_chat_id', '');
         if ($token !== null) {
@@ -578,7 +584,7 @@ class NotificationService
             CURLOPT_POSTFIELDS     => http_build_query([
                 'chat_id' => $chatId,
                 'text'    => $message,
-            ]),
+            ] + ($silent ? ['disable_notification' => 'true'] : [])),
         ]);
         $result = curl_exec($ch);
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);

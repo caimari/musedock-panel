@@ -201,10 +201,21 @@ final class ReplicationHealthService
             $mins = round(($now - min($fixedSince)) / 60);
             NotificationService::send("[{$host}] Réplica recuperada",
                 "La réplica de {$host} vuelve a copiarse con normalidad (estuvo parada unos {$mins} min). Se ha puesto al día sola: no hay que hacer nada.\n\n"
-                . 'Lo que se arregló: ' . implode(', ', array_map(static fn($k) => strtok($k, ':') . ' ' . (explode(':', $k)[1] ?? ''), array_keys($fixed))) . '.', 'replication');
+                . 'Lo que se arregló: ' . implode(', ', array_map(static fn($k) => self::label($k), array_keys($fixed))) . '.', 'replication');
             LogService::log('cluster.replication', 'recovered', implode(', ', array_keys($fixed)));
         }
         return ['issues' => $issues, 'notified_now' => array_keys($new), 'recovered' => array_keys($fixed)];
+    }
+
+    /** Nombre legible de un problema (clave «motor:qué») para el aviso de recuperación. */
+    private static function label(string $k): string
+    {
+        return [
+            'mail:stale' => 'réplica de buzones de correo',
+            'mysql:replica' => 'réplica de MariaDB/MySQL',
+            'mysql:lag' => 'retraso de MariaDB/MySQL',
+            'redis:link' => 'réplica de Redis',
+        ][$k] ?? (str_starts_with($k, 'pg:') ? 'PostgreSQL ' . (explode(':', $k)[1] ?? '') : str_replace(':', ' ', $k));
     }
 
     private static function state(): array

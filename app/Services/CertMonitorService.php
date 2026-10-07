@@ -47,6 +47,9 @@ class CertMonitorService
         foreach ($failures as $domain => $info) {
             if ($info['count'] < self::FAIL_THRESHOLD) continue;
             if (!static::shouldAlert($domain)) continue;
+            // Si ya sirve un certificado válido (falló y luego lo consiguió, p. ej. un
+            // emisor falla y el otro no), no hay bucle que cortar.
+            if (!$info['rate_limited'] && !empty(CertWatchService::checkHost($domain)['ok'])) continue;
 
             $rateLimited = $info['rate_limited'] ? ' (¡está agotando el límite de Let\'s Encrypt!)' : '';
             $resolves = static::domainResolvesHere($domain);
@@ -64,7 +67,7 @@ class CertMonitorService
                   . "Acción recomendada: si el dominio ya no se usa, márcalo como inactivo "
                   . "(Superadmin → Tenants) o elimínalo del hosting. Si debe funcionar, revisa su DNS.";
 
-            NotificationService::send($subject, $body);
+            NotificationService::send($subject, $body, 'cert');
             LogService::log('cert.monitor', 'alert', "Alerta: {$domain} en bucle ACME ({$info['count']} fallos){$rateLimited}");
             static::markAlerted($domain);
             $alerted[] = ['domain' => $domain, 'count' => $info['count'], 'rate_limited' => $info['rate_limited']];
@@ -95,6 +98,10 @@ class CertMonitorService
         foreach (preg_split('/\r?\n/', $out) as $line) {
             if ($line === '') continue;
             if (!preg_match('/"identifier":"([^"]+)"/', $line, $m)) continue;
+            // Solo errores: tls.obtain también registra los pasos de una emisión que sale
+            // bien («obtaining certificate», «certificate obtained successfully»…) y una
+            // web nueva contaba como 20+ «fallos».
+            if (!preg_match('/"level":"(error|warn)"|\t(ERROR|WARN)\t|could not get certificate|rateLimited|too many failed/i', $line)) continue;
             $domain = $m[1];
             // Fold www. into the base domain so we don't double-alert.
             $base = preg_replace('/^www\./', '', $domain);

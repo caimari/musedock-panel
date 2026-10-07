@@ -24,9 +24,16 @@ class ChangelogController
                 'date' => '2026-10-07',
                 'badge' => 'info',
                 'changes' => [
+                    'added' => [
+                        'Sitio sin conexión con las webs a salvo: si el que manda tiene Internet y una copia deja de responder junto con todos sus vecinos (p. ej. la oficina sin Internet), llega un único aviso informativo (sin sonido en Telegram) y otro al volver; los avisos de nodo caído, réplica, ficheros, correo y testigos de esas máquinas quedan en el registro sin enviarse (también los de recuperación de los 10 min siguientes). Si responde algún vecino, o el afectado es el que manda, aviso normal. Se puede silenciar en Ajustes → Avisos',
+                        'Pasados 10 min desde la vuelta, lo que siga roto (réplica, buzones, lsyncd, nodo de correo, testigos) avisa de forma normal, con sonido: se borran las marcas de «ya avisado» que se pusieron durante el silencio. Si una máquina sigue caída aunque su sitio ya responda, se dice y su aviso de nodo caído empieza desde cero',
+                    ],
+                    'fixed' => [
+                        'Subdominios de un hosting (api., portal.…) sin ruta en Caddy tras un cambio de mando (error 525 con proxy): la reparación automática de rutas ahora también los repone',
+                    ],
                     'changed' => [
-                        'es' => ['Pasar el mando: TTL a 60 s antes de apartarse (con las webs funcionando), reenvio de visitas del servidor viejo al nuevo mientras caducan las caches, y DNS solo en las zonas que cambian (de ~84 s a segundos)'],
-                        'en' => ['Planned handover: TTL lowered to 60 s before fencing (sites still up), old server forwards visitors to the new one while caches expire, and DNS only in the zones that change (from ~84 s to seconds)'],
+                        '«Failover: servidores con warnings» tiene tipo (nodo caído): se puede silenciar y respeta el modo mantenimiento',
+                        '«Réplica recuperada» dice qué se arregló con palabras («réplica de buzones de correo», «PostgreSQL main») y no con claves internas',
                     ],
                 ],
             ],
@@ -35,6 +42,10 @@ class ChangelogController
                 'date' => '2026-10-07',
                 'badge' => 'info',
                 'changes' => [
+                    'changed' => [
+                        'es' => ['Pasar el mando: TTL a 60 s antes de apartarse (con las webs funcionando), reenvio de visitas del servidor viejo al nuevo mientras caducan las caches, y DNS solo en las zonas que cambian (de ~84 s a segundos)'],
+                        'en' => ['Planned handover: TTL lowered to 60 s before fencing (sites still up), old server forwards visitors to the new one while caches expire, and DNS only in the zones that change (from ~84 s to seconds)'],
+                    ],
                     'fixed' => [
                         'es' => ['Aviso de buzones atrasados en falso en la copia: antes de avisar se pide una sincronizacion completa de esos buzones y solo se avisa si siguen atrasados'],
                         'en' => ['False stale-mailbox alert on the replica: a full sync of those mailboxes is requested first and only reported if still behind'],

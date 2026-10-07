@@ -207,7 +207,8 @@ try {
                 "Failover: servidores con warnings",
                 "Los siguientes servidores tienen alertas (NO se ha disparado failover):\n\n" .
                 implode("\n", $warningNames) . "\n\n" .
-                "Revisa el panel para más detalles."
+                "Revisa el panel para más detalles.",
+                'node_down'
             );
             Settings::set('failover_last_warning_notif', date('Y-m-d H:i:s'));
             logMsg("Warning notification sent for " . count($warningServers) . " servers");

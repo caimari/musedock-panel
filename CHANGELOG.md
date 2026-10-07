@@ -2,14 +2,25 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [1.0.347] — 2026-10-07 — «Pasar el mando» casi sin corte para los visitantes
+## [1.0.347] — 2026-10-07 — Oficina sin conexión: un aviso, no una ráfaga
+
+### Añadido
+- **Sitio sin conexión con las webs a salvo: un único aviso.** Si el servidor que manda tiene Internet y una copia deja de responder junto con todos sus vecinos (Failover → Vecinos; p. ej. la oficina sin Internet), llega un solo aviso informativo («las webs siguen funcionando desde …»), sin sonido en Telegram, y otro cuando vuelven. Mientras dura, los avisos de nodo caído, réplica, copia de ficheros, correo y testigos que nombran a esas máquinas quedan en el registro sin enviarse, y también los de recuperación de los 10 minutos siguientes. Si responde algún vecino, la que ha caído es esa máquina sola y el aviso es el normal. Si el afectado es el que manda, o si este se queda sin Internet, también: aviso normal. Un nodo sin vecinos configurados entra en el mismo corte si dejó de responder a la vez (±10 min) que otro de un sitio caído. En la copia que se quedó sin Internet, tampoco se envían esos avisos mientras dura el corte ni en los 10 minutos siguientes. Se puede silenciar en Ajustes → Avisos («Sitio sin conexión»).
+- **Pasado el silencio, lo que siga roto avisa normal, con sonido.** Durante el corte los vigilantes (réplica de bases de datos y buzones, lsyncd, nodo de correo, testigos, copia de configuración) apuntaban «ya avisado» aunque el aviso no saliera. A los 10 minutos de volver se les borra esa marca: lo que siga roto se avisa en su siguiente pasada como algo nuevo, y lo que ya se arregló no manda nada. Si vuelve el sitio pero una máquina sigue sin responder, el aviso de vuelta lo dice («sigue sin responder: es esa máquina»), sale del silencio y su aviso de nodo caído empieza desde cero.
+
+### Corregido
+- **Subdominios sin ruta en Caddy (error 525 con el proxy de Cloudflare).** La reparación automática de rutas (cluster-worker cada 10 min y al arrancar Caddy) reponía las webs y las redirecciones de cada hosting, pero no sus subdominios (api., portal., megadmin.…). Tras un cambio de mando se quedaban sin ruta ni certificado. Ahora se reponen también, con su carpeta, su versión de PHP y su tipo (php, spa…).
+
+### Cambiado
+- El aviso «Failover: servidores con warnings» tiene tipo (nodo caído / recuperado): ahora se puede silenciar y respeta el modo mantenimiento.
+- El aviso «Réplica recuperada» dice qué se ha arreglado con palabras («réplica de buzones de correo», «PostgreSQL main»…) en lugar de claves internas como «mail stale», y su explicación menciona también los buzones.
+
+## [1.0.346] — 2026-10-07 — «Pasar el mando» casi sin corte y sin falsos avisos de buzones
 
 ### Cambiado
 - **Antes de apartarse, el TTL del DNS baja a 60 s** en los registros que se van a mover (sin proxy de Cloudflare: con la nube naranja el cambio ya es instantáneo) y se espera a que caduque el anterior, **con las webs funcionando**. Tras el cambio, las cachés de los visitantes apuntan al nuevo servidor en 1 min y no en 5.
 - **El servidor que pasa el mando reenvía las visitas al nuevo** (80/443, tal cual, por la VPN, sin descifrar) en cuanto éste sirve las webs, durante el tiempo que tardan en caducar las cachés; luego se quita solo. Antes, quien llegaba con la caché antigua veía la web caída o servida desde la copia con la base en solo lectura (errores 500). Probado: una web pedida a la IP antigua responde 200 desde el nuevo; el panel y la VPN no se tocan; al quitarlo, `ip_forward` vuelve a su valor.
 - **El DNS se mueve solo en las zonas que cambian** (las del plan calculado antes), no en todas las de todas las cuentas: de ~84 s a pocos segundos.
-
-## [1.0.346] — 2026-10-07 — Sin falsos avisos de buzones atrasados
 
 ### Corregido
 - **El aviso de buzones sin sincronizar podía saltar en falso en la copia**: cada nodo solo anota las sincronizaciones que lanza él, y tras una copia completa lanzada desde la pareja seguía viéndolas "antiguas". Ahora, antes de avisar, el panel pide una sincronización completa de esos buzones (como mucho una vez por hora) y solo avisa si en la siguiente pasada siguen atrasados.
