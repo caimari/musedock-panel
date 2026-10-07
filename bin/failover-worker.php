@@ -448,6 +448,15 @@ function autoPromoteIfNeeded(array $checks, array $foConfig): bool
     }
     Settings::set('failover_site_wait_notified', '');
 
+    // Si el principal responde por su entrada alternativa (la otra línea), está vivo: no es
+    // una caída sino un corte de su entrada normal, que lo resuelve el vigilante de entrada
+    // cambiando el DNS. Antes se miraba al final, después de los testigos, y un testigo que
+    // lo veía por la red del sitio hacía avisar de "relevo ABORTADO" en cada pasada.
+    if (\MuseDockPanel\Services\IngressWatchService::reachableViaAlternate((string)$downPrimary['ip'])) {
+        logMsg('Auto-promote: NO — el principal responde por su entrada alternativa; se cambia la entrada, no el mando');
+        return false;
+    }
+
     // El master en el cluster (IP de la VPN), para el testigo y para apartarlo.
     $masterVpn = (string)Settings::get('cluster_master_ip', '');
 
@@ -482,6 +491,7 @@ function autoPromoteIfNeeded(array $checks, array $foConfig): bool
     }
     if ($sawAlive) {
         logMsg("Auto-promote: ABORTADO — un testigo aún alcanza el master: probable corte de red entre nodos, no caída");
+        if (failoverAbortShouldNotify((string)$downPrimary['id'], 'witness-node'))
         NotificationService::send(
             'Failover: relevo automático ABORTADO (posible corte de red)',
             "Este nodo ve caído el principal ({$downPrimary['name']}), pero otro nodo SÍ lo alcanza.\n"
@@ -498,6 +508,7 @@ function autoPromoteIfNeeded(array $checks, array $foConfig): bool
     }
     if (in_array('up', $ext, true)) {
         logMsg('Auto-promote: ABORTADO — un testigo externo llega al principal: no está caído');
+        if (failoverAbortShouldNotify((string)$downPrimary['id'], 'witness-external'))
         NotificationService::send('Failover: relevo automático ABORTADO (un testigo ve el principal vivo)',
             "Este nodo ve caído el principal ({$downPrimary['name']}), pero un testigo externo SÍ llega: " . json_encode($ext) . ".\nNo se toma el mando.");
         return false;
@@ -628,3 +639,19 @@ function autoReturnToPreferred(string $foMode, array $foConfig, array $counters)
 
 // (El resync y la vuelta automática antiguos se quitaron: el antiguo master se
 // reincorpora como copia él solo y la vuelta a mandar es un cambio de rol planificado.)
+
+/**
+ * Aviso de "relevo ABORTADO": una vez por caída y motivo, como mucho cada hora. El worker
+ * evalúa cada minuto; sin esto, una caída larga mandaba el mismo aviso cada minuto.
+ */
+function failoverAbortShouldNotify(string $primaryId, string $reason): bool
+{
+    $prev = json_decode((string)Settings::get('failover_abort_notified', '{}'), true) ?: [];
+    $key = $primaryId . '|' . $reason;
+    if (time() - (int)($prev[$key] ?? 0) < 3600) {
+        return false;
+    }
+    $prev[$key] = time();
+    Settings::set('failover_abort_notified', json_encode($prev));
+    return true;
+}

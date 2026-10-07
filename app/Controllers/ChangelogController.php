@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.342',
+                'date' => '2026-10-07',
+                'badge' => 'warning',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['Relevo abortado avisaba cada minuto durante la caida de una linea: si el principal responde por su entrada alternativa ya no se evalua el relevo, y los avisos de abortado salen una vez por caida (como mucho cada hora)'],
+                        'en' => ['Aborted failover alerted every minute while one line was down: if the primary answers on its alternate entry failover is no longer evaluated, and abort alerts go out once per outage (at most hourly)'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.341',
                 'date' => '2026-10-07',
                 'badge' => 'info',

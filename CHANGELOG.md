@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.342] — 2026-10-07 — Sin bombardeo de avisos al caer una línea
+
+### Corregido
+- **«Relevo automático ABORTADO» llegaba cada minuto** mientras una línea del principal estaba caída (prueba real: router de ONO apagado). El principal seguía vivo por su otra línea, pero el relevo se evaluaba igual tras la espera, un testigo lo veía por la red del sitio y se abortaba avisando en cada pasada. Ahora, si el principal responde por su entrada alternativa, no se evalúa el relevo (es un cambio de entrada, que ya hace el vigilante) y no se avisa. Y los avisos de relevo abortado salen una vez por caída y motivo (como mucho cada hora).
+
 ## [1.0.341] — 2026-10-07 — Nombre de cada máquina y zona horaria más clara
 
 ### Añadido
