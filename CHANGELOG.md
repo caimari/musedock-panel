@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.337] — 2026-10-07 — Pantalla de Failover más clara
+
+### Cambiado
+- **Configuración de Failover en tarjetas separadas** (Cluster → Failover), cada una con su botón Guardar: *Modo de operación*, *DNS*, *Detección de caídas* (con las comprobaciones del mismo sitio) y, plegadas como avanzadas, *Umbrales y severidad*, *Dos líneas de Internet en este servidor* y *Emergencia con caddy-l4*. Antes era un solo bloque largo con todos los campos.
+- **«Acciones de Failover» pasa a «Acciones de emergencia»** con una explicación clara: para un cambio planificado, Dashboard → «Pasar el mando a…»; estos botones son para mover el tráfico a mano cuando algo ya ha caído. Se quita el aviso de que lsyncd no se invertía (ya se gira solo al tomar el mando).
+
+### Corregido
+- **Botones que parecían no hacer nada** (Comprobar, Test de interfaces, Probar conexión de servidores remotos, verificar token de Cloudflare, Generar preview de caddy-l4): ahora muestran un spinner y se desactivan mientras trabajan, y si algo falla dicen por qué (sesión caducada, error de red, respuesta vacía) en vez de quedarse en silencio. «Probar conexión» sin servidores remotos explica que primero hay que añadir uno.
+- **El token de los servidores remotos (caddy-l4) se enviaba a la página** dentro del HTML. Ya no: el campo sale vacío y, si no se escribe nada, se conserva el guardado (también para «Probar conexión»).
+
 ## [1.0.336] — 2026-10-06 — Relay de reserva con la IP propia de cada servidor
 
 ### Cambiado

@@ -53,11 +53,19 @@ class FailoverController
             $rdsNames  = $_POST['rds_name'] ?? [];
             $rdsUrls   = $_POST['rds_url'] ?? [];
             $rdsTokens = $_POST['rds_token'] ?? [];
+            // El token ya no se envía a la página: vacío = conservar el guardado de esa URL.
+            $savedTokens = [];
+            foreach (FailoverService::getRemoteDomainSources() as $old) {
+                $savedTokens[rtrim((string)($old['url'] ?? ''), '/')] = (string)($old['token'] ?? '');
+            }
             for ($i = 0; $i < count($rdsNames); $i++) {
                 $name  = trim($rdsNames[$i] ?? '');
                 $url   = trim($rdsUrls[$i] ?? '');
                 $token = trim($rdsTokens[$i] ?? '');
                 if (!$url) continue;
+                if ($token === '') {
+                    $token = $savedTokens[rtrim($url, '/')] ?? '';
+                }
                 $sources[] = ['name' => $name ?: "Server-" . ($i + 1), 'url' => $url, 'token' => $token];
             }
             FailoverService::saveRemoteDomainSources($sources);
@@ -536,11 +544,16 @@ class FailoverController
         $input = json_decode(file_get_contents('php://input'), true);
         $sources = $input['sources'] ?? [];
         $results = [];
+        // Campo vacío en una fila ya guardada: se prueba con el token guardado de esa URL.
+        $savedTokens = [];
+        foreach (FailoverService::getRemoteDomainSources() as $old) {
+            $savedTokens[rtrim((string)($old['url'] ?? ''), '/')] = (string)($old['token'] ?? '');
+        }
 
         foreach ($sources as $src) {
             $name = trim($src['name'] ?? '');
             $url  = rtrim(trim($src['url'] ?? ''), '/');
-            $token = trim($src['token'] ?? '');
+            $token = trim($src['token'] ?? '') ?: ($savedTokens[$url] ?? '');
 
             if (!$url) {
                 $results[] = ['name' => $name, 'ok' => false, 'error' => 'URL vacía', 'count' => 0];

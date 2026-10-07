@@ -1796,7 +1796,7 @@
                 </div>
 
                 <div class="d-flex gap-2 align-items-center">
-                    <button class="btn btn-outline-info btn-sm" onclick="foCheckHealth()">
+                    <button class="btn btn-outline-info btn-sm" onclick="foCheckHealth(this)">
                         <i class="bi bi-heart-pulse me-1"></i>Comprobar
                     </button>
                     <span class="small text-muted" id="fo-check-time"></span>
@@ -1823,16 +1823,20 @@
         $foFailoverNames = implode(', ', array_map(fn($s) => $s['name'] ?? $s['ip'], $foFailovers));
     ?>
     <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-lightning me-2"></i>Acciones de Failover</div>
+        <div class="card-header"><i class="bi bi-lightning me-2"></i>Acciones de emergencia</div>
         <div class="card-body">
+            <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);color:#94a3b8;">
+                <i class="bi bi-info-circle me-1" style="color:#6ea8fe;"></i>
+                <strong style="color:#6ea8fe;">¿Cambio planificado?</strong> Usa <strong>Dashboard → «Pasar el mando a…»</strong>: comprueba antes que todo está listo, aparta al que manda, promueve al otro, mueve el DNS y deja la copia en orden, con un corte de segundos. Es lo recomendado.
+            </div>
             <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.15);color:#94a3b8;">
                 <i class="bi bi-exclamation-triangle text-danger me-1"></i>
-                <strong style="color:#f87171;">Acción atómica</strong> — Cada botón ejecuta todo de golpe en un solo clic:<br>
-                <span class="ms-3">✓ DNS en Cloudflare (redirige tráfico web)</span><br>
-                <span class="ms-3">✓ Promote/Demote del cluster (BD acepta escrituras)</span><br>
-                <span class="ms-3">✓ Firewall (abre/cierra los puertos web y, si hay correo, los del correo)</span><br>
-                <span class="ms-3 text-warning">⚠ La sincronización de archivos (lsyncd) no se invierte automáticamente — revisa la pestaña Archivos tras un failover.</span><br>
-                <span style="color:#6ea8fe;">Para operaciones quirúrgicas</span> (cambiar solo la BD sin tocar DNS), usa Promote/Demote en la pestaña <strong>Estado</strong>.
+                <strong style="color:#f87171;">Estos botones son para cuando algo ya ha caído</strong> y quieres mover el tráfico a mano, sin esperar al relevo automático. Cada uno hace de golpe:<br>
+                <span class="ms-3">✓ cambia los DNS en Cloudflare hacia el servidor de relevo;</span><br>
+                <span class="ms-3">✓ promueve la copia para que sus bases de datos acepten escrituras (o la degrada, al volver);</span><br>
+                <span class="ms-3">✓ abre o cierra en el cortafuegos los puertos de las webs y, si hay correo, los del correo;</span><br>
+                <span class="ms-3">✓ la copia de ficheros (lsyncd) se gira sola: sale siempre del que manda hacia el otro.</span><br>
+                Para cambiar <strong>solo</strong> las bases de datos sin tocar el DNS: Promote/Demote en la pestaña <strong>Estado</strong>.
             </div>
             <div class="d-flex flex-wrap gap-2">
                 <?php if ($foState === 'normal'): ?>
@@ -2122,15 +2126,12 @@
     <hr class="border-secondary my-4">
     <h6 class="text-muted mb-3"><i class="bi bi-sliders me-2"></i>Ajustes</h6>
 
-    <!-- ── Configuración general ────────────────────────────── -->
+    <!-- ── Configuración (un formulario, varias tarjetas; cada "Guardar" guarda todo) ── -->
+    <form method="post" action="/settings/failover/save-config" id="form-fo-config">
+        <?= View::csrf() ?>
     <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-gear me-2"></i>Configuración Failover</div>
+        <div class="card-header"><i class="bi bi-toggles me-2"></i>Modo de operación <span class="small text-muted fw-normal">— qué hace el relevo cuando cae el que manda</span></div>
         <div class="card-body">
-            <form method="post" action="/settings/failover/save-config" id="form-fo-config">
-                <?= View::csrf() ?>
-
-                <!-- Modo de operación -->
-                <h6 class="text-muted mb-2">Modo de operación</h6>
                 <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);color:#94a3b8;">
                     <strong>Manual:</strong> si cae el servidor que manda, te avisa; tú pasas el mando con el botón del Dashboard.<br>
                     <strong>Semi-auto:</strong> si cae el que manda, el de relevo <strong>toma el mando solo</strong> y te avisa. Cuando el caído vuelve, se pone como copia y te avisa de que está listo; <strong>la vuelta la decides tú</strong>.<br>
@@ -2161,8 +2162,16 @@
                     </div>
                 </div>
 
-                <!-- DynDNS -->
-                <h6 class="text-muted mb-2 mt-3">DynDNS (solo para servidores Backup con IP dinámica)</h6>
+        </div>
+        <div class="card-footer d-flex justify-content-between align-items-center" style="background:transparent;">
+            <span class="small text-muted">Guarda toda la configuración de failover y la copia a los nodos.</span>
+            <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-check-circle me-1"></i>Guardar</button>
+        </div>
+    </div>
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-globe2 me-2"></i>DNS <span class="small text-muted fw-normal">— TTL de Cloudflare y DynDNS</span></div>
+        <div class="card-body">
+                <h6 class="text-muted mb-2">DynDNS (solo para servidores Backup con IP dinámica)</h6>
                 <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);color:#94a3b8;">
                     Si tienes un servidor Backup con IP dinámica (ej: conexión doméstica), configura aquí el proveedor DynDNS para que el sistema siempre sepa su IP actual.
                     Si todos tus servidores tienen IP fija, déjalo en "Ninguno".
@@ -2219,8 +2228,16 @@
                     </div>
                 </div>
 
-                <!-- Health Checks -->
-                <h6 class="text-muted mb-2 mt-3">Health Checks</h6>
+        </div>
+        <div class="card-footer d-flex justify-content-between align-items-center" style="background:transparent;">
+            <span class="small text-muted">Guarda toda la configuración de failover y la copia a los nodos.</span>
+            <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-check-circle me-1"></i>Guardar</button>
+        </div>
+    </div>
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-heart-pulse me-2"></i>Detección de caídas <span class="small text-muted fw-normal">— cuándo se da un servidor por caído y comprobaciones del mismo sitio</span></div>
+        <div class="card-body">
+                <h6 class="text-muted mb-2">Comprobaciones de salud</h6>
                 <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);color:#94a3b8;">
                     El worker (cron cada minuto) llama a <code>/api/health</code> en cada servidor.
                     Para evitar falsos positivos, un servidor no se marca como caído hasta que falle N veces seguidas.
@@ -2285,8 +2302,20 @@
                     </div>
                 </div>
 
-                <!-- Umbrales de Severidad -->
-                <h6 class="text-muted mb-2 mt-3">Umbrales de disco y carga</h6>
+        </div>
+        <div class="card-footer d-flex justify-content-between align-items-center" style="background:transparent;">
+            <span class="small text-muted">Guarda toda la configuración de failover y la copia a los nodos.</span>
+            <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-check-circle me-1"></i>Guardar</button>
+        </div>
+    </div>
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center" role="button" data-bs-toggle="collapse" data-bs-target="#fo-adv-thresholds" aria-expanded="false" aria-controls="fo-adv-thresholds" style="cursor:pointer;">
+            <span><i class="bi bi-speedometer2 me-2"></i>Umbrales y severidad <span class="small text-muted fw-normal">— avanzado: disco, carga y qué servicios disparan el relevo</span></span>
+            <i class="bi bi-chevron-down text-muted"></i>
+        </div>
+        <div class="collapse" id="fo-adv-thresholds">
+        <div class="card-body">
+                <h6 class="text-muted mb-2">Umbrales de disco y carga</h6>
                 <div class="small mb-3 py-2 px-3 rounded" style="background:rgba(13,110,253,0.08);border:1px solid rgba(13,110,253,0.15);color:#94a3b8;">
                     <span class="badge bg-danger">Critical</span> = dispara failover (tras N checks consecutivos).
                     <span class="badge bg-warning text-dark">Warning</span> = solo notifica al admin, NO dispara failover.
@@ -2390,9 +2419,21 @@
                     </div>
                 </div>
 
-                <h6 class="text-muted mb-2 mt-3">
-                    <i class="bi bi-ethernet me-1"></i>Detección de interfaces de red (self-check local)
-                </h6>
+        </div>
+        <div class="card-footer d-flex justify-content-between align-items-center" style="background:transparent;">
+            <span class="small text-muted">Guarda toda la configuración de failover y la copia a los nodos.</span>
+            <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-check-circle me-1"></i>Guardar</button>
+        </div>
+        </div>
+    </div>
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center" role="button" data-bs-toggle="collapse" data-bs-target="#fo-adv-ifaces" aria-expanded="false" aria-controls="fo-adv-ifaces" style="cursor:pointer;">
+            <span><i class="bi bi-ethernet me-2"></i>Dos líneas de Internet en este servidor <span class="small text-muted fw-normal">— avanzado: solo si este servidor tiene línea principal y de reserva</span></span>
+            <i class="bi bi-chevron-down text-muted"></i>
+        </div>
+        <div class="collapse" id="fo-adv-ifaces">
+        <div class="card-body">
+                <h6 class="text-muted mb-2">Detección de interfaces de red</h6>
                 <div class="small mb-2" style="background:rgba(13,110,253,0.08);border-radius:6px;padding:10px 14px;color:#94a3b8;">
                     <i class="bi bi-info-circle me-1"></i>
                     <strong>Solo para slaves con dos ISPs.</strong>
@@ -2473,7 +2514,7 @@
                                     <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Normal</span>
                                 <?php endif; ?>
                             </span>
-                            <button type="button" class="btn btn-outline-info btn-sm" onclick="foTestIfaces()" title="Verificar interfaces ahora">
+                            <button type="button" class="btn btn-outline-info btn-sm" onclick="foTestIfaces(this)" title="Verificar interfaces ahora">
                                 <i class="bi bi-arrow-repeat"></i> Test
                             </button>
                         </div>
@@ -2481,7 +2522,21 @@
                 </div>
                 <div id="fo-iface-test-result" class="small mb-3" style="display:none;"></div>
 
-                <h6 class="text-muted mb-2 mt-3">caddy-l4 (modo emergencia)</h6>
+        </div>
+        <div class="card-footer d-flex justify-content-between align-items-center" style="background:transparent;">
+            <span class="small text-muted">Guarda toda la configuración de failover y la copia a los nodos.</span>
+            <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-check-circle me-1"></i>Guardar</button>
+        </div>
+        </div>
+    </div>
+    <div class="card mb-3">
+        <div class="card-header d-flex justify-content-between align-items-center" role="button" data-bs-toggle="collapse" data-bs-target="#fo-adv-l4" aria-expanded="false" aria-controls="fo-adv-l4" style="cursor:pointer;">
+            <span><i class="bi bi-radioactive me-2"></i>Emergencia con caddy-l4 <span class="small text-muted fw-normal">— avanzado: último recurso con un servidor Backup</span></span>
+            <i class="bi bi-chevron-down text-muted"></i>
+        </div>
+        <div class="collapse" id="fo-adv-l4">
+        <div class="card-body">
+                <h6 class="text-muted mb-2">caddy-l4</h6>
                 <div class="row g-2 mb-3">
                     <div class="col-md-4">
                         <label class="form-label small">Binario caddy-l4</label>
@@ -2533,7 +2588,10 @@
                             <tr>
                                 <td><input type="text" name="rds_name[]" class="form-control form-control-sm" value="<?= View::e($rs['name'] ?? '') ?>" placeholder="Server-2"></td>
                                 <td><input type="text" name="rds_url[]" class="form-control form-control-sm font-monospace" value="<?= View::e($rs['url'] ?? '') ?>" placeholder="https://192.168.2.155:8444"></td>
-                                <td><input type="password" name="rds_token[]" class="form-control form-control-sm font-monospace" value="<?= View::e($rs['token'] ?? '') ?>" placeholder="token del servidor remoto"></td>
+                                <?php /* El token no se envía a la página: vacío = conservar el guardado para esa URL. */ ?>
+                                <td><input type="text" name="rds_token[]" class="form-control form-control-sm font-monospace" value="" autocomplete="off" spellcheck="false"
+                                           data-lpignore="true" data-1p-ignore style="-webkit-text-security:disc;text-security:disc;"
+                                           placeholder="<?= !empty($rs['token']) ? '•••••• guardado — vacío para conservarlo' : 'token del servidor remoto' ?>"></td>
                                 <td class="text-center">
                                     <?php
                                         $cacheKey = 'failover_remote_domains_cache_' . md5($rs['url'] ?? '');
@@ -2554,7 +2612,7 @@
                     <button type="button" class="btn btn-outline-secondary btn-sm" onclick="foAddRemoteSource()">
                         <i class="bi bi-plus-circle me-1"></i>Añadir servidor remoto
                     </button>
-                    <button type="button" class="btn btn-outline-info btn-sm ms-2" onclick="foTestRemoteSources()">
+                    <button type="button" class="btn btn-outline-info btn-sm ms-2" onclick="foTestRemoteSources(this)">
                         <i class="bi bi-arrow-repeat me-1"></i>Probar conexión
                     </button>
                     <span id="fo-remote-test-result" class="small ms-2"></span>
@@ -2566,19 +2624,21 @@
                           style="color:#94a3b8;"><?= View::e(\MuseDockPanel\Settings::get('failover_remote_domains', '')) ?></textarea>
                 <div class="form-text mb-2" style="color:#6b7280;">Los dominios manuales se combinan con los automáticos. Usa esto si un servidor no tiene panel o como fallback.</div>
 
-                <button type="submit" class="btn btn-success btn-sm">
-                    <i class="bi bi-check-circle me-1"></i>Guardar Configuración
-                </button>
-            </form>
+        </div>
+        <div class="card-footer d-flex justify-content-between align-items-center" style="background:transparent;">
+            <span class="small text-muted">Guarda toda la configuración de failover y la copia a los nodos.</span>
+            <button type="submit" class="btn btn-success btn-sm"><i class="bi bi-check-circle me-1"></i>Guardar</button>
+        </div>
         </div>
     </div>
+    </form>
 
     <!-- ── Preview caddy-l4 ─────────────────────────────────── -->
     <?php if ($foConfigured): ?>
     <div class="card mb-3">
         <div class="card-header d-flex justify-content-between align-items-center">
             <span><i class="bi bi-filetype-json me-2"></i>caddy-l4 Config Preview</span>
-            <button type="button" class="btn btn-outline-info btn-sm" onclick="foPreviewCaddyL4()">
+            <button type="button" class="btn btn-outline-info btn-sm" onclick="foPreviewCaddyL4(this)">
                 <i class="bi bi-eye me-1"></i>Generar preview
             </button>
         </div>
@@ -2596,12 +2656,32 @@
 
 <!-- ── Failover JS ──────────────────────────────────────────── -->
 <script>
-function foCheckHealth() {
+// Botón ocupado: spinner + desactivado mientras trabaja; al terminar vuelve como estaba.
+function foBusy(btn, busy) {
+    if (!btn) return;
+    if (busy) {
+        if (btn.dataset.foHtml === undefined) btn.dataset.foHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1" role="status"></span>' + (btn.textContent.trim() || '');
+    } else {
+        btn.disabled = false;
+        if (btn.dataset.foHtml !== undefined) { btn.innerHTML = btn.dataset.foHtml; delete btn.dataset.foHtml; }
+    }
+}
+function foJson(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status + (r.status === 403 ? ' (sesión caducada o sin permiso: recarga la página)' : ''));
+    return r.json();
+}
+function foEsc(t) { const d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; }
+
+function foCheckHealth(btn) {
+    foBusy(btn, true);
+    const when = document.getElementById('fo-check-time');
     document.querySelectorAll('.fo-badge').forEach(b => { b.textContent = '...'; b.className = 'badge bg-secondary fo-badge'; });
-    fetch('/settings/failover/check-health')
-        .then(r => r.json())
+    fetch('/settings/failover/check-health', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(foJson)
         .then(data => {
-            if (!data.ok) return;
+            if (!data.ok) { if (when) when.innerHTML = '<span class="text-danger">' + foEsc(data.error || 'No se pudo comprobar') + '</span>'; return; }
             for (const [key, check] of Object.entries(data.checks)) {
                 const badge = document.querySelector(`.fo-badge[data-key="${key}"]`);
                 const ms = document.querySelector(`.fo-ms[data-key="${key}"]`);
@@ -2611,7 +2691,7 @@ function foCheckHealth() {
                 }
                 if (ms) ms.textContent = check.ok ? `${check.ms}ms` : (check.error || 'Sin respuesta');
             }
-            document.getElementById('fo-check-time').textContent = 'Comprobado: ' + new Date().toLocaleTimeString();
+            if (when) when.textContent = 'Comprobado: ' + new Date().toLocaleTimeString();
 
             if (data.mismatch) {
                 const labels = {normal:'Normal',degraded:'Degradado',primary_down:'Primarios caídos',emergency:'Emergencia'};
@@ -2621,7 +2701,8 @@ function foCheckHealth() {
                 el.querySelector('pre').textContent = msg;
             }
         })
-        .catch(e => console.error('Health check error:', e));
+        .catch(e => { if (when) when.innerHTML = '<span class="text-danger">Error: ' + foEsc(e.message) + '</span>'; })
+        .finally(() => foBusy(btn, false));
 }
 
 function foExecute(action, description) {
@@ -2738,6 +2819,7 @@ function foVerifyCfToken(btn) {
     const tokenInput = row.querySelector('.cf-token-input');
     const info = row.querySelector('.cf-zone-info');
     info.textContent = 'Verificando...';
+    foBusy(btn, true);
 
     const fd = new FormData();
     fd.append('token', tokenInput.value);
@@ -2745,29 +2827,34 @@ function foVerifyCfToken(btn) {
     fd.append('existing', row.querySelector('input[name="cf_existing[]"]')?.value || '');
     fd.append('_csrf_token', document.querySelector('input[name="_csrf_token"]')?.value || '');
 
-    fetch('/settings/failover/verify-cf-token', { method: 'POST', body: fd })
-        .then(r => r.json())
+    fetch('/settings/failover/verify-cf-token', { method: 'POST', body: fd, headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(foJson)
         .then(data => {
             if (data.ok) {
-                info.innerHTML = `<span class="text-success">${data.zones.length} zona(s): ${data.zones.map(z=>z.name).join(', ')}</span>`;
+                info.innerHTML = `<span class="text-success">${data.zones.length} zona(s): ${foEsc(data.zones.map(z=>z.name).join(', '))}</span>`;
             } else {
-                info.innerHTML = `<span class="text-danger">${data.error}</span>`;
+                info.innerHTML = `<span class="text-danger">${foEsc(data.error || 'Token no válido')}</span>`;
             }
         })
-        .catch(e => { info.innerHTML = `<span class="text-danger">Error: ${e.message}</span>`; });
+        .catch(e => { info.innerHTML = `<span class="text-danger">Error: ${foEsc(e.message)}</span>`; })
+        .finally(() => foBusy(btn, false));
 }
 
-function foPreviewCaddyL4() {
+function foPreviewCaddyL4(btn) {
     const el = document.getElementById('fo-caddy-preview');
     el.style.display = 'block';
-    document.getElementById('fo-caddy-json').textContent = 'Generando...';
-    fetch('/settings/failover/caddy-l4-preview')
-        .then(r => r.json())
+    const out = document.getElementById('fo-caddy-json');
+    out.textContent = 'Generando...';
+    foBusy(btn, true);
+    fetch('/settings/failover/caddy-l4-preview', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(foJson)
         .then(data => {
-            document.getElementById('fo-caddy-json').textContent = data.config || 'Error';
+            out.textContent = data.config || ('Error: ' + (data.error || 'sin configuración'));
             document.getElementById('fo-local-count').textContent = data.local || 0;
             document.getElementById('fo-remote-count').textContent = data.remote || 0;
-        });
+        })
+        .catch(e => { out.textContent = 'Error: ' + e.message; })
+        .finally(() => foBusy(btn, false));
 }
 
 function foAddServer() {
@@ -2947,14 +3034,15 @@ function foIfaceChanged(sel, ipFieldId) {
 }
 
 // Test interfaces via AJAX
-function foTestIfaces() {
+function foTestIfaces(btn) {
     const resultDiv = document.getElementById('fo-iface-test-result');
     const badge = document.getElementById('fo-iface-status-badge');
     resultDiv.style.display = 'block';
-    resultDiv.innerHTML = '<span class="text-muted"><i class="bi bi-arrow-repeat spin me-1"></i>Verificando interfaces...</span>';
+    resultDiv.innerHTML = '<span class="text-muted">Verificando interfaces...</span>';
+    foBusy(btn, true);
 
-    fetch('/settings/failover/test-ifaces')
-        .then(r => r.json())
+    fetch('/settings/failover/test-ifaces', { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        .then(foJson)
         .then(data => {
             let html = '';
 
@@ -2993,8 +3081,9 @@ function foTestIfaces() {
             }
         })
         .catch(err => {
-            resultDiv.innerHTML = `<span style="color:#ef4444;">Error: ${err.message}</span>`;
-        });
+            resultDiv.innerHTML = `<span style="color:#ef4444;">Error: ${foEsc(err.message)}</span>`;
+        })
+        .finally(() => foBusy(btn, false));
 }
 
 function foAddRemoteSource() {
@@ -3008,14 +3097,15 @@ function foAddRemoteSource() {
     document.getElementById('fo-remote-sources-body').insertAdjacentHTML('beforeend', html);
 }
 
-function foTestRemoteSources() {
+function foTestRemoteSources(btn) {
     const result = document.getElementById('fo-remote-test-result');
     const rows = document.querySelectorAll('#fo-remote-sources-body tr');
     if (!rows.length) {
-        result.innerHTML = '<span style="color:#94a3b8;">No hay servidores remotos configurados.</span>';
+        result.innerHTML = '<span class="text-warning"><i class="bi bi-info-circle me-1"></i>No hay servidores remotos: pulsa «Añadir servidor remoto» primero (solo hace falta para el modo emergencia con caddy-l4).</span>';
         return;
     }
-    result.innerHTML = '<span class="text-muted"><i class="bi bi-arrow-repeat spin me-1"></i>Probando...</span>';
+    result.innerHTML = '<span class="text-muted">Probando...</span>';
+    foBusy(btn, true);
 
     const sources = [];
     rows.forEach(row => {
@@ -3033,15 +3123,16 @@ function foTestRemoteSources() {
                   'X-CSRF-Token': (document.querySelector('input[name=_csrf_token]') || {}).value || ''},
         body: JSON.stringify({sources})
     })
-    .then(r => r.json())
+    .then(foJson)
     .then(data => {
-        if (data.results) {
+        if (!data.results) { result.innerHTML = '<span style="color:#ef4444;">' + foEsc(data.error || 'Sin respuesta') + '</span>'; return; }
+        {
             let html = '';
             const badges = document.querySelectorAll('#fo-remote-sources-body tr td:nth-child(4) .badge');
             data.results.forEach((r, i) => {
                 const icon = r.ok ? '✓' : '✗';
                 const color = r.ok ? '#22c55e' : '#ef4444';
-                html += `<span style="color:${color}" class="me-2">${icon} ${r.name}: ${r.ok ? r.count + ' dominios' : r.error}</span>`;
+                html += `<span style="color:${color}" class="me-2">${icon} ${foEsc(r.name)}: ${r.ok ? r.count + ' dominios' : foEsc(r.error)}</span>`;
                 if (badges[i]) {
                     badges[i].className = r.ok ? 'badge bg-success' : 'badge bg-danger';
                     badges[i].textContent = r.ok ? r.count : '✗';
@@ -3051,8 +3142,9 @@ function foTestRemoteSources() {
         }
     })
     .catch(err => {
-        result.innerHTML = `<span style="color:#ef4444;">Error: ${err.message}</span>`;
-    });
+        result.innerHTML = `<span style="color:#ef4444;">Error: ${foEsc(err.message)}</span>`;
+    })
+    .finally(() => foBusy(btn, false));
 }
 </script>
 

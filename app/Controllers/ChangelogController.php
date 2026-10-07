@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.337',
+                'date' => '2026-10-07',
+                'badge' => 'warning',
+                'changes' => [
+                    'changed' => [
+                        'es' => ['Configuracion de Failover en tarjetas separadas con su Guardar (modo, DNS, deteccion de caidas; avanzadas plegadas)', 'Acciones de emergencia explicadas: para un cambio planificado, Pasar el mando a...; se quita el aviso obsoleto de lsyncd'],
+                        'en' => ['Failover settings split into separate cards with their own Save (mode, DNS, failure detection; advanced ones collapsed)', 'Emergency actions explained: for a planned switch use Hand over to...; removed outdated lsyncd warning'],
+                    ],
+                    'fixed' => [
+                        'es' => ['Botones de la pantalla de Failover con spinner y mensaje de error en vez de quedarse en silencio', 'El token de los servidores remotos de caddy-l4 ya no se envia a la pagina'],
+                        'en' => ['Failover page buttons show a spinner and an error message instead of failing silently', 'caddy-l4 remote source tokens are no longer sent to the page'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.336',
                 'date' => '2026-10-06',
                 'badge' => 'info',
