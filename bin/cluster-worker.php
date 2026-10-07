@@ -380,6 +380,14 @@ try {
     if ($px !== '') {
         logMsg('Correo: ' . $px);
     }
+    $or = \MuseDockPanel\Services\MailOutboundRelayService::ensure();
+    if (!empty($or['changed']) || !empty($or['error'])) {
+        logMsg('Relé de salida: ' . ($or['message'] ?? $or['error'] ?? ''));
+    }
+    $pc = \MuseDockPanel\Services\MailService::ensureProxiedClientListeners();
+    if ($pc !== '') {
+        logMsg('Correo: ' . $pc);
+    }
     $rl = \MuseDockPanel\Services\MailService::ensureRelayLocalSubmission();
     if ($rl !== '') {
         logMsg('Relay privado: ' . $rl);

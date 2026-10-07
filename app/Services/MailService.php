@@ -2587,9 +2587,8 @@ class MailService
         if (!preg_match('/^smtp\s+inet\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+smtpd\b/m', $master)) {
             return '';
         }
-        $fw = self::ensureProxiedSmtpFirewall();
         if (preg_match('/^' . preg_quote("{$vpnIp}:{$port}", '/') . '\s+inet/m', $master)) {
-            return $fw;
+            return '';
         }
         // Si cambió la IP de la VPN, quitar el bloque viejo (solo el nuestro, marcado).
         $master = (string)preg_replace('/\n# musedock: entrada SMTP por proxy[^\n]*\n[^\n]+\n?(?:[ \t]+[^\n]*\n?)*/', "\n", $master);
@@ -2614,52 +2613,170 @@ class MailService
             shell_exec('postfix reload 2>&1');
         }
         LogService::log('mail.proxied-smtp', 'added', "Entrada SMTP por proxy en {$vpnIp}:{$port}");
-        return trim("entrada SMTP por proxy en {$vpnIp}:{$port} añadida. {$fw}");
+        return "entrada SMTP por proxy en {$vpnIp}:{$port} añadida";
     }
 
+    /** Puertos (solo VPN, con PROXY protocol) de los programas de correo detrás de un proxy. */
+    public const PROXIED_CLIENT_PORTS = ['submission' => 10587, 'smtps' => 10465, 'imaps' => 10993];
+
     /**
-     * Cortafuegos de la entrada SMTP por proxy: abierta solo para la red de la VPN (el
-     * proxy está en ella; desde fuera ni se ve, escucha en la IP de la VPN). Se comprueba
-     * una vez por red y se apunta, para no consultar el cortafuegos cada minuto.
+     * Cortafuegos de las entradas por proxy: abiertas solo para la red de la VPN (el proxy
+     * está en ella; desde fuera ni se ven, escuchan en la IP de la VPN). Se comprueba una
+     * vez por red y puertos y se apunta, para no consultar el cortafuegos cada minuto.
      */
-    private static function ensureProxiedSmtpFirewall(): string
+    private static function ensureProxiedFirewall(array $ports): string
     {
         $cidr = WireGuardService::vpnCidr();
-        $port = (string)self::PROXIED_SMTP_PORT;
-        if ($cidr === '' || Settings::get('mail_proxied_smtp_fw', '') === $cidr) {
+        $ports = array_values(array_unique(array_map('intval', $ports)));
+        sort($ports);
+        $key = $cidr . '|' . implode(',', $ports);
+        if ($cidr === '' || !$ports || Settings::get('mail_proxied_fw', '') === $key) {
             return '';
         }
         $type = FirewallService::getType();
-        $done = false;
-        if ($type === 'ufw') {
-            $have = false;
-            foreach (FirewallService::ufwGetRules() as $r) {
-                $txt = strtolower(json_encode($r));
-                if (str_contains($txt, $port) && str_contains($txt, strtolower($cidr))) {
-                    $have = true;
-                    break;
+        $rules = $type === 'ufw' ? FirewallService::ufwGetRules() : [];
+        $failed = [];
+        foreach ($ports as $port) {
+            $done = false;
+            if ($type === 'ufw') {
+                foreach ($rules as $r) {
+                    if (preg_match('#^' . $port . '(/tcp)?$#', trim((string)($r['to'] ?? ''))) && str_contains((string)($r['from'] ?? ''), $cidr)) {
+                        $done = true;
+                        break;
+                    }
+                }
+                if (!$done) {
+                    $add = FirewallService::ufwAddRule('allow', $cidr, (string)$port, 'tcp', 'musedock: correo por proxy (VPN)');
+                    $done = !empty($add['ok']) || stripos((string)($add['output'] ?? ''), 'existing rule') !== false;
+                }
+            } elseif ($type === 'iptables') {
+                $rule = '-s ' . escapeshellarg($cidr) . ' -p tcp --dport ' . $port . ' -j ACCEPT';
+                exec("iptables -C INPUT {$rule} 2>/dev/null", $o, $rc);
+                if ($rc !== 0) {
+                    exec("iptables -I INPUT 1 {$rule} 2>&1", $o, $rc);
+                    if ($rc === 0) {
+                        FirewallService::iptablesSave();
+                    }
+                }
+                $done = $rc === 0;
+            } else {
+                $done = true;   // sin cortafuegos gestionado: nada que abrir
+            }
+            if (!$done) {
+                $failed[] = $port;
+            }
+        }
+        if ($failed) {
+            return 'no se pudo abrir en el cortafuegos: ' . implode(', ', $failed) . " a {$cidr}";
+        }
+        Settings::set('mail_proxied_fw', $key);
+        LogService::log('mail.proxied', 'firewall', 'Puertos ' . implode(', ', $ports) . " abiertos a {$cidr}");
+        return 'puertos ' . implode(', ', $ports) . " abiertos a la VPN ({$cidr})";
+    }
+
+    /**
+     * Programas de correo (IMAP, envío) por una línea alternativa detrás de un proxy TCP con
+     * PROXY protocol, como el 2525 para el correo entrante: Postfix escucha en
+     * <IP VPN>:10587 y :10465 con las MISMAS opciones que su submission y smtps (usuario y
+     * contraseña obligatorios, TLS…) y Dovecot en <IP VPN>:10993 (IMAP con TLS). Así ven
+     * la IP real del programa: la protección contra contraseñas erróneas bloquea a quien
+     * toca y no al proxy, y nadie envía sin contraseña por venir de la VPN.
+     * Solo en la IP de la VPN; postfix check / doveconf antes de recargar, y marcha atrás
+     * si falla. Idempotente. Devuelve lo hecho ('' si nada).
+     */
+    public static function ensureProxiedClientListeners(): string
+    {
+        $vpnIp = WireGuardService::vpnIp();
+        $cidr = WireGuardService::vpnCidr();
+        if ($vpnIp === '' || $cidr === '') {
+            return '';
+        }
+        $done = [];
+        $ports = [];
+
+        // ── Postfix: copia de submission/smtps con la cabecera del proxy ──
+        $masterCf = '/etc/postfix/master.cf';
+        if (is_file($masterCf)) {
+            $orig = (string)file_get_contents($masterCf);
+            $master = $orig;
+            foreach (['submission', 'smtps'] as $svc) {
+                $port = self::PROXIED_CLIENT_PORTS[$svc];
+                if (!preg_match('/^' . $svc . '\s+inet\s[^\n]*\n(?:[ \t]+[^\n]*\n?)*/m', $master, $m)) {
+                    continue;   // este nodo no tiene ese servicio (p. ej. un relay)
+                }
+                $ports[] = $port;
+                if (preg_match('/^' . preg_quote("{$vpnIp}:{$port}", '/') . '\s+inet/m', $master)) {
+                    continue;
+                }
+                // IP de la VPN cambiada: quitar el bloque viejo (solo el nuestro, marcado).
+                $master = (string)preg_replace('/\n# musedock: ' . $svc . ' por proxy[^\n]*\n[^\n]+\n?(?:[ \t]+[^\n]*\n?)*/', "\n", $master);
+                $block = preg_replace('/^' . $svc . '(\s+inet)/', "{$vpnIp}:{$port}\$1", rtrim($m[0], "\n"));
+                $block = preg_replace('/syslog_name=(\S+)/', 'syslog_name=$1-proxied', $block, 1, $hasName);
+                if (!$hasName) {
+                    $block .= "\n  -o syslog_name=postfix/{$svc}-proxied";
+                }
+                $block .= "\n  -o smtpd_upstream_proxy_protocol=haproxy";
+                $master = rtrim($master, "\n") . "\n\n# musedock: {$svc} por proxy (PROXY protocol), solo VPN\n{$block}\n";
+                $done[] = "{$svc} en {$vpnIp}:{$port}";
+            }
+            if ($master !== $orig) {
+                $backup = $masterCf . '.bak-' . date('Ymd-His');
+                if (!@copy($masterCf, $backup) || file_put_contents($masterCf, $master) === false) {
+                    return 'no se pudo escribir master.cf: no se toca';
+                }
+                exec('postfix check 2>&1', $out, $rc);
+                if ($rc !== 0) {
+                    @copy($backup, $masterCf);
+                    LogService::log('mail.proxied', 'rollback', 'postfix check falló, master.cf restaurado: ' . implode(' ', $out));
+                    return 'postfix check falló: master.cf restaurado';
+                }
+                if (trim((string)shell_exec('systemctl is-active postfix 2>/dev/null')) === 'active') {
+                    shell_exec('postfix reload 2>&1');
                 }
             }
-            $done = $have || !empty(FirewallService::ufwAddRule('allow', $cidr, $port, 'tcp', 'musedock: SMTP por proxy (VPN)')['ok']);
-        } elseif ($type === 'iptables') {
-            $rule = '-s ' . escapeshellarg($cidr) . ' -p tcp --dport ' . $port . ' -j ACCEPT';
-            exec("iptables -C INPUT {$rule} 2>/dev/null", $o, $rc);
-            if ($rc !== 0) {
-                exec("iptables -I INPUT 1 {$rule} 2>&1", $o, $rc);
-                if ($rc === 0) {
-                    FirewallService::iptablesSave();
+        }
+
+        // ── Dovecot: IMAP con TLS y la cabecera del proxy ──
+        $dovecotConf = '/etc/dovecot/conf.d/11-musedock-proxied.conf';
+        if (is_dir('/etc/dovecot/conf.d') && str_contains((string)shell_exec('doveconf -h protocols 2>/dev/null'), 'imap')) {
+            $port = self::PROXIED_CLIENT_PORTS['imaps'];
+            $ports[] = $port;
+            $want = "# musedock: IMAP por proxy (PROXY protocol), solo VPN. Lo gestiona el panel.\n"
+                . "haproxy_trusted_networks = {$cidr}\n"
+                . "service imap-login {\n  inet_listener imaps_proxied {\n    address = {$vpnIp}\n    port = {$port}\n    ssl = yes\n    haproxy = yes\n  }\n}\n";
+            if ((string)@file_get_contents($dovecotConf) !== $want) {
+                $prev = is_file($dovecotConf) ? (string)file_get_contents($dovecotConf) : null;
+                if (file_put_contents($dovecotConf, $want) === false) {
+                    return trim(implode('; ', $done) . '; no se pudo escribir la configuración de Dovecot', '; ');
                 }
+                exec('doveconf -n >/dev/null 2>&1', $o, $rc);
+                if ($rc !== 0) {
+                    $prev === null ? @unlink($dovecotConf) : file_put_contents($dovecotConf, $prev);
+                    LogService::log('mail.proxied', 'rollback', 'doveconf falló con la escucha IMAP por proxy: deshecho');
+                    return trim(implode('; ', $done) . '; Dovecot no aceptó la escucha IMAP por proxy: deshecho', '; ');
+                }
+                if (trim((string)shell_exec('systemctl is-active dovecot 2>/dev/null')) === 'active') {
+                    shell_exec('doveadm reload 2>&1');
+                }
+                $done[] = "IMAP en {$vpnIp}:{$port}";
             }
-            $done = $rc === 0;
-        } else {
-            $done = true;   // sin cortafuegos gestionado: nada que abrir
         }
-        if (!$done) {
-            return "no se pudo abrir el puerto {$port} a {$cidr} en el cortafuegos";
+
+        if (self::isProxiedSmtpWanted()) {
+            $ports[] = self::PROXIED_SMTP_PORT;
         }
-        Settings::set('mail_proxied_smtp_fw', $cidr);
-        LogService::log('mail.proxied-smtp', 'firewall', "Puerto {$port} abierto a {$cidr}");
-        return "puerto {$port} abierto a la VPN ({$cidr})";
+        $fw = self::ensureProxiedFirewall($ports);
+        if ($done) {
+            LogService::log('mail.proxied', 'added', 'Programas de correo por proxy: ' . implode(', ', $done));
+        }
+        return trim(($done ? 'programas de correo por proxy: ' . implode(', ', $done) . '. ' : '') . $fw);
+    }
+
+    /** ¿Este nodo recibe correo (escucha en el 25)? Entonces lleva la entrada por proxy 2525. */
+    private static function isProxiedSmtpWanted(): bool
+    {
+        $master = (string)@file_get_contents('/etc/postfix/master.cf');
+        return (bool)preg_match('/^smtp\s+inet\s+\S+\s+\S+\s+\S+\s+\S+\s+\S+\s+smtpd\b/m', $master);
     }
 
     /**

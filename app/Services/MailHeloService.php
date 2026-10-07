@@ -48,7 +48,7 @@ class MailHeloService
         if ($ptr === $ip) {
             $ptr = '';
         }
-        $back = $ptr !== '' && in_array($ip, gethostbynamel($ptr) ?: [], true);
+        $back = $ptr !== '' && in_array($ip, self::publicA($ptr), true);
         $helo = self::postfixInstalled() ? trim((string)@shell_exec('/usr/sbin/postconf -h smtp_helo_name 2>/dev/null')) : '';
         if ($helo === '$myhostname' || $helo === '') {
             $helo = self::postfixInstalled() ? trim((string)@shell_exec('/usr/sbin/postconf -h myhostname 2>/dev/null')) : '';
@@ -58,13 +58,37 @@ class MailHeloService
         $advice = match (true) {
             $ip === '' => 'No se pudo saber la IP de salida de este servidor.',
             $ptr === '' => "La IP {$ip} no tiene DNS inverso: pídelo a tu proveedor (en Contabo y similares se pone en su panel).",
-            !$back => "El DNS inverso de {$ip} es {$ptr}, pero {$ptr} apunta a " . (implode(', ', gethostbynamel($ptr) ?: []) ?: 'ninguna IP')
+            !$back => "El DNS inverso de {$ip} es {$ptr}, pero {$ptr} apunta a " . (implode(', ', self::publicA($ptr)) ?: 'ninguna IP')
                 . ". Si ese nombre se mueve en un relevo (como el del correo), usa uno fijo solo para esta IP (p. ej. "
                 . self::suggest($ip) . "): registro A → {$ip} sin proxy, pide ese DNS inverso a tu proveedor y ponlo aquí como nombre de envío.",
             !$match => "Postfix se presenta como {$helo} y el DNS inverso es {$ptr}: pon {$ptr} como nombre de envío.",
             default => 'Todo cuadra: IP, DNS inverso y nombre de envío.',
         };
         return ['ip' => $ip, 'ptr' => $ptr, 'ptr_points_back' => $back, 'helo' => $helo, 'helo_matches' => $match, 'ok' => $ok, 'advice' => $advice];
+    }
+
+    /**
+     * IPs del registro A de un nombre según el DNS (no /etc/hosts: ahí el nombre de la
+     * propia máquina apunta a 127.0.1.1 y el DNS inverso parecía no cuadrar nunca).
+     */
+    private static function publicA(string $name): array
+    {
+        // Un DNS público directamente: el del sistema (systemd-resolved) también lee /etc/hosts.
+        foreach (['1.1.1.1', '8.8.8.8'] as $ns) {
+            $out = (string)@shell_exec('dig +short +time=3 +tries=1 @' . $ns . ' A ' . escapeshellarg($name) . ' 2>/dev/null');
+            $ips = array_values(array_filter(array_map('trim', explode("\n", $out)),
+                static fn($x) => (bool)filter_var($x, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4)));
+            if ($ips) {
+                return $ips;
+            }
+        }
+        $ips = [];
+        foreach (@dns_get_record($name, DNS_A) ?: [] as $r) {
+            if (!empty($r['ip']) && !str_starts_with((string)$r['ip'], '127.')) {
+                $ips[] = (string)$r['ip'];
+            }
+        }
+        return $ips;
     }
 
     /** Nombre fijo sugerido para una IP: último número de la IP + dominio del nombre del correo. */

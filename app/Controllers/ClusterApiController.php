@@ -616,6 +616,8 @@ class ClusterApiController
                 'portal-sync-now' => \MuseDockPanel\Services\PortalService::pullFromMaster(),
                 // Avisos del master copiados a este nodo (notify_configure copy_to_nodes).
                 'set-notify-config' => \MuseDockPanel\Services\NotificationService::importConfig($payload),
+                // Relé de salida del correo copiado del master (cada nodo decide si lo usa).
+                'set-outbound-relay' => \MuseDockPanel\Services\MailOutboundRelayService::importConfig($payload),
                 'set-alert-policy' => \MuseDockPanel\Services\AlertPolicyService::import($payload),
                 'set-alert-policy-master' => \MuseDockPanel\Services\AlertPolicyService::importFromNode($payload),
                 // Inventario de este nodo (solo lectura) para que el master compare

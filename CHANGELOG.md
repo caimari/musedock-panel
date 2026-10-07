@@ -2,12 +2,20 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.349] — 2026-10-07 — Relé de salida y programas de correo por la línea alternativa
+
+### Añadido
+- **Programas de correo (Outlook, el móvil) también por la entrada alternativa.** Igual que el 2525 para el correo entrante: Postfix escucha en `<IP VPN>:10587` y `:10465`, con las mismas opciones que su submission y smtps (usuario y contraseña obligatorios, TLS), y Dovecot en `<IP VPN>:10993` (IMAP con TLS), todos con PROXY protocol. Así un proxy TCP puede llevar 587, 465 y 993 de otra línea, y el servidor ve la IP real del programa: la protección contra contraseñas erróneas bloquea a quien toca y no al proxy, y nadie envía sin contraseña por venir de la VPN. Solo en la IP de la VPN, con el cortafuegos abierto solo a la red de la VPN; `postfix check` y `doveconf` antes de recargar, y marcha atrás si fallan.
+- **Relé de salida (Correo → Antispam).** El correo que envía el servidor (webmail, programas de correo, webs) puede entregarse a otro servidor que lo manda por él (relayhost de Postfix), de forma transparente para los usuarios; la firma DKIM la sigue poniendo el servidor. Varios relés en orden: el primero es el principal y los demás, reserva si no responde. Cada relé con servidor, puerto, usuario y contraseña opcionales (cifrada) y TLS. Vale igual para un servidor propio por la VPN que para Sweego, Brevo, Amazon SES… Modos: **apagado**, **siempre**, o **automático**: solo cuando la IP por la que sale ahora el servidor no tiene un DNS inverso que apunte de vuelta a ella (una línea de reserva con IP dinámica, una IP sin PTR todavía), y se quita solo cuando vuelve a cuadrar. Se guarda en el master y se copia a sus nodos; cada uno decide según su propia IP. Solo toca lo que pone el panel: un relayhost puesto a mano no se toca, y solo se apunta el cambio si Postfix lo ha aplicado de verdad.
+
+### Corregido
+- **El nombre de envío automático (HELO = DNS inverso) no se aplicaba nunca en las máquinas con nombre propio.** Para comprobar que el DNS inverso apunta de vuelta a la IP se miraba el resolutor del sistema, que lee `/etc/hosts`, y ahí el nombre de la máquina apunta a 127.0.1.1 (desde 1.0.341). Ahora se pregunta a un DNS público. Con DNS inverso correcto, Postfix se presenta con ese nombre (p. ej. `mortadelo.screenart.es`), como esperan Gmail y compañía.
+
 ## [1.0.348] — 2026-10-07 — Correo entrante por la línea alternativa y subdominios en la copia
 
 ### Añadido
 - **Correo entrante también por la entrada alternativa.** Cuando cae la línea normal de un servidor y el vigilante de entradas mueve sus webs a la alternativa, ahora mueve también los nombres a los que apuntan los MX, si por la alternativa responde el mismo servidor de correo. Lo comprueba con el saludo SMTP del puerto 25, comparado con el que da por la línea normal cuando va bien. Si no responde, o responde otro servidor, el MX no se mueve: así no se rebota correo. El aviso dice qué ha pasado con el correo. Al volver la línea normal se devuelve todo.
 - **Entrada SMTP para un proxy con PROXY protocol.** En los nodos que reciben correo, Postfix escucha además en `<IP de la VPN>:2525` con PROXY protocol, para que un proxy TCP (p. ej. caddy-l4 en la oficina, como ya se hace con 80/443) pueda llevar el puerto 25 de otra línea conservando la IP real del remitente (antispam, SPF). Solo escucha en la IP de la VPN, y el cortafuegos lo abre solo para la red de la VPN. Exige la cabecera del proxy: sin ella no da ni el saludo. Copia previa de master.cf y `postfix check` antes de recargar; si falla, se deja como estaba. Mismas reglas de recepción que el puerto 25.
-
 
 ### Corregido
 - **«Sincronizar Todo» no enviaba los subdominios a la copia.** Mandaba los hostings, sus alias y redirecciones, y sus bases de datos, pero no los subdominios (api., portal.…). La copia no los tenía en su panel, así que la reparación de rutas tampoco podía reponerlos y, al tomar el mando, esas webs daban error 525. Ahora también se envían.

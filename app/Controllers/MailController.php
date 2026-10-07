@@ -64,6 +64,32 @@ class MailController
         Router::redirect('/mail?tab=antispam');
     }
 
+    /**
+     * POST: relé de salida (modo y relés). Se guarda aquí y, en el master, se copia a sus
+     * nodos. Contraseña vacía = conservar la guardada.
+     */
+    public function outboundRelaySave(): void
+    {
+        $relays = [];
+        foreach ((array)($_POST['relay_host'] ?? []) as $i => $host) {
+            $relays[] = ['label' => $_POST['relay_label'][$i] ?? '', 'host' => $host, 'port' => $_POST['relay_port'][$i] ?? 587,
+                'user' => $_POST['relay_user'][$i] ?? '', 'pass' => $_POST['relay_pass'][$i] ?? '', 'tls' => $_POST['relay_tls'][$i] ?? 'starttls'];
+        }
+        $r = \MuseDockPanel\Services\MailOutboundRelayService::save((string)($_POST['relay_mode'] ?? 'off'), $relays);
+        if (empty($r['ok'])) {
+            Flash::set('error', (string)($r['error'] ?? 'No se pudo guardar'));
+            Router::redirect('/mail?tab=antispam');
+            return;
+        }
+        $copied = Settings::get('cluster_role', '') === 'master' ? \MuseDockPanel\Services\MailOutboundRelayService::pushToNodes() : [];
+        $msg = 'Relé de salida guardado.' . (!empty($r['message']) ? ' ' . $r['message'] . '.' : '') . (!empty($r['error']) ? ' ERROR: ' . $r['error'] : '');
+        if ($copied) {
+            $msg .= ' Copiado a: ' . implode(', ', array_map(static fn($n, $v) => "{$n} ({$v})", array_keys($copied), $copied)) . '.';
+        }
+        Flash::set(!empty($r['error']) ? 'warning' : 'success', $msg);
+        Router::redirect('/mail?tab=antispam');
+    }
+
     public function index(): void
     {
         if (!isset($_GET['tab']) && empty($_GET['setup'])) {

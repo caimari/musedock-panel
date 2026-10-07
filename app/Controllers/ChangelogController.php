@@ -20,6 +20,20 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.349',
+                'date' => '2026-10-07',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Relé de salida (Correo → Antispam): enviar a través de otro servidor (propio o proveedor), varios en orden, modos apagado/siempre/automático (solo si la IP de salida no tiene un DNS inverso que cuadre). Se copia del master a los nodos; transparente para los usuarios; DKIM igual',
+                        'Programas de correo por la entrada alternativa: <IP VPN>:10587 y :10465 (copia de submission y smtps, con contraseña obligatoria) y :10993 (IMAP con TLS), con PROXY protocol, solo VPN, con postfix check/doveconf y marcha atrás',
+                    ],
+                    'fixed' => [
+                        'Nombre de envío automático (HELO = DNS inverso): la comprobación de que el DNS inverso apunta de vuelta leía /etc/hosts (nombre de la máquina → 127.0.1.1) y no cuadraba nunca; ahora pregunta a un DNS público',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.348',
                 'date' => '2026-10-07',
                 'badge' => 'info',

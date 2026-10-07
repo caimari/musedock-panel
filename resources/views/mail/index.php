@@ -372,6 +372,88 @@
         }).catch(function () { box.innerHTML = '<span class="text-danger">No se pudo comprobar.</span>'; });
     })();
     </script>
+    <?php
+    $orCfg = \MuseDockPanel\Services\MailOutboundRelayService::publicConfig();
+    $orRelays = $orCfg['relays'] ?: [['host' => '', 'port' => 587, 'user' => '', 'has_pass' => false, 'tls' => 'starttls', 'label' => '']];
+    $orState = $orCfg['state'];
+    $orIsRelay = \MuseDockPanel\Settings::get('mail_mode', '') === 'relay';
+    ?>
+    <div class="card bg-dark border-secondary mb-4">
+        <div class="card-header border-secondary"><i class="bi bi-send-arrow-up me-2"></i>Relé de salida (enviar a través de otro servidor)</div>
+        <div class="card-body small">
+            <p class="text-muted mb-2">El correo que envía este servidor (webmail, programas de correo, webs) se entrega a otro servidor que lo manda por él.
+                Para los usuarios es transparente y la firma DKIM la sigue poniendo este servidor. Sirve cuando la IP de salida no tiene un DNS inverso
+                que cuadre (una línea de reserva con IP dinámica, una IP a la que el proveedor aún no ha puesto el PTR): sin esto, ese correo va a spam.
+                Varios relés en orden: si el primero no responde, se usa el siguiente. Vale igual un servidor propio (por la VPN, sin usuario) que un
+                proveedor (Sweego, Brevo, Amazon SES…). <strong>Añade la IP del relé (o su <code>include:</code>) al SPF de tus dominios.</strong>
+                En el servidor que manda, al guardar se copia a sus nodos; cada uno decide si lo usa según su propia IP de salida.</p>
+            <?php if ($orIsRelay): ?>
+                <div class="alert alert-secondary py-2 small">Este servidor es un relay: es el que reenvía, así que aquí no se usa.</div>
+            <?php endif; ?>
+            <div class="mb-3">
+                <?php if (!empty($orState['applied'])): ?>
+                    <span class="badge bg-warning text-dark"><i class="bi bi-send-check me-1"></i>Ahora el correo sale por el relé</span>
+                <?php else: ?>
+                    <span class="badge bg-secondary"><i class="bi bi-send me-1"></i>Ahora el correo sale directamente</span>
+                <?php endif; ?>
+                <?php if (!empty($orState['why'])): ?><span class="text-muted ms-2"><?= View::e($orState['why']) ?></span><?php endif; ?>
+            </div>
+            <form method="POST" action="/mail/outbound-relay">
+                <?= View::csrf() ?>
+                <div class="d-flex flex-wrap gap-3 mb-3">
+                    <?php foreach (['off' => 'Apagado', 'auto' => 'Automático (solo si la IP de salida no cuadra)', 'always' => 'Siempre'] as $m => $lbl): ?>
+                        <label class="form-check">
+                            <input class="form-check-input" type="radio" name="relay_mode" value="<?= $m ?>" <?= $orCfg['mode'] === $m ? 'checked' : '' ?>>
+                            <span class="form-check-label"><?= $lbl ?></span>
+                        </label>
+                    <?php endforeach; ?>
+                </div>
+                <div class="table-responsive">
+                <table class="table table-dark table-sm align-middle mb-2" id="relay-rows">
+                    <thead><tr class="text-muted"><th>#</th><th>Nombre</th><th>Servidor</th><th>Puerto</th><th>Usuario</th><th>Contraseña</th><th>TLS</th><th></th></tr></thead>
+                    <tbody>
+                    <?php foreach ($orRelays as $i => $r): ?>
+                        <tr>
+                            <td class="text-muted relay-num"><?= $i + 1 ?></td>
+                            <td><input name="relay_label[]" class="form-control form-control-sm" value="<?= View::e($r['label']) ?>" placeholder="asterisk, Sweego…"></td>
+                            <td><input name="relay_host[]" class="form-control form-control-sm" value="<?= View::e($r['host']) ?>" placeholder="10.10.70.2 o smtp.proveedor.com"></td>
+                            <td style="max-width:90px"><input name="relay_port[]" type="number" class="form-control form-control-sm" value="<?= (int)$r['port'] ?>"></td>
+                            <td><input name="relay_user[]" class="form-control form-control-sm" value="<?= View::e($r['user']) ?>" placeholder="(sin usuario)" autocomplete="off"></td>
+                            <td><input name="relay_pass[]" type="password" class="form-control form-control-sm" placeholder="<?= $r['has_pass'] ? 'guardada (vacío = no cambiar)' : '' ?>" autocomplete="new-password"></td>
+                            <td><select name="relay_tls[]" class="form-select form-select-sm">
+                                <option value="starttls" <?= $r['tls'] === 'starttls' ? 'selected' : '' ?>>STARTTLS</option>
+                                <option value="none" <?= $r['tls'] === 'none' ? 'selected' : '' ?>>Sin TLS (VPN)</option>
+                            </select></td>
+                            <td><button type="button" class="btn btn-sm btn-outline-danger relay-del" title="Quitar"><i class="bi bi-x"></i></button></td>
+                        </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-light me-2" id="relay-add"><i class="bi bi-plus me-1"></i>Añadir relé</button>
+                <button class="btn btn-sm btn-outline-info"><i class="bi bi-check2 me-1"></i>Guardar y aplicar</button>
+            </form>
+        </div>
+    </div>
+    <script>
+    (function () {
+        var body = document.querySelector('#relay-rows tbody');
+        var renum = function () { body.querySelectorAll('.relay-num').forEach(function (td, i) { td.textContent = i + 1; }); };
+        body.addEventListener('click', function (e) {
+            var b = e.target.closest('.relay-del');
+            if (!b) return;
+            if (body.rows.length > 1) { b.closest('tr').remove(); } else { b.closest('tr').querySelectorAll('input').forEach(function (i) { i.value = ''; }); }
+            renum();
+        });
+        document.getElementById('relay-add').onclick = function () {
+            var tr = body.rows[body.rows.length - 1].cloneNode(true);
+            tr.querySelectorAll('input').forEach(function (i) { i.value = i.type === 'number' ? '587' : ''; i.placeholder = i.type === 'password' ? '' : i.placeholder; });
+            tr.querySelector('select').value = 'starttls';
+            body.appendChild(tr);
+            renum();
+        };
+    })();
+    </script>
     <div class="card bg-dark border-secondary mb-4">
         <div class="card-header border-secondary"><i class="bi bi-shield-lock me-2"></i>Políticas de envío (anti-abuso)</div>
         <div class="card-body">
