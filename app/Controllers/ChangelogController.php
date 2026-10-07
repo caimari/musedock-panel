@@ -25,8 +25,8 @@ class ChangelogController
                 'badge' => 'warning',
                 'changes' => [
                     'added' => [
-                        'es' => ['Vecinos de cada servidor del relevo (comprobaciones del mismo sitio por servidor): el relevo mira los del servidor caido, valen igual si los papeles se invierten entre sitios'],
-                        'en' => ['Per-server neighbours for failover (same-site probes): failover checks those of the server that went down, so they work when roles swap between sites'],
+                        'es' => ['Vecinos de cada servidor del relevo (comprobaciones del mismo sitio por servidor): el relevo mira los del servidor caido, valen igual si los papeles se invierten entre sitios', 'MCP failover_tune: ajusta vecinos y tiempos de deteccion con plan y propagacion a los slaves'],
+                        'en' => ['Per-server neighbours for failover (same-site probes): failover checks those of the server that went down, so they work when roles swap between sites', 'MCP failover_tune: tunes neighbours and detection timings with a plan and propagation to slaves'],
                     ],
                     'changed' => [
                         'es' => ['Configuracion de Failover en tarjetas separadas con su Guardar (modo, DNS, deteccion de caidas; avanzadas plegadas)', 'Acciones de emergencia explicadas: para un cambio planificado, Pasar el mando a...; se quita el aviso obsoleto de lsyncd'],

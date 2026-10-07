@@ -57,6 +57,18 @@ final class McpClusterTools
                     'apply' => $apply,
                 ], ['failover_node', 'primary_ip', 'failover_ip']),
             ],
+            'failover_tune' => [
+                'write' => true,
+                'title' => 'Ajustar la detección de caídas del relevo',
+                'description' => 'En el MASTER: ajusta, sin tocar nada más, los «vecinos» de cada servidor del relevo (comprobaciones del mismo sitio: otras máquinas de SU sitio que no dependen de él, como el router, otro servidor físico o la otra línea; "ping:IP" o "IP:puerto", comprobables desde el otro sitio; vacío = sin vecinos, lo normal en un VPS sin alta disponibilidad) y los tiempos de detección. Si un servidor cae pero algún vecino responde, se espera site_alive_wait_minutes antes de tomar el mando (p. ej. Proxmox lo está moviendo); si no responde nada, se toma tras down_threshold comprobaciones. Guarda y propaga a los slaves. Sin apply devuelve el plan. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o([
+                    'neighbours' => ['type' => 'object', 'description' => 'Por servidor (nombre o IP pública de Failover → Servidores): lista de vecinos, p. ej. {"Filemon (154)": ["ping:203.0.113.1", "203.0.113.6:443"], "mortadelo.musedock.com": []}', 'additionalProperties' => ['type' => 'array', 'items' => ['type' => 'string']]],
+                    'down_threshold' => ['type' => 'integer', 'description' => 'Comprobaciones fallidas seguidas para dar un servidor por caído (1-20; con comprobación cada 60 s, minutos)'],
+                    'site_alive_wait_minutes' => ['type' => 'integer', 'description' => 'Espera si el servidor cayó pero su sitio responde (5-120 min; más que lo que tarda la alta disponibilidad en levantarlo)'],
+                    'global_site_probes' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Lista general (para servidores sin vecinos propios). [] = vaciarla'],
+                    'apply' => $apply,
+                ]),
+            ],
             'replication_adopt' => [
                 'write' => true,
                 'title' => 'Adoptar una réplica existente (PostgreSQL y MariaDB/MySQL)',
@@ -397,6 +409,7 @@ final class McpClusterTools
         return match ($name) {
             'failover_preflight'    => self::preflight(),
             'failover_configure'    => self::configure($args),
+            'failover_tune'         => self::tune($args),
             'replication_adopt'     => self::adopt($args),
             'cluster_node_services' => self::nodeServices($args),
             'cluster_pairing_open'  => self::pairingOpen($args),
@@ -1625,6 +1638,77 @@ final class McpClusterTools
     }
 
     // ── failover_configure ───────────────────────────────────────────────
+
+    /** failover_tune: vecinos por servidor y tiempos de detección (solo eso). */
+    private static function tune(array $args): array
+    {
+        if (self::role() !== 'master') {
+            throw new \RuntimeException('failover_tune se ejecuta en el MASTER del cluster.');
+        }
+        $servers = FailoverService::getServers();
+        $cfg = FailoverService::getConfig();
+        $changes = [];
+        foreach ((array)($args['neighbours'] ?? []) as $key => $list) {
+            $key = trim((string)$key);
+            $idx = null;
+            foreach ($servers as $i => $s) {
+                if (strcasecmp((string)($s['name'] ?? ''), $key) === 0 || (string)($s['ip'] ?? '') === $key) {
+                    $idx = $i;
+                }
+            }
+            if ($idx === null) {
+                throw new \InvalidArgumentException("No hay ningún servidor del relevo llamado o con IP «{$key}». Servidores: "
+                    . implode(', ', array_map(static fn($s) => ($s['name'] ?? '?') . ' (' . ($s['ip'] ?? '') . ')', $servers)));
+            }
+            $raw = implode("\n", array_map('strval', (array)$list));
+            $norm = FailoverService::normalizeSiteProbes($raw);
+            $bad = array_values(array_diff(array_filter(array_map('trim', (array)$list)), $norm === '' ? [] : explode("\n", $norm)));
+            if ($bad) {
+                throw new \InvalidArgumentException('Vecinos no válidos (usa "ping:IP" o "IP:puerto"): ' . implode(', ', $bad));
+            }
+            $old = (string)($servers[$idx]['site_probes'] ?? '');
+            if ($old !== $norm) {
+                $changes[] = ['what' => 'vecinos de ' . $servers[$idx]['name'], 'from' => $old === '' ? [] : explode("\n", $old), 'to' => $norm === '' ? [] : explode("\n", $norm)];
+                $servers[$idx]['site_probes'] = $norm;
+            }
+        }
+        $data = [];
+        if (isset($args['down_threshold'])) {
+            $v = max(1, min(20, (int)$args['down_threshold']));
+            if ((string)$v !== (string)($cfg['failover_down_threshold'] ?? '')) {
+                $data['failover_down_threshold'] = (string)$v;
+                $changes[] = ['what' => 'fallos para dar por caído', 'from' => $cfg['failover_down_threshold'] ?? '', 'to' => $v];
+            }
+        }
+        if (isset($args['site_alive_wait_minutes'])) {
+            $v = max(5, min(120, (int)$args['site_alive_wait_minutes']));
+            if ((string)$v !== (string)($cfg['failover_site_alive_wait_minutes'] ?? '')) {
+                $data['failover_site_alive_wait_minutes'] = (string)$v;
+                $changes[] = ['what' => 'espera si el sitio sigue vivo (min)', 'from' => $cfg['failover_site_alive_wait_minutes'] ?? '', 'to' => $v];
+            }
+        }
+        if (array_key_exists('global_site_probes', $args)) {
+            $norm = FailoverService::normalizeSiteProbes(implode("\n", array_map('strval', (array)$args['global_site_probes'])));
+            if ($norm !== trim((string)($cfg['failover_site_probes'] ?? ''))) {
+                $data['failover_site_probes'] = $norm;
+                $changes[] = ['what' => 'comprobaciones del mismo sitio (lista general)', 'from' => (string)($cfg['failover_site_probes'] ?? ''), 'to' => $norm];
+            }
+        }
+        $plan = ['changes' => $changes, 'propagate_to' => array_values(array_map(static fn($n) => $n['name'], ClusterService::getActiveNodes()))];
+        if (!$changes) {
+            return ['applied' => false, 'plan' => $plan, 'note' => 'Nada que cambiar: ya está así.'];
+        }
+        if (empty($args['apply'])) {
+            return ['applied' => false, 'plan' => $plan, 'next' => 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.'];
+        }
+        FailoverService::saveServers($servers);
+        if ($data) {
+            FailoverService::saveConfig($data);
+        }
+        $push = FailoverService::pushConfigToSlaves();
+        LogService::log('failover.config', null, 'MCP failover_tune: ' . json_encode($changes, JSON_UNESCAPED_UNICODE));
+        return ['applied' => true, 'plan' => $plan, 'propagated' => $push];
+    }
 
     private static function configure(array $args): array
     {
