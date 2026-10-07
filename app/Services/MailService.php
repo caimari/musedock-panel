@@ -4246,8 +4246,7 @@ class MailService
         $servicesActive    = $svc['postfix']['active'] && $svc['dovecot']['active'];
 
         // dsync configured? (the drop-in written by MailReplicationService)
-        $dsyncDropin = '/etc/dovecot/conf.d/95-musedock-replication.conf';
-        $dsyncConfigured = is_file($dsyncDropin);
+        $dsyncConfigured = is_file(MailReplicationService::DROPIN) || is_file(MailReplicationService::LEGACY_DROPIN);
         $dsyncPartner = Settings::get('mail_replication_partner', '');
 
         // Who is the master (partner to replicate from)? La réplica va por la VPN: la

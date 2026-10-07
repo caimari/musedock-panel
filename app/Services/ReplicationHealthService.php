@@ -99,6 +99,32 @@ final class ReplicationHealthService
             }
         }
 
+        // ── Buzones (Dovecot dsync) ──
+        // El replicador puede no dar error y aun así no sincronizar (2026-10: el aviso de
+        // cambios no estaba activo en IMAP/LMTP; 90 h sin sincronizar y nadie lo vio). Cada
+        // buzón tiene al menos una sincronización completa al día: más de 26 h sin una
+        // correcta, o marcado como fallido, es un problema.
+        if (is_file(MailReplicationService::DROPIN) || is_file(MailReplicationService::LEGACY_DROPIN)) {
+            $stale = [];
+            foreach (preg_split('/\R/', (string)shell_exec("timeout 10 doveadm replicator status '*' 2>/dev/null")) ?: [] as $line) {
+                $c = preg_split('/\s+/', trim($line));
+                if (count($c) < 6 || !str_contains($c[0], '@')) {
+                    continue;
+                }
+                // username priority fast-sync full-sync success-sync failed (duraciones H:MM:SS)
+                [$h] = array_map('intval', explode(':', (string)$c[4]) + [0]);
+                $failed = strtolower((string)end($c)) === 'y';
+                if ($failed || ($c[4] !== '-' && $h >= 26)) {
+                    $stale[] = $c[0] . ($failed ? ' (fallido)' : " ({$h} h)");
+                }
+            }
+            if ($stale) {
+                $issues['mail:stale'] = 'Réplica de buzones: ' . count($stale) . ' sin sincronizar bien con la pareja: '
+                    . implode(', ', array_slice($stale, 0, 8)) . (count($stale) > 8 ? '…' : '')
+                    . '. Lo que entre o se borre en ellos no está en el otro nodo.';
+            }
+        }
+
         self::saveState($state);
         return $issues;
     }

@@ -26,7 +26,13 @@ use MuseDockPanel\Database;
  */
 class MailReplicationService
 {
-    private const DROPIN = '/etc/dovecot/conf.d/95-musedock-replication.conf';
+    // 05-: tiene que cargarse ANTES que 10-musedock.conf. Con 95- el "mail_plugins =
+    // $mail_plugins notify replication" global llegaba después de los bloques protocol
+    // imap/lmtp, que ya habían copiado el valor: solo POP3 avisaba al replicador, y ni el
+    // correo entrante ni los borrados por IMAP se replicaban (Filemon↔mortadelo, 2026-10).
+    public const DROPIN = '/etc/dovecot/conf.d/05-musedock-replication.conf';
+    public const LEGACY_DROPIN = '/etc/dovecot/conf.d/95-musedock-replication.conf';
+    private const BACKUP_DIR = '/etc/dovecot/musedock-backup';
     private const SECRET_FILE = '/etc/dovecot/musedock-repl.secret';
     private const REPL_PORT = 12345; // doveadm replication (dsync) TCP port, WG-only
 
@@ -103,6 +109,8 @@ CONF;
             return ['ok' => false, 'error' => 'Dovecot no esta instalado en este nodo (configure primero el servidor de correo).'];
         }
 
+        // El drop-in antiguo (95-) se aparta: los dos a la vez duplicarían los servicios.
+        self::retireLegacyDropin();
         // Back up any previous drop-in, then write.
         if (file_exists(self::DROPIN)) {
             @copy(self::DROPIN, self::DROPIN . '.bak.' . date('Ymd_His'));
@@ -301,6 +309,97 @@ CONF;
      * Stored in panel settings (encrypted) and written to a root-only file the
      * partner also gets via the cluster action.
      */
+    /** Aparta (sin borrar) el drop-in antiguo 95-musedock-replication.conf. */
+    private static function retireLegacyDropin(): bool
+    {
+        if (!is_file(self::LEGACY_DROPIN)) {
+            return false;
+        }
+        @mkdir(self::BACKUP_DIR, 0700, true);
+        return @rename(self::LEGACY_DROPIN, self::BACKUP_DIR . '/95-musedock-replication.conf.' . date('Ymd-His'));
+    }
+
+    /**
+     * Repara la configuración de réplica de un nodo ya montado (cluster-worker). Solo si
+     * la réplica está configurada aquí. Cada cambio con copia y validado con doveconf; si
+     * no valida, se deshace todo.
+     *  1) drop-in 95- → 05- (que IMAP y LMTP avisen al replicador);
+     *  2) sin usuarios del sistema (auth-system: PAM/passwd): el replicador intentaba
+     *     copiar caddy, los usuarios de los hostings… y la réplica los rechazaba (miles de
+     *     errores); el correo del panel es de buzones virtuales (SQL);
+     *  3) quitar de la cola del replicador los usuarios que no son buzones.
+     * @return string[] lo hecho
+     */
+    public static function ensureHealthyConfig(): array
+    {
+        if (!is_dir('/etc/dovecot/conf.d') || (!is_file(self::DROPIN) && !is_file(self::LEGACY_DROPIN))) {
+            return [];
+        }
+        $done = [];
+        $restore = [];
+        @mkdir(self::BACKUP_DIR, 0700, true);
+        $stamp = date('Ymd-His');
+
+        if (is_file(self::LEGACY_DROPIN)) {
+            $legacy = (string)file_get_contents(self::LEGACY_DROPIN);
+            if (!is_file(self::DROPIN)) {
+                file_put_contents(self::DROPIN, $legacy);
+                @chmod(self::DROPIN, 0644);
+                $restore[] = static fn() => @unlink(self::DROPIN);
+            }
+            $bk = self::BACKUP_DIR . '/95-musedock-replication.conf.' . $stamp;
+            rename(self::LEGACY_DROPIN, $bk);
+            $restore[] = static fn() => @rename($bk, self::LEGACY_DROPIN);
+            $done[] = 'réplica de buzones: configuración cargada antes que la del correo (05-), para que IMAP y la entrega avisen de cada cambio';
+        }
+
+        $authFile = '/etc/dovecot/conf.d/10-auth.conf';
+        $auth = (string)@file_get_contents($authFile);
+        if (preg_match('/^\s*!include\s+auth-system\.conf\.ext\s*$/m', $auth)) {
+            @copy($authFile, self::BACKUP_DIR . '/10-auth.conf.' . $stamp);
+            $new = preg_replace('/^(\s*)(!include\s+auth-system\.conf\.ext)\s*$/m',
+                '$1#$2   # MuseDock: sin usuarios del sistema; solo buzones virtuales del panel', $auth);
+            file_put_contents($authFile, $new);
+            $restore[] = static fn() => @file_put_contents($authFile, $auth);
+            $done[] = 'Dovecot sin usuarios del sistema (solo los buzones del panel)';
+        }
+
+        if ($done) {
+            $o = [];
+            exec('doveconf -n 2>/dev/null', $o, $rc);
+            $n = implode("\n", $o);
+            $plugins = (string)shell_exec('doveconf -h -f protocol=imap mail_plugins 2>/dev/null') . ' '
+                . (string)shell_exec('doveconf -h -f protocol=lmtp mail_plugins 2>/dev/null');
+            // Tiene que seguir habiendo con qué entrar (passdb/userdb de los buzones virtuales).
+            if ($rc !== 0 || substr_count($plugins, 'replication') < 2
+                || !preg_match('/^passdb\s*\{/m', $n) || !preg_match('/^userdb\s*\{/m', $n)) {
+                foreach (array_reverse($restore) as $fn) {
+                    $fn();
+                }
+                LogService::log('mail.replication', 'config-fix-failed', 'La configuración nueva de Dovecot no valida; se deja como estaba');
+                return ['NO aplicado: la configuración nueva de Dovecot no valida; se deja como estaba'];
+            }
+            shell_exec('doveadm reload 2>&1');
+        }
+
+        // Cola del replicador: fuera los usuarios que no son buzones (sin @).
+        $removed = 0;
+        foreach (preg_split('/\R/', (string)shell_exec("doveadm replicator status '*' 2>/dev/null")) ?: [] as $line) {
+            $u = strtok(trim($line), " \t");
+            if ($u !== false && $u !== '' && $u !== 'username' && !str_contains($u, '@')) {
+                shell_exec('doveadm replicator remove ' . escapeshellarg($u) . ' 2>/dev/null');
+                $removed++;
+            }
+        }
+        if ($removed) {
+            $done[] = "cola del replicador: {$removed} usuarios que no son buzones quitados";
+        }
+        if ($done) {
+            LogService::log('mail.replication', 'config-fix', implode('; ', $done));
+        }
+        return $done;
+    }
+
     private static function ensureSharedSecret(string $provided = ''): string
     {
         if ($provided !== '') {

@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.345',
+                'date' => '2026-10-07',
+                'badge' => 'danger',
+                'changes' => [
+                    'fixed' => [
+                        'es' => ['La replica de buzones no replicaba lo recibido ni lo borrado: el drop-in de replicacion se cargaba despues de los bloques imap/lmtp (ahora 05-musedock-replication.conf)', 'El replicador intentaba copiar usuarios del sistema (auth-system): desactivado, solo buzones virtuales; nodos existentes reparados solos con validacion y vuelta atras'],
+                        'en' => ['Mailbox replication did not replicate incoming or deleted mail: the replication drop-in loaded after the imap/lmtp blocks (now 05-musedock-replication.conf)', 'The replicator tried to sync system users (auth-system): disabled, virtual mailboxes only; existing nodes fixed automatically with validation and rollback'],
+                    ],
+                    'added' => [
+                        'es' => ['Aviso si un buzon lleva mas de 26 h sin sincronizar con la pareja', 'Pasar el mando sincroniza los buzones antes de cambiar; si falla, no cambia'],
+                        'en' => ['Alert when a mailbox has not synced with its partner for over 26 h', 'Planned handover syncs mailboxes before switching; aborts if it fails'],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.343',
                 'date' => '2026-10-07',
                 'badge' => 'warning',

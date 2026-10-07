@@ -471,6 +471,21 @@ class RoleSwitchService
         }
         self::step($task, $st, 'La copia tiene todo: ' . $wait['detail'], true);
 
+        // Buzones: última sincronización con la pareja (el correo entrante ya está parado).
+        // Sin esto, lo borrado o recibido desde la última réplica no estaba en el nuevo
+        // master (2026-10-07: la bandeja borrada en Filemon reapareció en mortadelo).
+        $mail = self::finalMailSync();
+        if ($mail !== null) {
+            self::step($task, $st, 'Buzones: última sincronización con la copia…');
+            if (empty($mail['ok'])) {
+                FailoverSafetyService::unfenceSelf();
+                $fail('los buzones no se pudieron sincronizar con la copia (' . $mail['detail'] . '). Este servidor se ha reactivado: todo sigue como antes. '
+                    . 'Revisa la réplica de correo (MCP mail_replication_status) antes de volver a intentarlo.');
+                return;
+            }
+            self::step($task, $st, 'Buzones sincronizados: ' . $mail['detail'], true);
+        }
+
         // 2) Que el otro se promueva (en segundo plano allí) y esperarle.
         $r = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'role-switch-promote', 'payload' => [
             'old_vpn_ip' => $ips['my_vpn'], 'old_public_ip' => $ips['my_public'], 'new_public_ip' => $ips['their_public'],
@@ -543,6 +558,36 @@ class RoleSwitchService
                 . "── Pasos ──\n" . implode("\n", array_map(static fn($s) => "{$s['at']} {$s['msg']}", $st['steps'])));
         } catch (\Throwable) {
         }
+    }
+
+    /**
+     * Sincroniza cada buzón del panel con la pareja de réplica (doveadm sync -d, con
+     * mail_replica). null si este nodo no replica buzones.
+     */
+    public static function finalMailSync(int $timeoutPerBox = 120): ?array
+    {
+        if (!is_file(MailReplicationService::DROPIN) && !is_file(MailReplicationService::LEGACY_DROPIN)) {
+            return null;
+        }
+        try {
+            $boxes = array_column(Database::fetchAll("SELECT lower(email) AS email FROM mail_accounts ORDER BY email"), 'email');
+        } catch (\Throwable) {
+            $boxes = [];
+        }
+        if (!$boxes) {
+            return null;
+        }
+        $failed = [];
+        foreach ($boxes as $email) {
+            $o = [];
+            exec('timeout ' . (int)$timeoutPerBox . ' doveadm sync -d -u ' . escapeshellarg($email) . ' 2>&1', $o, $rc);
+            if ($rc !== 0) {
+                $failed[] = $email;
+            }
+        }
+        return ['ok' => !$failed, 'detail' => $failed
+            ? count($failed) . ' de ' . count($boxes) . ' fallaron: ' . implode(', ', array_slice($failed, 0, 6)) . (count($failed) > 6 ? '…' : '')
+            : count($boxes) . ' buzones al día'];
     }
 
     /**

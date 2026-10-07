@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.345] — 2026-10-07 — La réplica de buzones no sincronizaba
+
+### Corregido
+- **La réplica de buzones (Dovecot dsync) no replicaba lo recibido ni lo borrado.** El drop-in `95-musedock-replication.conf` ponía `mail_plugins = $mail_plugins notify replication` de forma global, pero se cargaba DESPUÉS de los bloques `protocol imap/lmtp` de `10-musedock.conf`, que ya habían copiado el valor: solo POP3 avisaba al replicador. Resultado: buzones con 90 h sin sincronizar y, tras pasar el mando, una bandeja borrada en el antiguo master reapareció en el nuevo. Ahora el drop-in es `05-musedock-replication.conf` (se carga antes) y el antiguo se aparta en `/etc/dovecot/musedock-backup/`.
+- **El replicador intentaba copiar usuarios del sistema** (caddy, los usuarios de los hostings…) por el `auth-system` (PAM/passwd) de Dovecot: miles de errores "Mail access for users with UID … not permitted". El correo del panel es de buzones virtuales: se desactiva `auth-system` y se quitan de la cola del replicador los usuarios que no son buzones.
+- Los nodos ya montados se reparan solos (cluster-worker), con copia previa y validación con `doveconf`; si la configuración nueva no valida (o no quedan passdb/userdb), se deshace todo.
+
+### Añadido
+- **Aviso si un buzón lleva más de 26 h sin sincronizar** con la pareja, o el replicador lo marca como fallido (vigilancia de réplicas). Antes la réplica de buzones podía estar días sin funcionar sin ningún aviso.
+- **«Pasar el mando» sincroniza los buzones antes de cambiar** (`doveadm sync -d` por buzón, con el correo entrante ya parado). Si falla alguno, no pasa el mando: reactiva el servidor y dice qué buzones fallaron.
+
 ## [1.0.343] — 2026-10-07 — Que una caída del principal no rompa ni borre nada
 
 ### Añadido

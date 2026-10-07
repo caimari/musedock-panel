@@ -172,6 +172,10 @@ if (time() - (int)Settings::get('replication_health_run_at', '0') >= 300) {
         if (!empty($rh['issues'])) {
             logMsg('Réplica: ' . count($rh['issues']) . ' problema(s): ' . implode(' | ', $rh['issues']));
         }
+        // Configuración de la réplica de buzones (orden de carga, sin usuarios del sistema).
+        foreach (\MuseDockPanel\Services\MailReplicationService::ensureHealthyConfig() as $fix) {
+            logMsg('Correo: ' . $fix);
+        }
         // Réplica rota con el principal sano (p. ej. el principal volvió con un disco más
         // antiguo que esta réplica): rehacerla sola, sin borrar nada (aparte, en segundo plano).
         $ar = \MuseDockPanel\Services\ReplicationAutoRepairService::launch();
