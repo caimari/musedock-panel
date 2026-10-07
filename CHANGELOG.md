@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.350] — 2026-10-07 — Nombre de envío y fin de los correos «SECURITY information»
+
+### Corregido
+- **Correos «*** SECURITY information ***» cada pocos minutos.** En cada recarga, Caddy intentaba instalar su autoridad de certificados interna en el sistema con `sudo tee /usr/local/share/ca-certificates/…` como usuario `caddy`; sudo lo rechazaba y mandaba un correo a root cada vez (que además no se podía entregar y se quedaba en la cola). Ahora el panel lo desactiva en la configuración en marcha de Caddy (cluster-worker) y el Caddyfile lleva `skip_install_trust`. La CA interna sigue funcionando igual (certificado del panel); solo no se instala en el sistema, que no hace falta.
+- **El nombre de envío automático leía el DNS inverso de `/etc/hosts`.** Si ese fichero asociaba la IP de la máquina a otro nombre (p. ej. `207.180.244.219 musedock.com`), el panel creía que el DNS inverso era ese nombre y no lo aplicaba bien. Ahora el DNS inverso también se pregunta a un DNS público (1.1.1.1 / 8.8.8.8), como la comprobación de que apunta de vuelta. Afecta al nombre con que se presenta Postfix y al relé de salida automático, que decide con esa misma comprobación.
+
 ## [1.0.349] — 2026-10-07 — Relé de salida y programas de correo por la línea alternativa
 
 ### Añadido

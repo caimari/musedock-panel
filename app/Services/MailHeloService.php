@@ -44,7 +44,7 @@ class MailHeloService
     public static function check(): array
     {
         $ip = self::outboundIp();
-        $ptr = $ip !== '' ? rtrim((string)@gethostbyaddr($ip), '.') : '';
+        $ptr = $ip !== '' ? self::publicPtr($ip) : '';
         if ($ptr === $ip) {
             $ptr = '';
         }
@@ -65,6 +65,22 @@ class MailHeloService
             default => 'Todo cuadra: IP, DNS inverso y nombre de envío.',
         };
         return ['ip' => $ip, 'ptr' => $ptr, 'ptr_points_back' => $back, 'helo' => $helo, 'helo_matches' => $match, 'ok' => $ok, 'advice' => $advice];
+    }
+
+    /**
+     * DNS inverso de una IP según el DNS público (no /etc/hosts, que puede asociar la IP
+     * de la máquina a otro nombre: p. ej. «207.180.244.219 musedock.com»).
+     */
+    private static function publicPtr(string $ip): string
+    {
+        foreach (['1.1.1.1', '8.8.8.8'] as $ns) {
+            $out = trim((string)@shell_exec('dig +short +time=3 +tries=1 @' . $ns . ' -x ' . escapeshellarg($ip) . ' 2>/dev/null'));
+            $first = rtrim(strtolower((string)strtok($out, "\n")), '.');
+            if ($first !== '' && !str_starts_with($first, ';') && preg_match('/^[a-z0-9.-]+$/', $first)) {
+                return $first;
+            }
+        }
+        return rtrim((string)@gethostbyaddr($ip), '.');
     }
 
     /**

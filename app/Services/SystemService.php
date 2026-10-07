@@ -75,6 +75,50 @@ class SystemService
         return ['ok' => true, 'previous' => $previous, 'hostname' => $name, 'note' => $cloudNote];
     }
 
+    /**
+     * Que Caddy no intente instalar su CA interna en el almacén del sistema. Lo intentaba
+     * en cada recarga con `sudo tee /usr/local/share/ca-certificates/…` como usuario
+     * caddy; sudo lo rechaza y manda un correo "SECURITY information" a root cada vez
+     * (cada pocos minutos). La CA interna sigue funcionando (tls internal del panel);
+     * solo no se instala en el sistema, que no hace falta. Idempotente: '' si nada.
+     */
+    public static function ensureCaddySkipInstallTrust(): string
+    {
+        $config = require PANEL_ROOT . '/config/panel.php';
+        $api = $config['caddy']['api_url'] ?? 'http://localhost:2019';
+        $call = static function (string $method, string $path, ?string $body = null) use ($api): array {
+            $ch = curl_init($api . $path);
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10, CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_CUSTOMREQUEST => $method, CURLOPT_HTTPHEADER => ['Content-Type: application/json']]
+                + ($body !== null ? [CURLOPT_POSTFIELDS => $body] : []));
+            $out = (string)curl_exec($ch);
+            $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+            return [$code, $out];
+        };
+        [$code, $out] = $call('GET', '/config/apps/pki/certificate_authorities/local/install_trust');
+        if ($code === 200 && trim($out) === 'false') {
+            return '';
+        }
+        [$c0, $apps] = $call('GET', '/config/apps');
+        if ($c0 !== 200 || !is_array(json_decode($apps, true))) {
+            return '';   // Caddy no responde: ya se hará en la próxima pasada
+        }
+        [$cp, $pki] = $call('GET', '/config/apps/pki');
+        $pkiArr = json_decode($pki, true);
+        if ($cp !== 200 || !is_array($pkiArr)) {
+            [$c, $o] = $call('PUT', '/config/apps/pki', json_encode(['certificate_authorities' => ['local' => ['install_trust' => false]]]));
+        } else {
+            $pkiArr['certificate_authorities']['local']['install_trust'] = false;
+            [$c, $o] = $call('PATCH', '/config/apps/pki', json_encode($pkiArr));
+        }
+        if ($c !== 200) {
+            return 'no se pudo desactivar la instalación de la CA interna: HTTP ' . $c . ' ' . substr(trim($o), 0, 120);
+        }
+        LogService::log('caddy.pki', 'install_trust', 'Caddy ya no intenta instalar su CA interna en el sistema (correos "SECURITY information" de sudo)');
+        return 'Caddy ya no intenta instalar su CA interna en el sistema';
+    }
+
     public static function caddyRouteId(string $domain): string
     {
         return 'hosting-' . preg_replace('/[^a-z0-9]/', '', strtolower($domain));

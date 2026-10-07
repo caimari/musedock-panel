@@ -850,6 +850,7 @@ repair_panel_tls_caddy() {
 {
     auto_https disable_redirects
     admin localhost:2019
+    skip_install_trust
     servers :${panel_port} {
         protocols h1 h2
     }

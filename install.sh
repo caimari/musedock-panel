@@ -3112,6 +3112,7 @@ SVCEOF
 {
     admin localhost:2019
     auto_https disable_redirects
+    skip_install_trust
 }
 CADDYEOF
             ok "$(t caddy_reconfigured)"
@@ -3133,6 +3134,7 @@ SVCEOF
 {
     admin localhost:2019
     auto_https disable_redirects
+    skip_install_trust
 }
 CADDYEOF
             ok "$(t caddy_configured)"
@@ -3177,6 +3179,7 @@ else
 {
     admin localhost:2019
     auto_https disable_redirects
+    skip_install_trust
 }
 CADDYEOF
     ok "$(t caddy_configured)"
@@ -3602,6 +3605,7 @@ cat > "$CADDY_FILE" << CADDYEOF
 {
     auto_https disable_redirects
     admin localhost:2019
+    skip_install_trust
 }
 
 ${PANEL_SITE_LABELS} {

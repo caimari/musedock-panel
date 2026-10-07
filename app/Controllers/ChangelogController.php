@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.350',
+                'date' => '2026-10-07',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Fin de los correos «SECURITY information» de sudo cada pocos minutos: Caddy ya no intenta instalar su CA interna en el sistema (install_trust desactivado en caliente y skip_install_trust en el Caddyfile)',
+                        'Nombre de envío automático y relé de salida: el DNS inverso de la IP de salida se pregunta a un DNS público y no a /etc/hosts (que puede asociar la IP a otro nombre)',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.349',
                 'date' => '2026-10-07',
                 'badge' => 'info',

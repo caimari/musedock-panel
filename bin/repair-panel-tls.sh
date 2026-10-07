@@ -95,6 +95,7 @@ cat > "$TMP_FILE" <<CADDYEOF
 {
     auto_https disable_redirects
     admin localhost:2019
+    skip_install_trust
 }
 
 ${PANEL_SITE_LABELS} {

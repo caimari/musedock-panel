@@ -412,6 +412,10 @@ if (Settings::get('cluster_fenced', '0') !== '1'
         foreach (\MuseDockPanel\Services\DomainAliasService::ensureRuntimeRoutes() as $d => $res) {
             logMsg("Caddy: {$d}: {$res}");
         }
+        $pki = \MuseDockPanel\Services\SystemService::ensureCaddySkipInstallTrust();
+        if ($pki !== '') {
+            logMsg('Caddy: ' . $pki);
+        }
     } catch (\Throwable $e) {
         logMsg('Caddy rutas de hostings error: ' . $e->getMessage());
     }
