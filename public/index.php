@@ -567,6 +567,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/witnesses/add', 'WitnessController@add');
 \MuseDockPanel\Router::post('/settings/witnesses/remove', 'WitnessController@remove');
 \MuseDockPanel\Router::get('/docs/witnesses', 'DocsController@witnesses');
+\MuseDockPanel\Router::get('/docs/fail2ban-cluster', 'DocsController@fail2banCluster');
 \MuseDockPanel\Router::get('/docs/mcp-nodes', 'DocsController@mcpNodes');
 \MuseDockPanel\Router::get('/docs/wordpress-security', 'DocsController@wordpressSecurity');
 \MuseDockPanel\Router::get('/docs/alerts', 'DocsController@alerts');

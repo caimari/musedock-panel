@@ -1116,12 +1116,13 @@ class ClusterApiController
         if (!\MuseDockPanel\Mcp\McpTools::exists($tool)) {
             return ['ok' => false, 'error' => "Herramienta desconocida: {$tool}"];
         }
-        // Por la vía nodo-a-nodo solo se permiten herramientas de lectura.
-        if (\MuseDockPanel\Mcp\McpTools::isWrite($tool)) {
-            return ['ok' => false, 'error' => 'Las acciones que modifican no se ejecutan a través de otro nodo.'];
-        }
         $args = is_array($payload['arguments'] ?? null) ? $payload['arguments'] : [];
         unset($args['node']);
+        // Por la vía nodo-a-nodo solo se permiten lecturas: herramientas de lectura, o una
+        // herramienta de escritura llamada solo para mirar (lista cerrada, McpTools).
+        if (\MuseDockPanel\Mcp\McpTools::isWrite($tool) && !\MuseDockPanel\Mcp\McpTools::isReadOnlyCall($tool, $args)) {
+            return ['ok' => false, 'error' => 'Las acciones que modifican no se ejecutan a través de otro nodo.'];
+        }
         // Que quede constancia AQUÍ (en el nodo consultado) de quién preguntó.
         try {
             $from = (int)($_REQUEST['_api_node_id'] ?? 0);

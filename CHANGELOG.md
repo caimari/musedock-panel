@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.355] — 2026-10-08 — Guía de fail2ban y consultas por MCP a otro nodo
+
+### Añadido
+- **Guía «Fail2ban en el cluster» (Docs).** Qué bloquea cada jaula y cuánto tiempo (normales y lentas), los bloqueos crecientes, qué se copia entre el que manda y sus copias (la lista blanca sí, unida y sin quitar nunca nada, y se invierte sola al cambiar el mando; los bloqueos no, a propósito), el informe diario y las consultas por MCP.
+
+### Cambiado
+- **MCP: `config_mirror` y `fail2ban_manage` se pueden consultar en otro nodo (`node`) cuando la llamada solo mira**: `config_mirror` sin `apply`/`enable`/`exclude`/`include` (estado y lo que haría, incluida la lista blanca) y `fail2ban_manage` sin `ip` (bloqueos y lista blanca). Antes, por ser herramientas que pueden modificar, no se reenviaban nunca. Es una lista cerrada; todo lo que cambia algo sigue sin reenviarse y exige «Permitir acciones que modifican».
+
 ## [1.0.354] — 2026-10-08 — fail2ban al día en todos los servidores
 
 ### Corregido

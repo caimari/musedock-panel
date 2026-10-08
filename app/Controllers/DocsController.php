@@ -445,6 +445,14 @@ class DocsController
                 'keywords' => 'mcp node nodo reenviado reenviada forwarded mcp-call puerta trasera token cluster solo lectura master slave asistente ia claude seguridad auditoria',
             ],
             [
+                'title' => 'Fail2ban en el cluster',
+                'description' => 'Que bloquea cada servidor y cuanto tiempo (jaulas normales y lentas, bloqueos crecientes), que se copia entre el que manda y sus copias (lista blanca si, bloqueos no), informe diario y consultas por MCP.',
+                'url' => '/docs/fail2ban-cluster',
+                'category' => 'Guia especial',
+                'icon' => 'bi-shield-lock',
+                'keywords' => 'fail2ban jaula jail bloqueo ban unban lista blanca ignoreip lista negra ataque lento slow recidive creciente increment wordpress dovecot postfix sshd informe diario seguridad security_attacks fail2ban_manage config_mirror copia master slave',
+            ],
+            [
                 'title' => 'Testigos externos',
                 'description' => 'Servidores solo ojos que confirman caidas reales antes de un relevo y eligen la entrada (linea normal o alternativa): que son, como crearlos desde el panel y como personalizarlos.',
                 'url' => '/docs/witnesses',
@@ -553,6 +561,10 @@ class DocsController
 
         if ($url === '/docs/mcp-nodes') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'mcp-nodes.php');
+        }
+
+        if ($url === '/docs/fail2ban-cluster') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'fail2ban-cluster.php');
         }
 
         if ($url === '/docs/witnesses') {
@@ -1498,6 +1510,14 @@ class DocsController
         View::render('help/mcp-nodes', [
             'layout' => 'main',
             'pageTitle' => 'Docs - MCP entre nodos',
+        ]);
+    }
+
+    public function fail2banCluster(): void
+    {
+        View::render('help/fail2ban-cluster', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Fail2ban en el cluster',
         ]);
     }
 

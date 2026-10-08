@@ -160,6 +160,30 @@ final class McpTools
         return !empty(self::all()[$name]['write']);
     }
 
+    /**
+     * Llamadas de herramientas "de escritura" que, con estos argumentos, solo LEEN: se
+     * pueden reenviar a otro nodo. Lista cerrada y explícita (nada genérico): config_mirror
+     * sin apply/enable/exclude/include muestra el estado y lo que haría; fail2ban_manage
+     * sin ip lista bloqueos y lista blanca.
+     */
+    public static function isReadOnlyCall(string $name, array $args): bool
+    {
+        $changing = match ($name) {
+            'config_mirror' => ['apply', 'enable', 'exclude', 'include'],
+            'fail2ban_manage' => ['ip', 'whitelist', 'apply'],
+            default => null,
+        };
+        if ($changing === null) {
+            return false;
+        }
+        foreach ($changing as $k) {
+            if (array_key_exists($k, $args) && $args[$k] !== false && $args[$k] !== null && $args[$k] !== '' && $args[$k] !== []) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // Ejecución
     // ─────────────────────────────────────────────────────────────────────
@@ -176,7 +200,9 @@ final class McpTools
         $where = $isLocal ? 'local' : "nodo {$node}";
 
         // Candados de escritura (aplican a HTTP y a stdio por igual).
-        if (self::isWrite($name)) {
+        // Una herramienta de escritura llamada solo para mirar (isReadOnlyCall) se trata
+        // como lectura: se puede reenviar a otro nodo y no exige el permiso de escritura.
+        if (self::isWrite($name) && !self::isReadOnlyCall($name, $args)) {
             if (Settings::get('mcp_allow_write', '0') !== '1') {
                 return self::result(['error' => 'Las acciones que modifican están desactivadas en este servidor. '
                     . 'Actívalas en Ajustes → MCP → "Permitir acciones que modifican".'], true);

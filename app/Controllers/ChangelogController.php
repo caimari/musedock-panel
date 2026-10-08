@@ -20,6 +20,19 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.355',
+                'date' => '2026-10-08',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Guía «Fail2ban en el cluster» en Docs: jaulas normales y lentas, bloqueos crecientes, qué se copia entre el que manda y sus copias (lista blanca sí, bloqueos no), informe diario y MCP',
+                    ],
+                    'changed' => [
+                        'MCP: config_mirror (sin apply/enable/exclude/include) y fail2ban_manage (sin ip) se pueden consultar en otro nodo con `node`, porque solo miran; lo que cambia algo sigue sin reenviarse',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.354',
                 'date' => '2026-10-08',
                 'badge' => 'info',
