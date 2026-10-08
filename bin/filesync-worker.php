@@ -44,11 +44,13 @@ try {
 
     // File sync and disk accounting have separate clocks:
     // - file sync follows the configured sync interval
-    // - disk usage runs every 10 minutes so /accounts reads fresh cached DB values
+    // - disk usage runs every 30 minutes (configurable) so /accounts reads cached DB values
     $lastRun = (int)\MuseDockPanel\Settings::get('filesync_last_run', '0');
     $intervalSeconds = max(60, (int)$config['interval_minutes'] * 60);
     $diskLastRun = (int)\MuseDockPanel\Settings::get('filesync_disk_usage_last_run', '0');
-    $diskIntervalSeconds = 600;
+    // Medir el espacio de cada hosting (du) es caro: cada 30 min por defecto (antes 10),
+    // ajustable con filesync_disk_scan_interval_seconds (10 min .. 24 h).
+    $diskIntervalSeconds = max(600, min(86400, (int)\MuseDockPanel\Settings::get('filesync_disk_scan_interval_seconds', '1800')));
     $now = time();
     $syncDue = (($now - $lastRun) >= $intervalSeconds);
     $diskDue = (($now - $diskLastRun) >= $diskIntervalSeconds);

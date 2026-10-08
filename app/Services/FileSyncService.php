@@ -1551,10 +1551,15 @@ class FileSyncService
 
         $localTotalMb = 0;
         $localReplicableMb = 0;
+        // Las medidas locales son las mismas para todos los nodos: se hacen una vez por
+        // pasada (antes se repetían por cada nodo) y al ritmo suave del monitor (25 % de
+        // un núcleo en vez de 50 %).
+        static $localCache = [];
+        $du = 'DU_THROTTLE_RUN_MS=10 DU_THROTTLE_PAUSE_MS=30 /opt/musedock-panel/bin/du-throttled';
         foreach ($accounts as $acc) {
             $homeDir = rtrim($acc['home_dir'] ?? '', '/');
             if ($homeDir && is_dir($homeDir)) {
-                $localMb = (int)trim((string)shell_exec(sprintf('/opt/musedock-panel/bin/du-throttled -sm %s 2>/dev/null | cut -f1', escapeshellarg($homeDir))));
+                $localMb = $localCache[$homeDir]['total'] ??= (int)trim((string)shell_exec(sprintf($du . ' -sm %s 2>/dev/null | cut -f1', escapeshellarg($homeDir))));
                 $localTotalMb += max(0, $localMb);
                 if ($localMb > 0) {
                     Database::query(
@@ -1570,8 +1575,8 @@ class FileSyncService
                         $excludeArgs .= ' --exclude=' . escapeshellarg($normalized);
                     }
                 }
-                $localRepMb = (int)trim((string)shell_exec(sprintf(
-                    '/opt/musedock-panel/bin/du-throttled -sm%s %s 2>/dev/null | cut -f1',
+                $localRepMb = $localCache[$homeDir]['rep'] ??= (int)trim((string)shell_exec(sprintf(
+                    $du . ' -sm%s %s 2>/dev/null | cut -f1',
                     $excludeArgs,
                     escapeshellarg($homeDir)
                 )));

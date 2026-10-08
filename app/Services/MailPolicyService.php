@@ -208,6 +208,37 @@ CONF;
      * Enable/disable the fail2ban mail jails (stock postfix + dovecot filters).
      * Bans IPs that repeatedly fail auth — the other half of stopping abuse.
      */
+    /**
+     * Jaulas de correo. Además de las normales (5 fallos en 10 min), las «lentas»: más de
+     * 15 fallos en 24 h. Un ataque a 4 intentos por hora nunca llegaba al límite normal
+     * (mortadelo, 2026-10-08: 98 intentos en un día de la misma IP sin ningún bloqueo).
+     */
+    private static function fail2banJailContent(): string
+    {
+        $base = static fn(string $name, string $filter, string $port, int $retry, int $find, int $ban) => "[{$name}]\n"
+            . "enabled  = true\nfilter   = {$filter}\nport     = {$port}\nbackend  = systemd\n"
+            . "maxretry = {$retry}\nfindtime = {$find}\nbantime  = {$ban}\n";
+        $smtp = 'smtp,submission,submissions';
+        $imap = 'imap,imaps,pop3,pop3s,submission,submissions';
+        return "# MuseDock — mail auth brute-force protection (auto-generated)\n"
+            . $base('postfix-sasl', 'postfix[mode=auth]', $smtp, 5, 600, 3600) . "\n"
+            . $base('dovecot', 'dovecot', $imap, 5, 600, 3600) . "\n"
+            . "# Ataques lentos (pocos intentos por hora): más de 15 fallos en 24 h.\n"
+            . $base('postfix-sasl-slow', 'postfix[mode=auth]', $smtp, 15, 86400, 86400) . "\n"
+            . $base('dovecot-slow', 'dovecot', $imap, 15, 86400, 86400);
+    }
+
+    /** cluster-worker: si las jaulas de correo están activas pero desfasadas, rehacerlas. */
+    public static function ensureFail2banCurrent(): string
+    {
+        if (!self::fail2banEnabled() || !is_file(self::FAIL2BAN_JAIL)
+            || (string)@file_get_contents(self::FAIL2BAN_JAIL) === self::fail2banJailContent()) {
+            return '';
+        }
+        $r = self::applyFail2ban();
+        return !empty($r['ok']) ? 'jaulas de correo de fail2ban actualizadas (incluidas las de ataques lentos)' : 'jaulas de correo: ' . ($r['error'] ?? $r['output'] ?? 'error');
+    }
+
     public static function applyFail2ban(): array
     {
         if (!is_dir('/etc/fail2ban')) {
@@ -221,27 +252,7 @@ CONF;
             return ['ok' => true, 'enabled' => false];
         }
 
-        // Postfix logs to journald/mail.log; dovecot too. Use the stock filters.
-        $jail = <<<JAIL
-# MuseDock — mail auth brute-force protection (auto-generated)
-[postfix-sasl]
-enabled  = true
-filter   = postfix[mode=auth]
-port     = smtp,submission,submissions
-backend  = systemd
-maxretry = 5
-findtime = 600
-bantime  = 3600
-
-[dovecot]
-enabled  = true
-filter   = dovecot
-port     = imap,imaps,pop3,pop3s,submission,submissions
-backend  = systemd
-maxretry = 5
-findtime = 600
-bantime  = 3600
-JAIL;
+        $jail = self::fail2banJailContent();
 
         $bak = self::FAIL2BAN_JAIL . '.bak.' . date('Ymd_His');
         if (file_exists(self::FAIL2BAN_JAIL)) @copy(self::FAIL2BAN_JAIL, $bak);
@@ -254,7 +265,7 @@ JAIL;
             // reload can fail if fail2ban wasn't running; try restart.
             $r = static::runCmd('systemctl restart fail2ban 2>&1');
         }
-        LogService::log('mail.policy', 'fail2ban', 'Jails de correo (postfix-sasl, dovecot) activados');
+        LogService::log('mail.policy', 'fail2ban', 'Jails de correo (postfix-sasl, dovecot y sus versiones lentas) activados');
         return ['ok' => $r['ok'], 'enabled' => true, 'output' => $r['output']];
     }
 

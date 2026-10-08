@@ -2530,6 +2530,10 @@ class SettingsController
             if (file_exists("{$panelDir}/musedock.conf")) {
                 @copy("{$panelDir}/musedock.conf", '/etc/fail2ban/jail.d/musedock.conf');
             }
+            foreach (glob("{$panelDir}/fail2ban.d/*.conf") ?: [] as $f) {
+                @mkdir('/etc/fail2ban/fail2ban.d', 0755, true);
+                @copy($f, '/etc/fail2ban/fail2ban.d/' . basename($f));
+            }
             if (file_exists("{$panelDir}/logrotate-musedock-auth")) {
                 @copy("{$panelDir}/logrotate-musedock-auth", '/etc/logrotate.d/musedock-auth');
             }
@@ -2567,6 +2571,11 @@ class SettingsController
         if (file_exists("{$panelDir}/musedock.conf")) {
             @copy("{$panelDir}/musedock.conf", '/etc/fail2ban/jail.d/musedock.conf');
             $installed[] = 'jail: musedock.conf';
+        }
+        foreach (glob("{$panelDir}/fail2ban.d/*.conf") ?: [] as $f) {
+            @mkdir('/etc/fail2ban/fail2ban.d', 0755, true);
+            @copy($f, '/etc/fail2ban/fail2ban.d/' . basename($f));
+            $installed[] = 'fail2ban.d: ' . basename($f);
         }
 
         // 3. Copy logrotate

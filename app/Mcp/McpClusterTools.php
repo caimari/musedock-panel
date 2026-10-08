@@ -319,6 +319,15 @@ final class McpClusterTools
                 'description' => 'Revisa si el servidor está realmente protegido. No mira reglas sueltas: simula la llegada de una conexión nueva a cada puerto en escucha (TCP y UDP) desde una IP cualquiera de internet y desde cada origen autorizado, siguiendo las cadenas de iptables. Dice por puerto si está abierto a todo internet, solo a ciertas IPs o cerrado, y avisa de: servicios sensibles expuestos (bases de datos, Redis, panel, APIs), IPv6 sin proteger, reglas que aceptan todo, orígenes con acceso a todos los puertos que no son de confianza, puertos de Docker (no pasan por INPUT) y ufw mezclado con iptables propio. Con `node` se audita otro nodo. Solo lectura.',
                 'inputSchema' => $o([]),
             ],
+            'security_attacks' => [
+                'write' => false,
+                'title' => 'Ataques vistos y bloqueados por fail2ban',
+                'description' => 'Solo lectura. Qué ha visto y bloqueado fail2ban en las últimas horas (24 por defecto, hasta 168): por jail (sshd, WordPress, panel, correo…) cuántos bloqueos, cuántos intentos fallidos y de cuántas IPs distintas; las IPs que más insisten, y las bloqueadas ahora. Con `node` se consulta otro nodo; con all_nodes=true, en el master, este y todos sus nodos.',
+                'inputSchema' => $o([
+                    'hours' => ['type' => 'integer', 'description' => 'Horas hacia atrás (1-168, por defecto 24)'],
+                    'all_nodes' => ['type' => 'boolean', 'description' => 'En el master: también sus nodos'],
+                ]),
+            ],
             'fail2ban_manage' => [
                 'write' => true,
                 'title' => 'fail2ban: ver bloqueos, desbloquear una IP y lista blanca',
@@ -442,6 +451,9 @@ final class McpClusterTools
             'firewall_check_ip'     => \MuseDockPanel\Services\FirewallAuditService::checkSource((string)($args['ip'] ?? ''), isset($args['port']) ? (int)$args['port'] : null),
             'firewall_trusted_sources' => self::trustedSources($args),
             'fail2ban_manage' => self::fail2banManage($args),
+            'security_attacks' => !empty($args['all_nodes'])
+                ? ['servers' => \MuseDockPanel\Services\Fail2banReportService::clusterSummaries((int)($args['hours'] ?? 24))]
+                : \MuseDockPanel\Services\Fail2banReportService::summary((int)($args['hours'] ?? 24)),
             'filesync_status'       => self::filesyncStatus(),
             'filesync_configure'    => self::filesyncConfigure($args),
             'filesync_extra_paths'  => self::filesyncExtraPaths($args),

@@ -40,6 +40,7 @@ class AlertPolicyService
         'config_mirror'      => ['Copia de configuración del master', 'En una copia: algo de la configuración del master no se pudo copiar (avisa solo cuando cambia la lista).'],
         'witness'            => ['Testigos', 'Un testigo externo no responde o vuelve.'],
         'node_down'          => ['Nodo caído / recuperado', 'Un servidor del cluster deja de responder a los demás (o vuelve).'],
+        'security_report'    => ['Informe diario de seguridad', 'Cada noche (21:00 UTC), un resumen de los ataques que fail2ban ha visto y bloqueado en las últimas 24 h en este servidor y sus nodos (lo manda el que manda). Activo por defecto.'],
         'site_outage'        => ['Sitio sin conexión (webs no afectadas)', 'Un servidor que no manda se queda sin conexión junto con todo su sitio (p. ej. la oficina sin Internet): un único aviso informativo, sin sonido en Telegram, y otro al volver. Mientras dura, los avisos de nodo caído, réplica, ficheros y correo de esas máquinas no se envían.'],
     ];
 
@@ -87,6 +88,8 @@ class AlertPolicyService
             'Mira el diagnóstico del correo: si el principal está caído o reiniciándose, la réplica se reengancha sola al volver. Si el principal responde, revisa Ajustes → Replicación o pide failover_preflight por MCP. Para trabajos programados, activa antes el modo mantenimiento.'],
         'lsyncd' => ['La copia de ficheros de las webs hacia el otro servidor va mal (o se ha recuperado).',
             'Mientras dure, el otro servidor no tiene los últimos cambios de las webs. Revisa Cluster → Archivos.'],
+        'security_report' => ['Resumen diario de los ataques (intentos de contraseña, escaneos de WordPress…) que fail2ban ha visto y bloqueado en las últimas 24 h.',
+            'Normalmente nada: fail2ban ya bloqueó a quien insistía. Si ves una IP tuya bloqueada, desbloquéala (MCP fail2ban_manage) y añádela a la lista blanca.'],
         'witness' => ['Un testigo externo (el servidor que confirma las caídas antes de un relevo) no responde, o vuelve.',
             'Si cae uno, decide el otro. Si caen todos, los relevos se deciden sin testigos. Comprueba que ese servidor está encendido.'],
         'cert' => ['Una o varias webs de este servidor no tienen un certificado válido para su nombre, o el suyo está a punto de caducar sin haberse renovado.',

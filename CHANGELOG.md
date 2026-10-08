@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.353] — 2026-10-08 — Informe diario de seguridad, menos CPU midiendo hostings y sin falsos avisos de firewall
+
+### Añadido
+- **Informe diario de seguridad (fail2ban).** Cada noche (21:00 UTC) llega por correo y Telegram un resumen de los ataques que fail2ban ha visto y bloqueado en las últimas 24 h: por servidor y por jail (sshd, WordPress, panel, correo…), cuántos bloqueos, cuántos intentos fallidos y de cuántas IPs, las IPs que más insisten y las bloqueadas ahora. Lo manda el servidor que manda, con sus datos y los de sus nodos: uno por cluster, no uno por servidor. Activo por defecto; se silencia en Ajustes → Avisos («Informe diario de seguridad»).
+- **Bloqueos crecientes en fail2ban.** Quien reincide queda bloqueado cada vez el doble (2 h → 4 h → 8 h …, según la jaula) hasta 1 semana, contando las reincidencias en todas las jaulas (`bantime.increment`, `bantime.overalljails`). fail2ban recuerda los bloqueos 30 días (`dbpurgeage`, en `/etc/fail2ban/fail2ban.d/musedock.conf`) para reconocerlos. El bloqueo en Caddy de quien llega por Cloudflare dura ahora lo mismo que el de fail2ban (se quita al desbloquear; tope de 1 semana): antes se soltaba a las 2 h aunque fail2ban lo mantuviera.
+- **Jaulas para ataques lentos.** Un atacante que prueba unas pocas veces por hora nunca llegaba al límite normal (5 fallos en 10 min): en mortadelo, una IP hizo 98 intentos al correo en un día sin ningún bloqueo. Ahora hay jaulas «lentas» que miran 24 h: correo (`dovecot-slow`, `postfix-sasl-slow`) a partir de 15 fallos y WordPress (`musedock-wordpress-slow`) a partir de 30, con 1 día de bloqueo que crece si reincide. Las jaulas de correo se actualizan solas en los servidores que ya las tenían.
+- **La lista blanca de fail2ban pasa del master a sus copias.** La copia de configuración une la lista blanca general (`[DEFAULT] ignoreip` de `jail.local`) del master a la de la copia: nunca quita nada, prueba la configuración antes de recargar y, si falla, la deja como estaba.
+- **MCP `security_attacks`.** Lo mismo bajo demanda y de solo lectura, para las horas que se pidan (1–168). Incluye, por jaula, las IPs que más lo intentan. Con `all_nodes=true`, en el master, también sus nodos.
+
+### Corregido
+- **Falso aviso «Cambio externo detectado en el firewall» por fail2ban.** El vigilante del firewall ya ignoraba las IP que fail2ban bloquea y desbloquea, pero no la estructura de sus cadenas (`f2b-*`, el salto desde INPUT y su RETURN). fail2ban la crea con el primer bloqueo de cada familia (IPv4 o IPv6) y la quita al parar, así que su aparición avisaba como un cambio manual. Ahora todo lo de fail2ban se ignora; un cambio de verdad en el resto de reglas sigue avisando.
+- **La medida del espacio de cada hosting para la copia de ficheros repetía el trabajo.** El `filesync-worker` medía con `du`, cada 10 minutos y una vez por cada nodo de copia, lo que ocupa cada hosting aquí (en total y lo que se copia): con dos nodos, los mismos `du` locales dos veces seguidas, al 50 % de un núcleo. Ahora las medidas locales se hacen una vez por pasada y valen para todos los nodos, al ritmo suave del monitor (25 % de un núcleo), y cada 30 minutos por defecto (ajustable con `filesync_disk_scan_interval_seconds`, de 10 min a 24 h).
+
 ## [1.0.352] — 2026-10-07 — Variables del crontab también en la copia
 
 ### Corregido

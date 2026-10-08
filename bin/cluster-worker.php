@@ -247,6 +247,26 @@ try {
     logMsg('Site outage check error: ' . $e->getMessage());
 }
 
+// ─── Step 0j4: Jaulas de correo de fail2ban al día (p. ej. las de ataques lentos) ───
+try {
+    $mj = \MuseDockPanel\Services\MailPolicyService::ensureFail2banCurrent();
+    if ($mj !== '') {
+        logMsg('Seguridad: ' . $mj);
+    }
+} catch (\Throwable $e) {
+    logMsg('Jaulas de correo error: ' . $e->getMessage());
+}
+
+// ─── Step 0j3: Informe diario de seguridad (fail2ban), una vez al día por la noche ─
+try {
+    $f2r = \MuseDockPanel\Services\Fail2banReportService::maybeSendDaily();
+    if ($f2r !== '') {
+        logMsg('Seguridad: ' . $f2r);
+    }
+} catch (\Throwable $e) {
+    logMsg('Informe de seguridad error: ' . $e->getMessage());
+}
+
 // ─── Step 0k: ¿Responden los testigos externos? (cada 5 min) ──────────────────
 // Uno caído no afecta (decide el otro); los dos caídos tampoco bloquean (se decide con la
 // vista de este nodo), pero se pierde la protección contra cortes de red: se avisa.

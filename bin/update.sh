@@ -765,12 +765,29 @@ if command -v fail2ban-client >/dev/null 2>&1 && [ -d "${PANEL_DIR}/config/fail2
         F2B_CHANGED=true
     fi
 
+    # Ajustes generales de fail2ban (p. ej. dbpurgeage para los bloqueos crecientes)
+    for f in "${PANEL_DIR}"/config/fail2ban/fail2ban.d/*.conf; do
+        [ -f "$f" ] || continue
+        mkdir -p /etc/fail2ban/fail2ban.d
+        FNAME=$(basename "$f")
+        if ! cmp -s "$f" "/etc/fail2ban/fail2ban.d/${FNAME}" 2>/dev/null; then
+            cp "$f" "/etc/fail2ban/fail2ban.d/${FNAME}"
+            F2B_CHANGED=true
+            F2B_RESTART=true
+        fi
+    done
+
     # Sync logrotate
     if [ -f "${PANEL_DIR}/config/fail2ban/logrotate-musedock-auth" ]; then
         cp "${PANEL_DIR}/config/fail2ban/logrotate-musedock-auth" /etc/logrotate.d/musedock-auth 2>/dev/null
     fi
 
-    if [ "$F2B_CHANGED" = true ] && systemctl is-active --quiet fail2ban 2>/dev/null; then
+    if [ "${F2B_RESTART:-false}" = true ] && systemctl is-active --quiet fail2ban 2>/dev/null; then
+        # dbpurgeage es del servidor de fail2ban: un reload no lo aplica. Los bloqueos
+        # vigentes se restauran desde su base de datos al arrancar.
+        systemctl restart fail2ban >/dev/null 2>&1
+        ok "Fail2Ban configs updated and restarted"
+    elif [ "$F2B_CHANGED" = true ] && systemctl is-active --quiet fail2ban 2>/dev/null; then
         fail2ban-client reload >/dev/null 2>&1
         ok "Fail2Ban configs updated and reloaded"
     else

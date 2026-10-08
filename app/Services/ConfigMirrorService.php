@@ -84,7 +84,94 @@ final class ConfigMirrorService
             'caddyfile' => (string)@file_get_contents('/etc/caddy/Caddyfile'),
             'fpm_pools' => $pools,
             'systemd' => $units,
+            'fail2ban_ignoreip' => self::f2bDefaultIgnore((string)@file_get_contents('/etc/fail2ban/jail.local')),
         ];
+    }
+
+    /** IPs/rangos de la lista blanca general de fail2ban ([DEFAULT] ignoreip de jail.local). */
+    private static function f2bDefaultIgnore(string $c): array
+    {
+        $sec = '';
+        foreach (preg_split('/\r?\n/', $c) as $l) {
+            if (preg_match('/^\s*\[([^\]]+)\]/', $l, $m)) {
+                $sec = trim($m[1]);
+                continue;
+            }
+            if ($sec === 'DEFAULT' && preg_match('/^\s*ignoreip\s*=\s*(.*)$/', $l, $m)) {
+                return array_values(array_filter(preg_split('/[\s,]+/', trim($m[1])) ?: []));
+            }
+        }
+        return [];
+    }
+
+    /**
+     * Lista blanca de fail2ban: la del master se UNE a la de la copia (nunca se quita nada
+     * de la copia). Así una IP propia (oficina, VPN, otro servidor) que se añade en el
+     * master tampoco se bloquea en la copia cuando le toque mandar. Solo [DEFAULT].
+     */
+    private static function mirrorFail2banIgnore(array $master, bool $apply, array &$actions, array &$issues): void
+    {
+        if (!$master || trim((string)shell_exec('command -v fail2ban-client 2>/dev/null')) === '') {
+            return;
+        }
+        $valid = array_values(array_filter($master, static function ($e) {
+            [$ip, $bits] = array_pad(explode('/', (string)$e, 2), 2, null);
+            return filter_var($ip, FILTER_VALIDATE_IP) && ($bits === null || (ctype_digit($bits) && (int)$bits <= 128));
+        }));
+        $file = '/etc/fail2ban/jail.local';
+        $c = is_file($file) ? (string)file_get_contents($file) : '';
+        $mine = self::f2bDefaultIgnore($c);
+        $add = array_values(array_diff($valid, $mine));
+        if (!$add) {
+            $actions[] = ['what' => 'fail2ban: lista blanca', 'result' => 'igual'];
+            return;
+        }
+        $actions[] = ['what' => 'fail2ban: lista blanca', 'result' => 'se añaden del master: ' . implode(' ', $add)];
+        if (!$apply) {
+            return;
+        }
+        $line = 'ignoreip = ' . implode(' ', array_values(array_unique(array_merge($mine ?: ['127.0.0.1/8', '::1'], $add))));
+        $out = [];
+        $sec = '';
+        $done = false;
+        $hasDefault = false;
+        foreach (preg_split('/\r?\n/', $c) as $l) {
+            if (preg_match('/^\s*\[([^\]]+)\]/', $l, $m)) {
+                if ($sec === 'DEFAULT' && !$done) {
+                    $out[] = $line;   // [DEFAULT] sin ignoreip: se añade al final de la sección
+                    $done = true;
+                }
+                $sec = trim($m[1]);
+                $hasDefault = $hasDefault || $sec === 'DEFAULT';
+                $out[] = $l;
+                continue;
+            }
+            if ($sec === 'DEFAULT' && !$done && preg_match('/^\s*ignoreip\s*=/', $l)) {
+                $out[] = $line;
+                $done = true;
+                continue;
+            }
+            $out[] = $l;
+        }
+        if ($sec === 'DEFAULT' && !$done) {
+            $out[] = $line;
+            $done = true;
+        }
+        $new = $hasDefault ? implode("\n", $out) : "[DEFAULT]\n{$line}\n\n" . $c;
+        if ($c !== '') {
+            self::backup($file);
+        }
+        if (file_put_contents($file, rtrim($new, "\n") . "\n") === false) {
+            $issues[] = 'fail2ban: no se pudo escribir jail.local';
+            return;
+        }
+        exec('fail2ban-client -t >/dev/null 2>&1', $o, $rc);
+        if ($rc !== 0) {
+            file_put_contents($file, $c);
+            $issues[] = 'fail2ban: la configuración con la lista blanca del master no pasó la prueba; se deja como estaba';
+            return;
+        }
+        shell_exec('fail2ban-client reload >/dev/null 2>&1');
     }
 
     // ── SLAVE: traer y aplicar ───────────────────────────────────────────
@@ -188,6 +275,7 @@ final class ConfigMirrorService
         self::mirrorCaddyfile((string)$cfg['caddyfile'], (int)$cfg['panel_port'], $state, $apply, $actions, $issues);
         self::mirrorPools((array)$cfg['fpm_pools'], $apply, $actions, $issues);
         self::mirrorSystemd((array)($cfg['systemd'] ?? []), $state, $apply, $actions, $issues);
+        self::mirrorFail2banIgnore((array)($cfg['fail2ban_ignoreip'] ?? []), $apply, $actions, $issues);
 
         if ($apply) {
             self::saveState($state);

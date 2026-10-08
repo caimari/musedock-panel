@@ -2002,6 +2002,7 @@ CRONEOF
             [ -f "$f" ] && cp "$f" /etc/fail2ban/filter.d/
         done
         cp "${PANEL_DIR}/config/fail2ban/musedock.conf" /etc/fail2ban/jail.d/musedock.conf 2>/dev/null
+        mkdir -p /etc/fail2ban/fail2ban.d && cp "${PANEL_DIR}"/config/fail2ban/fail2ban.d/*.conf /etc/fail2ban/fail2ban.d/ 2>/dev/null || true
         [ -f "${PANEL_DIR}/config/fail2ban/logrotate-musedock-auth" ] && cp "${PANEL_DIR}/config/fail2ban/logrotate-musedock-auth" /etc/logrotate.d/musedock-auth 2>/dev/null
 
         if systemctl is-active --quiet fail2ban 2>/dev/null; then
@@ -3792,6 +3793,7 @@ if [ "$F2B_CONFIGURE" = true ]; then
 
     # Install jails
     cp "${PANEL_DIR}/config/fail2ban/musedock.conf" /etc/fail2ban/jail.d/musedock.conf
+    mkdir -p /etc/fail2ban/fail2ban.d && cp "${PANEL_DIR}"/config/fail2ban/fail2ban.d/*.conf /etc/fail2ban/fail2ban.d/ 2>/dev/null || true
     ok "Jails Fail2Ban instalados (musedock-panel, musedock-portal, musedock-wordpress)"
 
     # Install logrotate

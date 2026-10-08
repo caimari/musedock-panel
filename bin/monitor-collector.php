@@ -830,9 +830,14 @@ function stripFail2BanDynamicRules(string $raw): string
             continue;
         }
 
-        // Dynamic per-IP bans added/removed by fail2ban inside f2b-* chains.
-        // Keep static chain scaffolding (RETURN/jumps), ignore only source-specific entries.
-        if (preg_match('/^-A\s+f2b-[A-Za-z0-9_.:-]+\s+-s\s+\S+\s+-j\s+\S+/i', $line)) {
+        // Todo lo de fail2ban: los bloqueos por IP y también su "estructura" (la cadena
+        // f2b-*, el salto desde INPUT y el RETURN). fail2ban crea la cadena con el primer
+        // bloqueo de cada familia (IPv4/IPv6) y la quita al parar: antes su aparición
+        // avisaba como "cambio externo en el firewall" (mortadelo, 2026-10-08, primer
+        // bloqueo IPv6 de la jaula musedock-wordpress).
+        if (preg_match('/^:f2b-[A-Za-z0-9_.:-]+\s/i', $line)
+            || preg_match('/^-A\s+f2b-[A-Za-z0-9_.:-]+\s/i', $line)
+            || preg_match('/\s-j\s+f2b-[A-Za-z0-9_.:-]+\s*$/i', $line)) {
             continue;
         }
 

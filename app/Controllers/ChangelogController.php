@@ -20,6 +20,24 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.353',
+                'date' => '2026-10-08',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Informe diario de seguridad (fail2ban) cada noche por correo y Telegram: bloqueos, intentos e IPs por servidor y jail, uno por cluster (lo manda el master con sus nodos). Activo por defecto, se silencia en Ajustes → Avisos',
+                        'fail2ban: bloqueos crecientes (el doble cada reincidencia, hasta 1 semana, contando todas las jaulas; recuerda 30 días) y el bloqueo en Caddy de quien llega por Cloudflare dura lo mismo que el de fail2ban',
+                        'Jaulas de fail2ban para ataques lentos (24 h): correo desde 15 fallos (dovecot-slow, postfix-sasl-slow) y WordPress desde 30 (musedock-wordpress-slow); las de correo se actualizan solas',
+                        'La lista blanca general de fail2ban del master se une a la de sus copias (copia de configuración; nunca quita nada)',
+                        'MCP security_attacks: ataques vistos y bloqueados por fail2ban bajo demanda (1-168 h), con all_nodes en el master',
+                    ],
+                    'fixed' => [
+                        'Falso aviso de cambio externo en el firewall cuando fail2ban crea o quita su cadena f2b-* (p. ej. su primer bloqueo IPv6): ahora se ignora todo lo de fail2ban',
+                        'Espacio de los hostings para la copia de ficheros: las medidas locales (du) se hacen una vez por pasada y no una por nodo, al 25 % de un núcleo y cada 30 min por defecto (filesync_disk_scan_interval_seconds)',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.352',
                 'date' => '2026-10-07',
                 'badge' => 'info',
