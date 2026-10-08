@@ -20,6 +20,20 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.354',
+                'date' => '2026-10-08',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'El cluster-worker pone al día la configuración de fail2ban del panel (como update.sh) con prueba previa: el servidor que publica se quedaba con las jaulas viejas',
+                        'Las jaulas lentas del correo se ponen al día en los nodos donde están instaladas aunque su ajuste figure apagado (sin activarlas ni borrarlas)',
+                    ],
+                    'changed' => [
+                        'MCP security_attacks: IPs que más lo intentan por jaula',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.353',
                 'date' => '2026-10-08',
                 'badge' => 'info',

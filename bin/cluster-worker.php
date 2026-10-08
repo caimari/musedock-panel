@@ -249,6 +249,10 @@ try {
 
 // ─── Step 0j4: Jaulas de correo de fail2ban al día (p. ej. las de ataques lentos) ───
 try {
+    $fs = \MuseDockPanel\Services\Fail2banReportService::syncPanelConfig();
+    if ($fs !== '') {
+        logMsg('Seguridad: ' . $fs);
+    }
     $mj = \MuseDockPanel\Services\MailPolicyService::ensureFail2banCurrent();
     if ($mj !== '') {
         logMsg('Seguridad: ' . $mj);

@@ -151,6 +151,62 @@ final class Fail2banReportService
             . "Si una IP propia aparece bloqueada, desbloquéala (MCP fail2ban_manage).";
     }
 
+    /**
+     * Configuración de fail2ban del panel (config/fail2ban) al día en /etc/fail2ban, como
+     * hace update.sh: un servidor que recibe la versión nueva sin pasar por update.sh
+     * (p. ej. el que publica) se quedaba con las jaulas viejas. Copia lo que cambió, prueba
+     * la configuración (fail2ban-client -t) y recarga; si la prueba falla, deja lo de antes.
+     */
+    public static function syncPanelConfig(): string
+    {
+        $src = (defined('PANEL_ROOT') ? PANEL_ROOT : '/opt/musedock-panel') . '/config/fail2ban';
+        if (!self::installed() || !is_dir($src) || !is_dir('/etc/fail2ban')) {
+            return '';
+        }
+        $map = [];
+        foreach (['filter.d', 'action.d', 'fail2ban.d'] as $d) {
+            foreach (glob("{$src}/{$d}/*.conf") ?: [] as $f) {
+                $map[$f] = "/etc/fail2ban/{$d}/" . basename($f);
+            }
+        }
+        if (is_file("{$src}/musedock.conf")) {
+            $map["{$src}/musedock.conf"] = '/etc/fail2ban/jail.d/musedock.conf';
+        }
+        $changed = [];
+        $restart = false;
+        $backup = [];
+        foreach ($map as $from => $to) {
+            $new = (string)@file_get_contents($from);
+            $old = is_file($to) ? (string)@file_get_contents($to) : null;
+            if ($old === $new) {
+                continue;
+            }
+            @mkdir(dirname($to), 0755, true);
+            $backup[$to] = $old;
+            if (@file_put_contents($to, $new) === false) {
+                continue;
+            }
+            $changed[] = str_replace('/etc/fail2ban/', '', $to);
+            $restart = $restart || str_contains($to, '/fail2ban.d/');
+        }
+        if (!$changed) {
+            return '';
+        }
+        exec('fail2ban-client -t >/dev/null 2>&1', $o, $rc);
+        if ($rc !== 0) {
+            foreach ($backup as $to => $old) {
+                $old === null ? @unlink($to) : @file_put_contents($to, $old);
+            }
+            LogService::log('fail2ban', 'sync', 'Configuración nueva del panel no pasó la prueba; se deja la anterior: ' . implode(', ', $changed));
+            return 'configuración de fail2ban del panel NO aplicada (no pasó la prueba): ' . implode(', ', $changed);
+        }
+        // dbpurgeage (fail2ban.d) es del servidor: solo se aplica reiniciando. Los
+        // bloqueos vigentes se restauran desde su base de datos al arrancar.
+        shell_exec($restart ? 'systemctl restart fail2ban 2>&1' : 'fail2ban-client reload 2>&1');
+        LogService::log('fail2ban', 'sync', 'Configuración del panel aplicada: ' . implode(', ', $changed));
+        return 'configuración de fail2ban del panel aplicada: ' . implode(', ', $changed);
+    }
+
     /** cluster-worker: el informe del día, una vez, a partir de las 21:00 UTC. */
     public static function maybeSendDaily(): string
     {

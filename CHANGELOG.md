@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.354] — 2026-10-08 — fail2ban al día en todos los servidores
+
+### Corregido
+- **Un servidor que recibe la versión nueva sin pasar por `update.sh` (p. ej. el que publica) se quedaba con la configuración vieja de fail2ban** (sin las jaulas lentas ni los bloqueos crecientes). Ahora el cluster-worker la pone al día igual que `update.sh`: copia lo que cambió de `config/fail2ban`, prueba la configuración (`fail2ban-client -t`) y recarga (o reinicia, si cambia `fail2ban.d`); si la prueba falla, deja lo de antes.
+- **Las jaulas lentas del correo no llegaban a un nodo** cuyo panel tenía las jaulas de correo instaladas (se las puso el master) pero su ajuste figuraba apagado. Ahora se ponen al día donde estén instaladas, sin activarlas ni borrarlas, con la configuración probada antes de recargar.
+
+### Cambiado
+- MCP `security_attacks`: incluye, por jaula, las IPs que más lo intentan.
+
 ## [1.0.353] — 2026-10-08 — Informe diario de seguridad, menos CPU midiendo hostings y sin falsos avisos de firewall
 
 ### Añadido
@@ -9,7 +18,7 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 - **Bloqueos crecientes en fail2ban.** Quien reincide queda bloqueado cada vez el doble (2 h → 4 h → 8 h …, según la jaula) hasta 1 semana, contando las reincidencias en todas las jaulas (`bantime.increment`, `bantime.overalljails`). fail2ban recuerda los bloqueos 30 días (`dbpurgeage`, en `/etc/fail2ban/fail2ban.d/musedock.conf`) para reconocerlos. El bloqueo en Caddy de quien llega por Cloudflare dura ahora lo mismo que el de fail2ban (se quita al desbloquear; tope de 1 semana): antes se soltaba a las 2 h aunque fail2ban lo mantuviera.
 - **Jaulas para ataques lentos.** Un atacante que prueba unas pocas veces por hora nunca llegaba al límite normal (5 fallos en 10 min): en mortadelo, una IP hizo 98 intentos al correo en un día sin ningún bloqueo. Ahora hay jaulas «lentas» que miran 24 h: correo (`dovecot-slow`, `postfix-sasl-slow`) a partir de 15 fallos y WordPress (`musedock-wordpress-slow`) a partir de 30, con 1 día de bloqueo que crece si reincide. Las jaulas de correo se actualizan solas en los servidores que ya las tenían.
 - **La lista blanca de fail2ban pasa del master a sus copias.** La copia de configuración une la lista blanca general (`[DEFAULT] ignoreip` de `jail.local`) del master a la de la copia: nunca quita nada, prueba la configuración antes de recargar y, si falla, la deja como estaba.
-- **MCP `security_attacks`.** Lo mismo bajo demanda y de solo lectura, para las horas que se pidan (1–168). Incluye, por jaula, las IPs que más lo intentan. Con `all_nodes=true`, en el master, también sus nodos.
+- **MCP `security_attacks`.** Lo mismo bajo demanda y de solo lectura, para las horas que se pidan (1–168). Con `all_nodes=true`, en el master, también sus nodos.
 
 ### Corregido
 - **Falso aviso «Cambio externo detectado en el firewall» por fail2ban.** El vigilante del firewall ya ignoraba las IP que fail2ban bloquea y desbloquea, pero no la estructura de sus cadenas (`f2b-*`, el salto desde INPUT y su RETURN). fail2ban la crea con el primer bloqueo de cada familia (IPv4 o IPv6) y la quita al parar, así que su aparición avisaba como un cambio manual. Ahora todo lo de fail2ban se ignora; un cambio de verdad en el resto de reglas sigue avisando.

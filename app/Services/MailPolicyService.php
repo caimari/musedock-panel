@@ -231,12 +231,28 @@ CONF;
     /** cluster-worker: si las jaulas de correo están activas pero desfasadas, rehacerlas. */
     public static function ensureFail2banCurrent(): string
     {
-        if (!self::fail2banEnabled() || !is_file(self::FAIL2BAN_JAIL)
-            || (string)@file_get_contents(self::FAIL2BAN_JAIL) === self::fail2banJailContent()) {
+        // Solo donde ya están instaladas (en un nodo las pone el master, aunque su propio
+        // ajuste figure apagado). Nunca se borran ni se activan aquí: solo se ponen al día.
+        if (!is_file(self::FAIL2BAN_JAIL)) {
             return '';
         }
-        $r = self::applyFail2ban();
-        return !empty($r['ok']) ? 'jaulas de correo de fail2ban actualizadas (incluidas las de ataques lentos)' : 'jaulas de correo: ' . ($r['error'] ?? $r['output'] ?? 'error');
+        $old = (string)@file_get_contents(self::FAIL2BAN_JAIL);
+        $new = self::fail2banJailContent();
+        if ($old === $new) {
+            return '';
+        }
+        @copy(self::FAIL2BAN_JAIL, self::FAIL2BAN_JAIL . '.bak.' . date('Ymd_His'));
+        if (@file_put_contents(self::FAIL2BAN_JAIL, $new) === false) {
+            return 'jaulas de correo: no se pudo escribir ' . self::FAIL2BAN_JAIL;
+        }
+        $t = static::runCmd('fail2ban-client -t 2>&1');
+        if (!$t['ok']) {
+            @file_put_contents(self::FAIL2BAN_JAIL, $old);
+            return 'jaulas de correo: la configuración nueva no pasó la prueba; se deja la anterior';
+        }
+        static::runCmd('fail2ban-client reload 2>&1');
+        LogService::log('mail.policy', 'fail2ban', 'Jaulas de correo puestas al día (incluidas las de ataques lentos)');
+        return 'jaulas de correo de fail2ban actualizadas (incluidas las de ataques lentos)';
     }
 
     public static function applyFail2ban(): array
