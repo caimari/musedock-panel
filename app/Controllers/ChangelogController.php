@@ -20,6 +20,30 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.359',
+                'date' => '2026-10-09',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Algunas contraseñas guardadas (p. ej. tokens de los nodos) se descifraban corruptas cuando el IV aleatorio contenía «::» (aviso «IV passed is only 15 bytes long» cada minuto): ahora se corta por posición',
+                        'pgsql-sender-login.cf con la línea hosts repetida (Postfix avisaba «overriding earlier entry»): una sola línea, y los servidores instalados se corrigen solos',
+                        'Las copias de los mapas pgsql de Postfix (con la contraseña de la base de datos del correo) eran legibles por todos: ahora 600, también las existentes',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.358',
+                'date' => '2026-10-09',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'El recoge-todo de un dominio se quedaba el correo de sus buzones reales (hello@, support@, notify@… acababan en su destino): ahora cada buzón se resuelve a sí mismo y el recoge-todo solo recibe lo que no existe; un alias concreto gana siempre al recoge-todo. Se corrige solo en los servidores instalados',
+                        'El contestador automático de los buzones nunca contestaba (vacation restringido a scripts globales en Dovecot): ahora funciona; se corrige solo en los servidores instalados. El script Sieve por defecto se compila como root (error «Read-only file system» en cada correo)',
+                        'El contestador se copia a las réplicas de correo y entra en la resincronización completa (antes, tras un relevo, dejaba de contestar)',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.357',
                 'date' => '2026-10-09',
                 'badge' => 'info',
@@ -27,11 +51,6 @@ class ChangelogController
                     'changed' => [
                         'Aviso «Certificado en bucle de fallo» en los slaves: un dominio que no apunta al slave no avisa mientras espera la copia del certificado del master (falsa alarma al crear un hosting sin Cloudflare); solo avisa si en 6 horas no ha llegado, indicando revisar el certificado del master y la sincronización de certificados',
                         'El aviso ya no dice que un dominio fallando bloquea los certificados de los demás: Let\'s Encrypt limita los fallos por nombre de dominio',
-                    ],
-                    'fixed' => [
-                        'El recoge-todo de un dominio se quedaba el correo de sus buzones reales (hello@, support@, notify@… acababan en su destino): ahora cada buzón se resuelve a sí mismo y el recoge-todo solo recibe lo que no existe; un alias concreto gana siempre al recoge-todo. Se corrige solo en los servidores instalados',
-                        'El contestador automático de los buzones nunca contestaba (vacation restringido a scripts globales en Dovecot): ahora funciona; se corrige solo en los servidores instalados. El script Sieve por defecto se compila como root (error «Read-only file system» en cada correo)',
-                        'El contestador se copia a las réplicas de correo y entra en la resincronización completa (antes, tras un relevo, dejaba de contestar)',
                     ],
                 ],
             ],

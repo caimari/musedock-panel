@@ -106,6 +106,51 @@ class MailPolicyService
      * this because they are injected locally (permit_mynetworks), not via the
      * authenticated submission port — so webmail_only still works.
      */
+    /**
+     * Servidores ya instalados: quita la línea `hosts` sin puerto cuando hay otra con
+     * puerto (la que usaba Postfix) y cierra los permisos de las copias de los mapas
+     * pgsql-*.cf, que llevan la contraseña de la base de datos. Devuelve '' si nada cambia.
+     */
+    public static function ensureSenderLoginCf(): string
+    {
+        $done = [];
+        $cf = self::SENDER_LOGIN_CF;
+        $txt = is_file($cf) ? (string)@file_get_contents($cf) : '';
+        if ($txt !== '' && preg_match_all('/^hosts\s*=\s*(\S+)\s*$/m', $txt, $m) >= 2) {
+            $withPort = array_values(array_filter($m[1], static fn($h) => str_contains($h, ':')));
+            if ($withPort) {
+                $lines = array_filter(explode("\n", $txt), static fn($l) => !preg_match('/^hosts\s*=/', $l));
+                $new = 'hosts = ' . end($withPort) . "\n" . implode("\n", $lines);
+                $bak = $cf . '.bak.' . date('Ymd_His');
+                if (@copy($cf, $bak)) {
+                    @chmod($bak, 0600);
+                    file_put_contents($cf, $new);
+                    exec('postfix check 2>&1', $out, $rc);
+                    if ($rc !== 0) {
+                        @copy($bak, $cf);
+                        LogService::log('mail.policy', 'rollback', 'postfix check falló, pgsql-sender-login.cf restaurado');
+                        return 'postfix check falló: pgsql-sender-login.cf restaurado';
+                    }
+                    shell_exec('postfix reload 2>&1');
+                    $done[] = 'línea hosts repetida quitada de pgsql-sender-login.cf';
+                }
+            }
+        }
+        $opened = 0;
+        foreach (glob('/etc/postfix/pgsql-*.cf.bak*') ?: [] as $b) {
+            if ((fileperms($b) & 0077) !== 0 && @chmod($b, 0600)) {
+                $opened++;
+            }
+        }
+        if ($opened) {
+            $done[] = "{$opened} copias de mapas pgsql cerradas a 600";
+        }
+        if ($done) {
+            LogService::log('mail.policy', 'sender-map', implode('; ', $done));
+        }
+        return implode('; ', $done);
+    }
+
     public static function installSenderPolicy(array $dbCfg): array
     {
         $whitelist = self::whitelistEnabled();
@@ -119,15 +164,18 @@ class MailPolicyService
                . "WHERE ma.email = '%s' AND ma.status = 'active' AND ma.can_send = true "
                . "AND ma.send_mode = 'normal'{$domainGate}";
 
-        $cf = "hosts = " . ($dbCfg['host'] ?? '127.0.0.1') . "\n"
+        // Una sola línea hosts (con el puerto si lo hay): antes salían dos y Postfix avisaba
+        // «overriding earlier entry» en cada consulta.
+        $cf = "hosts = " . ($dbCfg['host'] ?? '127.0.0.1') . (isset($dbCfg['port']) ? ':' . $dbCfg['port'] : '') . "\n"
             . "user = " . ($dbCfg['user'] ?? 'musedock_mail') . "\n"
             . "password = " . ($dbCfg['password'] ?? '') . "\n"
             . "dbname = " . ($dbCfg['dbname'] ?? 'musedock_panel') . "\n"
-            . (isset($dbCfg['port']) ? "hosts = " . ($dbCfg['host'] ?? '127.0.0.1') . ":" . $dbCfg['port'] . "\n" : "")
             . "query = " . $query . "\n";
 
         $bak = self::SENDER_LOGIN_CF . '.bak.' . date('Ymd_His');
-        if (file_exists(self::SENDER_LOGIN_CF)) @copy(self::SENDER_LOGIN_CF, $bak);
+        if (file_exists(self::SENDER_LOGIN_CF) && @copy(self::SENDER_LOGIN_CF, $bak)) {
+            @chmod($bak, 0600); // lleva la contraseña de la base de datos del correo
+        }
         if (@file_put_contents(self::SENDER_LOGIN_CF, $cf) === false) {
             return ['ok' => false, 'error' => 'No se pudo escribir ' . self::SENDER_LOGIN_CF];
         }

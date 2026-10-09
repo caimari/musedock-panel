@@ -27,7 +27,14 @@ class ReplicationService
         if ($stored === '') return '';
         $data = base64_decode($stored);
         if ($data === false || !str_contains($data, '::')) return '';
-        [$iv, $encrypted] = explode('::', $data, 2);
+        // El IV son 16 bytes aleatorios y puede contener «::»: cortar por posición, no por
+        // el primer «::» (si no, salía un IV de 15 bytes y la contraseña descifrada corrupta).
+        if (strlen($data) > 18 && substr($data, 16, 2) === '::') {
+            $iv = substr($data, 0, 16);
+            $encrypted = substr($data, 18);
+        } else {
+            [$iv, $encrypted] = explode('::', $data, 2);
+        }
         $decrypted = openssl_decrypt($encrypted, 'aes-256-cbc', static::encryptionKey(), 0, $iv);
         return $decrypted !== false ? $decrypted : '';
     }

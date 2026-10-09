@@ -426,6 +426,10 @@ try {
     if ($sv !== '') {
         logMsg('Correo: ' . $sv);
     }
+    $sl = \MuseDockPanel\Services\MailPolicyService::ensureSenderLoginCf();
+    if ($sl !== '') {
+        logMsg('Correo: ' . $sl);
+    }
     $or = \MuseDockPanel\Services\MailOutboundRelayService::ensure();
     if (!empty($or['changed']) || !empty($or['error'])) {
         logMsg('Relé de salida: ' . ($or['message'] ?? $or['error'] ?? ''));
