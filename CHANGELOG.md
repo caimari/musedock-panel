@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.360] — 2026-10-10 — Sin falsas alarmas de buzones sin sincronizar
+
+### Arreglado
+- **Aviso «Réplica parada» por un buzón que estaba bien.** Antes de avisar de un buzón atrasado, el panel pide una sincronización, pero lo hacía como mucho una vez por hora para todos los buzones a la vez, y el aviso salía a los 5 minutos: un buzón que se atrasaba poco después de otro avisaba sin haberlo intentado (calamar@ estaba vacío e igual en los dos nodos, y se sincronizó a la primera al pedirlo). Ahora cada buzón atrasado se pide en cuanto aparece (y luego, como mucho, una vez por hora cada uno) y solo se avisa si 15 minutos después sigue sin sincronizar.
+- **El aviso de buzones decía que «las bases de datos han dejado de copiarse desde el principal»**, también en el principal y con «parada desde hace 5 min» para un atraso de un día. Cuando el problema es solo de buzones, el aviso se titula «Buzones sin sincronizar con la pareja» y explica qué supone.
+
 ## [1.0.359] — 2026-10-09 — Contraseñas guardadas que se descifraban mal y mapa de envío de Postfix
 
 ### Arreglado

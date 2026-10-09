@@ -119,19 +119,30 @@ final class ReplicationHealthService
                 }
             }
             // Cada nodo solo anota las sincronizaciones que lanza él: tras una copia lanzada
-            // desde la pareja, aquí puede seguir viéndose "antigua". Antes de avisar, pedir
-            // una sincronización completa de esos buzones (como mucho una vez por hora); si
-            // funciona, en la siguiente pasada ya no salen y no se avisa.
-            if ($stale && $now - (int)($state['mail_kick_at'] ?? 0) >= 3600) {
-                foreach ($stale as $s) {
-                    shell_exec('timeout 10 doveadm replicator replicate -f ' . escapeshellarg(strtok($s, ' ')) . ' >/dev/null 2>&1');
+            // desde la pareja, o en un buzón sin cambios, aquí puede seguir viéndose "antigua".
+            // Antes de avisar, pedir una sincronización completa de CADA buzón atrasado en
+            // cuanto aparece (y luego como mucho una vez por hora por buzón), y avisar solo de
+            // los que siguen atrasados 15 min después. Antes el intento era uno por hora para
+            // todos a la vez y el aviso salía a los 5 min: un buzón que se atrasaba justo
+            // después de otro avisaba sin haberlo intentado (calamar@, 2026-10-09).
+            $kicks = array_intersect_key($state['mail_kicks'] ?? [], array_flip(array_map(static fn($s) => strtok($s, ' '), $stale)));
+            $report = [];
+            foreach ($stale as $s) {
+                $user = strtok($s, ' ');
+                if ($now - (int)($kicks[$user] ?? 0) >= 3600) {
+                    shell_exec('timeout 10 doveadm replicator replicate -f ' . escapeshellarg($user) . ' >/dev/null 2>&1');
+                    $kicks[$user] = $now;
                 }
-                $state['mail_kick_at'] = $now;
+                if ($now - (int)$kicks[$user] >= 900) {
+                    $report[] = $s;
+                }
             }
-            if ($stale) {
-                $issues['mail:stale'] = 'Réplica de buzones: ' . count($stale) . ' sin sincronizar bien con la pareja: '
-                    . implode(', ', array_slice($stale, 0, 8)) . (count($stale) > 8 ? '…' : '')
-                    . '. Lo que entre o se borre en ellos no está en el otro nodo.';
+            $state['mail_kicks'] = $kicks;
+            unset($state['mail_kick_at']);
+            if ($report) {
+                $issues['mail:stale'] = 'Réplica de buzones: ' . count($report) . ' sin sincronizar con la pareja aunque se ha pedido de nuevo: '
+                    . implode(', ', array_slice($report, 0, 8)) . (count($report) > 8 ? '…' : '')
+                    . '. Lo que entre o se borre en ellos puede no estar en el otro nodo.';
             }
         }
 
@@ -191,10 +202,19 @@ final class ReplicationHealthService
                     : '';
             }
             $mins = round(($now - min(array_intersect_key($firstSeen, $new))) / 60);
-            NotificationService::send("[{$host}] Réplica parada desde hace {$mins} min",
-                "Las bases de datos de este servidor ({$host}) han dejado de copiarse desde el principal:\n\n- " . implode("\n- ", $new)
-                . $diag
-                . "\n\nMientras dure, si hubiera que pasar el mando a este servidor podría faltar lo último que se guardó en el principal.", 'replication');
+            if (array_keys($new) === ['mail:stale']) {
+                // Solo buzones: no son «las bases de datos» ni tiene por qué ser una réplica
+                // (el principal también replica sus buzones con la pareja).
+                NotificationService::send("[{$host}] Buzones sin sincronizar con la pareja",
+                    "Algunos buzones de correo de este servidor ({$host}) no se han sincronizado con su pareja:\n\n- " . $new['mail:stale']
+                    . "\n\nEl correo sigue funcionando. Si hubiera que pasar el mando a la pareja, en esos buzones podría faltar "
+                    . "lo último que ha entrado o borrarse algo que ya se borró aquí.", 'replication');
+            } else {
+                NotificationService::send("[{$host}] Réplica parada desde hace {$mins} min",
+                    "Las bases de datos de este servidor ({$host}) han dejado de copiarse desde el principal:\n\n- " . implode("\n- ", $new)
+                    . $diag
+                    . "\n\nMientras dure, si hubiera que pasar el mando a este servidor podría faltar lo último que se guardó en el principal.", 'replication');
+            }
             LogService::log('cluster.replication', 'alert', implode(' | ', $new));
         }
         if ($fixed) {

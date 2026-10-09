@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.360',
+                'date' => '2026-10-10',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Falsa alarma «Réplica parada» por un buzón atrasado: ahora se pide la sincronización de cada buzón en cuanto se atrasa y solo se avisa si 15 min después sigue igual (antes, un intento por hora para todos y aviso a los 5 min)',
+                        'El aviso de buzones ya no habla de «bases de datos» ni de «réplica parada desde hace 5 min»: se titula «Buzones sin sincronizar con la pareja»',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.359',
                 'date' => '2026-10-09',
                 'badge' => 'info',
