@@ -183,7 +183,8 @@ hosts = $DB_HOST:$PG_PORT
 dbname = $DB_NAME
 user = $DB_USER
 password = $DB_PASS
-query = SELECT destination FROM mail_aliases WHERE (source = '%s' OR (is_catchall = true AND source = CONCAT('@', split_part('%s', '@', 2)))) AND is_active = true LIMIT 1
+# Mismo texto que MailService::POSTFIX_ALIAS_QUERY: el recoge-todo no se queda el correo de los buzones.
+query = SELECT destination FROM (SELECT destination, 0 AS o FROM mail_aliases WHERE source = '%s' AND is_active = true AND is_catchall = false UNION ALL SELECT email, 1 FROM mail_accounts WHERE email = '%s' AND status = 'active' UNION ALL SELECT destination, 2 FROM mail_aliases WHERE source = '%s' AND is_active = true AND is_catchall = true) t ORDER BY o LIMIT 1
 PGEOF
 
 # Secure the lookup files (contain passwords)
@@ -325,7 +326,7 @@ plugin {
   quota_status_overquota = "552 5.2.2 Mailbox is full"
   sieve = file:~/sieve;active=~/.dovecot.sieve
   sieve_default = /etc/dovecot/sieve/default.sieve
-  sieve_global_extensions = +vacation +copy +include
+  sieve_extensions = +vacation +copy +include
 }
 
 # LMTP for Postfix delivery

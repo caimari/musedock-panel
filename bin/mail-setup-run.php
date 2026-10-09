@@ -771,7 +771,7 @@ $postfixDir = '/etc/postfix';
 $sqlFiles = [
     'pgsql-virtual-domains.cf' => "hosts = {$dbHost}:{$dbPort}\ndbname = {$dbName}\nuser = {$dbUser}\npassword = {$dbPass}\nquery = SELECT domain FROM mail_domains WHERE domain = '%s' AND status = 'active'\n",
     'pgsql-virtual-mailboxes.cf' => "hosts = {$dbHost}:{$dbPort}\ndbname = {$dbName}\nuser = {$dbUser}\npassword = {$dbPass}\nquery = SELECT CONCAT(md.domain, '/', ma.local_part, '/Maildir/') FROM mail_accounts ma JOIN mail_domains md ON md.id = ma.mail_domain_id WHERE ma.email = '%s' AND ma.status = 'active'\n",
-    'pgsql-virtual-aliases.cf' => "hosts = {$dbHost}:{$dbPort}\ndbname = {$dbName}\nuser = {$dbUser}\npassword = {$dbPass}\nquery = SELECT destination FROM mail_aliases WHERE (source = '%s' OR (is_catchall = true AND source = CONCAT('@', split_part('%s', '@', 2)))) AND is_active = true LIMIT 1\n",
+    'pgsql-virtual-aliases.cf' => "hosts = {$dbHost}:{$dbPort}\ndbname = {$dbName}\nuser = {$dbUser}\npassword = {$dbPass}\nquery = " . \MuseDockPanel\Services\MailService::POSTFIX_ALIAS_QUERY . "\n",
 ];
 
 foreach ($sqlFiles as $filename => $content) {
@@ -912,7 +912,7 @@ plugin {
   quota_status_overquota = "552 5.2.2 Mailbox is full"
   sieve = file:~/sieve;active=~/.dovecot.sieve
   sieve_default = /etc/dovecot/sieve/default.sieve
-  sieve_global_extensions = +vacation +copy +include
+  sieve_extensions = +vacation +copy +include
 }
 
 # LMTP for Postfix delivery

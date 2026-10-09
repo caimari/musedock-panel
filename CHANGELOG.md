@@ -2,10 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [1.0.357] — 2026-10-09 — Aviso de certificados en los slaves
+## [1.0.357] — 2026-10-09 — El recoge-todo ya no se queda el correo de los buzones, contestador automático y aviso de certificados en los slaves
 
 ### Cambiado
 - **Aviso «Certificado en bucle de fallo» en los slaves.** Al crear un hosting cuyo DNS no está en Cloudflare, el slave intentaba sacar el certificado por su cuenta y fallaba hasta que le llegaba la copia del master (unos 20–30 intentos), y cada nodo mandaba un aviso que era una falsa alarma. Ahora, en un slave, un dominio que no apunta a él no avisa mientras espera la copia del master; solo avisa si en 6 horas no ha llegado, y entonces dice que se revise el certificado del master y la sincronización de certificados. El aviso ya no dice que un dominio fallando bloquea los certificados de los demás: Let's Encrypt limita los fallos por nombre de dominio.
+
+### Arreglado
+- **El recoge-todo de un dominio se quedaba el correo de sus buzones reales.** Con un recoge-todo activo (p. ej. @dominio → webmaster@), lo enviado a hello@, support@, notify@ o cualquier otro buzón existente acababa en el destino del recoge-todo, porque Postfix, al no encontrar alias para la dirección, buscaba «@dominio». Ahora cada buzón se resuelve a sí mismo y el recoge-todo solo recibe lo que no existe; un alias concreto gana siempre al recoge-todo (antes, con los dos, podía ganar cualquiera). Se corrige solo en los servidores ya instalados (copia de la configuración, `postfix check` y vuelta atrás si falla) y en las instalaciones nuevas.
+- **El contestador automático de los buzones nunca contestaba.** Dovecot tenía `vacation` restringido a los scripts globales, así que el script de cada buzón no compilaba. Ahora está disponible para los buzones (se corrige solo en los servidores ya instalados, con prueba de la configuración y vuelta atrás). También se compila como root el script Sieve por defecto, que Dovecot recompilaba en cada correo con un error «Read-only file system» en el log.
+- **El contestador se copia a las réplicas de correo** (Filemon): antes solo se aplicaba en el servidor principal y tras un relevo dejaba de contestar. La resincronización completa de una réplica también lo incluye.
 
 ## [1.0.356] — 2026-10-08 — Copia de configuración desde el panel y mejoras visuales
 

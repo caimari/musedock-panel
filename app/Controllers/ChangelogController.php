@@ -28,6 +28,11 @@ class ChangelogController
                         'Aviso «Certificado en bucle de fallo» en los slaves: un dominio que no apunta al slave no avisa mientras espera la copia del certificado del master (falsa alarma al crear un hosting sin Cloudflare); solo avisa si en 6 horas no ha llegado, indicando revisar el certificado del master y la sincronización de certificados',
                         'El aviso ya no dice que un dominio fallando bloquea los certificados de los demás: Let\'s Encrypt limita los fallos por nombre de dominio',
                     ],
+                    'fixed' => [
+                        'El recoge-todo de un dominio se quedaba el correo de sus buzones reales (hello@, support@, notify@… acababan en su destino): ahora cada buzón se resuelve a sí mismo y el recoge-todo solo recibe lo que no existe; un alias concreto gana siempre al recoge-todo. Se corrige solo en los servidores instalados',
+                        'El contestador automático de los buzones nunca contestaba (vacation restringido a scripts globales en Dovecot): ahora funciona; se corrige solo en los servidores instalados. El script Sieve por defecto se compila como root (error «Read-only file system» en cada correo)',
+                        'El contestador se copia a las réplicas de correo y entra en la resincronización completa (antes, tras un relevo, dejaba de contestar)',
+                    ],
                 ],
             ],
             [

@@ -455,6 +455,9 @@ class MailService
             } elseif (Settings::get('mail_local_configured', '') === '1') {
                 self::nodeUpdateAutoresponder($autoPayload);
             }
+            // Y a las réplicas de correo (Filemon): el contestador es un script Sieve en el
+            // buzón de cada servidor; sin esto, tras un relevo dejaba de contestar.
+            self::replicateMailOp('mail_update_autoresponder', $autoPayload);
         }
     }
 
@@ -2749,6 +2752,111 @@ class MailService
         return "entrada SMTP por proxy en {$vpnIp}:{$port} añadida";
     }
 
+    /**
+     * Consulta de alias de Postfix. El recoge-todo (@dominio) solo vale para direcciones
+     * que no son un buzón: antes se quedaba también el correo de los buzones reales
+     * (hello@, support@, notify@… acababan en el destino del recoge-todo). Postfix, si una
+     * dirección no da resultado, pregunta después por «@dominio», así que cada buzón se
+     * devuelve a sí mismo (así se para ahí). Orden: alias concreto, buzón, recoge-todo.
+     */
+    public const POSTFIX_ALIAS_QUERY = "SELECT destination FROM ("
+        . "SELECT destination, 0 AS o FROM mail_aliases WHERE source = '%s' AND is_active = true AND is_catchall = false"
+        . " UNION ALL SELECT email, 1 FROM mail_accounts WHERE email = '%s' AND status = 'active'"
+        . " UNION ALL SELECT destination, 2 FROM mail_aliases WHERE source = '%s' AND is_active = true AND is_catchall = true"
+        . ") t ORDER BY o LIMIT 1";
+
+    /**
+     * Pone POSTFIX_ALIAS_QUERY en el pgsql-virtual-aliases.cf de este servidor si tiene
+     * otra (instalaciones anteriores). Copia de seguridad, `postfix check` y vuelta atrás
+     * si falla. Devuelve '' si no hay nada que hacer.
+     */
+    public static function ensureAliasQuery(): string
+    {
+        $cf = '/etc/postfix/pgsql-virtual-aliases.cf';
+        if (!is_file($cf)) {
+            return '';
+        }
+        $txt = (string)file_get_contents($cf);
+        $want = 'query = ' . self::POSTFIX_ALIAS_QUERY;
+        if (!preg_match('/^query\s*=.*$/m', $txt, $m) || trim($m[0]) === $want
+            || !str_contains($m[0], 'FROM mail_aliases')) {
+            return '';
+        }
+        $backup = $cf . '.bak-' . date('Ymd-His');
+        if (!@copy($cf, $backup)) {
+            return 'no se pudo copiar pgsql-virtual-aliases.cf: no se toca';
+        }
+        @chmod($backup, 0600);
+        $new = preg_replace('/^query\s*=.*$/m', str_replace(['\\', '$'], ['\\\\', '\\$'], $want), $txt, 1);
+        if (file_put_contents($cf, $new) === false) {
+            return 'no se pudo escribir pgsql-virtual-aliases.cf';
+        }
+        exec('postfix check 2>&1', $out, $rc);
+        if ($rc !== 0) {
+            @copy($backup, $cf);
+            LogService::log('mail.alias-query', 'rollback', 'postfix check falló, consulta restaurada: ' . implode(' ', $out));
+            return 'postfix check falló: consulta de alias restaurada';
+        }
+        if (trim((string)shell_exec('systemctl is-active postfix 2>/dev/null')) === 'active') {
+            shell_exec('postfix reload 2>&1');
+        }
+        LogService::log('mail.alias-query', 'fixed', 'Recoge-todo ya no se queda el correo de los buzones reales');
+        return 'consulta de alias corregida (el recoge-todo ya no se queda el correo de los buzones)';
+    }
+
+    /**
+     * Sieve de Dovecot en servidores ya instalados:
+     *  - `sieve_global_extensions = +vacation…` dejaba vacation SOLO para scripts globales,
+     *    así que el contestador de cada buzón no compilaba y nunca contestaba → pasa a
+     *    `sieve_extensions` (con copia, `doveconf` de prueba y vuelta atrás si falla);
+     *  - el script por defecto se compila como root si su .svbin está atrasado (Dovecot no
+     *    puede guardarlo en /etc y lo recompilaba en cada correo, con un error en el log).
+     */
+    public static function ensureSieveConfig(): string
+    {
+        $done = [];
+        $changed = [];
+        foreach (glob('/etc/dovecot/conf.d/*.conf') ?: [] as $f) {
+            $txt = (string)@file_get_contents($f);
+            if (!preg_match('/^\s*sieve_global_extensions\s*=\s*\+vacation\b[^\n]*$/m', $txt)) {
+                continue;
+            }
+            $backup = $f . '.bak-' . date('Ymd-His');
+            if (!@copy($f, $backup)) {
+                return 'no se pudo copiar ' . basename($f) . ': no se toca';
+            }
+            $new = preg_replace('/^(\s*)sieve_global_extensions(\s*=\s*\+vacation\b)/m', '$1sieve_extensions$2', $txt);
+            file_put_contents($f, $new);
+            $changed[$f] = $backup;
+        }
+        if ($changed) {
+            exec('doveconf -n >/dev/null 2>&1', $o, $rc);
+            if ($rc !== 0) {
+                foreach ($changed as $f => $backup) {
+                    @copy($backup, $f);
+                }
+                LogService::log('mail.sieve', 'rollback', 'doveconf falló, configuración de Sieve restaurada');
+                return 'doveconf falló: configuración de Sieve restaurada';
+            }
+            foreach ($changed as $backup) {
+                @unlink($backup); // dovecot no lee *.bak-*, pero no dejar copias con la misma config
+            }
+            shell_exec('systemctl reload dovecot 2>&1');
+            LogService::log('mail.sieve', 'fixed', 'vacation disponible para los scripts de los buzones (contestador)');
+            $done[] = 'contestador automático habilitado en Sieve';
+        }
+        $def = '/etc/dovecot/sieve/default.sieve';
+        $bin = '/etc/dovecot/sieve/default.svbin';
+        if (is_file($def) && (!is_file($bin) || filemtime($bin) < filemtime($def))) {
+            shell_exec('sievec ' . escapeshellarg($def) . ' 2>&1');
+            clearstatcache();
+            if (is_file($bin) && filemtime($bin) >= filemtime($def)) {
+                $done[] = 'script Sieve por defecto compilado';
+            }
+        }
+        return implode('; ', $done);
+    }
+
     /** Puertos (solo VPN, con PROXY protocol) de los programas de correo detrás de un proxy. */
     public const PROXIED_CLIENT_PORTS = ['submission' => 10587, 'smtps' => 10465, 'imaps' => 10993];
 
@@ -3477,7 +3585,7 @@ class MailService
             . "plugin {\n"
             . "  sieve = file:~/sieve;active=~/.dovecot.sieve\n"
             . "  sieve_default = /etc/dovecot/sieve/default.sieve\n"
-            . "  sieve_global_extensions = +vacation +copy +include\n"
+            . "  sieve_extensions = +vacation +copy +include\n"
             . "}\n\n"
             . "service managesieve-login {\n"
             . "  inet_listener sieve {\n"
@@ -4162,6 +4270,15 @@ class MailService
                     'rate_limit_per_hour' => (int)($a['rate_limit_per_hour'] ?? 0),
                 ]);
                 $mc++;
+                if (in_array($a['autoresponder_enabled'] ?? null, [true, 't', 'true', 1, '1'], true)) {
+                    ClusterService::enqueue($nodeId, 'mail_update_autoresponder', [
+                        'email'    => $a['email'],
+                        'home_dir' => $a['home_dir'],
+                        'enabled'  => true,
+                        'subject'  => (string)($a['autoresponder_subject'] ?? ''),
+                        'body'     => (string)($a['autoresponder_body'] ?? ''),
+                    ]);
+                }
             }
             // Aliases of this domain.
             $aliases = Database::fetchAll(

@@ -418,6 +418,14 @@ try {
     if ($px !== '') {
         logMsg('Correo: ' . $px);
     }
+    $aq = \MuseDockPanel\Services\MailService::ensureAliasQuery();
+    if ($aq !== '') {
+        logMsg('Correo: ' . $aq);
+    }
+    $sv = \MuseDockPanel\Services\MailService::ensureSieveConfig();
+    if ($sv !== '') {
+        logMsg('Correo: ' . $sv);
+    }
     $or = \MuseDockPanel\Services\MailOutboundRelayService::ensure();
     if (!empty($or['changed']) || !empty($or['error'])) {
         logMsg('Relé de salida: ' . ($or['message'] ?? $or['error'] ?? ''));
