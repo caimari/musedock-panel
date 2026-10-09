@@ -18,6 +18,10 @@ use MuseDockPanel\Database;
  * silent, fleet-wide outage into a single actionable email: "domain X keeps
  * failing its certificate; give it a look."
  *
+ * On a slave, a domain that does not point here is expected to fail until the
+ * master's certificate arrives through the cert sync, so it is only reported if
+ * that copy has not arrived after SLAVE_WAIT_HOURS.
+ *
  * Read-only: it never disables a domain on its own. Taking a tenant down is a
  * business decision, so it only reports.
  */
@@ -27,6 +31,8 @@ class CertMonitorService
     private const FAIL_THRESHOLD = 20;
     /** Only re-alert about the same domain every N hours (anti-spam). */
     private const REALERT_HOURS = 12;
+    /** Slave: horas de margen para que llegue la copia del certificado del master. */
+    private const SLAVE_WAIT_HOURS = 6;
 
     /**
      * Scan recent Caddy logs for ACME certificate failures, aggregate per domain,
@@ -39,6 +45,7 @@ class CertMonitorService
         // revisar el journal de Caddy cada minuto en vez de cada 30.
         Settings::set('cert_monitor_last_run', date('Y-m-d H:i:s'));
         $failures = static::recentAcmeFailures();
+        static::pruneSlaveWait($failures);
         if (empty($failures)) {
             return ['ok' => true, 'checked' => 0, 'alerted' => []];
         }
@@ -51,21 +58,38 @@ class CertMonitorService
             // emisor falla y el otro no), no hay bucle que cortar.
             if (!$info['rate_limited'] && !empty(CertWatchService::checkHost($domain)['ok'])) continue;
 
-            $rateLimited = $info['rate_limited'] ? ' (¡está agotando el límite de Let\'s Encrypt!)' : '';
             $resolves = static::domainResolvesHere($domain);
-            $why = $resolves === false
-                ? 'El dominio NO resuelve a la IP de este servidor (DNS movido o dominio caducado).'
-                : ($resolves === null ? 'No se pudo comprobar el DNS del dominio.'
-                    : 'El dominio resuelve aquí, pero el reto ACME falla igualmente (revisar HTTP-01/DNS-01).');
+            // En un slave, una web que no apunta aquí no puede sacar su certificado: lo
+            // saca el master y le llega por la sincronización de certificados. Hasta que
+            // llega la copia, Caddy reintenta y falla (pasa con cada hosting nuevo cuyo
+            // DNS no está en Cloudflare); solo es un problema si la copia no llega.
+            $waitingCopy = false;
+            if ($resolves !== true && Settings::get('cluster_role', 'standalone') === 'slave') {
+                if (static::waitingForMasterCopy($domain)) continue;
+                $waitingCopy = true;
+            }
+
+            $rateLimited = $info['rate_limited'] ? ' (ya ha llegado al límite de intentos de Let\'s Encrypt para este dominio)' : '';
+            $why = $waitingCopy
+                ? 'Este servidor es un slave y el dominio no apunta a él: el certificado lo saca el master y aquí llega copiado, '
+                  . 'pero la copia no ha llegado en ' . self::SLAVE_WAIT_HOURS . ' horas. Revisa que el master tenga el certificado '
+                  . 'y que la sincronización de certificados SSL (Cluster → Archivos) esté activa.'
+                : ($resolves === false
+                    ? 'El dominio NO resuelve a la IP de este servidor (DNS movido o dominio caducado).'
+                    : ($resolves === null ? 'No se pudo comprobar el DNS del dominio.'
+                        : 'El dominio resuelve aquí, pero el reto ACME falla igualmente (revisar HTTP-01/DNS-01).'));
 
             $subject = "Certificado en bucle de fallo: {$domain}";
             $body = "El dominio {$domain} ha fallado la emisión de su certificado "
                   . "{$info['count']} veces en la última hora{$rateLimited}.\n\n"
                   . "Motivo probable: {$why}\n\n"
-                  . "Un dominio muerto reintentando sin parar agota el cupo de Let's Encrypt "
-                  . "(5 fallos/hora) y puede bloquear los certificados de los demás dominios y del correo.\n\n"
-                  . "Acción recomendada: si el dominio ya no se usa, márcalo como inactivo "
-                  . "(Superadmin → Tenants) o elimínalo del hosting. Si debe funcionar, revisa su DNS.";
+                  . "Let's Encrypt admite 5 fallos por hora para cada nombre: mientras siga fallando, "
+                  . "este dominio no podrá obtener ni renovar su certificado, y los reintentos sin fin cargan a Caddy "
+                  . "y a la cuenta de Let's Encrypt del servidor.\n\n"
+                  . ($waitingCopy
+                      ? "Acción recomendada: comprueba el certificado en el master (cert_status) y la sincronización de certificados."
+                      : "Acción recomendada: si el dominio ya no se usa, márcalo como inactivo "
+                        . "(Superadmin → Tenants) o elimínalo del hosting. Si debe funcionar, revisa su DNS.");
 
             NotificationService::send($subject, $body, 'cert');
             LogService::log('cert.monitor', 'alert', "Alerta: {$domain} en bucle ACME ({$info['count']} fallos){$rateLimited}");
@@ -138,6 +162,39 @@ class CertMonitorService
         $last = Settings::get($key, '');
         if ($last === '') return true;
         return (time() - strtotime($last)) >= self::REALERT_HOURS * 3600;
+    }
+
+    /**
+     * Slave: true mientras el dominio esté dentro del margen de espera a la copia del
+     * certificado del master (contado desde la primera vez que se le vio fallar). Cuando
+     * deja de fallar, el contador se borra solo en la siguiente pasada.
+     */
+    private static function waitingForMasterCopy(string $domain): bool
+    {
+        $wait = static::slaveWaitMap();
+        if (!isset($wait[$domain])) {
+            $wait[$domain] = date('Y-m-d H:i:s');
+            Settings::set('cert_monitor_slave_wait', json_encode($wait));
+            return true;
+        }
+        return (time() - strtotime($wait[$domain])) < self::SLAVE_WAIT_HOURS * 3600;
+    }
+
+    /** @return array<string,string> dominio => desde cuándo espera la copia del master */
+    private static function slaveWaitMap(): array
+    {
+        $wait = json_decode((string)Settings::get('cert_monitor_slave_wait', '{}'), true);
+        return is_array($wait) ? $wait : [];
+    }
+
+    /** Olvida las esperas de los dominios que ya no fallan. */
+    private static function pruneSlaveWait(array $failing): void
+    {
+        $wait = static::slaveWaitMap();
+        $kept = array_intersect_key($wait, $failing);
+        if (count($kept) !== count($wait)) {
+            Settings::set('cert_monitor_slave_wait', json_encode($kept));
+        }
     }
 
     private static function markAlerted(string $domain): void

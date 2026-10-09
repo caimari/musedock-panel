@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.357] — 2026-10-09 — Aviso de certificados en los slaves
+
+### Cambiado
+- **Aviso «Certificado en bucle de fallo» en los slaves.** Al crear un hosting cuyo DNS no está en Cloudflare, el slave intentaba sacar el certificado por su cuenta y fallaba hasta que le llegaba la copia del master (unos 20–30 intentos), y cada nodo mandaba un aviso que era una falsa alarma. Ahora, en un slave, un dominio que no apunta a él no avisa mientras espera la copia del master; solo avisa si en 6 horas no ha llegado, y entonces dice que se revise el certificado del master y la sincronización de certificados. El aviso ya no dice que un dominio fallando bloquea los certificados de los demás: Let's Encrypt limita los fallos por nombre de dominio.
+
 ## [1.0.356] — 2026-10-08 — Copia de configuración desde el panel y mejoras visuales
 
 ### Añadido

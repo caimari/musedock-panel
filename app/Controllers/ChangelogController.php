@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.357',
+                'date' => '2026-10-09',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'Aviso «Certificado en bucle de fallo» en los slaves: un dominio que no apunta al slave no avisa mientras espera la copia del certificado del master (falsa alarma al crear un hosting sin Cloudflare); solo avisa si en 6 horas no ha llegado, indicando revisar el certificado del master y la sincronización de certificados',
+                        'El aviso ya no dice que un dominio fallando bloquea los certificados de los demás: Let\'s Encrypt limita los fallos por nombre de dominio',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.356',
                 'date' => '2026-10-08',
                 'badge' => 'info',
