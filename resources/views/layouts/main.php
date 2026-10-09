@@ -204,7 +204,10 @@
 <!-- Main content -->
 <div class="main-content">
     <div class="top-bar">
-        <h4><?= View::e($pageTitle ?? 'Dashboard') ?></h4>
+        <h4 class="d-flex align-items-center gap-2 mb-0">
+            <a href="#" id="nav-back" class="btn btn-sm btn-outline-secondary d-none" title="Volver" aria-label="Volver"><i class="bi bi-arrow-left"></i></a>
+            <span><?= View::e($pageTitle ?? 'Dashboard') ?></span>
+        </h4>
         <div class="top-bar-right">
             <span
                 id="system-time-clock"
@@ -535,6 +538,83 @@ fetch('/settings/updates/api/status').then(r=>r.json()).then(d=>{
         document.getElementById('update-banner').style.display='inline';
     }
 }).catch(()=>{});
+</script>
+<script>
+// Ventana con el detalle por carpeta de un buzón (correos y sin leer), p. ej. para ver si
+// hay correo bueno en el spam. Botones con data-mail-folders='[{name,messages,unread,kind}]'.
+document.addEventListener('click', function (e) {
+    const b = e.target.closest('[data-mail-folders]');
+    if (!b || typeof Swal === 'undefined') return;
+    e.preventDefault();
+    let f = [];
+    try { f = JSON.parse(b.dataset.mailFolders || '[]'); } catch (x) { f = []; }
+    const esc = (t) => { const d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; };
+    const label = (x) => x.kind === 'spam' ? ' <span class="badge bg-warning text-dark">spam</span>' : (x.kind === 'trash' ? ' <span class="badge bg-secondary">papelera</span>' : '');
+    f.sort((a, b) => (b.unread - a.unread) || (b.messages - a.messages));
+    const rows = f.length ? f.map(x => '<tr' + (x.kind === 'spam' && x.unread > 0 ? ' class="table-warning text-dark"' : '') + '><td>' + esc(x.name) + label(x) + '</td><td class="text-end">' + esc(x.messages)
+        + '</td><td class="text-end">' + (x.unread > 0 ? '<strong>' + esc(x.unread) + '</strong>' : '0') + '</td></tr>').join('')
+        : '<tr><td colspan="3" class="text-muted">Sin correos.</td></tr>';
+    const spamUnread = f.filter(x => x.kind === 'spam').reduce((a, x) => a + x.unread, 0);
+    Swal.fire({
+        title: esc(b.dataset.mailbox || 'Carpetas'),
+        html: '<table class="table table-dark table-sm small text-start mb-2"><thead><tr class="text-muted"><th>Carpeta</th><th class="text-end">Correos</th><th class="text-end">Sin leer</th></tr></thead><tbody>' + rows + '</tbody></table>'
+            + (spamUnread > 0 ? '<div class="small text-warning text-start"><i class="bi bi-exclamation-triangle me-1"></i>Hay ' + spamUnread + ' sin leer en el spam: revísalos por si alguno es bueno.</div>' : '')
+            + '<div class="small text-muted text-start mt-1">Solo cifras; el contenido se ve en el webmail.</div>',
+        width: 560, showCloseButton: true, confirmButtonText: 'Cerrar'
+    });
+});
+
+// Volver a donde estabas: el panel recuerda, en esta pestaña del navegador, las páginas por
+// las que has pasado con su pestaña interna (?tab=…, #…). Los enlaces de "volver" de cada
+// página (los de la flecha) llevan a la última vez que estuviste en esa página, con su
+// pestaña; y si una página no tiene, aparece una flecha junto al título.
+(function () {
+    const K = 'md_nav';
+    const cur = () => location.pathname + location.search + location.hash;
+    let st = [];
+    try { st = JSON.parse(sessionStorage.getItem(K) || '[]'); if (!Array.isArray(st)) st = []; } catch (e) { st = []; }
+    const save = () => { try { sessionStorage.setItem(K, JSON.stringify(st.slice(-60))); } catch (e) {} };
+    const pathOf = (u) => { try { return new URL(u, location.origin).pathname; } catch (e) { return ''; } };
+    const here = cur();
+    if (st.length && pathOf(st[st.length - 1]) === location.pathname) {
+        st[st.length - 1] = here;                         // recarga o cambio de pestaña interna
+    } else if (st.length > 1 && pathOf(st[st.length - 2]) === location.pathname) {
+        st.pop(); st[st.length - 1] = here;               // has vuelto a la página anterior
+    } else {
+        st.push(here);
+    }
+    save();
+    // Las pestañas internas cambian la dirección sin recargar: apuntar la del momento.
+    const touch = () => { if (st.length) { st[st.length - 1] = cur(); save(); } };
+    ['replaceState', 'pushState'].forEach((m) => {
+        const orig = history[m];
+        history[m] = function () { const r = orig.apply(this, arguments); touch(); return r; };
+    });
+    window.addEventListener('hashchange', touch);
+    window.addEventListener('pagehide', touch);
+    document.addEventListener('click', (e) => { if (e.target.closest('a[href]')) touch(); }, true);
+
+    // Enlaces de "volver" de la página: a la última visita de esa página, con su pestaña.
+    let ownBack = false;
+    document.querySelectorAll('.content-area a[href] > i.bi-arrow-left:first-child').forEach((i) => {
+        const a = i.parentElement;
+        let u;
+        try { u = new URL(a.getAttribute('href'), location.origin); } catch (e) { return; }
+        if (u.origin !== location.origin || u.pathname === location.pathname) return;
+        ownBack = true;
+        for (let k = st.length - 2; k >= 0; k--) {
+            if (pathOf(st[k]) === u.pathname) { a.setAttribute('href', st[k]); break; }
+        }
+    });
+    // Flecha junto al título si la página no tiene su propio "volver".
+    const prev = st.length > 1 ? st[st.length - 2] : null;
+    const btn = document.getElementById('nav-back');
+    if (btn && prev && !ownBack) {
+        btn.setAttribute('href', prev);
+        btn.title = 'Volver a ' + prev;
+        btn.classList.remove('d-none');
+    }
+})();
 </script>
 </body>
 </html>

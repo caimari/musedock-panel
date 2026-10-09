@@ -2513,7 +2513,8 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                         <th class="ps-3">Domain</th>
                         <th>Customer</th>
                         <th>Mail Node</th>
-                        <th>Accounts</th>
+                        <th>Buzones</th>
+                        <th>Alias</th>
                         <th>DKIM</th>
                         <th>Status</th>
                         <th></th>
@@ -2540,7 +2541,16 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                                 <span class="text-muted">Local</span>
                             <?php endif; ?>
                         </td>
-                        <td><?= $d['account_count'] ?></td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-link p-0 text-decoration-none mail-dom-list" data-id="<?= (int)$d['id'] ?>" data-domain="<?= View::e($d['domain']) ?>" data-focus="mailboxes" title="Ver los buzones">
+                                <i class="bi bi-inbox me-1"></i><?= (int)$d['account_count'] ?>
+                            </button>
+                        </td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-link p-0 text-decoration-none mail-dom-list" data-id="<?= (int)$d['id'] ?>" data-domain="<?= View::e($d['domain']) ?>" data-focus="aliases" title="Ver los alias">
+                                <i class="bi bi-signpost-2 me-1"></i><?= (int)($d['alias_count'] ?? 0) ?>
+                            </button>
+                        </td>
                         <td>
                             <?php if ($d['dkim_public_key']): ?>
                                 <span class="badge bg-success">OK</span>
@@ -3434,4 +3444,37 @@ async function rotateMailDbPassword() {
     }
 }
 <?php endif; ?>
+</script>
+
+<script>
+// Lista de dominios: al pulsar el número de buzones o de alias, ventana con la lista.
+document.addEventListener('click', function (e) {
+    const b = e.target.closest('.mail-dom-list');
+    if (!b) return;
+    const esc = (t) => { const d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; };
+    Swal.fire({title: esc(b.dataset.domain), html: '<div class="text-muted small py-3"><i class="bi bi-hourglass-split me-1"></i>Cargando…</div>', width: 760, showConfirmButton: false, showCloseButton: true});
+    fetch('/mail/domains/' + encodeURIComponent(b.dataset.id) + '/summary', {headers: {'Accept': 'application/json'}}).then(r => r.json()).then(d => {
+        if (!d.ok) { Swal.update({html: '<div class="text-danger small">' + esc(d.error || 'No se pudo cargar') + '</div>'}); return; }
+        const mb = d.mailboxes || [], al = d.aliases || [];
+        const mbRows = mb.length ? mb.map(m => '<tr><td><a class="text-info text-decoration-none" href="/mail/accounts/' + m.id + '/edit">' + esc(m.email) + '</a>'
+                + (m.webmail ? ' <a href="' + esc(m.webmail) + '" target="_blank" rel="noopener" class="ms-1 text-info" title="Abrir el webmail con este buzón ya puesto"><i class="bi bi-box-arrow-up-right"></i></a>' : '')
+                + (m.display_name ? '<div class="text-muted">' + esc(m.display_name) + '</div>' : '') + '</td>'
+                + '<td>' + (m.status === 'active' ? '<span class="badge bg-success">activo</span>' : '<span class="badge bg-secondary">' + esc(m.status) + '</span>') + '</td>'
+                + '<td>' + (m.messages != null ? esc(m.messages) + ' (' + esc(m.unread) + ' sin leer)'
+                    + ((m.folders || []).filter(x => x.unread > 0).length ? '<div class="text-muted">' + m.folders.filter(x => x.unread > 0).map(x => esc(x.name) + ' ' + esc(x.unread) + (x.kind === 'spam' ? ' ⚠' : '')).join(' · ') + '</div>' : '') : '—') + '</td>'
+                + '<td>' + esc(m.used_mb || 0) + ' MB' + (Number(m.quota_mb) > 0 ? ' / ' + esc(m.quota_mb) + ' MB' : ' · sin límite') + '</td>'
+                + '<td class="text-muted">' + esc(m.last_login_at ? String(m.last_login_at).slice(0, 16) : '—') + '</td></tr>').join('')
+            : '<tr><td colspan="5" class="text-muted">Sin buzones.</td></tr>';
+        const alRows = al.length ? al.map(a => '<tr><td>' + (a.is_catchall ? '<span class="badge bg-warning text-dark me-1">recoge-todo</span>' : '') + esc(a.source)
+                + '</td><td><i class="bi bi-arrow-right text-muted me-1"></i>' + esc(a.destination).replace(/,\s*/g, '<br>') + '</td>'
+                + '<td>' + (a.is_active ? '<span class="badge bg-success">activo</span>' : '<span class="badge bg-secondary">inactivo</span>') + '</td></tr>').join('')
+            : '<tr><td colspan="3" class="text-muted">Sin alias.</td></tr>';
+        const sec = (id, icon, title, n, head, rows) => '<div id="' + id + '" class="mb-3"><h6 class="text-start mb-2"><i class="bi ' + icon + ' me-1"></i>' + title + ' (' + n + ')</h6>'
+            + '<div class="table-responsive"><table class="table table-dark table-sm small text-start align-middle mb-0"><thead><tr class="text-muted">' + head + '</tr></thead><tbody>' + rows + '</tbody></table></div></div>';
+        const mbSec = sec('mdl-mailboxes', 'bi-inbox', 'Buzones', mb.length, '<th>Buzón</th><th>Estado</th><th>Correos</th><th>Espacio</th><th>Último acceso</th>', mbRows);
+        const alSec = sec('mdl-aliases', 'bi-signpost-2', 'Alias', al.length, '<th>Dirección</th><th>Reenvía a</th><th>Estado</th>', alRows);
+        Swal.update({html: (b.dataset.focus === 'aliases' ? alSec + mbSec : mbSec + alSec)
+            + '<div class="d-flex justify-content-between small"><span class="text-muted">Correos y espacio: actualizados cada 30 min (botón en la ficha del dominio)</span><a class="text-info" href="/mail/domains/' + encodeURIComponent(b.dataset.id) + '">Abrir el dominio</a></div>'});
+    }).catch(() => Swal.update({html: '<div class="text-danger small">No se pudo cargar.</div>'}));
+});
 </script>

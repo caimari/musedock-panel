@@ -271,6 +271,40 @@ class WordPressHardenService
         return is_dir($root) && fileowner($root) === 0;
     }
 
+    /**
+     * Que PHP pueda leer el código cerrado (root:grupo-del-usuario, 640). Los pools de PHP-FPM
+     * corren con `group = www-data`; así PHP-FPM solo conserva los grupos en los que el usuario
+     * figura como MIEMBRO en /etc/group, y el grupo propio del usuario es su grupo principal,
+     * no figura. Resultado: "Permission denied" al leer wp-config.php y error 500 (almatwins,
+     * screenartfilms y filmsinfest en mortadelo tras el cambio de mando del 2026-10-07; en
+     * Filemon sí eran miembros). Se añade como miembro y se recarga su PHP-FPM.
+     * Devuelve true si cambió algo.
+     */
+    private static function ensureOwnGroupMember(string $user): bool
+    {
+        $pw = posix_getpwnam($user);
+        if (!$pw) {
+            return false;
+        }
+        $gr = posix_getgrgid((int)$pw['gid']);
+        if (!$gr || in_array($user, (array)($gr['members'] ?? []), true)) {
+            return false;
+        }
+        exec('gpasswd -a ' . escapeshellarg($user) . ' ' . escapeshellarg((string)$gr['name']) . ' 2>&1', $o, $rc);
+        if ($rc !== 0) {
+            return false;
+        }
+        // Recargar el PHP-FPM de las versiones que tienen un pool de este usuario.
+        foreach (glob('/etc/php/*/fpm/pool.d/*.conf') ?: [] as $f) {
+            if (preg_match('/^\s*user\s*=\s*' . preg_quote($user, '/') . '\s*$/m', (string)@file_get_contents($f))) {
+                $ver = basename(dirname(dirname(dirname($f))));
+                shell_exec('systemctl reload ' . escapeshellarg("php{$ver}-fpm") . ' 2>&1');
+            }
+        }
+        LogService::log('wp.harden', $user, "Usuario añadido a su propio grupo ({$gr['name']}) para que PHP lea el código cerrado; PHP-FPM recargado");
+        return true;
+    }
+
     /** El código pasa a root (se puede leer, no escribir); las carpetas de datos siguen del usuario. */
     public static function lock(string $root, string $user): string
     {
@@ -289,6 +323,8 @@ class WordPressHardenService
         $own = escapeshellarg((string)(posix_getgrgid((int)posix_getpwnam($user)['gid'])['name'] ?? $user));
         self::writeMuPlugin($root);
         shell_exec("chown -R root:{$own} {$r} 2>&1; chmod -R go-w {$r} 2>&1");
+        // PHP tiene que poder leer por ese grupo (ver ensureOwnGroupMember).
+        self::ensureOwnGroupMember($user);
         // Lo que no era legible por todos (p. ej. wp-config.php 600) lo lee el usuario por su grupo.
         shell_exec("find {$r} -type f ! -perm -o=r -exec chmod g+r {} + 2>&1");
         shell_exec("find {$r} -type d ! -perm -o=rx -exec chmod g+rx {} + 2>&1");
@@ -379,6 +415,9 @@ class WordPressHardenService
             foreach (self::wpRoots($acc) as $root) {
                 $r = self::applyRoutes($root, (string)$acc['username']);
                 if (!empty($r['routes'])) {
+                    $fixed[] = $acc['domain'];
+                }
+                if (self::isLocked($root) && self::ensureOwnGroupMember((string)$acc['username'])) {
                     $fixed[] = $acc['domain'];
                 }
                 $s = self::settingsFor((string)$acc['username']);

@@ -578,6 +578,7 @@ systemctl restart caddy</pre>
     const kinds = {
         full:    { color: 'success',   icon: 'bi-shield-check',        short: 'Réplica completa' },
         partial: { color: 'warning',   icon: 'bi-shield-exclamation',  short: 'Réplica a medias' },
+        backup:  { color: 'primary',   icon: 'bi-archive',             short: 'Copia de seguridad' },
         files:   { color: 'info',      icon: 'bi-folder2',             short: 'Solo ficheros' },
         unknown: { color: 'secondary', icon: 'bi-question-circle',     short: 'Sin datos' },
     };

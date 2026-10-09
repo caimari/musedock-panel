@@ -154,6 +154,10 @@ class RoleSwitchService
     {
         $me = self::health();
         $fs = FileSyncService::getConfig();
+        // Volcados periódicos de las bases de datos a los nodos que no replican en vivo
+        // (FileSyncService / filesync-worker): copia con retraso, no réplica.
+        $dumps = $fs['enabled'] && !empty($fs['db_dumps']);
+        $dumpEvery = max(1, (int)($fs['interval_minutes'] ?? 15));
         $out = [];
         foreach (ClusterService::getNodes() as $node) {
             $services = json_decode((string)($node['services'] ?? ''), true) ?: [];
@@ -178,7 +182,8 @@ class RoleSwitchService
                 $ok = $th && $th['in_recovery'] && $th['streaming'];
                 $dbOk += $ok ? 1 : 0;
                 $items[] = ['name' => "PostgreSQL {$key}", 'ok' => $ok,
-                    'detail' => !$th ? 'no existe allí' : ($ok ? 'réplica en vivo' : ($th['in_recovery'] ? 'réplica parada' : 'base propia, no es copia'))];
+                    'detail' => !$th ? ($dumps ? "esa instancia no existe allí; las bases de las webs le llegan por volcados cada {$dumpEvery} min" : 'no existe allí') : ($ok ? 'réplica en vivo' : ($th['in_recovery'] ? 'réplica parada'
+                        : ($dumps ? "copia por volcados cada {$dumpEvery} min (no en vivo)" : 'base propia, no es copia')))];
             }
             if (!empty($me['mysql']['configured'])) {
                 $dbTotal++;
@@ -186,7 +191,8 @@ class RoleSwitchService
                 $ok = ($tm['io'] ?? '') === 'Yes' && ($tm['sql'] ?? '') === 'Yes';
                 $dbOk += $ok ? 1 : 0;
                 $items[] = ['name' => 'MariaDB', 'ok' => $ok,
-                    'detail' => $ok ? 'réplica en vivo' : (!empty($tm['is_slave']) ? 'réplica parada' : 'base propia, no es copia')];
+                    'detail' => $ok ? 'réplica en vivo' : (!empty($tm['is_slave']) ? 'réplica parada'
+                        : ($dumps ? "copia por volcados cada {$dumpEvery} min (no en vivo)" : 'base propia, no es copia'))];
             }
             if (!empty($me['redis']['installed'])) {
                 $tr = $t['redis'] ?? [];
@@ -209,6 +215,8 @@ class RoleSwitchService
                 [$kind, $label] = ['full', 'Réplica completa: puede tomar el mando'];
             } elseif ($dbTotal > 0 && $dbOk === $dbTotal) {
                 [$kind, $label] = ['full', 'Réplica completa (falta su IP pública en Failover para poder tomar el mando)'];
+            } elseif ($dbOk === 0 && $dumps && $fs['enabled']) {
+                [$kind, $label] = ['backup', "Copia de seguridad: ficheros al instante y bases de datos por volcados cada {$dumpEvery} min (no puede tomar el mando sin perder lo último)"];
             } elseif ($dbOk === 0) {
                 [$kind, $label] = ['files', $fs['enabled'] ? 'Solo copia de ficheros: las webs sin sus bases de datos (no puede tomar el mando)' : 'Sin copia de datos'];
             } else {

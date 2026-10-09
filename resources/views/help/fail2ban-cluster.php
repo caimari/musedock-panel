@@ -51,7 +51,7 @@
                 del servidor que manda se <strong>une</strong> a la de cada copia, cada 5 minutos (copia de configuración). <strong>Nunca se quita nada</strong>:
                 si quitas una IP en el que manda, en las copias se queda (así no se deja fuera por error una IP propia).
                 Al <strong>cambiar el mando</strong> se invierte solo: la copia de configuración la hace siempre quien es copia, contra quien manda en ese momento.
-                Requiere que la copia de configuración esté activada en la copia.</li>
+                Requiere que la copia de configuración esté activada en la copia (<a href="/docs/config-mirror" class="text-info">guía</a>); en un nodo sin ella, la lista blanca se pone a mano.</li>
             <li><strong>IPs bloqueadas:</strong> <strong>no se copian</strong>, a propósito. Cada servidor bloquea a quien le ataca a él; una copia no recibe
                 visitas mientras no manda, y al tomar el mando empieza a bloquear por su cuenta.</li>
             <li><strong>Jaulas y tiempos:</strong> los pone el panel en cada servidor (<code>config/fail2ban</code>, al actualizar y desde el cluster-worker,

@@ -929,6 +929,60 @@ class ClusterController
     }
 
     /**
+     * GET /settings/cluster/config-mirror (JSON): la copia de configuración en cada nodo.
+     */
+    public function configMirrorStatus(): void
+    {
+        header('Content-Type: application/json');
+        $out = [];
+        foreach (ClusterService::getNodes() as $n) {
+            $row = ['id' => (int)$n['id'], 'name' => (string)$n['name']];
+            try {
+                $r = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'config-mirror-status', 'payload' => []]);
+                $d = $r['data'] ?? [];
+                $row += !empty($r['ok']) && !empty($d['ok'])
+                    ? ['role' => $d['role'] ?? '?', 'enabled' => !empty($d['enabled']), 'last_run' => $d['last_run'] ?? null]
+                    : ['error' => (string)($d['error'] ?? $r['error'] ?? 'sin respuesta') . ' (¿panel del nodo anterior a 1.0.356?)'];
+            } catch (\Throwable $e) {
+                $row['error'] = $e->getMessage();
+            }
+            $out[] = $row;
+        }
+        echo json_encode(['ok' => true, 'local_role' => Settings::get('cluster_role', 'standalone'), 'nodes' => $out], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    /**
+     * POST /settings/cluster/config-mirror (JSON): activar o desactivar la copia de
+     * configuración en un nodo. Exige la contraseña del administrador.
+     */
+    public function configMirrorSet(): void
+    {
+        View::verifyCsrf();
+        header('Content-Type: application/json');
+        $adminId = (int)($_SESSION['panel_user']['id'] ?? 0);
+        $admin = $adminId ? Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]) : null;
+        if (!$admin || !password_verify((string)($_POST['admin_password'] ?? ''), (string)$admin['password_hash'])) {
+            echo json_encode(['ok' => false, 'error' => 'Contraseña de administrador incorrecta.']);
+            exit;
+        }
+        $nodeId = (int)($_POST['node_id'] ?? 0);
+        $node = $nodeId ? ClusterService::getNode($nodeId) : null;
+        if (!$node) {
+            echo json_encode(['ok' => false, 'error' => 'Nodo no encontrado.']);
+            exit;
+        }
+        $on = ($_POST['enabled'] ?? '') === '1';
+        $r = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'config-mirror-set', 'payload' => ['enabled' => $on]]);
+        $d = $r['data'] ?? [];
+        $ok = !empty($r['ok']) && !empty($d['ok']);
+        LogService::log('cluster.mirror', (string)$node['name'], 'Copia de configuración ' . ($on ? 'activada' : 'desactivada') . ' desde el panel' . ($ok ? '' : ' (FALLO)'));
+        echo json_encode($ok ? ['ok' => true, 'message' => (string)($d['message'] ?? 'Hecho'), 'issues' => $d['issues'] ?? []]
+            : ['ok' => false, 'error' => (string)($d['error'] ?? $r['error'] ?? 'El nodo no respondió')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
+    /**
      * POST /settings/cluster/verify-admin-password (JSON)
      */
     public function verifyAdminPassword(): void

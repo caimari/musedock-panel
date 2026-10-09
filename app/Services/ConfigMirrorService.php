@@ -174,6 +174,41 @@ final class ConfigMirrorService
         shell_exec('fail2ban-client reload >/dev/null 2>&1');
     }
 
+    // ── Estado y activación (tarjeta de Cluster, acciones config-mirror-*) ──
+
+    /** Estado de la copia de configuración en ESTE servidor. */
+    public static function nodeStatus(): array
+    {
+        return [
+            'ok' => true,
+            'role' => self::role(),
+            'enabled' => Settings::get('cluster_config_mirror', '0') === '1',
+            'last_run' => json_decode((string)Settings::get('cluster_config_mirror_last', 'null'), true),
+            'excluded' => self::excluded(),
+        ];
+    }
+
+    /**
+     * Activa o desactiva la copia automática en ESTE servidor (solo una copia/slave).
+     * Al activarla se hace una pasada en el momento. Al desactivarla no se quita nada de
+     * lo ya copiado (sigue apagado, como estaba); solo deja de ponerse al día.
+     */
+    public static function setEnabled(bool $on): array
+    {
+        if ($on && self::role() !== 'slave') {
+            return ['ok' => false, 'error' => 'Solo se activa en una copia (slave): el que manda es el origen de la copia.'];
+        }
+        Settings::set('cluster_config_mirror', $on ? '1' : '0');
+        LogService::log('cluster.mirror', $on ? 'enable' : 'disable', 'Copia de configuración del master ' . ($on ? 'activada' : 'desactivada'));
+        if (!$on) {
+            return self::nodeStatus() + ['message' => 'Copia automática desactivada. Lo ya copiado se queda como estaba (apagado).'];
+        }
+        $r = self::run(true);
+        $changed = count(array_filter($r['actions'] ?? [], static fn($a) => !in_array($a['result'], ['igual', 'omitido'], true)));
+        return self::nodeStatus() + ['message' => "Copia automática activada; primera pasada: {$changed} cambios, " . count($r['issues'] ?? []) . ' avisos.',
+            'issues' => $r['issues'] ?? []];
+    }
+
     // ── SLAVE: traer y aplicar ───────────────────────────────────────────
 
     private static function role(): string

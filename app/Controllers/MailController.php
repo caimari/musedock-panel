@@ -391,6 +391,48 @@ class MailController
         }
     }
 
+    /** GET (JSON): buzones y alias de un dominio, para la ventana rápida de la lista. */
+    public function domainSummary(array $params): void
+    {
+        header('Content-Type: application/json');
+        $id = (int)($params['id'] ?? 0);
+        $domain = MailService::getDomain($id);
+        if (!$domain) {
+            echo json_encode(['ok' => false, 'error' => 'Dominio no encontrado']);
+            return;
+        }
+        $mailboxes = Database::fetchAll(
+            "SELECT id, email, display_name, status, quota_mb, used_mb, last_login_at FROM mail_accounts WHERE mail_domain_id = :d ORDER BY email",
+            ['d' => $id]
+        );
+        // Correos y tamaño reales (Dovecot); el used_mb de la base no se mantiene al día.
+        $usage = MailService::cachedUsage(array_column($mailboxes, 'email'));
+        foreach ($mailboxes as &$m) {
+            $m = array_merge($m, $usage[$m['email']] ?? []);
+            $m['webmail'] = WebmailService::loginUrl((string)$m['email']);
+        }
+        unset($m);
+        $aliases = Database::fetchAll(
+            "SELECT source, destination, is_catchall, is_active FROM mail_aliases WHERE mail_domain_id = :d ORDER BY is_catchall DESC, source",
+            ['d' => $id]
+        );
+        echo json_encode(['ok' => true, 'domain' => $domain['domain'], 'mailboxes' => $mailboxes, 'aliases' => $aliases], JSON_UNESCAPED_UNICODE);
+    }
+
+    /** POST (JSON): actualizar ya el uso de los buzones de un dominio (botón de la ficha). */
+    public function domainUsageRefresh(array $params): void
+    {
+        header('Content-Type: application/json');
+        $id = (int)($params['id'] ?? 0);
+        if (!MailService::getDomain($id)) {
+            echo json_encode(['ok' => false, 'error' => 'Dominio no encontrado']);
+            return;
+        }
+        $emails = array_column(MailService::getAccounts($id), 'email');
+        $n = MailService::refreshUsage($emails);
+        echo json_encode(['ok' => true, 'updated' => $n]);
+    }
+
     public function domainShow(array $params): void
     {
         $domain = MailService::getDomain((int)$params['id']);
@@ -401,6 +443,13 @@ class MailController
         }
 
         $accounts = MailService::getAccounts((int)$params['id']);
+        // Uso real (Dovecot) GUARDADO: lo pone al día el cluster-worker cada 30 min o el
+        // botón de actualizar; la página no pregunta a Dovecot en cada carga.
+        $usage = MailService::cachedUsage(array_column($accounts, 'email'));
+        foreach ($accounts as &$acc) {
+            $acc = array_merge($acc, $usage[$acc['email']] ?? []);
+        }
+        unset($acc);
         $aliases = MailService::getAliases((int)$params['id']);
         $dnsRecords = MailService::getDnsRecords((int)$params['id']);
 
@@ -578,6 +627,8 @@ class MailController
             'layout'    => 'main',
             'pageTitle' => 'Mail - Edit ' . $account['email'],
             'account'   => $account,
+            'usage'     => MailService::cachedUsage([$account['email']])[$account['email']] ?? null,
+            'webmailUrl' => WebmailService::loginUrl((string)$account['email']),
             'customers' => $customers,
         ]);
     }
@@ -692,6 +743,75 @@ class MailController
             Flash::set('success', "Alias {$source} -> {$destination} creado.");
         } catch (\Throwable $e) {
             Flash::set('error', 'Error: ' . $e->getMessage());
+        }
+        Router::redirect("/mail/domains/{$domainId}");
+    }
+
+    /**
+     * POST: borrar varios buzones o alias de un dominio a la vez (casillas de la ficha).
+     * Exige la contraseña del administrador y solo toca elementos de ESE dominio.
+     */
+    public function bulkDelete(array $params): void
+    {
+        $domainId = (int)$params['id'];
+        $back = "/mail/domains/{$domainId}";
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect($back);
+            return;
+        }
+        $adminId = (int)($_SESSION['panel_user']['id'] ?? 0);
+        $admin = $adminId ? Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]) : null;
+        if (!$admin || !password_verify((string)($_POST['admin_password'] ?? ''), (string)$admin['password_hash'])) {
+            Flash::set('error', 'Contraseña de administrador incorrecta: no se ha borrado nada.');
+            Router::redirect($back);
+            return;
+        }
+        $type = ($_POST['type'] ?? '') === 'accounts' ? 'accounts' : 'aliases';
+        $ids = array_values(array_unique(array_filter(array_map('intval', (array)($_POST['ids'] ?? [])))));
+        if (!$ids) {
+            Flash::set('error', 'No has seleccionado nada.');
+            Router::redirect($back);
+            return;
+        }
+        $table = $type === 'accounts' ? 'mail_accounts' : 'mail_aliases';
+        $col = $type === 'accounts' ? 'email' : 'source';
+        $done = [];
+        foreach ($ids as $id) {
+            $row = Database::fetchOne("SELECT id, {$col} AS name FROM {$table} WHERE id = :id AND mail_domain_id = :d", ['id' => $id, 'd' => $domainId]);
+            if (!$row) {
+                continue;   // no es de este dominio: no se toca
+            }
+            try {
+                $type === 'accounts' ? MailService::deleteAccount($id) : MailService::deleteAlias($id);
+                $done[] = (string)$row['name'];
+            } catch (\Throwable $e) {
+                LogService::log('mail.bulk-delete', (string)$row['name'], 'Error: ' . $e->getMessage());
+            }
+        }
+        LogService::log($type === 'accounts' ? 'mail.account.delete' : 'mail.alias.delete', 'varios', 'Borrado en grupo (' . count($done) . '): ' . implode(', ', $done));
+        Flash::set($done ? 'success' : 'error', $done
+            ? ($type === 'accounts' ? 'Buzones' : 'Alias') . ' borrados (' . count($done) . '): ' . implode(', ', $done)
+            : 'No se ha borrado nada.');
+        Router::redirect($back);
+    }
+
+    public function aliasUpdate(array $params): void
+    {
+        if (self::isSlave()) {
+            Flash::set('error', 'Este servidor es Slave.');
+            Router::redirect('/mail');
+            return;
+        }
+        $domainId = (int)$params['id'];
+        try {
+            $active = isset($_POST['active']) ? $_POST['active'] === '1' : null;
+            $r = MailService::updateAlias((int)$params['alias_id'], (string)($_POST['destination'] ?? ''), $active);
+            $state = $r['was_active'] === $r['active'] ? '' : ($r['active'] ? '; reactivado' : '; PAUSADO');
+            LogService::log('mail.alias.update', $r['source'], "Destino: {$r['old']} → {$r['new']}{$state}");
+            Flash::set('success', "Alias {$r['source']} → {$r['new']}" . ($r['active'] ? '' : ' (pausado: no reenvía)') . '.');
+        } catch (\Throwable $e) {
+            Flash::set('error', 'No se pudo cambiar el alias: ' . $e->getMessage());
         }
         Router::redirect("/mail/domains/{$domainId}");
     }

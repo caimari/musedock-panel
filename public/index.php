@@ -446,6 +446,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/mail/helo', 'MailController@heloSave');
 \MuseDockPanel\Router::post('/mail/outbound-relay', 'MailController@outboundRelaySave');
 \MuseDockPanel\Router::get('/mail/domains/{id}', 'MailController@domainShow');
+\MuseDockPanel\Router::get('/mail/domains/{id}/summary', 'MailController@domainSummary');
+\MuseDockPanel\Router::post('/mail/domains/{id}/usage-refresh', 'MailController@domainUsageRefresh');
 \MuseDockPanel\Router::post('/mail/domains/{id}/delete', 'MailController@domainDelete');
 \MuseDockPanel\Router::post('/mail/domains/{id}/regenerate-dkim', 'MailController@domainRegenerateDkim');
 \MuseDockPanel\Router::get('/mail/domains/{id}/accounts/create', 'MailController@accountCreate');
@@ -455,6 +457,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/mail/accounts/{account_id}/delete', 'MailController@accountDelete');
 \MuseDockPanel\Router::post('/mail/domains/{id}/aliases/store', 'MailController@aliasStore');
 \MuseDockPanel\Router::post('/mail/domains/{id}/aliases/{alias_id}/delete', 'MailController@aliasDelete');
+\MuseDockPanel\Router::post('/mail/domains/{id}/aliases/{alias_id}/update', 'MailController@aliasUpdate');
+\MuseDockPanel\Router::post('/mail/domains/{id}/bulk-delete', 'MailController@bulkDelete');
 \MuseDockPanel\Router::get('/mail/nodes/health', 'MailController@nodeHealth');
 \MuseDockPanel\Router::post('/mail/repair-local', 'MailController@repairLocal');
 \MuseDockPanel\Router::post('/mail/test-send', 'MailController@testSend');
@@ -568,6 +572,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/witnesses/remove', 'WitnessController@remove');
 \MuseDockPanel\Router::get('/docs/witnesses', 'DocsController@witnesses');
 \MuseDockPanel\Router::get('/docs/fail2ban-cluster', 'DocsController@fail2banCluster');
+\MuseDockPanel\Router::get('/docs/config-mirror', 'DocsController@configMirror');
 \MuseDockPanel\Router::get('/docs/mcp-nodes', 'DocsController@mcpNodes');
 \MuseDockPanel\Router::get('/docs/wordpress-security', 'DocsController@wordpressSecurity');
 \MuseDockPanel\Router::get('/docs/alerts', 'DocsController@alerts');
@@ -646,6 +651,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/save-settings', 'ClusterController@saveSettings');
 \MuseDockPanel\Router::post('/settings/cluster/save-setting', 'ClusterController@saveSetting');
 \MuseDockPanel\Router::post('/settings/cluster/verify-admin-password', 'ClusterController@verifyAdminPassword');
+\MuseDockPanel\Router::get('/settings/cluster/config-mirror', 'ClusterController@configMirrorStatus');
+\MuseDockPanel\Router::post('/settings/cluster/config-mirror', 'ClusterController@configMirrorSet');
 \MuseDockPanel\Router::post('/settings/cluster/clean-queue', 'ClusterController@cleanQueue');
 \MuseDockPanel\Router::post('/settings/cluster/retry-queue', 'ClusterController@retryQueue');
 \MuseDockPanel\Router::post('/settings/cluster/sync-all-hostings', 'ClusterController@syncAllHostings');

@@ -20,6 +20,32 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.356',
+                'date' => '2026-10-08',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Cluster → Nodos: tarjeta de la copia de configuración del master por nodo (estado, última pasada) para activarla o desactivarla con contraseña de administrador y una ventana que explica qué hace',
+                        'Guía «Copia de configuración del master» en Docs',
+                        'Nuevo tipo de nodo «Copia de seguridad» (ficheros al instante y bases por volcados periódicos) en el Dashboard y en la guía de Cambio de rol; antes salía como «Solo copia de ficheros, sin sus bases de datos»',
+                    ],
+                    'changed' => [
+                        'Correo → Dominios: columnas de buzones y alias; al pulsar el número, ventana con sus buzones (correos, sin leer, espacio real, último acceso) y alias (destino, recoge-todo, estado)',
+                        'Ficha del dominio de correo: espacio usado real (Dovecot; antes siempre 0 MB) y columna de correos y sin leer; «Último acceso» muestra «—» en vez de «Never» mientras no se registren',
+                        'Uso de los buzones guardado (se actualiza cada 30 min o con el botón ↻) en vez de preguntar a Dovecot en cada carga; tarjeta de uso en la ficha del buzón',
+                        'Ficha del buzón: «Cambiar contraseña» con botones Generar (segura, 20 caracteres) y Copiar',
+                        '«Sin leer» por carpetas: al pulsarlo, ventana con correos y sin leer de cada carpeta (papelera y spam marcados, aviso si hay sin leer en el spam)',
+                        'Editar el destino de un alias desde la ficha del dominio (ventana, varios destinos, validación, réplica a los nodos de correo y registro); casilla Activo para pausarlo o desactivar el recoge-todo, con aviso en la misma ventana',
+                        'La réplica de correo copia el estado activo/pausado de cada alias (antes los dejaba siempre activos en los nodos)',
+                        'WordPress blindados con error 500 tras un cambio de mando: el usuario del hosting se añade como miembro de su propio grupo para que PHP (pool con group = www-data) pueda leer el wp-config.php cerrado',
+                        'Borrar varios buzones o alias a la vez (casillas, seleccionar todos) con lista, aviso y contraseña de administrador',
+                        'Botón «Webmail» por buzón: abre el webmail con el buzón ya puesto, solo falta la contraseña',
+                        'Volver a donde estabas en todo el panel: los enlaces de volver llevan a la última visita de esa página con su pestaña (?tab=, #), y las páginas sin uno tienen una flecha junto al título',
+                        'Changelog completo: las versiones publicadas sin entrada (sobre todo 1.0.187-1.0.221 y republicaciones) tienen ahora su descripción',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.355',
                 'date' => '2026-10-08',
                 'badge' => 'info',
@@ -176,6 +202,16 @@ class ChangelogController
                 ],
             ],
             [
+                'version' => '1.0.344',
+                'date' => '2026-10-07',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'Republicación de 1.0.343 sin cambios.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.343',
                 'date' => '2026-10-07',
                 'badge' => 'warning',
@@ -224,6 +260,26 @@ class ChangelogController
                     'fixed' => [
                         'es' => ['Una copia sin salida a Internet ya no se promueve sola cuando no responde ningun testigo (el aislado era ella): evita dos masters al volver la red'],
                         'en' => ['A replica without Internet access no longer promotes itself when no witness answers (it was the isolated one): avoids two masters when the network returns'],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.339',
+                'date' => '2026-10-07',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'MCP failover_tune: ajustar los vecinos de cada servidor y los tiempos de detección.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.338',
+                'date' => '2026-10-07',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Cada servidor del relevo tiene sus propios vecinos (comprobaciones del mismo sitio), que viajan con él si se invierten los papeles; columna «Vecinos» en Failover.',
                     ],
                 ],
             ],
@@ -370,6 +426,16 @@ class ChangelogController
                     'fixed' => [
                         'es' => ['Pruebas de correo y Telegram con lo escrito en el formulario (sin guardar), correo principal y secundario por separado y motivo real del fallo'],
                         'en' => ['Mail and Telegram tests use the form values (unsaved), primary and secondary SMTP separately, with the real failure reason'],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.327',
+                'date' => '2026-10-06',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'Republicación de 1.0.326 sin cambios.',
                     ],
                 ],
             ],
@@ -559,6 +625,16 @@ class ChangelogController
                     'added' => [
                         'es' => ['Vigilante de cambios del sistema (posible intruso), en todos los nodos cada 10 min: avisa una vez de carpetas nuevas en /opt, /srv, /var/www y /etc (no de paquetes), carpetas de /var/www/vhosts que no son de ningun hosting, servicios systemd, tareas cron, programas de /usr/local, claves SSH autorizadas (dice cual) y ejecutables en /tmp, /var/tmp y /dev/shm. Tipo de aviso system_changes; rutas a ignorar en Avisos o MCP alerts_configure ignore_system_paths; Docs > Avisos', 'Carpetas sin copia al servidor de relevo: tambien /var/www fuera de vhosts (aviso, sync-add/sync-local y MCP filesync_extra_paths)'],
                         'en' => ['System change watch (possible intruder) on every node every 10 min: warns once about new folders in /opt, /srv, /var/www and /etc (not from packages), /var/www/vhosts folders that belong to no hosting, systemd units, cron jobs, /usr/local programs, authorized SSH keys (names which) and executables in /tmp, /var/tmp and /dev/shm. Alert type system_changes; ignore paths in Alerts or MCP alerts_configure ignore_system_paths', 'Folders not copied to the failover server: also /var/www outside vhosts (alert, sync-add/sync-local and MCP filesync_extra_paths)'],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.311',
+                'date' => '2026-10-05',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'Republicación de 1.0.310 sin cambios.',
                     ],
                 ],
             ],
@@ -876,6 +952,50 @@ class ChangelogController
                 ],
             ],
             [
+                'version' => '1.0.289',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'Republicación de 1.0.288 sin cambios.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.288',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Al abrir una terminal (SSH o VS Code) en una copia, un aviso de que lo que se edite ahí lo sobrescribe el master.',
+                        'En modo auto, tras un relevo por caída, el mando vuelve al titular cuando lleva un rato respondiendo bien y está al día.',
+                    ],
+                    'fixed' => [
+                        'Al promover por caída del master se acepta la réplica si aplicó todo lo recibido y recibía hasta hace poco.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.287',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'Republicación de 1.0.286 sin cambios.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.286',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'La ficha de un hosting con correo salía con la cabecera rota (comillas en el texto de la ventana).',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.285',
                 'date' => '2026-10-03',
                 'badge' => 'info',
@@ -954,6 +1074,16 @@ class ChangelogController
                     'fixed' => [
                         'es' => ['El Dashboard ya no avisa de desincronizacion por envios de la config de relevo superados por uno posterior correcto (se marcan como cancelados)', 'Los avisos salen con el remitente del servidor que envia (antes el del master en todos)', 'El boton "Pasar el mando a…" no abria la ventana (se ejecutaba antes de cargar SweetAlert)', 'Al promover se abren tambien los puertos del correo (25, 465, 587, 993, 143) si el nodo tiene correo', 'Al promover ya no se etiquetan reglas de firewall que ya existian (al volver a slave se borraban y cerraban 80/443)'],
                         'en' => ['The dashboard no longer warns about drift for failover-config pushes superseded by a later successful one (marked cancelled)', 'The "Hand over to…" button did not open its dialog (ran before SweetAlert loaded)', 'Promote also opens the mail ports (25, 465, 587, 993, 143) when the node has mail', 'Promote no longer tags pre-existing firewall rules (demote used to delete them, closing 80/443)'],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.279',
+                'date' => '2026-10-03',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'La configuración del relevo se envía entera y supera los envíos fallidos anteriores: el Dashboard ya no avisa de una desincronización ya resuelta.',
                     ],
                 ],
             ],
@@ -1133,6 +1263,26 @@ class ChangelogController
                 ],
             ],
             [
+                'version' => '1.0.267',
+                'date' => '2026-10-02',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Al guardar el token de Cloudflare en un nodo, Caddy se reinicia 3 s después de responder: reiniciarlo en el acto cortaba la petición y la cola lo reintentaba una y otra vez.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.266',
+                'date' => '2026-10-02',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'Los avisos de éxito se cierran solos a los 4 s; los errores se muestran además en una ventana con el texto seleccionable y botón Copiar.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.265',
                 'date' => '2026-10-02',
                 'badge' => 'info',
@@ -1150,6 +1300,16 @@ class ChangelogController
                     'added' => [
                         'es' => ['MCP `cloudflare_caddy_token_sync` (master, plan/apply) y `cloudflare_tokens` indica si Caddy tiene el token correcto'],
                         'en' => ['MCP `cloudflare_caddy_token_sync` (master, plan/apply) and `cloudflare_tokens` reports whether Caddy has the right token'],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.264',
+                'date' => '2026-10-02',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Las cuentas de Cloudflare llegan a las copias con el token descifrado (cada panel cifra con su clave): el slave guardaba el texto cifrado y el token no servía («Invalid request headers»).',
                     ],
                 ],
             ],
@@ -1372,6 +1532,16 @@ class ChangelogController
                 ],
             ],
             [
+                'version' => '1.0.251',
+                'date' => '2026-10-01',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'Republicación de 1.0.250 sin cambios.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.250',
                 'date' => '2026-10-01',
                 'badge' => 'info',
@@ -1549,6 +1719,16 @@ class ChangelogController
                     'improved' => [
                         'es' => ['El inventario reconoce las tareas cron desactivadas a proposito en un slave (`#MUSEDOCK-OFF#`, `.disabled`)'],
                         'en' => ['The inventory recognises cron tasks intentionally disabled on a slave (`#MUSEDOCK-OFF#`, `.disabled`)'],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.239',
+                'date' => '2026-09-30',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'Republicación de 1.0.238 sin cambios.',
                     ],
                 ],
             ],
@@ -1924,6 +2104,26 @@ class ChangelogController
                 ],
             ],
             [
+                'version' => '1.0.221',
+                'date' => '2026-09-11',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'El certificado de Caddy vuelve a llegar a Postfix y Dovecot en nodos actualizados desde versiones antiguas (ruta estable mail.crt/mail.key, reparación al actualizar).',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.220',
+                'date' => '2026-08-18',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'Documentada en el changelog la versión 1.0.219 (sin cambios de código).',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.219',
                 'date' => '2026-08-18',
                 'badge' => 'success',
@@ -1951,6 +2151,299 @@ class ChangelogController
                         'en' => [
                             'After updating, `bin/update.sh` reinstalls the (now fixed) repair hook. On servers that applied the interim mitigation (removing the `zz-musedock-panel-repair.conf` drop-in), the update restores it with the safe version',
                         ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.218',
+                'date' => '2026-07-29',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'La compilación de los módulos DNS de Caddy en un nodo se hace en segundo plano y el master consulta su avance (tarda minutos y antes cortaba la petición).',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.217',
+                'date' => '2026-07-29',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'La copia de un hosting de varios GB ya no se da por muerta a los 3 minutos (se informa del avance cada 10 s) y se corta si deja de pasar datos.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.216',
+                'date' => '2026-07-29',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Suspender un hosting en un nodo fallaba siempre (faltaban datos del pool PHP).',
+                    ],
+                    'changed' => [
+                        'Fechas en formato español con «hace X días».',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.215',
+                'date' => '2026-07-29',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'La sincronización completa envía también los alias y redirecciones de cada hosting y las redirecciones sueltas.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.214',
+                'date' => '2026-07-29',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Las redirecciones de dominio sin hosting no llegaban nunca a los nodos; ahora se envían al crearlas, borrarlas y al sincronizar todo.',
+                        'Una sincronización completa cancela los fallos viejos de la cola de ese nodo, y el aviso de desincronización del Dashboard desaparece al terminar.',
+                    ],
+                    'added' => [
+                        'Configurar como master un cluster de PostgreSQL concreto, de forma segura, desde Replicación.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.213',
+                'date' => '2026-07-24',
+                'badge' => 'info',
+                'changes' => [
+                    'security' => [
+                        'Bloqueado el método antiguo de activar la réplica de PostgreSQL: tocaba el cluster del panel, lo abría a todas las interfaces y lo reiniciaba (tumbaba el panel).',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.212',
+                'date' => '2026-07-24',
+                'badge' => 'info',
+                'changes' => [
+                    'security' => [
+                        'Promover y degradar (acciones que reconstruyen bases de datos) solo se aceptan de un nodo registrado y hacia la IP de un nodo registrado.',
+                        'Comprobación de testigo (¿llega este nodo a esa IP?) solo hacia nodos registrados y puertos permitidos, para que un token filtrado no sirva para escanear puertos.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.211',
+                'date' => '2026-07-23',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'La CA interna del cluster quedaba ilegible para el panel (creada por root) y la verificación TLS a ese nodo fallaba; ahora se corrige el propietario.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.210',
+                'date' => '2026-07-23',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Al sincronizar, varios alias del mismo dominio se tomaban como duplicados y solo se enviaba el primero.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.209',
+                'date' => '2026-07-23',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Botones «Sincronizar ahora» para reenviar dominios, buzones y alias a un nodo (sin borrar nada) y «Sincronizar contactos ahora».',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.208',
+                'date' => '2026-07-23',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'El inicio de sesión de CardDAV/CalDAV contra Dovecot se recuerda 30 s (solo los aciertos, con hash): un cliente hace muchas peticiones seguidas y cada una tardaba.',
+                    ],
+                    'fixed' => [
+                        'Validación contra el Dovecot local por SSL 993 y, si no, 143 sin TLS (solo dentro de la máquina).',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.207',
+                'date' => '2026-07-22',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'El master muestra el progreso de la instalación de CardDAV en un nodo.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.206',
+                'date' => '2026-07-22',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Las peticiones DAV llegan bien a Baïkal («Requested uri is out of base uri»): ruta estándar de PHP, y la raíz y .well-known redirigen a /dav.php/.',
+                        'Baïkal puede escribir su configuración.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.205',
+                'date' => '2026-07-22',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Formularios de la pantalla de correo que no enviaban el token CSRF y fallaban.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.204',
+                'date' => '2026-07-22',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'La instalación de CardDAV muestra su avance (porcentaje y fase).',
+                    ],
+                    'fixed' => [
+                        'Mensaje claro si no se puede crear la carpeta de instalación.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.203',
+                'date' => '2026-07-22',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Servicio de contactos y calendarios (Baïkal) con acceso por la cuenta de correo, publicado en Caddy y con réplica al nodo de relevo (el master le envía una copia completa).',
+                        'Guía «Contactos y calendarios».',
+                    ],
+                    'security' => [
+                        'Las copias de contactos y los ficheros recibidos no se vuelcan enteros en el registro del cluster.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.202',
+                'date' => '2026-07-22',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Los alias (y sus borrados) se replican a todos los nodos de correo.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.201',
+                'date' => '2026-07-22',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Las protecciones anti-abuso del correo (fail2ban, límite de envío, lista blanca) se aplican también en los nodos de correo, para que un nodo promovido tenga las mismas.',
+                        'Guías de puertos del correo y de seguridad del correo.',
+                    ],
+                    'changed' => [
+                        'Al promoverse, el nodo pasa a ser la fuente del correo y envía sus dominios y buzones a los demás.',
+                    ],
+                    'security' => [
+                        'El hash de la contraseña de un buzón ya no queda en el registro replicado del panel.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.200',
+                'date' => '2026-07-21',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'Roundcube guarda sus datos (identidades, contactos, preferencias) en PostgreSQL, en una base que se replica, y no en SQLite local.',
+                    ],
+                    'fixed' => [
+                        'La ruta del webmail se pone la primera en Caddy, para que no la capture la ruta comodín del panel («dominio no configurado»).',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.199',
+                'date' => '2026-07-21',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Un solo alias recoge-todo por dominio (al marcar uno se desmarca el anterior).',
+                        'Guardar un alias desactivado fallaba en PostgreSQL (el valor falso llegaba vacío).',
+                        'El webmail no se publicaba porque no encontraba el socket de PHP-FPM (es un socket, no un fichero).',
+                    ],
+                    'changed' => [
+                        'Al crear un buzón se elige sola la web del mismo dominio; mejoras en la ficha del dominio de correo.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.198',
+                'date' => '2026-07-21',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Se abre el puerto de la base del panel (5433) en el cortafuegos del master solo para la IP de la VPN del nodo: el instalador de la réplica se quedaba colgado en «verificar PostgreSQL». Nunca se abre a Internet.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.197',
+                'date' => '2026-07-21',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'El estado de la réplica de correo de cada nodo viaja en su latido (heartbeat): la página de Infraestructura ya no espera a nodos lentos.',
+                    ],
+                    'fixed' => [
+                        'La instalación comprueba que el nodo no solo recibió la orden sino que la ejecutó bien antes de lanzar el paso final.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.196',
+                'date' => '2026-07-21',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'La tabla de Infraestructura de correo muestra si cada nodo ya tiene la réplica (ninguna, instalando, solo servicios, lista) y el botón dice «Reinstalar» cuando ya existe.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.195',
+                'date' => '2026-07-21',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'La instalación de la réplica de correo en un nodo muestra su progreso en una ventana (se consulta al nodo mientras instala).',
+                    ],
+                    'fixed' => [
+                        'El paso final de la réplica de correo se reintenta durante toda la instalación de Dovecot (puede tardar minutos) en vez de rendirse a los 3 intentos.',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.194',
+                'date' => '2026-07-21',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Al reincorporar un nodo como copia, cada cluster de PostgreSQL se reconfigura como réplica del nuevo master con pg_rewind (solo lo que cambió) y, si no se puede, con una copia completa; sustituye al método antiguo de un solo cluster, que fallaba.',
+                    ],
+                    'added' => [
+                        'Guía «Correo en alta disponibilidad» (mail-ha).',
                     ],
                 ],
             ],
@@ -2058,6 +2551,20 @@ class ChangelogController
                 ],
             ],
             [
+                'version' => '1.0.190',
+                'date' => '2026-07-17',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Réplica real de los buzones de correo entre dos nodos (Dovecot dsync por la VPN), para que el correo sobreviva a un relevo; tarjeta en Cluster con estado y activación con prueba previa.',
+                        'Ayuda en llano de la «Sincronización completa» y guía de cómo funciona de verdad la copia de ficheros.',
+                    ],
+                    'fixed' => [
+                        'La sincronización completa sigue aunque se reinicie el panel (proceso separado) y se detecta una sincronización «zombi» cuyo proceso murió, en vez de dejar la ventana esperando para siempre.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.189',
                 'date' => '2026-07-17',
                 'badge' => 'success',
@@ -2138,6 +2645,16 @@ class ChangelogController
                             '`Failover → Cloudflare accounts`: **"Propagate token to Caddy" is a one-shot action, not a setting** — it restarts Caddy on the master and every slave, which is why it does not stay checked. The **last propagation timestamp** is shown instead',
                             'Nodes installed **before** this version lack `update-caddy-token.sh`: copy it once or reinstall the panel there. From this version on, **every new node ships with it**',
                         ],
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.187',
+                'date' => '2026-07-14',
+                'badge' => 'info',
+                'changes' => [
+                    'changed' => [
+                        'Documentada en el changelog la reescritura de la replicación multi-cluster de 1.0.186 (sin cambios de código).',
                     ],
                 ],
             ],

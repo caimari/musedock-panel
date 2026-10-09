@@ -2,6 +2,30 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.356] — 2026-10-08 — Copia de configuración desde el panel y mejoras visuales
+
+### Añadido
+- **Cluster → Nodos → «Copia de configuración del master en cada copia».** Muestra, por nodo, su papel, si la copia de configuración automática está activada y su última pasada, y permite activarla o desactivarla. Pide la contraseña de administrador en una ventana que explica qué hace: al activarla, la copia trae cada 5 minutos del que manda programas de fondo, tareas programadas, servicios, webs fijas del Caddyfile, pools de PHP y la lista blanca de fail2ban, todo apagado hasta que tome el mando (y hace una primera pasada); al desactivarla, deja de ponerse al día sin quitar nada. Antes solo se podía por MCP.
+- **Guía «Copia de configuración del master» (Docs)**: para qué sirve, qué copia y cómo queda, qué pasa al cambiar el mando y cuándo activarla.
+- **Nuevo tipo de nodo «Copia de seguridad»** (Dashboard → Cluster y guía de Cambio de rol). Un nodo que recibe los ficheros al instante y las bases de datos por volcados periódicos (cada intervalo de la copia de ficheros, restaurados encima) ya no aparece como «Solo copia de ficheros: las webs sin sus bases de datos», que era falso. Por base: «copia por volcados cada N min (no en vivo)». La guía explica este tipo de nodo de forma general: qué tiene, qué no, por qué no puede tomar el mando sin perder lo último y cómo convertirlo en relevo.
+
+### Cambiado
+- **Correo → Dominios: columna de alias y ventana rápida.** La lista de dominios muestra cuántos buzones y cuántos alias tiene cada uno; al pulsar cualquiera de los dos números se abre una ventana con sus buzones (estado, correos y sin leer, espacio real según Dovecot, último acceso) y sus alias (dirección, a dónde reenvía, recoge-todo, estado), sin salir de la lista.
+- **Ficha del dominio de correo: uso real de cada buzón.** El espacio usado salía siempre a 0 MB (el panel guardaba un campo que no se actualizaba); ahora es el real según Dovecot, y hay una columna nueva con el número de correos y los sin leer, como en el MCP. «Último acceso» ya no dice «Never» en todos (el panel aún no registra los accesos): muestra «—».
+- **Uso de los buzones guardado y botón para actualizar.** Las páginas ya no preguntan a Dovecot en cada carga: el uso (correos, sin leer, espacio) se guarda y se actualiza solo cada 30 min (cluster-worker), o al momento con el botón ↻ de la ficha del dominio y de la del buzón, que dicen de cuándo es el dato. De paso se corrige el campo de espacio del panel, que estaba siempre a 0.
+- **Ficha del buzón: tarjeta «Uso del buzón»** con correos, sin leer, espacio y cuota, como en la lista.
+- **«Sin leer» por carpetas.** Los correos y los sin leer cuentan todas las carpetas (también la papelera y el spam: puede haber correo bueno en el spam). Al pulsar «sin leer» se abre una ventana con el desglose por carpeta (correos y sin leer en cada una), con la papelera y el spam marcados y un aviso si hay sin leer en el spam. En la ficha del buzón hay además una casilla «En spam»; en la ventana rápida de la lista, las carpetas con sin leer.
+- **Ficha del buzón: cambiar la contraseña más claro, a mano o generada.** La sección se llama «Cambiar contraseña» y tiene un botón **Generar** (contraseña segura de 20 caracteres, rellena los dos campos y la muestra) y otro para **copiarla**. Se aplica al guardar.
+- **Editar el destino de un alias.** En la ficha del dominio, cada alias tiene un lápiz que abre una ventana para cambiar a dónde reenvía (sugiere los buzones del dominio; admite varios destinos separados por comas y comprueba que sean direcciones válidas). El cambio se aplica al momento y se copia a los nodos de correo, como al crearlo, y queda en el registro (antes → después). Antes había que borrarlo y crearlo de nuevo. En la misma ventana, una casilla **Activo** pausa o reactiva el alias sin borrarlo (en la tabla sale «pausado»); en el recoge-todo, al desmarcarla la ventana explica en rojo que los correos a direcciones que no existan se rechazarán y el botón pasa a «Desactivar recoge-todo». Es el campo que respeta el correo: la marca de recoge-todo por sí sola no lo desactiva.
+- **Borrar varios buzones o alias a la vez.** En la ficha del dominio, casillas por fila y «seleccionar todos» en buzones y en alias; aparece «Borrar seleccionados (N)», que abre una ventana con la lista de lo que se borra, un aviso claro (buzones: también todos sus correos, aquí y en la réplica; alias: dejan de reenviarse, y si incluye el recoge-todo, que se rechazarán las direcciones que no existan) y la contraseña de administrador. Solo se borra lo que pertenece a ese dominio y queda en el registro.
+- **Botón «Webmail» por buzón** (ficha del buzón, lista de buzones del dominio y ventana rápida): abre el webmail en otra pestaña con el buzón ya escrito en el usuario; solo falta la contraseña.
+- **Volver a donde estabas, en todo el panel.** El panel recuerda, en cada pestaña del navegador, las páginas por las que pasas con su pestaña interna (`?tab=…` o `#…`). Los enlaces de volver de cada página (p. ej. «← Mail» en la ficha de un dominio) llevan a la última vez que estuviste en esa página, con la pestaña que tenías (p. ej. `/mail?tab=domains` y no la portada de Correo). Las páginas sin enlace propio de volver tienen una flecha junto al título que lleva a la página anterior.
+- **Changelog completo.** Las 48 versiones publicadas que no tenían entrada (la mayoría entre 1.0.187 y 1.0.221, y algunas republicaciones) tienen ahora su descripción, reconstruida a partir de los cambios de cada versión.
+
+### Corregido
+- **WordPress blindados con error 500 tras un cambio de mando.** El blindaje deja el código y el `wp-config.php` como `root:grupo-del-usuario` (640) para que PHP lo lea por el grupo propio del usuario. Pero los pools de PHP-FPM corren con `group = www-data` y así PHP solo conserva los grupos en los que el usuario figura como miembro en `/etc/group`, y en su propio grupo no figuraba: «Permission denied» al leer `wp-config.php`. Pasó en mortadelo con almatwins.es, screenartfilms.es y filmsinfest.com tras el cambio de mando del 7-oct (en Filemon sí eran miembros). Ahora el blindaje añade al usuario como miembro de su grupo y recarga su PHP-FPM, también en las webs ya blindadas (cada 30 min).
+- **La réplica de correo dejaba siempre activos los alias.** Al copiar un alias a los nodos (también con «Sincronizar ahora») se marcaba activo aunque en el master estuviera pausado; ahora se copia su estado.
+
 ## [1.0.355] — 2026-10-08 — Guía de fail2ban y consultas por MCP a otro nodo
 
 ### Añadido
@@ -104,6 +128,11 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 - **Aviso si un buzón lleva más de 26 h sin sincronizar** con la pareja, o el replicador lo marca como fallido (vigilancia de réplicas). Antes la réplica de buzones podía estar días sin funcionar sin ningún aviso.
 - **«Pasar el mando» sincroniza los buzones antes de cambiar** (`doveadm sync -d` por buzón, con el correo entrante ya parado). Si falla alguno, no pasa el mando: reactiva el servidor y dice qué buzones fallaron.
 
+## [1.0.344] — 2026-10-07 — Republicación
+
+### Cambiado
+- Republicación de 1.0.343 sin cambios.
+
 ## [1.0.343] — 2026-10-07 — Que una caída del principal no rompa ni borre nada
 
 ### Añadido
@@ -129,6 +158,16 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 
 ### Corregido
 - **Una copia que se queda sin Internet ya no se promueve sola.** Si no respondía ningún testigo, la copia decidía con lo que veía ella; pero si la aislada era ella (sus líneas caídas), veía el principal "caído" y se promovía, sin poder mover el DNS: al volver la red había dos masters. Ahora, sin ningún testigo que responda, antes de promoverse comprueba su propia salida a Internet (la API de Cloudflare, que es lo que hace falta para el relevo); si no la tiene, no hace nada.
+
+## [1.0.339] — 2026-10-07 — MCP failover_tune
+
+### Añadido
+- MCP failover_tune: ajustar los vecinos de cada servidor y los tiempos de detección.
+
+## [1.0.338] — 2026-10-07 — Vecinos por servidor en el relevo
+
+### Añadido
+- Cada servidor del relevo tiene sus propios vecinos (comprobaciones del mismo sitio), que viajan con él si se invierten los papeles; columna «Vecinos» en Failover.
 
 ## [1.0.337] — 2026-10-07 — Pantalla de Failover más clara y vecinos por servidor
 
@@ -227,6 +266,11 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 
 ### Arreglado
 - **Los botones de prueba de correo y Telegram usaban lo guardado**, no lo escrito: fallaban si aún no se había pulsado Guardar, y solo decían "revisa la configuración". Ahora prueban lo que hay en el formulario (si la contraseña o el token están vacíos, los guardados), el de correo prueba el principal y el secundario por separado, y los dos dicen el motivo real del fallo (p. ej. Telegram "chat not found": hay que abrir el bot y pulsar Iniciar).
+
+## [1.0.327] — 2026-10-06 — Republicación
+
+### Cambiado
+- Republicación de 1.0.326 sin cambios.
 
 ## [1.0.326] — 2026-10-06 — Correos a clientes en HTML y envío SMTP con un nombre real
 
@@ -346,6 +390,11 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
   - ejecutables en `/tmp`, `/var/tmp` y `/dev/shm`.
   - Al actualizar el panel se rehace la foto de servicios, cron y programas sin avisar. Tipo de aviso nuevo `system_changes` (no se calla en modo mantenimiento). Rutas que cambian a menudo: *Ajustes → Avisos → Cambios del sistema: ignorar* o MCP `alerts_configure` con `ignore_system_paths` (admite `servidor:patrón`). Explicado en *Docs → Avisos*. Es un cable trampa, no un antivirus: un intruso que ya es root puede desactivarlo.
 - **Carpetas sin copia al servidor de relevo: también `/var/www`** (fuera de `vhosts`, que ya se copia entera). Una app en `/var/www/miapp` no se copiaba ni se avisaba de ella; ahora entra en el aviso, en `sync-add`/`sync-local` y en MCP `filesync_extra_paths`.
+
+## [1.0.311] — 2026-10-05 — Republicación
+
+### Cambiado
+- Republicación de 1.0.310 sin cambios.
 
 ## [1.0.310] — 2026-10-05 — Portal de clientes en el 443
 
@@ -630,6 +679,30 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 
   El cluster-worker lo vuelve a poner si una recarga de Caddy lo quita. También: `status` y `disable`.
 
+## [1.0.289] — 2026-10-03 — Republicación
+
+### Cambiado
+- Republicación de 1.0.288 sin cambios.
+
+## [1.0.288] — 2026-10-03 — Aviso en las copias y vuelta del mando
+
+### Añadido
+- Al abrir una terminal (SSH o VS Code) en una copia, un aviso de que lo que se edite ahí lo sobrescribe el master.
+- En modo auto, tras un relevo por caída, el mando vuelve al titular cuando lleva un rato respondiendo bien y está al día.
+
+### Corregido
+- Al promover por caída del master se acepta la réplica si aplicó todo lo recibido y recibía hasta hace poco.
+
+## [1.0.287] — 2026-10-03 — Republicación
+
+### Cambiado
+- Republicación de 1.0.286 sin cambios.
+
+## [1.0.286] — 2026-10-03 — Cabecera de los hostings con correo
+
+### Corregido
+- La ficha de un hosting con correo salía con la cabecera rota (comillas en el texto de la ventana).
+
 ## [1.0.285] — 2026-10-03 — El relevo DNS deja de decir "caído" sin estarlo
 
 ### Arreglado
@@ -731,6 +804,11 @@ Lo aprendido en la prueba del 3-oct, en la que el cambio se paró a mitad y las 
 - **Al promover un nodo no se abrían los puertos del correo** (25, 465, 587, 993, 143): tras un relevo el correo no entraba hasta abrirlos a mano. Ahora, si el nodo tiene correo instalado, se abren junto con 80/443.
 - **Al promover se "apropiaba" de puertos que ya estaban abiertos**: `ufw allow` sobre una regla existente le ponía la etiqueta del relevo y al volver a slave se borraba, cerrando 80/443 que estaban abiertos de siempre. Ahora, si una regla propia del servidor ya abre el puerto a todos, no se toca; al volver a slave solo se cierra lo que abrió el panel.
 - **El Dashboard avisaba de "desincronización" por envíos de la configuración de relevo que fallaron hace tiempo**, aunque después se hubiera enviado bien. La configuración se manda entera y cada envío sustituye al anterior, así que cuando uno llega bien a un nodo, los fallidos o pendientes anteriores a ese nodo se marcan como superados (cancelados).
+
+## [1.0.279] — 2026-10-03 — Aviso de desincronización del relevo
+
+### Corregido
+- La configuración del relevo se envía entera y supera los envíos fallidos anteriores: el Dashboard ya no avisa de una desincronización ya resuelta.
 
 ## [1.0.278] — 2026-10-03 — El sembrado de MariaDB no choca con una réplica anterior
 
@@ -859,6 +937,16 @@ Lo aprendido en la prueba del 3-oct, en la que el cambio se paró a mitad y las 
 - **MCP `cloudflare_tokens`** dice si Caddy tiene el token de la cuenta con la zona del panel (o que no puede comprobarlo, si el proceso no puede leer `/etc/default/caddy`).
 - **MCP `cloudflare_email_routing`** ya no se salta las zonas cuyo token no puede leer el *estado* de Email Routing (otro permiso): lee igualmente las reglas y el MX, y deduce si recibe por Cloudflare (`mx_to_cloudflare`). Antes, con el token rotado de la cuenta principal, solo aparecían 2 de 10 dominios.
 
+## [1.0.267] — 2026-10-02 — Token de Cloudflare sin cortar el panel
+
+### Corregido
+- Al guardar el token de Cloudflare en un nodo, Caddy se reinicia 3 s después de responder: reiniciarlo en el acto cortaba la petición y la cola lo reintentaba una y otra vez.
+
+## [1.0.266] — 2026-10-02 — Avisos del panel
+
+### Cambiado
+- Los avisos de éxito se cierran solos a los 4 s; los errores se muestran además en una ventana con el texto seleccionable y botón Copiar.
+
 ## [1.0.265] — 2026-10-02 — El token de Caddy se sincroniza solo desde el master
 
 ### Arreglado
@@ -874,6 +962,11 @@ Lo aprendido en la prueba del 3-oct, en la que el cambio se paró a mitad y las 
 ### Añadido
 - **MCP `cloudflare_caddy_token_sync`** (en el master, plan/apply): lo mismo que Guardar, con el resultado por nodo.
 - **MCP `cloudflare_tokens`** dice si Caddy tiene el token de la cuenta con la zona del panel.
+
+## [1.0.264] — 2026-10-02 — Token de Cloudflare en las copias
+
+### Corregido
+- Las cuentas de Cloudflare llegan a las copias con el token descifrado (cada panel cifra con su clave): el slave guardaba el texto cifrado y el token no servía («Invalid request headers»).
 
 ## [1.0.263] — 2026-10-02 — Tokens de Cloudflare: los nodos ya no los reciben estropeados, y el navegador no cuela contraseñas
 
@@ -1036,6 +1129,11 @@ Lo aprendido en la prueba del 3-oct, en la que el cambio se paró a mitad y las 
 - **`cluster_drift` decía "el nodo no tiene Composer" cuando sí estaba instalado pero no arrancaba.** Pasa, por ejemplo, con el Composer 2.2.6 de Ubuntu cuando el PHP por defecto es 8.4. Ahora distingue entre "no está instalado" e "instalado pero `composer --version` falla", y dice qué PHP por defecto tiene el nodo.
 - **El aviso de `config_mirror` sobre el token de Cloudflare indicaba un menú equivocado.** El sitio correcto es Cluster → Failover → Cuentas Cloudflare. Ahora además avisa de que ese botón usa la **primera** cuenta y reinicia Caddy en todos los nodos. Como alternativa, propone copiar `/etc/default/caddy` del master.
 
+## [1.0.251] — 2026-10-01 — Republicación
+
+### Cambiado
+- Republicación de 1.0.250 sin cambios.
+
 ## [1.0.250] — 2026-10-01 — config_mirror valida el Caddyfile con el entorno real de Caddy
 
 ### Arreglado
@@ -1154,6 +1252,11 @@ Lo aprendido en la prueba del 3-oct, en la que el cambio se paró a mitad y las 
 
 ### Mejorado
 - El inventario reconoce las tareas cron **desactivadas a propósito** en un slave (líneas `#MUSEDOCK-OFF#` y ficheros `.disabled` de `/etc/cron.d`) y las marca con `disabled: true` en vez de ignorarlas.
+
+## [1.0.239] — 2026-09-30 — Republicación
+
+### Cambiado
+- Republicación de 1.0.238 sin cambios.
 
 ## [1.0.238] — 2026-09-30 — MCP: sincronización de ficheros entre nodos
 
@@ -1327,6 +1430,12 @@ Visto al emparejar asterisk (master) y obelix (slave): «nodo caído», panel mu
 ### Arreglado
 - **`clone_inventory` no mostraba la versión de Composer.** Ejecutado como root, Composer se para a preguntar «Continue as root?» y la consulta volvía vacía. Ahora se lanza con `COMPOSER_ALLOW_SUPERUSER=1` y sin entrada estándar.
 
+## [1.0.229] — 2026-09-29
+
+### Corregido
+- El inventario MCP no mostraba la version de Composer: como root, Composer se paraba a preguntar si continuar y la consulta volvia vacia
+- The MCP inventory did not show the Composer version: as root, Composer stopped to ask whether to continue and the query came back empty
+
 ## [1.0.228] — 2026-09-29 — Correcciones del inventario MCP tras probarlo en asterisk
 
 ### Arreglado
@@ -1474,6 +1583,16 @@ El servidor de correo no tiene certbot propio: reutiliza el wildcard `*.musedock
 
 - **`cli/repair-mail-cert-sync.php`**: repara la propagación en nodos de correo con Caddy — obtiene el cert vigente, apunta `smtpd_tls_cert_file`/`key_file` de Postfix y reescribe `/etc/dovecot/conf.d/10-ssl.conf` a la ruta estable, y recarga. Se **salta** los nodos sin Caddy (gestionados por certbot), que no se tocan.
 - **Hook en `bin/update.sh`**: tras cada actualización del panel se ejecuta ese repair (best-effort), de modo que los nodos de correo que venían de versiones antiguas quedan corregidos automáticamente al actualizar.
+
+## [1.0.221] — 2026-09-11 — Certificados del correo tras actualizar
+
+### Corregido
+- El certificado de Caddy vuelve a llegar a Postfix y Dovecot en nodos actualizados desde versiones antiguas (ruta estable mail.crt/mail.key, reparación al actualizar).
+
+## [1.0.220] — 2026-08-18 — Changelog de 1.0.219
+
+### Cambiado
+- Documentada en el changelog la versión 1.0.219 (sin cambios de código).
 
 ## [1.0.219] — 2026-08-18 — Red de seguridad del reparador de Caddy (incidente web caída 9 días)
 
@@ -1658,6 +1777,174 @@ Base del servicio de correo en alta disponibilidad sobre la que se construyeron 
 - **Guía «Correo HA (master + slave)»** en el panel (`/docs/mail/ha`), dinámica con hostname/IP reales, más las guías de puertos y seguridad anti-abuso (`mail-ports`, `mail-security`).
 - Consolidación de los fixes del instalador de correo en `bin/mail-setup-run.php` (Sieve solo en `protocol lmtp`/`lda`, para no romper la auth IMAP con `undefined symbol`).
 
+## [1.0.218] — 2026-07-29 — Módulos de Caddy en segundo plano
+
+### Cambiado
+- La compilación de los módulos DNS de Caddy en un nodo se hace en segundo plano y el master consulta su avance (tarda minutos y antes cortaba la petición).
+
+## [1.0.217] — 2026-07-29 — Hostings grandes en la sincronización
+
+### Corregido
+- La copia de un hosting de varios GB ya no se da por muerta a los 3 minutos (se informa del avance cada 10 s) y se corta si deja de pasar datos.
+
+## [1.0.216] — 2026-07-29 — Suspender hostings en los nodos
+
+### Corregido
+- Suspender un hosting en un nodo fallaba siempre (faltaban datos del pool PHP).
+
+### Cambiado
+- Fechas en formato español con «hace X días».
+
+## [1.0.215] — 2026-07-29 — Sincronización completa más completa
+
+### Corregido
+- La sincronización completa envía también los alias y redirecciones de cada hosting y las redirecciones sueltas.
+
+## [1.0.214] — 2026-07-29 — Redirecciones a los nodos y réplica por cluster
+
+### Corregido
+- Las redirecciones de dominio sin hosting no llegaban nunca a los nodos; ahora se envían al crearlas, borrarlas y al sincronizar todo.
+- Una sincronización completa cancela los fallos viejos de la cola de ese nodo, y el aviso de desincronización del Dashboard desaparece al terminar.
+
+### Añadido
+- Configurar como master un cluster de PostgreSQL concreto, de forma segura, desde Replicación.
+
+## [1.0.213] — 2026-07-24 — Método antiguo de réplica bloqueado
+
+### Seguridad
+- Bloqueado el método antiguo de activar la réplica de PostgreSQL: tocaba el cluster del panel, lo abría a todas las interfaces y lo reiniciaba (tumbaba el panel).
+
+## [1.0.212] — 2026-07-24 — Endurecimiento del relevo
+
+### Seguridad
+- Promover y degradar (acciones que reconstruyen bases de datos) solo se aceptan de un nodo registrado y hacia la IP de un nodo registrado.
+- Comprobación de testigo (¿llega este nodo a esa IP?) solo hacia nodos registrados y puertos permitidos, para que un token filtrado no sirva para escanear puertos.
+
+## [1.0.211] — 2026-07-23 — Nodos que salían «pendiente / 0 dominios»
+
+### Corregido
+- La CA interna del cluster quedaba ilegible para el panel (creada por root) y la verificación TLS a ese nodo fallaba; ahora se corrige el propietario.
+
+## [1.0.210] — 2026-07-23 — Alias perdidos al sincronizar
+
+### Corregido
+- Al sincronizar, varios alias del mismo dominio se tomaban como duplicados y solo se enviaba el primero.
+
+## [1.0.209] — 2026-07-23 — Sincronizar correo y contactos a mano
+
+### Añadido
+- Botones «Sincronizar ahora» para reenviar dominios, buzones y alias a un nodo (sin borrar nada) y «Sincronizar contactos ahora».
+
+## [1.0.208] — 2026-07-23 — CardDAV más rápido
+
+### Cambiado
+- El inicio de sesión de CardDAV/CalDAV contra Dovecot se recuerda 30 s (solo los aciertos, con hash): un cliente hace muchas peticiones seguidas y cada una tardaba.
+
+### Corregido
+- Validación contra el Dovecot local por SSL 993 y, si no, 143 sin TLS (solo dentro de la máquina).
+
+## [1.0.207] — 2026-07-22 — Progreso de CardDAV en los nodos
+
+### Añadido
+- El master muestra el progreso de la instalación de CardDAV en un nodo.
+
+## [1.0.206] — 2026-07-22 — Rutas de CardDAV
+
+### Corregido
+- Las peticiones DAV llegan bien a Baïkal («Requested uri is out of base uri»): ruta estándar de PHP, y la raíz y .well-known redirigen a /dav.php/.
+- Baïkal puede escribir su configuración.
+
+## [1.0.205] — 2026-07-22 — Token de seguridad en la pantalla de correo
+
+### Corregido
+- Formularios de la pantalla de correo que no enviaban el token CSRF y fallaban.
+
+## [1.0.204] — 2026-07-22 — Instalación de CardDAV con progreso
+
+### Añadido
+- La instalación de CardDAV muestra su avance (porcentaje y fase).
+
+### Corregido
+- Mensaje claro si no se puede crear la carpeta de instalación.
+
+## [1.0.203] — 2026-07-22 — Contactos y calendarios (CardDAV/CalDAV)
+
+### Añadido
+- Servicio de contactos y calendarios (Baïkal) con acceso por la cuenta de correo, publicado en Caddy y con réplica al nodo de relevo (el master le envía una copia completa).
+- Guía «Contactos y calendarios».
+
+### Seguridad
+- Las copias de contactos y los ficheros recibidos no se vuelcan enteros en el registro del cluster.
+
+## [1.0.202] — 2026-07-22 — Alias en la réplica de correo
+
+### Corregido
+- Los alias (y sus borrados) se replican a todos los nodos de correo.
+
+## [1.0.201] — 2026-07-22 — Protecciones del correo iguales en todos los nodos
+
+### Añadido
+- Las protecciones anti-abuso del correo (fail2ban, límite de envío, lista blanca) se aplican también en los nodos de correo, para que un nodo promovido tenga las mismas.
+- Guías de puertos del correo y de seguridad del correo.
+
+### Cambiado
+- Al promoverse, el nodo pasa a ser la fuente del correo y envía sus dominios y buzones a los demás.
+
+### Seguridad
+- El hash de la contraseña de un buzón ya no queda en el registro replicado del panel.
+
+## [1.0.200] — 2026-07-21 — Webmail con PostgreSQL
+
+### Cambiado
+- Roundcube guarda sus datos (identidades, contactos, preferencias) en PostgreSQL, en una base que se replica, y no en SQLite local.
+
+### Corregido
+- La ruta del webmail se pone la primera en Caddy, para que no la capture la ruta comodín del panel («dominio no configurado»).
+
+## [1.0.199] — 2026-07-21 — Alias y webmail
+
+### Corregido
+- Un solo alias recoge-todo por dominio (al marcar uno se desmarca el anterior).
+- Guardar un alias desactivado fallaba en PostgreSQL (el valor falso llegaba vacío).
+- El webmail no se publicaba porque no encontraba el socket de PHP-FPM (es un socket, no un fichero).
+
+### Cambiado
+- Al crear un buzón se elige sola la web del mismo dominio; mejoras en la ficha del dominio de correo.
+
+## [1.0.198] — 2026-07-21 — Puerto de la base del panel para la réplica de correo
+
+### Corregido
+- Se abre el puerto de la base del panel (5433) en el cortafuegos del master solo para la IP de la VPN del nodo: el instalador de la réplica se quedaba colgado en «verificar PostgreSQL». Nunca se abre a Internet.
+
+## [1.0.197] — 2026-07-21 — Estado de la réplica sin esperas
+
+### Cambiado
+- El estado de la réplica de correo de cada nodo viaja en su latido (heartbeat): la página de Infraestructura ya no espera a nodos lentos.
+
+### Corregido
+- La instalación comprueba que el nodo no solo recibió la orden sino que la ejecutó bien antes de lanzar el paso final.
+
+## [1.0.196] — 2026-07-21 — Estado de la réplica de correo por nodo
+
+### Añadido
+- La tabla de Infraestructura de correo muestra si cada nodo ya tiene la réplica (ninguna, instalando, solo servicios, lista) y el botón dice «Reinstalar» cuando ya existe.
+
+## [1.0.195] — 2026-07-21 — Instalación de la réplica de correo con progreso
+
+### Añadido
+- La instalación de la réplica de correo en un nodo muestra su progreso en una ventana (se consulta al nodo mientras instala).
+
+### Corregido
+- El paso final de la réplica de correo se reintenta durante toda la instalación de Dovecot (puede tardar minutos) en vez de rendirse a los 3 intentos.
+
+## [1.0.194] — 2026-07-21 — Reincorporación de PostgreSQL tras un relevo
+
+### Corregido
+- Al reincorporar un nodo como copia, cada cluster de PostgreSQL se reconfigura como réplica del nuevo master con pg_rewind (solo lo que cambió) y, si no se puede, con una copia completa; sustituye al método antiguo de un solo cluster, que fallaba.
+
+### Añadido
+- Guía «Correo en alta disponibilidad» (mail-ha).
+
 ## [1.0.193] — 2026-07-21 — Alta disponibilidad y consistencia de nodos
 
 Trabajo de base para el **failover master↔slave** y para que los nodos nuevos nazcan consistentes entre sí.
@@ -1729,6 +2016,15 @@ Primera instalación de **Correo Completo por el panel**: se pulieron todos los 
 
 - En un servidor con Caddy, el certificado del correo lo gestiona **Caddy** (mismo mecanismo que las webs), con renovación automática. No hay que usar `certbot` ni abrir el puerto 80 para el correo.
 
+## [1.0.190] — 2026-07-17 — Réplica de buzones para el relevo
+
+### Añadido
+- Réplica real de los buzones de correo entre dos nodos (Dovecot dsync por la VPN), para que el correo sobreviva a un relevo; tarjeta en Cluster con estado y activación con prueba previa.
+- Ayuda en llano de la «Sincronización completa» y guía de cómo funciona de verdad la copia de ficheros.
+
+### Corregido
+- La sincronización completa sigue aunque se reinicie el panel (proceso separado) y se detecta una sincronización «zombi» cuyo proceso murió, en vez de dejar la ventana esperando para siempre.
+
 ## [1.0.189] — 2026-07-17
 
 Alta disponibilidad de correo: los buzones ahora se pueden replicar de verdad entre dos nodos, no solo la configuración.
@@ -1781,6 +2077,11 @@ Corrige una caída total de Caddy y tres fallos silenciosos que impedían que el
 ### Notes
 
 - Los nodos instalados **antes** de esta versión (p. ej. Nitro, Filemon) no tienen `update-caddy-token.sh`: hay que copiarlo una vez o reinstalar el panel en ellos. A partir de esta versión, **todo nodo nuevo nace con él**.
+
+## [1.0.187] — 2026-07-14 — Changelog de 1.0.186
+
+### Cambiado
+- Documentada en el changelog la reescritura de la replicación multi-cluster de 1.0.186 (sin cambios de código).
 
 ## [1.0.186] — 2026-07-14
 
@@ -2724,6 +3025,40 @@ Reescritura del módulo de replicación para soportar **múltiples clústeres Po
 
 ### Improved
 - Nueva variable opcional `.env`: `CADDY_PANEL_SERVER_NAME` para personalizar el server runtime dedicado del panel.
+
+## [1.0.60] — 2026-04-23
+
+### New
+- CLI de reparacion Caddy: nuevo comando `php cli/repair-caddy-routes.php` para validar y reparar listeners/politicas/rutas del panel
+- Caddy repair CLI: new `php cli/repair-caddy-routes.php` command to validate and repair panel listeners/policies/routes
+
+### Improved
+- Caddy self-heal reforzado: normalizacion de `srv0` ante estados mixtos (`listen`/`routes` nulos o incompletos) y compatibilidad con despliegues sin modulo DNS Cloudflare
+- Hardened Caddy self-heal: `srv0` normalization for mixed states (`listen`/`routes` null or incomplete) and compatibility with deployments without Cloudflare DNS module
+
+### Corregido
+- Migraciones: corregido fallo en nodos legacy donde faltaba `hosting_subdomains` al aplicar `2026_04_03_000004_add_hosting_type_to_subdomains`
+- Migrations: fixed legacy-node failure when `hosting_subdomains` was missing while applying `2026_04_03_000004_add_hosting_type_to_subdomains`
+
+## [1.0.59] — 2026-04-23
+
+### Improved
+- Monitoring (7d/30d/1y): graficas de administracion ajustadas para lectura operativa — linea principal en AVG y linea secundaria en P95 (en lugar de mostrar solo picos)
+- Monitoring (7d/30d/1y): admin charts tuned for operational reading — main line uses AVG and secondary line uses P95 (instead of showing only peaks)
+
+### Corregido
+- Login: placeholder de usuario cambiado de \"admin\" a \"Nombre de usuario\" y placeholder de contrasenya a \"Password\" para evitar confusiones en primer acceso
+- Login: username placeholder changed from \"admin\" to \"Nombre de usuario\" and password placeholder to \"Password\" to reduce first-login confusion
+
+## [1.0.58] — 2026-04-22
+
+### Improved
+- Cluster TLS: validacion interna endurecida con soporte de CA/pinning para conexiones entre nodos
+- Cluster TLS: internal validation hardened with CA/pinning support for node-to-node connections
+
+### Corregido
+- File operations: eliminado uso residual de eval en rutas sensibles para reducir superficie de riesgo
+- File operations: removed residual eval usage in sensitive paths to reduce risk surface
 
 ## [1.0.53] — 2026-04-22
 

@@ -7,6 +7,33 @@
                 <i class="bi bi-arrow-left me-1"></i> <?= View::e($account['domain_name']) ?>
             </a>
         </div>
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-inbox me-2"></i>Uso del buzón</span>
+                <span class="d-flex align-items-center gap-2">
+                    <span class="text-muted small"><?= !empty($usage['at']) ? 'Actualizado hace ' . max(0, (int)round((time() - (int)$usage['at']) / 60)) . ' min' : 'Aún sin medir' ?></span>
+                    <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" id="usage-refresh" data-id="<?= (int)$account['mail_domain_id'] ?>" title="Actualizar ya"><i class="bi bi-arrow-repeat"></i></button>
+                    <?php if (!empty($webmailUrl)): ?>
+                    <a href="<?= View::e($webmailUrl) ?>" target="_blank" rel="noopener" class="btn btn-outline-info btn-sm py-0" title="Abre el webmail con este buzón ya puesto: solo falta la contraseña">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>Webmail
+                    </a>
+                    <?php endif; ?>
+                </span>
+            </div>
+            <div class="card-body">
+                <div class="row text-center small">
+                    <div class="col"><div class="text-muted">Correos</div><div class="fs-5"><?= isset($usage['messages']) ? (int)$usage['messages'] : '—' ?></div></div>
+                    <div class="col"><div class="text-muted">Sin leer</div><div class="fs-5">
+                        <?php if (isset($usage['unread'])): ?>
+                            <a href="#" class="text-decoration-none <?= !empty($usage['unread']) ? 'text-warning' : 'text-light' ?>" data-mail-folders="<?= View::e(json_encode($usage['folders'] ?? [], JSON_UNESCAPED_UNICODE)) ?>" data-mailbox="<?= View::e($account['email']) ?>" title="Ver en qué carpetas están"><?= (int)$usage['unread'] ?> <i class="bi bi-folder2 small"></i></a>
+                        <?php else: ?>—<?php endif; ?>
+                    </div></div>
+                    <div class="col"><div class="text-muted">En spam</div><div class="fs-5 <?= !empty($usage['spam']) ? 'text-warning' : '' ?>"><?= isset($usage['spam']) ? (int)$usage['spam'] : '—' ?></div></div>
+                    <div class="col"><div class="text-muted">Espacio</div><div class="fs-5"><?= isset($usage['used_mb']) ? View::e((string)$usage['used_mb']) . ' MB' : '—' ?></div></div>
+                    <div class="col"><div class="text-muted">Cuota</div><div class="fs-5"><?= (int)$account['quota_mb'] > 0 ? (int)$account['quota_mb'] . ' MB' : 'Sin límite' ?></div></div>
+                </div>
+            </div>
+        </div>
         <div class="card">
             <div class="card-header"><i class="bi bi-pencil me-2"></i>Edit: <?= View::e($account['email']) ?></div>
             <div class="card-body">
@@ -18,11 +45,13 @@
                             <input type="text" class="form-control" value="<?= View::e($account['email']) ?>" disabled>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label" for="pw1">Nueva contraseña</label>
+                            <label class="form-label" for="pw1"><i class="bi bi-key me-1"></i>Nueva contraseña</label>
                             <div class="input-group">
                                 <input type="password" name="password" id="pw1" class="form-control" minlength="8"
                                        autocomplete="new-password" placeholder="Vacío = no cambiar">
                                 <button type="button" class="btn btn-outline-secondary pw-eye" data-target="pw1" title="Mostrar/ocultar" tabindex="-1"><i class="bi bi-eye"></i></button>
+                                <button type="button" class="btn btn-outline-info" id="pw-gen" title="Generar una contraseña segura" tabindex="-1"><i class="bi bi-magic"></i></button>
+                                <button type="button" class="btn btn-outline-secondary d-none" id="pw-copy" title="Copiar la contraseña" tabindex="-1"><i class="bi bi-clipboard"></i></button>
                             </div>
                         </div>
                         <div class="col-md-4">
@@ -33,6 +62,10 @@
                                 <button type="button" class="btn btn-outline-secondary pw-eye" data-target="pw2" title="Mostrar/ocultar" tabindex="-1"><i class="bi bi-eye"></i></button>
                             </div>
                             <div id="pw-msg" class="form-text"></div>
+                        </div>
+                        <div class="col-12 mt-1">
+                            <div class="form-text"><i class="bi bi-info-circle me-1"></i>Escribe la contraseña a mano o pulsa <i class="bi bi-magic"></i> para generar una segura
+                                (luego <i class="bi bi-clipboard"></i> la copia). Vacío = no se cambia. Se aplica al guardar; anótala antes, luego no se puede volver a ver.</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label">Display Name</label>
@@ -159,6 +192,47 @@
     p2.addEventListener('input', check);
     form.addEventListener('submit', function (ev) {
         if (!check()) { ev.preventDefault(); (p1.value.length < 8 ? p1 : p2).focus(); }
+    });
+})();
+</script>
+
+<script>
+(function () {
+    const b = document.getElementById('usage-refresh');
+    if (!b) return;
+    b.addEventListener('click', function () {
+        b.disabled = true;
+        b.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        const fd = new FormData();
+        fd.append('_csrf_token', <?= json_encode(View::csrfToken()) ?>);
+        fetch('/mail/domains/' + encodeURIComponent(b.dataset.id) + '/usage-refresh', {method: 'POST', body: fd})
+            .then(r => r.json()).then(() => location.reload())
+            .catch(() => { b.disabled = false; b.innerHTML = '<i class="bi bi-arrow-repeat"></i>'; });
+    });
+})();
+</script>
+
+<script>
+// Generar contraseña segura: rellena los dos campos, la muestra y permite copiarla.
+(function () {
+    const gen = document.getElementById('pw-gen'), copy = document.getElementById('pw-copy');
+    const p1 = document.getElementById('pw1'), p2 = document.getElementById('pw2');
+    if (!gen || !p1 || !p2) return;
+    gen.addEventListener('click', function () {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789-_.!';
+        const buf = new Uint32Array(20);
+        crypto.getRandomValues(buf);
+        const pw = Array.from(buf, (n) => chars[n % chars.length]).join('');
+        p1.value = pw; p2.value = pw;
+        p1.type = 'text'; p2.type = 'text';
+        p1.dispatchEvent(new Event('input')); p2.dispatchEvent(new Event('input'));
+        copy.classList.remove('d-none');
+    });
+    copy.addEventListener('click', function () {
+        navigator.clipboard.writeText(p1.value).then(() => {
+            copy.innerHTML = '<i class="bi bi-check2"></i>';
+            setTimeout(() => { copy.innerHTML = '<i class="bi bi-clipboard"></i>'; }, 1500);
+        });
     });
 })();
 </script>

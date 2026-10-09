@@ -34,6 +34,7 @@ class MailService
         return Database::fetchAll("
             SELECT md.*, cn.name AS node_name, c.name AS customer_name,
                    (SELECT COUNT(*) FROM mail_accounts WHERE mail_domain_id = md.id) AS account_count,
+                   (SELECT COUNT(*) FROM mail_aliases WHERE mail_domain_id = md.id) AS alias_count,
                    -- ¿También es una web del panel? (correo y hosting se unen por el nombre)
                    (SELECT h.id FROM hosting_accounts h WHERE lower(h.domain) = lower(md.domain) AND h.status != 'deleted' LIMIT 1) AS hosting_id,
                    (SELECT h.domain FROM hosting_accounts h WHERE lower(h.domain) = lower(md.domain) AND h.status != 'deleted' LIMIT 1) AS hosting_domain
@@ -42,6 +43,101 @@ class MailService
             LEFT JOIN customers c ON c.id = md.customer_id
             ORDER BY md.domain
         ");
+    }
+
+    /**
+     * Uso real de los buzones según Dovecot: correos y sin leer de todas las carpetas, con el
+     * desglose por carpeta ('folders': nombre, correos, sin leer, si es papelera o spam) y el
+     * tamaño total (MB). El used_mb de la base no se mantiene al día. Un buzón
+     * del que Dovecot no responde no aparece. Solo cifras, nunca contenido.
+     */
+    public static function mailboxUsage(array $emails): array
+    {
+        if (!$emails || trim((string)shell_exec('command -v doveadm 2>/dev/null')) === '') {
+            return [];
+        }
+        $out = [];
+        foreach ($emails as $email) {
+            // Por carpeta: la papelera y el spam van aparte (un correo movido a la papelera sin
+            // abrir sigue «sin leer» y antes se contaba como pendiente).
+            $u8 = escapeshellarg((string)$email);
+            $folders = array_values(array_filter(array_map('trim', preg_split('/\R/', (string)shell_exec("doveadm mailbox list -u {$u8} 2>/dev/null")) ?: [])));
+            if (!$folders) {
+                continue;
+            }
+            $u = ['messages' => 0, 'unread' => 0, 'used_mb' => 0.0, 'trash' => 0, 'spam' => 0, 'folders' => []];
+            $bytes = 0;
+            foreach ($folders as $folder) {
+                $st = trim((string)shell_exec("doveadm -f tab mailbox status -u {$u8} 'messages unseen vsize' " . escapeshellarg($folder) . ' 2>/dev/null'));
+                $rows = preg_split('/\R/', $st) ?: [];
+                if (count($rows) < 2) {
+                    continue;
+                }
+                $keys = explode("\t", $rows[0]);
+                $v = array_combine($keys, array_pad(explode("\t", $rows[1]), count($keys), '0'));
+                $name = strtolower($folder);
+                $leaf = substr($name, max(strrpos($name, '/') === false ? 0 : strrpos($name, '/') + 1, strrpos($name, '.') === false ? 0 : strrpos($name, '.') + 1));
+                $bytes += (int)($v['vsize'] ?? 0);
+                $kind = in_array($leaf, ['trash', 'papelera', 'deleted', 'deleted items', 'deleted messages', 'elementos eliminados'], true) ? 'trash'
+                    : (in_array($leaf, ['junk', 'spam', 'correo no deseado', 'bulk'], true) ? 'spam' : '');
+                $msgs = (int)($v['messages'] ?? 0);
+                $unseen = (int)($v['unseen'] ?? 0);
+                // Totales de TODAS las carpetas (también papelera y spam: puede haber correo
+                // bueno en el spam); el desglose por carpeta lo enseña la ventana de "sin leer".
+                $u['messages'] += $msgs;
+                $u['unread'] += $unseen;
+                if ($kind !== '') {
+                    $u[$kind] += $msgs;
+                }
+                if ($msgs > 0) {
+                    $u['folders'][] = ['name' => $folder, 'messages' => $msgs, 'unread' => $unseen, 'kind' => $kind];
+                }
+            }
+            $u['used_mb'] = round($bytes / 1048576, 1);
+            $out[(string)$email] = $u;
+        }
+        return $out;
+    }
+
+    private const USAGE_CACHE = 'mail_usage_cache';
+
+    /**
+     * Uso guardado (sin preguntar a Dovecot: las páginas no se ralentizan). Lo pone al día
+     * el cluster-worker cada 30 min y el botón de actualizar. [email => [..., 'at' => ts]]
+     */
+    public static function cachedUsage(array $emails): array
+    {
+        $c = json_decode((string)Settings::get(self::USAGE_CACHE, '{}'), true) ?: [];
+        return array_intersect_key($c, array_flip(array_map('strval', $emails)));
+    }
+
+    /**
+     * Pregunta a Dovecot el uso de estos buzones (o de todos los activos de este servidor)
+     * y lo guarda; también deja used_mb al día en la base. Devuelve cuántos se actualizaron.
+     */
+    public static function refreshUsage(?array $emails = null): int
+    {
+        if ($emails === null) {
+            $emails = array_column(Database::fetchAll("SELECT email FROM mail_accounts WHERE status = 'active'"), 'email');
+        }
+        $usage = self::mailboxUsage($emails);
+        if (!$usage) {
+            return 0;
+        }
+        $c = json_decode((string)Settings::get(self::USAGE_CACHE, '{}'), true) ?: [];
+        $now = time();
+        foreach ($usage as $email => $u) {
+            $c[$email] = $u + ['at' => $now];
+            try {
+                Database::update('mail_accounts', ['used_mb' => (int)ceil($u['used_mb'])], 'email = :e', ['e' => $email]);
+            } catch (\Throwable) {
+            }
+        }
+        // Buzones que ya no existen: fuera de la caché.
+        $exist = array_flip(array_column(Database::fetchAll('SELECT email FROM mail_accounts'), 'email'));
+        $c = array_intersect_key($c, $exist);
+        Settings::set(self::USAGE_CACHE, json_encode($c, JSON_UNESCAPED_UNICODE));
+        return count($usage);
     }
 
     public static function getDomain(int $id): ?array
@@ -432,6 +528,42 @@ class MailService
         return $id;
     }
 
+    /**
+     * Cambia el destino de un alias (una o varias direcciones separadas por comas) y lo
+     * replica a los nodos de correo igual que al crearlo. Devuelve el alias o lanza error.
+     */
+    public static function updateAlias(int $id, string $destination, ?bool $active = null): array
+    {
+        $al = Database::fetchOne(
+            "SELECT a.*, d.domain FROM mail_aliases a JOIN mail_domains d ON d.id = a.mail_domain_id WHERE a.id = :id",
+            ['id' => $id]
+        );
+        if (!$al) {
+            throw new \RuntimeException('Alias no encontrado');
+        }
+        $list = array_values(array_unique(array_filter(array_map(static fn($x) => strtolower(trim($x)), preg_split('/[\s,;]+/', $destination) ?: []))));
+        if (!$list) {
+            throw new \InvalidArgumentException('El destino no puede estar vacío');
+        }
+        foreach ($list as $d) {
+            if (!filter_var($d, FILTER_VALIDATE_EMAIL)) {
+                throw new \InvalidArgumentException("Dirección no válida: {$d}");
+            }
+        }
+        $dest = implode(',', $list);
+        $wasActive = in_array($al['is_active'], [true, 't', 'true', 1, '1'], true);
+        $isActive = $active ?? $wasActive;
+        // El correo respeta is_active (no la marca de recoge-todo: el alias @dominio se busca
+        // por su nombre). Pausar = dejar de reenviar sin borrarlo.
+        Database::update('mail_aliases', ['destination' => $dest, 'is_active' => $isActive ? 'true' : 'false'], 'id = :id', ['id' => $id]);
+        self::replicateMailOp('mail_upsert_alias', [
+            'domain' => $al['domain'], 'source' => $al['source'], 'destination' => $dest,
+            'is_catchall' => in_array($al['is_catchall'], [true, 't', 'true', 1, '1'], true),
+            'is_active' => $isActive,
+        ]);
+        return ['source' => $al['source'], 'old' => $al['destination'], 'new' => $dest, 'was_active' => $wasActive, 'active' => $isActive];
+    }
+
     public static function deleteAlias(int $id): void
     {
         // Capture the alias identity before deleting so we can replicate the delete.
@@ -467,7 +599,8 @@ class MailService
                 'source'         => $source,
                 'destination'    => strtolower(trim((string)($payload['destination'] ?? ''))),
                 'is_catchall'    => $isCatchall ? 'true' : 'false',
-                'is_active'      => 'true',
+                // Pausado en el master = pausado aquí (antes la réplica lo dejaba siempre activo).
+                'is_active'      => array_key_exists('is_active', $payload) && empty($payload['is_active']) ? 'false' : 'true',
             ];
             if ($existing) {
                 Database::update('mail_aliases', $fields, 'id = :id', ['id' => (int)$existing['id']]);
@@ -4032,7 +4165,7 @@ class MailService
             }
             // Aliases of this domain.
             $aliases = Database::fetchAll(
-                "SELECT source, destination, is_catchall FROM mail_aliases WHERE mail_domain_id = :did",
+                "SELECT source, destination, is_catchall, is_active FROM mail_aliases WHERE mail_domain_id = :did",
                 ['did' => (int)$d['id']]
             );
             foreach ($aliases as $al) {
@@ -4041,6 +4174,7 @@ class MailService
                     'source'      => $al['source'],
                     'destination' => $al['destination'],
                     'is_catchall' => !empty($al['is_catchall']),
+                    'is_active'   => in_array($al['is_active'], [true, 't', 'true', 1, '1'], true),
                 ]);
                 $ac++;
             }

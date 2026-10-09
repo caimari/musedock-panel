@@ -619,6 +619,9 @@ class ClusterApiController
                 // Relé de salida del correo copiado del master (cada nodo decide si lo usa).
                 'set-outbound-relay' => \MuseDockPanel\Services\MailOutboundRelayService::importConfig($payload),
                 // Resumen de fail2ban de este nodo para el informe diario de seguridad del master.
+                // Copia de configuración del master en este nodo (tarjeta de Cluster del master).
+                'config-mirror-status' => \MuseDockPanel\Services\ConfigMirrorService::nodeStatus(),
+                'config-mirror-set' => \MuseDockPanel\Services\ConfigMirrorService::setEnabled(!empty($payload['enabled'])),
                 'fail2ban-report' => ['ok' => true, 'report' => \MuseDockPanel\Services\Fail2banReportService::summary((int)($payload['hours'] ?? 24))],
                 'set-alert-policy' => \MuseDockPanel\Services\AlertPolicyService::import($payload),
                 'set-alert-policy-master' => \MuseDockPanel\Services\AlertPolicyService::importFromNode($payload),

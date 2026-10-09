@@ -445,6 +445,14 @@ class DocsController
                 'keywords' => 'mcp node nodo reenviado reenviada forwarded mcp-call puerta trasera token cluster solo lectura master slave asistente ia claude seguridad auditoria',
             ],
             [
+                'title' => 'Copia de configuración del master',
+                'description' => 'Lo que una copia necesita fuera de /var/www para tomar el mando (supervisor, tareas, servicios, Caddyfile, pools PHP, lista blanca de fail2ban): que copia, como queda apagado, cuando activarla y como.',
+                'url' => '/docs/config-mirror',
+                'category' => 'Guia especial',
+                'icon' => 'bi-files',
+                'keywords' => 'copia de configuracion config mirror espejo slave master supervisor cron crontab systemd caddyfile php-fpm pool relevo tomar el mando promover activar desactivar nodo',
+            ],
+            [
                 'title' => 'Fail2ban en el cluster',
                 'description' => 'Que bloquea cada servidor y cuanto tiempo (jaulas normales y lentas, bloqueos crecientes), que se copia entre el que manda y sus copias (lista blanca si, bloqueos no), informe diario y consultas por MCP.',
                 'url' => '/docs/fail2ban-cluster',
@@ -561,6 +569,10 @@ class DocsController
 
         if ($url === '/docs/mcp-nodes') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'mcp-nodes.php');
+        }
+
+        if ($url === '/docs/config-mirror') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'config-mirror.php');
         }
 
         if ($url === '/docs/fail2ban-cluster') {
@@ -1510,6 +1522,14 @@ class DocsController
         View::render('help/mcp-nodes', [
             'layout' => 'main',
             'pageTitle' => 'Docs - MCP entre nodos',
+        ]);
+    }
+
+    public function configMirror(): void
+    {
+        View::render('help/config-mirror', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Copia de configuración del master',
         ]);
     }
 

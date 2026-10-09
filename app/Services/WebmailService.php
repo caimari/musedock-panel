@@ -53,6 +53,19 @@ class WebmailService
         ];
     }
 
+    /**
+     * Enlace al webmail con el usuario ya puesto (Roundcube rellena el campo con ?_user=):
+     * solo falta la contraseña. '' si el webmail no está instalado.
+     */
+    public static function loginUrl(string $email): string
+    {
+        $c = self::config();
+        if (!$c['enabled'] || $c['url'] === '') {
+            return '';
+        }
+        return rtrim($c['url'], '/') . '/?_user=' . rawurlencode($email);
+    }
+
     public static function defaultHost(): string
     {
         $mailHost = Settings::get('mail_local_hostname', '') ?: Settings::get('mail_setup_hostname', '') ?: Settings::get('mail_outbound_hostname', '');

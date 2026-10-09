@@ -247,6 +247,20 @@ try {
     logMsg('Site outage check error: ' . $e->getMessage());
 }
 
+// ─── Step 0j5: Uso de los buzones (correos, sin leer, espacio), cada 30 min ──────────
+// Las páginas leen lo guardado y no preguntan a Dovecot en cada carga.
+if (Settings::get('mail_enabled', '0') === '1' && time() - (int)Settings::get('mail_usage_refreshed_at', '0') >= 1800) {
+    Settings::set('mail_usage_refreshed_at', (string)time());
+    try {
+        $mu = \MuseDockPanel\Services\MailService::refreshUsage();
+        if ($mu > 0) {
+            logMsg("Correo: uso de {$mu} buzones actualizado");
+        }
+    } catch (\Throwable $e) {
+        logMsg('Uso de buzones error: ' . $e->getMessage());
+    }
+}
+
 // ─── Step 0j4: Jaulas de correo de fail2ban al día (p. ej. las de ataques lentos) ───
 try {
     $fs = \MuseDockPanel\Services\Fail2banReportService::syncPanelConfig();

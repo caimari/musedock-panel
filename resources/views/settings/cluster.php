@@ -870,6 +870,85 @@
         </div>
     </div>
 
+    <div class="card bg-dark border-secondary mt-4" id="configMirrorCard">
+        <div class="card-header border-secondary d-flex justify-content-between align-items-center">
+            <span><i class="bi bi-files me-2"></i>Copia de configuración del master en cada copia</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="configMirrorRefresh"><i class="bi bi-arrow-repeat"></i></button>
+        </div>
+        <div class="card-body">
+            <div class="small text-muted mb-3">
+                Activada en una copia (slave), cada 5 minutos trae del servidor que manda lo que las webs necesitan <strong>fuera de /var/www</strong>
+                — programas de fondo (supervisor), tareas programadas, servicios propios (systemd), webs fijas del Caddyfile, pools de PHP y la lista blanca
+                de fail2ban — y lo deja <strong>instalado pero apagado</strong>. Al pasarle el mando se enciende todo; al dejar de mandar, se apaga.
+                Actívala en las copias que puedan tomar el mando; en un nodo que nunca mandará (p. ej. solo VPN o vídeo) sobra.
+                <a href="/docs/config-mirror" class="text-info">Guía</a>
+            </div>
+            <div id="configMirrorBody"><div class="text-muted small py-2"><i class="bi bi-hourglass-split me-1"></i>Consultando nodos…</div></div>
+        </div>
+    </div>
+    <script>
+    (function () {
+        const body = document.getElementById('configMirrorBody');
+        if (!body) return;
+        const esc = (t) => { const d = document.createElement('div'); d.textContent = t == null ? '' : String(t); return d.innerHTML; };
+        const load = () => {
+            body.innerHTML = '<div class="text-muted small py-2"><i class="bi bi-hourglass-split me-1"></i>Consultando nodos…</div>';
+            fetch('/settings/cluster/config-mirror', {headers: {'Accept': 'application/json'}}).then(r => r.json()).then(d => {
+                if (!d.nodes || !d.nodes.length) { body.innerHTML = '<div class="text-muted small">No hay nodos.</div>'; return; }
+                let h = '<table class="table table-dark table-sm small align-middle mb-0"><thead><tr class="text-muted"><th>Nodo</th><th>Papel</th><th>Copia automática</th><th>Última pasada</th><th></th></tr></thead><tbody>';
+                d.nodes.forEach(n => {
+                    if (n.error) { h += '<tr><td>' + esc(n.name) + '</td><td colspan="4" class="text-warning">' + esc(n.error) + '</td></tr>'; return; }
+                    const last = n.last_run ? esc(n.last_run.at) + ' · ' + esc(n.last_run.changes) + ' cambios' + ((n.last_run.issues || []).length ? ' · <span class="text-warning">' + n.last_run.issues.length + ' avisos</span>' : '') : '<span class="text-muted">nunca</span>';
+                    const badge = n.enabled ? '<span class="badge bg-success">Activada</span>' : '<span class="badge bg-secondary">Desactivada</span>';
+                    const btn = n.role !== 'slave' ? '<span class="text-muted">solo en copias</span>'
+                        : '<button type="button" class="btn btn-sm ' + (n.enabled ? 'btn-outline-warning' : 'btn-outline-success') + ' cm-toggle" data-id="' + n.id + '" data-name="' + esc(n.name) + '" data-on="' + (n.enabled ? '0' : '1') + '">' + (n.enabled ? 'Desactivar' : 'Activar') + '</button>';
+                    h += '<tr><td>' + esc(n.name) + '</td><td>' + esc(n.role) + '</td><td>' + badge + '</td><td>' + last + '</td><td class="text-end">' + btn + '</td></tr>';
+                });
+                body.innerHTML = h + '</tbody></table>';
+            }).catch(() => { body.innerHTML = '<div class="text-danger small">No se pudo consultar.</div>'; });
+        };
+        body.addEventListener('click', (e) => {
+            const b = e.target.closest('.cm-toggle');
+            if (!b) return;
+            const on = b.dataset.on === '1';
+            const name = esc(b.dataset.name);
+            const html = on
+                ? '<div class="text-start small"><p>Vas a <strong>activar</strong> la copia de configuración en <strong>' + name + '</strong>.</p>'
+                  + '<p>Cada 5 minutos traerá del servidor que manda: programas de fondo (supervisor), tareas programadas (crontabs y /etc/cron.d), servicios propios (systemd), webs fijas del Caddyfile, pools de PHP-FPM y la lista blanca de fail2ban.</p>'
+                  + '<p>Todo queda <strong>instalado pero apagado</strong> (tareas comentadas, programas sin arrancar, servicios sin activar, Caddyfile aparte) y se enciende solo si ' + name + ' toma el mando. '
+                  + 'Nunca borra nada: lo que ya no está en el master se aparta con otro nombre. Ahora se hará una primera pasada.</p>'
+                  + '<p class="mb-2 text-warning">Úsalo en copias que puedan tomar el mando. En un nodo que nunca mandará solo añade cosas apagadas que no se usan.</p></div>'
+                : '<div class="text-start small"><p>Vas a <strong>desactivar</strong> la copia de configuración en <strong>' + name + '</strong>.</p>'
+                  + '<p>Dejará de ponerse al día con el servidor que manda. Lo ya copiado se queda como está (apagado); no se borra nada.</p>'
+                  + '<p class="mb-2 text-warning">Si ' + name + ' tomara el mando más adelante, le faltarían los cambios de configuración posteriores (tareas, programas, servicios).</p></div>';
+            Swal.fire({
+                icon: on ? 'question' : 'warning', title: (on ? 'Activar' : 'Desactivar') + ' la copia de configuración',
+                html: html + '<input type="password" id="cm-pwd" class="swal2-input" placeholder="Contraseña de administrador" autocomplete="current-password">',
+                showCancelButton: true, confirmButtonText: on ? 'Activar' : 'Desactivar', cancelButtonText: 'Cancelar', width: 640,
+                preConfirm: () => { const v = document.getElementById('cm-pwd').value; if (!v) { Swal.showValidationMessage('Escribe la contraseña'); return false; } return v; }
+            }).then((r) => {
+                if (!r.isConfirmed) return;
+                const fd = new FormData();
+                fd.append('_csrf_token', document.querySelector('input[name="_csrf_token"]')?.value || '');
+                fd.append('node_id', b.dataset.id);
+                fd.append('enabled', on ? '1' : '0');
+                fd.append('admin_password', r.value);
+                b.disabled = true;
+                fetch('/settings/cluster/config-mirror', {method: 'POST', body: fd}).then(x => x.json()).then(j => {
+                    Swal.fire({icon: j.ok ? 'success' : 'error', title: j.ok ? 'Hecho' : 'No se pudo', text: j.ok ? j.message : j.error});
+                    load();
+                }).catch(() => { Swal.fire({icon: 'error', title: 'No se pudo', text: 'Sin respuesta del panel'}); b.disabled = false; });
+            });
+        });
+        document.getElementById('configMirrorRefresh').addEventListener('click', load);
+        const tabBtn = document.querySelector('[data-bs-target="#tab-nodos"]');
+        let loaded = false;
+        const once = () => { if (!loaded) { loaded = true; load(); } };
+        if (tabBtn) tabBtn.addEventListener('shown.bs.tab', once);
+        if (location.hash === '#nodos' || location.hash === '#tab-nodos') once();
+    })();
+    </script>
+
 </div>
 <?php endif; ?>
 

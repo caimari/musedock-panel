@@ -46,6 +46,11 @@
                         <td>No: las webs de las bases que faltan se quedarían sin datos.</td>
                     </tr>
                     <tr>
+                        <td><span class="badge bg-primary">Copia de seguridad</span></td>
+                        <td>Ficheros de las webs al instante + bases de datos por <strong>volcados periódicos</strong> (cada pocos minutos, no en vivo).</td>
+                        <td>No sin perder lo último: tendría los datos de hasta un intervalo antes. Sirve para recuperar, no para relevar.</td>
+                    </tr>
+                    <tr>
                         <td><span class="badge bg-info">Solo copia de ficheros</span></td>
                         <td>Los ficheros de las webs, sin sus bases de datos.</td>
                         <td>No.</td>
@@ -58,6 +63,26 @@
             Una réplica <strong>no es una copia de seguridad</strong>: es un espejo. Si se borra algo en el master, también se borra en la réplica.
             Las copias de seguridad van aparte (<a href="/docs/default-backups" class="text-info">Backups</a>).
         </div>
+    </div>
+</div>
+
+<!-- Nodo de copia de seguridad -->
+<div class="card mb-4" style="border-color:rgba(13,110,253,.3);">
+    <div class="card-header"><i class="bi bi-archive me-2"></i>Nodo de copia de seguridad (volcados periódicos)</div>
+    <div class="card-body small text-muted">
+        <p>Es un nodo que guarda todo, pero <strong>con retraso</strong> en las bases de datos. Útil como copia de seguridad en otro sitio, o en una máquina que
+            hace otras cosas (VPN, vídeo, copias) y no debe mandar.</p>
+        <ul>
+            <li><strong>Ficheros de las webs:</strong> al instante, como cualquier nodo (Cluster → Archivos, lsyncd).</li>
+            <li><strong>Bases de datos:</strong> si en Cluster → Archivos está activada la copia de bases de datos por volcados, cada intervalo (p. ej. 15 min)
+                el master vuelca las bases de las webs (PostgreSQL y MariaDB/MySQL), las envía al nodo y allí <strong>se restauran encima</strong> de las anteriores.
+                A los nodos que ya replican en vivo no se les mandan (se restaurarían encima de la réplica).</li>
+            <li><strong>Qué no tiene:</strong> réplica en vivo, así que si el master cae le faltaría lo guardado desde el último volcado. Por eso el panel no lo cuenta
+                como nodo que pueda tomar el mando. Tampoco necesita la <a href="/docs/config-mirror" class="text-info">copia de configuración</a>; su lista blanca
+                de fail2ban se pone a mano (<a href="/docs/fail2ban-cluster" class="text-info">guía</a>).</li>
+            <li><strong>No escribas en sus bases de datos:</strong> cada restauración las pisa.</li>
+        </ul>
+        <p class="mb-0">Para convertirlo en relevo de verdad, ponle réplica en vivo de cada base (PostgreSQL y MariaDB) y pasará a <span class="badge bg-success">Réplica completa</span>.</p>
     </div>
 </div>
 
