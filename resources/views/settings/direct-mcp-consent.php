@@ -1,0 +1,8 @@
+<?php use MuseDockPanel\View; $write=in_array('musedock:write',$requestedScopes,true); $dns=in_array('musedock:dns',$requestedScopes,true); ?>
+<div class="card"><div class="card-body"><h4>Autorizar <?= View::e($client['name']) ?></h4>
+<p>Este cliente podrá consultar el servidor y los nodos que permitan consultas reenviadas.</p>
+<?php if($write): ?><div class="alert alert-warning"><strong>También solicita escritura.</strong> Podrá preparar cambios de correo, bases de datos y redirecciones en este servidor. Cada ejecución necesita tu aprobación del plan en el panel privado.<?php if($dns): ?> También podrá solicitar publicación o edición de DNS.<?php endif; ?></div><?php else: ?><p>Solo lectura: no podrá modificar configuraciones ni crear contenido.</p><?php endif; ?>
+<p>Cliente: <code><?= View::e($clientId) ?></code><br>Ámbitos solicitados: <code><?= View::e(implode(' ',$requestedScopes)) ?></code><br>Devolución autorizada: <code><?= View::e($client['redirect_uri']) ?></code></p>
+<p>El acceso caduca. Puedes revocar este cliente de forma independiente en Ajustes → MCP.</p>
+<form method="post" action="/settings/mcp/direct/approve"><?= View::csrf() ?><input type="hidden" name="client" value="<?= View::e($clientId) ?>"><input type="hidden" name="request" value="<?= View::e($requestId) ?>"><button class="btn <?= $write?'btn-warning':'btn-primary' ?>" name="decision" value="approve"><?= $write?'Autorizar lectura y solicitudes de escritura':'Autorizar solo lectura' ?></button> <button class="btn btn-outline-secondary" name="decision" value="deny">Rechazar</button></form>
+</div></div>

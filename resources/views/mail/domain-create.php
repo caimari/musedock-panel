@@ -17,6 +17,7 @@
                 <?php endif; ?>
                 <form method="POST" action="/mail/domains/store">
                     <?= View::csrf() ?>
+                    <p class="small text-info">Después del alta podrás revisar los DNS actuales y confirmar su publicación. <a href="/docs/settings/domain-dns">DNS y certificados: ver guía</a></p>
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label text-light">Domain *</label>

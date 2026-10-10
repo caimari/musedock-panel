@@ -116,6 +116,10 @@ class McpController
         View::render('settings/mcp', [
             'layout' => 'main',
             'pageTitle' => 'MCP',
+            'directMcp' => \MuseDockPanel\DirectMcp\Registry::settings(),
+            'directMcpCredentials' => $_SESSION['direct_mcp_credentials'] ?? null,
+            'chatGpt' => \MuseDockPanel\ChatGpt\Integration::state(),
+            'chatGptNewSecret' => $_SESSION['chatgpt_new_secret'] ?? null,
             'enabled' => Settings::get('mcp_enabled', '0') === '1',
             'allowWrite' => Settings::get('mcp_allow_write', '0') === '1',
             'allowDns' => Settings::get('mcp_allow_dns', '0') === '1',
@@ -134,6 +138,7 @@ class McpController
             'sshHost' => $host,
             'serverKey' => preg_replace('/[^a-z0-9]+/', '-', strtolower(explode('.', $host)[0])),
         ]);
+        unset($_SESSION['chatgpt_new_secret'], $_SESSION['direct_mcp_credentials']);
     }
 
     public function save(): void

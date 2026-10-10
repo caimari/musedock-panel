@@ -4,7 +4,7 @@
  * Independent hosting panel on port 8444
  */
 
-define('PANEL_ROOT', dirname(__DIR__));
+if (!defined('PANEL_ROOT')) define('PANEL_ROOT', dirname(__DIR__));
 
 
 
@@ -34,7 +34,8 @@ if (rtrim($requestPath, '/') === '/api/internal/smtp-config') {
 // IP allowlist (ALLOWED_IPS in .env)
 $allowedIps = array_values($config['allowed_ips'] ?? []);
 // El mapa de dominios del proxy de entrada alternativa tiene su propia clave (IngressService).
-if (!empty($allowedIps) && rtrim($requestPath, '/') !== '/api/ingress/domains') {
+if (!empty($allowedIps) && rtrim($requestPath, '/') !== '/api/ingress/domains'
+    && !\MuseDockPanel\ChatGpt\IngressPolicy::exempt($requestPath, $_SERVER)) {
     $clientIp = (static function (): string {
         $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '';
 
@@ -112,6 +113,20 @@ if (!empty($allowedIps) && rtrim($requestPath, '/') !== '/api/ingress/domains') 
         }
         exit;
     }
+}
+
+// Dedicated direct host never falls through to panel administration, even with a forged Host.
+if (\MuseDockPanel\DirectMcp\Gateway::host($_SERVER) || in_array($requestPath, ['/mcp','/oauth/authorize','/oauth/token','/oauth/revoke'], true)) {
+    (new \MuseDockPanel\Controllers\DirectMcpController())->endpoint();
+}
+
+// OAuth discovery/token routes have no panel session and never reach admin routing.
+if (\MuseDockPanel\ChatGpt\IngressPolicy::publicPath($requestPath)) {
+    (new \MuseDockPanel\Controllers\ChatGptController())->publicEndpoint();
+}
+// Tunnel endpoint is locally reachable only; it uses independent OAuth grants.
+if ($requestPath === '/api/mcp/chatgpt') {
+    (new \MuseDockPanel\Controllers\ChatGptController())->mcp();
 }
 
 // Session (hardened)
@@ -402,6 +417,11 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 // Domains
 \MuseDockPanel\Router::get('/domains', 'DomainController@index');
 \MuseDockPanel\Router::post('/domains/check-dns', 'DomainController@checkDns');
+// Manual domain provisioning: independent from the MCP/OAuth routes.
+\MuseDockPanel\Router::get('/domains/dns-sync', 'DomainDnsSyncController@index');
+\MuseDockPanel\Router::post('/domains/dns-sync/plan', 'DomainDnsSyncController@plan');
+\MuseDockPanel\Router::post('/domains/dns-sync/apply', 'DomainDnsSyncController@apply');
+\MuseDockPanel\Router::post('/domains/dns-sync/verify', 'DomainDnsSyncController@verify');
 \MuseDockPanel\Router::post('/domains/add-redirect', 'DomainController@addRedirect');
 \MuseDockPanel\Router::post('/domains/delete-redirect', 'DomainController@deleteRedirect');
 
@@ -563,6 +583,13 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 
 // Notifications
 \MuseDockPanel\Router::get('/settings/mcp', 'McpController@settings');
+\MuseDockPanel\Router::get('/settings/mcp/chatgpt/approve', 'ChatGptController@approve');
+\MuseDockPanel\Router::post('/settings/mcp/chatgpt/approve', 'ChatGptController@approve');
+\MuseDockPanel\Router::post('/settings/mcp/chatgpt/save', 'ChatGptController@save');
+\MuseDockPanel\Router::post('/settings/mcp/chatgpt/action', 'ChatGptController@action');
+\MuseDockPanel\Router::get('/settings/mcp/direct/approve', 'DirectMcpController@approve');
+\MuseDockPanel\Router::post('/settings/mcp/direct/approve', 'DirectMcpController@approve');
+\MuseDockPanel\Router::post('/settings/mcp/direct/save', 'DirectMcpController@save');
 \MuseDockPanel\Router::get('/settings/alerts', 'AlertsController@index');
 \MuseDockPanel\Router::post('/settings/alerts/save', 'AlertsController@save');
 \MuseDockPanel\Router::get('/settings/witnesses', 'WitnessController@index');

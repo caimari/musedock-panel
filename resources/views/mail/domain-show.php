@@ -7,6 +7,7 @@
     </div>
     <?php if (!$ro): ?>
     <div class="d-flex gap-2">
+        <a href="/domains/dns-sync?scope=mail&amp;domain=<?= rawurlencode($domain['domain']) ?>" class="btn btn-outline-info btn-sm">Revisar DNS</a>
         <a href="/mail/domains/<?= $domain['id'] ?>/accounts/create" class="btn btn-primary btn-sm">
             <i class="bi bi-plus-lg me-1"></i> New Mailbox
         </a>

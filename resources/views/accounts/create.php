@@ -7,6 +7,7 @@
             <div class="card-body">
                 <form id="createAccountForm" method="POST" action="/accounts/store">
                     <?= \MuseDockPanel\View::csrf() ?>
+                    <p class="small text-info">Después del alta podrás revisar los DNS actuales y confirmar su publicación. <a href="/docs/settings/domain-dns">DNS y certificados: ver guía</a></p>
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label">Domain *</label>
@@ -70,6 +71,19 @@
                             <label class="form-label">Description</label>
                             <textarea name="description" class="form-control" rows="2" placeholder="Notes about this account..."></textarea>
                         </div>
+                    </div>
+
+                    <?php $mailOptions = $hostingMailOptions ?? ['available' => false, 'nodes' => [], 'default_available' => false, 'reason' => 'Configura primero el servidor de correo.']; ?>
+                    <div class="mt-3 p-3 rounded border">
+                        <label class="form-check"><input class="form-check-input" type="checkbox" name="create_mail" value="1" id="hostingCreateMail" <?= $mailOptions['available'] ? '' : 'disabled' ?>><span class="form-check-label">Crear también el correo para este hosting</span></label>
+                        <p class="small text-muted mb-2">Se crea el dominio de correo y su DKIM. Después podrás crear buzones; los registros DNS se publican únicamente con tu confirmación.</p>
+                        <?php if ($mailOptions['available']): ?>
+                        <label for="hostingMailNode" class="form-label small">Servidor de correo</label>
+                        <select name="hosting_mail_node_id" id="hostingMailNode" class="form-select" disabled>
+                            <?php if ($mailOptions['default_available']): ?><option value="">Configuración de correo predeterminada</option><?php endif; ?>
+                            <?php foreach ($mailOptions['nodes'] as $n): ?><option value="<?= (int)$n['id'] ?>"><?= View::e($n['name']) ?></option><?php endforeach; ?>
+                        </select>
+                        <?php else: ?><p class="small text-warning mb-0"><?= View::e($mailOptions['reason']) ?></p><?php endif; ?>
                     </div>
 
                     <!-- DNS check result -->
@@ -263,7 +277,7 @@ function generatePassword() {
                 }
                 html += '</div>';
                 html += '<div class="mt-3 d-flex gap-2 justify-content-center">' +
-                    '<a href="/accounts/' + result.account_id + '" class="btn btn-sm btn-primary"><i class="bi bi-eye me-1"></i>Ver cuenta</a>' +
+                    '<a href="/domains/dns-sync?created=1&amp;scope=hosting&amp;domain=' + encodeURIComponent(result.domain) + '" class="btn btn-sm btn-primary">Revisar DNS</a>' +
                     '<a href="/accounts" class="btn btn-sm btn-outline-light"><i class="bi bi-list me-1"></i>Listado</a>' +
                     '<a href="/accounts/create" class="btn btn-sm btn-outline-light"><i class="bi bi-plus me-1"></i>Crear otra</a>' +
                 '</div>';
@@ -356,7 +370,7 @@ function generatePassword() {
                                 '<div class="small text-muted">Dominio: <strong style="color:#e2e8f0;">' + (result.domain || status.domain || '') + '</strong></div>' +
                                 '</div>' +
                                 '<div class="mt-3 d-flex gap-2 justify-content-center">' +
-                                (result.account_id ? '<a href="/accounts/' + result.account_id + '" class="btn btn-sm btn-primary"><i class="bi bi-eye me-1"></i>Ver cuenta</a>' : '') +
+                                (result.account_id ? '<a href="/domains/dns-sync?created=1&amp;scope=hosting&amp;domain=' + encodeURIComponent(result.domain) + '" class="btn btn-sm btn-primary">Revisar DNS</a>' : '') +
                                 '<a href="/accounts" class="btn btn-sm btn-outline-light"><i class="bi bi-list me-1"></i>Listado</a>' +
                                 '</div>';
                             resultEl.style.display = '';
@@ -442,5 +456,12 @@ function generatePassword() {
         // Let the form submit normally to /accounts/store (POST)
         form.action = '/accounts/store';
     });
+})();
+</script>
+
+<script>
+(function () {
+    var checkbox = document.getElementById('hostingCreateMail'), node = document.getElementById('hostingMailNode');
+    if (checkbox && node) checkbox.addEventListener('change', function () { node.disabled = !checkbox.checked; });
 })();
 </script>

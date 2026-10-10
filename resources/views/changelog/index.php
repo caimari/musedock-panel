@@ -14,8 +14,8 @@
 <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span>
-            <span class="badge bg-<?= View::e($v['badge']) ?> me-2">v<?= View::e($v['version']) ?></span>
-            <strong>v<?= View::e($v['version']) ?></strong>
+            <span class="badge bg-<?= View::e($v['badge']) ?> me-2"><?= View::e($v['display_version'] ?? ('v' . $v['version'])) ?></span>
+            <strong><?= View::e($v['display_version'] ?? ('v' . $v['version'])) ?></strong>
         </span>
         <small class="text-muted changelog-date" data-date="<?= View::e($v['date']) ?>"><?= View::e($v['date']) ?></small>
     </div>

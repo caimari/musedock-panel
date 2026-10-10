@@ -1,0 +1,10 @@
+{
+  "source": "https://github.com/openai/tunnel-client",
+  "commit": "b91e6c992dfd33e5c5ea94b00449c527c110851e",
+  "sha256": "fa208418c9c4819549919ede44061048b9282a9b6a76e4878be29b6b089e32ed",
+  "build": "go build -o tunnel-client ./cmd/client",
+  "go": "1.27.0",
+  "platform": "linux/amd64",
+  "dependencies": "go mod verify: all modules verified",
+  "validation": "60 OAuth checks + 36 isolated HTTP checks including official dev proxy; not connected to a real Platform tunnel"
+}

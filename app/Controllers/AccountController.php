@@ -12,6 +12,7 @@ use MuseDockPanel\Services\SystemService;
 use MuseDockPanel\Services\LogService;
 use MuseDockPanel\Services\MailService;
 use MuseDockPanel\Services\SubdomainService;
+use MuseDockPanel\Services\HostingMailSetupService;
 
 class AccountController
 {
@@ -191,6 +192,7 @@ class AccountController
             'layout' => 'main',
             'pageTitle' => 'Create Hosting Account',
             'customers' => $customers,
+            'hostingMailOptions' => HostingMailSetupService::options(),
         ]);
     }
 
@@ -253,6 +255,7 @@ class AccountController
         $fpmSocket = "unix//run/php/php{$phpVersion}-fpm-{$username}.sock";
 
         try {
+            $mailOptions = HostingMailSetupService::validate($_POST);
             // 1. Create system user and directories
             $result = SystemService::createAccount($username, $domain, $homeDir, $documentRoot, $phpVersion, $password, $shell);
 
@@ -312,8 +315,13 @@ class AccountController
                 }
             }
 
-            Flash::set('success', "Cuenta creada: {$domain}");
-            Router::redirect('/accounts');
+            try {
+                $mailId = HostingMailSetupService::create($domain, $customerId, $mailOptions);
+            } catch (\Throwable $mailError) {
+                Flash::set('warning', 'Hosting creado, pero el correo quedó pendiente: ' . $mailError->getMessage());
+            }
+            Flash::set('success', "Cuenta creada: {$domain}. Revisa y confirma ahora su DNS.");
+            Router::redirect('/domains/dns-sync?created=1&scope=hosting&domain=' . rawurlencode($domain));
 
         } catch (\Throwable $e) {
             Flash::set('error', 'Error: ' . $e->getMessage());
@@ -419,6 +427,13 @@ class AccountController
             $shell = '/usr/sbin/nologin';
         }
 
+        try {
+            $mailOptions = HostingMailSetupService::validate($_POST);
+        } catch (\Throwable $e) {
+            echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
+            return;
+        }
+
         // Store data in session for SSE stream to pick up
         $token = bin2hex(random_bytes(16));
         $sessionKey = 'provision_stream_' . $token;
@@ -431,6 +446,7 @@ class AccountController
             'description' => $description,
             'disk_quota_mb' => $diskQuota,
             'php_version' => $phpVersion,
+            'mail_options' => $mailOptions,
         ];
 
         echo json_encode(['ok' => true, 'token' => $token]);
@@ -626,12 +642,21 @@ class AccountController
             return;
         }
 
+        try {
+            $mailId = HostingMailSetupService::create($domain, $customerId, $data['mail_options'] ?? null);
+            if ($mailId) $this->provisionSendSSE('log', 'Dominio de correo creado; sus DNS se revisarán junto al hosting.', $st);
+        } catch (\Throwable $e) {
+            $errors[] = 'Correo pendiente: ' . $e->getMessage();
+            $this->provisionSendSSE('error', end($errors), $st);
+        }
+
         // ── Done ──
         $this->provisionSendSSE('progress', json_encode(['step' => 7, 'total' => 7, 'percent' => 100]), $st);
         $this->provisionSendSSE('log', 'Hosting creado correctamente!', $st);
         $this->provisionSendSSE('done', json_encode([
             'ok' => true,
             'account_id' => $id,
+            'dns_review_url' => '/domains/dns-sync?created=1&scope=hosting&domain=' . rawurlencode($domain),
             'domain' => $domain,
             'username' => $username,
             'warnings' => $errors,

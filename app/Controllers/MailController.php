@@ -298,7 +298,7 @@ class MailController
                 . ($hosting ? " (hosting {$hosting['domain']}, {$hosting['kind']})" : ''));
             Flash::set('success', "Dominio de mail {$domain} creado."
                 . ($hosting ? " Este dominio también es una web del panel (hosting {$hosting['domain']}, {$hosting['kind']}): su correo se ve también en la ficha del hosting." : ''));
-            Router::redirect('/mail/domains/' . $id);
+            Router::redirect('/domains/dns-sync?created=1&scope=mail&domain=' . rawurlencode($domain));
         } catch (\Throwable $e) {
             Flash::set('error', 'Error: ' . $e->getMessage());
             Router::redirect('/mail/domains/create');

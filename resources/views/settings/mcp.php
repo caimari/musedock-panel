@@ -31,7 +31,29 @@ $claudeHttp = 'claude mcp add --transport http musedock-' . $serverKey . ' ' . $
 $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHost . ' php /opt/musedock-panel/bin/mcp-stdio.php';
 ?>
 
+<style>
+.mcp-settings .card {border-color:rgba(148,163,184,.22);border-radius:12px;overflow:hidden}
+.mcp-settings .card-header {padding:18px 22px}
+.mcp-settings .card-body {padding:22px}
+.mcp-settings code,.mcp-settings small {overflow-wrap:anywhere}
+.mcp-settings .input-group .form-control {min-width:0}
+.mcp-settings summary {cursor:pointer;padding:10px 0;font-weight:600}
+.mcp-settings .mcp-section {background:rgba(148,163,184,.04);border:1px solid rgba(148,163,184,.2);border-radius:10px;padding:18px;margin-bottom:18px}
+</style>
+<div class="mcp-settings">
+<p class="text-muted">Gestiona las conexiones de tus asistentes. Cada modalidad mantiene su propia autenticación y permisos.</p>
+<ul class="nav nav-pills gap-2 mb-4" role="tablist" aria-label="Modalidad de conexión MCP">
+<li class="nav-item"><button class="nav-link active" id="mcp-direct-tab" data-bs-toggle="pill" data-bs-target="#mcp-direct-pane" type="button" role="tab" aria-controls="mcp-direct-pane" aria-selected="true">Directa · ChatGPT y Claude</button></li>
+<li class="nav-item"><button class="nav-link" id="mcp-tunnel-tab" data-bs-toggle="pill" data-bs-target="#mcp-tunnel-pane" type="button" role="tab" aria-controls="mcp-tunnel-pane" aria-selected="false">Túnel · OpenAI</button></li>
+<li class="nav-item"><button class="nav-link" id="mcp-legacy-tab" data-bs-toggle="pill" data-bs-target="#mcp-legacy-pane" type="button" role="tab" aria-controls="mcp-legacy-pane" aria-selected="false">Token y SSH · Avanzado</button></li>
+</ul>
+<div class="tab-content"><div class="tab-pane fade show active" id="mcp-direct-pane" role="tabpanel" aria-labelledby="mcp-direct-tab">
 <!-- Estado -->
+<?php require __DIR__ . '/_direct-mcp.php'; ?>
+</div><div class="tab-pane fade" id="mcp-tunnel-pane" role="tabpanel" aria-labelledby="mcp-tunnel-tab">
+<?php require __DIR__ . '/_chatgpt.php'; ?>
+</div><div class="tab-pane fade" id="mcp-legacy-pane" role="tabpanel" aria-labelledby="mcp-legacy-tab">
+<div class="alert alert-info">Aquí se configuran los límites generales del servidor MCP y el acceso con token/SSH. Activar escritura o DNS aquí permite esas operaciones en el servidor, pero cada cliente OAuth necesita además sus propios ámbitos, consentimiento y aprobación de cada plan.</div>
 <div class="card mb-3">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-plug me-2"></i>Servidor MCP (Model Context Protocol)</span>
@@ -268,10 +290,10 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
             <div class="alert alert-warning">
                 <div class="fw-semibold mb-2"><i class="bi bi-exclamation-octagon me-1"></i>Copia este token ahora: no se volverá a mostrar.</div>
                 <div class="input-group">
-                    <input type="text" class="form-control font-monospace" id="mcpNewToken" value="<?= View::e($newToken) ?>" readonly>
+                    <input type="password" class="form-control font-monospace" id="mcpNewToken" value="<?= View::e($newToken) ?>" readonly>
                     <button type="button" class="btn btn-outline-light" onclick="navigator.clipboard.writeText(document.getElementById('mcpNewToken').value);this.innerHTML='<i class=&quot;bi bi-check2&quot;></i> Copiado'">
                         <i class="bi bi-clipboard"></i> Copiar
-                    </button>
+                    </button><button type="button" class="btn btn-outline-light" data-mcp-toggle="mcpNewToken">Mostrar</button>
                 </div>
             </div>
         <?php endif; ?>
@@ -347,3 +369,6 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
     });
 })();
 </script>
+
+</div></div></div>
+<script src="/assets/mcp-settings.js"></script>

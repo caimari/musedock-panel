@@ -18,6 +18,7 @@ use MuseDockPanel\Services\CloudflareService;
                 <span><i class="bi bi-server me-2"></i>Account Details</span>
                 <div class="d-flex gap-2">
                     <?php if (!($isSlave ?? false)): ?>
+                    <a href="/domains/dns-sync?scope=hosting&amp;domain=<?= rawurlencode($account['domain']) ?>" class="btn btn-outline-info btn-sm">Revisar DNS</a>
                     <a href="/accounts/<?= $account['id'] ?>/files" class="btn btn-outline-light btn-sm"><i class="bi bi-folder me-1"></i>Files</a>
                     <a href="/accounts/<?= $account['id'] ?>/stats" class="btn btn-outline-info btn-sm"><i class="bi bi-bar-chart me-1"></i>Stats</a>
                     <a href="/accounts/<?= $account['id'] ?>/migrate" class="btn btn-outline-light btn-sm"><i class="bi bi-cloud-download me-1"></i>Migrate</a>

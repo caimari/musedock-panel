@@ -4,15 +4,17 @@
  * Used with: php -S 0.0.0.0:8444 -t public router.php
  */
 
-require_once dirname(__DIR__) . '/app/Env.php';
-\MuseDockPanel\Env::load(dirname(__DIR__) . '/.env');
+if (!defined('PANEL_ROOT')) define('PANEL_ROOT', dirname(__DIR__));
+require_once dirname(__DIR__) . '/app/bootstrap.php';
 
 // Enforce ALLOWED_IPS for all requests, including static files.
 // Excepción: el mapa de dominios del proxy de entrada alternativa tiene su propia clave
 // (IngressService) y lo pide un equipo que no tiene por qué estar en la lista.
 $allowedRaw = trim((string)\MuseDockPanel\Env::get('ALLOWED_IPS', ''));
 $routerPath = rtrim((string)(strtok($_SERVER['REQUEST_URI'] ?? '/', '?') ?: '/'), '/');
-if ($allowedRaw !== '' && $routerPath !== '/api/ingress/domains') {
+require_once dirname(__DIR__) . '/app/ChatGpt/IngressPolicy.php';
+if ($allowedRaw !== '' && $routerPath !== '/api/ingress/domains'
+    && !\MuseDockPanel\ChatGpt\IngressPolicy::exempt($routerPath, $_SERVER)) {
     $allowedIps = array_filter(array_map('trim', explode(',', $allowedRaw)));
     $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '';
     $clientIp = '';
@@ -82,6 +84,9 @@ if ($allowedRaw !== '' && $routerPath !== '/api/ingress/domains') {
 
 $uri = $_SERVER['REQUEST_URI'];
 $path = parse_url($uri, PHP_URL_PATH);
+
+// A dedicated MCP host cannot serve panel assets either.
+if (\MuseDockPanel\DirectMcp\Gateway::host($_SERVER)) { require __DIR__ . '/index.php'; return true; }
 
 // Serve static files directly
 if (preg_match('/\.(css|js|png|jpg|gif|svg|ico|woff2?|ttf|eot)$/', $path)) {

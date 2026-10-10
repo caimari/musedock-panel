@@ -1,0 +1,21 @@
+# Render placeholders from your installation. Import into the existing Caddyfile.
+# HTTPS 443 only. The private MCP endpoint is NEVER published here.
+__OAUTH_HOST__ {
+    @oauth {
+        path /.well-known/oauth-authorization-server /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/api/mcp/chatgpt /api/chatgpt/oauth/authorize /api/chatgpt/oauth/token /api/chatgpt/oauth/revoke
+    }
+    handle @oauth {
+        request_body {
+            max_size 16KB
+        }
+        header Cache-Control "no-store"
+        header Referrer-Policy "no-referrer"
+        reverse_proxy 127.0.0.1:__PANEL_INTERNAL_PORT__ {
+            header_up X-Forwarded-Proto https
+        }
+    }
+    handle {
+        respond "Not found" 404
+    }
+    # Do not enable access logs containing OAuth authorization query parameters.
+}

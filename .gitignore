@@ -13,3 +13,8 @@ storage/*.flag
 *.deb
 docs/
 Notas.txt
+
+storage/chatgpt/
+storage/chatgpt-client/
+
+/storage/direct-mcp/

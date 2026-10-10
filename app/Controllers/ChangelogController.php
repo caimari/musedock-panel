@@ -20,6 +20,54 @@ class ChangelogController
     {
         return [
             [
+                'version' => 'unreleased-dns',
+                'display_version' => 'Sin publicar · DNS y correo',
+                'date' => '2026-10-10',
+                'badge' => 'warning',
+                'changes' => [
+                    'added' => [
+                        'es' => [
+                            'Alta manual de hosting o correo con revisión DNS: proveedor, cuenta, nameservers y valores actuales/propuestos; modal de autorización antes de publicar en Cloudflare.',
+                            'Hosting: alinear dominio/www por A o por el CNAME configurado; solo correo: conservar la web y revisar MX, SPF, DKIM, DMARC y hostname de correo.',
+                            'Casilla opcional para crear también el dominio de correo y su DKIM junto al hosting, con selección y validación del servidor; botón para añadir correo después del alta.',
+                            'Preparación TLS en Caddy y comprobación de DNS/HTTPS. Interfaz de adaptadores para incorporar proveedores DNS futuros, independiente de MCP y de los módulos DNS-01.',
+                            'Guía pública del producto dentro de Docs: Alta de dominios, DNS y certificados; enlaces en formularios y fichas de hosting/correo.',
+                        ],
+                        'en' => [
+                            'Manual hosting/mail creation with DNS review: provider, account, nameservers and current/proposed values; explicit modal consent before publishing to Cloudflare.',
+                            'Hosting aligns domain/www through A records or the configured CNAME; mail-only preserves the website and reviews MX, SPF, DKIM, DMARC and the mail hostname.',
+                            'Optional mail-domain and DKIM creation alongside hosting, with mail-server selection and validation; action to add mail after hosting creation.',
+                            'Caddy TLS preparation and DNS/HTTPS checks. Zone-provider adapter interface for future DNS providers, independent of MCP and DNS-01 modules.',
+                            'Product documentation inside Docs: domain creation, DNS and certificates; links from hosting/mail forms and detail pages.',
+                        ],
+                    ],
+                    'fixed' => [
+                        'es' => [
+                            'Modal DNS con fondo oscuro y texto legible siguiendo la estética del panel.',
+                            'La tabla vuelve a consultar DNS después de publicar y conserva el resultado de la operación.',
+                            'La comprobación distingue DNS público alineado de caché local pendiente y un certificado válido de errores HTTP como 403.',
+                        ],
+                        'en' => [
+                            'DNS confirmation modal uses the panel dark theme with readable text.',
+                            'The table refreshes DNS after publication while preserving the operation result.',
+                            'Verification distinguishes aligned public DNS from stale local caches, and valid certificates from HTTP errors such as 403.',
+                        ],
+                    ],
+                    'notes' => [
+                        'es' => [
+                            'Solo se escribe en zonas activas cuya delegación coincide. Confirmaciones de sesión de un solo uso, con caducidad, comprobación de cambios concurrentes y auditoría.',
+                            'Ante un fallo se detiene la publicación, se informa del resultado parcial y se intenta restaurar los registros retirados de la sustitución fallida.',
+                            '37 comprobaciones backend aisladas y prueba JavaScript del flujo de confirmación; sin modificar DNS reales en las pruebas. Esta entrada no publica una nueva versión.',
+                        ],
+                        'en' => [
+                            'Writes require active zones with matching delegation. Session-bound, expiring, single-use confirmations include concurrent-change checks and auditing.',
+                            'Failures stop publication, report partial results and attempt to restore records removed by the failed replacement.',
+                            '37 isolated backend checks and a JavaScript confirmation-flow test; tests do not modify real DNS. This entry does not publish a new version.',
+                        ],
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.360',
                 'date' => '2026-10-10',
                 'badge' => 'info',

@@ -11,3 +11,5 @@
     <div class="col-lg-6"><div class="card h-100"><div class="card-header"><i class="bi bi-play-circle me-2"></i>Flujo basico</div><div class="card-body"><ol class="small text-muted mb-0"><li>Anadir dominio remitente.</li><li>Publicar DNS recomendados (SPF, DKIM, DMARC, A/PTR cuando toque).</li><li>Pulsar refresh/check para actualizar estado.</li><li>Confirmar cambio a estado activo.</li></ol></div></div></div>
     <div class="col-lg-6"><div class="card h-100"><div class="card-header"><i class="bi bi-check2-square me-2"></i>Validaciones</div><div class="card-body"><ul class="small text-muted mb-0"><li>DKIM del selector esperado publicado.</li><li>SPF incluye IP/host real de salida.</li><li>DMARC presente con politica definida.</li><li>Dominio en estado usable para SMTP.</li></ul></div></div></div>
 </div>
+
+<div class="card mt-4"><div class="card-body"><h5>DNS al crear un dominio</h5><p>El alta manual abre una revisión de MX, SPF, DKIM, DMARC y el hostname de correo. El destino de la web se conserva y los cambios requieren aceptar el modal.</p><a href="/docs/settings/domain-dns">Consultar la guía completa de DNS y certificados</a></div></div>

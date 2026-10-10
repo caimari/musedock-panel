@@ -2,6 +2,40 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.361] — 2026-10-10 — MCP OAuth con permisos y escritura aprobada en el panel
+
+### Añadido
+- Conexión MCP directa para ChatGPT, Claude y otros clientes compatibles mediante un subdominio HTTPS dedicado en 443, sin túnel. OAuth obligatorio, registro manual por cliente, callback exacto, PKCE S256, tokens caducables y refresh rotatorio. Credenciales, consentimientos y revocación independientes.
+- Filtrado en Caddy con redes oficiales OpenAI/Anthropic y rangos manuales para otros clientes. Actualización validada y bloqueo por caducidad. Solo se publican MCP y OAuth; el panel administrativo, el firewall y el puerto 8444 mantienen sus restricciones.
+- Permisos por cliente: `musedock:read`, `musedock:write` y `musedock:dns`. La escritura está desactivada por defecto; requiere lectura, y DNS requiere escritura. Cualquier cambio de ámbitos revoca tokens, consentimientos y solicitudes pendientes. Los conectores deben autorizar de nuevo los ámbitos seleccionados.
+- Lista explícita de escritura: crear dominios y buzones de correo, alias y dominios alias, cambiar selector DKIM, crear bases de datos y redirecciones, publicar DNS de correo y crear/modificar registros DNS. No se heredan otras herramientas de escritura ni se reenvían escrituras a nodos.
+- Aprobación privada obligatoria de cada operación: `apply=false` devuelve el plan y `apply=true` crea una solicitud de 10 minutos, sin ejecutar. El administrador revisa y confirma en Ajustes → MCP. Se comprueban otra vez los permisos, el consentimiento vigente, la cuenta administradora y el plan antes de ejecutar; un plan cambiado exige una solicitud nueva.
+- Solicitudes de un solo uso, sin reintento automático tras un fallo parcial; auditoría de solicitud, aprobación, rechazo y resultado. Se conservan los límites generales del servidor para escritura y DNS. Las contraseñas se generan y se consultan en el panel, sin enviarlas al chat.
+- Modalidad alternativa mediante túnel OpenAI, con OAuth y solo lectura, instalador y configuración de servicio independientes. Permanece opcional y necesita su propia configuración.
+
+### Interfaz y correcciones
+- Ajustes → MCP organizado en pestañas: conexión directa, túnel OpenAI y token/SSH. Configuración técnica plegada, fichas de permisos, alta de credenciales ChatGPT y clientes independientes.
+- Secretos nuevos ocultos inicialmente, botones de copiar y mostrar/ocultar, y cierre que retira las credenciales de la página. Los secretos OAuth siguen mostrándose una sola vez.
+- Consentimiento OAuth muestra los ámbitos realmente solicitados y distingue lectura, solicitudes de escritura y DNS. Casillas de permisos con dependencias y revocación por cliente.
+- Actualizaciones de rutas Caddy conservan objetos JSON vacíos y rutas de otras webs, usan ETag y evitan recargas si no cambia la configuración.
+- Corregido el acceso de cuentas `superadmin` a la configuración del túnel y el guardado de su clave runtime.
+
+### Validación
+- 280 comprobaciones aisladas del registro OAuth, autorización HTTP, Caddy, separación de clientes, revocación, permisos de escritura y aprobación. Los ejecutores de escritura se simulan: las pruebas no crean buzones/bases ni publican DNS reales.
+
+## [Sin publicar] — 2026-10-10 — DNS confirmado en el alta manual de dominios
+
+- Al crear un hosting o un dominio de correo, se abre la revisión DNS con los valores actuales y propuestos, proveedor, cuenta y nameservers. Un modal exige autorización explícita antes de publicar.
+- Publicación en las cuentas de Cloudflare configuradas, solo con zona activa y delegación coincidente. Hosting alinea dominio/www; solo correo conserva la web y publica MX, SPF, DKIM, DMARC y el hostname de correo.
+- Planes de sesión de un solo uso, caducidad, comprobación de cambios concurrentes, parada ante fallos y restauración de registros retirados en una sustitución fallida. Auditoría de valores confirmados y resultado parcial.
+- Preparación TLS en Caddy y comprobación de propagación y HTTPS del origen, con estados pendientes explícitos. El correo remoto conserva la gestión de certificados de su nodo.
+- Interfaz de adaptadores de gestión de zonas para incorporar proveedores futuros, independiente de los módulos DNS-01 y de MCP.
+- Guía integrada en Docs → Settings → Alta de dominios: DNS y certificados, con enlaces en formularios y fichas de hosting/correo.
+- Modal con la estética oscura del panel y contraste legible. La tabla vuelve a consultar la zona después de publicar, conservando el resultado de la operación.
+- Casilla opcional para crear también el dominio de correo y su DKIM junto al hosting, con validación del modo y nodo; acceso para añadir correo después del alta.
+- La comprobación distingue la caché DNS local del DNS público y separa un certificado válido de una respuesta HTTP de error.
+- Validación aislada de 37 casos backend y del flujo de confirmación en JavaScript; sin modificar DNS reales en las pruebas.
+
 ## [1.0.360] — 2026-10-10 — Sin falsas alarmas de buzones sin sincronizar
 
 ### Arreglado

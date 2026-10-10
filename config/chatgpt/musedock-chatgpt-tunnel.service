@@ -1,0 +1,33 @@
+[Unit]
+Description=MuseDock Panel - private read-only ChatGPT MCP tunnel
+After=network-online.target musedock-panel.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=musedock-tunnel
+Group=musedock-tunnel
+WorkingDirectory=/var/lib/musedock-tunnel
+ExecStart=/usr/local/lib/musedock-tunnel/tunnel-client run --profile-file __PANEL_DIR__/storage/chatgpt/profile.yaml
+Restart=on-failure
+RestartSec=10
+UMask=0077
+Environment=HOME=/var/lib/musedock-tunnel
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadWritePaths=/var/lib/musedock-tunnel
+ReadOnlyPaths=__PANEL_DIR__/storage/chatgpt
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target

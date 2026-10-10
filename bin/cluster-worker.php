@@ -524,6 +524,9 @@ try {
     logMsg('Ingress error: ' . $e->getMessage());
 }
 
+// Restore only an explicitly activated direct MCP route; never touch firewall rules.
+try { \MuseDockPanel\DirectMcp\CaddyRoute::maintain(); } catch (\Throwable) { logMsg('MCP directo: no se pudo mantener la ruta protegida.'); }
+
 // ─── Step 0f: Aviso en las terminales si este servidor es copia ─────────
 try {
     \MuseDockPanel\Services\ClusterService::refreshRoleBanner();
