@@ -24,6 +24,36 @@
 </div>
 
 <div class="card mb-4">
+    <div class="card-header"><i class="bi bi-check2-circle me-2"></i>¿Hace falta activarla? Por defecto ya es limpio</div>
+    <div class="card-body small text-muted">
+        <p>No. La protección es una <strong>segunda barrera</strong>: sin tocar nada, apagada, el relevo ya es selectivo por diseño. Cada panel, en un relevo o en un cambio de rol,
+            solo cambia los registros <strong>A que apuntan exactamente a la IP de su propio servidor principal</strong>.</p>
+        <table class="table table-dark table-sm small mb-3">
+            <thead><tr><th>Servidor principal</th><th>IP</th><th>Qué mueve su relevo</th></tr></thead>
+            <tbody>
+                <tr><td><code>servidor-a1</code></td><td><code>203.0.113.10</code></td><td>Los registros A que valen <code>203.0.113.10</code> (y lo que va por CNAME a ellos).</td></tr>
+                <tr><td><code>servidor-b1</code></td><td><code>198.51.100.20</code></td><td>Los registros A que valen <code>198.51.100.20</code> (y lo que va por CNAME a ellos).</td></tr>
+            </tbody>
+        </table>
+        <p class="mb-1">Aunque los dos servidores compartan cuenta de Cloudflare y su token llegue a todas las zonas:</p>
+        <ul class="mb-3">
+            <li>El relevo de <code>servidor-a1</code> no toca un registro que vale <code>198.51.100.20</code>, y el de <code>servidor-b1</code> no toca uno que vale <code>203.0.113.10</code>. Cada uno solo ve «lo suyo».</li>
+            <li>Los <strong>nombres de máquina</strong> (<code>servidor-a1</code>, <code>servidor-a2</code>…) no se mueven nunca.</li>
+            <li>Al devolver el mando, <strong>solo se restaura lo que ese relevo movió</strong> (hay un diario); no se toca nada más.</li>
+            <li>Para comprobarlo, mira el plan de relevo de cada servidor (MCP <code>failover_dns_plan</code>, o el aviso previo al cambio de rol): lista exactamente qué registros cambiaría y cuáles no.</li>
+        </ul>
+        <p class="mb-1"><strong>Lo único que hay que tener en cuenta</strong></p>
+        <ul class="mb-3">
+            <li><strong>Lo que apunta a tu IP se mueve contigo.</strong> Si alguien apunta al <code>servidor-a1</code> una web que en realidad es de otro grupo, su relevo la movería. Es lo correcto: significa que la sirve ese servidor.</li>
+            <li><strong>Los CNAME acompañan.</strong> Una web que va por CNAME a un nombre que se mueve, se mueve con él. Es lo que se quiere.</li>
+            <li><strong>Las ediciones manuales y el MCP no tienen límite.</strong> Con la protección apagada, la pantalla de DNS o <code>dns_record_set</code> pueden escribir en cualquier zona que alcance el token. Esto es lo único que la protección cubre y el relevo no: un error humano o de una herramienta, no del relevo.</li>
+        </ul>
+        <p class="mb-0"><i class="bi bi-lightbulb me-1"></i><strong>En resumen:</strong> si editas con cuidado y las herramientas externas solo escriben donde les pides, no hace falta activar nada. Aun así, activarla en
+            <strong>«Solo avisar»</strong> unos días no cuesta nada, porque no bloquea: si algún día se escribe en una zona que no toca, queda apuntado.</p>
+    </div>
+</div>
+
+<div class="card mb-4">
     <div class="card-header"><i class="bi bi-list-check me-2"></i>Las tres reglas</div>
     <div class="card-body small text-muted">
         <p>Las tres son opcionales y se combinan. En zonas y nombres, el <code>*</code> vale como comodín.</p>

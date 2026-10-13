@@ -44,6 +44,9 @@ class AlertPolicyService
         'site_outage'        => ['Sitio sin conexión (webs no afectadas)', 'Un servidor que no manda se queda sin conexión junto con todo su sitio (p. ej. la oficina sin Internet): un único aviso informativo, sin sonido en Telegram, y otro al volver. Mientras dura, los avisos de nodo caído, réplica, ficheros y correo de esas máquinas no se envían.'],
     ];
 
+    /** Canales por los que puede salir un aviso (clave → nombre). */
+    public const CHANNELS = ['email' => 'Correo', 'telegram' => 'Telegram'];
+
     /**
      * Qué significa cada aviso y qué hacer, para el final del correo. Escrito para quien
      * lo recibe, no para quien programa el panel.
@@ -116,7 +119,8 @@ class AlertPolicyService
         $label = self::TYPES[$type][0] ?? $type;
         return "\n\n──────────\nQué significa: {$e[0]}\n\nQué hacer: {$e[1]}\n\n"
             . "¿No quieres este aviso? En el panel del servidor principal: Ajustes → Avisos → silenciar \"{$label}\""
-            . " (desde aquí: https://{$host}:{$port}/settings/alerts). Este correo lo envía {$host}.";
+            . " o elegir por qué canal te llega (correo o Telegram)"
+            . " (desde aquí: https://{$host}:{$port}/settings/alerts). Este aviso lo envía {$host}.";
     }
 
     private static function json(string $key, $default)
@@ -136,6 +140,78 @@ class AlertPolicyService
         }
         $list = self::json('alerts_muted', []);
         return in_array($type, $list, true) || in_array(self::shortHost() . ':' . $type, $list, true) || self::hidden($type);
+    }
+
+    /**
+     * Canales que NO deben usarse para un tipo de aviso: {"security_report": ["telegram"]}.
+     * Por defecto (sin entrada) un aviso sale por todos los canales activos.
+     */
+    public static function channelsOff(): array
+    {
+        $out = [];
+        foreach (self::json('alerts_channels_off', []) as $type => $chs) {
+            if (!isset(self::TYPES[$type]) || !is_array($chs)) {
+                continue;
+            }
+            $c = array_values(array_intersect(array_keys(self::CHANNELS), array_map('strval', $chs)));
+            if ($c) {
+                $out[$type] = $c;
+            }
+        }
+        return $out;
+    }
+
+    /** ¿Debe este aviso salir por ese canal? (Solo mira la elección por tipo, no si el canal está activo.) */
+    public static function channelEnabled(string $type, string $channel): bool
+    {
+        if ($type === '' || !isset(self::TYPES[$type])) {
+            return true;
+        }
+        return !in_array($channel, self::channelsOff()[$type] ?? [], true);
+    }
+
+    /**
+     * Canales activos Y configurados en este servidor (los únicos que tiene sentido ofrecer):
+     * correo con destinatario y servidor de envío, y Telegram con bot y chat; ambos con su
+     * interruptor general de Ajustes → Notificaciones encendido.
+     * @return array<string,string> clave → nombre
+     */
+    public static function activeChannels(): array
+    {
+        $out = [];
+        if (Settings::get('monitor_notify_email', '0') === '1' && NotificationService::isEmailConfigured()) {
+            $out['email'] = self::CHANNELS['email'];
+        }
+        if (Settings::get('monitor_notify_telegram', '0') === '1'
+            && Settings::get('notify_telegram_token', '') !== '' && Settings::get('notify_telegram_chat_id', '') !== '') {
+            $out['telegram'] = self::CHANNELS['telegram'];
+        }
+        return $out;
+    }
+
+    /**
+     * De lo marcado en el formulario a lo que se guarda: por tipo, los canales que NO se usan.
+     * Solo se deciden los canales activos (los que se ven); la elección de un canal que hoy no
+     * está activo se conserva como estaba.
+     * @param array<string,array> $posted tipo → canales marcados
+     * @param string[] $active canales activos y configurados
+     * @param array<string,array> $old lo que había guardado (channelsOff())
+     */
+    public static function channelsOffFromForm(array $posted, array $active, array $old): array
+    {
+        $out = [];
+        foreach (array_keys(self::TYPES) as $type) {
+            $off = array_values(array_diff($old[$type] ?? [], $active));
+            foreach ($active as $ch) {
+                if (!in_array($ch, array_map('strval', (array)($posted[$type] ?? [])), true)) {
+                    $off[] = $ch;
+                }
+            }
+            if ($off) {
+                $out[$type] = array_values(array_unique($off));
+            }
+        }
+        return $out;
     }
 
     /**
@@ -235,6 +311,7 @@ class AlertPolicyService
             'hidden' => self::json('alerts_hidden', []),
             'hardening_accepted' => self::hardeningAcceptedRaw(),
             'disk_overrides' => self::json('alerts_disk_overrides', []),
+            'channels_off' => self::channelsOff(),
             'mail_node_after_minutes' => self::mailNodeAfterMinutes(),
             'system_watch_ignore' => self::systemWatchIgnore(),
         ];
@@ -269,6 +346,19 @@ class AlertPolicyService
                 }
             }
             Settings::set('alerts_muted', json_encode(array_values(array_unique($m))));
+        }
+        if (array_key_exists('channels_off', $p)) {
+            $co = [];
+            foreach ((array)$p['channels_off'] as $type => $chs) {
+                if (!isset(self::TYPES[(string)$type])) {
+                    continue;
+                }
+                $c = array_values(array_intersect(array_keys(self::CHANNELS), array_map('strval', (array)$chs)));
+                if ($c) {
+                    $co[(string)$type] = $c;
+                }
+            }
+            Settings::set('alerts_channels_off', json_encode($co));
         }
         if (array_key_exists('hardening_accepted', $p)) {
             $a = array_values(array_unique(array_filter(array_map(static fn($t) => trim((string)$t), (array)$p['hardening_accepted']))));

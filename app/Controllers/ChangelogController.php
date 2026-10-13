@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.363',
+                'date' => '2026-10-13',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Ajustes → Avisos: «Enviar por» en cada tipo de aviso, con una casilla por canal (correo, Telegram): p. ej. el informe diario de seguridad solo por correo, o el disco lleno solo por Telegram. Sin cambios, todo sale por todos los canales como hasta ahora',
+                        'Solo se ofrecen los canales activos y configurados en ese servidor (si no hay ninguno, se indica dónde activarlos); la elección de un canal inactivo se conserva. Se copia a los nodos; desmarcar todos equivale a silenciar; los avisos del relevo siguen saliendo siempre por todos',
+                        'MCP alerts_configure: disable_channel / enable_channel (TIPO:canal); alerts_status muestra active_channels y channels_off',
+                        'El pie de los avisos por correo indica que se puede elegir el canal; guía de Avisos ampliada',
+                        'Guía «Protección de DNS» reescrita con ejemplos genéricos y la sección «¿Hace falta activarla? Por defecto ya es limpio» (el relevo solo mueve los registros A que apuntan a la IP de su propio servidor principal)',
+                    ],
+                    'fixed' => [
+                        'El aviso «Sitio sin conexión» también respeta la elección de canales',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.362',
                 'date' => '2026-10-13',
                 'badge' => 'info',

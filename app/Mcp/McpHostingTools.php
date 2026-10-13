@@ -130,12 +130,14 @@ class McpHostingTools
             'alerts_configure' => [
                 'write' => true,
                 'title' => 'Cambiar las reglas de avisos',
-                'description' => 'Silencia o reactiva tipos de aviso (solo quita el correo/Telegram; siguen en el monitor), da por buenos controles de hardening (por su título, ver alerts_status), pone umbral propio o silencia un disco de un servidor (host corto p. ej. "servidor2" o "*"; threshold 0 = sin aviso, null = quitar la regla) y fija cuántos minutos debe fallar un nodo de correo antes de avisar. Lo que no se indique se deja igual. Se guarda en el master y se copia a todos sus nodos (desde una copia, se envía al master). Primero sin apply. Requiere "Permitir acciones que modifican".',
+                'description' => 'Silencia o reactiva tipos de aviso (solo quita el correo/Telegram; siguen en el monitor), elige por qué canal sale cada tipo (disable_channel/enable_channel: p. ej. el informe diario solo por correo), da por buenos controles de hardening (por su título, ver alerts_status), pone umbral propio o silencia un disco de un servidor (host corto p. ej. "servidor2" o "*"; threshold 0 = sin aviso, null = quitar la regla) y fija cuántos minutos debe fallar un nodo de correo antes de avisar. Lo que no se indique se deja igual. Se guarda en el master y se copia a todos sus nodos (desde una copia, se envía al master). Primero sin apply. Requiere "Permitir acciones que modifican".',
                 'inputSchema' => $o([
                     'mute' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos a silenciar en todos los servidores ("DISK_HIGH") o solo en uno ("servidor2:DISK_HIGH"; nombre corto del servidor). Ver alerts_status → types'],
                     'unmute' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos a reactivar'],
                     'hide' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos que ni se apuntan en el monitor ni avisan ("DISK_HIGH" o "servidor2:DISK_HIGH")'],
                     'unhide' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Tipos que vuelven a apuntarse en el monitor'],
+                    'disable_channel' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Quitar un tipo de aviso de un canal, sin silenciarlo en los demás: "TIPO:canal" con canal email o telegram (p. ej. "security_report:telegram" = el informe diario solo por correo). Solo valen canales activos y configurados (alerts_status → active_channels)'],
+                    'enable_channel' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Volver a enviar un tipo por un canal ("TIPO:canal")'],
                     'accept_hardening' => ['type' => 'array', 'items' => ['type' => 'string'], 'description' => 'Títulos de controles a dar por buenos'],
                     'unaccept_hardening' => ['type' => 'array', 'items' => ['type' => 'string']],
                     'disk_rules' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => (object)[
@@ -485,6 +487,8 @@ class McpHostingTools
         } catch (\Throwable) {
         }
         return AP::export() + [
+            'active_channels' => AP::activeChannels(),
+            'channels_help' => 'channels_off = por tipo, los canales por los que NO sale (el resto de canales activos, sí). Se cambia con disable_channel / enable_channel en alerts_configure.',
             'this_host' => AP::shortHost(),
             'hardening_failing_here' => $failed,
             'types' => array_map(static fn($t) => $t[0], AP::TYPES),
@@ -516,6 +520,29 @@ class McpHostingTools
             } else {
                 $new['disk_overrides'][$h][$m] = (float)$r['threshold'];
             }
+        }
+        if (isset($args['disable_channel']) || isset($args['enable_channel'])) {
+            $active = AP::activeChannels();
+            $co = $cur['channels_off'] ?? [];
+            foreach (['disable_channel' => true, 'enable_channel' => false] as $arg => $disable) {
+                foreach ((array)($args[$arg] ?? []) as $e) {
+                    $parts = explode(':', (string)$e, 2);
+                    $type = $parts[0];
+                    $ch = strtolower($parts[1] ?? '');
+                    if (!isset(AP::TYPES[$type]) || !isset(AP::CHANNELS[$ch])) {
+                        throw new \InvalidArgumentException("«{$e}»: usa TIPO:canal con un tipo de alerts_status → types y canal email o telegram.");
+                    }
+                    if ($disable && !isset($active[$ch])) {
+                        throw new \InvalidArgumentException("El canal {$ch} no está activo y configurado en este servidor (alerts_status → active_channels): no hay nada que quitar. Actívalo en Ajustes → Notificaciones.");
+                    }
+                    $cur_ = $co[$type] ?? [];
+                    $co[$type] = $disable ? array_values(array_unique(array_merge($cur_, [$ch]))) : array_values(array_diff($cur_, [$ch]));
+                    if (!$co[$type]) {
+                        unset($co[$type]);
+                    }
+                }
+            }
+            $new['channels_off'] = $co;
         }
         if (isset($args['mail_node_after_minutes'])) {
             $new['mail_node_after_minutes'] = (int)$args['mail_node_after_minutes'];

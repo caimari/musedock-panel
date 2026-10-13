@@ -47,6 +47,8 @@ class AlertsController
             'localDisks' => $disks,
             'thisHost' => AlertPolicyService::shortHost(),
             'hostHints' => array_values(array_unique(array_filter(array_merge($hosts, ['*'])))),
+            'channels' => AlertPolicyService::activeChannels(),
+            'channelsOff' => AlertPolicyService::channelsOff(),
             'diskDefault' => (float)Settings::get('monitor_alert_disk', '90'),
             'isSlave' => Settings::get('cluster_role', 'standalone') === 'slave',
             'masterUrl' => self::masterUrl(),
@@ -91,6 +93,12 @@ class AlertsController
                 $muted[] = strtolower(trim((string)$h)) . ':' . $t;
             }
         }
+        // Canales por tipo: solo se tocan los que están activos y se ven en pantalla; la elección
+        // de un canal que hoy no está activo se conserva tal cual estaba.
+        $active = array_keys(AlertPolicyService::activeChannels());
+        $channelsOff = $active
+            ? AlertPolicyService::channelsOffFromForm((array)($_POST['ch'] ?? []), $active, AlertPolicyService::channelsOff())
+            : [];
         $policy = [
             'muted' => $muted,
             'hidden' => (array)($_POST['hidden'] ?? []),
@@ -101,6 +109,9 @@ class AlertsController
             'outage_after_minutes' => (int)($_POST['outage_after_minutes'] ?? 5),
             'system_watch_ignore' => array_values(array_filter(array_map('trim', explode("\n", (string)($_POST['system_watch_ignore'] ?? ''))))),
         ];
+        if ($active) {
+            $policy['channels_off'] = $channelsOff;
+        }
         if (isset($_POST['maintenance_minutes']) && $_POST['maintenance_minutes'] !== '') {
             $policy['maintenance_minutes'] = (int)$_POST['maintenance_minutes'];
             $policy['maintenance_reason'] = (string)($_POST['maintenance_reason'] ?? '');

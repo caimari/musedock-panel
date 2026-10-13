@@ -73,6 +73,24 @@
     </div>
 </div>
 
+<div class="card mb-4" style="border-color:rgba(56,189,248,.3);">
+    <div class="card-header"><i class="bi bi-broadcast me-2"></i>Elegir por qué canal llega cada aviso</div>
+    <div class="card-body small">
+        <p>Por defecto, cada aviso sale por <strong>todos los canales que tengas activos</strong> (correo y/o Telegram, en <a href="/settings/notifications" class="text-info">Ajustes → Notificaciones</a>).
+            Si quieres un aviso por un canal y no por el otro, no hace falta silenciarlo: en <a href="/settings/alerts" class="text-info">Ajustes → Avisos</a>, debajo de cada tipo, aparece
+            <strong>«Enviar por:»</strong> con una casilla por canal.</p>
+        <ul class="mb-2">
+            <li><strong>Ejemplo:</strong> el <em>Informe diario de seguridad</em> es largo y no necesita sonar en el móvil. Déjalo marcado solo en <em>Correo</em> y desmarca <em>Telegram</em>: te llega a la bandeja y no al chat.
+                Con el <em>Disco lleno</em> puede ser al revés: solo Telegram, para enterarte al momento.</li>
+            <li>Solo se ofrecen los canales que están <strong>activos y configurados</strong> en ese servidor: correo con destinatario y servidor de envío, y Telegram con bot y chat. Si no hay ninguno, esa parte no aparece y se indica dónde activarlos.</li>
+            <li>Si desmarcas todos los canales de un aviso, equivale a silenciarlo: se apunta en el monitor pero no se envía.</li>
+            <li>La elección se guarda en el master y se copia a los nodos, igual que el resto de reglas de Avisos. Un canal que hoy no está activo conserva la elección que tuviera.</li>
+            <li>Los avisos del relevo (failover, cambio de rol) no se pueden quitar de ningún canal: siempre salen por todos.</li>
+            <li>MCP: <code>alerts_status</code> muestra <code>active_channels</code> y <code>channels_off</code>; <code>alerts_configure</code> acepta <code>disable_channel</code> y <code>enable_channel</code> con el formato <code>TIPO:canal</code>, por ejemplo <code>security_report:telegram</code>.</li>
+        </ul>
+    </div>
+</div>
+
 <div class="card mb-4" style="border-color:rgba(34,197,94,.3);">
     <div class="card-header"><i class="bi bi-bell-slash me-2"></i>Silenciar</div>
     <div class="card-body small">
@@ -80,7 +98,7 @@
             <li><a href="/settings/alerts" class="text-info">Ajustes → Avisos</a> (en el master): tipos silenciados, controles de hardening aceptados, reglas por disco
                 (servidor + punto de montaje: umbral propio o sin aviso) y minutos de espera del aviso de correo. Se copia a los nodos al guardar.</li>
             <li>MCP: <code>alerts_status</code> (lectura, con <code>node</code>) y <code>alerts_configure</code> (primero el plan).</li>
-            <li>Silenciar solo quita el correo o el Telegram: el aviso sigue en el monitor del panel.</li>
+            <li>Silenciar solo quita el correo o el Telegram: el aviso sigue en el monitor del panel. Para quitarlo de un solo canal, mira la sección anterior.</li>
             <li>El estado de las vigilancias se guarda en <code>storage/state</code>: una actualización del panel ya no repite avisos que ya se dieron.</li>
         </ul>
     </div>

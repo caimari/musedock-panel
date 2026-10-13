@@ -52,12 +52,28 @@ class NotificationService
         }
         $message .= AlertPolicyService::emailFooter($type);
         $subject = self::tagSubject($subject);
-        if (Settings::get('monitor_notify_email', '0') === '1') {
+        // Cada tipo de aviso puede quitarse de un canal (Ajustes → Avisos): p. ej. el informe diario
+        // por correo y no por Telegram. Sin ajuste, sale por todos los canales activos.
+        $channels = self::channelsFor($type);
+        if (in_array('email', $channels, true)) {
             self::sendEmail($subject, $message);
         }
-        if (Settings::get('monitor_notify_telegram', '0') === '1') {
+        if (in_array('telegram', $channels, true)) {
             self::sendTelegram("{$subject}\n\n{$message}");
         }
+    }
+
+    /** Canales por los que sale un aviso de ese tipo: los encendidos en Notificaciones y no quitados en Avisos. */
+    public static function channelsFor(string $type): array
+    {
+        $out = [];
+        if (Settings::get('monitor_notify_email', '0') === '1' && AlertPolicyService::channelEnabled($type, 'email')) {
+            $out[] = 'email';
+        }
+        if (Settings::get('monitor_notify_telegram', '0') === '1' && AlertPolicyService::channelEnabled($type, 'telegram')) {
+            $out[] = 'telegram';
+        }
+        return $out;
     }
 
     /**

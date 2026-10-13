@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.363] — 2026-10-13 — Elegir por qué canal llega cada aviso
+
+### Añadido
+- **Ajustes → Avisos: «Enviar por» en cada tipo de aviso.** Antes, cada aviso salía por todos los canales activos (correo y Telegram), y la única forma de quitarlo de uno era silenciarlo en los dos. Ahora, debajo de cada tipo hay una casilla por canal: por ejemplo, el *Informe diario de seguridad* solo por correo y no por Telegram, o el *Disco lleno* solo por Telegram. Sin cambios, todo sigue saliendo por todos los canales, como hasta ahora.
+- **Solo se ofrecen los canales activos y configurados** en ese servidor (correo con destinatario y servidor de envío, Telegram con bot y chat, y su interruptor general de Notificaciones encendido). Si no hay ninguno, esa parte no aparece y se indica dónde activarlos. La elección de un canal que hoy no está activo se conserva.
+- Se guarda en el master y se copia a los nodos, igual que el resto de reglas de Avisos. Desmarcar todos los canales de un aviso equivale a silenciarlo (queda en el monitor). Los avisos del relevo (failover, cambio de rol) siguen saliendo siempre por todos.
+- **MCP `alerts_configure`:** `disable_channel` y `enable_channel` (formato `TIPO:canal`, p. ej. `security_report:telegram`); `alerts_status` muestra `active_channels` y `channels_off`.
+- El pie de cada aviso por correo ahora dice que se puede elegir el canal, además de silenciarlo. Guía de Avisos ampliada con la sección «Elegir por qué canal llega cada aviso».
+- Guía «Protección de DNS» (Docs) reescrita con dominios y servidores de ejemplo genéricos y una sección nueva, «¿Hace falta activarla? Por defecto ya es limpio»: el relevo de cada servidor solo mueve los registros A que apuntan a la IP de su propio servidor principal, y qué cubre la protección además.
+
+### Arreglado
+- El aviso informativo «Sitio sin conexión» (Telegram sin sonido, o correo si no hay Telegram) también respeta ahora esta elección de canales.
+
 ## [1.0.362] — 2026-10-13 — Protección de DNS por servidor
 
 ### Añadido

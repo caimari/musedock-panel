@@ -298,12 +298,13 @@ final class SiteOutageService
             return;
         }
         $subject = NotificationService::tagSubject($subject);
-        if (Settings::get('monitor_notify_telegram', '0') === '1') {
+        // Respeta la elección de canales de Ajustes → Avisos (p. ej. solo por correo).
+        if (Settings::get('monitor_notify_telegram', '0') === '1' && AlertPolicyService::channelEnabled('site_outage', 'telegram')) {
             if (NotificationService::sendTelegram("{$subject}\n\n{$msg}", null, null, $err, true)) {
                 return;
             }
         }
-        if (Settings::get('monitor_notify_email', '0') === '1') {
+        if (Settings::get('monitor_notify_email', '0') === '1' && AlertPolicyService::channelEnabled('site_outage', 'email')) {
             NotificationService::sendEmail($subject, $msg . AlertPolicyService::emailFooter('site_outage'));
         }
     }

@@ -4,7 +4,7 @@
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-3">
     <div>
         <h4 class="mb-1"><i class="bi bi-bell-slash me-2"></i>Avisos</h4>
-        <div class="text-muted small">Qué avisos te llegan por correo o Telegram. Silenciar un aviso solo quita el correo: sigue apareciendo en el monitor del panel.
+        <div class="text-muted small">Qué avisos te llegan, y por qué canal (correo o Telegram). Silenciar un aviso solo quita el envío: sigue apareciendo en el monitor del panel.
             Se guarda en el master y se copia a sus nodos. Los avisos del relevo (failover, cambio de rol) no se pueden silenciar.</div>
     </div>
     <a href="/settings/notifications" class="btn btn-outline-light btn-sm"><i class="bi bi-envelope me-1"></i>Canales (correo, Telegram)</a>
@@ -24,6 +24,13 @@
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-toggles me-2"></i>Tipos de aviso</div>
         <div class="card-body small">
+            <?php if (!empty($channels)): ?>
+                <p class="text-muted">Cada aviso sale por los canales activos (<?= View::e(implode(' y ', $channels)) ?>). Debajo de cada uno puedes quitarlo de un canal: por ejemplo,
+                    el informe diario solo por correo y no por Telegram. Si desmarcas todos, el aviso queda apuntado en el monitor pero no se envía.</p>
+            <?php else: ?>
+                <p class="text-muted">No hay ningún canal de aviso activo y configurado en este servidor (correo o Telegram), así que no hay nada que elegir por aviso.
+                    Actívalos en <a href="/settings/notifications">Canales (correo, Telegram)</a>; cuando lo estén, aparecerán aquí.</p>
+            <?php endif; ?>
             <div class="row g-2">
                 <?php foreach ($types as $key => [$label, $desc]): ?>
                     <div class="col-md-6">
@@ -33,11 +40,23 @@
                             <label class="form-check-label" for="mute-<?= View::e($key) ?>"><strong>Silenciar en todos: <?= View::e($label) ?></strong>
                                 <span class="text-muted d-block"><?= View::e($desc) ?></span></label>
                         </div>
-                        <div class="form-check form-switch ms-4 mb-2">
+                        <div class="form-check form-switch ms-4 mb-1">
                             <input class="form-check-input" type="checkbox" role="switch" id="hide-<?= View::e($key) ?>" name="hidden[]" value="<?= View::e($key) ?>"
                                 <?= in_array($key, $policy['hidden'] ?? [], true) ? 'checked' : '' ?>>
                             <label class="form-check-label text-muted" for="hide-<?= View::e($key) ?>">y ocultarlo también del monitor (ni se apunta)</label>
                         </div>
+                        <?php if (!empty($channels)): ?>
+                        <div class="ms-4 mb-2 d-flex flex-wrap align-items-center gap-3">
+                            <span class="text-muted">Enviar por:</span>
+                            <?php foreach ($channels as $chKey => $chName): ?>
+                            <div class="form-check form-check-inline mb-0">
+                                <input class="form-check-input" type="checkbox" id="ch-<?= View::e($key) ?>-<?= View::e($chKey) ?>" name="ch[<?= View::e($key) ?>][]" value="<?= View::e($chKey) ?>"
+                                    <?= in_array($chKey, $channelsOff[$key] ?? [], true) ? '' : 'checked' ?>>
+                                <label class="form-check-label" for="ch-<?= View::e($key) ?>-<?= View::e($chKey) ?>"><?= View::e($chName) ?></label>
+                            </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php endif; ?>
                     </div>
                 <?php endforeach; ?>
             </div>
