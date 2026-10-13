@@ -20,13 +20,33 @@ class ChangelogController
     {
         return [
             [
-                'version' => 'unreleased-dns',
-                'display_version' => 'Sin publicar · DNS y correo',
+                'version' => '1.0.362',
+                'date' => '2026-10-13',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Protección de DNS (Cloudflare DNS): zonas prohibidas, «solo estas zonas» y registros protegidos (nombre con *, tipos y acciones) para limitar lo que cada servidor puede escribir en Cloudflare aunque su token llegue a todas las zonas. Todo pasa por el filtro (relevo, cambio de rol, MCP, correo, pantalla de DNS, migraciones); leer siempre se puede. Modos: apagada, solo avisar y activa',
+                        'No se aceptan reglas que impidan el propio relevo (se comprueban contra el plan de relevo al guardar); si un registro queda protegido más tarde, el relevo lo salta con aviso y mueve el resto',
+                        'Guardar pide la contraseña de administrador y se envía a las copias del master; probador de operaciones y lista de los últimos intentos bloqueados o avisados',
+                        'MCP dns_guard (solo lectura): reglas y últimos intentos, simulación de una operación y comprobación contra el plan de relevo',
+                        'Guía «Protección de DNS» en Docs',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.361',
                 'date' => '2026-10-10',
-                'badge' => 'warning',
+                'badge' => 'info',
                 'changes' => [
                     'added' => [
                         'es' => [
+                            'Conexión MCP directa para ChatGPT, Claude y otros clientes compatibles mediante un subdominio HTTPS dedicado en 443, sin túnel. OAuth obligatorio, registro manual por cliente, callback exacto, PKCE S256, tokens caducables y refresh rotatorio. Credenciales, consentimientos y revocación independientes.',
+                            'Filtrado en Caddy con redes oficiales OpenAI/Anthropic y rangos manuales para otros clientes. Actualización validada y bloqueo por caducidad. Solo se publican MCP y OAuth; el panel administrativo, el firewall y el puerto 8444 mantienen sus restricciones.',
+                            'Permisos por cliente: `musedock:read`, `musedock:write` y `musedock:dns`. La escritura está desactivada por defecto; requiere lectura, y DNS requiere escritura. Cualquier cambio de ámbitos revoca tokens, consentimientos y solicitudes pendientes. Los conectores deben autorizar de nuevo los ámbitos seleccionados.',
+                            'Lista explícita de escritura: crear dominios y buzones de correo, alias y dominios alias, cambiar selector DKIM, crear bases de datos y redirecciones, publicar DNS de correo y crear/modificar registros DNS. No se heredan otras herramientas de escritura ni se reenvían escrituras a nodos.',
+                            'Aprobación privada obligatoria de cada operación: `apply=false` devuelve el plan y `apply=true` crea una solicitud de 10 minutos, sin ejecutar. El administrador revisa y confirma en Ajustes → MCP. Se comprueban otra vez los permisos, el consentimiento vigente, la cuenta administradora y el plan antes de ejecutar; un plan cambiado exige una solicitud nueva.',
+                            'Solicitudes de un solo uso, sin reintento automático tras un fallo parcial; auditoría de solicitud, aprobación, rechazo y resultado. Se conservan los límites generales del servidor para escritura y DNS. Las contraseñas se generan y se consultan en el panel, sin enviarlas al chat.',
+                            'Modalidad alternativa mediante túnel OpenAI, con OAuth y solo lectura, instalador y configuración de servicio independientes. Permanece opcional y necesita su propia configuración.',
                             'Alta manual de hosting o correo con revisión DNS: proveedor, cuenta, nameservers y valores actuales/propuestos; modal de autorización antes de publicar en Cloudflare.',
                             'Hosting: alinear dominio/www por A o por el CNAME configurado; solo correo: conservar la web y revisar MX, SPF, DKIM, DMARC y hostname de correo.',
                             'Casilla opcional para crear también el dominio de correo y su DKIM junto al hosting, con selección y validación del servidor; botón para añadir correo después del alta.',
@@ -34,6 +54,13 @@ class ChangelogController
                             'Guía pública del producto dentro de Docs: Alta de dominios, DNS y certificados; enlaces en formularios y fichas de hosting/correo.',
                         ],
                         'en' => [
+                            'Direct MCP connections over a dedicated HTTPS hostname for ChatGPT, Claude and other clients, with mandatory OAuth, exact callbacks, PKCE and rotating tokens.',
+                            'Caddy access filtering with official OpenAI/Anthropic networks and manual ranges; administrative panel and firewall restrictions are preserved.',
+                            'Per-client read, write and DNS scopes, with dependencies and revocation when permissions change.',
+                            'Explicit allowed write operations for mail domains/mailboxes, aliases, DKIM selectors, databases, redirects and DNS; other write tools and forwarding to nodes are excluded.',
+                            'Each write requires a private, expiring request reviewed in Settings > MCP; permissions, consent, administrator and plan are checked again before execution.',
+                            'Single-use approvals, auditing and no automatic retry after partial failure. Generated passwords stay in the panel.',
+                            'Optional independent OpenAI tunnel with OAuth and read-only access.',
                             'Manual hosting/mail creation with DNS review: provider, account, nameservers and current/proposed values; explicit modal consent before publishing to Cloudflare.',
                             'Hosting aligns domain/www through A records or the configured CNAME; mail-only preserves the website and reviews MX, SPF, DKIM, DMARC and the mail hostname.',
                             'Optional mail-domain and DKIM creation alongside hosting, with mail-server selection and validation; action to add mail after hosting creation.',
@@ -43,11 +70,21 @@ class ChangelogController
                     ],
                     'fixed' => [
                         'es' => [
+                            'Ajustes → MCP organizado en pestañas: conexión directa, túnel OpenAI y token/SSH. Configuración técnica plegada, fichas de permisos, alta de credenciales ChatGPT y clientes independientes.',
+                            'Secretos nuevos ocultos inicialmente, botones de copiar y mostrar/ocultar, y cierre que retira las credenciales de la página. Los secretos OAuth siguen mostrándose una sola vez.',
+                            'Consentimiento OAuth muestra los ámbitos realmente solicitados y distingue lectura, solicitudes de escritura y DNS. Casillas de permisos con dependencias y revocación por cliente.',
+                            'Actualizaciones de rutas Caddy conservan objetos JSON vacíos y rutas de otras webs, usan ETag y evitan recargas si no cambia la configuración.',
+                            'Corregido el acceso de cuentas `superadmin` a la configuración del túnel y el guardado de su clave runtime.',
                             'Modal DNS con fondo oscuro y texto legible siguiendo la estética del panel.',
                             'La tabla vuelve a consultar DNS después de publicar y conserva el resultado de la operación.',
                             'La comprobación distingue DNS público alineado de caché local pendiente y un certificado válido de errores HTTP como 403.',
                         ],
                         'en' => [
+                            'MCP settings organized into direct connection, OpenAI tunnel and token/SSH tabs, with per-client permissions.',
+                            'New credentials are initially hidden and include copy/show controls; OAuth secrets remain visible only once.',
+                            'OAuth consent shows requested scopes and distinguishes reading, write requests and DNS.',
+                            'Caddy route updates preserve empty JSON objects and unrelated website routes, use ETags and avoid unnecessary reloads.',
+                            'Fixed superadmin access to tunnel settings and saving its runtime key.',
                             'DNS confirmation modal uses the panel dark theme with readable text.',
                             'The table refreshes DNS after publication while preserving the operation result.',
                             'Verification distinguishes aligned public DNS from stale local caches, and valid certificates from HTTP errors such as 403.',
@@ -55,14 +92,16 @@ class ChangelogController
                     ],
                     'notes' => [
                         'es' => [
+                            '280 comprobaciones aisladas del registro OAuth, autorización HTTP, Caddy, separación de clientes, revocación, permisos de escritura y aprobación. Los ejecutores de escritura se simulan: las pruebas no crean buzones/bases ni publican DNS reales.',
                             'Solo se escribe en zonas activas cuya delegación coincide. Confirmaciones de sesión de un solo uso, con caducidad, comprobación de cambios concurrentes y auditoría.',
                             'Ante un fallo se detiene la publicación, se informa del resultado parcial y se intenta restaurar los registros retirados de la sustitución fallida.',
-                            '37 comprobaciones backend aisladas y prueba JavaScript del flujo de confirmación; sin modificar DNS reales en las pruebas. Esta entrada no publica una nueva versión.',
+                            '37 comprobaciones backend aisladas y prueba JavaScript del flujo de confirmación; sin modificar DNS reales en las pruebas. Cambios incluidos en la versión 1.0.361.',
                         ],
                         'en' => [
+                            '280 isolated OAuth, HTTP, Caddy, client separation, revocation, permission and approval checks; write executors are simulated.',
                             'Writes require active zones with matching delegation. Session-bound, expiring, single-use confirmations include concurrent-change checks and auditing.',
                             'Failures stop publication, report partial results and attempt to restore records removed by the failed replacement.',
-                            '37 isolated backend checks and a JavaScript confirmation-flow test; tests do not modify real DNS. This entry does not publish a new version.',
+                            '37 isolated backend checks and a JavaScript confirmation-flow test; tests do not modify real DNS. Changes included in version 1.0.361.',
                         ],
                     ],
                 ],

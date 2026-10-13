@@ -2,7 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [1.0.361] — 2026-10-10 — MCP OAuth con permisos y escritura aprobada en el panel
+## [1.0.362] — 2026-10-13 — Protección de DNS por servidor
+
+### Añadido
+- **Protección de DNS (Cloudflare DNS → «Protección de DNS»).** Aunque el token de Cloudflare de un panel llegue a todas las zonas de la cuenta, cada servidor solo debería escribir el DNS de lo suyo. Ahora se pueden fijar **zonas prohibidas**, **solo estas zonas** y **registros protegidos** (nombre con `*`, tipos y acciones crear/cambiar/borrar). Todo lo que se escribe en Cloudflare pasa por el filtro (relevo, cambio de rol, MCP, publicación de correo, pantalla de DNS y migraciones); leer siempre se puede. Tres modos: apagada, **solo avisar** (apunta lo que bloquearía, sin bloquear) y activa. Sin reglas o apagada no cambia nada.
+- **No se aceptan reglas que impidan el propio relevo:** al activar, el panel calcula el plan de relevo de ese servidor y rechaza las reglas que bloquearían alguno de esos registros, diciendo cuáles. Si más adelante un registro queda protegido, el relevo lo salta con aviso y mueve el resto (no cuenta como fallo).
+- Guardar pide la contraseña de administrador y, en el master, envía las reglas a sus copias (si una copia toma el mando, ya las tiene; una copia no las edita). Probador de operaciones («¿se bloquearía esto?») y lista de los últimos intentos bloqueados o avisados.
+- **MCP `dns_guard`** (solo lectura): modo, zonas permitidas y prohibidas, registros protegidos y últimos intentos; con `zone`/`name`/`type`/`action` simula una operación y con `check_failover=true` comprueba las reglas contra el plan de relevo. Las reglas solo se cambian desde el panel con contraseña, no por MCP.
+- Guía «Protección de DNS» en Docs: para qué sirve, qué se puede limitar, modos, relevos y límites.
+
+### Notas
+- Si el propio código de la protección fallara por un error interno, la escritura sigue (para no parar un relevo) y el error se anota. Es un filtro del panel, no un permiso de Cloudflare: para limitar también fuera del panel, usa un token con permisos solo de las zonas de ese grupo.
+
+## [1.0.361] — 2026-10-10 — MCP OAuth, DNS confirmado y correo opcional
 
 ### Añadido
 - Conexión MCP directa para ChatGPT, Claude y otros clientes compatibles mediante un subdominio HTTPS dedicado en 443, sin túnel. OAuth obligatorio, registro manual por cliente, callback exacto, PKCE S256, tokens caducables y refresh rotatorio. Credenciales, consentimientos y revocación independientes.
@@ -23,7 +35,7 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 ### Validación
 - 280 comprobaciones aisladas del registro OAuth, autorización HTTP, Caddy, separación de clientes, revocación, permisos de escritura y aprobación. Los ejecutores de escritura se simulan: las pruebas no crean buzones/bases ni publican DNS reales.
 
-## [Sin publicar] — 2026-10-10 — DNS confirmado en el alta manual de dominios
+### DNS confirmado en el alta manual de dominios
 
 - Al crear un hosting o un dominio de correo, se abre la revisión DNS con los valores actuales y propuestos, proveedor, cuenta y nameservers. Un modal exige autorización explícita antes de publicar.
 - Publicación en las cuentas de Cloudflare configuradas, solo con zona activa y delegación coincidente. Hosting alinea dominio/www; solo correo conserva la web y publica MX, SPF, DKIM, DMARC y el hostname de correo.

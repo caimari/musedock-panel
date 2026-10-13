@@ -600,6 +600,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/docs/witnesses', 'DocsController@witnesses');
 \MuseDockPanel\Router::get('/docs/fail2ban-cluster', 'DocsController@fail2banCluster');
 \MuseDockPanel\Router::get('/docs/config-mirror', 'DocsController@configMirror');
+\MuseDockPanel\Router::get('/docs/dns-guard', 'DocsController@dnsGuard');
 \MuseDockPanel\Router::get('/docs/mcp-nodes', 'DocsController@mcpNodes');
 \MuseDockPanel\Router::get('/docs/wordpress-security', 'DocsController@wordpressSecurity');
 \MuseDockPanel\Router::get('/docs/alerts', 'DocsController@alerts');
@@ -747,6 +748,8 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cloudflare-dns/delete-record', 'CloudflareDnsController@deleteRecord');
 \MuseDockPanel\Router::post('/settings/cloudflare-dns/toggle-proxy', 'CloudflareDnsController@toggleProxy');
 \MuseDockPanel\Router::post('/settings/cloudflare-dns/bulk-action', 'CloudflareDnsController@bulkAction');
+\MuseDockPanel\Router::post('/settings/cloudflare-dns/guard-save', 'CloudflareDnsController@guardSave');
+\MuseDockPanel\Router::get('/settings/cloudflare-dns/guard-check', 'CloudflareDnsController@guardCheck');
 
 // Proxy Routes (permanent SNI proxy via caddy-l4)
 \MuseDockPanel\Router::get('/settings/proxy-routes', 'ProxyRouteController@index');

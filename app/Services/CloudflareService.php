@@ -41,6 +41,21 @@ class CloudflareService
      */
     public static function apiRequest(string $token, string $method, string $endpoint, array $data = [], int $timeout = 15): array
     {
+        // Protección de DNS: toda escritura de registros pasa por aquí (relevo, MCP, correo,
+        // pantalla de DNS, migraciones), así que es el único sitio que hay que vigilar.
+        if ($method !== 'GET') {
+            try {
+                $blocked = DnsGuardService::blockFor($token, $method, $endpoint, $data);
+            } catch (\Throwable $e) {
+                // Un fallo interno de la protección no debe parar un relevo: se sigue y se apunta.
+                $blocked = null;
+                error_log('DnsGuardService: ' . $e->getMessage());
+            }
+            if ($blocked !== null) {
+                return $blocked;
+            }
+        }
+
         $url = self::API_BASE . $endpoint;
 
         if ($method === 'GET' && !empty($data)) {
@@ -306,6 +321,8 @@ class CloudflareService
             if ($r['ok']) {
                 $updated++;
                 unset($list[$key]);
+            } elseif (!empty($r['blocked'])) {
+                $skipped++;          // protegido por la protección de DNS: sigue en el diario, no cuenta como fallo
             } else {
                 $failed++;
             }
@@ -419,6 +436,10 @@ class CloudflareService
                 if ($journal !== null) {
                     self::journalAdd($journal, $zoneId, $record, $oldIp, $newIp);
                 }
+            } elseif (!empty($result['blocked'])) {
+                // La protección de DNS lo impide (ya queda apuntado): no es un fallo del relevo,
+                // el resto de registros se mueven igual.
+                $details[] = ['name' => $record['name'], 'ok' => true, 'skipped' => 'protegido por la protección de DNS: no se mueve'];
             } else {
                 $failed++;
                 $details[] = ['name' => $record['name'], 'ok' => false, 'error' => $result['error']];

@@ -1344,6 +1344,7 @@ class FailoverService
             'failover_pg_panel_severity', 'failover_pg_hosting_severity',
             'failover_mysql_severity', 'failover_caddy_severity',
             'failover_dns_exclude', 'failover_dns_exclude_auto',
+            'dns_guard',
             'failover_preferred_ip', 'failover_return_stable_minutes',
             'failover_site_probes', 'failover_site_alive_wait_minutes',
             'filesync_snapshot',

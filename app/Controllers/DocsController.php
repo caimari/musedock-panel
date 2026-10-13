@@ -453,6 +453,14 @@ class DocsController
                 'keywords' => 'copia de configuracion config mirror espejo slave master supervisor cron crontab systemd caddyfile php-fpm pool relevo tomar el mando promover activar desactivar nodo',
             ],
             [
+                'title' => 'Protección de DNS',
+                'description' => 'Que puede cambiar cada servidor en Cloudflare aunque su token llegue a todas las zonas: zonas permitidas o prohibidas, registros protegidos, modos (apagada, solo avisar, activa), relevos y consulta por MCP.',
+                'url' => '/docs/dns-guard',
+                'category' => 'Guia especial',
+                'icon' => 'bi-shield-lock',
+                'keywords' => 'proteccion dns cloudflare token zonas permitidas prohibidas registros protegidos bloquear escribir relevo failover mcp dns_guard cambio de rol master slave par seguridad limitar',
+            ],
+            [
                 'title' => 'Fail2ban en el cluster',
                 'description' => 'Que bloquea cada servidor y cuanto tiempo (jaulas normales y lentas, bloqueos crecientes), que se copia entre el que manda y sus copias (lista blanca si, bloqueos no), informe diario y consultas por MCP.',
                 'url' => '/docs/fail2ban-cluster',
@@ -573,6 +581,10 @@ class DocsController
 
         if ($url === '/docs/config-mirror') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'config-mirror.php');
+        }
+
+        if ($url === '/docs/dns-guard') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'dns-guard.php');
         }
 
         if ($url === '/docs/fail2ban-cluster') {
@@ -1571,6 +1583,14 @@ class DocsController
         View::render('help/config-mirror', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Copia de configuración del master',
+        ]);
+    }
+
+    public function dnsGuard(): void
+    {
+        View::render('help/dns-guard', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Protección de DNS',
         ]);
     }
 

@@ -1,4 +1,5 @@
-<?php use MuseDockPanel\View; ?>
+<?php use MuseDockPanel\View;
+use MuseDockPanel\Services\DnsGuardService; ?>
 
 <?php include __DIR__ . '/_tabs.php'; ?>
 
@@ -22,6 +23,144 @@
 </div>
 
 <?= View::csrf() ?>
+
+<?php
+$gMode = $guard['mode'] ?? 'off';
+$gBadge = ['off' => ['bg-secondary', 'Apagada'], 'audit' => ['bg-warning text-dark', 'Solo avisar'], 'enforce' => ['bg-success', 'Activa']][$gMode] ?? ['bg-secondary', 'Apagada'];
+$gOpen = $gMode !== 'off' || !empty($guardLog);
+?>
+<div class="card mb-3" id="dns-guard">
+    <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2" role="button" data-bs-toggle="collapse" data-bs-target="#dnsGuardBody">
+        <span><i class="bi bi-shield-lock me-2" style="color:#38bdf8;"></i>Protección de DNS
+            <span class="badge <?= $gBadge[0] ?> ms-2"><?= $gBadge[1] ?></span>
+            <?php if (!empty($guard['zones_allow'])): ?><span class="badge bg-dark ms-1"><?= count($guard['zones_allow']) ?> zonas permitidas</span><?php endif; ?>
+            <?php if (!empty($guard['zones_deny'])): ?><span class="badge bg-dark ms-1"><?= count($guard['zones_deny']) ?> zonas prohibidas</span><?php endif; ?>
+            <?php if (!empty($guard['rules'])): ?><span class="badge bg-dark ms-1"><?= count($guard['rules']) ?> registros protegidos</span><?php endif; ?>
+        </span>
+        <span class="small text-muted">Qué puede cambiar este servidor en Cloudflare <i class="bi bi-chevron-down ms-1"></i></span>
+    </div>
+    <div id="dnsGuardBody" class="collapse <?= $gOpen ? 'show' : '' ?>">
+        <div class="card-body small">
+            <p class="text-muted mb-3">El token de Cloudflare de este servidor llega a todas las zonas, pero cada servidor solo debería tocar el DNS de lo suyo.
+                Aquí se limita lo que el panel puede escribir <strong>con ese token</strong>: relevos, cambio de rol, MCP, correo y esta pantalla.
+                Leer siempre se puede. Si un relevo necesita mover un registro que las reglas impiden, no se guarda.
+                <a href="/docs/dns-guard" class="ms-1">Cómo funciona</a></p>
+            <?php if (!empty($guardSlave)): ?>
+            <div class="alert alert-info py-2 small"><i class="bi bi-info-circle me-1"></i>Este servidor es una copia (slave): recibe estas reglas del master y no se pueden cambiar aquí.</div>
+            <?php endif; ?>
+
+            <form method="POST" action="/settings/cloudflare-dns/guard-save" id="dnsGuardForm">
+                <?= View::csrf() ?>
+                <input type="hidden" name="admin_password" id="dnsGuardPwd" value="">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label text-muted">Modo</label>
+                        <select name="mode" class="form-select form-select-sm" style="background:#1e293b;border-color:#334155;color:#e2e8f0;" <?= !empty($guardSlave) ? 'disabled' : '' ?>>
+                            <option value="off" <?= $gMode === 'off' ? 'selected' : '' ?>>Apagada (no bloquea nada)</option>
+                            <option value="audit" <?= $gMode === 'audit' ? 'selected' : '' ?>>Solo avisar (apunta lo que bloquearía, no bloquea)</option>
+                            <option value="enforce" <?= $gMode === 'enforce' ? 'selected' : '' ?>>Activa (bloquea)</option>
+                        </select>
+                        <div class="form-text">Empieza en «Solo avisar» unos días y mira los intentos de abajo.</div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label text-muted">Solo estas zonas <span class="text-muted">(vacío = todas)</span></label>
+                        <textarea name="zones_allow" rows="4" class="form-control form-control-sm" style="background:#1e293b;border-color:#334155;color:#e2e8f0;" placeholder="example.*&#10;otra-empresa.net" <?= !empty($guardSlave) ? 'disabled' : '' ?>><?= View::e(implode("\n", $guard['zones_allow'] ?? [])) ?></textarea>
+                        <div class="form-text">Una por línea; <code>*</code> es comodín. Solo se escribe en estas.</div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label text-muted">Zonas prohibidas</label>
+                        <textarea name="zones_deny" rows="4" class="form-control form-control-sm" style="background:#1e293b;border-color:#334155;color:#e2e8f0;" placeholder="example.*&#10;otra-empresa.net" <?= !empty($guardSlave) ? 'disabled' : '' ?>><?= View::e(implode("\n", $guard['zones_deny'] ?? [])) ?></textarea>
+                        <div class="form-text">Aquí este servidor no escribe nunca.</div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label text-muted">Registros protegidos <span class="text-muted">(uno por línea: <code>nombre | tipos | acciones | nota</code>)</span></label>
+                        <textarea name="rules" rows="5" class="form-control form-control-sm font-monospace" style="background:#1e293b;border-color:#334155;color:#e2e8f0;" placeholder="mail.example.com | A | cambiar,borrar | servidor de correo&#10;*.example.com | | borrar&#10;_dmarc.* | TXT | cambiar,borrar,crear" <?= !empty($guardSlave) ? 'disabled' : '' ?>><?= View::e(DnsGuardService::rulesToText($guard['rules'] ?? [])) ?></textarea>
+                        <div class="form-text">Nombre con <code>*</code> de comodín. Tipos separados por comas (vacío = todos). Acciones: <code>crear</code>, <code>cambiar</code>, <code>borrar</code> (vacío = todas).</div>
+                    </div>
+                </div>
+                <?php if (empty($guardSlave)): ?>
+                <div class="mt-3 d-flex flex-wrap gap-2 align-items-center">
+                    <button type="button" class="btn btn-primary btn-sm" id="dnsGuardSave"><i class="bi bi-save me-1"></i>Guardar protección</button>
+                    <span class="text-muted">Pide la contraseña de administrador. En el master, se envía a sus copias.</span>
+                </div>
+                <?php endif; ?>
+            </form>
+
+            <hr style="border-color:#334155;">
+            <div class="row g-3">
+                <div class="col-lg-5">
+                    <div class="fw-semibold mb-2"><i class="bi bi-question-circle me-1"></i>Probar una operación</div>
+                    <div class="input-group input-group-sm mb-2">
+                        <input type="text" id="gcZone" class="form-control" placeholder="zona (example.com)" style="background:#1e293b;border-color:#334155;color:#e2e8f0;">
+                        <input type="text" id="gcName" class="form-control" placeholder="registro (mail.example.com)" style="background:#1e293b;border-color:#334155;color:#e2e8f0;">
+                    </div>
+                    <div class="input-group input-group-sm mb-2">
+                        <select id="gcType" class="form-select" style="background:#1e293b;border-color:#334155;color:#e2e8f0;">
+                            <option value="">tipo: cualquiera</option>
+                            <?php foreach (DnsGuardService::TYPES as $t): ?><option><?= $t ?></option><?php endforeach; ?>
+                        </select>
+                        <select id="gcAction" class="form-select" style="background:#1e293b;border-color:#334155;color:#e2e8f0;">
+                            <option value="update">cambiar</option><option value="create">crear</option><option value="delete">borrar</option>
+                        </select>
+                        <button type="button" class="btn btn-outline-light" id="gcRun">Probar</button>
+                    </div>
+                    <div id="gcResult" class="small"></div>
+                </div>
+                <div class="col-lg-7">
+                    <div class="fw-semibold mb-2"><i class="bi bi-clock-history me-1"></i>Últimos intentos bloqueados o avisados</div>
+                    <?php if (empty($guardLog)): ?>
+                    <div class="text-muted">Ninguno todavía.</div>
+                    <?php else: ?>
+                    <div style="max-height:220px;overflow:auto;">
+                    <table class="table table-dark table-sm small mb-0">
+                        <thead><tr><th>Cuándo</th><th>Qué</th><th>Motivo</th></tr></thead>
+                        <tbody>
+                        <?php foreach ($guardLog as $g): ?>
+                            <tr>
+                                <td class="text-nowrap"><?= View::e($g['at'] ?? '') ?></td>
+                                <td><span class="badge <?= !empty($g['blocked']) ? 'bg-danger' : 'bg-warning text-dark' ?>"><?= !empty($g['blocked']) ? 'bloqueado' : 'aviso' ?></span>
+                                    <?= View::e(($g['action'] ?? '') . ' ' . ($g['name'] ?? '?') . (!empty($g['type']) ? ' ' . $g['type'] : '')) ?></td>
+                                <td class="text-muted"><?= View::e($g['reason'] ?? '') ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                    </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+(function () {
+    const save = document.getElementById('dnsGuardSave');
+    if (save) save.addEventListener('click', function () {
+        const form = document.getElementById('dnsGuardForm');
+        const mode = form.querySelector('[name=mode]').value;
+        const txt = {off: 'Se apagará la protección: este servidor podrá escribir en cualquier zona.',
+            audit: 'Solo se apuntará lo que se bloquearía; no se bloquea nada todavía.',
+            enforce: 'Se bloquearán las operaciones que las reglas prohíben. Antes se comprueba que el relevo de este servidor pueda seguir moviendo sus registros.'}[mode];
+        Swal.fire({
+            icon: 'question', title: 'Guardar la protección de DNS',
+            html: '<div class="text-start small mb-2">' + txt + '</div><input type="password" id="dg-pwd" class="swal2-input" placeholder="Contraseña de administrador" autocomplete="current-password">',
+            showCancelButton: true, confirmButtonText: 'Guardar', cancelButtonText: 'Cancelar', width: 520,
+            preConfirm: () => { const v = document.getElementById('dg-pwd').value; if (!v) { Swal.showValidationMessage('Escribe la contraseña'); return false; } return v; }
+        }).then((r) => { if (r.isConfirmed) { document.getElementById('dnsGuardPwd').value = r.value; form.submit(); } });
+    });
+    const run = document.getElementById('gcRun');
+    if (run) run.addEventListener('click', function () {
+        const q = new URLSearchParams({zone: document.getElementById('gcZone').value, name: document.getElementById('gcName').value,
+            type: document.getElementById('gcType').value, action: document.getElementById('gcAction').value});
+        const out = document.getElementById('gcResult');
+        out.textContent = '…';
+        fetch('/settings/cloudflare-dns/guard-check?' + q, {credentials: 'same-origin'}).then(r => r.json()).then(d => {
+            out.className = 'small ' + (d.blocked ? 'text-danger' : 'text-success');
+            out.textContent = (d.blocked ? 'Se bloquearía: ' : '') + d.reason;
+        }).catch(() => { out.className = 'small text-danger'; out.textContent = 'No se pudo comprobar.'; });
+    });
+})();
+</script>
 
 <div class="row g-3">
     <!-- Left: Zone selector -->

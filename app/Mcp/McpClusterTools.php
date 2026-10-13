@@ -304,6 +304,18 @@ final class McpClusterTools
                 'description' => 'Solo lectura. Con las cuentas de Cloudflare de ESTE panel, lista por zona los registros A que hoy apuntan a la IP del servidor primario y que un relevo cambiaría, lo que se mueve con ellos por CNAME, y qué NO se movería: dominios de hostings y TODO lo que sirve Caddy aquí (también lo añadido por otras aplicaciones, p. ej. tenants del CMS). Ejecútalo en el MASTER para ver todo lo que sirve (las cuentas de Cloudflare son las mismas en el nodo de relevo). No cambia nada.',
                 'inputSchema' => $o([]),
             ],
+            'dns_guard' => [
+                'write' => false,
+                'title' => 'Protección de DNS: zonas y registros que este panel no puede tocar',
+                'description' => 'Solo lectura. La protección de DNS de ESTE panel: modo (off / audit = solo avisa / enforce = bloquea), zonas en las que solo puede escribir (`zones_allow`), zonas donde no escribe nunca (`zones_deny`), registros protegidos (nombre con *, tipos y acciones crear/cambiar/borrar) y los últimos intentos bloqueados o avisados. Aunque el token de Cloudflare llegue a todas las zonas, lo que se escriba con él (relevos, cambio de rol, MCP, correo, pantalla de DNS) pasa por estas reglas; leer siempre se puede. Con `zone`, `name`, `type` y `action` simula una operación y dice si se bloquearía y por qué. Con `check_failover=true` comprueba que las reglas no impidan mover ninguno de los registros de un relevo de este panel (llama a Cloudflare: tarda). Para cambiarla: Ajustes → Cloudflare DNS (pide contraseña de administrador).',
+                'inputSchema' => $o([
+                    'zone' => ['type' => 'string', 'description' => 'Opcional: zona de la operación a simular (example.com)'],
+                    'name' => ['type' => 'string', 'description' => 'Opcional: registro de la operación a simular (mail.example.com)'],
+                    'type' => ['type' => 'string', 'description' => 'Opcional: A, CNAME, TXT, MX...'],
+                    'action' => ['type' => 'string', 'description' => 'Opcional: create, update (por defecto) o delete'],
+                    'check_failover' => ['type' => 'boolean', 'description' => 'Comprobar las reglas contra el plan de relevo (por defecto false)'],
+                ]),
+            ],
             'firewall_check_ip' => [
                 'write' => false,
                 'title' => '¿Qué puede hacer esta IP contra el servidor?',
@@ -431,6 +443,7 @@ final class McpClusterTools
             'hosting_php_settings'  => self::hostingPhp($args),
             'config_mirror'         => self::configMirror($args),
             'failover_dns_plan'     => self::dnsPlan(),
+            'dns_guard'             => self::dnsGuard($args),
             'witnesses_status'      => self::witnessesStatus(),
             'page_check'            => self::pageCheck($args),
             'panel_errors'          => self::panelErrors($args),
@@ -1411,6 +1424,45 @@ final class McpClusterTools
             'journal_moved' => $cf::journal($fo::DNS_JOURNAL),
             'journal_moved_backup' => $cf::journal($fo::DNS_JOURNAL_BACKUP),
         ];
+    }
+
+    // ── Protección de DNS (solo lectura) ─────────────────────────────────
+
+    private static function dnsGuard(array $args): array
+    {
+        $g = \MuseDockPanel\Services\DnsGuardService::class;
+        $cfg = $g::config();
+        $out = [
+            'mode' => $cfg['mode'],
+            'mode_explained' => [
+                'off' => 'Apagada: no se bloquea nada.',
+                'audit' => 'Solo avisa: se apunta lo que se bloquearía, pero se permite.',
+                'enforce' => 'Activa: se bloquean las operaciones prohibidas.',
+            ][$cfg['mode']] ?? '',
+            'zones_allow' => $cfg['zones_allow'],
+            'zones_deny' => $cfg['zones_deny'],
+            'rules' => $cfg['rules'],
+            'recent' => $g::recentLog(15),
+            'role' => \MuseDockPanel\Settings::get('cluster_role', 'standalone'),
+            'note' => 'Cada panel tiene la suya; las copias (slave) reciben la de su master. Leer siempre se puede; solo se limita escribir.',
+        ];
+        if (!empty($args['zone']) || !empty($args['name'])) {
+            $sim = $cfg;
+            $sim['mode'] = $cfg['mode'] === 'off' ? 'off' : 'enforce';
+            $name = strtolower(trim((string)($args['name'] ?? '')));
+            $zone = strtolower(trim((string)($args['zone'] ?? ''))) ?: $name;
+            $action = in_array($args['action'] ?? '', $g::ACTIONS, true) ? $args['action'] : 'update';
+            $reason = $g::evaluate($sim, $zone, $name !== '' ? $name : null, !empty($args['type']) ? strtoupper((string)$args['type']) : null, $action);
+            $out['simulation'] = [
+                'zone' => $zone, 'name' => $name, 'type' => strtoupper((string)($args['type'] ?? '')) ?: null, 'action' => $action,
+                'blocked' => $reason !== null,
+                'reason' => $reason ?? ($cfg['mode'] === 'off' ? 'La protección está apagada.' : 'Se permitiría.'),
+            ];
+        }
+        if (!empty($args['check_failover'])) {
+            $out['failover_check'] = $g::planConflicts($cfg);
+        }
+        return $out;
     }
 
     // ── Utilidades ───────────────────────────────────────────────────────

@@ -4,7 +4,11 @@ namespace MuseDockPanel\Controllers;
 use MuseDockPanel\Database;
 use MuseDockPanel\Flash;
 use MuseDockPanel\View;
+use MuseDockPanel\Router;
+use MuseDockPanel\Settings;
 use MuseDockPanel\Services\CloudflareService;
+use MuseDockPanel\Services\DnsGuardService;
+use MuseDockPanel\Services\FailoverService;
 use MuseDockPanel\Services\LogService;
 
 class CloudflareDnsController
@@ -34,7 +38,100 @@ class CloudflareDnsController
             'hasAccounts'    => $hasAccounts,
             'hostingDomains' => $hostingDomains,
             'aliasDomains'   => $aliasDomains,
+            'guard'          => DnsGuardService::config(),
+            'guardLog'       => DnsGuardService::recentLog(12),
+            'guardSlave'     => Settings::get('cluster_role', 'standalone') === 'slave',
         ]);
+    }
+
+    /**
+     * POST: guardar la protección de DNS (zonas y registros que este panel no puede tocar).
+     * Pide la contraseña del administrador y no acepta reglas que impidan el propio relevo.
+     */
+    public function guardSave(): void
+    {
+        View::verifyCsrf();
+        $back = '/settings/cloudflare-dns';
+        if (Settings::get('cluster_role', 'standalone') === 'slave') {
+            Flash::set('error', 'Este servidor es una copia (slave): la protección de DNS la recibe del master.');
+            Router::redirect($back);
+            return;
+        }
+        if (!$this->verifyAdminPassword((string)($_POST['admin_password'] ?? ''))) {
+            Flash::set('error', 'Contraseña de administrador incorrecta: no se ha cambiado nada.');
+            Router::redirect($back);
+            return;
+        }
+
+        $cfg = DnsGuardService::normalize([
+            'mode'        => (string)($_POST['mode'] ?? 'off'),
+            'zones_allow' => (string)($_POST['zones_allow'] ?? ''),
+            'zones_deny'  => (string)($_POST['zones_deny'] ?? ''),
+            'rules'       => DnsGuardService::rulesFromText((string)($_POST['rules'] ?? '')),
+        ]);
+
+        $note = '';
+        if ($cfg['mode'] === 'enforce') {
+            $chk = DnsGuardService::planConflicts($cfg);
+            if ($chk['blocked']) {
+                $list = array_map(static fn($b) => $b['name'] . ' (' . $b['zone'] . ')', array_slice($chk['blocked'], 0, 8));
+                Flash::set('error', 'No se guarda: con estas reglas el relevo de este servidor no podría mover '
+                    . count($chk['blocked']) . ' registro(s): ' . implode(', ', $list) . (count($chk['blocked']) > 8 ? '…' : '')
+                    . '. Quita esas zonas o registros de las reglas, o déjalo en modo «Solo avisar».');
+                Router::redirect($back);
+                return;
+            }
+            $note = $chk['error'] !== null
+                ? ' No se ha podido comprobar contra el plan de relevo: ' . $chk['error']
+                : " Comprobado: el relevo puede mover sus {$chk['checked']} registros.";
+        }
+
+        DnsGuardService::save($cfg);
+        LogService::log('dns.guard', 'config', 'Protección de DNS guardada: modo ' . $cfg['mode']
+            . ', ' . count($cfg['zones_allow']) . ' zonas permitidas, ' . count($cfg['zones_deny']) . ' prohibidas, '
+            . count($cfg['rules']) . ' reglas de registros');
+
+        $pushed = '';
+        if (Settings::get('cluster_role', 'standalone') === 'master') {
+            $r = FailoverService::pushConfigToSlaves();
+            $pushed = !empty($r['ok']) ? ' Enviado a las copias.' : ' No se pudo enviar a todas las copias (se reintenta).';
+        }
+        Flash::set('success', 'Protección de DNS guardada (modo: ' . $cfg['mode'] . ').' . $note . $pushed);
+        Router::redirect($back);
+    }
+
+    /** GET (AJAX): ¿bloquearía la protección actual esta operación? No cambia nada. */
+    public function guardCheck(): void
+    {
+        header('Content-Type: application/json');
+        $cfg = DnsGuardService::config();
+        if ($cfg['mode'] === 'off') {
+            echo json_encode(['ok' => true, 'blocked' => false, 'reason' => 'La protección está apagada: no se bloquea nada.']);
+            return;
+        }
+        $cfg['mode'] = 'enforce';
+        $action = in_array($_GET['action'] ?? '', DnsGuardService::ACTIONS, true) ? $_GET['action'] : 'update';
+        $name = strtolower(trim((string)($_GET['name'] ?? '')));
+        $type = strtoupper(trim((string)($_GET['type'] ?? '')));
+        $zone = strtolower(trim((string)($_GET['zone'] ?? '')));
+        if ($zone === '' && $name !== '') {
+            $zone = $name;
+        }
+        $reason = DnsGuardService::evaluate($cfg, $zone, $name !== '' ? $name : null, $type !== '' ? $type : null, $action);
+        echo json_encode(['ok' => true, 'blocked' => $reason !== null, 'reason' => $reason ?? 'Se permitiría.']);
+    }
+
+    private function verifyAdminPassword(string $password): bool
+    {
+        if ($password === '') {
+            return false;
+        }
+        $adminId = (int)($_SESSION['panel_user']['id'] ?? 0);
+        if ($adminId <= 0) {
+            return false;
+        }
+        $admin = Database::fetchOne('SELECT password_hash FROM panel_admins WHERE id = :id', ['id' => $adminId]);
+        return $admin && password_verify($password, (string)$admin['password_hash']);
     }
 
     /**
