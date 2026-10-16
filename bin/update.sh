@@ -765,6 +765,39 @@ if command -v fail2ban-client >/dev/null 2>&1 && [ -d "${PANEL_DIR}/config/fail2
         F2B_CHANGED=true
     fi
 
+    # Jaulas del CMS MuseDock (logins fallidos y escáneres): solo si el CMS está en este
+    # servidor. El CMS anota los eventos en storage/logs/security-events.log.
+    CMS_SECURITY_LOG="${MUSEDOCK_CMS_SECURITY_LOG:-/var/www/vhosts/musedock.com/httpdocs/storage/logs/security-events.log}"
+    CMS_LOG_DIR="$(dirname "$CMS_SECURITY_LOG")"
+    if [ -f "${PANEL_DIR}/config/fail2ban/jail-musedock-cms.conf" ] && [ -d "$CMS_LOG_DIR" ]; then
+        CMS_OWNER="$(stat -c %U "$CMS_LOG_DIR")"; CMS_GROUP="$(stat -c %G "$CMS_LOG_DIR")"
+        # El fichero tiene que existir para que fail2ban cargue la jaula; lo crea el dueño del CMS
+        [ -f "$CMS_SECURITY_LOG" ] || install -m 0640 -o "$CMS_OWNER" -g "$CMS_GROUP" /dev/null "$CMS_SECURITY_LOG"
+        CMS_JAIL_TMP="$(mktemp)"
+        sed "s#__CMS_SECURITY_LOG__#${CMS_SECURITY_LOG}#g" "${PANEL_DIR}/config/fail2ban/jail-musedock-cms.conf" > "$CMS_JAIL_TMP"
+        if ! cmp -s "$CMS_JAIL_TMP" /etc/fail2ban/jail.d/musedock-cms.conf 2>/dev/null; then
+            install -m 0644 "$CMS_JAIL_TMP" /etc/fail2ban/jail.d/musedock-cms.conf
+            F2B_CHANGED=true
+        fi
+        rm -f "$CMS_JAIL_TMP"
+        # Rotación (el directorio es del usuario del CMS: logrotate necesita «su»)
+        cat > /etc/logrotate.d/musedock-cms-security <<LOGROTATE
+${CMS_SECURITY_LOG} {
+    su ${CMS_OWNER} ${CMS_GROUP}
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+LOGROTATE
+    elif [ -f /etc/fail2ban/jail.d/musedock-cms.conf ]; then
+        rm -f /etc/fail2ban/jail.d/musedock-cms.conf /etc/logrotate.d/musedock-cms-security
+        F2B_CHANGED=true
+    fi
+
     # Ajustes generales de fail2ban (p. ej. dbpurgeage para los bloqueos crecientes)
     for f in "${PANEL_DIR}"/config/fail2ban/fail2ban.d/*.conf; do
         [ -f "$f" ] || continue

@@ -20,6 +20,18 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.364',
+                'date' => '2026-10-16',
+                'badge' => 'success',
+                'changes' => [
+                    'added' => [
+                        'Fail2Ban para MuseDock CMS: jaulas musedock-cms-login (8 logins o códigos 2FA fallidos en 10 min → 1 h) y musedock-cms-probe (10 sondeos de escáner en 5 min → 24 h), con bloqueo en iptables y en Caddy (funciona detrás de Cloudflare) y bloqueos crecientes por reincidencia',
+                        'El CMS anota los eventos en storage/logs/security-events.log con la IP real ya validada (nunca IPs de Cloudflare, privadas ni de loopback) y sin emails ni contraseñas',
+                        'update.sh instala las jaulas solo si el CMS está en el servidor (MUSEDOCK_CMS_SECURITY_LOG para otra ruta), crea el fichero de registro con el dueño del CMS y añade su rotación semanal',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.363',
                 'date' => '2026-10-13',
                 'badge' => 'info',
