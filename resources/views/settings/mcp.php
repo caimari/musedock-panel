@@ -45,6 +45,7 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
 <ul class="nav nav-pills gap-2 mb-4" role="tablist" aria-label="Modalidad de conexión MCP">
 <li class="nav-item"><button class="nav-link active" id="mcp-direct-tab" data-bs-toggle="pill" data-bs-target="#mcp-direct-pane" type="button" role="tab" aria-controls="mcp-direct-pane" aria-selected="true">Directa · ChatGPT y Claude</button></li>
 <li class="nav-item"><button class="nav-link" id="mcp-tunnel-tab" data-bs-toggle="pill" data-bs-target="#mcp-tunnel-pane" type="button" role="tab" aria-controls="mcp-tunnel-pane" aria-selected="false">Túnel · OpenAI</button></li>
+<li class="nav-item"><button class="nav-link" id="mcp-creds-tab" data-bs-toggle="pill" data-bs-target="#mcp-creds-pane" type="button" role="tab" aria-controls="mcp-creds-pane" aria-selected="false">Credenciales pendientes<?php if (!empty($pendingCredentials)): ?> <span class="badge bg-warning text-dark"><?= count($pendingCredentials) ?></span><?php endif; ?></button></li>
 <li class="nav-item"><button class="nav-link" id="mcp-legacy-tab" data-bs-toggle="pill" data-bs-target="#mcp-legacy-pane" type="button" role="tab" aria-controls="mcp-legacy-pane" aria-selected="false">Token y SSH · Avanzado</button></li>
 </ul>
 <div class="tab-content"><div class="tab-pane fade show active" id="mcp-direct-pane" role="tabpanel" aria-labelledby="mcp-direct-tab">
@@ -52,6 +53,48 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
 <?php require __DIR__ . '/_direct-mcp.php'; ?>
 </div><div class="tab-pane fade" id="mcp-tunnel-pane" role="tabpanel" aria-labelledby="mcp-tunnel-tab">
 <?php require __DIR__ . '/_chatgpt.php'; ?>
+</div><div class="tab-pane fade" id="mcp-creds-pane" role="tabpanel" aria-labelledby="mcp-creds-tab">
+<?php if (!empty($pendingCredentials)): ?>
+<div class="card mb-3" style="border-color:rgba(234,179,8,.4);">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-key-fill me-2"></i>Credenciales pendientes (<?= count($pendingCredentials) ?>)</span>
+        <form method="post" action="/settings/mcp/credentials/clear" class="js-confirm-token m-0"
+              data-confirm-title="¿Borrar las credenciales pendientes?"
+              data-confirm-html="<?= View::e('Asegúrate de haberlas guardado: <strong>no se pueden recuperar</strong> (sí cambiar la contraseña desde el panel).') ?>">
+            <?= View::csrf() ?>
+            <button class="btn btn-outline-warning btn-sm"><i class="bi bi-trash me-1"></i>Ya las he guardado, borrar</button>
+        </form>
+    </div>
+    <div class="card-body p-0">
+        <p class="small text-muted px-3 pt-3 mb-2">Contraseñas generadas por el MCP (buzones, acceso SFTP de hostings, usuarios de bases de datos…). Nunca pasan por el chat con la IA: solo se ven aquí, y caducan a los 7 días.</p>
+        <div class="table-responsive">
+            <table class="table table-sm mb-0">
+                <thead><tr><th class="ps-3">Para</th><th>Contraseña</th><th>Datos de conexión</th><th>Creada</th></tr></thead>
+                <tbody>
+                <?php foreach ($pendingCredentials as $i => $c): ?>
+                    <tr>
+                        <td class="ps-3 align-middle"><div><?= View::e($c['label']) ?></div><div class="small text-muted"><?= View::e($c['kind_label']) ?></div></td>
+                        <td class="align-middle">
+                            <div class="input-group input-group-sm" style="max-width:340px;">
+                                <input type="password" class="form-control font-monospace" id="pc<?= $i ?>" value="<?= View::e($c['password']) ?>" readonly>
+                                <button type="button" class="btn btn-outline-secondary" title="Mostrar/ocultar"
+                                        onclick="var f=document.getElementById('pc<?= $i ?>');f.type=f.type==='password'?'text':'password';this.firstElementChild.className=f.type==='password'?'bi bi-eye':'bi bi-eye-slash'"><i class="bi bi-eye"></i></button>
+                                <button type="button" class="btn btn-outline-secondary" title="Copiar"
+                                        onclick="navigator.clipboard.writeText(document.getElementById('pc<?= $i ?>').value);this.innerHTML='<i class=&quot;bi bi-check2&quot;></i>'"><i class="bi bi-clipboard"></i></button>
+                            </div>
+                        </td>
+                        <td class="align-middle small"><?php foreach ($c['details'] as $dk => $dv): ?><div><span class="text-muted"><?= View::e((string)$dk) ?>:</span> <code><?= View::e((string)$dv) ?></code></div><?php endforeach; ?></td>
+                        <td class="align-middle small text-muted"><?= View::e($c['at']) ?></td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<?php else: ?>
+<div class="alert alert-secondary mb-0"><i class="bi bi-key me-2"></i>No hay credenciales pendientes. Las contraseñas que genere el MCP (buzones, SFTP de hostings, usuarios de bases de datos…) aparecerán aquí, una sola vez y durante 7 días.</div>
+<?php endif; ?>
 </div><div class="tab-pane fade" id="mcp-legacy-pane" role="tabpanel" aria-labelledby="mcp-legacy-tab">
 <div class="alert alert-info">Aquí se configuran los límites generales del servidor MCP y el acceso con token/SSH. Activar escritura o DNS aquí permite esas operaciones en el servidor, pero cada cliente OAuth necesita además sus propios ámbitos, consentimiento y aprobación de cada plan.</div>
 <div class="card mb-3">
@@ -242,45 +285,6 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
 </div>
 <?php endif; ?>
 
-<?php if (!empty($pendingCredentials)): ?>
-<div class="card mb-3" style="border-color:rgba(234,179,8,.4);">
-    <div class="card-header d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-key-fill me-2"></i>Credenciales pendientes (<?= count($pendingCredentials) ?>)</span>
-        <form method="post" action="/settings/mcp/credentials/clear" class="js-confirm-token m-0"
-              data-confirm-title="¿Borrar las credenciales pendientes?"
-              data-confirm-html="<?= View::e('Asegúrate de haberlas guardado: <strong>no se pueden recuperar</strong> (sí cambiar la contraseña desde el panel).') ?>">
-            <?= View::csrf() ?>
-            <button class="btn btn-outline-warning btn-sm"><i class="bi bi-trash me-1"></i>Ya las he guardado, borrar</button>
-        </form>
-    </div>
-    <div class="card-body p-0">
-        <p class="small text-muted px-3 pt-3 mb-2">Contraseñas generadas por el MCP (buzones, acceso SFTP de hostings, usuarios de bases de datos…). Nunca pasan por el chat con la IA: solo se ven aquí, y caducan a los 7 días.</p>
-        <div class="table-responsive">
-            <table class="table table-sm mb-0">
-                <thead><tr><th class="ps-3">Para</th><th>Contraseña</th><th>Datos de conexión</th><th>Creada</th></tr></thead>
-                <tbody>
-                <?php foreach ($pendingCredentials as $i => $c): ?>
-                    <tr>
-                        <td class="ps-3 align-middle"><div><?= View::e($c['label']) ?></div><div class="small text-muted"><?= View::e($c['kind_label']) ?></div></td>
-                        <td class="align-middle">
-                            <div class="input-group input-group-sm" style="max-width:340px;">
-                                <input type="password" class="form-control font-monospace" id="pc<?= $i ?>" value="<?= View::e($c['password']) ?>" readonly>
-                                <button type="button" class="btn btn-outline-secondary" title="Mostrar/ocultar"
-                                        onclick="var f=document.getElementById('pc<?= $i ?>');f.type=f.type==='password'?'text':'password';this.firstElementChild.className=f.type==='password'?'bi bi-eye':'bi bi-eye-slash'"><i class="bi bi-eye"></i></button>
-                                <button type="button" class="btn btn-outline-secondary" title="Copiar"
-                                        onclick="navigator.clipboard.writeText(document.getElementById('pc<?= $i ?>').value);this.innerHTML='<i class=&quot;bi bi-check2&quot;></i>'"><i class="bi bi-clipboard"></i></button>
-                            </div>
-                        </td>
-                        <td class="align-middle small"><?php foreach ($c['details'] as $dk => $dv): ?><div><span class="text-muted"><?= View::e((string)$dk) ?>:</span> <code><?= View::e((string)$dv) ?></code></div><?php endforeach; ?></td>
-                        <td class="align-middle small text-muted"><?= View::e($c['at']) ?></td>
-                    </tr>
-                <?php endforeach; ?>
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
-<?php endif; ?>
 
 <!-- Token -->
 <div class="card mb-3">
@@ -372,3 +376,11 @@ $claudeSsh = 'claude mcp add musedock-' . $serverKey . ' -- ssh root@' . $sshHos
 
 </div></div></div>
 <script src="/assets/mcp-settings.js"></script>
+<script>
+(function () {
+    if (location.hash === '#credenciales' && window.bootstrap) {
+        var t = document.getElementById('mcp-creds-tab');
+        if (t) { window.bootstrap.Tab.getOrCreateInstance(t).show(); }
+    }
+})();
+</script>

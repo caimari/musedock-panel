@@ -54,7 +54,7 @@ final class McpServer
                             . 'Herramientas de lectura para consultar el estado del servidor, del cluster, servicios, correo, certificados y failover. '
                             . 'Usa list_nodes y el argumento `node` para consultar otros nodos del cluster desde el master. '
                             . 'clone_inventory detecta lo que habría que clonar para crear un slave exacto, incluido lo que el panel no gestiona. '
-                            . 'Herramientas de correo que MODIFICAN (mail_domain_create, mail_dns_publish, mail_mailbox_create, mail_alias_create): '
+                            . 'Herramientas de correo que MODIFICAN (mail_domain_create, mail_dns_publish, mail_mailbox_create, mail_alias_create, mail_sender_map_apply):'
                             . 'llámalas SIEMPRE primero sin apply para obtener el plan, muéstraselo al usuario y pide su confirmación explícita '
                             . 'antes de repetir la llamada con apply=true. Nunca pidas, escribas ni muestres contraseñas en la conversación: '
                             . 'si no se indica una, el panel la genera y el usuario la ve en Ajustes → MCP → Credenciales pendientes. '

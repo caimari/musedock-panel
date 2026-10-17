@@ -20,6 +20,19 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.369',
+                'date' => '2026-10-17',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Enviar como un alias desde el buzón que lo recibe: el mapa de remitentes de Postfix sigue los alias concretos (no el catch-all) hasta los buzones finales, así quien recibe en un buzón «master» puede contestar con la dirección a la que escribieron. Mantiene buzón activo, can_send y modo normal; con la lista blanca activa exige también el envío permitido en el dominio del remitente. Se aplica al guardar la política de cualquier buzón o dominio',
+                        'MCP mail_sender_map_apply (plan/apply): regenera el mapa de remitentes del servidor (copia del fichero anterior, recarga de Postfix) y lo comprueba con postmap sobre un buzón real; si la prueba falla, restaura sola la copia anterior. Sin root (mcp-stdio con usuario normal) lo dice y no cambia nada',
+                        'Ajustes → MCP: pestaña propia «Credenciales pendientes» (con contador), antes dentro de «Token y SSH · Avanzado»; se ve siempre, con aviso si no hay ninguna, y al borrarlas vuelve a esa pestaña',
+                        'MCP mail_alias_create admite varios destinos separados por comas (p. ej. webmaster@x.com, master@x.com para dejar copia en el buzón y en otro)',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.368',
                 'date' => '2026-10-17',
                 'badge' => 'info',

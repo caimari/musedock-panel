@@ -151,6 +151,56 @@ class MailPolicyService
         return implode('; ', $done);
     }
 
+    /**
+     * Regenera el mapa de remitentes de ESTE servidor (lo mismo que al guardar una política
+     * desde Correo) y comprueba con postmap que un buzón real sigue pudiendo enviar como sí
+     * mismo. Si la prueba falla, vuelve a la copia anterior: un mapa roto bloquearía todo el
+     * envío autenticado. Devuelve ['ok','probe','rolled_back','output'].
+     */
+    public static function reapplySenderMap(): array
+    {
+        $enc = Settings::get('mail_db_password_enc', '');
+        $cfg = [
+            'host'     => \MuseDockPanel\Env::get('DB_HOST', '127.0.0.1'),
+            'port'     => (int)\MuseDockPanel\Env::get('DB_PORT', '5433'),
+            'dbname'   => \MuseDockPanel\Env::get('DB_NAME', 'musedock_panel'),
+            'user'     => 'musedock_mail',
+            'password' => $enc !== '' ? ReplicationService::decryptPassword($enc) : '',
+        ];
+        $res = self::installSenderPolicy($cfg);
+        if (empty($res['ok'])) {
+            return ['ok' => false, 'rolled_back' => false, 'output' => (string)($res['error'] ?? $res['output'] ?? 'No se pudo instalar el mapa')];
+        }
+
+        $gate = self::whitelistEnabled() ? ' AND md.send_allowed = true' : '';
+        $probe = Database::fetchOne(
+            "SELECT ma.email FROM mail_accounts ma JOIN mail_domains md ON md.id = ma.mail_domain_id "
+            . "WHERE ma.status = 'active' AND ma.can_send = true AND ma.send_mode = 'normal'{$gate} ORDER BY ma.id LIMIT 1"
+        );
+        if (!$probe) {
+            return ['ok' => true, 'probe' => null, 'rolled_back' => false, 'output' => 'Mapa instalado (no hay buzón con envío permitido para probarlo)'];
+        }
+        $email = (string)$probe['email'];
+        $t = self::runCmd('postmap -q ' . escapeshellarg($email) . ' pgsql:' . escapeshellarg(self::SENDER_LOGIN_CF));
+        if (str_contains($t['output'], $email) && !preg_match('/fatal|error/i', $t['output'])) {
+            LogService::log('mail.policy', 'sender-map', "Mapa de remitentes reaplicado y comprobado con {$email}");
+            return ['ok' => true, 'probe' => $email, 'rolled_back' => false, 'output' => 'Mapa instalado y comprobado'];
+        }
+
+        // La prueba falló: restaurar la copia más reciente y recargar
+        $baks = glob(self::SENDER_LOGIN_CF . '.bak.*') ?: [];
+        usort($baks, static fn($a, $b) => filemtime($b) <=> filemtime($a));
+        $rolled = false;
+        if ($baks && @copy($baks[0], self::SENDER_LOGIN_CF)) {
+            @chmod(self::SENDER_LOGIN_CF, 0640);
+            @chgrp(self::SENDER_LOGIN_CF, 'postfix');
+            self::runCmd('postfix reload');
+            $rolled = true;
+        }
+        LogService::log('mail.policy', 'sender-map', "La prueba del mapa con {$email} falló" . ($rolled ? ': copia anterior restaurada' : ': SIN copia que restaurar'));
+        return ['ok' => false, 'probe' => $email, 'rolled_back' => $rolled, 'output' => 'La comprobación con postmap falló: ' . substr($t['output'], 0, 300)];
+    }
+
     public static function installSenderPolicy(array $dbCfg): array
     {
         $whitelist = self::whitelistEnabled();
@@ -158,11 +208,25 @@ class MailPolicyService
         // master switch is on.
         $domainGate = $whitelist ? " AND md.send_allowed = true" : "";
 
+        // Un buzón puede enviar como sí mismo y como cualquier alias concreto (no el catch-all)
+        // que, siguiendo los reenvíos, acabe llegándole: así quien recibe en un buzón «master»
+        // puede contestar con la dirección a la que escribieron. La consulta recorre los alias
+        // desde la dirección del remitente hasta los buzones finales (UNION corta los ciclos).
         // 'normal' can send from clients; webmail_only/readonly cannot (external).
-        $query = "SELECT ma.email FROM mail_accounts ma "
+        // Ojo: Postfix sustituye los porcentajes de esta consulta, no escribir ninguno más.
+        $sourceGate = $whitelist
+            ? " AND EXISTS (SELECT 1 FROM mail_domains sd WHERE sd.domain = split_part('%s', '@', 2) AND sd.send_allowed = true)"
+            : "";
+        $query = "WITH RECURSIVE t(addr) AS ("
+               . "SELECT lower('%s')::text "
+               . "UNION SELECT lower(trim(u.d)) FROM t "
+               . "JOIN mail_aliases al ON al.source = t.addr AND al.is_active = true AND al.is_catchall = false "
+               . "CROSS JOIN LATERAL unnest(string_to_array(al.destination, ',')) AS u(d)) "
+               . "SELECT DISTINCT ma.email FROM t "
+               . "JOIN mail_accounts ma ON ma.email = t.addr "
                . "JOIN mail_domains md ON md.id = ma.mail_domain_id "
-               . "WHERE ma.email = '%s' AND ma.status = 'active' AND ma.can_send = true "
-               . "AND ma.send_mode = 'normal'{$domainGate}";
+               . "WHERE ma.status = 'active' AND ma.can_send = true "
+               . "AND ma.send_mode = 'normal'{$domainGate}{$sourceGate}";
 
         // Una sola línea hosts (con el puerto si lo hay): antes salían dos y Postfix avisaba
         // «overriding earlier entry» en cada consulta.

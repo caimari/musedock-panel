@@ -234,7 +234,7 @@ class McpController
         Settings::set('mcp_pending_credentials', '[]');
         LogService::log('mcp.credentials', 'cleared', 'Credenciales pendientes del MCP borradas');
         Flash::set('success', 'Credenciales pendientes borradas.');
-        header('Location: /settings/mcp');
+        header('Location: /settings/mcp#credenciales');
         exit;
     }
 

@@ -4,6 +4,7 @@ namespace MuseDockPanel\Mcp;
 use MuseDockPanel\Services\ClusterService;
 use MuseDockPanel\Services\CloudflareService;
 use MuseDockPanel\Services\LogService;
+use MuseDockPanel\Services\MailPolicyService;
 use MuseDockPanel\Services\MailService;
 use MuseDockPanel\Services\ReplicationService;
 use MuseDockPanel\Settings;
@@ -74,6 +75,12 @@ final class McpMailTools
                     'apply' => $apply,
                 ], ['source', 'destination']),
             ],
+            'mail_sender_map_apply' => [
+                'write' => true,
+                'title' => 'Aplicar el mapa de remitentes de Postfix',
+                'description' => 'Regenera en ESTE servidor el mapa que dice quién puede usar qué dirección como remitente al enviar con usuario y contraseña (puertos 587/465, webmail, Thunderbird, móvil): cada buzón puede enviar como sí mismo y como los alias concretos (no el catch-all) que le llegan, también por varios reenvíos. Hace lo mismo que guardar una política desde Correo: copia de seguridad del fichero anterior, recarga de Postfix y prueba real con postmap; si la prueba falla, vuelve solo a la copia anterior. No toca buzones, alias ni DNS. Con apply=false dice si ya está aplicado. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o(['apply' => $apply], []),
+            ],
             'mail_domain_alias' => [
                 'write' => true,
                 'title' => 'Dominio alias (sinónimo) de otro dominio de correo',
@@ -140,6 +147,7 @@ final class McpMailTools
             'mail_dns_publish'    => self::dnsPublish($args),
             'mail_mailbox_create' => self::mailboxCreate($args),
             'mail_alias_create'   => self::aliasCreate($args),
+            'mail_sender_map_apply' => self::senderMapApply($args),
             'mail_domain_alias'   => self::domainAlias($args),
             'mail_domain_verify'  => self::domainVerify($args),
             'mail_replication_status' => self::replicationStatus($args),
@@ -835,12 +843,19 @@ final class McpMailTools
     private static function aliasCreate(array $args): array
     {
         $source = strtolower(trim((string)($args['source'] ?? '')));
-        $dest = strtolower(trim((string)($args['destination'] ?? '')));
+        // Una o varias direcciones separadas por coma, espacio o punto y coma (se guardan unidas por comas).
+        $destList = array_values(array_unique(array_filter(preg_split('/[\s,;]+/', strtolower(trim((string)($args['destination'] ?? '')))) ?: [])));
+        $dest = implode(',', $destList);
         if (!preg_match('/^([^@]*)@(.+)$/', $source, $m) || !preg_match(self::DOMAIN_RE, $m[2]) || ($m[1] !== '' && !preg_match(self::LOCAL_RE, $m[1]))) {
             throw new \InvalidArgumentException('source no válido: usa alias@dominio o @dominio para el catch-all.');
         }
-        if (!filter_var($dest, FILTER_VALIDATE_EMAIL)) {
+        if (!$destList) {
             throw new \InvalidArgumentException('destination debe ser una dirección de correo válida.');
+        }
+        foreach ($destList as $d) {
+            if (!filter_var($d, FILTER_VALIDATE_EMAIL)) {
+                throw new \InvalidArgumentException("destination debe ser una dirección de correo válida (o varias separadas por comas): {$d}");
+            }
         }
         $catchall = $m[1] === '';
         $row = self::requireDomain($m[2]);
@@ -866,6 +881,37 @@ final class McpMailTools
         MailService::createAlias((int)$row['id'], $source, $dest, $catchall);
         LogService::log('mail.alias.create', $source, "Alias {$source} -> {$dest}" . ($catchall ? ' (catch-all)' : '') . ' via MCP');
         return ['status' => 'creado'] + $plan;
+    }
+
+    // ── mail_sender_map_apply ────────────────────────────────────────────
+
+    private static function senderMapApply(array $args): array
+    {
+        self::guardWritable();
+        $cf = '/etc/postfix/pgsql-sender-login.cf';
+        $txt = is_file($cf) && is_readable($cf) ? (string)file_get_contents($cf) : '';
+        $already = str_contains($txt, 'WITH RECURSIVE');
+        $plan = [
+            'fichero' => $cf,
+            'ya_aplicado' => $txt === '' ? 'desconocido (el panel no puede leer el fichero)' : $already,
+            'whitelist_dominios' => MailPolicyService::whitelistEnabled(),
+            'efecto' => 'Cada buzón activo con envío permitido podrá enviar como sí mismo y como los alias concretos que le lleguen (catch-all excluido). Copia del fichero anterior, recarga de Postfix y prueba con postmap; si falla, se restaura sola.',
+        ];
+        // Escribe en /etc/postfix y recarga Postfix: sin root (p. ej. mcp-stdio con un usuario normal) no se puede
+        $isRoot = !function_exists('posix_geteuid') || posix_geteuid() === 0;
+        $plan['puede_aplicar_desde_aqui'] = $isRoot ?: 'no: este MCP corre sin root; usa el MCP HTTP del panel o guarda una política desde Correo';
+        if (empty($args['apply'])) {
+            return ['status' => 'plan', 'apply' => false] + $plan;
+        }
+        if (!$isRoot) {
+            throw new \RuntimeException('Este MCP corre sin root y no puede escribir en /etc/postfix ni recargar Postfix. No se ha cambiado nada: aplícalo desde el MCP HTTP del panel o guardando una política en Correo.');
+        }
+        $res = MailPolicyService::reapplySenderMap();
+        LogService::log('mail.policy', 'sender-map', 'Mapa de remitentes reaplicado via MCP: ' . ($res['ok'] ? 'ok' : 'fallo'));
+        if (!$res['ok']) {
+            throw new \RuntimeException($res['output'] . (!empty($res['rolled_back']) ? ' (se ha restaurado la copia anterior)' : ''));
+        }
+        return ['status' => 'hecho', 'comprobado_con' => $res['probe'], 'detalle' => $res['output']] + $plan;
     }
 
     // ── mail_domain_verify ───────────────────────────────────────────────

@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.369] — 2026-10-17 — Enviar como los alias que te llegan
+
+### Añadido
+- **Enviar como un alias desde el buzón que lo recibe.** El mapa de remitentes de Postfix (`pgsql-sender-login.cf`) solo dejaba a cada buzón enviar como sí mismo. Ahora sigue los alias concretos (no el catch-all) hasta los buzones finales: quien recibe en un buzón «master» puede contestar con la dirección a la que escribieron, también por varios reenvíos seguidos. Mantiene las condiciones de siempre (buzón activo, `can_send` y modo normal) y, con la lista blanca activa, exige además que el dominio del remitente tenga el envío permitido. Se aplica al guardar la política de cualquier buzón o dominio.
+- **MCP `mail_sender_map_apply` (plan/apply)**: regenera el mapa de remitentes del servidor (copia del fichero anterior, recarga de Postfix) y lo comprueba con `postmap` sobre un buzón real; si la prueba falla, restaura sola la copia anterior. Sin root (mcp-stdio con usuario normal) lo dice y no cambia nada. `MailPolicyService::reapplySenderMap()` es lo que usa.
+- **Ajustes → MCP: pestaña propia «Credenciales pendientes»** (con contador). Antes estaba dentro de «Token y SSH · Avanzado»; ahora se ve siempre, con un aviso cuando no hay ninguna, y al borrarlas vuelve a esa pestaña.
+- **MCP `mail_alias_create` admite varios destinos** separados por comas (p. ej. `webmaster@x.com, master@x.com` para dejar copia en el buzón y en otro).
+
 ## [1.0.368] — 2026-10-17 — www → sin www con 301 por defecto
 
 ### Añadido
