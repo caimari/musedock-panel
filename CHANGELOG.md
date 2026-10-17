@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.368] — 2026-10-17 — www → sin www con 301 por defecto
+
+### Añadido
+- **www → sin www con 301 por defecto en los hostings.** Hasta ahora cada web respondía igual con y sin www (contenido duplicado para los buscadores). Los dominios y alias nuevos se crean ya con la redirección, que conserva la ruta y los parámetros.
+- **`bin/www-redirect-apply.php`** la aplica a los hostings que ya existían (simulación por defecto, `--apply` para aplicarlo). Si la web de un dominio ya manda al www, se deja con www para no crear un bucle y se apunta como excepción.
+- Ajustes: `hosting_www_redirect = 0` lo apaga para todo; `hosting_www_keep` lista los dominios que conservan las dos direcciones.
+
 ## [1.0.365] — 2026-10-17 — Conmutación automática ante bloqueos de Cloudflare
 
 ### Añadido

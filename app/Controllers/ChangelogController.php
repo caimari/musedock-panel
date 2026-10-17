@@ -20,6 +20,18 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.368',
+                'date' => '2026-10-17',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'www → sin www con 301 por defecto en los hostings (mejor para el SEO: una sola dirección por web). Los nuevos dominios y alias lo llevan al crearse; la ruta 301 conserva la ruta y los parámetros (https://dominio{ruta})',
+                        'bin/www-redirect-apply.php lo aplica a los hostings que ya existían (simulación por defecto, --apply para aplicarlo). Si la web de un dominio ya manda al www (p. ej. WordPress configurado así), se deja con www para no crear un bucle y se apunta en la lista de excepciones',
+                        'Ajustes en panel_settings: hosting_www_redirect = 0 lo apaga para todo; hosting_www_keep = dominios que conservan las dos direcciones',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.365',
                 'date' => '2026-10-17',
                 'badge' => 'success',

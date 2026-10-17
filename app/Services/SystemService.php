@@ -1581,6 +1581,9 @@ CONF;
         self::ensureTlsCatchAllPolicy($caddyApi);
 
         $hosts = self::hostsWithWww($domain);
+        // www → sin www con 301 (por defecto): el www sale de esta ruta y va a una ruta de redirección propia
+        $wwwMap = self::wwwRedirectMap($hosts);
+        $hosts = array_values(array_diff($hosts, array_keys($wwwMap)));
         $subroutes = self::buildCaddySubroutes($documentRoot, $username, $phpVersion, $hostingType);
 
         $caddyConfig = [
@@ -1603,8 +1606,9 @@ CONF;
         curl_close($ch);
 
         if ($httpCode >= 200 && $httpCode < 300) {
+            self::applyWwwRedirects($caddyApi, $wwwMap, self::hostsWithWww($domain));
             // Register domains for access logging (Fail2Ban wp-login protection)
-            self::ensureHostingAccessLog($caddyApi, $hosts);
+            self::ensureHostingAccessLog($caddyApi, array_merge($hosts, array_keys($wwwMap)));
             return $routeId;
         }
         return null;
@@ -3125,6 +3129,10 @@ CONF;
         }
         self::ensureTlsCatchAllPolicy($caddyApi);
 
+        $allHosts = $hosts;
+        // www → sin www con 301 (por defecto) para el dominio principal y cada alias
+        $wwwMap = self::wwwRedirectMap($hosts);
+        $hosts = array_values(array_diff($hosts, array_keys($wwwMap)));
         $subroutes = self::buildCaddySubroutes($documentRoot, $username, $phpVersion, $hostingType);
         $caddyConfig = [
             '@id' => $routeId,
@@ -3146,11 +3154,109 @@ CONF;
         curl_close($ch);
 
         if ($httpCode >= 200 && $httpCode < 300) {
+            self::applyWwwRedirects($caddyApi, $wwwMap, $allHosts);
             // Register all domains for access logging (Fail2Ban wp-login protection)
-            self::ensureHostingAccessLog($caddyApi, $hosts);
+            self::ensureHostingAccessLog($caddyApi, $allHosts);
             return $routeId;
         }
         return null;
+    }
+
+    // ── www → sin www (301) ───────────────────────────────────────────────
+
+    /**
+     * ¿Redirigir www.<dominio> → <dominio> con 301? Sí por defecto (mejor para el SEO: una sola dirección).
+     * Ajustes: hosting_www_redirect = '0' lo apaga para todo; hosting_www_keep = dominios (uno por línea) que
+     * conservan las dos direcciones, p. ej. una web configurada para usar el www (redirigiría al revés: bucle).
+     */
+    public static function wwwRedirectEnabled(string $domain): bool
+    {
+        if (\MuseDockPanel\Settings::get('hosting_www_redirect', '1') === '0') {
+            return false;
+        }
+        $d = strtolower(trim($domain, " .\t"));
+        foreach (preg_split('/[\r\n,]+/', \MuseDockPanel\Settings::get('hosting_www_keep', '')) as $keep) {
+            if (strtolower(trim($keep, " .\t")) === $d) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** Añade un dominio a la lista de los que conservan www (no se redirigen). */
+    public static function wwwKeep(string $domain): void
+    {
+        $list = array_filter(array_map('trim', preg_split('/[\r\n,]+/', \MuseDockPanel\Settings::get('hosting_www_keep', ''))));
+        $d = strtolower(trim($domain, " .\t"));
+        if ($d !== '' && !in_array($d, array_map('strtolower', $list), true)) {
+            $list[] = $d;
+            \MuseDockPanel\Settings::set('hosting_www_keep', implode("\n", $list));
+        }
+    }
+
+    /** Hosts www.X de la lista cuyo X también está y debe redirigirse: [www.X => X]. */
+    public static function wwwRedirectMap(array $hosts): array
+    {
+        $set = array_flip(array_map('strtolower', $hosts));
+        $map = [];
+        foreach (array_keys($set) as $h) {
+            if (str_starts_with($h, 'www.')) {
+                $apex = substr($h, 4);
+                if (isset($set[$apex]) && self::wwwRedirectEnabled($apex)) {
+                    $map[$h] = $apex;
+                }
+            }
+        }
+
+        return $map;
+    }
+
+    public static function wwwRedirectRouteId(string $wwwHost): string
+    {
+        return 'www-redirect-panel-' . preg_replace('/[^a-z0-9]+/', '-', strtolower($wwwHost));
+    }
+
+    /**
+     * Crea (o recrea) la ruta 301 de cada www.X → https://X{ruta}, al principio de la lista de rutas, y quita las
+     * de los www que ya no deben redirigirse ($allHosts: todos los nombres del hosting, con y sin www).
+     */
+    public static function applyWwwRedirects(string $caddyApi, array $map, array $allHosts = []): void
+    {
+        foreach ($allHosts as $h) {
+            $h = strtolower($h);
+            if (str_starts_with($h, 'www.') && !isset($map[$h])) {
+                self::caddyApiCall($caddyApi, 'DELETE', '/id/' . self::wwwRedirectRouteId($h));
+            }
+        }
+        foreach ($map as $www => $apex) {
+            $id = self::wwwRedirectRouteId($www);
+            self::caddyApiCall($caddyApi, 'DELETE', '/id/' . $id);
+            self::caddyApiCall($caddyApi, 'PUT', '/config/apps/http/servers/srv0/routes/0', [
+                '@id' => $id,
+                'match' => [['host' => [$www]]],
+                'handle' => [['handler' => 'static_response', 'status_code' => '301',
+                    'headers' => ['Location' => ["https://{$apex}{http.request.uri}"]]]],
+                'terminal' => true,
+            ]);
+        }
+    }
+
+    /** Llamada sencilla a la API de administración de Caddy. @return int código HTTP */
+    private static function caddyApiCall(string $caddyApi, string $method, string $path, ?array $body = null): int
+    {
+        $ch = curl_init($caddyApi . $path);
+        $opts = [CURLOPT_CUSTOMREQUEST => $method, CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10];
+        if ($body !== null) {
+            $opts[CURLOPT_POSTFIELDS] = json_encode($body);
+            $opts[CURLOPT_HTTPHEADER] = ['Content-Type: application/json'];
+        }
+        curl_setopt_array($ch, $opts);
+        curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+
+        return $code;
     }
 
     /**
