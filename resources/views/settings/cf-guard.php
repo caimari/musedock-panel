@@ -198,7 +198,7 @@ echo '* * * * * root EDGE_PROBE_CONF=/etc/musedock-edge-probe-panel.conf flock -
                                                                          : 'Se pondrá la nube naranja en Cloudflare ahora mismo.';
                     } ?>
                     <tr>
-                        <td><strong><?= View::e($d['name']) ?></strong><?php if ($d['excluded']): ?> <span class="badge bg-secondary">nunca tocar</span><?php endif; ?></td>
+                        <td><a href="https://<?= View::e($d['name']) ?>/" target="_blank" rel="noopener noreferrer" class="fw-bold text-reset text-decoration-none" title="Abrir en una pestaña nueva"><?= View::e($d['name']) ?> <i class="bi bi-box-arrow-up-right" style="font-size:.7em;opacity:.6;"></i></a><?php if ($d['excluded']): ?> <span class="badge bg-secondary">nunca tocar</span><?php endif; ?></td>
                         <td class="text-muted"><?= View::e($d['type'] . ' ' . $d['content']) ?></td>
                         <td>
                             <button type="button" class="badge border-0 cfg-original <?= $d['original'] ? '' : 'bg-dark border' ?>" style="cursor:pointer;<?= $d['original'] ? 'background:#f6821f;' : '' ?>" <?= $isSlave ? 'disabled' : '' ?>
