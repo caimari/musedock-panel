@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.370] — 2026-10-17 — El mapa de remitentes se actualiza solo
+
+### Añadido
+- **El mapa de remitentes se pone al día solo tras actualizar.** `ensureSenderLoginCf()` (el `cluster-worker` la ejecuta cada minuto en el master y en cada nodo) cambia únicamente la línea `query` del mapa instalado, conservando servidor, usuario, contraseña y base de datos, y lo comprueba con `postmap`; si la prueba falla, restaura la copia anterior y no reintenta hasta pasada una hora. Los servidores nuevos lo instalan ya con la consulta nueva (`senderQuery()` es la única definición). No hace falta guardar una política a mano en ningún servidor.
+
 ## [1.0.369] — 2026-10-17 — Enviar como los alias que te llegan
 
 ### Añadido

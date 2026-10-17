@@ -20,6 +20,16 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.370',
+                'date' => '2026-10-17',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'El mapa de remitentes se pone al día solo tras actualizar: el cluster-worker (cada minuto, en el master y en cada nodo) cambia únicamente la línea query del mapa instalado, conserva sus credenciales y lo comprueba con postmap; si falla, restaura la copia anterior y no reintenta hasta pasada una hora. Los servidores nuevos lo instalan ya con la consulta nueva. No hay que guardar una política a mano',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.369',
                 'date' => '2026-10-17',
                 'badge' => 'info',
