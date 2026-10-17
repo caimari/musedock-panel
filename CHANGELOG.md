@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.365] — 2026-10-17 — Conmutación automática ante bloqueos de Cloudflare
+
+### Añadido
+- **Ajustes → Bloqueos Cloudflare.** Durante los partidos de LaLiga, las operadoras españolas bloquean IPs de Cloudflare compartidas por miles de webs legales. Unas sondas en conexiones reales (p. ej. una máquina en España con dos operadoras) prueban cada minuto las IPs de Cloudflare de los dominios de hosting del panel. Si una deja de responder desde alguna operadora y el servidor responde directo con certificado válido, se quita la nube naranja solo a los dominios afectados; cuando la IP lleva un rato estable en todas las operadoras, se vuelve a poner. No es un escudo: ir sin proxy expone la IP del servidor, por eso dura lo que dura el bloqueo.
+- **Reglas:** solo toca lo que tenía proxy; al volver, solo si el registro sigue como lo dejó (los cambios manuales se respetan); sin informes de sondas no cambia nada; modos apagado/simulación/automático; solo actúa el panel que manda; las cuentas con un MuseDock CMS que ya hace esto se excluyen solas.
+- **Las sondas resuelven el DNS desde su país** (Cloudflare da IPs distintas según la región) y se vigilan todas. Inicio y fin de cada bloqueo por IP y operadora, con horas de España y UTC.
+- **Configuración original editable** por dominio con la contraseña de administrador, consciente del bloqueo.
+- **API de sondas** `/api/cf-guard/{targets,report}` con token propio (solo se guarda su huella), mismo protocolo que MuseDock CMS: la misma sonda sirve para los dos (`API_PREFIX`). Proceso `bin/cf-guard-worker.php` cada minuto (cron instalado por `update.sh`), tipo de aviso «Bloqueos de Cloudflare» y guía en Docs.
+
 ## [1.0.363] — 2026-10-13 — Elegir por qué canal llega cada aviso
 
 ### Añadido

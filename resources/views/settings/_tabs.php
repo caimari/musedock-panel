@@ -23,6 +23,7 @@
     <a href="/settings/mcp" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'MCP' ? 'active' : '' ?>"><i class="bi bi-plug me-1"></i>MCP</a>
     <a href="/settings/proxy-routes" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Proxy Routes' ? 'active' : '' ?>"><i class="bi bi-diagram-2 me-1"></i>Proxy Routes</a>
     <a href="/settings/dns" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'DNS' ? 'active' : '' ?>"><i class="bi bi-globe2 me-1"></i>DNS</a>
+    <a href="/settings/cf-guard" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Bloqueos Cloudflare' ? 'active' : '' ?>"><i class="bi bi-shield-exclamation me-1"></i>Bloqueos Cloudflare</a>
     <a href="/settings/cloudflare-dns" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Cloudflare DNS' ? 'active' : '' ?>" style="<?= ($pageTitle ?? '') === 'Cloudflare DNS' ? '' : 'border-color:#f97316;color:#f97316;' ?>"><i class="bi bi-cloud-fill me-1"></i>Cloudflare DNS</a>
     <a href="/settings/health" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'System Health' ? 'active' : '' ?>"><i class="bi bi-heart-pulse me-1"></i>System Health</a>
     <a href="/settings/updates" class="btn btn-outline-light btn-sm <?= ($pageTitle ?? '') === 'Updates' ? 'active' : '' ?>"><i class="bi bi-cloud-arrow-down me-1"></i>Updates</a>

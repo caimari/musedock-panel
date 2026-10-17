@@ -37,6 +37,7 @@ class AlertPolicyService
         'license'            => ['Licencia del portal', 'La licencia del portal de clientes caduca pronto (14, 7, 3 y 1 días), entra en periodo de gracia o caduca. Una vez por etapa.'],
         'filesync_unsynced'  => ['Carpetas sin copia al relevo', 'En el master: una carpeta de app en /opt o /srv que no se copia al servidor de relevo ni está marcada como propia de la máquina (avisa solo cuando cambia la lista).'],
         'cert'               => ['Certificados', 'Una web sin certificado válido o que no se ha renovado (con proxy en strict, error 526).'],
+        'cf_proxy'           => ['Bloqueos de Cloudflare', 'Se quita o se vuelve a poner la nube naranja de dominios porque sus IPs de Cloudflare están bloqueadas por operadoras (p. ej. durante el fútbol), y el principio y fin de cada bloqueo.'],
         'config_mirror'      => ['Copia de configuración del master', 'En una copia: algo de la configuración del master no se pudo copiar (avisa solo cuando cambia la lista).'],
         'witness'            => ['Testigos', 'Un testigo externo no responde o vuelve.'],
         'node_down'          => ['Nodo caído / recuperado', 'Un servidor del cluster deja de responder a los demás (o vuelve).'],

@@ -588,6 +588,16 @@ CRONEOF
     CRON_UPDATED=true
 fi
 
+# Bloqueos de Cloudflare (CfGuardService): +35s. Solo actúa en el panel que manda.
+if ! grep -q 'cf-guard-worker' /etc/cron.d/musedock-cf-guard 2>/dev/null; then
+    cat > /etc/cron.d/musedock-cf-guard << CRONEOF
+# MuseDock Panel — Conmutación automática ante bloqueos de Cloudflare (staggered: +35s)
+* * * * * root sleep 35 && /usr/bin/php ${PANEL_DIR}/bin/cf-guard-worker.php >> ${PANEL_DIR}/storage/logs/cf-guard-worker.log 2>&1
+CRONEOF
+    chmod 644 /etc/cron.d/musedock-cf-guard
+    CRON_UPDATED=true
+fi
+
 # Failover worker: +10s
 if ! grep -q 'sleep 10' /etc/cron.d/musedock-failover 2>/dev/null; then
     cat > /etc/cron.d/musedock-failover << CRONEOF

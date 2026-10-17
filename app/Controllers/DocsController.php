@@ -469,6 +469,14 @@ class DocsController
                 'keywords' => 'fail2ban jaula jail bloqueo ban unban lista blanca ignoreip lista negra ataque lento slow recidive creciente increment wordpress dovecot postfix sshd informe diario seguridad security_attacks fail2ban_manage config_mirror copia master slave',
             ],
             [
+                'title' => 'Bloqueos de Cloudflare (LaLiga)',
+                'description' => 'Quitar y volver a poner la nube naranja sola cuando las operadoras bloquean IPs de Cloudflare: sondas, modos, reglas, configuracion original, horas, relacion con MuseDock CMS y solucion de problemas.',
+                'url' => '/docs/cf-guard',
+                'category' => 'Guia especial',
+                'icon' => 'bi-shield-exclamation',
+                'keywords' => 'cloudflare bloqueo laliga futbol proxy nube naranja gris ip bloqueada operadora vodafone orange movistar ono sonda probe b250 err_connection_timed_out conmutacion cf-guard edge-guard r2',
+            ],
+            [
                 'title' => 'Testigos externos',
                 'description' => 'Servidores solo ojos que confirman caidas reales antes de un relevo y eligen la entrada (linea normal o alternativa): que son, como crearlos desde el panel y como personalizarlos.',
                 'url' => '/docs/witnesses',
@@ -589,6 +597,10 @@ class DocsController
 
         if ($url === '/docs/fail2ban-cluster') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'fail2ban-cluster.php');
+        }
+
+        if ($url === '/docs/cf-guard') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'cf-guard.php');
         }
 
         if ($url === '/docs/witnesses') {
@@ -1599,6 +1611,14 @@ class DocsController
         View::render('help/fail2ban-cluster', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Fail2ban en el cluster',
+        ]);
+    }
+
+    public function cfGuard(): void
+    {
+        View::render('help/cf-guard', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Bloqueos de Cloudflare',
         ]);
     }
 

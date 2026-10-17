@@ -34,7 +34,9 @@ if (rtrim($requestPath, '/') === '/api/internal/smtp-config') {
 // IP allowlist (ALLOWED_IPS in .env)
 $allowedIps = array_values($config['allowed_ips'] ?? []);
 // El mapa de dominios del proxy de entrada alternativa tiene su propia clave (IngressService).
+// La API de las sondas de bloqueos de Cloudflare (CfGuardController) también: va con token de sonda.
 if (!empty($allowedIps) && rtrim($requestPath, '/') !== '/api/ingress/domains'
+    && !str_starts_with($requestPath, '/api/cf-guard/')
     && !\MuseDockPanel\ChatGpt\IngressPolicy::exempt($requestPath, $_SERVER)) {
     $clientIp = (static function (): string {
         $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '';
@@ -262,6 +264,9 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/api/mcp', 'McpController@handle');
 // Mapa de dominios para el proxy de entrada alternativa (clave propia en el controlador).
 \MuseDockPanel\Router::get('/api/ingress/domains', 'IngressController@domains');
+// Sondas de bloqueos de Cloudflare (token de sonda; mismo protocolo que MuseDock CMS)
+\MuseDockPanel\Router::get('/api/cf-guard/targets', 'CfGuardController@apiTargets');
+\MuseDockPanel\Router::post('/api/cf-guard/report', 'CfGuardController@apiReport');
 \MuseDockPanel\Router::get('/api/mcp', 'McpController@handle');
 
 // Federation API (token auth — called by remote peers)
@@ -593,11 +598,21 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/settings/alerts', 'AlertsController@index');
 \MuseDockPanel\Router::post('/settings/alerts/save', 'AlertsController@save');
 \MuseDockPanel\Router::get('/settings/witnesses', 'WitnessController@index');
+// Bloqueos de Cloudflare (CfGuardController)
+\MuseDockPanel\Router::get('/settings/cf-guard', 'CfGuardController@index');
+\MuseDockPanel\Router::post('/settings/cf-guard', 'CfGuardController@save');
+\MuseDockPanel\Router::post('/settings/cf-guard/probe', 'CfGuardController@createProbe');
+\MuseDockPanel\Router::post('/settings/cf-guard/probe/revoke', 'CfGuardController@revokeProbe');
+\MuseDockPanel\Router::post('/settings/cf-guard/inventory', 'CfGuardController@inventory');
+\MuseDockPanel\Router::post('/settings/cf-guard/clear-log', 'CfGuardController@clearLog');
+\MuseDockPanel\Router::post('/settings/cf-guard/original', 'CfGuardController@setOriginal');
+\MuseDockPanel\Router::get('/settings/cf-guard/probe.py', 'CfGuardController@downloadProbe');
 \MuseDockPanel\Router::get('/settings/witnesses/status', 'WitnessController@status');
 \MuseDockPanel\Router::post('/settings/witnesses/script', 'WitnessController@script');
 \MuseDockPanel\Router::post('/settings/witnesses/add', 'WitnessController@add');
 \MuseDockPanel\Router::post('/settings/witnesses/remove', 'WitnessController@remove');
 \MuseDockPanel\Router::get('/docs/witnesses', 'DocsController@witnesses');
+\MuseDockPanel\Router::get('/docs/cf-guard', 'DocsController@cfGuard');
 \MuseDockPanel\Router::get('/docs/fail2ban-cluster', 'DocsController@fail2banCluster');
 \MuseDockPanel\Router::get('/docs/config-mirror', 'DocsController@configMirror');
 \MuseDockPanel\Router::get('/docs/dns-guard', 'DocsController@dnsGuard');
