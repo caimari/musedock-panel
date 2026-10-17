@@ -82,17 +82,23 @@ def api(conf, method, path, body=None):
 
 
 def check(iface, target):
-    """¿Se llega por esta salida? cf: cualquier respuesta HTTP vale. origin: certificado válido y sin error 5xx."""
+    """¿Se llega por esta salida?
+    cf: la IP de Cloudflare responde si se completa la conexión cifrada (TLS), aunque la web tarde o dé error:
+        un bloqueo de la operadora impide conectar; una web lenta o caída conecta y luego no contesta.
+    origin: certificado válido y respuesta sin error 5xx."""
     tid, ip, host = target
-    args = ['-o', '/dev/null', '-w', '%{http_code} %{time_total}', '--max-time', '8', '--connect-timeout', '5',
+    args = ['-o', '/dev/null', '-w', '%{http_code} %{time_total} %{time_appconnect}', '--max-time', '8', '--connect-timeout', '5',
             '--resolve', '%s:443:%s' % (host, ip), 'https://%s/' % host]
     if iface:
         args = ['--interface', iface] + args
     out = curl(args, timeout=12).split()
     code = out[0] if out else '000'
     ms = int(float(out[1]) * 1000) if len(out) > 1 else 0
+    tls = float(out[2]) > 0 if len(out) > 2 else False
     n = int(code) if code.isdigit() else 0
-    ok = (200 <= n < 500) if tid.startswith('origin:') else n > 0
+    ok = (200 <= n < 500) if tid.startswith('origin:') else (n > 0 or tls)
+    if not tid.startswith('origin:') and n == 0 and tls:
+        code = 'tls'   # conectó con Cloudflare, pero la web no contestó a tiempo
     return {'t': tid, 'ok': ok, 'code': code, 'ms': ms}
 
 
