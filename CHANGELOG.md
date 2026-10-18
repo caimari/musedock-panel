@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.375] — 2026-10-18 — La revisión de correo entiende las réplicas
+
+### Corregido
+- **Un nodo réplica salía en «error» en el panel principal solo porque su correo está parado a propósito.** La revisión de correo (`MailService::checkMailNodeHealth`) exigía los puertos 25, 587 y 993 también a las réplicas (esclavo del clúster, nodo aislado por un relevo o con PostgreSQL en recuperación); en asterisk, Dovecot 993 rechazado ponía el nodo en «error» cada minuto. Ahora el propio nodo informa de su papel (`cluster_role`, aislado, `pg_is_in_recovery`); si es una réplica, los puertos cerrados se muestran como «en espera» y no cuentan como fallo, y el estado no pasa a «error». Se conserva el papel de correo del nodo: si vuelve a ser principal, se vuelve a exigir todo. Si el nodo no responde por la API no se sabe su papel y sigue contando como fallo.
+
+### Añadido
+- Prueba: `tests/mail_node_standby_test.php`.
+
 ## [1.0.374] — 2026-10-18 — La copia de ficheros no pierde sus valores por defecto
 
 ### Corregido

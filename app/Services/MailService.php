@@ -3712,14 +3712,6 @@ class MailService
             : [];
 
         $allOk = true;
-        foreach ($checks as $name => $port) {
-            $fp = @fsockopen($host, $port, $errno, $errstr, 5);
-            $ok = $fp !== false;
-            if ($fp) fclose($fp);
-
-            $services[$name] = ['port' => $port, 'ok' => $ok, 'error' => $ok ? '' : "{$errstr} ({$errno})"];
-            if (!$ok) $allOk = false;
-        }
 
         // Also check the panel API endpoint
         $apiResult = ClusterService::sendHeartbeat($nodeId);
@@ -3767,6 +3759,27 @@ class MailService
             $dbHealth['error'] = 'panel API unreachable';
         }
 
+        // Una réplica (esclavo del cluster, aislada por un relevo o con PostgreSQL en recuperación) tiene el
+        // correo parado a propósito hasta ser principal: sus puertos cerrados no son un fallo (2026-10-18,
+        // asterisk quedó en «error» en Obelix por Dovecot 993 rechazado).
+        $standby = self::mailNodeIsStandby($dbHealth);
+        $dbHealth['standby'] = $standby;
+
+        foreach ($checks as $name => $port) {
+            $fp = @fsockopen($host, $port, $errno, $errstr, 5);
+            $ok = $fp !== false;
+            if ($fp) fclose($fp);
+
+            $services[$name] = ['port' => $port, 'ok' => $ok, 'error' => $ok ? '' : "{$errstr} ({$errno})"];
+            if (!$ok && $standby) {
+                $services[$name]['ok'] = true;
+                $services[$name]['standby'] = true;
+                $services[$name]['error'] = '';
+            } elseif (!$ok) {
+                $allOk = false;
+            }
+        }
+
         $decision = self::evaluateMailDbHealth($dbHealth);
         $dbHealth['status'] = $decision['status'];
         $dbHealth['message'] = $decision['message'];
@@ -3794,6 +3807,16 @@ class MailService
             'db_health' => $dbHealth,
             'node' => $node['name'],
         ];
+    }
+
+    /**
+     * ¿El nodo es una réplica con el correo parado a propósito? (dato que informa el propio nodo)
+     */
+    public static function mailNodeIsStandby(array $health): bool
+    {
+        if (!empty($health['fenced'])) return true;
+        if (($health['cluster_role'] ?? '') === 'slave') return true;
+        return !empty($health['is_replica']) && !empty($health['pg_alive']);
     }
 
     private static function evaluateMailDbHealth(array $health): array
@@ -3954,6 +3977,8 @@ class MailService
             'is_replica' => false,
             'replication_lag_seconds' => null,
             'maildir_ok' => self::maildirIsHealthy(),
+            'cluster_role' => (string)Settings::get('cluster_role', ''),
+            'fenced' => Settings::get('cluster_fenced', '0') === '1' || is_file(FailoverSafetyService::FENCE_FLAG),
             'ptr_ok' => null,
             'ptr_value' => '',
             'expected_hostname' => trim((string)($payload['expected_hostname'] ?? '')),

@@ -29,6 +29,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 
@@ -101,6 +102,56 @@ def check(iface, target):
     if not tid.startswith('origin:') and n == 0 and tls:
         code = 'tls'   # conectó con Cloudflare, pero la web no contestó a tiempo
     return {'t': tid, 'ok': ok, 'code': code, 'ms': ms}
+
+
+MAX_BODY = 15000   # el endpoint del CMS rechazó con «JSON no válido» cualquier cuerpo > 16 KB (filemon, 2026-10-18)
+PAUSE = 21         # el servidor admite una entrega cada 20 s como mucho por sonda
+
+
+def split_report(paths, dns, limit=None):
+    """Reparte el informe en cuerpos de menos de `limit` bytes. Si cabe entero, va entero (lo de siempre). Si no: cada
+    ruta (operadora) aparte, con el DNS en la primera si cabe (si no, en partes propias), y si una sola ruta no cabe,
+    sus resultados en trozos con la misma cabecera. El servidor guarda las mediciones por ruta y objetivo, así que
+    llegar en varias partes es equivalente. Pura."""
+    limit = limit or MAX_BODY
+
+    def size(b):
+        return len(json.dumps(b))
+
+    whole = {'paths': paths, 'dns': dns}
+    if size(whole) <= limit:
+        return [whole]
+
+    def chunks_of(path):
+        """La ruta entera si cabe; si no, sus resultados en trozos con la misma cabecera."""
+        if size({'paths': [path], 'dns': []}) <= limit:
+            return [path]
+        head = {k: v for k, v in path.items() if k != 'results'}
+        out, cur = [], []
+        for r in path.get('results', []):
+            if cur and size({'paths': [dict(head, results=cur + [r])], 'dns': []}) > limit:
+                out.append(dict(head, results=cur))
+                cur = []
+            cur.append(r)
+        out.append(dict(head, results=cur))
+        return out
+
+    parts = [c for p in paths for c in chunks_of(p)]
+    bodies = []
+    if parts and size({'paths': [parts[0]], 'dns': dns}) <= limit:
+        bodies.append({'paths': [parts[0]], 'dns': dns})
+        parts = parts[1:]
+    else:
+        cur = []
+        for d in dns:
+            if cur and size({'paths': [], 'dns': cur + [d]}) > limit:
+                bodies.append({'paths': [], 'dns': cur})
+                cur = []
+            cur.append(d)
+        if cur:
+            bodies.append({'paths': [], 'dns': cur})
+    bodies.extend({'paths': [p], 'dns': []} for p in parts)
+    return bodies
 
 
 def main():
@@ -176,12 +227,24 @@ def run_once(conf):
 
     if VERBOSE:
         print('DNS desde aquí: %d nombres resueltos' % len(dns))
-    code, text = api(conf, 'POST', '/report', {'paths': paths, 'dns': dns})
-    if code != '200':
-        hint = ' — normal si el cron acaba de entregar otro (máximo uno cada 20 s)' if code == '429' else ''
-        return 1, 'El servidor no aceptó el informe (HTTP %s)%s: %s' % (code, hint, text[:200])
-    if VERBOSE:
-        print('Informe entregado a %s: %s' % (conf['URL'], text.strip()[:200]))
+    bodies = split_report(paths, dns)
+    if VERBOSE and len(bodies) > 1:
+        print('El informe pesa más de %d bytes: se entrega en %d partes (una cada %d s, el servidor admite una cada 20 s)' % (MAX_BODY, len(bodies), PAUSE))
+    for i, body in enumerate(bodies):
+        if i:
+            time.sleep(PAUSE)
+        code, text = api(conf, 'POST', '/report', body)
+        if code != '200':
+            hint = ' — normal si el cron acaba de entregar otro (máximo uno cada 20 s)' if code == '429' else ''
+            msg = 'El servidor no aceptó el informe (HTTP %s)%s: %s' % (code, hint, text[:200])
+            if i == 0:
+                return 1, msg
+            # Una parte posterior rechazada: lo entregado sigue valiendo; se avisa solo en modo detallado
+            if VERBOSE:
+                print('Parte %d de %d: %s' % (i + 1, len(bodies), msg), file=sys.stderr)
+            continue
+        if VERBOSE:
+            print('Informe entregado a %s%s: %s' % (conf['URL'], (' (parte %d de %d)' % (i + 1, len(bodies))) if len(bodies) > 1 else '', text.strip()[:200]))
     return 0, ''
 
 

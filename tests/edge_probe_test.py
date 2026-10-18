@@ -89,5 +89,93 @@ m = load('URL=%s,%s\nTOKEN_FILE=@TOKEN@\nAPI_PREFIX=/api/cf-guard\nRESOLVE=10.0.
 rc, o, e, c = run(m, {A: ('200', '200'), B: ('200', '200')})
 ok('menos RESOLVE que URL: la segunda va sin forzar IP', {(x[0], x[1]) for x in c} == {(A, '10.0.0.1'), (B, '')}, str(c))
 
+print('\n\033[1m4. Informes grandes: el CMS de filemon rechazaba cuerpos de más de 16 KB (HTTP 400 «JSON no válido»)\033[0m')
+import json
+m = load('URL=%s\nTOKEN_FILE=@TOKEN@\nAPI_PREFIX=/api/v1/edge-guard\n' % A)
+
+
+def mk_path(name, n):
+    return {'path': name, 'public_ip': '203.0.113.9', 'control_ok': True,
+            'results': [{'t': 'cf:198.51.100.%d' % i if i < 40 else 'origin:%032x' % i, 'ok': i % 17 != 0, 'code': '200', 'ms': 12 + i} for i in range(n)]}
+
+
+def mk_dns(n):
+    return [{'t': 'dns:%032x' % i, 'ips': ['198.51.100.%d' % (i % 250), '198.51.100.%d' % ((i + 1) % 250)]} for i in range(n)]
+
+
+def total(bodies):
+    paths = {}
+    for b in bodies:
+        for p in b['paths']:
+            paths.setdefault(p['path'], []).extend(r['t'] for r in p['results'])
+    return paths, [d['t'] for b in bodies for d in b['dns']]
+
+
+small = ([mk_path('ONO', 5), mk_path('Orange', 5)], mk_dns(3))
+bs = m.split_report(*small)
+ok('un informe pequeño va ENTERO en una sola entrega (como siempre)', len(bs) == 1 and bs[0] == {'paths': small[0], 'dns': small[1]})
+
+real = ([mk_path('ONO', 74), mk_path('Orange', 74)], mk_dns(72))
+assert len(json.dumps({'paths': real[0], 'dns': real[1]})) > 16384, 'la prueba debe superar los 16 KB'
+bs = m.split_report(*real)
+ok('el informe real (~17,7 KB) se reparte en varias partes', len(bs) >= 2, str(len(bs)))
+ok('NINGUNA parte pasa de 15.000 bytes (el servidor corta en 16.384)', all(len(json.dumps(b)) <= 15000 for b in bs), str([len(json.dumps(b)) for b in bs]))
+tp, td = total(bs)
+ok('no se pierde ni se duplica ninguna medición ni ningún nombre DNS', tp == {'ONO': [r['t'] for r in real[0][0]['results']], 'Orange': [r['t'] for r in real[0][1]['results']]} and td == [d['t'] for d in real[1]], '%s %s' % ({k: len(v) for k, v in tp.items()}, len(td)))
+ok('cada parte es un informe válido para el servidor (lista «paths» presente)', all(isinstance(b['paths'], list) and isinstance(b['dns'], list) for b in bs))
+
+huge = ([mk_path('ONO', 400)], mk_dns(2))
+bs = m.split_report(*huge)
+tp, td = total(bs)
+ok('una sola ruta enorme (400 objetivos) se parte en trozos con la misma cabecera', len(bs) >= 2 and all(len(json.dumps(b)) <= 15000 for b in bs) and all(p['path'] == 'ONO' and p['public_ip'] == '203.0.113.9' and p['control_ok'] is True for b in bs for p in b['paths']))
+ok('y no se pierde ningún objetivo', tp == {'ONO': [r['t'] for r in huge[0][0]['results']]} and td == [d['t'] for d in huge[1]])
+
+dnsbig = ([mk_path('ONO', 3)], mk_dns(600))
+bs = m.split_report(*dnsbig)
+tp, td = total(bs)
+ok('mucho DNS: va en partes propias, sin perder nombres', all(len(json.dumps(b)) <= 15000 for b in bs) and td == [d['t'] for d in dnsbig[1]] and tp == {'ONO': [r['t'] for r in dnsbig[0][0]['results']]})
+
+# Entrega: run_once con las llamadas simuladas
+import socket as _socket
+orig_gai = _socket.getaddrinfo
+_socket.getaddrinfo = lambda *a, **k: [(2, 1, 6, '', ('198.51.100.7', 443))]
+m.curl = lambda args, timeout=10: '204' if '-w' in args else '203.0.113.9'
+m.check = lambda iface, t: {'t': t[0], 'ok': True, 'code': '200', 'ms': 9}
+targets_txt = '\n'.join(['cf:198.51.100.%d 198.51.100.%d x%d.example' % (i, i, i) for i in range(34)]
+                        + ['origin:%032x 203.0.113.%d y%d.example' % (i, i, i) for i in range(40)]      # como los reales: ids largos
+                        + ['dns:%032x - n%d.example' % (i, i) for i in range(72)])
+sleeps, posts = [], []
+m.time.sleep = lambda s: sleeps.append(s)
+m.PAUSE = 21
+
+
+def run_with(post_codes):
+    posts.clear(); sleeps.clear()
+    codes = iter(post_codes)
+
+    def fake_api(conf, method, path, body=None):
+        if method == 'GET':
+            return '200', targets_txt
+        posts.append(body)
+        return next(codes, '200'), 'ok'
+    m.api = fake_api
+    out, err = io.StringIO(), io.StringIO()
+    with redirect_stdout(out), redirect_stderr(err):
+        c = dict(m.load_conf())
+        c['PATHS'] = 'ONO:,Orange:'   # dos salidas, como en b250 (sin interfaz: la prueba no toca la red)
+        rc = m.run_once(c)
+    return rc, err.getvalue()
+
+
+m.PATHS_BACKUP = None
+rc, e = run_with(['200', '200', '200', '200'])
+ok('con el informe grande se entrega en varias partes, esperando 21 s entre ellas', rc[0] == 0 and len(posts) >= 2 and sleeps == [21] * (len(posts) - 1), '%s posts=%d sleeps=%s' % (rc, len(posts), sleeps))
+ok('ninguna de las partes enviadas pasa de 15.000 bytes', all(len(json.dumps(b)) <= 15000 for b in posts), str([len(json.dumps(b)) for b in posts]))
+rc, e = run_with(['429'])
+ok('si la PRIMERA parte se rechaza, es un fallo (como antes)', rc[0] == 1 and 'HTTP 429' in rc[1])
+rc, e = run_with(['200', '429', '429'])
+ok('si se rechaza una parte POSTERIOR, lo ya entregado vale y no es un fallo', rc[0] == 0 and e == '', '%s %r' % (rc, e))
+_socket.getaddrinfo = orig_gai
+
 print('\n' + ('\033[0;32mTodo correcto: %d comprobaciones\033[0m' % passed if failed == 0 else '\033[0;31m%d fallo(s) de %d\033[0m' % (failed, passed + failed)))
 sys.exit(0 if failed == 0 else 1)
