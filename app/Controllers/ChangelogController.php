@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.373',
+                'date' => '2026-10-18',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Los parámetros de réplica de PostgreSQL los pisaba cualquier fichero posterior de conf.d (15-musedock-standby-params.conf se leía antes que 90-replica-obelix.conf con max_wal_senders = 5 y el arranque como réplica fallaba otra vez en asterisk). Ahora se llama zz-musedock-standby-params.conf (el último en cargarse; el nombre antiguo se migra y se borra) y se comprueba el valor efectivo: si algo lo sigue contradiciendo, se fija también en postgresql.auto.conf, que PostgreSQL lee la última',
+                        'pg_rewind fallaba en Ubuntu porque postgresql.conf está en /etc/postgresql y no en el directorio de datos, y se caía siempre a la copia completa (570 MB en asterisk): ahora se le pasa --config-file cuando hace falta y la versión lo admite (PG ≥ 16, comprobado mirando su ayuda)',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.372',
                 'date' => '2026-10-18',
                 'badge' => 'info',

@@ -1419,6 +1419,9 @@ class ReplicationService
              . escapeshellarg($rewindBin)
              . ' --target-pgdata=' . escapeshellarg($dataDir)
              . ' --source-server=' . escapeshellarg($connStr)
+             // La configuración vive en /etc/postgresql (Ubuntu), no en el directorio de datos: sin esto, si el clúster
+             // necesita terminar una recuperación pg_rewind no la encuentra y falla (PG ≥ 16; antes no existe la opción)
+             . self::pgRewindConfigArg((string)($cluster['config_file'] ?? ''), $dataDir, self::pgRewindSupportsConfigFile($rewindBin))
              . ' --write-recovery-conf --progress 2>&1';
         $rw = static::runChecked($cmd);
         @unlink($pgpass);
@@ -1708,7 +1711,11 @@ class ReplicationService
     // asterisk (max_wal_senders 5) no pudo seguir a obelix (10): el demote deshizo todo, dos
     // veces, y el nodo quedó sin PostgreSQL y sin aviso.
     public const STANDBY_MIN_PARAMS = ['max_connections', 'max_worker_processes', 'max_wal_senders', 'max_prepared_transactions', 'max_locks_per_transaction'];
-    public const STANDBY_PARAMS_FILE = '15-musedock-standby-params.conf';
+    // Se llama zz-… para cargarse el ÚLTIMO de conf.d: PostgreSQL lee los ficheros por orden alfabético y gana el último.
+    // Con «15-…» lo pisaba cualquier fichero posterior (en asterisk, 90-replica-obelix.conf con max_wal_senders = 5 y el
+    // demote volvió a fallar, relevo 2026-10-18). El nombre anterior se migra y se borra.
+    public const STANDBY_PARAMS_FILE = 'zz-musedock-standby-params.conf';
+    public const STANDBY_PARAMS_FILE_OLD = '15-musedock-standby-params.conf';
 
     /** Valores de esos parámetros en un primario (conexión normal). [] si no se pudo consultar. */
     public static function primaryStandbyParams(string $host, int $port, string $user, string $pass): array
@@ -1784,9 +1791,13 @@ class ReplicationService
         }
         $file = $confDir . '/' . self::STANDBY_PARAMS_FILE;
         $current = [];
-        if (is_file($file) && preg_match_all('/^\s*(max_[a-z_]+)\s*=\s*(\d+)\s*$/m', (string)file_get_contents($file), $mm, PREG_SET_ORDER)) {
-            foreach ($mm as $x) {
-                $current[$x[1]] = (int)$x[2];
+        // Valores que ya hubiera, también en el fichero con el nombre anterior (que se migra y se borra)
+        $old = $confDir . '/' . self::STANDBY_PARAMS_FILE_OLD;
+        foreach ([$file, $old] as $f) {
+            if (is_file($f) && preg_match_all('/^\s*(max_[a-z_]+)\s*=\s*(\d+)\s*$/m', (string)file_get_contents($f), $mm, PREG_SET_ORDER)) {
+                foreach ($mm as $x) {
+                    $current[$x[1]] = max((int)($current[$x[1]] ?? 0), (int)$x[2]);
+                }
             }
         }
         foreach ($changes as $k => $v) {
@@ -1803,7 +1814,82 @@ class ReplicationService
             return false;
         }
         @chmod($file, 0644);
+        if (is_file($old)) {
+            @unlink($old);
+        }
         return true;
+    }
+
+    /**
+     * Fija parámetros en postgresql.auto.conf (lo último que lee PostgreSQL: gana a postgresql.conf y a todo conf.d).
+     * Sustituye la línea del mismo parámetro y deja el resto. Es la red de seguridad cuando un fichero posterior de
+     * conf.d contradice el valor que hace falta. $autoConf es parámetro para poder probarlo sobre un fichero temporal.
+     */
+    public static function setAutoConfParams(string $autoConf, array $params): bool
+    {
+        if (!$params) {
+            return false;
+        }
+        $txt = is_file($autoConf) ? (string)@file_get_contents($autoConf) : '';
+        foreach ($params as $name => $value) {
+            if (!preg_match('/^[a-z_]+$/', (string)$name)) {
+                continue;
+            }
+            $txt = (string)preg_replace('/^\s*' . preg_quote((string)$name, '/') . '\s*=.*\R?/m', '', $txt);
+            $txt = rtrim($txt) . "\n" . $name . " = '" . (int)$value . "'\n";
+        }
+        if (@file_put_contents($autoConf, ltrim($txt)) === false) {
+            return false;
+        }
+        @chown($autoConf, 'postgres');
+        @chgrp($autoConf, 'postgres');
+        @chmod($autoConf, 0600);
+        return true;
+    }
+
+    /**
+     * Escribe lo que hace falta (fichero propio de conf.d, el último en cargarse) y COMPRUEBA el valor efectivo con el
+     * clúster parado; los parámetros que sigan por debajo (algo los contradice más tarde) se fijan también en
+     * postgresql.auto.conf. Si no se puede comprobar, se fijan en las dos partes (valores iguales o mayores: inocuo).
+     * Devuelve los parámetros que hubo que fijar además en auto.conf.
+     */
+    public static function applyStandbyParams(array $cluster, array $changes): array
+    {
+        if (!$changes) {
+            return [];
+        }
+        static::writeStandbyParams($cluster, $changes);
+        $still = [];
+        foreach ($changes as $name => $need) {
+            $eff = static::localEffectiveParam($cluster, (string)$name);
+            if ($eff === null || $eff < (int)$need) {
+                $still[$name] = (int)$need;
+            }
+        }
+        if ($still && !empty($cluster['data_dir'])) {
+            static::setAutoConfParams(rtrim((string)$cluster['data_dir'], '/') . '/postgresql.auto.conf', $still);
+            LogService::log('cluster.failover', 'standby-params-auto', ($cluster['key'] ?? '?') . ': algo contradecía conf.d; fijado también en postgresql.auto.conf: ' . json_encode($still));
+        }
+        return $still;
+    }
+
+    /**
+     * Opción de pg_rewind para que encuentre la configuración cuando NO está en el directorio de datos (Debian/Ubuntu:
+     * /etc/postgresql/<ver>/<cluster>/). Sin ella, si el clúster necesita terminar una recuperación, pg_rewind falla
+     * (no encuentra postgresql.conf) y se cae a la copia completa. Solo PG ≥ 16 la admite. Pura.
+     */
+    public static function pgRewindConfigArg(string $configFile, string $dataDir, bool $supported): string
+    {
+        if (!$supported || $configFile === '' || $dataDir === '' || str_starts_with($configFile, rtrim($dataDir, '/') . '/')) {
+            return '';
+        }
+        return ' --config-file=' . escapeshellarg($configFile);
+    }
+
+    /** ¿Admite este pg_rewind --config-file? (se mira su ayuda: depende de la versión). */
+    public static function pgRewindSupportsConfigFile(string $bin): bool
+    {
+        return str_contains((string)shell_exec(escapeshellarg($bin) . ' --help 2>&1'), '--config-file');
     }
 
     /**
@@ -1824,7 +1910,7 @@ class ReplicationService
             }
         }
         $changes = static::standbyParamChanges($primary, $local);
-        if ($changes && static::writeStandbyParams($cluster, $changes)) {
+        if ($changes && static::applyStandbyParams($cluster, $changes) !== null) {
             $txt = [];
             foreach ($changes as $k => $v) {
                 $txt[] = "{$k} " . ($local[$k] ?? '?') . ' → ' . $v;
@@ -1844,7 +1930,7 @@ class ReplicationService
         $log = '/var/log/postgresql/postgresql-' . $cluster['version'] . '-' . $cluster['cluster'] . '.log';
         $tail = (string)shell_exec('tail -n 60 ' . escapeshellarg($log) . ' 2>/dev/null');
         $need = static::standbyParamsFromLog($tail);
-        if ($need && static::writeStandbyParams($cluster, $need)) {
+        if ($need && static::applyStandbyParams($cluster, $need) !== null) {
             LogService::log('cluster.failover', 'standby-params-log', "{$cluster['key']}: " . json_encode($need));
             return $need;
         }
