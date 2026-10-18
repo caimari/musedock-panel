@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.377',
+                'date' => '2026-10-18',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'La sonda de bloqueos de Cloudflare ya no depende de que la máquina tenga ruta IPv6: la comprobación de control y la IP pública van por IPv4 explícito (b250 no tiene ruta IPv6 y daba «red inalcanzable» inmediato, que no es un bloqueo).',
+                        'vigila-memoria (y unidades parecidas) bloqueaba el ready: true del preflight de la réplica: una unidad que el master no tiene habilitada y a la que le falta su programa en la réplica ya no cuenta como problema (se omite y se anota); las habilitadas en el master siguen avisando.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.375',
                 'date' => '2026-10-18',
                 'badge' => 'info',

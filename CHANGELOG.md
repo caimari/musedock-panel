@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.377] — 2026-10-18 — Sondas y réplicas sin falsos avisos
+
+### Corregido
+- **La sonda de bloqueos de Cloudflare ya no depende de que la máquina tenga ruta IPv6.** Los objetivos ya se medían por IPv4 (IP fija con `--resolve`); la comprobación de control y la IP pública usaban el DNS y podían intentar IPv6 (b250 no tiene ruta IPv6: «red inalcanzable» inmediato, no un bloqueo). Ahora van por IPv4 explícito, y si el control falla la salida se da por «sin internet» y no se acusa a nadie de bloquear.
+- **`vigila-memoria` (y cualquier unidad parecida) bloqueaba el `ready: true` del preflight de la réplica.** La copia de configuración llevaba solo el `.service` y no su programa ni su temporizador. Una unidad que el master no tiene habilitada (la lanza un temporizador o es local del nodo) y a la que le falta su programa en la réplica ya no cuenta como problema: se omite y queda anotada. Las unidades habilitadas en el master a las que les falte el programa siguen avisando, porque tras el relevo nadie las arrancaría.
+
 ## [1.0.375] — 2026-10-18 — La revisión de correo entiende las réplicas
 
 ### Corregido
@@ -9,6 +15,7 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 
 - **Una réplica sin correo local seguía en «error» por «PostgreSQL local no responde en el nodo de mail».** En una réplica (esclavo/aislado) la comprobación de la base de datos de correo ya no es un fallo y no pausa la cola; un principal con PostgreSQL caído sigue dando «down».
 - **Los alias no llegaban a la ruta de Caddy de las réplicas** (`img.picalias.com` sin ruta ni certificado en Filemon tras el relevo, y la sonda lo daba por caído). El reparador de rutas (cada 10 min) ya no se conforma con que exista la ruta del hosting: si le faltan alias entre sus hosts, la rehace.
+
 
 ### Añadido
 - Pruebas: `tests/mail_node_standby_test.php` (14 comprobaciones).

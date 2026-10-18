@@ -1387,6 +1387,13 @@ final class ConfigMirrorService
                 continue;
             }
             $problems = self::unitProblems($content);
+            if ($problems && empty($u['enabled'])) {
+                // Unidad que el master no tiene habilitada (la lanza un temporizador o es del propio nodo, p. ej.
+                // vigila-memoria en filemon): al relevo nadie la arrancaría, así que que falte su programa aquí no
+                // impide tomar el mando. Se omite sin avisar como fallo (2026-10-18: bloqueaba ready=true).
+                $actions[] = ['what' => "systemd/{$name}", 'result' => 'omitido (local del master, no habilitado: ' . implode('; ', $problems) . ')'];
+                continue;
+            }
             if ($problems) {
                 $issues[] = "systemd {$name}: " . implode('; ', $problems) . ' (¿faltan sus ficheros? se reintentará)';
                 $actions[] = ['what' => "systemd/{$name}", 'result' => 'omitido'];

@@ -210,8 +210,8 @@ def run_once(conf):
         label, _, iface = item.partition(':')
         iface = iface.strip()
         pre = ['--interface', iface] if iface else []
-        public_ip = curl(pre + ['--max-time', '6', 'https://api.ipify.org']).strip()[:64]
-        ctl = curl(pre + ['-o', '/dev/null', '-w', '%{http_code}', '--max-time', '6', conf['CONTROL']]).strip()
+        public_ip = curl(pre + ['-4', '--max-time', '6', 'https://api.ipify.org']).strip()[:64]
+        ctl = curl(pre + ['-4', '-o', '/dev/null', '-w', '%{http_code}', '--max-time', '6', conf['CONTROL']]).strip()
         control_ok = ctl.isdigit() and 200 <= int(ctl) < 400
         results = []
         if control_ok and targets:
