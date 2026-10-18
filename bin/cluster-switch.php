@@ -85,7 +85,8 @@ switch ($cmd) {
         break;
 
     case 'fence':
-        $r = FailoverSafetyService::fenceSelf('switchover planificado (cluster-switch.php)');
+        // Razón opcional: php bin/cluster-switch.php fence "promotion of another node" (la usa la orden remota)
+        $r = FailoverSafetyService::fenceSelf((string)($argv[2] ?? '') !== '' && !str_starts_with((string)$argv[2], '--') ? (string)$argv[2] : 'switchover planificado (cluster-switch.php)');
         $out($r);
         break;
 
@@ -94,7 +95,9 @@ switch ($cmd) {
         break;
 
     case 'promote':
-        $r = ClusterService::promoteToMaster(in_array('--force', $argv, true));
+        // --allow-alive: promover aunque el master actual responda y esté sano (lo aparta primero). Sin eso se
+        // rechaza: para cambiar de master a propósito está «Pasar el mando a…» (role-switch), con vuelta atrás.
+        $r = ClusterService::promoteToMaster(in_array('--force', $argv, true), '', in_array('--allow-alive', $argv, true));
         $out($r);
         $ok = !empty($r['ok']);
         if ($ok && Settings::get('cluster_fenced', '0') === '1') {

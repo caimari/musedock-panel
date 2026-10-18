@@ -1231,10 +1231,25 @@ class ReplicationService
         static::runChecked('chown -R postgres:postgres ' . escapeshellarg($dataDir));
         $steps[] = ['name' => 'Sustituir directorio de datos', 'ok' => true, 'output' => "anterior apartado en {$oldDir}"];
 
+        // Una réplica necesita max_wal_senders, max_connections… IGUALES O MAYORES que su primario: si
+        // no, PostgreSQL aborta al arrancar y este paso deshacía todo (2026-10-18, asterisk). Se sube
+        // ANTES de arrancar, en un fichero fuera del directorio de datos.
+        $sp = static::ensureStandbyParams($cluster, $masterIp, $sourcePort, $replUser, $replPass);
+        if (!empty($sp['changes'])) {
+            $steps[] = ['name' => 'Parámetros de réplica', 'ok' => true, 'output' => $sp['message']];
+        }
+
         // Start ONLY this cluster.
         shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
         sleep(2);
         $running = PgClusterService::isRunning($cluster);
+        if (!$running && ($fix = static::fixStandbyParamsFromLog($cluster))) {
+            // El log dice qué valores exige el primario: se aplican y se arranca una vez más.
+            $steps[] = ['name' => 'Parámetros de réplica (según el log)', 'ok' => true, 'output' => json_encode($fix)];
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+            sleep(3);
+            $running = PgClusterService::isRunning($cluster);
+        }
 
         if (!$running) {
             // Rollback: remove the (non-starting) standby and restore the original.
@@ -1440,6 +1455,11 @@ class ReplicationService
         $steps[] = ['name' => 'Configurar standby', 'ok' => true, 'output' => "standby.signal + primary_conninfo → {$newMasterIp}"];
 
         // ── Start as standby ────────────────────────────────────────────
+        // Parámetros de réplica ≥ los del primario, ANTES de arrancar (ver ensureStandbyParams).
+        $sp = static::ensureStandbyParams($cluster, $newMasterIp, $sourcePort, $replUser, $replPass);
+        if (!empty($sp['changes'])) {
+            $steps[] = ['name' => 'Parámetros de réplica', 'ok' => true, 'output' => $sp['message']];
+        }
         shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
         // Poll for up to ~20s instead of a fixed sleep(2): a large cluster can take
         // longer than 2s to open its port after recovery, and a false "no arrancó"
@@ -1448,6 +1468,15 @@ class ReplicationService
         for ($i = 0; $i < 10; $i++) {
             usleep(2_000_000); // 2s
             if (PgClusterService::isRunning($cluster)) { $running = true; break; }
+        }
+        if (!$running && ($fix = static::fixStandbyParamsFromLog($cluster))) {
+            // El log dice qué valores exige el primario: se aplican y se arranca una vez más.
+            $steps[] = ['name' => 'Parámetros de réplica (según el log)', 'ok' => true, 'output' => json_encode($fix)];
+            shell_exec('pg_ctlcluster ' . escapeshellarg($cluster['version']) . ' ' . escapeshellarg($cluster['cluster']) . ' start 2>&1');
+            for ($i = 0; $i < 10; $i++) {
+                usleep(2_000_000);
+                if (PgClusterService::isRunning($cluster)) { $running = true; break; }
+            }
         }
         if (!$running) {
             return ['ok' => false, 'steps' => $steps, 'error' => "El clúster no arrancó tras el rebobinado (se pasa a la copia completa desde el nuevo master)."];
@@ -1671,6 +1700,155 @@ class ReplicationService
         @chown($autoConf, 'postgres');
         @chgrp($autoConf, 'postgres');
         @chmod($autoConf, 0600);
+    }
+
+    // ─── Parámetros que una réplica debe tener IGUALES O MAYORES que su primario ─────────
+    // PostgreSQL aborta el arranque de una réplica con «recovery aborted because of
+    // insufficient parameter settings» si alguno es menor que en el primario. El 2026-10-18
+    // asterisk (max_wal_senders 5) no pudo seguir a obelix (10): el demote deshizo todo, dos
+    // veces, y el nodo quedó sin PostgreSQL y sin aviso.
+    public const STANDBY_MIN_PARAMS = ['max_connections', 'max_worker_processes', 'max_wal_senders', 'max_prepared_transactions', 'max_locks_per_transaction'];
+    public const STANDBY_PARAMS_FILE = '15-musedock-standby-params.conf';
+
+    /** Valores de esos parámetros en un primario (conexión normal). [] si no se pudo consultar. */
+    public static function primaryStandbyParams(string $host, int $port, string $user, string $pass): array
+    {
+        try {
+            $pdo = new \PDO('pgsql:host=' . addcslashes($host, "'") . ";port={$port};dbname=postgres;connect_timeout=5", $user, $pass, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+            $in = "'" . implode("','", self::STANDBY_MIN_PARAMS) . "'";
+            $rows = $pdo->query("SELECT name, setting FROM pg_settings WHERE name IN ({$in})")->fetchAll(\PDO::FETCH_KEY_PAIR);
+            return array_map('intval', $rows ?: []);
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /** Valor efectivo de un parámetro de un clúster PARADO (config + conf.d + auto.conf), o null. */
+    public static function localEffectiveParam(array $cluster, string $name): ?int
+    {
+        $bin = '/usr/lib/postgresql/' . (int)($cluster['version'] ?? 0) . '/bin/postgres';
+        if (!is_executable($bin) || empty($cluster['data_dir']) || empty($cluster['config_file'])) {
+            return null;
+        }
+        $out = trim((string)shell_exec('runuser -u postgres -- ' . escapeshellarg($bin) . ' -C ' . escapeshellarg($name)
+            . ' -D ' . escapeshellarg((string)$cluster['data_dir']) . ' --config-file=' . escapeshellarg((string)$cluster['config_file']) . ' 2>/dev/null'));
+        return ctype_digit($out) ? (int)$out : null;
+    }
+
+    /** Qué parámetros hay que subir: los del primario que superan al valor local (o cuyo valor local se ignora). */
+    public static function standbyParamChanges(array $primary, array $local): array
+    {
+        $changes = [];
+        foreach (self::STANDBY_MIN_PARAMS as $name) {
+            if (!isset($primary[$name]) || $primary[$name] <= 0) {
+                continue;
+            }
+            if (!isset($local[$name]) || $local[$name] < $primary[$name]) {
+                $changes[$name] = (int)$primary[$name];
+            }
+        }
+        return $changes;
+    }
+
+    /**
+     * Lo que dice el log de PostgreSQL cuando rechaza el arranque de una réplica:
+     * «max_wal_senders = 5 is a lower setting than on the primary server, where its value was 10»
+     * (también en español: «…donde su valor era 10»). Devuelve nombre => valor del primario.
+     */
+    public static function standbyParamsFromLog(string $log): array
+    {
+        $found = [];
+        if (preg_match_all('/\b(max_[a-z_]+)\s*=\s*(\d+)\D{0,120}?(?:value was|valor era)\s*(\d+)/i', $log, $m, PREG_SET_ORDER)) {
+            foreach ($m as $x) {
+                if (in_array(strtolower($x[1]), self::STANDBY_MIN_PARAMS, true)) {
+                    $found[strtolower($x[1])] = max((int)($found[strtolower($x[1])] ?? 0), (int)$x[3]);
+                }
+            }
+        }
+        return $found;
+    }
+
+    /**
+     * Escribe los valores en un fichero propio de conf.d (fuera del directorio de datos, así que
+     * sobrevive a que el demote lo reconstruya). Mezcla con lo que ya hubiera: nunca baja un valor.
+     * Sin conf.d (instalación sin include_dir), los pone en postgresql.conf.
+     */
+    public static function writeStandbyParams(array $cluster, array $changes): bool
+    {
+        if (!$changes || empty($cluster['config_file'])) {
+            return false;
+        }
+        $confDir = dirname((string)$cluster['config_file']) . '/conf.d';
+        if (!is_dir($confDir)) {
+            return static::modifyConfigFile((string)$cluster['config_file'], array_map('strval', $changes));
+        }
+        $file = $confDir . '/' . self::STANDBY_PARAMS_FILE;
+        $current = [];
+        if (is_file($file) && preg_match_all('/^\s*(max_[a-z_]+)\s*=\s*(\d+)\s*$/m', (string)file_get_contents($file), $mm, PREG_SET_ORDER)) {
+            foreach ($mm as $x) {
+                $current[$x[1]] = (int)$x[2];
+            }
+        }
+        foreach ($changes as $k => $v) {
+            $current[$k] = max((int)($current[$k] ?? 0), (int)$v);
+        }
+        ksort($current);
+        $body = "# MuseDock: una réplica física necesita estos parámetros IGUALES O MAYORES que su primario\n"
+              . "# (si no, PostgreSQL aborta con «insufficient parameter settings»). Los pone el panel al\n"
+              . "# reincorporar el nodo como réplica; vive fuera del directorio de datos a propósito.\n";
+        foreach ($current as $k => $v) {
+            $body .= "{$k} = {$v}\n";
+        }
+        if (@file_put_contents($file, $body) === false) {
+            return false;
+        }
+        @chmod($file, 0644);
+        return true;
+    }
+
+    /**
+     * ANTES de arrancar el clúster como réplica: sube lo que le falte respecto al primario.
+     * Devuelve ['changes' => nombre=>valor, 'message' => texto].
+     */
+    public static function ensureStandbyParams(array $cluster, string $host, int $port, string $user, string $pass): array
+    {
+        $primary = static::primaryStandbyParams($host, $port, $user, $pass);
+        if (!$primary) {
+            return ['changes' => [], 'message' => 'no se pudieron leer los parámetros del primario (se confía en el log si el arranque falla)'];
+        }
+        $local = [];
+        foreach (self::STANDBY_MIN_PARAMS as $name) {
+            $v = static::localEffectiveParam($cluster, $name);
+            if ($v !== null) {
+                $local[$name] = $v;
+            }
+        }
+        $changes = static::standbyParamChanges($primary, $local);
+        if ($changes && static::writeStandbyParams($cluster, $changes)) {
+            $txt = [];
+            foreach ($changes as $k => $v) {
+                $txt[] = "{$k} " . ($local[$k] ?? '?') . ' → ' . $v;
+            }
+            LogService::log('cluster.failover', 'standby-params', "{$cluster['key']}: " . implode(', ', $txt));
+            return ['changes' => $changes, 'message' => implode(', ', $txt)];
+        }
+        return ['changes' => [], 'message' => 'ya son suficientes'];
+    }
+
+    /**
+     * Último recurso si el clúster no arrancó como réplica: lee del log qué valores exige el
+     * primario y los aplica. Devuelve lo aplicado ([] = el log no habla de parámetros).
+     */
+    public static function fixStandbyParamsFromLog(array $cluster): array
+    {
+        $log = '/var/log/postgresql/postgresql-' . $cluster['version'] . '-' . $cluster['cluster'] . '.log';
+        $tail = (string)shell_exec('tail -n 60 ' . escapeshellarg($log) . ' 2>/dev/null');
+        $need = static::standbyParamsFromLog($tail);
+        if ($need && static::writeStandbyParams($cluster, $need)) {
+            LogService::log('cluster.failover', 'standby-params-log', "{$cluster['key']}: " . json_encode($need));
+            return $need;
+        }
+        return [];
     }
 
     public const POSTGRES_PGPASS = '/var/lib/postgresql/.pgpass';

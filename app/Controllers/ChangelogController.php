@@ -20,6 +20,39 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.371',
+                'date' => '2026-10-18',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Un slave vigilaba su propia IP como si fuera el master: demoteToSlave no actualizaba cluster_master_ip y el latido (por la VPN, IP privada) no sustituía una IP pública ya guardada, así que el slave nunca habría notado que el master real caía. Ahora el demote guarda la IP del nuevo master, el latido sustituye una IP de este mismo servidor y el worker repara los nodos que ya la tenían mal',
+                        'Una réplica de PostgreSQL no arrancaba con parámetros menores que los de su primario (max_wal_senders 5 frente a 10): el demote lo deshacía todo y dejaba el nodo sin PostgreSQL ni aviso. Ahora, antes de arrancar como réplica, iguala max_connections, max_worker_processes, max_wal_senders, max_prepared_transactions y max_locks_per_transaction con los del primario en conf.d/15-musedock-standby-params.conf (fuera del directorio de datos, sobrevive a la reconstrucción) y, si aun así falla, aplica los valores que pide el registro de PostgreSQL y arranca una vez más',
+                        'Dovecot quedó fallido horas tras un reinicio: escucha en la IP de WireGuard y arrancó un segundo antes de que existiera. Dovecot, PostgreSQL y Postfix arrancan ahora después de WireGuard y Dovecot reintenta solo si falla',
+                        'El master que pasó a mandar no copiaba ficheros a nadie (lsyncd sin instalar o sin activar). adoptPeerAsFileSyncTarget instala lsyncd si falta y el worker reintenta cada 10 min poner la copia en marcha hacia cada slave que contesta; en un slave lsyncd se instala pero queda parado',
+                        'Un nodo registrado por un nombre de DNS que el relevo movió al propio servidor fallaba cada minuto con un error de TLS sin sentido: ahora el error lo explica y la preparación del nodo avisa (también de posibles duplicados)',
+                        '«MCP directo: no se pudo mantener la ruta protegida» salía cada minuto sin motivo: ahora dice el motivo y no se repite (cada 30 min o cuando cambia) ni sale en un nodo apartado',
+                        'Promover un nodo dejó al otro apartado y a nadie mandando: la orden de apartarse para el Caddy por el que llegó la petición, la respuesta se perdía y quien promovía abortaba sin deshacer nada. Ahora fence-self y unfence-self contestan antes y actúan 2 s después, quien los pide comprueba el estado (hasta 45 s) en vez de fiarse de la respuesta y, si la promoción se aborta tras pedir el aislamiento, reactiva al otro nodo (comprobado) y avisa',
+                        'Una prueba ordenó apartarse a un servidor real (Filemon, dos veces): fenceOldMaster buscaba el nodo con LIKE %10.10.70.1%, que también casa con .154 y .156. Ahora el nodo se busca por host exacto (getNodeByHost, sin adivinar si hay ambigüedad), un servidor no se aísla a sí mismo y con MUSEDOCK_DISABLE_REMOTE_FENCE=1 (que pone tests/replication_test.php) ninguna orden de aislar ni de reactivar sale hacia otro nodo',
+                        'Un master sano ya no se aparta «a mano»: «Promover» (botón, cluster-switch.php promote, API) se rechaza si el master actual responde y manda a «Pasar el mando a…»; --allow-alive para forzarlo. Con el master caído se promueve como siempre',
+                        '«Reactivar» un nodo apartado ahora devuelve también MariaDB a escritura si el nodo manda (antes solo PostgreSQL; una réplica sigue en solo lectura)',
+                        'Un servicio copiado del master se reiniciaba sin parar (microcortes en Filemon, +4.500 intentos): la copia de configuración ahora comprueba también el script cuando ExecStart lanza python/php/bash/node/perl/ruby y no arranca un servicio al promocionar si le faltan ficheros',
+                        'Ficheros con dueño de administración que la réplica no podía leer (500 en picalias, festgate, cineautor) y carpetas de Laravel que no existían en la réplica (mycellup, relaybuild): ver Añadido',
+                    ],
+                    'added' => [
+                        'ClusterGuardService (cluster-worker): reintenta servicios caídos (máx. 3 veces; solo lo que falló, nunca lo que se paró a mano), avisa si no se arreglan (tipo Servicio caído en un nodo, con las últimas líneas del registro) y avisa de PostgreSQL parado con el motivo probable (no lo arranca solo)',
+                        'Preparación para tomar el mando (cada 30 min): lsyncd, clave SSH de la copia, IP del master, parámetros de réplica de PostgreSQL entre los dos nodos, servicios caídos y nodos mal registrados. Aviso en el dashboard, tipo Nodo no preparado para tomar el mando y herramienta MCP failover_preflight. Acciones de cluster pg-params y node-readiness',
+                        'Guardián de arranque opcional (bin/install-boot-guard.sh, como root): si el nodo era master y otro se promovió después, lo aparta en el arranque, antes de las bases de datos, Caddy y el correo (PostgreSQL de datos en solo lectura desde el primer arranque). Falla siempre abierto y no hace demote; --dry-run en el instalador y en bin/boot-guard.php',
+                        'Dueños de los ficheros de cada web (WebPermissionService, bin/web-permissions.php, en todos los nodos): detecta ficheros de httpdocs cuyo dueño no es root ni el usuario de la web. Cada día solo avisa (perm_guard_mode=fix para corregir también); al promocionar corrige siempre, en segundo plano. Cambia solo dueño y grupo, nunca los permisos ni lo de root, y antes guarda la lista anterior en /var/lib/musedock/permisos-<fecha>.txt (--restore la deshace)',
+                        'Carpetas de Laravel (--laravel-dirs): en webs con artisan crea storage/framework/{views,sessions,cache/data}, storage/logs y bootstrap/cache con el dueño de la web si faltan; al promocionar',
+                        'Prueba de las webs (WebSmokeService, bin/web-smoke.php): portada de cada web contra 127.0.0.1; al promocionar se lanza a los 45 s y un 5xx o sin respuesta avisa con la última línea de error de la web (tipo Webs con error tras un cambio de servidor). Solo lee',
+                        'Opciones de la copia en vivo, apagadas por defecto (MCP filesync_options): preserve_acls (rsync -A -X) y keep_empty_dirs (las carpetas de caché/sesiones/vistas/registros llegan vacías). Nada borra datos',
+                        'Aviso de servicios propios en bucle de reinicios (más de 20 seguidos, una vez cada 12 h)',
+                        'bin/cluster-node-remove.php: quita un nodo duplicado del registro del cluster; por defecto solo simula y enseña qué se ve afectado, --apply lo quita, se niega si hay dominios de correo asignados sin --move-mail-to',
+                        'Docs: Vigilancia de nodos y relevos (nombres de servidor genéricos)',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.370',
                 'date' => '2026-10-17',
                 'badge' => 'info',

@@ -33,6 +33,10 @@ class AlertPolicyService
         'mail_queue'         => ['Cola de correo pausada', 'Altas/cambios de correo hacia un nodo llevan más de 24 h en pausa (el nodo no las recibe).'],
         'replication'        => ['Réplica con problemas', 'PostgreSQL, MariaDB o Redis de este nodo no replican bien (o se recuperan). Mejor no silenciarlo: un relevo podría perder datos.'],
         'lsyncd'             => ['Copia de ficheros (lsyncd)', 'La copia de ficheros a los nodos falla o se recupera.'],
+        'service_down'       => ['Servicio caído en un nodo', 'Un servicio que debería estar en marcha (correo, Caddy, PostgreSQL…) lleva un rato parado o fallido. Se reintenta solo cuando es seguro y se avisa si no se arregla. Mejor no silenciarlo: tras un relevo, un servicio parado deja al nodo sin protección.'],
+        'web_permissions'    => ['Ficheros de una web con dueño ajeno', 'Una web tiene ficheros cuyo dueño no es root ni el usuario de la web (p. ej. editados con un usuario de administración). En el principal la web puede leerlos por una ACL, pero en una réplica no: error 500 tras un relevo. Se avisa una vez por cambio.'],
+        'web_errors'         => ['Webs con error tras un cambio de servidor', 'Tras promocionar un nodo, alguna web da 5xx o no responde al pedir su portada contra 127.0.0.1. El aviso trae la causa (última línea de error de la web).'],
+        'ha_readiness'       => ['Nodo no preparado para tomar el mando', 'Antes de que haga falta: a este nodo le falta algo para poder ser master de verdad (copia de ficheros, parámetros de PostgreSQL, IP del master…). Se avisa una vez por cada cosa que falte.'],
         'system_changes'     => ['Cambios del sistema (posible intruso)', 'Algo nuevo o cambiado donde se instalan apps o se esconde un intruso: carpetas de /opt, /srv, /var/www y /etc, servicios, tareas programadas, /usr/local/bin, claves SSH, ejecutables en /tmp. Se avisa una vez de cada cosa. Mejor no silenciarlo: ignora rutas concretas abajo.'],
         'license'            => ['Licencia del portal', 'La licencia del portal de clientes caduca pronto (14, 7, 3 y 1 días), entra en periodo de gracia o caduca. Una vez por etapa.'],
         'filesync_unsynced'  => ['Carpetas sin copia al relevo', 'En el master: una carpeta de app en /opt o /srv que no se copia al servidor de relevo ni está marcada como propia de la máquina (avisa solo cuando cambia la lista).'],
@@ -57,7 +61,7 @@ class AlertPolicyService
      * (reinicios, pruebas de relevo, mudanzas de VM): se apuntan, pero no se envían.
      */
     public const MAINTENANCE_TYPES = ['replication', 'node_down', 'mail_node', 'mail_queue', 'witness', 'lsyncd', 'cert',
-        'config_mirror', 'monitor_gap', 'server_reboot'];
+        'config_mirror', 'monitor_gap', 'server_reboot', 'service_down'];
 
     public const EXPLAIN = [
         'node_down' => ['Un servidor del cluster ha dejado de responder a los demás (o ha vuelto).',
@@ -92,6 +96,14 @@ class AlertPolicyService
             'Mira el diagnóstico del correo: si el principal está caído o reiniciándose, la réplica se reengancha sola al volver. Si el principal responde, revisa Ajustes → Replicación o pide failover_preflight por MCP. Para trabajos programados, activa antes el modo mantenimiento.'],
         'lsyncd' => ['La copia de ficheros de las webs hacia el otro servidor va mal (o se ha recuperado).',
             'Mientras dure, el otro servidor no tiene los últimos cambios de las webs. Revisa Cluster → Archivos.'],
+        'service_down' => ['Un servicio que debería estar funcionando en este servidor está parado o ha fallado.',
+            'El aviso dice cuál y desde cuándo. Si es de correo o de la base de datos tras un relevo, el nodo no está haciendo de réplica: mira el motivo en el aviso o con journalctl -u <servicio>. El panel ya lo ha intentado arrancar cuando es seguro hacerlo.'],
+        'web_permissions' => ['Hay webs con ficheros cuyo dueño no es root ni el usuario con el que corre la web.',
+            'El aviso lista cada web y ejemplos. Corregirlo: php bin/web-permissions.php --fix (guarda antes los dueños anteriores en /var/lib/musedock/permisos-*.txt y se puede deshacer con --restore). Con perm_guard_mode=fix se corrige solo cada día; al promocionar un nodo se corrige siempre.'],
+        'web_errors' => ['Alguna web da error (5xx o sin respuesta) al probarla contra este mismo servidor tras un cambio de rol.',
+            'El aviso trae la última línea de error de cada web. Las causas habituales: un fichero que el usuario de la web no puede leer, una carpeta de Laravel que no existe (storage/framework/…) o una base de datos en solo lectura. Repetir la prueba: php bin/web-smoke.php.'],
+        'ha_readiness' => ['Este servidor no está del todo preparado para tomar el mando si el otro cae.',
+            'El aviso lista qué falta (por ejemplo lsyncd sin instalar, un parámetro de PostgreSQL menor que el del master o una IP del master mal guardada). Se arregla antes de que haga falta, no durante el relevo.'],
         'security_report' => ['Resumen diario de los ataques (intentos de contraseña, escaneos de WordPress…) que fail2ban ha visto y bloqueado en las últimas 24 h.',
             'Normalmente nada: fail2ban ya bloqueó a quien insistía. Si ves una IP tuya bloqueada, desbloquéala (MCP fail2ban_manage) y añádela a la lista blanca.'],
         'witness' => ['Un testigo externo (el servidor que confirma las caídas antes de un relevo) no responde, o vuelve.',

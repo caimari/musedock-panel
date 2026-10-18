@@ -316,6 +316,22 @@ class ClusterService
         Database::update('cluster_nodes', $data, 'id = :id', ['id' => $id]);
     }
 
+    /**
+     * Nodo cuyo host (el de api_url) ES exactamente esta IP o nombre. Nunca por subcadena: buscar «10.10.70.1» con
+     * LIKE '%10.10.70.1%' también casa 10.10.70.154 y 10.10.70.156, y así una prueba que quería aislar a mortadelo
+     * ordenó apartarse a Filemon (relevo 2026-10-18). null si ninguno o si hay más de uno (ambiguo: no se adivina).
+     */
+    public static function getNodeByHost(string $host): ?array
+    {
+        $found = [];
+        foreach (self::getNodes() as $n) {
+            if (strcasecmp((string)(parse_url((string)($n['api_url'] ?? ''), PHP_URL_HOST) ?: ''), $host) === 0) {
+                $found[] = $n;
+            }
+        }
+        return count($found) === 1 ? $found[0] : null;
+    }
+
     public static function removeNode(int $id): void
     {
         // Delete related queue items first (cascade should handle it, but be explicit)
@@ -827,10 +843,65 @@ class ClusterService
         $token = ReplicationService::decryptPassword($node['auth_token']);
         $apiUrl = rtrim($node['api_url'], '/');
 
-        return self::callNodeDirect($apiUrl, $token, $method, $endpoint, $data, 30, [
+        $res = self::callNodeDirect($apiUrl, $token, $method, $endpoint, $data, 30, [
             'metadata' => $node['metadata'] ?? null,
             'node_id'  => (int)$node['id'],
         ]);
+        // Un nodo registrado por un nombre que el relevo ha movido a ESTE servidor falla con un
+        // error de TLS que no dice nada (se estaba llamando a sí mismo): se explica.
+        if (empty($res['ok']) && !empty($res['error'])) {
+            $res['error'] = ClusterGuardService::explainNodeError($apiUrl, (string)$res['error']);
+        }
+        return $res;
+    }
+
+    /**
+     * En el MASTER, cada pocos minutos: si la copia de ficheros se usa en el cluster pero este
+     * master no está emitiendo (lsyncd sin activar o parado), la pone en marcha hacia cada slave
+     * que ya contesta. Al promover un nodo con el antiguo master caído no se pudo hacer (sin SSH
+     * al otro lado) y nadie lo reintentaba al volver: Filemon y Obelix quedaron sin copiar ficheros
+     * horas tras el relevo del 2026-10-18. adoptPeerAsFileSyncTarget es idempotente.
+     */
+    public static function ensureFileSyncTowardSlaves(): string
+    {
+        if (Settings::get('cluster_role', '') !== 'master' || is_file(FailoverSafetyService::FENCE_FLAG) || !ClusterGuardService::filesyncWanted()) {
+            return '';
+        }
+        if (FileSyncService::getConfig()['sync_mode'] !== 'lsyncd' && Settings::get('filesync_enabled', '0') === '1') {
+            return ''; // modo periódico: lo hace el worker de copia, no lsyncd
+        }
+        $running = trim((string)shell_exec('systemctl is-active lsyncd 2>/dev/null')) === 'active';
+        if ($running && Settings::get('filesync_enabled', '0') === '1') {
+            return '';
+        }
+        if (time() - (int)Settings::get('filesync_ensure_at', '0') < 600) {
+            return '';
+        }
+        Settings::set('filesync_ensure_at', (string)time());
+        $mine = ClusterGuardService::localIps();
+        $done = [];
+        foreach (self::getNodes() as $n) {
+            $host = (string)(parse_url((string)($n['api_url'] ?? ''), PHP_URL_HOST) ?: '');
+            if (($n['role'] ?? '') !== 'slave' || ($n['status'] ?? '') !== 'online' || !filter_var($host, FILTER_VALIDATE_IP) || in_array($host, $mine, true)) {
+                continue;
+            }
+            try {
+                $r = self::adoptPeerAsFileSyncTarget($host);
+                $done[] = "{$n['name']}: " . (!empty($r['ok']) ? 'copia de ficheros en marcha' : ('no se pudo (' . ($r['error'] ?? '?') . ')'));
+                if (empty($r['ok']) && time() - (int)Settings::get('filesync_ensure_alert_at', '0') >= 21600) {
+                    Settings::set('filesync_ensure_alert_at', (string)time());
+                    NotificationService::send('Copia de ficheros sin arrancar en ' . gethostname(),
+                        "Este servidor manda pero no está copiando ficheros a «{$n['name']}»: " . ($r['error'] ?? 'error desconocido')
+                        . "\n\nMientras tanto, los ficheros nuevos de las webs solo están aquí.", 'lsyncd');
+                }
+            } catch (\Throwable $e) {
+                $done[] = "{$n['name']}: error " . $e->getMessage();
+            }
+        }
+        if ($done) {
+            LogService::log('cluster.guard', 'filesync-ensure', implode(' | ', $done));
+        }
+        return $done ? 'Copia de ficheros hacia los slaves: ' . implode(' | ', $done) : '';
     }
 
     public static function callNodeDirect(
@@ -2297,6 +2368,14 @@ class ClusterService
         if (is_array($snap) && ($snap['filesync_enabled'] ?? '0') !== '1') {
             return ['ok' => true, 'steps' => array_merge($steps, ['el master no tenía activada la copia de ficheros: no se activa'])];
         }
+        // lsyncd puede no estar instalado (el nodo era una copia y nunca emitió): sin él no hay copia.
+        if (!FileSyncService::isLsyncdInstalled()) {
+            $inst = FileSyncService::installLsyncd();
+            $steps[] = !empty($inst['ok']) ? 'lsyncd instalado (no lo tenía)' : 'ERROR: lsyncd no está instalado y no se pudo instalar';
+            if (empty($inst['ok'])) {
+                return ['ok' => false, 'error' => 'lsyncd no está instalado y no se pudo instalar', 'steps' => $steps];
+            }
+        }
         Settings::set('filesync_enabled', '1');
         $gen = FileSyncService::generateLsyncdConfig();
         shell_exec('systemctl restart lsyncd 2>&1');
@@ -2323,10 +2402,15 @@ class ClusterService
      *                            have physically verified the old master is off)
      * @param string $oldMasterIp old master to fence; defaults to the configured one
      */
-    public static function promoteToMaster(bool $force = false, string $oldMasterIp = ''): array
+    public static function promoteToMaster(bool $force = false, string $oldMasterIp = '', bool $allowAlive = false): array
     {
         $errors = [];
         $results = [];
+
+        // Un slave que se vigila a sí mismo (cluster_master_ip = una IP suya) no sabría a quién aislar.
+        if ($oldMasterIp === '') {
+            ClusterGuardService::ensureMasterIpNotSelf();
+        }
 
         // ── FENCING GATE ────────────────────────────────────────────
         // Promoting while the old master is still alive and writable creates
@@ -2335,9 +2419,30 @@ class ClusterService
         // proven down / stopped, or the operator explicitly forces it.
         $oldMasterIp = $oldMasterIp !== '' ? $oldMasterIp : (string)Settings::get('cluster_master_ip', '');
         if ($oldMasterIp !== '') {
+            // Un master vivo y sano no se aparta para promover otro «a mano»: si el aislamiento o la promoción
+            // fallan a medias se quedan los dos sin servir (2026-10-18). Eso es el cambio de rol planificado.
+            if (!$force && !$allowAlive) {
+                $blocked = FailoverSafetyService::promoteBlockReason($oldMasterIp, FailoverSafetyService::masterIsHealthy($oldMasterIp), $force, $allowAlive);
+                if ($blocked !== null) {
+                    LogService::log('cluster.failover', 'promote-refused', "Promoción rechazada: el master {$oldMasterIp} está sano");
+                    return ['ok' => false, 'results' => $results, 'errors' => [$blocked]];
+                }
+            }
             $fence = FailoverSafetyService::fenceOldMaster($oldMasterIp, $force);
             $results['fencing'] = $fence;
             if (empty($fence['fenced'])) {
+                // Si se le llegó a pedir que se apartara, puede haberlo hecho aunque no lo confirmara: se le deja
+                // como estaba y se avisa, en vez de dejarlo apartado y sin nadie que mande.
+                $undo = FailoverSafetyService::requestUnfence($oldMasterIp);
+                $results['unfence_old_master'] = $undo;
+                LogService::log('cluster.failover', 'promote-aborted', 'Promoción abortada: ' . ($fence['error'] ?? 'no se pudo aislar el master antiguo') . ' · reactivar al master antiguo: ' . ($undo['message'] ?? '?'));
+                try {
+                    NotificationService::send('Promoción abortada en ' . gethostname(),
+                        "Este servidor intentó promoverse pero no pudo aislar al master actual ({$oldMasterIp}): " . ($fence['error'] ?? '?')
+                        . "\n\nReactivar al master antiguo: " . ($undo['message'] ?? '?') . (empty($undo['ok']) ? "\nOJO: si sigue apartado, reactívalo con: php bin/cluster-switch.php unfence (en ese servidor)." : '')
+                        . "\n\nEste servidor sigue como estaba (réplica).");
+                } catch (\Throwable) {
+                }
                 return [
                     'ok'      => false,
                     'results' => $results,
@@ -2415,8 +2520,7 @@ class ClusterService
         // an empty mailbox. The messages are already here because dsync kept this
         // node in sync, so repoint every domain served by the old node to this one.
         try {
-            $localNode = Database::fetchOne("SELECT id FROM cluster_nodes WHERE api_url LIKE :u LIMIT 1",
-                ['u' => '%' . (trim((string)shell_exec("hostname -I | awk '{print \$1}'"))) . '%']);
+            $localNode = self::getNodeByHost(trim((string)shell_exec("hostname -I | awk '{print \$1}'")));
             $oldMailNode = (int)Settings::get('mail_default_node_id', '0');
             $newMailNodeId = $localNode ? (int)$localNode['id'] : 0;
             if ($oldMailNode > 0 && $newMailNodeId > 0 && $oldMailNode !== $newMailNodeId) {
@@ -2570,6 +2674,20 @@ class ClusterService
             $results['unfence'] = FailoverSafetyService::unfenceSelf();
         }
 
+        // Ya mandando: dueños de ficheros de las webs y carpetas de Laravel que lsyncd no copia (en segundo plano,
+        // un relevo no puede esperar a recorrer todas las webs) y, pasados unos segundos, una prueba de cada web
+        // contra este mismo servidor con aviso si alguna da 5xx. Nada de esto toca el relevo si falla.
+        try {
+            $results['web_permissions'] = WebPermissionService::onPromote();
+        } catch (\Throwable $e) {
+            $results['web_permissions'] = 'error: ' . $e->getMessage();
+        }
+        try {
+            $results['web_smoke'] = WebSmokeService::scheduleAfterPromote();
+        } catch (\Throwable $e) {
+            $results['web_smoke'] = 'error: ' . $e->getMessage();
+        }
+
         return [
             'ok'      => empty($errors),
             'results' => $results,
@@ -2721,6 +2839,14 @@ class ClusterService
         } catch (\Throwable) {
         }
         Settings::set('repl_remote_ip', $newMasterIp);
+        // El master que vigila este slave es el NUEVO. Antes se quedaba la IP anterior (la de este
+        // mismo servidor, que era el master) y el latido, que llega por VPN, no la sustituía: el
+        // slave se vigilaba a sí mismo y no notaría que el master real cae (relevo 2026-10-18).
+        Settings::set('cluster_master_ip', $newMasterIp);
+        Settings::set('cluster_master_heartbeat_ip', $newMasterIp);
+        Settings::set('cluster_master_last_heartbeat', date('Y-m-d H:i:s'));
+        Settings::set('cluster_master_down_alerted', '');
+        Settings::set('cluster_master_down_alert_count', '0');
 
         try {
             Database::update('servers', ['role' => 'slave'], 'is_local = true');
@@ -2754,6 +2880,8 @@ class ClusterService
             Settings::set('cluster_fenced', '0');
             $results['unfenced'] = true;
         }
+        // El solo-lectura que el guardián de arranque dejó en conf.d (si lo hubo) ya no procede.
+        FailoverSafetyService::clearFencedReadOnlyConf();
 
         // Lo copiado del master se vuelve a apagar (programas parados, crons off) y el
         // Caddyfile vuelve a ser el propio de slave.

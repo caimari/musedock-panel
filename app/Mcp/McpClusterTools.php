@@ -396,6 +396,16 @@ final class McpClusterTools
                     'apply' => $apply,
                 ]),
             ],
+            'filesync_options' => [
+                'write' => true,
+                'title' => 'Opciones de la copia en vivo (ACL y carpetas vacías)',
+                'description' => 'En ESTE servidor: dos opciones de lsyncd, apagadas por defecto, que arreglan fallos vistos tras el relevo del 2026-10-18. preserve_acls=true: la copia lleva también las ACL y atributos extendidos (rsync -A -X); hoy solo viaja el dueño por nombre, y un fichero que en el principal se lee por una ACL no se podría leer en la réplica (error 500). keep_empty_dirs=true: storage/framework/{cache,sessions,views}, storage/logs, logs y sessions llegan VACÍAS en vez de no llegar (Laravel da 500 «Please provide a valid cache path» si no existen). Ninguna borra datos: lo excluido sigue sin tocarse y lsyncd conserva delete="running". Sin argumentos y con apply=false dice cómo está ahora. Probar primero en un nodo; al aplicar regenera la configuración y recarga lsyncd si está en marcha. Requiere "Permitir acciones que modifican".',
+                'inputSchema' => $o([
+                    'preserve_acls' => ['type' => 'boolean', 'description' => 'Que la copia lleve ACL y atributos extendidos (rsync -A -X)'],
+                    'keep_empty_dirs' => ['type' => 'boolean', 'description' => 'Que las carpetas de caché/sesiones/vistas/registros lleguen vacías'],
+                    'apply' => $apply,
+                ]),
+            ],
             'filesync_extra_paths' => [
                 'write' => true, 'destructive' => true,
                 'title' => 'Carpetas extra en la copia de ficheros',
@@ -468,6 +478,7 @@ final class McpClusterTools
                 ? ['servers' => \MuseDockPanel\Services\Fail2banReportService::clusterSummaries((int)($args['hours'] ?? 24))]
                 : \MuseDockPanel\Services\Fail2banReportService::summary((int)($args['hours'] ?? 24)),
             'filesync_status'       => self::filesyncStatus(),
+            'filesync_options'      => self::filesyncOptions($args),
             'filesync_configure'    => self::filesyncConfigure($args),
             'filesync_extra_paths'  => self::filesyncExtraPaths($args),
             default                 => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
@@ -1659,6 +1670,18 @@ final class McpClusterTools
                 $issues[] = 'Hay réplicas de PostgreSQL conectadas pero el panel no lo tiene registrado: replication_adopt.';
             }
         }
+        // Lo que le falta a este nodo para tomar el mando de verdad: lsyncd sin instalar o parado,
+        // parámetros de PostgreSQL que no cuadran con el otro nodo, IP del master mal guardada,
+        // servicios caídos, nodos registrados por un nombre que el relevo movió (relevo 2026-10-18).
+        try {
+            foreach (\MuseDockPanel\Services\ClusterGuardService::readiness()['issues'] as $gi) {
+                if (($gi['severity'] ?? '') === 'warn') {
+                    $issues[] = $gi['text'];
+                }
+            }
+        } catch (\Throwable) {
+        }
+        $issues = array_values(array_unique($issues));
         // Sin canal de avisos, un fallo de réplica o del master pasa en silencio.
         foreach (self::notifyStatus()['issues'] as $ni) {
             $issues[] = $ni;
@@ -2421,6 +2444,32 @@ final class McpClusterTools
         $r = $fs::reloadLsyncd();
         LogService::log('mcp.filesync', 'extra-paths', 'Carpetas extra: ' . implode(', ', $paths) . ' → nodos ' . implode(',', $nodes));
         return ['applied' => true, 'plan' => $plan, 'lsyncd_running' => !empty($r['ok'])];
+    }
+
+    private static function filesyncOptions(array $args): array
+    {
+        $cfg = \MuseDockPanel\Services\FileSyncService::getConfig();
+        $now = ['preserve_acls' => (bool)$cfg['lsyncd_acls'], 'keep_empty_dirs' => (bool)$cfg['lsyncd_keep_dirs']];
+        $want = [
+            'preserve_acls' => array_key_exists('preserve_acls', $args) ? !empty($args['preserve_acls']) : $now['preserve_acls'],
+            'keep_empty_dirs' => array_key_exists('keep_empty_dirs', $args) ? !empty($args['keep_empty_dirs']) : $now['keep_empty_dirs'],
+        ];
+        $lsyncdRunning = trim((string)shell_exec('systemctl is-active lsyncd 2>/dev/null')) === 'active';
+        $plan = ['ahora' => $now, 'despues' => $want, 'lsyncd_en_marcha' => $lsyncdRunning,
+            'efecto' => ($want === $now ? 'sin cambios' : 'se regenera /etc/lsyncd/lsyncd.conf.lua' . ($lsyncdRunning ? ' y se recarga lsyncd (hace una pasada completa de comprobación; no borra nada al arrancar)' : ' (lsyncd no está en marcha: se usará la próxima vez que arranque)'))];
+        if (empty($args['apply']) || $want === $now) {
+            return ['status' => 'plan', 'apply' => false] + $plan;
+        }
+        \MuseDockPanel\Services\FileSyncService::saveConfig([
+            'filesync_lsyncd_acls' => $want['preserve_acls'] ? '1' : '0',
+            'filesync_lsyncd_keep_dirs' => $want['keep_empty_dirs'] ? '1' : '0',
+        ]);
+        \MuseDockPanel\Services\LogService::log('filesync.options', 'set', 'Copia en vivo: ACL ' . ($want['preserve_acls'] ? 'sí' : 'no') . ', carpetas vacías ' . ($want['keep_empty_dirs'] ? 'sí' : 'no') . ' (via MCP)');
+        $res = $lsyncdRunning ? \MuseDockPanel\Services\FileSyncService::reloadLsyncd() : \MuseDockPanel\Services\FileSyncService::generateLsyncdConfig();
+        if (empty($res['ok'])) {
+            throw new \RuntimeException('Opciones guardadas pero no se pudo regenerar o recargar lsyncd: ' . ($res['error'] ?? '?'));
+        }
+        return ['status' => 'hecho'] + $plan;
     }
 
     private static function filesyncConfigure(array $args): array

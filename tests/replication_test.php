@@ -11,6 +11,10 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
+// SEGURIDAD: estas pruebas se ejecutan en servidores REALES. Una de ellas (fenceOldMaster sobre un master «vivo»)
+// llegó a ordenar a un nodo de verdad que se apartara: el 2026-10-18 apartó a Filemon dos veces y dejó las webs
+// caídas. Con este interruptor, ninguna prueba puede pedirle a otro servidor que se aísle ni que se reactive.
+putenv('MUSEDOCK_DISABLE_REMOTE_FENCE=1');
 spl_autoload_register(function ($class) {
     $prefix = 'MuseDockPanel\\';
     if (strncmp($prefix, $class, strlen($prefix)) !== 0) return;

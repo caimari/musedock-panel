@@ -48,6 +48,12 @@ class FailoverSafetyService
         if (!filter_var($oldMasterIp, FILTER_VALIDATE_IP)) {
             return ['fenced' => false, 'checks' => $checks, 'error' => 'IP del master antiguo no valida'];
         }
+        // Un servidor no puede «aislar al master antiguo» si esa IP es la suya: sería pedirse a sí mismo que se aparte
+        // (o, peor, apartar a otro por una búsqueda imprecisa). Casi siempre es un cluster_master_ip mal guardado.
+        if (!$force && ClusterGuardService::hostIsSelf($oldMasterIp)) {
+            return ['fenced' => false, 'checks' => $checks,
+                'error' => "La IP del master antiguo ({$oldMasterIp}) es de ESTE servidor: no se aísla a sí mismo y promover así dejaría dos masters (split-brain). Revisa cluster_master_ip."];
+        }
 
         // (a) Is its panel API answering?
         $panelUp = self::probe("https://{$oldMasterIp}:8444/", 5);
@@ -101,23 +107,105 @@ class FailoverSafetyService
     /** Ask a node to stop serving (fence itself) via the cluster API. */
     private static function requestSelfFence(string $ip): array
     {
-        $node = Database::fetchOne(
-            "SELECT id FROM cluster_nodes WHERE api_url LIKE :u LIMIT 1",
-            ['u' => '%' . $ip . '%']
-        );
+        // Interruptor de seguridad: con MUSEDOCK_DISABLE_REMOTE_FENCE=1 (lo pone la batería de pruebas) NUNCA se
+        // ordena aislarse a otro servidor. Una prueba que llamó a esta función en producción apartó a Filemon dos
+        // veces el 2026-10-18.
+        if (getenv('MUSEDOCK_DISABLE_REMOTE_FENCE') === '1') {
+            return ['ok' => false, 'message' => 'aislamiento remoto desactivado (MUSEDOCK_DISABLE_REMOTE_FENCE=1)'];
+        }
+        // Nodo EXACTO por su host (no por subcadena: «10.10.70.1» casaba también con 10.10.70.154 y .156)
+        $node = ClusterService::getNodeByHost($ip);
         if (!$node) {
-            return ['ok' => false, 'message' => 'No esta registrado como nodo: no se puede pedir el fencing remoto'];
+            return ['ok' => false, 'message' => 'No esta registrado como nodo (o hay más de uno con esa dirección): no se puede pedir el fencing remoto'];
         }
         try {
             $r = ClusterService::callNode((int)$node['id'], 'POST', 'api/cluster/action', [
                 'action'  => 'fence-self',
                 'payload' => ['reason' => 'promotion of another node'],
             ]);
-            $ok = !empty($r['ok']);
-            return ['ok' => $ok, 'message' => $ok ? 'servicios detenidos' : ($r['error'] ?? 'sin respuesta')];
+            // La respuesta NO es fiable: quien se aísla para su Caddy, y por ese Caddy llegó esta petición, así
+            // que la respuesta puede perderse («Connection reset») aunque el aislamiento se haga (relevo
+            // 2026-10-18: Filemon se apartó y mortadelo, sin respuesta, abortó la promoción y no deshizo nada).
+            // Se mira de verdad: el otro nodo dice que está apartado, o ya no responde por ninguna parte.
+            $answered = !empty($r['ok']);
+            $deadline = time() + 45;
+            do {
+                $st = ClusterService::callNode((int)$node['id'], 'POST', 'api/cluster/action', ['action' => 'query-local-state', 'payload' => []]);
+                $state = is_array($st['data']['state'] ?? null) && !empty($st['ok']) ? $st['data']['state'] : null;
+                if (self::fenceConfirmed($state, self::probe("https://{$ip}:8444/", 4), self::probe("https://{$ip}/", 4), self::tcpProbe($ip, 5432, 2) || self::tcpProbe($ip, 5433, 2))) {
+                    return ['ok' => true, 'message' => 'servicios detenidos (comprobado' . ($answered ? '' : ': la respuesta se perdió, pero el nodo ya está apartado') . ')'];
+                }
+                sleep(3);
+            } while (time() < $deadline);
+            return ['ok' => false, 'message' => 'no se pudo confirmar que el nodo se haya apartado en 45 s' . ($answered ? '' : ' (sin respuesta: ' . ($r['error'] ?? '?') . ')')];
         } catch (\Throwable $e) {
             return ['ok' => false, 'message' => $e->getMessage()];
         }
+    }
+
+    /**
+     * ¿Está apartado el otro nodo? Sí si lo dice él (cluster_fenced) o si no responde por ninguna parte
+     * (panel, web y base de datos). Pura.
+     */
+    public static function fenceConfirmed(?array $remoteState, bool $panelUp, bool $webUp, bool $pgUp): bool
+    {
+        if ($remoteState !== null && !empty($remoteState['cluster_fenced'])) {
+            return true;
+        }
+        return !$panelUp && !$webUp && !$pgUp;
+    }
+
+    /** ¿Responde el master como sano (panel y web)? Un master apartado responde por el panel de rescate pero no sirve webs. */
+    public static function masterIsHealthy(string $ip): bool
+    {
+        return filter_var($ip, FILTER_VALIDATE_IP) !== false
+            && self::probe("https://{$ip}:8444/", 5) && self::probe("https://{$ip}/", 5);
+    }
+
+    /**
+     * Por qué NO promover ahora (null = se puede). Un master vivo y sano se aparta primero para promover otro:
+     * si algo falla a medias se quedan los dos sin servir. Para eso está «Pasar el mando a…» (cambio planificado,
+     * con comprobaciones y vuelta atrás). Pura.
+     */
+    public static function promoteBlockReason(string $oldMasterIp, bool $masterHealthy, bool $force, bool $allowAlive): ?string
+    {
+        if ($oldMasterIp === '' || $force || $allowAlive || !$masterHealthy) {
+            return null;
+        }
+        return "El master actual ({$oldMasterIp}) responde y está sano: promover este servidor lo apartaría y, si algo falla a medias, "
+            . 'se quedarían los dos sin servir (pasó el 2026-10-18). Para cambiar de master a propósito usa «Pasar el mando a…» en el Dashboard '
+            . '(con comprobaciones y vuelta atrás). Si de verdad quieres promover sin ese cambio: php bin/cluster-switch.php promote --allow-alive';
+    }
+
+    /**
+     * Deshace el apartado de otro nodo (si estaba apartado) y comprueba que ya no lo está. Es lo que hay que hacer si
+     * se le pidió apartarse y la promoción no llegó a hacerse.
+     */
+    public static function requestUnfence(string $ip): array
+    {
+        if (getenv('MUSEDOCK_DISABLE_REMOTE_FENCE') === '1') {
+            return ['ok' => false, 'message' => 'reactivación remota desactivada (MUSEDOCK_DISABLE_REMOTE_FENCE=1)'];
+        }
+        $node = ClusterService::getNodeByHost($ip);
+        if (!$node) {
+            return ['ok' => false, 'message' => 'no está registrado como nodo (o hay más de uno con esa dirección)'];
+        }
+        $st = ClusterService::callNode((int)$node['id'], 'POST', 'api/cluster/action', ['action' => 'query-local-state', 'payload' => []]);
+        $state = $st['data']['state'] ?? null;
+        if (!empty($st['ok']) && is_array($state) && empty($state['cluster_fenced'])) {
+            return ['ok' => true, 'message' => 'no estaba apartado'];
+        }
+        ClusterService::callNode((int)$node['id'], 'POST', 'api/cluster/action', ['action' => 'unfence-self', 'payload' => []]);
+        $deadline = time() + 45;
+        do {
+            sleep(3);
+            $st = ClusterService::callNode((int)$node['id'], 'POST', 'api/cluster/action', ['action' => 'query-local-state', 'payload' => []]);
+            $state = $st['data']['state'] ?? null;
+            if (!empty($st['ok']) && is_array($state) && empty($state['cluster_fenced'])) {
+                return ['ok' => true, 'message' => 'reactivado (comprobado)'];
+            }
+        } while (time() < $deadline);
+        return ['ok' => false, 'message' => 'no se pudo confirmar que se haya reactivado'];
     }
 
     /**
@@ -133,7 +221,7 @@ class FailoverSafetyService
      * un nodo apartado que se reinicia (corte de red, proveedor…) volvería a servir
      * webs con datos viejos hasta que el cluster-worker lo apartara otra vez.
      */
-    private static function installFenceGuard(): void
+    public static function installFenceGuard(): void
     {
         $panel = dirname(__DIR__, 2);
         $dropin = "/etc/systemd/system/caddy.service.d/zz-musedock-fence.conf";
@@ -426,6 +514,86 @@ class FailoverSafetyService
         return ['fenced' => true, 'steps' => $steps, 'hooks' => $hooks];
     }
 
+    // ── Apartado desde el arranque (guardián de arranque, bin/boot-guard.php) ─────────
+    // Un master que vuelve tras un reinicio creyéndose master arrancaba sus bases de datos
+    // ESCRIBIBLES y las apps escribían en ellas hasta que el cluster-worker (cron, tras la red) lo
+    // aislaba: 2,5 minutos el 2026-10-18, ~48 KB de WAL que impidieron reincorporarlo solo. ALTER
+    // SYSTEM no sirve con PostgreSQL parado; este fichero de conf.d sí vale desde el primer arranque.
+    public const FENCED_PG_CONF = '90-musedock-fenced.conf';
+
+    /** Clústeres de datos (no el del panel) con su carpeta conf.d. */
+    private static function dataClusterConfDirs(): array
+    {
+        $out = [];
+        $panelPort = (int)\MuseDockPanel\Env::int('DB_PORT', 5432);
+        $all = PgClusterService::listClusters();
+        foreach ($all as $c) {
+            if ($c['cluster'] === 'panel' || (count($all) > 1 && (int)$c['port'] === $panelPort)) {
+                continue;
+            }
+            $dir = dirname((string)($c['config_file'] ?? '')) . '/conf.d';
+            if (is_dir($dir)) {
+                $out[$c['key']] = $dir;
+            }
+        }
+        return $out;
+    }
+
+    /** Pone default_transaction_read_only = on para el próximo arranque de cada clúster de datos. */
+    public static function writeFencedReadOnlyConf(): array
+    {
+        $done = [];
+        foreach (self::dataClusterConfDirs() as $key => $dir) {
+            $f = $dir . '/' . self::FENCED_PG_CONF;
+            $body = "# MuseDock: este nodo está apartado (master caducado): sin escrituras hasta que se reincorpore.\n"
+                  . "# Lo quita el panel al reactivarlo o convertirlo en réplica; no lo borres a mano antes.\ndefault_transaction_read_only = on\n";
+            if (!is_file($f) || file_get_contents($f) !== $body) {
+                @file_put_contents($f, $body);
+                @chmod($f, 0644);
+            }
+            $done[] = $key;
+        }
+        return $done;
+    }
+
+    /** Quita ese fichero (y recarga los clústeres en marcha). Devuelve los clústeres tocados. */
+    public static function clearFencedReadOnlyConf(bool $reload = true): array
+    {
+        $cleared = [];
+        foreach (self::dataClusterConfDirs() as $key => $dir) {
+            $f = $dir . '/' . self::FENCED_PG_CONF;
+            if (is_file($f) && @unlink($f)) {
+                $cleared[] = $key;
+            }
+        }
+        if ($cleared && $reload) {
+            foreach (PgClusterService::listClusters() as $c) {
+                if (in_array($c['key'], $cleared, true) && PgClusterService::isRunning($c)) {
+                    shell_exec('runuser -u postgres -- psql -p ' . (int)$c['port'] . ' -Xc ' . escapeshellarg('SELECT pg_reload_conf()') . ' 2>&1');
+                }
+            }
+        }
+        return $cleared;
+    }
+
+    /**
+     * Versión MÍNIMA del aislamiento para el arranque (la llama bin/boot-guard.php ANTES de que
+     * arranquen las bases de datos, Caddy y el correo): marca el nodo como apartado, deja a Caddy y
+     * al correo sin arrancar y a las bases de datos de datos en solo lectura. No hace demote ni toca
+     * PostgreSQL en marcha (bloquearía el propio arranque): el aislamiento completo, los avisos y la
+     * reincorporación los hace el cluster-worker en cuanto corre.
+     */
+    public static function fenceAtBoot(string $reason): array
+    {
+        @mkdir(dirname(self::FENCE_FLAG), 0755, true);
+        file_put_contents(self::FENCE_FLAG, date('c') . ' boot-guard: ' . $reason . "\n");
+        self::installFenceGuard();
+        shell_exec('systemctl daemon-reload 2>&1');
+        $pg = self::writeFencedReadOnlyConf();
+        LogService::log('cluster.failover', 'boot-fence', 'Apartado desde el arranque: ' . $reason . ($pg ? ' (PostgreSQL de solo lectura: ' . implode(', ', $pg) . ')' : ''));
+        return ['fenced' => true, 'pg_read_only' => $pg];
+    }
+
     /** Undo fenceSelf once this node is legitimately a slave again. */
     public static function unfenceSelf(): array
     {
@@ -437,9 +605,24 @@ class FailoverSafetyService
                 . escapeshellarg('SELECT pg_reload_conf()') . ' 2>&1');
             $steps[] = ['name' => "PostgreSQL {$c['key']}", 'ok' => true, 'output' => 'read-only revertido'];
         }
+        // MariaDB/MySQL: fenceSelf lo puso en solo lectura y reactivar el nodo no lo devolvía a escritura
+        // (relevo 2026-10-18: «reactivar» dejaba MariaDB sin escribir). Solo si este nodo manda: una
+        // réplica debe seguir en solo lectura.
+        if ((Settings::get('cluster_role', '') ?: \MuseDockPanel\Env::get('PANEL_ROLE', 'standalone')) !== 'slave') {
+            try {
+                $pdo = ReplicationService::getMysqlPdo();
+                if ($pdo) {
+                    $pdo->exec('SET GLOBAL read_only = 0');
+                    $steps[] = ['name' => 'MariaDB/MySQL', 'ok' => true, 'output' => 'read_only=0 (vuelve a escribir)'];
+                }
+            } catch (\Throwable $e) {
+                $steps[] = ['name' => 'MariaDB/MySQL', 'ok' => false, 'output' => $e->getMessage()];
+            }
+        }
         // Quitar la marca ANTES de arrancar Caddy (si no, su ExecCondition lo impide) y
         // liberar el puerto del panel (lo tiene el Caddy de rescate).
         @unlink(self::FENCE_FLAG);
+        self::clearFencedReadOnlyConf();
         shell_exec('php ' . escapeshellarg(dirname(__DIR__, 2) . '/bin/panel-rescue.php') . ' stop 2>&1');
         shell_exec('systemctl start caddy 2>&1');
         if ($mail = self::resumeMailIntake()) {

@@ -294,7 +294,10 @@ class ClusterApiController
         if ($callerIp !== '' && $effectiveRole !== 'master') {
             $currentMasterIp = Settings::get('cluster_master_ip', '');
             $isPublic = static fn(string $ip) => filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== false;
-            if ($currentMasterIp === '' || !$isPublic($currentMasterIp) || $isPublic($callerIp)) {
+            // Y si la IP guardada es de ESTE servidor (tras un relevo seguía siendo la suya cuando
+            // era el master), el latido siempre la sustituye: si no, el slave se vigila a sí mismo.
+            if ($currentMasterIp === '' || !$isPublic($currentMasterIp) || $isPublic($callerIp)
+                || \MuseDockPanel\Services\ClusterGuardService::hostIsSelf($currentMasterIp)) {
                 Settings::set('cluster_master_ip', $callerIp);
             }
             Settings::set('cluster_master_heartbeat_ip', $callerIp);
@@ -468,10 +471,21 @@ class ClusterApiController
                 // Stop serving on this node because another node is being promoted.
                 // This is the fencing step that prevents split-brain: without it,
                 // the old master keeps accepting writes while the new one does too.
-                'fence-self'       => \MuseDockPanel\Services\FailoverSafetyService::fenceSelf(
-                    (string)($payload['reason'] ?? 'remote request')
-                ),
-                'unfence-self'     => \MuseDockPanel\Services\FailoverSafetyService::unfenceSelf(),
+                // Aislarse (y reactivarse) PARA el Caddy por el que llegó esta misma petición: la respuesta se
+                // perdía y quien lo pedía creía que había fallado (relevo 2026-10-18: mortadelo abortó su
+                // promoción y Filemon se quedó apartado). Ahora se contesta ya y el cambio se hace 2 s después,
+                // aparte; quien lo pide lo COMPRUEBA preguntando por el estado (query-local-state).
+                'fence-self'       => (function () use ($payload) {
+                    $reason = mb_substr(trim((string)preg_replace('/[^\p{L}\p{N} ._:()\-]/u', '', (string)($payload['reason'] ?? 'remote request'))), 0, 120) ?: 'remote request';
+                    $script = dirname(__DIR__, 2) . '/bin/cluster-switch.php';
+                    shell_exec('nohup sh -c ' . escapeshellarg('sleep 2; php ' . escapeshellarg($script) . ' fence ' . escapeshellarg($reason)) . ' >/dev/null 2>&1 &');
+                    return ['ok' => true, 'deferred' => true, 'note' => 'el aislamiento se hace en 2 s; comprueba con query-local-state (cluster_fenced)'];
+                })(),
+                'unfence-self'     => (function () {
+                    $script = dirname(__DIR__, 2) . '/bin/cluster-switch.php';
+                    shell_exec('nohup sh -c ' . escapeshellarg('sleep 2; php ' . escapeshellarg($script) . ' unfence') . ' >/dev/null 2>&1 &');
+                    return ['ok' => true, 'deferred' => true, 'note' => 'la reactivación se hace en 2 s; comprueba con query-local-state (cluster_fenced)'];
+                })(),
                 'caddy-info'       => \MuseDockPanel\Services\CaddyBinaryService::localInfo(),
                 // Build the missing DNS provider module INTO this node's Caddy via
                 // xcaddy. ASYNC: xcaddy takes minutes but FPM kills requests at
@@ -568,6 +582,10 @@ class ClusterApiController
                 'notify-iface-down' => $this->handleNotifyIfaceDown($payload),
                 'notify-iface-up'   => $this->handleNotifyIfaceUp($payload),
                 'query-local-state' => $this->handleQueryLocalState(),
+                // Parámetros de réplica de PostgreSQL de este nodo (para comparar con el otro) y
+                // qué le falta para tomar el mando (ClusterGuardService).
+                'pg-params'      => ['ok' => true, 'result' => ['params' => \MuseDockPanel\Services\ClusterGuardService::pgParams()]],
+                'node-readiness' => ['ok' => true, 'result' => \MuseDockPanel\Services\ClusterGuardService::readiness()],
                 // Cambio de rol planificado (RoleSwitchService).
                 'role-switch-health'  => ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::health()],
                 'role-switch-promote' => ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::startPromoteHere(

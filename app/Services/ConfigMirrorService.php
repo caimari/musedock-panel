@@ -1317,6 +1317,32 @@ final class ConfigMirrorService
 
     // ── Servicios systemd propios ──
 
+    /**
+     * Para un ExecStart que lanza un intérprete (python, php, bash, node, perl, ruby…), comprueba que exista el
+     * primer argumento que sea una ruta absoluta (el script). Pura salvo por file_exists.
+     */
+    public static function execStartScriptProblems(string $content): array
+    {
+        if (!preg_match('/^\s*ExecStart\s*=\s*[-@+!:]*(.+)$/m', $content, $m)) {
+            return [];
+        }
+        $tokens = preg_split('/\s+/', trim($m[1])) ?: [];
+        $bin = basename((string)array_shift($tokens));
+        if (!preg_match('/^(python[0-9.]*|php[0-9.]*|bash|sh|dash|node(js)?|perl|ruby)$/', $bin)) {
+            return [];
+        }
+        foreach ($tokens as $t) {
+            if ($t === '' || $t[0] === '-') {
+                continue;       // opciones del intérprete (-u, -m x…)
+            }
+            if ($t[0] === '/') {
+                return file_exists($t) ? [] : ["no existe el script {$t}"];
+            }
+            break;              // primer argumento no es una ruta absoluta (módulo, comando…): no se juzga
+        }
+        return [];
+    }
+
     private static function unitProblems(string $content): array
     {
         $p = [];
@@ -1324,6 +1350,12 @@ final class ConfigMirrorService
             $bin = $m[1];
             if (str_starts_with($bin, '/') ? !is_executable($bin) : trim((string)shell_exec('command -v ' . escapeshellarg($bin) . ' 2>/dev/null')) === '') {
                 $p[] = "no existe el ejecutable {$bin}";
+            }
+            // Si el programa es un intérprete (python3 /usr/local/sbin/x), el que importa es el SCRIPT: con
+            // python presente y el script ausente, el servicio se reiniciaba cada 5 s para siempre en la copia
+            // (microcortes en Filemon: más de 4.500 intentos, relevo 2026-10-18).
+            foreach (self::execStartScriptProblems($content) as $sp) {
+                $p[] = $sp;
             }
         } else {
             $p[] = 'sin ExecStart';
@@ -1441,6 +1473,13 @@ final class ConfigMirrorService
         }
         foreach ($state['systemd'] as $name => $enabledOnMaster) {
             if ($enabledOnMaster && is_file("/etc/systemd/system/{$name}")) {
+                // Si le faltan ficheros en este nodo (p. ej. el script que lanza), arrancarlo solo lo deja
+                // reiniciándose cada pocos segundos: se avisa y no se arranca.
+                $unitProblems = self::unitProblems((string)file_get_contents("/etc/systemd/system/{$name}"));
+                if ($unitProblems) {
+                    $done[] = "systemd/{$name}: NO se arranca (" . implode('; ', $unitProblems) . '): copia esos ficheros a este nodo';
+                    continue;
+                }
                 shell_exec('systemctl enable --now ' . escapeshellarg((string)$name) . ' >/dev/null 2>&1');
                 $done[] = "systemd/{$name}: habilitado y arrancado";
             }

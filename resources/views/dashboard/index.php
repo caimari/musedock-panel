@@ -127,6 +127,28 @@
 </div>
 <?php endif; ?>
 
+<!-- Preparación para tomar el mando (ClusterGuardService): lo que falta ANTES de que haga falta -->
+<?php if (!empty($haReadiness)): ?>
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card border-warning">
+            <div class="card-header bg-warning text-dark py-2">
+                <i class="bi bi-exclamation-triangle me-2"></i>Este servidor podría tomar el mando, pero no está completamente preparado
+                <small class="ms-2 fw-normal">(revisado <?= View::e((string)($haReadiness['at'] ?? '')) ?>)</small>
+            </div>
+            <div class="card-body py-2">
+                <ul class="mb-1 small">
+                    <?php foreach ($haReadiness['issues'] as $hrItem): ?>
+                        <li><?= View::e((string)($hrItem['text'] ?? '')) ?></li>
+                    <?php endforeach; ?>
+                </ul>
+                <div class="small" style="color:#cbd5e1">Se revisa cada 30 minutos y se avisa una vez por cada cosa nueva. Conviene arreglarlo ahora y no durante un relevo.</div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <!-- Firewall exposure banner: servicio sensible abierto a todo internet, IPv6 sin
      proteger, orígenes con acceso total no autorizados… (FirewallAuditService) -->
 <?php if (!empty($firewallAudit) && ((int)($firewallAudit['critical'] ?? 0) > 0 || (int)($firewallAudit['warnings'] ?? 0) > 0)): ?>

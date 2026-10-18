@@ -461,6 +461,14 @@ class DocsController
                 'keywords' => 'proteccion dns cloudflare token zonas permitidas prohibidas registros protegidos bloquear escribir relevo failover mcp dns_guard cambio de rol master slave par seguridad limitar',
             ],
             [
+                'title' => 'Vigilancia de nodos y relevos',
+                'description' => 'Lo que el panel comprueba y arregla solo en cada servidor tras (y antes de) un relevo: servicios caídos, IP del master, parámetros de réplica de PostgreSQL, copia de ficheros, orden de arranque con la VPN, guardián de arranque y preparación para tomar el mando.',
+                'url' => '/docs/node-guard',
+                'category' => 'Guia especial',
+                'icon' => 'bi-heart-pulse',
+                'keywords' => 'vigilancia nodos relevo failover guardian arranque split-brain dovecot servicio caido reintento postgresql max_wal_senders parametros replica lsyncd instalar cluster_master_ip wireguard orden arranque preparado tomar el mando demote master caducado apartado nodo duplicado promover fence-self aislar reactivar mariadb permisos dueño ficheros acl laravel storage framework 500 prueba humo webs microcortes bucle reinicios web-permissions web-smoke filesync_options',
+            ],
+            [
                 'title' => 'Fail2ban en el cluster',
                 'description' => 'Que bloquea cada servidor y cuanto tiempo (jaulas normales y lentas, bloqueos crecientes), que se copia entre el que manda y sus copias (lista blanca si, bloqueos no), informe diario y consultas por MCP.',
                 'url' => '/docs/fail2ban-cluster',
@@ -593,6 +601,10 @@ class DocsController
 
         if ($url === '/docs/dns-guard') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'dns-guard.php');
+        }
+
+        if ($url === '/docs/node-guard') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'node-guard.php');
         }
 
         if ($url === '/docs/fail2ban-cluster') {
@@ -1595,6 +1607,14 @@ class DocsController
         View::render('help/config-mirror', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Copia de configuración del master',
+        ]);
+    }
+
+    public function nodeGuard(): void
+    {
+        View::render('help/node-guard', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Vigilancia de nodos y relevos',
         ]);
     }
 

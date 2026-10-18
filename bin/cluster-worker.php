@@ -133,6 +133,42 @@ if (Settings::get('cluster_role', 'standalone') === 'master') {
     }
 }
 
+// ─── Step 0a: Vigilancia del nodo tras relevos (ClusterGuardService) ──
+// Nace del relevo del 2026-10-18: un slave vigilándose a sí mismo, Dovecot fallido horas sin
+// aviso, PostgreSQL sin arrancar, lsyncd sin instalar en el nodo que pasó a mandar.
+// Todo idempotente; nada de esto borra datos. Cada pieza falla por separado.
+foreach ([
+    'IP del master' => static fn() => \MuseDockPanel\Services\ClusterGuardService::ensureMasterIpNotSelf(),
+    'Orden de arranque' => static fn() => \MuseDockPanel\Services\ClusterGuardService::ensureWireguardOrdering(),
+    'Solo-lectura de arranque' => static fn() => \MuseDockPanel\Services\ClusterGuardService::ensureFencedConfConsistent(),
+    'Dueños de ficheros' => static fn() => \MuseDockPanel\Services\WebPermissionService::periodic(),
+    'Servicios' => static fn() => implode(' | ', \MuseDockPanel\Services\ClusterGuardService::ensureServices()),
+    'lsyncd' => static fn() => \MuseDockPanel\Services\FileSyncService::ensureLsyncdInstalled(),
+    'Copia de ficheros' => static fn() => \MuseDockPanel\Services\ClusterService::ensureFileSyncTowardSlaves(),
+] as $guardName => $guardFn) {
+    try {
+        $gm = $guardFn();
+        if ($gm !== '') {
+            logMsg("Guardián · {$guardName}: {$gm}");
+        }
+    } catch (\Throwable $e) {
+        logMsg("Guardián · {$guardName} error: " . $e->getMessage());
+    }
+}
+// Qué le falta a este nodo para tomar el mando de verdad (cada 30 min; avisa una vez por cosa nueva)
+if (time() - (int)Settings::get('ha_readiness_run_at', '0') >= 1800) {
+    Settings::set('ha_readiness_run_at', (string)time());
+    try {
+        $hr = \MuseDockPanel\Services\ClusterGuardService::checkAndNotify();
+        $hw = count(array_filter($hr['issues'], static fn($i) => $i['severity'] === 'warn'));
+        if ($hw > 0) {
+            logMsg("Guardián · Preparación para el mando: {$hw} punto(s) por resolver");
+        }
+    } catch (\Throwable $e) {
+        logMsg('Guardián · Preparación error: ' . $e->getMessage());
+    }
+}
+
 // ─── Step 0b: Copia de la configuración del sistema del master (en un slave) ──
 // Cada 5 min, si está activada (MCP config_mirror): supervisor, cron, Caddyfile y
 // pools de PHP del master, adaptados al papel de reserva y verificados.
@@ -525,7 +561,20 @@ try {
 }
 
 // Restore only an explicitly activated direct MCP route; never touch firewall rules.
-try { \MuseDockPanel\DirectMcp\CaddyRoute::maintain(); } catch (\Throwable) { logMsg('MCP directo: no se pudo mantener la ruta protegida.'); }
+// Si falla, se dice el motivo y no se repite cada minuto (tras un relevo salía 28 veces seguidas
+// sin explicar nada); en un nodo apartado, con el Caddy principal parado a propósito, no se avisa.
+try {
+    \MuseDockPanel\DirectMcp\CaddyRoute::maintain();
+    Settings::set('mcp_route_last_error', '');
+} catch (\Throwable $mcpRouteErr) {
+    $why = $mcpRouteErr->getMessage() !== '' ? $mcpRouteErr->getMessage() : 'sin detalle';
+    $apartado = is_file(\MuseDockPanel\Services\FailoverSafetyService::FENCE_FLAG);
+    if (!$apartado && ($why !== Settings::get('mcp_route_last_error', '') || time() - (int)Settings::get('mcp_route_error_at', '0') >= 1800)) {
+        Settings::set('mcp_route_last_error', $why);
+        Settings::set('mcp_route_error_at', (string)time());
+        logMsg('MCP directo: no se pudo mantener la ruta protegida: ' . $why);
+    }
+}
 
 // ─── Step 0f: Aviso en las terminales si este servidor es copia ─────────
 try {

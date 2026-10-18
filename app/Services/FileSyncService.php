@@ -65,6 +65,10 @@ class FileSyncService
             'rsync_default_excludes' => Settings::get('filesync_rsync_default_excludes', implode("\n", self::FALLBACK_RSYNC_DEFAULT_EXCLUDES)),
             'lsyncd_default_excludes' => Settings::get('filesync_lsyncd_default_excludes', implode("\n", self::FALLBACK_LSYNCD_DEFAULT_EXCLUDES)),
             'lsyncd_auto_heal' => Settings::get('filesync_lsyncd_auto_heal', '0') === '1',
+            // Opcionales (apagadas por defecto; probar primero en un nodo): que viajen las ACL y los atributos
+            // extendidos, y que las carpetas de caché/sesiones/vistas/registros lleguen VACÍAS en vez de no llegar.
+            'lsyncd_acls'      => Settings::get('filesync_lsyncd_acls', '0') === '1',
+            'lsyncd_keep_dirs' => Settings::get('filesync_lsyncd_keep_dirs', '0') === '1',
             'sync_ssl_certs'   => Settings::get('filesync_ssl_certs', '0') === '1',
             'ssl_cert_path'    => Settings::get('filesync_ssl_cert_path', ''),
             'rewrite_db_host'  => Settings::get('filesync_rewrite_dbhost', '1') === '1',
@@ -82,7 +86,7 @@ class FileSyncService
             'filesync_ssh_port', 'filesync_ssh_key_path', 'filesync_ssh_user',
             'filesync_interval', 'filesync_bwlimit', 'filesync_exclude',
             'filesync_rsync_default_excludes', 'filesync_lsyncd_default_excludes',
-            'filesync_lsyncd_auto_heal',
+            'filesync_lsyncd_auto_heal', 'filesync_lsyncd_acls', 'filesync_lsyncd_keep_dirs',
             'filesync_ssl_certs', 'filesync_ssl_cert_path', 'filesync_rewrite_dbhost',
             'filesync_db_dumps', 'filesync_db_dump_mysql', 'filesync_db_dump_pgsql',
             'filesync_db_dump_path',
@@ -92,6 +96,33 @@ class FileSyncService
                 Settings::set($key, $data[$key]);
             }
         }
+    }
+
+    /** Carpetas cuyo CONTENIDO no se copia pero que deben existir en la copia (Laravel necesita storage/framework/*). */
+    public const KEEP_DIR_CONTAINERS = [
+        'storage/framework/cache', 'storage/framework/sessions', 'storage/framework/views',
+        'storage/logs', 'storage/cache', 'logs', 'sessions',
+    ];
+
+    /**
+     * Cambia «carpeta» por «carpeta/*» en esas exclusiones: rsync copia la carpeta VACÍA pero no su contenido.
+     * Hoy se excluye la carpeta entera, así que en la réplica nunca existen y Laravel da 500 («Please provide a
+     * valid cache path», relevo 2026-10-18). El resto de patrones no se toca. Las exclusiones siguen protegidas
+     * del borrado (rsync no borra lo excluido) y delete="running" no borra al arrancar. Pura.
+     */
+    public static function keepDirExcludes(array $patterns): array
+    {
+        $out = [];
+        foreach ($patterns as $p) {
+            $out[] = in_array($p, self::KEEP_DIR_CONTAINERS, true) ? $p . '/*' : $p;
+        }
+        return array_values(array_unique($out));
+    }
+
+    /** Líneas del bloque rsync de lsyncd para que viajen ACL y atributos extendidos (rsync -A -X). Pura. */
+    public static function rsyncPreserveLines(bool $acls): string
+    {
+        return $acls ? "        acls     = true,\n        xattrs   = true,\n" : '';
     }
 
     public static function parseExcludePatterns(string $raw): array
@@ -1625,6 +1656,30 @@ class FileSyncService
         return $path !== '' && file_exists($path);
     }
 
+    /**
+     * En un nodo donde la copia de ficheros se usa (aquí o en lo que mandó el master) pero
+     * lsyncd no está instalado: lo instala en segundo plano (como mucho una vez cada 6 h).
+     * Obelix pasó a mandar el 2026-10-18 sin lsyncd instalado y no copió nada a nadie.
+     * En un slave el paquete queda parado y sin arrancar con el sistema: solo manda el master.
+     * Devuelve el texto de lo hecho o ''.
+     */
+    public static function ensureLsyncdInstalled(): string
+    {
+        if (self::isLsyncdInstalled() || !ClusterGuardService::filesyncWanted()) {
+            return '';
+        }
+        if (time() - (int)Settings::get('lsyncd_install_try_at', '0') < 21600) {
+            return '';
+        }
+        Settings::set('lsyncd_install_try_at', (string)time());
+        $isSlave = (Settings::get('cluster_role', '') ?: \MuseDockPanel\Env::get('PANEL_ROLE', 'standalone')) === 'slave';
+        $script = 'apt-get update -qq; DEBIAN_FRONTEND=noninteractive apt-get install -y -qq lsyncd; mkdir -p /etc/lsyncd'
+            . ($isSlave ? '; systemctl disable --now lsyncd' : '');
+        shell_exec('nohup flock -n /run/musedock-lsyncd-install.lock timeout 600 sh -c ' . escapeshellarg($script) . ' >/dev/null 2>&1 &');
+        LogService::log('filesync', 'install-lsyncd', 'lsyncd no estaba instalado: instalación lanzada en segundo plano');
+        return 'lsyncd no estaba instalado: instalándolo en segundo plano' . ($isSlave ? ' (queda parado: en un slave solo arranca si el nodo pasa a mandar)' : '');
+    }
+
     public static function installLsyncd(): array
     {
         $output = shell_exec('apt-get update -qq 2>&1 && apt-get install -y -qq lsyncd 2>&1');
@@ -2077,6 +2132,9 @@ class FileSyncService
             // Merge built-in excludes + user pattern excludes + specific path exclusions
             $specificExclusions = self::parseExcludePatterns(Settings::get('filesync_exclusions_list', ''));
             $allExcludes = array_unique(array_merge(self::getLsyncdDefaultExcludes(), $userExcludes, $specificExclusions));
+            if (!empty($config['lsyncd_keep_dirs'])) {
+                $allExcludes = self::keepDirExcludes($allExcludes);
+            }
             if (!empty($allExcludes)) {
                 $lua .= "    exclude = {\n";
                 foreach ($allExcludes as $ex) {
@@ -2096,6 +2154,7 @@ class FileSyncService
             $lua .= "    rsync = {\n";
             $lua .= "        binary   = \"/opt/musedock-panel/bin/rsync-nice\",\n";
             $lua .= "        archive  = true,\n";
+            $lua .= self::rsyncPreserveLines(!empty($config['lsyncd_acls']));
             $lua .= "        compress = true,\n";
             $lua .= "        rsh      = \"" . addcslashes($sshRsh, '"') . "\",\n";
             if ($bwLimit > 0) {

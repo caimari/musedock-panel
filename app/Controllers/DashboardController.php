@@ -113,6 +113,15 @@ class DashboardController
             'clusterRole' => $clusterRole,
             // Silent replication drift (dead sync-queue items that never self-heal).
             'syncDrift' => ($clusterRole === 'master') ? ClusterService::getSyncDriftSummary() : ['has_drift' => false],
+            // Qué le falta a este nodo para tomar el mando (ClusterGuardService, cada 30 min en el worker).
+            'haReadiness' => (static function () {
+                $r = json_decode(Settings::get('ha_readiness_last', 'null'), true);
+                if (!is_array($r)) {
+                    return null;
+                }
+                $warn = array_values(array_filter((array)($r['issues'] ?? []), static fn($i) => ($i['severity'] ?? '') === 'warn'));
+                return $warn ? ['issues' => $warn, 'at' => (string)($r['checked_at'] ?? '')] : null;
+            })(),
             // Última auditoría del firewall (la refresca el cluster-worker cada 15 min).
             'firewallAudit' => (static function () {
                 $fw = json_decode(Settings::get('firewall_audit_last', 'null'), true);
