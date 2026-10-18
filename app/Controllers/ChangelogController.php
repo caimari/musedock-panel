@@ -20,6 +20,16 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.374',
+                'date' => '2026-10-18',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'La copia de ficheros salía sin exclusiones ni llave SSH en el nuevo principal (Obelix) y habría copiado y borrado .claude, logs, sessions y storage/framework: la copia de ajustes entre nodos mandaba como cadena vacía lo que el emisor nunca configuró y el receptor perdía sus valores por defecto. Ahora el emisor omite esas claves vacías, el receptor no las copia y quien lee trata el vacío como «sin definir»; filesync_configure se niega a aplicar si las exclusiones o la llave salen vacías (la copia es un espejo que borra)',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.373',
                 'date' => '2026-10-18',
                 'badge' => 'info',

@@ -2357,6 +2357,11 @@ class ClusterService
         if (is_array($snap)) {
             foreach ($snap as $k => $v) {
                 if (str_starts_with((string)$k, 'filesync_') && $k !== 'filesync_extra_nodes') {
+                    // Un valor vacío de lo que tiene valor por defecto (llave SSH, usuario, puerto, exclusiones) no se
+                    // copia: el otro nodo nunca lo configuró y aquí dejaría la copia sin exclusiones (Obelix, 2026-10-18)
+                    if (trim((string)$v) === '' && in_array((string)$k, FileSyncService::NEVER_EMPTY, true)) {
+                        continue;
+                    }
                     Settings::set((string)$k, (string)$v);
                 }
             }

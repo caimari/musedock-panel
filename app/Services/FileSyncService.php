@@ -56,14 +56,14 @@ class FileSyncService
             'enabled'          => Settings::get('filesync_enabled', '0') === '1',
             'sync_mode'        => Settings::get('filesync_sync_mode', 'periodic'), // 'periodic' or 'lsyncd'
             'method'           => Settings::get('filesync_method', 'ssh'),     // 'ssh' or 'https'
-            'ssh_port'         => (int)Settings::get('filesync_ssh_port', '22'),
-            'ssh_key_path'     => Settings::get('filesync_ssh_key_path', '/root/.ssh/id_ed25519'),
-            'ssh_user'         => Settings::get('filesync_ssh_user', 'root'),
+            'ssh_port'         => (int)self::settingOr('filesync_ssh_port', '22'),
+            'ssh_key_path'     => self::settingOr('filesync_ssh_key_path', '/root/.ssh/id_ed25519'),
+            'ssh_user'         => self::settingOr('filesync_ssh_user', 'root'),
             'interval_minutes' => (int)Settings::get('filesync_interval', '10'),
             'bandwidth_limit'  => (int)Settings::get('filesync_bwlimit', '0'), // KB/s, 0=unlimited
             'exclude_patterns' => Settings::get('filesync_exclude', '.cache,*.log,*.tmp,node_modules'),
-            'rsync_default_excludes' => Settings::get('filesync_rsync_default_excludes', implode("\n", self::FALLBACK_RSYNC_DEFAULT_EXCLUDES)),
-            'lsyncd_default_excludes' => Settings::get('filesync_lsyncd_default_excludes', implode("\n", self::FALLBACK_LSYNCD_DEFAULT_EXCLUDES)),
+            'rsync_default_excludes' => self::settingOr('filesync_rsync_default_excludes', implode("\n", self::FALLBACK_RSYNC_DEFAULT_EXCLUDES)),
+            'lsyncd_default_excludes' => self::settingOr('filesync_lsyncd_default_excludes', implode("\n", self::FALLBACK_LSYNCD_DEFAULT_EXCLUDES)),
             'lsyncd_auto_heal' => Settings::get('filesync_lsyncd_auto_heal', '0') === '1',
             // Opcionales (apagadas por defecto; probar primero en un nodo): que viajen las ACL y los atributos
             // extendidos, y que las carpetas de caché/sesiones/vistas/registros lleguen VACÍAS en vez de no llegar.
@@ -133,9 +133,28 @@ class FileSyncService
         return array_values(array_unique($parts));
     }
 
+    /**
+     * Ajustes que NUNCA pueden quedar vacíos (tienen un valor por defecto sensato). Un valor guardado vacío —por
+     * ejemplo copiado desde otro nodo que nunca los configuró— se trata como «sin definir».
+     */
+    public const NEVER_EMPTY = ['filesync_ssh_key_path', 'filesync_ssh_user', 'filesync_ssh_port',
+        'filesync_rsync_default_excludes', 'filesync_lsyncd_default_excludes'];
+
+    /** Valor guardado, o el por defecto si falta O está vacío (Settings::get solo usa el por defecto si falta del todo). Pura salvo Settings. */
+    public static function settingOr(string $key, string $default): string
+    {
+        return self::valueOrDefault(Settings::get($key, ''), $default);
+    }
+
+    /** Pura: el valor si no está vacío (tras recortar), si no el por defecto. */
+    public static function valueOrDefault(string $stored, string $default): string
+    {
+        return trim($stored) !== '' ? $stored : $default;
+    }
+
     public static function getRsyncDefaultExcludes(): array
     {
-        return self::parseExcludePatterns(Settings::get(
+        return self::parseExcludePatterns(self::settingOr(
             'filesync_rsync_default_excludes',
             implode("\n", self::FALLBACK_RSYNC_DEFAULT_EXCLUDES)
         ));
@@ -143,7 +162,7 @@ class FileSyncService
 
     public static function getLsyncdDefaultExcludes(): array
     {
-        return self::parseExcludePatterns(Settings::get(
+        return self::parseExcludePatterns(self::settingOr(
             'filesync_lsyncd_default_excludes',
             implode("\n", self::FALLBACK_LSYNCD_DEFAULT_EXCLUDES)
         ));
@@ -159,7 +178,7 @@ class FileSyncService
     public static function generateSshKey(string $keyPath = ''): array
     {
         if ($keyPath === '') {
-            $keyPath = Settings::get('filesync_ssh_key_path', '/root/.ssh/id_ed25519');
+            $keyPath = self::settingOr('filesync_ssh_key_path', '/root/.ssh/id_ed25519');
         }
 
         if (file_exists($keyPath)) {
@@ -192,7 +211,7 @@ class FileSyncService
     public static function getPublicKey(string $keyPath = ''): string
     {
         if ($keyPath === '') {
-            $keyPath = Settings::get('filesync_ssh_key_path', '/root/.ssh/id_ed25519');
+            $keyPath = self::settingOr('filesync_ssh_key_path', '/root/.ssh/id_ed25519');
         }
         $pubFile = $keyPath . '.pub';
         return file_exists($pubFile) ? trim(file_get_contents($pubFile)) : '';
@@ -234,10 +253,10 @@ class FileSyncService
     public static function testSshConnection(string $host, int $port = 22, string $keyPath = '', string $user = ''): array
     {
         if ($keyPath === '') {
-            $keyPath = Settings::get('filesync_ssh_key_path', '/root/.ssh/id_ed25519');
+            $keyPath = self::settingOr('filesync_ssh_key_path', '/root/.ssh/id_ed25519');
         }
         if ($user === '') {
-            $user = Settings::get('filesync_ssh_user', 'root');
+            $user = self::settingOr('filesync_ssh_user', 'root');
         }
         $user = preg_replace('/[^a-zA-Z0-9_.-]/', '', (string)$user) ?: 'root';
 
@@ -1931,7 +1950,13 @@ class FileSyncService
     {
         $o = [];
         foreach (self::PEER_KEYS as $k) {
-            $o[$k] = Settings::get($k, '');
+            $v = Settings::get($k, '');
+            // Lo que este nodo nunca configuró va como cadena vacía y, al recibirlo, el otro nodo perdía sus valores por
+            // defecto (Obelix: exclusiones y llave SSH vacías; copiaría y borraría .claude, logs, storage/framework…)
+            if ($v === '' && in_array($k, self::NEVER_EMPTY, true)) {
+                continue;
+            }
+            $o[$k] = $v;
         }
         return $o;
     }

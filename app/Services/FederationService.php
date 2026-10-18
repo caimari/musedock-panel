@@ -532,7 +532,7 @@ class FederationService
         $apiUrl = "https://{$publicIp}:{$port}";
 
         // SSH info
-        $sshKeyPath = Settings::get('filesync_ssh_key_path', '/root/.ssh/id_ed25519');
+        $sshKeyPath = FileSyncService::settingOr('filesync_ssh_key_path', '/root/.ssh/id_ed25519');
 
         // Build pairing payload
         $payload = [
@@ -541,8 +541,8 @@ class FederationService
             'url' => $apiUrl,
             'token' => $localToken,
             'ssh_host' => $publicIp,
-            'ssh_port' => (int)Settings::get('filesync_ssh_port', '22'),
-            'ssh_user' => Settings::get('filesync_ssh_user', 'root'),
+            'ssh_port' => (int)FileSyncService::settingOr('filesync_ssh_port', '22'),
+            'ssh_user' => FileSyncService::settingOr('filesync_ssh_user', 'root'),
             'ssh_key' => $sshKeyPath,
             'exp' => time() + 600, // 10 min expiry
         ];

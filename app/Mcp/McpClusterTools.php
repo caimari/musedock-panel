@@ -2509,6 +2509,15 @@ final class McpClusterTools
             'mirror_git' => $mirrorGit,
             'mirror_node_modules' => $mirrorNm,
         ];
+        // La copia es un ESPEJO que borra en el nodo: sin exclusiones copiaría y borraría .claude, logs, sessions,
+        // storage/framework… (Obelix las tenía vacías por una copia de ajustes). Ni se aplica ni se deja pasar el plan.
+        if (!$plan['excludes'] || trim((string)$cfg['ssh_key_path']) === '') {
+            $why = !$plan['excludes'] ? 'la lista de exclusiones está VACÍA (el espejo copiaría y borraría .claude, logs, sessions, storage/framework…)' : 'no hay ruta de llave SSH';
+            if (!empty($args['apply'])) {
+                throw new \RuntimeException("No se aplica: {$why}. Revisa Cluster → Archivos o restaura los valores por defecto.");
+            }
+            $plan['aviso'] = "NO se podría aplicar: {$why}.";
+        }
         if (empty($args['apply'])) {
             return ['applied' => false, 'plan' => $plan, 'next' => 'Muestra el plan al usuario y, si lo confirma, repite con apply=true.'];
         }

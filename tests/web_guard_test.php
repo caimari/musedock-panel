@@ -100,5 +100,17 @@ ok('con ACL: acls y xattrs en el bloque rsync', str_contains(FS::rsyncPreserveLi
 ok('sin ACL (por defecto): nada que añadir', FS::rsyncPreserveLines(false) === '');
 ok('por defecto las dos opciones están apagadas', FS::getConfig()['lsyncd_acls'] === false && FS::getConfig()['lsyncd_keep_dirs'] === false);
 
+section('7. Ajustes de la copia de ficheros que no pueden quedar vacíos (Obelix: exclusiones y llave SSH vacías)');
+ok('un valor vacío cae al por defecto (Settings::get solo lo hace si falta del todo)', FS::valueOrDefault('', '/root/.ssh/id_ed25519') === '/root/.ssh/id_ed25519');
+ok('solo espacios también', FS::valueOrDefault("  \n ", 'root') === 'root');
+ok('un valor real se respeta', FS::valueOrDefault('/root/.ssh/otra', '/root/.ssh/id_ed25519') === '/root/.ssh/otra');
+ok('las 5 claves con valor por defecto están protegidas', array_diff(['filesync_ssh_key_path', 'filesync_ssh_user', 'filesync_ssh_port', 'filesync_rsync_default_excludes', 'filesync_lsyncd_default_excludes'], FS::NEVER_EMPTY) === []);
+ok('las exclusiones por defecto de lsyncd nunca salen vacías', count(FS::getLsyncdDefaultExcludes()) > 5 && in_array('storage/framework/cache', FS::getLsyncdDefaultExcludes(), true));
+ok('las de rsync tampoco', count(FS::getRsyncDefaultExcludes()) > 0);
+ok('la llave SSH, el usuario y el puerto nunca salen vacíos', FS::getConfig()['ssh_key_path'] !== '' && FS::getConfig()['ssh_user'] !== '' && FS::getConfig()['ssh_port'] > 0);
+$snapPeer = FS::snapshotForPeer();
+$emptyBad = array_filter(FS::NEVER_EMPTY, static fn($k) => array_key_exists($k, $snapPeer) && trim((string)$snapPeer[$k]) === '');
+ok('la copia que se manda al otro nodo NUNCA lleva vacío lo que tiene valor por defecto', $emptyBad === [], json_encode($emptyBad));
+
 echo "\n" . ($fail === 0 ? "\033[0;32mTodo correcto: {$pass} comprobaciones\033[0m" : "\033[0;31m{$fail} fallo(s) de " . ($pass + $fail) . "\033[0m") . "\n";
 exit($fail === 0 ? 0 : 1);

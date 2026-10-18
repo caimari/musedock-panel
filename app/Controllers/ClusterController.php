@@ -1149,7 +1149,7 @@ class ClusterController
         View::verifyCsrf();
         header('Content-Type: application/json');
 
-        $keyPath = trim($_POST['key_path'] ?? Settings::get('filesync_ssh_key_path', '/root/.ssh/id_ed25519'));
+        $keyPath = trim($_POST['key_path'] ?? FileSyncService::settingOr('filesync_ssh_key_path', '/root/.ssh/id_ed25519'));
         $result = FileSyncService::generateSshKey($keyPath);
         echo json_encode($result);
         exit;

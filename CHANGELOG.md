@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.374] — 2026-10-18 — La copia de ficheros no pierde sus valores por defecto
+
+### Corregido
+- **La copia de ficheros salía sin exclusiones ni llave SSH en el nuevo principal (Obelix), y habría copiado y borrado `.claude`, logs, sessions, `storage/framework`…** `Settings::get` solo usa el valor por defecto si el ajuste **no existe**; `snapshotForPeer()` mandaba **todas** las claves, y las que el nodo emisor nunca configuró iban como cadena vacía: al recibirlas, el otro nodo las guardaba vacías y perdía los valores por defecto. Ahora: quien envía **omite** las claves vacías que tienen valor por defecto (`FileSyncService::NEVER_EMPTY`: llave SSH, usuario, puerto y las dos listas de exclusiones), quien recibe **no las copia** y quien lee trata un valor vacío como «sin definir» (`settingOr`, también en la federación y en el generador de llaves). Y `filesync_configure` **se niega a aplicar** (y lo avisa ya en el plan) si las exclusiones o la llave salen vacías, porque la copia es un espejo que borra.
+
+### Añadido
+- Pruebas: `tests/web_guard_test.php` pasa a 40 comprobaciones (ajustes que no pueden quedar vacíos).
+
 ## [1.0.373] — 2026-10-18 — El paso a réplica de PostgreSQL, a prueba de los dos fallos de asterisk
 
 El demote de asterisk hacia obelix volvió a fallar por dos motivos que no se vieron antes de un relevo real.
@@ -9,6 +17,7 @@ El demote de asterisk hacia obelix volvió a fallar por dos motivos que no se vi
 ### Corregido
 - **Los parámetros de réplica los pisaba cualquier fichero posterior de `conf.d`.** El fichero se llamaba `15-musedock-standby-params.conf` y PostgreSQL lee `conf.d` por orden alfabético (gana el último): en asterisk, `90-replica-obelix.conf` con `max_wal_senders = 5` lo contradecía y el arranque como réplica fallaba otra vez. Ahora se llama `zz-musedock-standby-params.conf` (el último en cargarse; el nombre antiguo se migra sin bajar ningún valor y se borra) y, además, **se comprueba el valor efectivo** (`postgres -C`) después de escribirlo: si algo lo sigue contradiciendo, se fija también en `postgresql.auto.conf`, que PostgreSQL lee la última. Sirve también para el reintento que lee el motivo del registro.
 - **`pg_rewind` fallaba en Ubuntu** porque `postgresql.conf` está en `/etc/postgresql/<ver>/<cluster>/`, no en el directorio de datos: si el clúster necesita terminar una recuperación no encuentra la configuración y se caía siempre a la copia completa (570 MB en asterisk). Ahora se le pasa `--config-file=<ruta>` cuando hace falta y la versión lo admite (PG ≥ 16; en PG 14 la opción no existe y se comprueba mirando la ayuda del propio `pg_rewind`, no se supone).
+
 
 ### Añadido
 - Pruebas: `tests/standby_params_test.php` pasa a 35 comprobaciones (orden de carga frente a `90-…`, migración del nombre antiguo, `postgresql.auto.conf`, `--config-file`).
