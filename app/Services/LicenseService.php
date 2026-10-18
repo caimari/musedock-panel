@@ -321,7 +321,11 @@ class LicenseService
         $st = self::getPortalStatus();
         $exp = (int)($st['expires'] ?? 0);
         $boundHere = ($st['hostname'] ?? '') === '' || ($st['hostname'] ?? '') === trim((string)gethostname());
-        if ($exp > time() + 23 * 86400 && $boundHere) {
+        // Y si el servidor de licencias aún no conoce este clúster, se renueva UNA vez aunque falte mucho para caducar:
+        // sin eso, si el nodo ligado cae antes de renovar, el nuevo master recibe «Server changed» y el portal se
+        // para (relevo 2026-10-18: licencia válida hasta noviembre, ligada al nombre de máquina de mortadelo).
+        $registered = (string)Settings::get('portal_license_instance_registered', '') === self::instanceId();
+        if ($exp > time() + 23 * 86400 && $boundHere && $registered) {
             return null;
         }
         Settings::set('portal_license_renew_at', (string)time());
@@ -352,6 +356,9 @@ class LicenseService
     private static function storePortalJwt(string $jwt): void
     {
         Settings::set('portal_license_jwt', $jwt);
+        // El servidor de licencias acaba de recibir el identificador de este clúster (renovación o activación lo
+        // mandan): ya puede pasar la licencia a otro nodo del clúster tras un relevo sin «transferirla a mano».
+        Settings::set('portal_license_instance_registered', self::instanceId());
         $file = '/opt/musedock-portal/.license';
         if (is_dir(dirname($file))) {
             @file_put_contents($file, $jwt);

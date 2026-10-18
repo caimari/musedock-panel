@@ -585,6 +585,9 @@ class ClusterApiController
                 // Parámetros de réplica de PostgreSQL de este nodo (para comparar con el otro) y
                 // qué le falta para tomar el mando (ClusterGuardService).
                 'pg-params'      => ['ok' => true, 'result' => ['params' => \MuseDockPanel\Services\ClusterGuardService::pgParams()]],
+                // Configuración de «Bloqueos Cloudflare» de este nodo (ajustes y huellas de sondas, nunca tokens) para
+                // que el master que la tenga en blanco la adopte (FailoverService::pullCfGuardFromPeers). Solo lee.
+                'export-cf-guard' => ['ok' => true, 'result' => \MuseDockPanel\Services\CfGuardService::exportConfig()],
                 'node-readiness' => ['ok' => true, 'result' => \MuseDockPanel\Services\ClusterGuardService::readiness()],
                 // Cambio de rol planificado (RoleSwitchService).
                 'role-switch-health'  => ['ok' => true, 'result' => \MuseDockPanel\Services\RoleSwitchService::health()],
@@ -811,8 +814,12 @@ class ClusterApiController
             $role = Settings::get('cluster_role', '') ?: Env::get('PANEL_ROLE', 'standalone');
             if ($role === 'slave') {
                 foreach ($servers as $srv) {
+                    // Si el primario de esa configuración ES este servidor (tras un relevo el master es el otro y el
+                    // «primario» sigue siendo el titular), esa IP no es la del master que hay que vigilar: dejaba a
+                    // este slave vigilándose a sí mismo cada 30 min (relevo 2026-10-18).
                     if (($srv['role'] ?? '') === 'primary' && ($srv['enabled'] ?? true)
-                        && filter_var($srv['ip'] ?? '', FILTER_VALIDATE_IP)) {
+                        && filter_var($srv['ip'] ?? '', FILTER_VALIDATE_IP)
+                        && !\MuseDockPanel\Services\ClusterGuardService::hostIsSelf((string)$srv['ip'])) {
                         Settings::set('cluster_master_ip', (string)$srv['ip']);
                         break;
                     }
@@ -908,6 +915,12 @@ class ClusterApiController
             $val = Settings::get($key, '');
             if ($val !== '') {
                 $config[$key] = $val;
+            }
+        }
+        // Con «Bloqueos Cloudflare» en blanco aquí, no se manda: no debe pisar la configuración de quien la pide.
+        if (\MuseDockPanel\Services\CfGuardService::isConfigBlank()) {
+            foreach (\MuseDockPanel\Services\CfGuardService::SYNC_KEYS as $k) {
+                unset($config[$k]);
             }
         }
 

@@ -131,6 +131,18 @@ php bin/cf-guard-worker.php --new-probe=NOMBRE --token-file=/root/token   # crea
 </div>
 
 <div class="card mb-4">
+    <div class="card-header"><i class="bi bi-arrow-left-right me-2"></i>Con un par master / réplica</div>
+    <div class="card-body small text-muted">
+        <p>Solo <strong>manda el panel que es master</strong> (una réplica o un nodo apartado muestra el estado pero no toca Cloudflare). Para que el sistema siga protegiendo tras un relevo, dos cosas tienen que seguir al master:</p>
+        <ul class="mb-2">
+            <li><strong>La configuración</strong> (modo, minutos de espera, dominios que no se tocan, zona horaria y las sondas, estas solo como <em>huella</em>: sirve para reconocer a la sonda, no para hacerse pasar por ella; el token nunca viaja) se copia del master a su réplica junto con el resto de la configuración de relevo. Un master con esta pantalla <strong>en blanco</strong> (apagado, sin sondas ni exclusiones) <strong>no la manda</strong>, para no pisar la de una réplica que sí la tiene; al contrario, <strong>la adopta</strong> de ella en cuanto manda (cada 5 min como mucho). Nunca pisa una configuración que ya existe.</li>
+            <li><strong>Las sondas</strong> deben informar a los <strong>dos</strong> paneles, no a uno fijo: <code>URL=https://panel-a:8444,https://panel-b:8444</code> (y, si hace falta, <code>RESOLVE=ip-a,ip-b</code>, una por posición). La sonda entrega el mismo informe a los dos y solo se queja si <em>ninguno</em> lo acepta, así que una réplica o un nodo apartado no llenan el correo. Solo el master actúa sobre Cloudflare.</li>
+        </ul>
+        <p class="mb-0">Si la sonda informa a un solo servidor y ese deja de mandar, el nuevo master ve «ninguna sonda ha informado» y <strong>no cambia nada</strong>: es el caso del relevo del 2026-10-18, que coincidió con un bloqueo de LaLiga y dejó 12 webs sin quitar el proxy.</p>
+    </div>
+</div>
+
+<div class="card mb-4">
     <div class="card-header"><i class="bi bi-wrench me-2"></i>Solución de problemas</div>
     <div class="card-body small text-muted">
         <ul class="mb-0">

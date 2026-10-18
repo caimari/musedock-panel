@@ -9,10 +9,11 @@ solo su token de sonda, que únicamente sirve para pedir la lista y entregar res
 Guía / guide: https://musedock.com/docs/escudo-bloqueos-cloudflare
 
 Configuración / configuration: /etc/musedock-edge-probe.conf (CLAVE=valor)
-    URL=https://tu-cms.example               # tu CMS / your CMS
+    URL=https://tu-cms.example               # tu CMS / your CMS. Varios, separados por comas: URL=https://a:8444,https://b:8444
+                                             # (informa a todos; solo se queja si ninguno acepta: útil con un par master/réplica)
     TOKEN_FILE=/etc/musedock-edge-probe.token
     PATHS=Operadora1:eth0,Operadora2:eth1    # opcional: nombre:interfaz de cada salida; vacío = salida por defecto
-    RESOLVE=10.0.0.1                         # opcional: IP por la que llegar al CMS (p. ej. por WireGuard)
+    RESOLVE=10.0.0.1                         # opcional: IP por la que llegar al CMS (p. ej. por WireGuard); con varias URL, una por posición: RESOLVE=10.0.0.1,10.0.0.2
     API_PREFIX=/api/v1/edge-guard            # MuseDock CMS (por defecto); MuseDock Panel: /api/cf-guard
     INSECURE=1                               # opcional: no comprobar el certificado (paneles con certificado propio)
     CONTROL=https://www.google.com/generate_204   # opcional: web de control
@@ -103,12 +104,32 @@ def check(iface, target):
 
 
 def main():
+    """Informa a uno o VARIOS paneles/CMS (URL=a,b; RESOLVE=ip1,ip2 por posición). Con varios, solo se queja si
+    NINGUNO acepta el informe: un nodo en reserva o apartado no debe llenar el correo de avisos cada minuto.
+    Así la sonda no depende de qué servidor manda en cada momento (tras un relevo seguía informando solo al anterior)."""
     conf = load_conf()
+    urls = [u.strip() for u in conf['URL'].split(',') if u.strip()]
+    resolves = [r.strip() for r in conf.get('RESOLVE', '').split(',')]
+    oks, errs = [], []
+    for i, url in enumerate(urls):
+        c = dict(conf)
+        c['URL'] = url
+        c['RESOLVE'] = resolves[i] if i < len(resolves) else ''
+        rc, msg = run_once(c)
+        (oks if rc == 0 else errs).append(url if rc == 0 else '%s: %s' % (url, msg))
+        if rc != 0 and (len(urls) == 1 or VERBOSE):
+            print(msg, file=sys.stderr)
+    if len(urls) > 1 and not oks:
+        print('Ningún servidor aceptó el informe:\n  ' + '\n  '.join(errs), file=sys.stderr)
+    return 0 if oks else 1
+
+
+def run_once(conf):
+    """Un ciclo completo contra UN servidor. Devuelve (código de salida, mensaje de error)."""
     code, text = api(conf, 'GET', '/targets')
     if code != '200':
         hint = {'401': ' — token incorrecto o revocado', '000': ' — no se llega al servidor: revisa URL, API_PREFIX y RESOLVE'}.get(code, '')
-        print('No se pudo pedir la lista de objetivos (HTTP %s)%s' % (code, hint), file=sys.stderr)
-        return 1
+        return 1, 'No se pudo pedir la lista de objetivos (HTTP %s)%s' % (code, hint)
     targets = []
     dns_names = []
     for line in text.splitlines():
@@ -158,11 +179,10 @@ def main():
     code, text = api(conf, 'POST', '/report', {'paths': paths, 'dns': dns})
     if code != '200':
         hint = ' — normal si el cron acaba de entregar otro (máximo uno cada 20 s)' if code == '429' else ''
-        print('El servidor no aceptó el informe (HTTP %s)%s: %s' % (code, hint, text[:200]), file=sys.stderr)
-        return 1
+        return 1, 'El servidor no aceptó el informe (HTTP %s)%s: %s' % (code, hint, text[:200])
     if VERBOSE:
-        print('Informe entregado: %s' % text.strip()[:200])
-    return 0
+        print('Informe entregado a %s: %s' % (conf['URL'], text.strip()[:200]))
+    return 0, ''
 
 
 VERBOSE = '-v' in sys.argv or '--verbose' in sys.argv

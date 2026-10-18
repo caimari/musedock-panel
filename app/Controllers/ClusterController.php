@@ -1652,6 +1652,10 @@ class ClusterController
                             $keys = \MuseDockPanel\Services\FailoverService::getSyncableConfigKeys();
                             $c = [];
                             foreach ($keys as $k) { $v = \MuseDockPanel\Settings::get($k, ''); if ($v !== '') $c[$k] = $v; }
+                            // Con «Bloqueos Cloudflare» en blanco aquí, no se manda (no pisar la del otro nodo)
+                            if (\MuseDockPanel\Services\CfGuardService::isConfigBlank()) {
+                                foreach (\MuseDockPanel\Services\CfGuardService::SYNC_KEYS as $sk) { unset($c[$sk]); }
+                            }
                             return $c;
                         }),
                         'servers'        => \MuseDockPanel\Services\FailoverService::getServers(),

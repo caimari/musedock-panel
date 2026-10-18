@@ -43,6 +43,52 @@ class CfGuardService
         Settings::set('cf_guard_' . $key, $value ?? '');
     }
 
+    /** Claves de configuración que siguen al que manda (nada de estado: bloqueos, observaciones, inventario). */
+    public const SYNC_KEYS = ['cf_guard_mode', 'cf_guard_restore_minutes', 'cf_guard_excluded', 'cf_guard_display_tz', 'cf_guard_probes'];
+
+    /**
+     * Configuración que sigue al que manda, para el otro nodo. Las sondas viajan solo como HUELLA (sha256), nunca el
+     * token: sirve para reconocer a la sonda, no para hacerse pasar por ella. Sin claves de Cloudflare.
+     */
+    public static function exportConfig(): array
+    {
+        return [
+            'mode' => self::mode(),
+            'restore_minutes' => self::setting('restore_minutes', ''),
+            'excluded' => self::setting('excluded', ''),
+            'display_tz' => self::setting('display_tz', ''),
+            'probes' => array_map(static fn($p) => ['name' => (string)($p['name'] ?? ''), 'hash' => (string)($p['hash'] ?? ''), 'created_at' => (string)($p['created_at'] ?? '')], self::probes()),
+        ];
+    }
+
+    /** ¿Está en blanco (apagado, sin sondas ni exclusiones)? Un nodo así nunca debe pisar la configuración de otro. */
+    public static function isConfigBlank(?array $cfg = null): bool
+    {
+        $cfg ??= self::exportConfig();
+        return ($cfg['mode'] ?? 'off') === 'off' && empty($cfg['probes']) && trim((string)($cfg['excluded'] ?? '')) === '';
+    }
+
+    /**
+     * Qué ajustes adoptar de otro nodo (nombre de ajuste => valor). Pura. Solo si la configuración de aquí está en
+     * blanco y la del otro no: nunca se pisa una configuración que ya existe aquí.
+     */
+    public static function adoptionPlan(array $local, array $peer): array
+    {
+        if (!self::isConfigBlank($local) || self::isConfigBlank($peer)) {
+            return [];
+        }
+        $plan = [
+            'cf_guard_mode' => in_array($peer['mode'] ?? '', self::MODES, true) ? (string)$peer['mode'] : 'off',
+            'cf_guard_probes' => json_encode(array_values(array_filter((array)($peer['probes'] ?? []), static fn($p) => !empty($p['hash']) && preg_match('/^[a-f0-9]{64}$/', (string)$p['hash'])))),
+        ];
+        foreach (['restore_minutes' => 'cf_guard_restore_minutes', 'excluded' => 'cf_guard_excluded', 'display_tz' => 'cf_guard_display_tz'] as $k => $setting) {
+            if (trim((string)($peer[$k] ?? '')) !== '') {
+                $plan[$setting] = (string)$peer[$k];
+            }
+        }
+        return $plan;
+    }
+
     public static function mode(): string
     {
         $m = self::setting('mode', 'off');

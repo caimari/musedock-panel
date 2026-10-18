@@ -1348,7 +1348,50 @@ class FailoverService
             'failover_preferred_ip', 'failover_return_stable_minutes',
             'failover_site_probes', 'failover_site_alive_wait_minutes',
             'filesync_snapshot',
+            // Bloqueos de Cloudflare: la configuración sigue al que manda (solo ajustes y huellas de sondas)
+            'cf_guard_mode', 'cf_guard_restore_minutes', 'cf_guard_excluded', 'cf_guard_display_tz', 'cf_guard_probes',
         ];
+    }
+
+    /**
+     * En el MASTER: si su configuración de «Bloqueos Cloudflare» está en blanco y otro nodo tiene la suya, la adopta
+     * (modo, minutos, exclusiones y las huellas de las sondas). Tras un relevo el nuevo master tenía todo vacío y,
+     * peor, su copia vacía podía pisar la del antiguo. Solo añade y nunca pisa una configuración que ya existe.
+     * Cada 5 min como mucho; sin red cuando ya tiene configuración. Devuelve lo hecho o ''.
+     */
+    public static function pullCfGuardFromPeers(): string
+    {
+        if (Settings::get('cluster_role', '') !== 'master' || !CfGuardService::isConfigBlank()) {
+            return '';
+        }
+        if (time() - (int)Settings::get('cf_guard_adopt_at', '0') < 300) {
+            return '';
+        }
+        Settings::set('cf_guard_adopt_at', (string)time());
+        $local = CfGuardService::exportConfig();
+        foreach (ClusterService::getNodes() as $n) {
+            if (($n['status'] ?? '') === 'offline') {
+                continue;
+            }
+            $r = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'export-cf-guard', 'payload' => []]);
+            $peer = $r['data']['result'] ?? null;
+            if (empty($r['ok']) || !is_array($peer)) {
+                continue;
+            }
+            $plan = CfGuardService::adoptionPlan($local, $peer);
+            if (!$plan) {
+                continue;
+            }
+            foreach ($plan as $k => $v) {
+                Settings::set($k, (string)$v);
+            }
+            CfGuardService::event('info', "Configuración de bloqueos adoptada de «{$n['name']}»: modo {$plan['cf_guard_mode']}, "
+                . count((array)json_decode($plan['cf_guard_probes'], true)) . ' sonda(s)'
+                . (isset($plan['cf_guard_excluded']) ? ', exclusiones' : '') . '.');
+            LogService::log('cf-guard', 'adopt', "Configuración adoptada de {$n['name']}");
+            return "configuración de Bloqueos Cloudflare adoptada de «{$n['name']}» (modo {$plan['cf_guard_mode']})";
+        }
+        return '';
     }
 
     /**
@@ -1410,6 +1453,13 @@ class FailoverService
             $val = Settings::get($key, '');
             if ($val !== '') {
                 $config[$key] = $val;
+            }
+        }
+        // Un master con la configuración de «Bloqueos Cloudflare» en blanco NO la manda: pisaría la de un slave que
+        // sí la tiene (p. ej. tras un relevo, la del antiguo master). Primero la adopta (pullCfGuardFromPeers).
+        if (CfGuardService::isConfigBlank()) {
+            foreach (CfGuardService::SYNC_KEYS as $k) {
+                unset($config[$k]);
             }
         }
 

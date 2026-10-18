@@ -603,6 +603,16 @@ class ClusterGuardService
             $issues[] = $i;
         }
 
+        // Portal de clientes: la licencia sigue al clúster, pero solo si el servidor de licencias conoce el clúster
+        try {
+            if (PortalService::installed() && !empty(LicenseService::getPortalStatus()['active'])
+                && (string)Settings::get('portal_license_instance_registered', '') !== LicenseService::instanceId()) {
+                $issues[] = ['severity' => 'warn', 'key' => 'portal-license-instance',
+                    'text' => 'El servidor de licencias aún no conoce este clúster: si cambia el mando, el portal de clientes no podría renovar su licencia en el nuevo master («Server changed») y se pararía. Se registra solo en cuanto el nodo al que está ligada la renueve; ya: php bin/portal-license.php --renew (en el nodo ligado, como root).'];
+            }
+        } catch (\Throwable) {
+        }
+
         // Servicios que llevan caídos un rato
         $state = json_decode((string)Settings::get(self::SERVICE_STATE, '{}'), true);
         foreach ((is_array($state) ? $state : []) as $unit => $st) {

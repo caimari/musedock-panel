@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.372',
+                'date' => '2026-10-18',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'La sonda de bloqueos de Cloudflare informa a varios paneles (URL=https://a:8444,https://b:8444, RESOLVE=ip1,ip2 por posición): entrega el mismo informe a todos y solo se queja si ninguno lo acepta, así que una réplica o un nodo apartado no llenan el correo y no depende de qué servidor manda',
+                        'bin/portal-license.php: estado de la licencia del portal en este nodo y --renew (como root) para renovarla a mano',
+                    ],
+                    'fixed' => [
+                        '«Bloqueos Cloudflare» no protegía nada tras el relevo: su configuración vivía solo en el panel donde se guardó (el nuevo master la tenía apagada y sin sondas) y las sondas informaban a una IP fija del anterior. Ahora modo, minutos, exclusiones, zona y las huellas de las sondas (nunca los tokens) siguen al master; un master con esa pantalla en blanco no la manda (no pisa la de la réplica) y la adopta de ella al mandar, sin pisar nunca una configuración existente',
+                        'La copia de configuración dejaba a una réplica vigilándose a sí misma cada 30 min: ahora se ignora el primario de la configuración si es una IP de este mismo servidor',
+                        'Las alertas de tipo secondary, primary, light y dark salían con fondo claro y letra blanca (cuadro blanco sin texto visible en Bloqueos Cloudflare y en la pestaña de credenciales de MCP): ya se ven en el tema oscuro',
+                        'El portal de clientes se paraba en el nuevo master: la licencia está ligada al nombre de máquina del anterior y solo pasa sola al nuevo si el servidor de licencias ya conoce el identificador del clúster, cosa que solo ocurría al renovar el nodo ligado (con más de 23 días de validez no renovaba nunca). Ahora se renueva una vez para registrarlo, la preparación del nodo avisa mientras falte y bin/portal-license.php (estado, --renew como root) lo hace a mano y enseña el motivo literal si el servidor de licencias rechaza',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.371',
                 'date' => '2026-10-18',
                 'badge' => 'info',

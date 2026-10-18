@@ -87,6 +87,11 @@
         .alert-warning { background: rgba(120,53,15,0.34) !important; border-color: rgba(251,191,36,0.35) !important; color: #fde68a !important; }
         .alert-success { background: rgba(20,83,45,0.34) !important; border-color: rgba(34,197,94,0.35) !important; color: #bbf7d0 !important; }
         .alert-info { background: rgba(12,74,110,0.34) !important; border-color: rgba(56,189,248,0.35) !important; color: #bae6fd !important; }
+        /* Los demás tipos de Bootstrap salían con fondo claro y letra clara (cuadro blanco sin texto visible en «Bloqueos Cloudflare») */
+        .alert-secondary { background: rgba(148,163,184,0.14) !important; border-color: rgba(148,163,184,0.35) !important; color: #cbd5e1 !important; }
+        .alert-primary { background: rgba(30,64,175,0.30) !important; border-color: rgba(96,165,250,0.35) !important; color: #bfdbfe !important; }
+        .alert-light { background: rgba(226,232,240,0.10) !important; border-color: rgba(226,232,240,0.30) !important; color: #e2e8f0 !important; }
+        .alert-dark { background: rgba(2,6,23,0.55) !important; border-color: rgba(100,116,139,0.40) !important; color: #cbd5e1 !important; }
         .form-control::placeholder { color: #475569; }
         option { background: #1e293b; color: #e2e8f0; }
         .card-body { background: transparent; }

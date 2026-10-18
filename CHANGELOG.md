@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.372] — 2026-10-18 — La licencia del portal sigue al clúster
+
+### Corregido
+- **El portal de clientes se paraba en el nuevo master (licencia ligada al nombre de máquina del anterior).** La licencia sigue al clúster, pero solo si el servidor de licencias ya conoce el identificador del clúster (`portal_instance_id`), y eso solo ocurría cuando el nodo ligado renovaba (con más de 23 días de validez no renovaba nunca): si caía antes, el nuevo master recibía «Server changed». Ahora la renovación automática se fuerza **una vez** aunque falte mucho para caducar, hasta que el servidor de licencias confirma el clúster (`portal_license_instance_registered`); la preparación del nodo avisa mientras falte; y `bin/portal-license.php` (estado) / `--renew` (como root) lo hace a mano y enseña el motivo literal si el servidor de licencias rechaza.
+
+- **«Bloqueos Cloudflare» no protegía nada tras el relevo.** Toda su configuración (`cf_guard_*`) vivía solo en el panel donde se guardó: el nuevo master la tenía apagada y sin sondas, y encima las sondas informaban a una IP fija del anterior. Con un bloqueo de LaLiga activo, 12 webs se quedaron sin quitar la nube naranja. Ahora la configuración (modo, minutos, exclusiones, zona y las **huellas** de las sondas, nunca los tokens) sigue al master con la configuración de relevo; **un master con esa pantalla en blanco no la manda** (no pisa la de la réplica) y **la adopta** de ella al mandar (`FailoverService::pullCfGuardFromPeers`, cada 5 min como mucho, nunca pisa una existente). Nueva acción de cluster de solo lectura `export-cf-guard`.
+- **La copia de configuración dejaba a una réplica vigilándose a sí misma cada 30 min.** Al aplicarla, un slave tomaba como «master que vigilo» la IP pública del servidor primario de la configuración, que tras un relevo es el propio titular (la réplica). Ahora se ignora si es una IP de este mismo servidor.
+
+### Añadido
+- **La sonda de bloqueos informa a varios paneles** (`URL=https://a:8444,https://b:8444`, `RESOLVE=ip1,ip2` por posición): entrega el mismo informe a todos y solo se queja si **ninguno** lo acepta (una réplica o un nodo apartado no llenan el correo). Así no depende de qué servidor manda. `tests/edge_probe_test.py` (10) y `tests/cf_guard_sync_test.php` (16).
+- **`bin/portal-license.php`**: estado de la licencia del portal en este nodo (a qué nodo está ligada, hasta cuándo, si el servidor de licencias conoce el clúster) y `--renew` (como root) para renovarla a mano.
+
 ## [1.0.371] — 2026-10-18 — Vigilancia de nodos tras un relevo
 
 Nace del primer relevo real (2026-10-18, dos pares de servidores). Los relevos funcionaron (DNS movido, webs sirviendo en pocos minutos) pero dejaron a la vista fallos que ningún aviso recogía. Documentado en Docs → «Vigilancia de nodos y relevos».
