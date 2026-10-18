@@ -266,6 +266,75 @@ class WebPermissionService
     }
 
     // ─────────────────────────────────────────────────────────
+    // Carpetas que exige cada pool de PHP-FPM (tmp, sesiones)
+    // ─────────────────────────────────────────────────────────
+
+    /**
+     * Del texto de un pool de PHP-FPM: usuario, grupo y carpetas de trabajo que declara (upload_tmp_dir,
+     * sys_temp_dir, session.save_path) con el modo con el que deben crearse. Pura.
+     * Sin carpeta tmp, PHP solo recibe en memoria los primeros 16 KB del cuerpo de una petición y el resto
+     * se pierde: el MCP de musedock.com rechazaba todo update_post de más de 16 KB (2026-10-18).
+     * @return array{user:string,group:string,dirs:array<string,int>}
+     */
+    public static function poolDirs(string $conf): array
+    {
+        $out = ['user' => '', 'group' => '', 'dirs' => []];
+        if (preg_match('/^\s*user\s*=\s*(\S+)/m', $conf, $m)) {
+            $out['user'] = $m[1];
+        }
+        if (preg_match('/^\s*group\s*=\s*(\S+)/m', $conf, $m)) {
+            $out['group'] = $m[1];
+        }
+        $modes = ['upload_tmp_dir' => 0755, 'sys_temp_dir' => 0755, 'session.save_path' => 0750];
+        foreach ($modes as $key => $mode) {
+            if (preg_match('/^\s*php_(?:admin_)?value\[' . preg_quote($key, '/') . '\]\s*=\s*"?([^"\s;]+)"?/m', $conf, $m)) {
+                $out['dirs'][$m[1]] = $mode;
+            }
+        }
+        return $out;
+    }
+
+    /** Solo se crean carpetas dentro de /var/www/vhosts/<web>/…, sin «..» y con la carpeta madre ya existente. */
+    public static function poolDirAllowed(string $dir): bool
+    {
+        return (bool)preg_match('#^/var/www/vhosts/[A-Za-z0-9._-]+/[A-Za-z0-9._/-]+$#', $dir)
+            && !str_contains($dir, '..') && !str_contains($dir, '//');
+    }
+
+    /**
+     * Crea las carpetas de trabajo que declaran los pools de PHP-FPM y no existen, con el usuario y grupo del pool.
+     * Solo crea; no toca nada que exista ni inventa la carpeta madre.
+     * @return list<array{pool:string,dir:string}>
+     */
+    public static function ensurePoolDirs(bool $apply = true): array
+    {
+        $made = [];
+        foreach (glob('/etc/php/*/fpm/pool.d/*.conf') ?: [] as $file) {
+            $conf = (string)@file_get_contents($file);
+            if ($conf === '') {
+                continue;
+            }
+            $p = self::poolDirs($conf);
+            foreach ($p['dirs'] as $dir => $mode) {
+                if (is_dir($dir) || !self::poolDirAllowed($dir) || !is_dir(dirname($dir))) {
+                    continue;
+                }
+                $made[] = ['pool' => $file, 'dir' => $dir];
+                if ($apply && @mkdir($dir, $mode)) {
+                    @chmod($dir, $mode);
+                    if ($p['user'] !== '') {
+                        self::chown($dir, $p['user'], $p['group'] !== '' ? $p['group'] : $p['user']);
+                    }
+                }
+            }
+        }
+        if ($apply && $made) {
+            LogService::log('web.permissions', 'pool-dirs', 'Carpetas de pools PHP creadas: ' . implode(', ', array_unique(array_column($made, 'dir'))));
+        }
+        return $made;
+    }
+
+    // ─────────────────────────────────────────────────────────
     // Automatismos (worker y promoción)
     // ─────────────────────────────────────────────────────────
 

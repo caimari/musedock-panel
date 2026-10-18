@@ -28,6 +28,11 @@ class ChangelogController
                         'La sonda de bloqueos de Cloudflare ya no depende de que la máquina tenga ruta IPv6: la comprobación de control y la IP pública van por IPv4 explícito (b250 no tiene ruta IPv6 y daba «red inalcanzable» inmediato, que no es un bloqueo).',
                         'vigila-memoria (y unidades parecidas) bloqueaba el ready: true del preflight de la réplica: una unidad que el master no tiene habilitada y a la que le falta su programa en la réplica ya no cuenta como problema (se omite y se anota); las habilitadas en el master siguen avisando.',
                     ],
+                    'added' => [
+                        'El panel crea las carpetas de trabajo que exige cada pool de PHP-FPM (tmp, sesiones): sin upload_tmp_dir, PHP solo recibe los primeros 16 KB del cuerpo de una petición (el MCP de musedock.com rechazaba todo update_post de más de 16 KB y la sonda del CMS se quedaba en 16 KB). web-permissions.php --laravel-dirs, que lanzan el relevo y la revisión diaria, crea las que falten dentro de /var/www/vhosts/<web>/ con el usuario y grupo del pool, sin tocar lo que existe.',
+                        'Avisos de nodo agrupados en un solo correo: los avisos de servicio caído, réplica, copia de ficheros, nodo, correo, testigos, preparación para el relevo, permisos y errores web se apuntan y el cron del clúster los envía juntos cuando el más antiguo lleva 60 s (asunto «N avisos del clúster: …», cuerpo con todos numerados y con hora). Un solo aviso sale igual que antes. Ajuste alerts_digest_seconds (0 = no agrupar). Los avisos de seguridad e informes salen al momento. Si no se puede apuntar, sale como siempre.',
+                        'Prueba tests/notification_digest_test.php (19 comprobaciones).',
+                    ],
                 ],
             ],
             [

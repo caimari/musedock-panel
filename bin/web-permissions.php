@@ -71,6 +71,13 @@ if (isset($opts['laravel-dirs'])) {
         echo "    {$m['domain']}: {$m['dir']}\n";
     }
 }
+if (isset($opts['laravel-dirs'])) {
+    $pm = W::ensurePoolDirs(true);
+    echo $pm ? 'Carpetas de pools PHP creadas: ' . count($pm) . "\n" : "Carpetas de pools PHP: no faltaba ninguna.\n";
+    foreach ($pm as $m) {
+        echo "    {$m['dir']}\n";
+    }
+}
 if (isset($opts['notify'])) {
     W::notify($rep);
 }

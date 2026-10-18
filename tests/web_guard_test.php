@@ -112,5 +112,18 @@ $snapPeer = FS::snapshotForPeer();
 $emptyBad = array_filter(FS::NEVER_EMPTY, static fn($k) => array_key_exists($k, $snapPeer) && trim((string)$snapPeer[$k]) === '');
 ok('la copia que se manda al otro nodo NUNCA lleva vacío lo que tiene valor por defecto', $emptyBad === [], json_encode($emptyBad));
 
+section('8. Carpetas que exige cada pool de PHP-FPM (sin tmp, PHP solo recibía los primeros 16 KB: MCP de musedock.com, 2026-10-18)');
+$pool = "[musedockcomcalamar]\nuser = musedockcomcalamar\ngroup = www-data\nphp_admin_value[open_basedir] = /var/www/vhosts/musedock.com/:/tmp/\nphp_admin_value[upload_tmp_dir] = /var/www/vhosts/musedock.com/tmp\nphp_admin_value[session.save_path] = /var/www/vhosts/musedock.com/sessions\nphp_admin_value[sys_temp_dir] = /var/www/vhosts/musedock.com/tmp\n";
+$pd = W::poolDirs($pool);
+ok('lee el usuario y el grupo del pool', $pd['user'] === 'musedockcomcalamar' && $pd['group'] === 'www-data');
+ok('encuentra tmp y sesiones (y no repite tmp)', array_keys($pd['dirs']) === ['/var/www/vhosts/musedock.com/tmp', '/var/www/vhosts/musedock.com/sessions'], json_encode($pd['dirs']));
+ok('las sesiones se crean más cerradas (0750) que tmp (0755)', $pd['dirs']['/var/www/vhosts/musedock.com/sessions'] === 0750 && $pd['dirs']['/var/www/vhosts/musedock.com/tmp'] === 0755);
+ok('un pool sin esas líneas no pide nada', W::poolDirs("[www]\nuser = www-data\n")['dirs'] === []);
+ok('open_basedir no se confunde con una carpeta de trabajo', !isset($pd['dirs']['/var/www/vhosts/musedock.com/:/tmp/']));
+ok('se permite una carpeta dentro de una web', W::poolDirAllowed('/var/www/vhosts/musedock.com/tmp'));
+foreach (['/tmp/x', '/etc/cron.d/x', '/var/www/vhosts/a.com/../../etc/x', '/var/www/vhosts//x', '/var/www/vhosts/x', '/root/tmp'] as $bad) {
+    ok("se niega crear {$bad}", !W::poolDirAllowed($bad));
+}
+
 echo "\n" . ($fail === 0 ? "\033[0;32mTodo correcto: {$pass} comprobaciones\033[0m" : "\033[0;31m{$fail} fallo(s) de " . ($pass + $fail) . "\033[0m") . "\n";
 exit($fail === 0 ? 0 : 1);

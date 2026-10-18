@@ -133,6 +133,17 @@ if (Settings::get('cluster_role', 'standalone') === 'master') {
     }
 }
 
+// ─── Step 0-digest: avisos de nodo agrupados (un correo por incidente) ──
+// Envía juntos los avisos apuntados cuando el más antiguo cumple la ventana (Ajustes: alerts_digest_seconds).
+try {
+    $sentDigest = \MuseDockPanel\Services\NotificationDigestService::flush();
+    if ($sentDigest > 0) {
+        logMsg("Avisos agrupados enviados: {$sentDigest}");
+    }
+} catch (\Throwable $e) {
+    logMsg('Avisos agrupados error: ' . $e->getMessage());
+}
+
 // ─── Step 0a: Vigilancia del nodo tras relevos (ClusterGuardService) ──
 // Nace del relevo del 2026-10-18: un slave vigilándose a sí mismo, Dovecot fallido horas sin
 // aviso, PostgreSQL sin arrancar, lsyncd sin instalar en el nodo que pasó a mandar.

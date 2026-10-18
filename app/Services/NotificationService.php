@@ -50,6 +50,19 @@ class NotificationService
             LogService::log('notify.site-outage', $type, 'No enviado (sitio sin conexión, webs no afectadas): ' . $subject);
             return;
         }
+        // Avisos de nodo que llegan casi a la vez: un solo correo (NotificationDigestService; si no se puede, sale ya).
+        try {
+            if (NotificationDigestService::enqueue($type, $subject, $message)) {
+                return;
+            }
+        } catch (\Throwable) {
+        }
+        self::deliver($subject, $message, $type);
+    }
+
+    /** Envío real por los canales del tipo (con pie de ayuda y servidor en el asunto). Lo usa también el envío agrupado. */
+    public static function deliver(string $subject, string $message, string $type = ''): void
+    {
         $message .= AlertPolicyService::emailFooter($type);
         $subject = self::tagSubject($subject);
         // Cada tipo de aviso puede quitarse de un canal (Ajustes → Avisos): p. ej. el informe diario
