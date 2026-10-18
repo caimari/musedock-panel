@@ -3841,6 +3841,18 @@ class MailService
             ? (float)$health['replication_lag_seconds']
             : 0.0;
 
+        // Réplica con el correo parado a propósito (esclavo/aislado): sin Postfix/Dovecot configurados o con
+        // PostgreSQL en recuperación, la base de datos de correo local no es un fallo (asterisk, 2026-10-18:
+        // «PostgreSQL local no responde» dejaba el nodo en error). La réplica de PostgreSQL se vigila aparte.
+        if (!empty($health['standby']) && (empty($health['pg_alive']) || empty($health['pg_read_ok']))) {
+            return [
+                'status' => 'active',
+                'pause_queue' => false,
+                'reason' => '',
+                'message' => 'Nodo en espera (réplica): el correo local está parado a propósito hasta que sea principal; la réplica de PostgreSQL se vigila aparte.',
+            ];
+        }
+
         if (empty($health['pg_alive'])) {
             return [
                 'status' => 'down',

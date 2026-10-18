@@ -260,7 +260,11 @@ class DomainAliasService
                 continue;
             }
             $routeId = (string)($acc['caddy_route_id'] ?: SystemService::caddyRouteId($domain));
-            if (!$routeExists($routeId) && !isset($served[$domain])) {
+            $present = $routeExists($routeId);
+            // La ruta existe pero le faltan alias (img.picalias.com, 2026-10-18: el alias se añadió
+            // en mortadelo y la ruta de filemon no lo llevaba: sin ruta ni certificado tras el relevo).
+            $missingAliases = $present ? self::aliasesMissingFromRoute($api, $routeId, self::getAliasDomains((int)$acc['id'])) : [];
+            if ((!$present && !isset($served[$domain])) || $missingAliases) {
                 $ok = SystemService::rebuildCaddyRouteWithAliases(
                     $domain,
                     self::getAliasDomains((int)$acc['id']),
@@ -269,7 +273,9 @@ class DomainAliasService
                     (string)($acc['php_version'] ?? '8.3') ?: '8.3',
                     (string)($acc['hosting_type'] ?? 'php') ?: 'php'
                 ) !== null;
-                $out[$domain] = $ok ? 'ruta repuesta' : 'FALLO al reponer la ruta';
+                $out[$domain] = $ok
+                    ? ($missingAliases ? 'ruta rehecha con los alias que faltaban: ' . implode(', ', $missingAliases) : 'ruta repuesta')
+                    : 'FALLO al reponer la ruta';
             }
             foreach (self::getRedirects((int)$acc['id']) as $r) {
                 $from = strtolower(trim((string)$r['domain']));
@@ -310,6 +316,32 @@ class DomainAliasService
             }
         }
         return $out;
+    }
+
+    /**
+     * Alias del hosting que la ruta viva de Caddy no lleva entre sus hosts. Si no se puede leer
+     * la ruta devuelve [] (no tocar nada ante la duda). Un alias que ya sirve otra ruta propia
+     * (p. ej. una redirección con ese nombre) tampoco cuenta como pendiente.
+     */
+    public static function aliasesMissingFromRoute(string $api, string $routeId, array $aliases): array
+    {
+        if (!$aliases) return [];
+        $ctx = stream_context_create(['http' => ['timeout' => 5]]);
+        $route = json_decode((string)@file_get_contents("{$api}/id/" . rawurlencode($routeId), false, $ctx), true);
+        if (!is_array($route)) return [];
+        $hosts = [];
+        foreach (($route['match'] ?? []) as $m) {
+            foreach (($m['host'] ?? []) as $h) {
+                $hosts[strtolower((string)$h)] = true;
+            }
+        }
+        if (!$hosts) return [];
+        $missing = [];
+        foreach ($aliases as $a) {
+            $a = strtolower(trim((string)$a));
+            if ($a !== '' && !isset($hosts[$a])) $missing[] = $a;
+        }
+        return $missing;
     }
 
     /**

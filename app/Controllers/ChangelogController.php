@@ -26,9 +26,11 @@ class ChangelogController
                 'changes' => [
                     'fixed' => [
                         'Un nodo réplica salía en «error» en el panel principal solo porque su correo está parado a propósito: la revisión de correo exigía los puertos 25, 587 y 993 también a las réplicas (esclavo, aislado por un relevo o con PostgreSQL en recuperación). Ahora el nodo informa de su papel y, si es réplica, los puertos cerrados se muestran como «en espera» y no cuentan como fallo; si vuelve a ser principal, se exige todo otra vez.',
+                        'Una réplica sin correo local seguía en «error» por «PostgreSQL local no responde en el nodo de mail»: en una réplica la comprobación de la base de datos de correo ya no es un fallo y no pausa la cola; un principal con PostgreSQL caído sigue dando «down».',
+                        'Los alias no llegaban a la ruta de Caddy de las réplicas (img.picalias.com sin ruta ni certificado en Filemon tras el relevo): el reparador de rutas ya rehace la ruta del hosting si le faltan alias entre sus hosts.',
                     ],
                     'added' => [
-                        'Prueba tests/mail_node_standby_test.php.',
+                        'Prueba tests/mail_node_standby_test.php (14 comprobaciones).',
                     ],
                 ],
             ],
