@@ -700,6 +700,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/settings/cluster/role-switch/start', 'ClusterController@roleSwitchStart');
 \MuseDockPanel\Router::get('/settings/cluster/role-switch/status', 'ClusterController@roleSwitchStatus');
 \MuseDockPanel\Router::post('/settings/cluster/demote', 'ClusterController@demoteLocal');
+\MuseDockPanel\Router::post('/cluster/rejoin', 'ClusterController@rejoinLocal');
 \MuseDockPanel\Router::post('/settings/cluster/generate-token', 'ClusterController@generateToken');
 \MuseDockPanel\Router::post('/settings/cluster/save-settings', 'ClusterController@saveSettings');
 \MuseDockPanel\Router::post('/settings/cluster/save-setting', 'ClusterController@saveSetting');

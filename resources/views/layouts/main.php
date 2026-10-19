@@ -258,6 +258,23 @@
             Otro nodo hace de principal. Estás en el <strong>panel de rescate</strong>.
             <span class="d-block small mt-1 text-muted">Motivo: <?= \MuseDockPanel\View::e(\MuseDockPanel\Settings::get('cluster_fenced_reason', '—')) ?>
             · Para reactivarlo o convertirlo en copia del principal: <code>bin/cluster-switch.php</code> (unfence / demote / promote).</span>
+            <?php $__rj = \MuseDockPanel\Services\FailoverSafetyService::rejoinPending(); ?>
+            <?php if ($__rj): ?>
+            <?php $__run = (int)\MuseDockPanel\Settings::get('cluster_rejoin_running_at', '0'); $__busy = $__run > 0 && time() - $__run < 3600; ?>
+            <div class="mt-2 pt-2" style="border-top:1px solid rgba(239,68,68,.35);">
+                <strong>No se ha reincorporado solo como copia de <?= \MuseDockPanel\View::e((string)$__rj['name']) ?>.</strong>
+                <span class="small d-block mt-1" style="color:#fecaca;">Motivo: <?= \MuseDockPanel\View::e((string)$__rj['reason']) ?></span>
+                <?php if ($__busy): ?>
+                    <span class="small d-block mt-2"><i class="bi bi-hourglass-split me-1"></i>Reincorporación en curso desde hace <?= (int)round((time() - $__run) / 60) ?> min (storage/logs/rejoin.log). Recarga en unos minutos.</span>
+                <?php else: ?>
+                <form method="POST" action="/cluster/rejoin" class="mt-2 d-inline" onsubmit="return confirm('Este servidor se convertirá en copia de <?= \MuseDockPanel\View::e(addslashes((string)$__rj['name'])) ?> y puede descartar lo escrito aquí desde el relevo si no coincide con el nuevo master. Tarda unos minutos y no corta el sitio. ¿Seguir?')">
+                    <?= \MuseDockPanel\View::csrf() ?>
+                    <button type="submit" class="btn btn-sm btn-danger"><i class="bi bi-arrow-repeat me-1"></i>Reincorporar como copia de <?= \MuseDockPanel\View::e((string)$__rj['name']) ?></button>
+                </form>
+                <span class="small ms-2" style="color:#fecaca;">El panel lo reintenta solo cada 5 minutos.</span>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
         </div>
         <?php endif; ?>
         <?php include dirname(__DIR__) . '/partials/flash-toasts.php'; ?>

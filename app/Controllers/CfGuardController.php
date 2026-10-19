@@ -66,6 +66,7 @@ class CfGuardController
             'isSlave' => Settings::get('cluster_role', 'standalone') === 'slave',
             'restoreMinutes' => G::restoreMinutes(),
             'excluded' => G::setting('excluded', ''),
+            'extraHosts' => G::setting('extra_hosts', ''),
             'cmsManaged' => G::cmsManaged(),
             'probes' => G::probes(),
             'probePaths' => G::probePaths(),
@@ -118,6 +119,7 @@ class CfGuardController
         G::setSetting('restore_minutes', (string) max(10, min(240, (int) ($_POST['restore_minutes'] ?? 30))));
         $ex = implode("\n", array_slice(array_filter(array_map(fn ($l) => strtolower(trim($l, " \t.")), preg_split('/[\r\n,]+/', (string) ($_POST['excluded'] ?? '')))), 0, 500));
         G::setSetting('excluded', $ex);
+        G::setSetting('extra_hosts', implode("\n", G::normalizeHostList((string) ($_POST['extra_hosts'] ?? ''))));
         Flash::set('success', 'Ajustes guardados.');
         Router::redirect(self::BACK);
     }

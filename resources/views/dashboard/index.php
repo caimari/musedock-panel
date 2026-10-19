@@ -666,14 +666,19 @@ document.addEventListener('DOMContentLoaded', function () {
             return '<div class="alert alert-warning small text-start">No se pudo calcular el plan DNS: ' + esc(plan && plan.error || 'sin respuesta') + '. El cambio puede hacerse igual; el correo final dirá qué se movió.</div>';
         }
         const recs = []; (plan.zones || []).forEach(z => (z.records || []).forEach(r => recs.push(r)));
-        const notMoved = (plan.hosting_domains_not_moved || []).concat(plan.caddy_domains_not_moved || []);
+        const allNotMoved = (plan.hosting_domains_not_moved || []).concat(plan.caddy_domains_not_moved || []);
+        // Detrás de Cloudflare con proxy en otra cuenta: desde aquí no se ve su destino (si es un CNAME a un nombre que se mueve, irá con él).
+        const behindCf = allNotMoved.filter(i => i && i.kind === 'behind_cloudflare');
+        const notMoved = allNotMoved.filter(i => !(i && i.kind === 'behind_cloudflare'));
         return '<div class="text-start small mb-1"><strong>DNS:</strong> cambian <strong>' + recs.length + '</strong> registros y van con ellos por CNAME <strong>'
             + (plan.moved_via_cname || []).length + '</strong>.'
-            + (notMoved.length ? ' <span class="text-warning">' + notMoved.length + ' no se pueden mover desde el panel.</span>' : '') + '</div>'
+            + (notMoved.length ? ' <span class="text-warning">' + notMoved.length + ' no se pueden mover desde el panel.</span>' : '')
+            + (behindCf.length ? ' <span class="text-info">' + behindCf.length + ' con el destino no visible desde aquí (Cloudflare con proxy en otra cuenta; si son CNAME a un nombre que se mueve, van con él).</span>' : '') + '</div>'
             + listBlock('Registros A que cambian', recs, false)
             + listBlock('Se mueven con ellos por CNAME', plan.moved_via_cname, false)
             + listBlock('Nombres de máquina que se quedan en su servidor', plan.machine_names_kept, false)
             + listBlock('⚠️ No se pueden mover: su DNS no está en las cuentas de Cloudflare del panel', notMoved, true, 'text-warning')
+            + listBlock('ℹ️ Destino no visible desde aquí (proxy de Cloudflare en otra cuenta): probablemente van por CNAME con el nombre que se mueve', behindCf, false, 'text-info')
             + listBlock('Sin DNS (nada que mover)', plan.caddy_domains_without_dns, false)
             + listBlock('Zonas que no se pudieron leer', plan.zone_errors, true, 'text-danger')
             + (movesHere ? '<div class="alert alert-info small text-start mt-2 mb-0"><i class="bi bi-info-circle me-1"></i>El nombre de este panel (<code>' + esc(location.hostname)

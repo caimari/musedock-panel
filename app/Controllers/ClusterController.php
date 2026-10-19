@@ -860,6 +860,21 @@ class ClusterController
     }
 
     /**
+     * POST /cluster/rejoin — el botón «Reincorporar como copia» del aviso rojo de un servidor apartado. Lanza en segundo plano
+     * la reincorporación al nuevo master (la hace sola cluster-switch demote) y vuelve a la página de origen.
+     */
+    public function rejoinLocal(): void
+    {
+        View::verifyCsrf();
+        $r = \MuseDockPanel\Services\FailoverSafetyService::startRejoinInBackground();
+        Flash::set($r['ok'] ? 'success' : 'error', $r['message']);
+        $back = (string)($_SERVER['HTTP_REFERER'] ?? '');
+        $path = (string)(parse_url($back, PHP_URL_PATH) ?: '/');
+        header('Location: ' . (str_starts_with($path, '/') && !str_starts_with($path, '//') ? $path : '/'));
+        exit;
+    }
+
+    /**
      * POST /settings/cluster/generate-token (JSON response)
      */
     public function generateToken(): void

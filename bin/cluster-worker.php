@@ -133,6 +133,40 @@ if (Settings::get('cluster_role', 'standalone') === 'master') {
     }
 }
 
+// ─── Step 0-rejoin: reincorporación pendiente de un master apartado ──
+// Si al apartarse no pudo reincorporarse solo como copia, se reintenta cada 5 min (por si el motivo desaparece) y se recuerda
+// por correo cada 6 h; el Dashboard muestra el aviso con el botón «Reincorporar como copia».
+try {
+    $rj = \MuseDockPanel\Services\FailoverSafetyService::rejoinPending();
+    if ($rj !== null && Settings::get('cluster_role', '') === 'slave') {
+        \MuseDockPanel\Services\FailoverSafetyService::clearRejoinPending();
+    } elseif ($rj !== null && Settings::get('cluster_fenced', '0') === '1') {
+        $running = (int)Settings::get('cluster_rejoin_running_at', '0');
+        $busy = $running > 0 && time() - $running < 3600;
+        if (!$busy && \MuseDockPanel\Services\FailoverSafetyService::rejoinRetryDue($rj, time())) {
+            $rj['last_try'] = time();
+            Settings::set(\MuseDockPanel\Services\FailoverSafetyService::REJOIN_KEY, json_encode($rj, JSON_UNESCAPED_UNICODE));
+            $try = \MuseDockPanel\Services\FailoverSafetyService::autoRejoinAsSlave((string)$rj['host']);
+            if (!empty($try['done'])) {
+                \MuseDockPanel\Services\FailoverSafetyService::clearRejoinPending();
+                logMsg('Reincorporación automática hecha: este servidor es copia de ' . $rj['name']);
+                \MuseDockPanel\Services\NotificationService::send('Failover: este servidor ya es espejo del nuevo master',
+                    "Se ha reincorporado solo como copia de {$rj['name']} ({$rj['host']}) en un reintento.");
+            } else {
+                $rj['reason'] = (string)($try['reason'] ?? $rj['reason']);
+                if (\MuseDockPanel\Services\FailoverSafetyService::rejoinReminderDue($rj, time())) {
+                    $rj['last_mail'] = time();
+                    [$subject, $body] = \MuseDockPanel\Services\FailoverSafetyService::rejoinEmail((string)$rj['name'], (string)$rj['host'], $rj['reason'], true);
+                    \MuseDockPanel\Services\NotificationService::send($subject, $body);
+                }
+                Settings::set(\MuseDockPanel\Services\FailoverSafetyService::REJOIN_KEY, json_encode($rj, JSON_UNESCAPED_UNICODE));
+            }
+        }
+    }
+} catch (\Throwable $e) {
+    logMsg('Reincorporación pendiente error: ' . $e->getMessage());
+}
+
 // ─── Step 0-digest: avisos de nodo agrupados (un correo por incidente) ──
 // Envía juntos los avisos apuntados cuando el más antiguo cumple la ventana (Ajustes: alerts_digest_seconds).
 try {

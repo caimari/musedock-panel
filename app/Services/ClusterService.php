@@ -2887,6 +2887,8 @@ class ClusterService
         }
         // El solo-lectura que el guardián de arranque dejó en conf.d (si lo hubo) ya no procede.
         FailoverSafetyService::clearFencedReadOnlyConf();
+        // Ya es copia: nada pendiente de reincorporar (aviso permanente del Dashboard y recordatorios).
+        FailoverSafetyService::clearRejoinPending();
 
         // Lo copiado del master se vuelve a apagar (programas parados, crons off) y el
         // Caddyfile vuelve a ser el propio de slave.

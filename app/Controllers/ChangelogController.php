@@ -20,6 +20,23 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.387',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Hueco del relevo automático en una cadena de caídas: tras un relevo por caída la lista de servidores seguía diciendo «principal = el titular» aunque mandaba el otro, así que, si caía el que manda ahora, la réplica no veía ninguna caída y no se promovía sola. Ahora cada nodo alinea los papeles de su lista con quien manda de verdad en cada vuelta del vigilante; no toca la lista con más de dos servidores ni en un master apartado, y no cambia el titular de la vuelta automática.',
+                        'Una réplica atrasada podía promoverse sola y perder lo escrito en el master: el relevo automático comprueba ahora que sus bases de datos estaban al día hace poco (replica_fresh_at, margen failover_fresh_max_minutes = 30, contado desde que cayó el master); si no, avisa y decide una persona con «Tomar el mando». failover_require_fresh = 0 lo desactiva.',
+                        'Un master que vuelve apartado y no se reincorpora solo como copia ya no queda a la espera de un «demote» manual: el panel lo anota y muestra en todas las páginas de ese servidor (también el Dashboard) un aviso rojo con el motivo y un botón «Reincorporar como copia de …» (segundo plano, con confirmación; descarta lo que el nuevo master no tenga); reintenta solo cada 5 minutos; y manda un correo explicativo al apartarse (qué pasó, qué hacer, qué se pierde) que repite cada 6 horas mientras siga pendiente.',
+                        'La comprobación de un cambio de mando asustaba de más con dominios de otra cuenta de Cloudflare: los nombres de máquina que se quedan ya no salen como «no se puede mover» y, para un dominio fuera de las cuentas del panel, se mira su DNS público: si apunta directo a la IP de este servidor avisa de verdad; si va por Cloudflare con proxy se muestra aparte como información (destino no visible; si es CNAME a un nombre que se mueve, irá con él). Si el dominio es de otra cuenta y su CNAME se ve en el DNS público (sin proxy) y acaba en un nombre que se mueve, va con él. Prueba tests/dns_plan_test.php (16). La guía /docs/failover-modes explica la fórmula recomendada: nombre de servicio que se mueve (CNAME a él) y nombre de máquina fijo para entrar al panel.',
+                        'Un dominio que sirve una aplicación (no un hosting del panel) no lo vigilaba ninguna guarda de bloqueos de Cloudflare (caso app.agent8ai.com: CNAME con proxy añadido por una aplicación directamente a Caddy, con la zona en otra cuenta). Nuevo ajuste «Nombres extra a vigilar» (Ajustes → Bloqueos Cloudflare o cf-guard-worker.php --add-host=NOMBRE): nombres exactos que la guarda trata como los de un hosting si su registro está en una zona de las cuentas de ese panel; se copia al otro nodo con la configuración. Prueba tests/cf_guard_sync_test.php (24).',
+                    ],
+                    'added' => [
+                        'Documentación del relevo ampliada (/docs/failover-modes): qué vigila el relevo automático (el «principal» de la lista de servidores, que debe reflejar quién manda), qué pasa en una cadena de caídas y los casos en que queda todo parado hasta que alguien actúe, y qué ocurre si cae toda la red de un sitio.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.386',
                 'date' => '2026-10-19',
                 'badge' => 'info',

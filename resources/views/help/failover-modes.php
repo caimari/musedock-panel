@@ -248,6 +248,39 @@
     </div>
 </div>
 
+<!-- La fórmula: dos familias de nombres -->
+<div class="card mb-4" style="border-color:rgba(56,189,248,.3);">
+    <div class="card-header"><i class="bi bi-diagram-2 me-2"></i>La fórmula recomendada: nombres que se mueven y nombres que no</div>
+    <div class="card-body small text-muted">
+        <p>Para que un cambio de mando sea transparente y el panel no se pierda al cambiar, usa <strong>dos familias de nombres</strong>:</p>
+        <table class="table table-dark table-sm small mb-3">
+            <thead><tr><th style="width:24%">Familia</th><th>Qué es</th><th style="width:34%">Ejemplo (genérico)</th></tr></thead>
+            <tbody>
+                <tr><td><strong>Nombre de servicio</strong> (se mueve)</td>
+                    <td>Un registro <strong>A</strong> por pareja, en una zona de las cuentas de Cloudflare del panel, que apunta al servidor que manda. Es lo que cambia el relevo. Todo lo demás (webs, aplicaciones, otros dominios) apunta a él con un <strong>CNAME</strong>.</td>
+                    <td><code>servicio.ejemplo.net</code> → IP del que manda<br><code>www.ejemplo.com</code> → CNAME <code>servicio.ejemplo.net</code></td></tr>
+                <tr><td><strong>Nombre de máquina</strong> (fijo)</td>
+                    <td>Un nombre por servidor, que apunta siempre a <strong>su propia IP</strong> y no cambia nunca en un relevo. Es el que se usa para <strong>entrar al panel por HTTPS</strong>, por SSH y para monitorizar; así se llega al panel de cada servidor mande o no.</td>
+                    <td><code>nodo-a.ejemplo.org</code> → IP de A<br><code>nodo-b.ejemplo.org</code> → IP de B<br>Panel: <code>https://nodo-a.ejemplo.org:PUERTO</code> (o <code>https://IP:PUERTO</code>)</td></tr>
+            </tbody>
+        </table>
+        <p class="mb-1"><strong>Qué gana:</strong></p>
+        <ul class="mb-2">
+            <li><strong>Los dominios de otra cuenta de Cloudflare (o de otro proveedor) se mueven solos</strong> si son un CNAME al nombre de servicio: el panel no necesita acceso a su zona. Es lo ideal también por seguridad: cada panel solo tiene el token de las zonas de su pareja, con los mínimos permisos.</li>
+            <li>El nombre del panel de cada servidor <strong>no se mueve</strong>, así que <strong>se entra al panel del que deja de mandar</strong> sin depender de la IP ni de que el DNS cambie.</li>
+        </ul>
+        <p class="mb-1"><strong>Cómo lo trata la comprobación del cambio de mando</strong> (ventana de «Pasar el mando a…», <code>cluster-switch.php dns-plan</code> y <code>failover_dns_plan</code>):</p>
+        <ul class="mb-2">
+            <li><strong>Registros A</strong> en las zonas del panel que apuntan al servidor que manda: <em>se cambian</em>.</li>
+            <li><strong>CNAME</strong> (en las zonas del panel o, si no llevan proxy, visibles en el DNS público) cuyo destino se mueve: <em>van con él</em>.</li>
+            <li><strong>Nombres de máquina</strong>: <em>se quedan</em> y no son un aviso.</li>
+            <li><strong>Dominio de otra cuenta con proxy de Cloudflare</strong> (nube naranja): su destino no se ve desde fuera, así que sale <em>como información</em>: si es un CNAME al nombre de servicio, irá con él.</li>
+            <li><strong>Dominio de otra cuenta que apunta directo a la IP del servidor</strong> (un A, no un CNAME): <em>aviso real</em>, no se moverá solo. Cámbialo por un CNAME al nombre de servicio, cámbialo a mano en su proveedor o dale a este panel acceso a su zona.</li>
+        </ul>
+        <p class="mb-0">Los <strong>certificados</strong> de esos dominios (y su ruta de Caddy) tienen que existir también en el servidor al que pasa el mando; compruébalo con la lista de hosts de Caddy de cada nodo antes del cambio (<code>caddy_hosts</code> por MCP).</p>
+    </div>
+</div>
+
 <!-- Cómo configurarlo -->
 <div class="card mb-4" style="border-color:rgba(34,197,94,.3);">
     <div class="card-header"><i class="bi bi-gear me-2"></i>Cómo configurarlo, paso a paso</div>
@@ -318,5 +351,77 @@
         <h6 class="mt-3">7. Probar</h6>
         <p class="mb-0 text-muted">Antes de fiarte del modo automático, haz un <a href="/docs/role-switch" class="text-info">cambio de rol planificado</a>
             de ida y vuelta: prueba lo mismo que un relevo (DNS, bases, puertos, correo) con los dos servidores bien y sin prisas.</p>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header"><i class="bi bi-eye me-2"></i>Qué vigila el relevo automático: a quien manda de verdad</div>
+    <div class="card-body small text-muted">
+        <p>La réplica se promueve sola cuando <strong>cae el servidor que figura como «principal»</strong> en <em>Cluster → Failover → Servidores</em>
+            (y antes los testigos y las comprobaciones de su sitio lo confirman). Para que eso valga también después de un relevo, <strong>el panel mantiene esa lista
+            alineada con quien manda de verdad</strong>: cada nodo, en cada vuelta del vigilante (cada minuto), pone como principal al master real y como relevo a los demás.
+            En una réplica con dos servidores en la lista, el master es «el otro». Así, tras un relevo por caída, si cae el que manda ahora, la otra réplica lo detecta.</p>
+        <ul class="mb-2">
+            <li>Con <strong>más de dos servidores</strong> en la lista, una réplica no puede saber cuál manda: no toca nada. Ordénala con «Pasar el mando a…» o a mano.</li>
+            <li>Un master <strong>apartado</strong> (que volvió después de que otro se promoviera) no toca la lista.</li>
+            <li>El <strong>titular</strong> (a quien se le devuelve el mando en modo auto) no depende de esos papeles: es quien recibió el mando en el último cambio planificado.</li>
+        </ul>
+        <p class="mb-0">Los nodos que forman parejas deben tener el <strong>mismo modo</strong> (manual, semiauto o auto), la misma lista con sus «vecinos» y los mismos tiempos de detección.
+            Compruébalo con <code>failover_status</code> en cada nodo (MCP) o en <em>Cluster → Failover</em>. Que <code>caddy-l4</code> esté instalado solo en alguno no es un problema:
+            lo usa la variante de relevo por proxy TCP (SNI), no el relevo por DNS de estos modos.</p>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header"><i class="bi bi-arrow-repeat me-2"></i>Caídas encadenadas: ¿qué pasa si el que sustituye también cae y el titular vuelve a caer?</div>
+    <div class="card-body small text-muted">
+        <p>Dos servidores, A (el titular) y B (su relevo), en modo <strong>semiauto</strong>, con la copia al día:</p>
+        <ol class="mb-2">
+            <li><strong>A cae.</strong> B se promueve solo y mueve el DNS. B pasa a figurar como principal.</li>
+            <li><strong>A vuelve.</strong> Se aparta solo y se reincorpora como <em>copia</em> de B. En semiauto B sigue mandando y el panel te avisa de que A está listo.</li>
+            <li><strong>B cae</strong> mientras A es copia al día. A lo detecta (B es el principal de su lista) y se promueve solo, con los mismos controles: espera de los vecinos, testigos y copia al día.</li>
+            <li><strong>B vuelve.</strong> Se aparta y se reincorpora como copia de A.</li>
+            <li><strong>A vuelve a caer.</strong> B es la copia al día: se repite desde el paso 1. <strong>El ciclo no se queda atascado</strong>: cada servidor que cae y vuelve queda aislado y se reincorpora como copia, y el que está en pie manda.</li>
+        </ol>
+        <p class="mb-1"><strong>Los casos límite:</strong></p>
+        <ul class="mb-2">
+            <li><strong>Caen los dos a la vez.</strong> No hay a quién promover. Al volver, <strong>el que mandaba sigue mandando</strong>: no hay otro master que lo aparte. Si la réplica vuelve antes y espera su plazo (más los testigos),
+                se promueve; entonces el antiguo master, al volver, se aparta y se reincorpora como copia. Si tenía escrituras que no estaban replicadas, <strong>no se convierte solo en copia</strong>: te avisa, porque se perderían.</li>
+            <li><strong>Cae el que manda justo cuando el otro acaba de volver y aún se está reconstruyendo.</strong> Esa copia no tiene lo escrito mientras estuvo caída. <strong>La réplica no se promueve sola si sus bases de datos no estaban al día</strong>
+                (recibiendo del master) en los últimos 30 minutos, contados desde que el master cayó: te avisa y decides tú con «Tomar el mando» (perdiendo lo escrito desde entonces) o esperas a que vuelva el principal.
+                Ajustes: <code>failover_fresh_max_minutes</code> (margen, 30 por defecto) y <code>failover_require_fresh</code> (0 la desactiva).</li>
+            <li><strong>Una caída justo después de actualizar el panel:</strong> sin dato anterior de la copia, se permite el relevo como antes.</li>
+        </ul>
+        <p class="mb-0"><strong>Regla práctica:</strong> tras un relevo, espera a ver en el Dashboard del que manda «<strong>Réplica completa: puede tomar el mando</strong>» en la tarjeta del otro nodo antes de fiarte de un segundo relevo.
+            En modo auto, cuando el titular lleva 15 minutos estable y es copia al día, recupera el mando solo.</p>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header"><i class="bi bi-arrow-repeat me-2"></i>Un servidor apartado que no se reincorpora solo: aviso, botón y correo</div>
+    <div class="card-body small text-muted">
+        <p>Cuando un master caído vuelve y otro ya manda, <strong>se aparta solo</strong> (no sirve webs; sus bases de datos de clientes quedan en solo lectura) y <strong>se reincorpora solo como copia</strong> del nuevo master
+            si no tiene nada propio que perder (ni escrituras hechas después del relevo ni historial que no cuadre). Si no puede hacerlo solo:</p>
+        <ul class="mb-2">
+            <li><strong>Aviso permanente</strong> en todas las páginas de su panel (también el Dashboard): un cuadro rojo con el motivo y el botón <strong>«Reincorporar como copia de …»</strong>.
+                Solo aparece cuando hace falta pulsarlo.</li>
+            <li><strong>El botón</strong> lanza la reincorporación en segundo plano (tarda unos minutos y <strong>no corta el sitio</strong>, que sigue en el nuevo master) y pide confirmación: si el servidor tiene datos que el nuevo master no tiene, <strong>los descarta</strong> y los sustituye por una copia del nuevo master. El avance se ve en <code>storage/logs/rejoin.log</code>.</li>
+            <li><strong>Correo</strong> en el momento de apartarse, con qué ha pasado, por qué no se reincorporó solo, qué hacer (el botón o <code>php bin/cluster-switch.php demote &lt;IP-del-nuevo-master&gt;</code>) y qué se pierde. Se repite cada 6 horas mientras siga pendiente.</li>
+            <li><strong>Reintentos automáticos</strong> cada 5 minutos: si el motivo desaparece (la red, un servicio parado, el nuevo master que aún no respondía), se reincorpora solo y te lo cuenta.</li>
+        </ul>
+        <p class="mb-0">El aviso desaparece solo en cuanto el servidor es copia. Para <em>devolverle el mando</em> después sigue siendo el botón «Pasar el mando a…» del servidor que manda.</p>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header"><i class="bi bi-wifi-off me-2"></i>Qué pasa si cae toda la red de un sitio</div>
+    <div class="card-body small text-muted">
+        <ul class="mb-2">
+            <li><strong>Cae una de las dos líneas de internet del sitio</strong> (y la otra sigue): el vigilante de entrada mueve la entrada (DNS y correo) a la otra línea tras unos minutos de fallos y la devuelve cuando la normal lleva un rato sana. <strong>El mando no cambia.</strong></li>
+            <li><strong>Cae todo el sitio</strong> (luz o las dos líneas): la réplica de otro sitio ve caído al principal, pregunta a los testigos (que deben estar fuera de ese sitio y de su proveedor) y, pasada la espera, se promueve sola y mueve el DNS,
+                con su copia al día. Los datos que lleve son los replicados hasta la caída: lo último escrito en los segundos previos puede faltar.</li>
+            <li>Cuando el sitio vuelve, el servidor que mandaba se aparta solo y queda como copia; el panel <strong>no lo convierte en copia solo</strong> si tiene escrituras propias que no están en el nuevo master: te lo avisa.</li>
+        </ul>
+        <p class="mb-0 text-muted">En semiauto, tomar el mando tras la caída es automático; devolverlo no (lo haces tú). Prueba con un simulacro controlado: modo mantenimiento, cortar la VPN o el acceso del servidor que manda, y medir cuánto tarda la réplica y que no se pierda nada.</p>
     </div>
 </div>

@@ -763,7 +763,12 @@ class FailoverService
      */
     public static function evaluateState(array $checks): string
     {
-        $servers = self::getServers();
+        return self::stateFor(self::getServers(), $checks);
+    }
+
+    /** Lo mismo que evaluateState pero con la lista de servidores dada (pura: se puede probar sin ajustes). */
+    public static function stateFor(array $servers, array $checks): string
+    {
         $primaries = array_filter($servers, fn($s) => ($s['role'] ?? '') === self::ROLE_PRIMARY && ($s['enabled'] ?? true));
         $failovers = array_filter($servers, fn($s) => ($s['role'] ?? '') === self::ROLE_FAILOVER && ($s['enabled'] ?? true));
 
@@ -792,6 +797,90 @@ class FailoverService
 
         // Everything down
         return self::STATE_EMERGENCY;
+    }
+
+    /**
+     * Lista de servidores con los papeles según quién manda de verdad: el master pasa a «primary» y los demás a «failover».
+     * Pura. Devuelve la lista nueva (mismos servidores y datos; solo cambian role y failover_to).
+     */
+    public static function rolesForMaster(array $servers, string $masterId): array
+    {
+        $others = [];
+        foreach ($servers as $s) {
+            if (($s['id'] ?? '') !== $masterId && in_array($s['role'] ?? '', [self::ROLE_PRIMARY, self::ROLE_FAILOVER], true) && ($s['enabled'] ?? true)) {
+                $others[] = (string)$s['id'];
+            }
+        }
+        foreach ($servers as &$s) {
+            if (($s['id'] ?? '') === $masterId) {
+                $s['role'] = self::ROLE_PRIMARY;
+                $s['failover_to'] = (string)($others[0] ?? '');
+            } elseif (in_array($s['role'] ?? '', [self::ROLE_PRIMARY, self::ROLE_FAILOVER], true)) {
+                $s['role'] = self::ROLE_FAILOVER;
+                $s['failover_to'] = '';
+            }
+        }
+        unset($s);
+        return $servers;
+    }
+
+    /**
+     * ¿Cuál de los servidores de la lista es el master real de este nodo? Master: el propio. Réplica: el único otro servidor
+     * activo (con más de uno no se puede saber sin más datos: null). Puro.
+     */
+    public static function realMasterId(array $servers, string $myId, string $clusterRole, bool $fenced): ?string
+    {
+        if ($myId === '' || $fenced) {
+            return null;    // un master apartado ya no manda: no se toca la lista
+        }
+        if ($clusterRole === 'master') {
+            return $myId;
+        }
+        if ($clusterRole !== 'slave') {
+            return null;
+        }
+        $others = array_values(array_filter($servers, static fn($s) => ($s['id'] ?? '') !== $myId && ($s['enabled'] ?? true)
+            && in_array($s['role'] ?? '', [self::ROLE_PRIMARY, self::ROLE_FAILOVER], true)));
+        return count($others) === 1 ? (string)$others[0]['id'] : null;
+    }
+
+    /**
+     * Deja la lista de servidores del relevo con los papeles de quien manda de verdad en este nodo. Sin esto, tras un relevo
+     * por caída la lista seguía diciendo «principal = el titular» (que ahora es réplica y está vivo): si caía el que manda, la
+     * réplica «no veía ninguna caída del principal» y no se promovía sola (hueco visto el 2026-10-19). Lo hace cada nodo con lo
+     * que sabe de sí mismo, en cada vuelta del vigilante; no empuja nada a los demás. @return array{changed:bool,master:?string}
+     */
+    public static function alignRolesWithRealMaster(): array
+    {
+        $servers = self::getServers();
+        $mine = preg_split('/\s+/', trim((string)@shell_exec('hostname -I 2>/dev/null'))) ?: [];
+        $myId = '';
+        foreach ($servers as $s) {
+            if (in_array((string)($s['ip'] ?? ''), $mine, true)) {
+                $myId = (string)$s['id'];
+            }
+        }
+        $fenced = Settings::get('cluster_fenced', '0') === '1' || is_file('/var/lib/musedock/fenced');
+        $masterId = self::realMasterId($servers, $myId, (string)Settings::get('cluster_role', ''), $fenced);
+        if ($masterId === null) {
+            return ['changed' => false, 'master' => null];
+        }
+        $new = self::rolesForMaster($servers, $masterId);
+        $same = true;
+        foreach ($servers as $i => $s) {
+            if (($s['role'] ?? '') !== ($new[$i]['role'] ?? '') || (string)($s['failover_to'] ?? '') !== (string)($new[$i]['failover_to'] ?? '')) {
+                $same = false;
+            }
+        }
+        if ($same) {
+            return ['changed' => false, 'master' => $masterId];
+        }
+        self::saveServers($new);
+        try {
+            LogService::log('cluster.failover', 'align-roles', 'Papeles del relevo alineados con quien manda de verdad: principal = ' . $masterId);
+        } catch (\Throwable) {
+        }
+        return ['changed' => true, 'master' => $masterId];
     }
 
     /**
@@ -1349,7 +1438,7 @@ class FailoverService
             'failover_site_probes', 'failover_site_alive_wait_minutes',
             'filesync_snapshot',
             // Bloqueos de Cloudflare: la configuración sigue al que manda (solo ajustes y huellas de sondas)
-            'cf_guard_mode', 'cf_guard_restore_minutes', 'cf_guard_excluded', 'cf_guard_display_tz', 'cf_guard_probes',
+            'cf_guard_mode', 'cf_guard_restore_minutes', 'cf_guard_excluded', 'cf_guard_display_tz', 'cf_guard_probes', 'cf_guard_extra_hosts',
         ];
     }
 

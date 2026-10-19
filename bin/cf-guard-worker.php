@@ -8,6 +8,7 @@
  *   php bin/cf-guard-worker.php --inventory     vuelve a leer ya los registros de Cloudflare
  *   php bin/cf-guard-worker.php --status        sondas, IPs y cambios activos, sin hacer nada
  *   php bin/cf-guard-worker.php --new-probe=NOMBRE --token-file=RUTA   crea una sonda; el token va al fichero (600)
+ *   php bin/cf-guard-worker.php --add-host=NOMBRE | --remove-host=NOMBRE | --hosts   nombres extra a vigilar (p. ej. el dominio de un tenant de otra aplicación)
  *
  * Solo actúa en el panel que manda (no en un slave ni en uno aislado).
  */
@@ -25,10 +26,23 @@ spl_autoload_register(function ($class) {
 
 use MuseDockPanel\Services\CfGuardService as G;
 
-$opts = getopt('', ['inventory', 'status', 'new-probe:', 'token-file:']);
+$opts = getopt('', ['inventory', 'status', 'new-probe:', 'token-file:', 'add-host:', 'remove-host:', 'hosts']);
 
 $lockFp = fopen(PANEL_ROOT . '/storage/cf-guard-worker.lock', 'c');
 if (!$lockFp || !flock($lockFp, LOCK_EX | LOCK_NB)) {
+    exit(0);
+}
+
+if (isset($opts['add-host']) || isset($opts['remove-host']) || isset($opts['hosts'])) {
+    if (isset($opts['add-host'])) {
+        echo G::addExtraHost((string) $opts['add-host']) ? "Añadido a «Nombres extra a vigilar»: " . strtolower(trim((string) $opts['add-host'])) . "\n" : "Nombre no válido.\n";
+    }
+    if (isset($opts['remove-host'])) {
+        G::removeExtraHost((string) $opts['remove-host']);
+        echo "Quitado: " . strtolower(trim((string) $opts['remove-host'])) . "\n";
+    }
+    $h = G::extraHosts();
+    echo $h ? "Nombres extra vigilados (" . count($h) . "):\n  " . implode("\n  ", $h) . "\nSe leen de Cloudflare en la próxima lectura (cada 30 min) o con --inventory.\n" : "No hay nombres extra.\n";
     exit(0);
 }
 

@@ -66,10 +66,23 @@ ok('la exportación nunca lleva tokens: solo name, hash y created_at', (function
     }
     return true;
 })());
-ok('las claves que viajan son solo de configuración (no bloqueos, observaciones ni inventario)', G::SYNC_KEYS === ['cf_guard_mode', 'cf_guard_restore_minutes', 'cf_guard_excluded', 'cf_guard_display_tz', 'cf_guard_probes']);
+ok('las claves que viajan son solo de configuración (no bloqueos, observaciones ni inventario)', G::SYNC_KEYS === ['cf_guard_mode', 'cf_guard_restore_minutes', 'cf_guard_excluded', 'cf_guard_display_tz', 'cf_guard_probes', 'cf_guard_extra_hosts']);
 $sync = F::getSyncableConfigKeys();
 ok('todas esas claves están en la lista de lo que se copia entre nodos', array_diff(G::SYNC_KEYS, $sync) === []);
 ok('el estado interno NO está en esa lista', !array_filter($sync, static fn($k) => preg_match('/^cf_guard_(blocked_ips|inventory|last_report|stale_noted)/', $k)));
+
+echo "\n\033[1mNombres extra a vigilar (dominios de tenants de otras aplicaciones, p. ej. un CNAME con proxy)\033[0m\n";
+$h = G::normalizeHostList("App.Cliente.com.\n  otro.cliente.org , basura sin punto\nAPP.cliente.com\n; drop table\n-malo-.com\n*.wild.cliente.net");
+ok('limpia mayúsculas, puntos finales y repetidos, y descarta lo que no es un nombre', $h === ['app.cliente.com', 'otro.cliente.org', '*.wild.cliente.net'], json_encode($h));
+ok('nada de inyectar texto raro en la lista: un nombre con «;» o «$(…)» se descarta entero', G::normalizeHostList("a.com; rm -rf /\n\$(x).com") === [] && G::normalizeHostList('ok.com') === ['ok.com']);
+ok('una lista vacía sale vacía', G::normalizeHostList('  ') === []);
+ok('un nombre extra cuenta como configuración (no está «en blanco»)', !G::isConfigBlank(['extra_hosts' => 'app.cliente.com'] + $blank));
+ok('solo espacios: sigue en blanco', G::isConfigBlank(['extra_hosts' => " \n "] + $blank));
+$plan2 = G::adoptionPlan($blank, ['mode' => 'auto', 'extra_hosts' => "app.cliente.com"] + $real);
+ok('un nodo en blanco adopta también los nombres extra del otro', ($plan2['cf_guard_extra_hosts'] ?? '') === 'app.cliente.com', json_encode($plan2));
+ok('los nombres extra se exportan con la configuración', array_key_exists('extra_hosts', G::exportConfig()));
+$cfsrc = file_get_contents(PANEL_ROOT . '/app/Services/CfGuardService.php');
+ok('el inventario vigila los nombres extra (solo el nombre exacto, sin su www)', str_contains($cfsrc, 'foreach (self::extraHosts() as $x)') && str_contains($cfsrc, '$add($x, false)'));
 
 echo "\n" . ($fail === 0 ? "\033[0;32mTodo correcto: {$pass} comprobaciones\033[0m" : "\033[0;31m{$fail} fallo(s) de " . ($pass + $fail) . "\033[0m") . "\n";
 exit($fail === 0 ? 0 : 1);

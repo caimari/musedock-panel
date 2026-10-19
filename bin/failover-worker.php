@@ -96,6 +96,24 @@ try {
         goto cleanup;
     }
 
+    // ─── 0-bis. Papeles del relevo = quien manda de verdad ───────
+    // Tras un relevo la lista de servidores seguía con el titular como «principal»: si caía el que manda ahora, la réplica no veía
+    // ninguna caída del principal y no se promovía sola (2026-10-19). Cada nodo ordena su lista con lo que sabe de sí mismo.
+    try {
+        $al = FailoverService::alignRolesWithRealMaster();
+        if (!empty($al['changed'])) {
+            logMsg('Papeles del relevo alineados con quien manda de verdad (principal = ' . $al['master'] . ')');
+            $servers = FailoverService::getServers();
+        }
+        // En una réplica, anota que sus bases están al día (lo necesita el relevo automático para no promover una copia atrasada).
+        if (Settings::get('cluster_role', '') === 'slave' && Settings::get('cluster_fenced', '0') !== '1'
+            && \MuseDockPanel\Services\FailoverSafetyService::replicaDbHealthyNow()) {
+            Settings::set('replica_fresh_at', (string)time());
+        }
+    } catch (\Throwable $e) {
+        logMsg('Alineación de papeles error: ' . $e->getMessage());
+    }
+
     // ─── 0. Local interface self-check ────────────────────────
     // Detects if primary ethernet (e.g. ONO) is down, only NAT/backup remains
     $ifacePrimary = trim($foConfig['failover_iface_primary'] ?? '');
@@ -541,6 +559,24 @@ function autoPromoteIfNeeded(array $checks, array $foConfig): bool
         logMsg('Auto-promote: sin testigo que responda — se decide con la vista de este nodo (configura un testigo en otro proveedor)');
     }
 
+    // ── ¿Mi copia está al día? ── Promover una réplica atrasada (acaba de volver y aún se reconstruye, o su réplica llevaba
+    // rato rota) pierde lo escrito en el master mientras no estaba. No se promueve sola: se avisa y decide una persona.
+    $cntFresh = json_decode((string)Settings::get('failover_health_counters', '{}'), true) ?: [];
+    $downMinFresh = (int)round((int)($cntFresh[$downPrimary['id']]['fail_count'] ?? 0) * max(30, (int)($foConfig['failover_check_interval'] ?? 60)) / 60);
+    $fresh = \MuseDockPanel\Services\FailoverSafetyService::freshnessVerdict(
+        (int)Settings::get('replica_fresh_at', '0') ?: null, time(),
+        (int)Settings::get('failover_fresh_max_minutes', '30'), Settings::get('failover_require_fresh', '1') !== '0', $downMinFresh);
+    if (!$fresh['ok']) {
+        logMsg("Auto-promote: NO — {$fresh['reason']}");
+        if (failoverAbortShouldNotify((string)$downPrimary['id'], 'stale-copy')) {
+            NotificationService::send('Failover: relevo automático NO hecho (la copia no está al día)',
+                "El principal ({$downPrimary['name']}) no responde, pero este servidor no se promueve solo: {$fresh['reason']}.\n\n"
+                . "Promoverlo ahora perdería lo escrito en el principal desde entonces. Si prefieres arriesgarte (o el principal no va a volver), "
+                . "pulsa «Tomar el mando» en el Dashboard de este servidor. Si el principal vuelve, no hace falta hacer nada.");
+        }
+        return false;
+    }
+    logMsg('Auto-promote: ' . $fresh['reason']);
     logMsg("Auto-promote: principal {$downPrimary['name']} caído y me toca — promoviendo este servidor");
     Settings::set('failover_original_master_ip', $masterVpn);
     try {

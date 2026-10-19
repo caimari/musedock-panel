@@ -44,7 +44,7 @@ class CfGuardService
     }
 
     /** Claves de configuración que siguen al que manda (nada de estado: bloqueos, observaciones, inventario). */
-    public const SYNC_KEYS = ['cf_guard_mode', 'cf_guard_restore_minutes', 'cf_guard_excluded', 'cf_guard_display_tz', 'cf_guard_probes'];
+    public const SYNC_KEYS = ['cf_guard_mode', 'cf_guard_restore_minutes', 'cf_guard_excluded', 'cf_guard_display_tz', 'cf_guard_probes', 'cf_guard_extra_hosts'];
 
     /**
      * Configuración que sigue al que manda, para el otro nodo. Las sondas viajan solo como HUELLA (sha256), nunca el
@@ -56,6 +56,7 @@ class CfGuardService
             'mode' => self::mode(),
             'restore_minutes' => self::setting('restore_minutes', ''),
             'excluded' => self::setting('excluded', ''),
+            'extra_hosts' => self::setting('extra_hosts', ''),
             'display_tz' => self::setting('display_tz', ''),
             'probes' => array_map(static fn($p) => ['name' => (string)($p['name'] ?? ''), 'hash' => (string)($p['hash'] ?? ''), 'created_at' => (string)($p['created_at'] ?? '')], self::probes()),
         ];
@@ -65,7 +66,7 @@ class CfGuardService
     public static function isConfigBlank(?array $cfg = null): bool
     {
         $cfg ??= self::exportConfig();
-        return ($cfg['mode'] ?? 'off') === 'off' && empty($cfg['probes']) && trim((string)($cfg['excluded'] ?? '')) === '';
+        return ($cfg['mode'] ?? 'off') === 'off' && empty($cfg['probes']) && trim((string)($cfg['excluded'] ?? '')) === '' && trim((string)($cfg['extra_hosts'] ?? '')) === '';
     }
 
     /**
@@ -81,7 +82,7 @@ class CfGuardService
             'cf_guard_mode' => in_array($peer['mode'] ?? '', self::MODES, true) ? (string)$peer['mode'] : 'off',
             'cf_guard_probes' => json_encode(array_values(array_filter((array)($peer['probes'] ?? []), static fn($p) => !empty($p['hash']) && preg_match('/^[a-f0-9]{64}$/', (string)$p['hash'])))),
         ];
-        foreach (['restore_minutes' => 'cf_guard_restore_minutes', 'excluded' => 'cf_guard_excluded', 'display_tz' => 'cf_guard_display_tz'] as $k => $setting) {
+        foreach (['restore_minutes' => 'cf_guard_restore_minutes', 'excluded' => 'cf_guard_excluded', 'display_tz' => 'cf_guard_display_tz', 'extra_hosts' => 'cf_guard_extra_hosts'] as $k => $setting) {
             if (trim((string)($peer[$k] ?? '')) !== '') {
                 $plan[$setting] = (string)$peer[$k];
             }
@@ -99,6 +100,47 @@ class CfGuardService
     public static function restoreMinutes(): int
     {
         return max(10, min(240, (int) self::setting('restore_minutes', '30')));
+    }
+
+    /**
+     * Lista de nombres de máquina/dominio (uno por línea o separados por comas) limpia: minúsculas, sin puntos finales, solo nombres válidos
+     * (letras, números, guiones y puntos; con al menos un punto), sin repetidos. Pura.
+     */
+    public static function normalizeHostList(string $raw, int $max = 200): array
+    {
+        $out = [];
+        foreach (preg_split('/[\r\n,\s]+/', strtolower($raw)) ?: [] as $h) {
+            $h = trim($h, " \t.");
+            if ($h !== '' && strlen($h) <= 253 && preg_match('/^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/', $h)) {
+                $out[$h] = true;
+            }
+        }
+        return array_slice(array_keys($out), 0, $max);
+    }
+
+    /**
+     * Nombres EXTRA que esta guarda debe vigilar aunque no sean hostings, alias ni subdominios de este panel: p. ej. el dominio de un cliente
+     * que una aplicación (un tenant) sirve por Caddy y que tiene un CNAME con proxy en una zona de las cuentas de este panel.
+     */
+    public static function extraHosts(): array
+    {
+        return self::normalizeHostList(self::setting('extra_hosts', ''));
+    }
+
+    public static function addExtraHost(string $name): bool
+    {
+        $n = self::normalizeHostList($name);
+        if (count($n) !== 1) {
+            return false;
+        }
+        self::setSetting('extra_hosts', implode("\n", array_values(array_unique(array_merge(self::extraHosts(), $n)))));
+        return true;
+    }
+
+    public static function removeExtraHost(string $name): void
+    {
+        $n = self::normalizeHostList($name);
+        self::setSetting('extra_hosts', implode("\n", array_values(array_diff(self::extraHosts(), $n))));
     }
 
     public static function excluded(): array
@@ -239,6 +281,10 @@ class CfGuardService
         }
         foreach (Database::fetchAll('SELECT domain FROM hosting_domain_aliases') as $r) {
             $add($r['domain']);
+        }
+        // Nombres extra puestos a mano (p. ej. dominios de tenants de otras aplicaciones): solo el nombre exacto, sin añadir su www.
+        foreach (self::extraHosts() as $x) {
+            $add($x, false);
         }
 
         return array_keys($hosts);

@@ -457,7 +457,10 @@ class RoleSwitchService
             $plan = self::dnsPlanFor($ips['my_public'], $ips['their_public']);
             self::step($task, $st, 'Plan DNS: ' . (int)($plan['records_that_would_change'] ?? 0) . ' registros cambian, '
                 . count($plan['moved_via_cname'] ?? []) . ' van con ellos por CNAME, '
-                . (count($plan['hosting_domains_not_moved'] ?? []) + count($plan['caddy_domains_not_moved'] ?? [])) . ' no se pueden mover desde el panel.', true);
+                . count(array_filter(array_merge((array)($plan['hosting_domains_not_moved'] ?? []), (array)($plan['caddy_domains_not_moved'] ?? [])),
+                    static fn($i) => ($i['kind'] ?? '') !== 'behind_cloudflare')) . ' no se pueden mover desde el panel'
+                . (($b = count(array_filter((array)($plan['caddy_domains_not_moved'] ?? []), static fn($i) => ($i['kind'] ?? '') === 'behind_cloudflare'))) > 0
+                    ? " y {$b} con el destino no visible (proxy de Cloudflare en otra cuenta; si son CNAME a un nombre que se mueve, van con él)" : '') . '.', true);
         } catch (\Throwable $e) {
             self::step($task, $st, 'No se pudo calcular el plan DNS (' . $e->getMessage() . '); el cambio sigue igual.', false);
         }

@@ -178,6 +178,61 @@ class FailoverSafetyService
     }
 
     /**
+     * ¿Las bases de datos de esta réplica están recibiendo AHORA del master? PostgreSQL (cada clúster en recuperación con el
+     * receptor en «streaming») y MariaDB/MySQL (IO y SQL en marcha, poco retraso). Solo lectura y barato: lo anota el vigilante
+     * del relevo cada minuto en las réplicas (replica_fresh_at). Si no hay ninguna base en recuperación no hay nada que medir (true).
+     */
+    public static function replicaDbHealthyNow(): bool
+    {
+        try {
+            foreach (PgClusterService::listClusters() as $c) {
+                $rec = ReplicationService::queryCluster($c, 'SELECT pg_is_in_recovery()');
+                if (($rec[0][0] ?? '') !== 't') {
+                    continue;
+                }
+                $wr = ReplicationService::queryCluster($c, 'SELECT status FROM pg_stat_wal_receiver');
+                if (($wr[0][0] ?? '') !== 'streaming') {
+                    return false;
+                }
+            }
+            $ss = ReplicationService::getMysqlSlaveStatus();
+            if ($ss) {
+                $io = $ss['Slave_IO_Running'] ?? $ss['Replica_IO_Running'] ?? '';
+                $sql = $ss['Slave_SQL_Running'] ?? $ss['Replica_SQL_Running'] ?? '';
+                if ($io !== 'Yes' || $sql !== 'Yes' || (int)($ss['Seconds_Behind_Master'] ?? 0) > 300) {
+                    return false;
+                }
+            }
+        } catch (\Throwable) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * ¿Esta réplica puede promoverse SOLA sin perder lo escrito en el master? Se promueve solo si sus bases estaban al día hace
+     * poco (replica_fresh_at, anotado mientras el master vivía). Una réplica que acaba de volver y aún se está reconstruyendo, o cuya
+     * réplica lleva rato rota, no tiene lo escrito por el master: promoverla pierde esos cambios. Sin dato (versión recién
+     * instalada) se deja pasar como antes. Pura. @return array{ok:bool,reason:string}
+     */
+    public static function freshnessVerdict(?int $freshAt, int $now, int $maxMinutes, bool $required = true, int $downMinutes = 0): array
+    {
+        if (!$required) {
+            return ['ok' => true, 'reason' => 'comprobación desactivada (failover_require_fresh = 0)'];
+        }
+        if ($freshAt === null || $freshAt <= 0) {
+            return ['ok' => true, 'reason' => 'sin dato de la copia (aún no se ha anotado): se permite como antes'];
+        }
+        // El dato deja de renovarse cuando cae el master: se cuenta el margen desde que cayó (la espera por los vecinos y los testigos no la atrasa).
+        $age = (int)floor(($now - $freshAt) / 60);
+        $limit = max(1, $maxMinutes) + max(0, $downMinutes);
+        if ($age > $limit) {
+            return ['ok' => false, 'reason' => "la copia de las bases de datos no estaba al día: la última vez que lo estuvo fue hace {$age} min (límite {$limit})"];
+        }
+        return ['ok' => true, 'reason' => "copia al día hace {$age} min"];
+    }
+
+    /**
      * Deshace el apartado de otro nodo (si estaba apartado) y comprueba que ya no lo está. Es lo que hay que hacer si
      * se le pidió apartarse y la promoción no llegó a hacerse.
      */
@@ -432,13 +487,16 @@ class FailoverSafetyService
                 // Y, si es seguro, pasar a ser espejo del nuevo master sin esperar a nadie.
                 $rejoin = self::autoRejoinAsSlave($host);
                 try {
-                    NotificationService::send(
-                        $rejoin['done'] ? 'Failover: este servidor ya es espejo del nuevo master' : 'Failover: este servidor sigue apartado (decide tú)',
-                        $rejoin['done']
-                            ? "Tras apartarse, se ha convertido en réplica de {$n['name']} ({$host}): no tenía escrituras propias tras el relevo. Volver a ser principal es manual."
-                            : 'No se ha convertido en réplica automáticamente: ' . ($rejoin['reason'] ?? '?')
-                              . "\n\nRevisa y, si procede: php bin/cluster-switch.php demote {$host}"
-                    );
+                    if (!empty($rejoin['done'])) {
+                        self::clearRejoinPending();
+                        NotificationService::send('Failover: este servidor ya es espejo del nuevo master',
+                            "Tras apartarse, se ha convertido en réplica de {$n['name']} ({$host}): no tenía escrituras propias tras el relevo. Volver a ser principal es manual.");
+                    } else {
+                        $why = (string)($rejoin['reason'] ?? 'motivo desconocido');
+                        self::markRejoinPending((string)$n['name'], $host, $why);
+                        [$subject, $body] = self::rejoinEmail((string)$n['name'], $host, $why);
+                        NotificationService::send($subject, $body);
+                    }
                 } catch (\Throwable) {
                 }
                 return ['stale' => true, 'winner' => $n['name'], 'reason' => $reason, 'rejoin' => $rejoin] + $fence;
@@ -814,6 +872,99 @@ class FailoverSafetyService
         $diverged = $toInt($myLsn) > $toInt($switch);
         return ['diverged' => $diverged, 'local_lsn' => $myLsn, 'switch_lsn' => $switch,
                 'reason' => $diverged ? "este nodo escribió después del relevo ({$myLsn} > {$switch})" : 'sin escrituras propias tras el relevo'];
+    }
+
+    public const REJOIN_KEY = 'cluster_rejoin_pending';
+
+    /** El nuevo master al que este nodo apartado debe reincorporarse como copia, si queda pendiente. @return array|null */
+    public static function rejoinPending(): ?array
+    {
+        $r = json_decode((string)Settings::get(self::REJOIN_KEY, ''), true);
+        return is_array($r) && !empty($r['host']) ? $r : null;
+    }
+
+    /** Anota que este nodo está apartado y NO se ha reincorporado solo (para el aviso permanente, el botón y los recordatorios). */
+    public static function markRejoinPending(string $winnerName, string $host, string $reason): void
+    {
+        $prev = self::rejoinPending();
+        $since = ($prev && ($prev['host'] ?? '') === $host) ? (int)($prev['since'] ?? time()) : time();
+        Settings::set(self::REJOIN_KEY, json_encode(['name' => $winnerName, 'host' => $host, 'reason' => $reason, 'since' => $since,
+            'last_try' => (int)($prev['last_try'] ?? 0), 'last_mail' => (int)($prev['last_mail'] ?? time())], JSON_UNESCAPED_UNICODE));
+    }
+
+    public static function clearRejoinPending(): void
+    {
+        Settings::set(self::REJOIN_KEY, '');
+        Settings::set('cluster_rejoin_running_at', '0');
+    }
+
+    /** ¿Toca reintentar la reincorporación automática? (cada $minSeconds; el primer intento ya se hizo al apartarse). Pura. */
+    public static function rejoinRetryDue(?array $pending, int $now, int $minSeconds = 300): bool
+    {
+        return $pending !== null && ($now - (int)($pending['last_try'] ?? 0)) >= $minSeconds;
+    }
+
+    /** ¿Toca recordar por correo que sigue sin reincorporarse? (la primera vez ya se avisó al apartarse). Pura. */
+    public static function rejoinReminderDue(?array $pending, int $now, int $everySeconds = 21600): bool
+    {
+        return $pending !== null && ($now - (int)($pending['last_mail'] ?? $now)) >= $everySeconds;
+    }
+
+    /**
+     * Asunto y cuerpo del correo cuando este nodo apartado no se reincorpora solo: qué pasa, por qué, qué hacer (botón del
+     * Dashboard o terminal) y qué se pierde. Pura. @return array{0:string,1:string}
+     */
+    public static function rejoinEmail(string $winnerName, string $host, string $reason, bool $reminder = false): array
+    {
+        $diverged = (bool)preg_match('/escritura|diverg|GTID|copia completa|timeline/i', $reason);
+        $subject = ($reminder ? 'Recordatorio: ' : '') . 'Failover: este servidor sigue apartado y hay que reincorporarlo como copia (decide tú)';
+        $body = "Este servidor se ha apartado porque {$winnerName} manda ahora: no sirve webs y sus bases de datos de clientes están en solo lectura.\n\n"
+            . "El panel NO lo ha reincorporado solo como copia de {$winnerName} ({$host}). Motivo: {$reason}\n\n"
+            . "QUÉ HACER (cuando te venga bien; mientras tanto el sitio funciona con {$winnerName}):\n"
+            . "  1. Entra al panel de ESTE servidor (por su IP o su dirección del panel): arriba de cualquier página hay un aviso rojo con el botón "
+            . "«Reincorporar como copia de {$winnerName}». Púlsalo y espera unos minutos (copia lo que falta del nuevo master).\n"
+            . "  2. O por terminal, como root: php /opt/musedock-panel/bin/cluster-switch.php demote {$host}\n\n"
+            . ($diverged
+                ? "OJO: este servidor tiene datos que el nuevo master no tiene (escrituras hechas aquí después del relevo, o un historial que no cuadra). "
+                  . "Reincorporarlo los DESCARTA y los sustituye por una copia del nuevo master. Si hay algo que quieras conservar, cópialo antes.\n\n"
+                : "No se han detectado escrituras propias: la copia solo trae lo que le falta.\n\n")
+            . "El panel lo reintenta solo cada 5 minutos por si el motivo desaparece (red, servicio parado…) y te lo recuerda por correo cada 6 horas mientras siga así.";
+        return [$subject, $body];
+    }
+
+    /**
+     * Lanza en segundo plano la reincorporación de este nodo apartado como copia del nuevo master (lo que hace el botón del Dashboard).
+     * Tarda minutos (copia de bases de datos): no se espera. @return array{ok:bool,message:string}
+     */
+    public static function startRejoinInBackground(): array
+    {
+        $p = self::rejoinPending();
+        if ($p === null) {
+            return ['ok' => false, 'message' => 'No hay nada pendiente: este servidor no está esperando reincorporarse.'];
+        }
+        if (Settings::get('cluster_role', '') === 'slave') {
+            self::clearRejoinPending();
+            return ['ok' => false, 'message' => 'Este servidor ya es copia.'];
+        }
+        $running = (int)Settings::get('cluster_rejoin_running_at', '0');
+        if ($running > 0 && time() - $running < 3600) {
+            return ['ok' => false, 'message' => 'Ya hay una reincorporación en curso desde hace ' . (int)round((time() - $running) / 60) . ' min.'];
+        }
+        $host = (string)$p['host'];
+        if (!filter_var($host, FILTER_VALIDATE_IP)) {
+            return ['ok' => false, 'message' => 'La dirección del nuevo master no es válida.'];
+        }
+        Settings::set('cluster_rejoin_running_at', (string)time());
+        $root = defined('PANEL_ROOT') ? PANEL_ROOT : dirname(__DIR__, 2);
+        $log = $root . '/storage/logs/rejoin.log';
+        @shell_exec('echo "[$(date -u +%FT%TZ)] reincorporación pedida desde el panel" >> ' . escapeshellarg($log) . ' 2>&1');
+        @shell_exec('nohup /usr/bin/php ' . escapeshellarg($root . '/bin/cluster-switch.php') . ' demote ' . escapeshellarg($host)
+            . ' >> ' . escapeshellarg($log) . ' 2>&1 &');
+        try {
+            LogService::log('cluster.rejoin', $host, 'Reincorporación como copia lanzada desde el panel');
+        } catch (\Throwable) {
+        }
+        return ['ok' => true, 'message' => 'Reincorporación iniciada en segundo plano: tarda unos minutos. Se ve en storage/logs/rejoin.log.'];
     }
 
     /**

@@ -92,6 +92,14 @@ echo '* * * * * root EDGE_PROBE_CONF=/etc/musedock-edge-probe-panel.conf flock -
                     <?php if ($cmsManaged): ?><div class="form-text">Excluidos solos (los gestiona su MuseDock CMS): <?= View::e(implode(', ', $cmsManaged)) ?></div><?php endif; ?>
                 </div>
             </div>
+            <div class="row g-3 mt-1">
+                <div class="col-md-8">
+                    <label class="form-label fw-semibold">Nombres extra a vigilar</label>
+                    <textarea class="form-control form-control-sm" name="extra_hosts" rows="2" placeholder="uno por línea (nombres exactos, p. ej. el dominio de un cliente que sirve una aplicación)"><?= View::e($extraHosts ?? '') ?></textarea>
+                    <div class="form-text">Para nombres que <strong>no son hostings de este panel</strong> pero cuyo registro (A o CNAME con proxy) está en una zona de las cuentas de este panel,
+                        por ejemplo el dominio de un tenant que una aplicación sirve por Caddy. Se copian al otro nodo con el resto de la configuración.</div>
+                </div>
+            </div>
             <?php if (!$isSlave): ?><button class="btn btn-primary btn-sm mt-3"><i class="bi bi-check-lg me-1"></i>Guardar</button><?php endif; ?>
         </form>
     </div>

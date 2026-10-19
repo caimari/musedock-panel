@@ -131,6 +131,25 @@ php bin/cf-guard-worker.php --new-probe=NOMBRE --token-file=/root/token   # crea
 </div>
 
 <div class="card mb-4">
+    <div class="card-header"><i class="bi bi-plus-circle me-2"></i>Nombres extra: dominios que no son hostings de este panel</div>
+    <div class="card-body small text-muted">
+        <p>La guarda solo vigila los registros cuyo nombre es un <strong>hosting, un alias o un subdominio de este panel</strong>. Un dominio que sirve una aplicación
+            por su cuenta (por ejemplo, el dominio de un cliente que apunta con un CNAME con proxy a un nombre de este servidor y que la aplicación añade directamente a Caddy)
+            no figura en ninguna lista del panel y <strong>no se vigilaría</strong>: si se bloquean las IPs de Cloudflare, seguiría con la nube naranja y quedaría inaccesible
+            desde las líneas afectadas.</p>
+        <ul class="mb-2">
+            <li>Añádelo en <em>Ajustes → Bloqueos Cloudflare → Nombres extra a vigilar</em> (uno por línea, el nombre exacto) o con <code>php bin/cf-guard-worker.php --add-host=app.cliente.com</code>
+                (<code>--remove-host</code> para quitarlo, <code>--hosts</code> para listarlos).</li>
+            <li>Tiene que hacerlo <strong>el panel que tenga la zona de ese dominio</strong> en sus cuentas de Cloudflare y que mande en ese momento; el ajuste se copia al otro nodo con el resto de la configuración.
+                Si la zona está en otra cuenta que un panel no tiene, ese panel no puede tocarlo.</li>
+            <li>Se lee de Cloudflare en la siguiente lectura del inventario (cada 30 minutos) o al momento con <code>--inventory</code>. Al quitar el proxy, el nombre pasa a ir directo al servidor
+                (un CNAME sin proxy resuelve a la IP del servidor al que apunta), así que ese servidor necesita un certificado válido para ese nombre.</li>
+        </ul>
+        <p class="mb-0">Al vigilar un nombre el panel lo trata igual que a un hosting: lo quita del proxy solo cuando varias sondas ven bloqueadas sus IPs y lo repone cuando llevan el tiempo configurado respondiendo bien.</p>
+    </div>
+</div>
+
+<div class="card mb-4">
     <div class="card-header"><i class="bi bi-arrow-left-right me-2"></i>Con un par master / réplica</div>
     <div class="card-body small text-muted">
         <p>Solo <strong>manda el panel que es master</strong> (una réplica o un nodo apartado muestra el estado pero no toca Cloudflare). Para que el sistema siga protegiendo tras un relevo, dos cosas tienen que seguir al master:</p>

@@ -110,10 +110,21 @@ class DnsPlanService
         // aplicaciones, p. ej. tenants de un CMS). En un slave Caddy solo sirve lo suyo.
         $caddyNotMoved = [];
         $caddyNoDns = [];
+        $machineLower = array_map('strtolower', $machineNames);
+        $viaCnamePublic = [];
         $caddy = CaddyDomainsService::classify();
         foreach (($caddy['domains'] ?? []) as $cd) {
             $n = (string)$cd['host'];
             if (isset($moved[$n]) || $follows($n)) {
+                continue;
+            }
+            // Nombre de máquina que se queda en su servidor a propósito: no es un aviso (ya sale en machine_names_kept).
+            if (in_array(strtolower($n), $machineLower, true)) {
+                continue;
+            }
+            // Zona de otra cuenta, pero con un CNAME visible en el DNS público (sin proxy) que acaba en un nombre que se mueve: se mueve solo.
+            if (!$inZones($n) && self::publicCnameFollows($n, $moved)) {
+                $viaCnamePublic[] = strtolower($n);
                 continue;
             }
             // Sin DNS no hay nada que mover (dominio caducado, sin www…): aparte.
@@ -121,10 +132,13 @@ class DnsPlanService
                 $caddyNoDns[] = ['name' => $n, 'why' => (string)$cd['group']];
                 continue;
             }
-            $caddyNotMoved[] = ['name' => $n, 'why' => "{$cd['group']}: {$cd['detail']} — " . ($inZones($n)
-                ? 'su zona está en estas cuentas, pero no apunta a este servidor'
-                : 'su DNS no está en las cuentas de Cloudflare del panel')];
+            $hint = $inZones($n) ? ['kind' => 'other', 'text' => 'su zona está en estas cuentas, pero no apunta a este servidor']
+                : self::outsideZoneHint(self::publicIps($n), array_keys($fromIps));
+            $caddyNotMoved[] = ['name' => $n, 'why' => "{$cd['group']}: {$cd['detail']} — " . $hint['text'], 'kind' => $hint['kind']];
         }
+
+        $viaCname = array_values(array_unique(array_merge($viaCname, $viaCnamePublic)));
+        sort($viaCname);
 
         return [
             'ok' => !$errors,
@@ -143,6 +157,85 @@ class DnsPlanService
             'zone_errors' => $errors,
             'note' => 'Cambian los registros A que apuntan exactamente a la IP de origen, en las zonas de las cuentas de Cloudflare de ESTE panel; lo que va por CNAME a esos nombres se mueve con ellos. Un dominio cuyo DNS esté en otra cuenta u otro proveedor no cambiaría.',
         ];
+    }
+
+    /**
+     * ¿Este nombre es (en el DNS público) un CNAME que acaba, en pocos saltos, en un nombre que se mueve? Sirve para dominios cuya zona
+     * está en otra cuenta de Cloudflare: si no llevan proxy su CNAME se ve desde fuera. Con proxy (nube naranja) el DNS público solo da IPs
+     * de Cloudflare y no se puede saber. $resolver(nombre) devuelve el destino o null (inyectable para probar).
+     */
+    public static function publicCnameFollows(string $name, array $moved, ?callable $resolver = null): bool
+    {
+        $resolver ??= static function (string $n): ?string {
+            $r = @dns_get_record($n, DNS_CNAME);
+            return !empty($r[0]['target']) ? strtolower(rtrim((string)$r[0]['target'], '.')) : null;
+        };
+        $n = strtolower($name);
+        for ($i = 0; $i < 10; $i++) {
+            $t = $resolver($n);
+            if ($t === null || $t === '') {
+                return false;
+            }
+            if (isset($moved[$t])) {
+                return true;
+            }
+            $n = $t;
+        }
+        return false;
+    }
+
+    /** Rangos de IPv4 de Cloudflare (https://www.cloudflare.com/ips-v4). */
+    private const CF_RANGES = ['173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18', '108.162.192.0/18',
+        '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17', '162.158.0.0/15', '104.16.0.0/13', '104.24.0.0/14',
+        '172.64.0.0/13', '131.0.72.0/22'];
+
+    /** ¿Es una IPv4 de Cloudflare? Pura. */
+    public static function isCloudflareIp(string $ip): bool
+    {
+        $l = ip2long($ip);
+        if ($l === false) {
+            return false;
+        }
+        foreach (self::CF_RANGES as $cidr) {
+            [$net, $bits] = explode('/', $cidr);
+            $mask = $bits == 0 ? 0 : (~0 << (32 - (int)$bits)) & 0xFFFFFFFF;
+            if (($l & $mask) === (ip2long($net) & $mask)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** IPv4 que da el DNS público para un nombre. */
+    private static function publicIps(string $name): array
+    {
+        $out = [];
+        foreach ((array)@dns_get_record($name, DNS_A) as $r) {
+            if (!empty($r['ip'])) {
+                $out[] = (string)$r['ip'];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Qué decir de un dominio cuya zona NO está en las cuentas de Cloudflare del panel, según lo que da su DNS público.
+     * apunta a la IP de origen = problema real (no se moverá); detrás de Cloudflare con proxy = su destino no se ve desde aquí
+     * (si es un CNAME a un nombre que se mueve, irá con él). Pura. @return array{kind:string,text:string}
+     */
+    public static function outsideZoneHint(array $ips, array $originIps): array
+    {
+        foreach ($ips as $ip) {
+            if (in_array($ip, $originIps, true)) {
+                return ['kind' => 'points_here', 'text' => "apunta directamente a la IP de este servidor ({$ip}) y su zona no está en las cuentas del panel: NO se moverá solo. "
+                    . 'Cambia su DNS a mano, o dale a este panel acceso a su zona'];
+            }
+        }
+        if ($ips && count(array_filter($ips, [self::class, 'isCloudflareIp'])) === count($ips)) {
+            return ['kind' => 'behind_cloudflare', 'text' => 'va por Cloudflare con proxy y su zona está en otra cuenta: desde aquí no se ve a qué apunta. '
+                . 'Si es un CNAME a un nombre que se mueve (p. ej. el de un servicio de este servidor), irá con él; si es un A a la IP de este servidor, no'];
+        }
+        return ['kind' => 'unknown', 'text' => 'su DNS no está en las cuentas de Cloudflare del panel'];
     }
 
     /** ¿Se mueve este nombre (directamente o por CNAME) según un plan? */
