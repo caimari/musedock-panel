@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.379] — 2026-10-19 — El correo del sistema que rebota se detecta antes
+
+### Añadido
+- **Aviso en el panel de que el correo del propio servidor (cron, root…) saldrá y rebotará.** Caso real: con `myorigin = mail.musedock.com` y `mydestination = localhost`, una tarea de cron que fallaba cada minuto generaba `usuario@mail.musedock.com`; Postfix lo trataba como ajeno, lo mandaba por el relayhost a otro nodo, que lo rechazaba («Relay access denied»), y se acumularon 1.305 mensajes reintentándose en asterisk (Contabo avisó del tráfico por el puerto 25). El preflight/readiness de cada nodo (`ClusterGuardService::systemMailIssues`) ahora avisa, solo leyendo, de tres cosas: (1) el dominio de origen del correo del sistema no es local para Postfix; (2) la cola de Postfix supera un umbral (ajuste `mail_queue_warn`, 100 por defecto); (3) una tarea del panel (`bin/*.php`) está a la vez en un crontab de usuario y en `/etc/cron.d` (la de usuario suele fallar sin permiso para su log).
+- **El panel entrega en el propio servidor el correo del sistema (cron, root…)** (`SystemMailService`, `bin/mail-system-local.php`). Si el dominio de origen no es local para Postfix, lo añade a `mydestination` (sin nombres escritos en el código: sale del Postfix de cada nodo). Seguro: no toca nada si el dominio es de buzones virtuales, alias, relay o transporte (Postfix no admite el mismo dominio en los dos sitios), si no se pudo comprobar (p. ej. sin permiso sobre las tablas de Postfix), o si `mydestination` es una configuración propia del administrador; hace copia de `main.cf`, valida con `postfix check` y restaura si algo falla. Modo por ajuste `mail_system_local_mode`: `warn` (por defecto: solo avisa en el preflight y da el comando), `auto` (el cron del clúster lo mantiene, como mucho una vez por hora) y `off`. Manual: `php bin/mail-system-local.php` simula y `--apply` aplica; `--mode=auto|warn|off` fija el modo. El aviso del preflight dice qué haría el panel o por qué no puede hacerlo solo.
+- Pruebas: `tests/cluster_guard_test.php` pasa a 71 comprobaciones y `tests/system_mail_test.php` (14).
+
 ## [1.0.377] — 2026-10-18 — Sondas y réplicas sin falsos avisos
 
 ### Corregido

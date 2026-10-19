@@ -144,6 +144,17 @@ try {
     logMsg('Avisos agrupados error: ' . $e->getMessage());
 }
 
+// ─── Step 0-sysmail: correo del sistema (cron, root) entregado en el propio servidor ──
+// Solo en modo auto (ajuste mail_system_local_mode) y como mucho cada hora; con copia de main.cf y marcha atrás.
+try {
+    $sm = \MuseDockPanel\Services\SystemMailService::periodic();
+    if ($sm !== '') {
+        logMsg($sm);
+    }
+} catch (\Throwable $e) {
+    logMsg('Correo del sistema error: ' . $e->getMessage());
+}
+
 // ─── Step 0a: Vigilancia del nodo tras relevos (ClusterGuardService) ──
 // Nace del relevo del 2026-10-18: un slave vigilándose a sí mismo, Dovecot fallido horas sin
 // aviso, PostgreSQL sin arrancar, lsyncd sin instalar en el nodo que pasó a mandar.

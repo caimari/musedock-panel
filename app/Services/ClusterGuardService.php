@@ -541,6 +541,138 @@ class ClusterGuardService
         return $issues;
     }
 
+    // ─────────────────────────────────────────────────────────
+    // Correo del sistema (cron, root…): que no salga del servidor ni se acumule
+    // ─────────────────────────────────────────────────────────
+
+    /**
+     * ¿El correo que genera el propio servidor (cron, root) sale con un remitente que Postfix trata como ajeno?
+     * Caso 2026-10-18: myorigin = mail.musedock.com y mydestination = localhost → un cron fallando cada minuto
+     * generaba usuario@mail.musedock.com, se mandaba por el relayhost a otro nodo, que lo rechazaba («Relay access
+     * denied») y se acumulaban 1.305 mensajes reintentándose sin parar. Pura: recibe lo que dice Postfix.
+     * @param array{origin:string,mydestination:string,virtual?:list<string>} $pf
+     */
+    public static function systemMailProblem(array $pf): ?string
+    {
+        $origin = strtolower(trim((string)($pf['origin'] ?? '')));
+        if ($origin === '') {
+            return null;
+        }
+        $local = preg_split('/[\s,]+/', strtolower((string)($pf['mydestination'] ?? ''))) ?: [];
+        if (in_array($origin, $local, true) || in_array('$myhostname', $local, true) && $origin === strtolower((string)($pf['myhostname'] ?? ''))) {
+            return null;
+        }
+        if (in_array($origin, array_map('strtolower', (array)($pf['virtual'] ?? [])), true)) {
+            return null;
+        }
+        return "El correo del propio servidor (cron, root…) sale como usuario@{$origin}, pero Postfix no considera ese dominio local: lo manda fuera"
+            . ((string)($pf['relayhost'] ?? '') !== '' ? ' por el relayhost' : '') . ' y, si el destino no lo acepta, se acumula en la cola y se reintenta sin parar. '
+            . "Solución: que {$origin} figure en mydestination (entrega local) o dirigir root y los usuarios a un buzón real.";
+    }
+
+    /**
+     * Tareas del panel (bin/*.php) que están a la vez en un crontab de usuario y en /etc/cron.d: la de usuario
+     * suele fallar (sin permiso para el log) y cada fallo es un correo por minuto. Pura.
+     * @param array<string,string> $userTabs usuario => texto del crontab
+     * @param array<string,string> $cronD    fichero => texto
+     * @return list<string> descripciones en llano
+     */
+    public static function duplicateCronJobs(array $userTabs, array $cronD): array
+    {
+        $scripts = static function (string $text): array {
+            $out = [];
+            foreach (preg_split('/\R/', $text) ?: [] as $line) {
+                $line = trim($line);
+                if ($line === '' || $line[0] === '#') {
+                    continue;
+                }
+                if (preg_match('#/bin/([A-Za-z0-9_.-]+\.php)#', $line, $m)) {
+                    $out[$m[1]] = true;
+                }
+            }
+            return array_keys($out);
+        };
+        $inD = [];
+        foreach ($cronD as $f => $t) {
+            foreach ($scripts($t) as $sc) {
+                $inD[$sc] = $f;
+            }
+        }
+        $dups = [];
+        foreach ($userTabs as $u => $t) {
+            if ($u === 'root') {
+                continue;
+            }
+            foreach ($scripts($t) as $sc) {
+                if (isset($inD[$sc])) {
+                    $dups[] = "{$sc} está en el crontab de «{$u}» y también en /etc/cron.d/{$inD[$sc]}: la del usuario suele fallar (sin permiso para su log) y cada fallo es un correo por minuto.";
+                }
+            }
+        }
+        return $dups;
+    }
+
+    /** Mensajes en la cola de Postfix (0 si no se puede saber). Mide con «postqueue -p» (sin root solo ve lo suyo). */
+    public static function mailQueueSize(): int
+    {
+        $out = (string)@shell_exec('postqueue -p 2>/dev/null | tail -n 1');
+        if (preg_match('/in (\d+) Requests?/', $out, $m)) {
+            return (int)$m[1];
+        }
+        return 0;
+    }
+
+    /** Fallos de configuración del correo del sistema para readiness(). Solo lectura. */
+    public static function systemMailIssues(): array
+    {
+        $issues = [];
+        if (trim((string)@shell_exec('command -v postconf 2>/dev/null')) === '') {
+            return $issues;
+        }
+        $pc = static fn(string $k): string => trim((string)@shell_exec('postconf -h ' . escapeshellarg($k) . ' 2>/dev/null'));
+        $origin = $pc('myorigin');
+        if ($origin !== '' && $origin[0] === '/') {
+            $origin = trim((string)strtok((string)@file_get_contents($origin), "\n"));
+        }
+        $problem = self::systemMailProblem([
+            'origin' => $origin, 'myhostname' => $pc('myhostname'), 'mydestination' => $pc('mydestination'),
+            'relayhost' => $pc('relayhost'),
+            'virtual' => [],
+        ]);
+        if ($problem !== null) {
+            // Qué haría el panel con ello (solo lectura): da el comando o explica por qué no se puede solo.
+            try {
+                $plan = SystemMailService::plan(SystemMailService::inspect());
+                if ($plan['action'] === 'add') {
+                    $problem .= ' El panel puede arreglarlo solo: «php bin/mail-system-local.php --apply» en este nodo (con copia de main.cf y marcha atrás), o ajuste mail_system_local_mode = auto.';
+                } elseif ($plan['action'] === 'skip') {
+                    $problem .= ' El panel no lo toca solo: ' . $plan['reason'];
+                }
+            } catch (\Throwable) {
+            }
+            $issues[] = ['severity' => 'warn', 'key' => 'system-mail-origin', 'text' => $problem];
+        }
+        $limit = max(10, (int)Settings::get('mail_queue_warn', '100'));
+        $q = self::mailQueueSize();
+        if ($q > $limit) {
+            $issues[] = ['severity' => 'warn', 'key' => 'mail-queue-big', 'text' => "La cola de correo de Postfix tiene {$q} mensajes (aviso a partir de {$limit}). Mira «mailq | head»: si son avisos internos que rebotan, se reintentan sin parar y llenan el tráfico saliente."];
+        }
+        if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
+            $tabs = [];
+            foreach (glob('/var/spool/cron/crontabs/*') ?: [] as $f) {
+                $tabs[basename($f)] = (string)@file_get_contents($f);
+            }
+            $d = [];
+            foreach (glob('/etc/cron.d/*') ?: [] as $f) {
+                $d[basename($f)] = (string)@file_get_contents($f);
+            }
+            foreach (self::duplicateCronJobs($tabs, $d) as $i => $text) {
+                $issues[] = ['severity' => 'warn', 'key' => 'cron-dup-' . substr(md5($text), 0, 8), 'text' => $text];
+            }
+        }
+        return $issues;
+    }
+
     /**
      * Lo que le falta a este nodo para tomar el mando de verdad. Cada punto: severity
      * (warn|info), key (estable, para no repetir avisos) y text (en llano).
@@ -557,6 +689,13 @@ class ClusterGuardService
             } elseif (in_array($mip, self::localIps(), true)) {
                 $issues[] = ['severity' => 'warn', 'key' => 'master-ip-self', 'text' => "El master que vigila este slave ({$mip}) es una IP de este mismo servidor: nunca notaría que el master real cae."];
             }
+        }
+
+        try {
+            foreach (self::systemMailIssues() as $i) {
+                $issues[] = $i;
+            }
+        } catch (\Throwable) {
         }
 
         if (self::filesyncWanted()) {

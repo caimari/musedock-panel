@@ -20,6 +20,18 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.379',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Aviso en el panel (readiness de cada nodo) de que el correo del propio servidor (cron, root) saldrá y rebotará: dominio de origen no local para Postfix, cola de Postfix por encima de un umbral (mail_queue_warn, 100 por defecto) y tareas del panel duplicadas entre un crontab de usuario y /etc/cron.d. Caso real: 1.305 avisos de cron reintentándose en asterisk.',
+                        'El panel entrega en el propio servidor el correo del sistema (cron, root): si el dominio de origen no es local para Postfix, lo añade a mydestination. No toca nada si el dominio es virtual/relay/transporte, si no se pudo comprobar o si mydestination es propio del administrador; copia de main.cf, postfix check y marcha atrás. Ajuste mail_system_local_mode (warn por defecto, auto, off); manual con bin/mail-system-local.php (--apply).',
+                        'Pruebas: tests/cluster_guard_test.php pasa a 71 comprobaciones y tests/system_mail_test.php (14).',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.377',
                 'date' => '2026-10-18',
                 'badge' => 'info',

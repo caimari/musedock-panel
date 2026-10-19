@@ -161,5 +161,20 @@ ok('con MUSEDOCK_DISABLE_REMOTE_FENCE=1 no se ordena aislar a nadie, ni siquiera
 $ru = F::requestUnfence('10.10.70.154');
 ok('con el interruptor tampoco se ordena reactivar', $ru['ok'] === false && str_contains($ru['message'], 'desactivada'), json_encode($ru));
 
+section('9. Correo del sistema que sale del servidor y rebota (asterisk, 1.305 mensajes, 2026-10-18)');
+$pf = ['origin' => 'mail.musedock.com', 'myhostname' => 'mail.musedock.com', 'mydestination' => 'localhost', 'relayhost' => '[10.10.70.2]:25'];
+$prob = G::systemMailProblem($pf);
+ok('origen fuera de mydestination (caso real): avisa y lo explica', $prob !== null && str_contains($prob, 'mail.musedock.com') && str_contains($prob, 'relayhost'), (string)$prob);
+ok('con el dominio en mydestination: sin aviso', G::systemMailProblem(['mydestination' => 'localhost, mail.musedock.com'] + $pf) === null);
+ok('con $myhostname en mydestination y origen = hostname: sin aviso', G::systemMailProblem(['mydestination' => 'localhost, $myhostname'] + $pf) === null);
+ok('con el dominio como virtual propio: sin aviso', G::systemMailProblem($pf + ['virtual' => ['mail.musedock.com']]) === null);
+ok('sin origen conocido no se inventa un aviso', G::systemMailProblem(['origin' => '', 'mydestination' => 'localhost']) === null);
+$d = ['musedock-cf-guard' => "# x\n* * * * * root sleep 35 && /usr/bin/php /opt/musedock-panel/bin/cf-guard-worker.php >> /opt/musedock-panel/storage/logs/x.log 2>&1\n"];
+$dup = G::duplicateCronJobs(['musedockcomcalamar' => "* * * * * php /opt/musedock-panel/bin/cf-guard-worker.php >> /opt/musedock-panel/storage/logs/cf-guard-worker.log 2>&1\n"], $d);
+ok('la tarea del panel repetida en un crontab de usuario se detecta (caso real)', count($dup) === 1 && str_contains($dup[0], 'cf-guard-worker.php') && str_contains($dup[0], 'musedockcomcalamar'), json_encode($dup));
+ok('lo mismo en el crontab de root no cuenta', G::duplicateCronJobs(['root' => "* * * * * php /opt/musedock-panel/bin/cf-guard-worker.php\n"], $d) === []);
+ok('una tarea distinta del usuario no cuenta', G::duplicateCronJobs(['u' => "0 * * * * php /var/www/x/artisan schedule:run\n"], $d) === []);
+ok('una línea comentada no cuenta', G::duplicateCronJobs(['u' => "# * * * * * php /opt/musedock-panel/bin/cf-guard-worker.php\n"], $d) === []);
+
 echo "\n" . ($fail === 0 ? "\033[0;32mTodo correcto: {$pass} comprobaciones\033[0m" : "\033[0;31m{$fail} fallo(s) de " . ($pass + $fail) . "\033[0m") . "\n";
 exit($fail === 0 ? 0 : 1);
