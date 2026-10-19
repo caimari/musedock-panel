@@ -215,6 +215,12 @@ class SystemWatchService
         return $s;
     }
 
+    private static function recentRoleChange(int $window = 900): bool
+    {
+        $t = max((int)\MuseDockPanel\Settings::get('cluster_role_changed_at', '0'), (int)\MuseDockPanel\Settings::get('cluster_demoted_at', '0'));
+        return $t > 0 && time() - $t < $window;
+    }
+
     /** Patrones que no se vigilan (Avisos → "Cambios del sistema: ignorar"). Admite "host:patrón". */
     public static function ignored(string $path): bool
     {
@@ -255,6 +261,12 @@ class SystemWatchService
                 $old = (array)($prev[$cat] ?? []);
                 foreach ($items as $path => $sig) {
                     if (self::ignored($path)) {
+                        continue;
+                    }
+                    // Tareas de /etc/cron.d que el panel apaga/enciende al cambiar de rol (se renombran a *.musedock-off):
+                    // un fichero apagado no corre, y en los 15 min tras un cambio de rol el cambio es del propio panel.
+                    if ($cat === 'cron' && str_starts_with($path, '/etc/cron.d/')
+                        && (str_ends_with($path, '.musedock-off') || self::recentRoleChange())) {
                         continue;
                     }
                     if (!array_key_exists($path, $old)) {

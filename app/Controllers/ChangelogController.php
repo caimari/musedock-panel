@@ -20,6 +20,28 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.391',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'El panel de rescate de un nodo apartado usa el certificado real del nombre del panel (Let\'s Encrypt, si sigue vigente): Chrome ya no lo bloquea por HSTS y se puede usar el botón de reincorporar entrando por el nombre.',
+                        'El vigilante de cambios del sistema no avisa de las tareas de /etc/cron.d que el panel enciende o apaga al cambiar de rol (*.musedock-off y los 15 min siguientes).',
+                    ],
+                ],
+            ],
+            [
+                'version' => '1.0.390',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Cambio de mando más corto: primero lo que hace servir (bases con escritura, Caddy, puertos) y el reenvío de visitas desde el nodo anterior; lo lento después. Queda medido en el paso «Sirviendo con escritura».',
+                        'Plan DNS: el nombre del panel y las comprobaciones propias salen como «se quedan donde están», no como aviso.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.389',
                 'date' => '2026-10-19',
                 'badge' => 'info',
@@ -27,8 +49,6 @@ class ChangelogController
                     'fixed' => [
                         'Un cambio de mando se deshacía por un paso de MariaDB en un nodo donde MariaDB no está en replicación: ahora se omite, y solo falla si está en replicación y no responde.',
                         'Tras un cambio revertido, el nodo apartado se reincorpora solo como copia (con su botón y reintento automático), sin ejecutar demote a mano.',
-                        'Cambio de mando más corto: primero lo que hace servir (bases con escritura, Caddy, puertos) y el reenvío de visitas desde el nodo anterior; lo lento después. Queda medido en el paso «Sirviendo con escritura».',
-                        'Plan DNS: el nombre del panel y las comprobaciones propias salen como «se quedan donde están», no como aviso.',
                         '«Comprobar» detecta ese caso antes de apartar al master.',
                         'Avisos del cambio fallido: un solo mensaje corto, sin volcado de pasos ni copia reenviada; sin avisos de permisos ni de webs caídas si la promoción se deshace.',
                     ],

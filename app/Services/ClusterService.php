@@ -2570,6 +2570,7 @@ class ClusterService
         // Stamp the promotion time so DAV snapshots carry "last promotion wins"
         // ordering (CardDavService::exportSnapshot / applySnapshot C2 guard).
         Settings::set('cluster_promoted_at', gmdate('c'));
+        Settings::set('cluster_role_changed_at', (string)time());   // lo usa SystemWatchService
 
         try {
             Database::update('servers', ['role' => 'master'], 'is_local = true');
@@ -2872,6 +2873,7 @@ class ClusterService
         self::updateEnvRole('slave');
         Settings::set('repl_role', 'slave');
         Settings::set('cluster_role', 'slave');
+        Settings::set('cluster_demoted_at', (string)time());   // el vigilante de cambios del sistema lo usa (SystemWatchService)
         try {
             self::refreshRoleBanner();
         } catch (\Throwable) {

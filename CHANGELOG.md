@@ -2,14 +2,24 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.391] — 2026-10-19 — Menos avisos falsos tras un cambio de rol
+
+### Corregido
+- **El panel de rescate de un nodo apartado usa el certificado real del nombre del panel** (el de Let's Encrypt del Caddy principal, si sigue vigente): Chrome ya no lo bloquea por HSTS y se puede entrar por el nombre para usar el botón «Reincorporar como copia». Por IP sigue el certificado interno; sin certificado válido, queda como antes.
+- **El vigilante de cambios del sistema ya no avisa de las tareas de `/etc/cron.d` que el panel enciende y apaga al cambiar de rol** (ficheros `*.musedock-off`, ni los 15 min siguientes a un cambio de rol).
+
+## [1.0.390] — 2026-10-19 — Cambio de mando más corto
+
+### Corregido
+- **Cambio de mando más corto:** la promoción pone primero lo que hace servir (bases con escritura, Caddy, puertos, reactivar) y avisa al nodo que pasa el mando para que reenvíe las visitas YA; lo lento (avisos, correo, CardDAV, copia de ficheros hacia el antiguo master, reparto de la réplica) va después. Sin ninguna ventana de solo lectura. El paso «Sirviendo con escritura (X s)» deja medido el tiempo.
+- **Plan DNS:** el nombre del panel y las comprobaciones propias del servidor salen como «se quedan donde están (es lo normal)», no como aviso amarillo.
+
 ## [1.0.389] — 2026-10-19 — El cambio de mando ya no se deshace por un MariaDB que no se usa
 
 ### Corregido
 - **Un cambio de mando se deshacía («se promovió a medias: MySQL promote: No se pudo conectar a MySQL/MariaDB») en un nodo donde MariaDB no está en replicación.** Ahora ese paso se omite (no hay nada que promover) y solo falla si MariaDB sí está en replicación y no responde.
 - **«Comprobar» no lo detectaba antes de apartar al master.** Ahora comprueba que MariaDB del destino responde cuando está en replicación.
 - **Tras un cambio revertido, el nodo apartado se reincorpora solo como copia** (antes había que ir a ejecutar `demote` a mano y su panel no mostraba botón): queda marcado como pendiente de reincorporar, con el botón de siempre y el reintento automático.
-- **Cambio de mando más corto:** la promoción pone primero lo que hace servir (bases con escritura, Caddy, puertos, reactivar) y avisa al nodo que pasa el mando para que reenvíe las visitas YA; lo lento (avisos, correo, CardDAV, copia de ficheros hacia el antiguo master, reparto de la réplica) va después. Sin ninguna ventana de solo lectura. El paso «Sirviendo con escritura (X s)» deja medido el tiempo.
-- **Plan DNS:** el nombre del panel y las comprobaciones propias del servidor salen como «se quedan donde están (es lo normal)», no como aviso amarillo.
 - **Avisos del cambio fallido, más claros:** un solo mensaje corto («❌ Cambio de mando a X FALLÓ»), sin volcado de pasos ni copia reenviada desde el otro nodo. Si la promoción tiene errores, no se lanzan la prueba de webs ni el arreglo de permisos (antes llegaban avisos sin sentido de un nodo ya apartado), y un nodo apartado no avisa de webs caídas.
 
 ## [1.0.388] — 2026-10-19 — Lo que se crea o cambia en el master llega a las réplicas al momento

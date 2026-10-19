@@ -108,6 +108,43 @@ foreach (['/var/lib/caddy/.local/share/caddy', '/root/.local/share/caddy'] as $s
         break;
     }
 }
+// El nombre del panel con SU certificado real (el de Let's Encrypt que ya tiene el Caddy principal), si sigue
+// vigente: así Chrome no lo bloquea por HSTS y el botón de reincorporar se puede usar entrando por el nombre.
+// Por IP sigue el certificado interno. Si no hay certificado válido, todo queda como antes.
+$loaded = [];
+foreach (['/var/lib/caddy/.local/share/caddy', '/root/.local/share/caddy'] as $store) {
+    foreach ($names as $h) {
+        if (filter_var($h, FILTER_VALIDATE_IP) || $h === 'localhost' || isset($loaded[$h])) {
+            continue;
+        }
+        foreach (glob("{$store}/certificates/*/{$h}/{$h}.crt") ?: [] as $crt) {
+            $key = substr($crt, 0, -4) . '.key';
+            if (str_contains($crt, '/certificates/local/') || !is_readable($crt) || !is_readable($key)) {
+                continue;
+            }
+            // vigente al menos un día más y con el nombre dentro
+            $ok = trim((string)shell_exec('openssl x509 -in ' . escapeshellarg($crt) . ' -noout -checkend 86400 2>&1')) === 'Certificate will not expire'
+                && str_contains((string)shell_exec('openssl x509 -in ' . escapeshellarg($crt) . ' -noout -ext subjectAltName 2>/dev/null'), $h);
+            if (!$ok) {
+                continue;
+            }
+            @mkdir("{$dir}/le", 0700, true);
+            @copy($crt, "{$dir}/le/{$h}.crt");
+            @copy($key, "{$dir}/le/{$h}.key");
+            @chmod("{$dir}/le/{$h}.key", 0600);
+            if (is_file("{$dir}/le/{$h}.crt") && is_file("{$dir}/le/{$h}.key")) {
+                $loaded[$h] = true;
+                $cfg['apps']['tls']['certificates']['load_files'][] = ['certificate' => "{$dir}/le/{$h}.crt", 'key' => "{$dir}/le/{$h}.key", 'tags' => ['rescue-le']];
+            }
+            break;
+        }
+    }
+}
+if ($loaded) {
+    $rest = array_values(array_diff($names, array_keys($loaded)));
+    $cfg['apps']['tls']['certificates']['automate'] = $rest;
+    $cfg['apps']['tls']['automation']['policies'][0]['subjects'] = $rest;
+}
 file_put_contents($conf, json_encode($cfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 chmod($conf, 0600);
 
