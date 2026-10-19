@@ -2412,6 +2412,9 @@ class ClusterService
     /** Para mostrar el avance en la terminal (bin/cluster-switch.php); en web no hace nada. */
     public static $progressCb = null;
 
+    /** Se llama en cuanto el nodo promovido ya sirve con escritura (antes de lo lento). */
+    public static $servingCb = null;
+
     public static function progress(string $msg): void
     {
         if (is_callable(self::$progressCb)) {
@@ -2634,6 +2637,19 @@ class ClusterService
             $errors[] = 'Firewall: ' . $e->getMessage();
         }
 
+        // Si este nodo estaba apartado (marca en disco: Caddy principal bloqueado y panel
+        // de rescate), ahora es el master: se reactiva para que sirva las webs.
+        if (is_file(FailoverSafetyService::FENCE_FLAG) || Settings::get('cluster_fenced', '0') === '1') {
+            self::progress('Este nodo estaba apartado: se reactiva (Caddy principal, sin panel de rescate)');
+            $results['unfence'] = FailoverSafetyService::unfenceSelf();
+        }
+
+        // Ya con escritura y las webs en marcha: se avisa al que pasa el mando para que empiece a reenviarle las
+        // visitas YA; lo lento (avisos, correo, DAV, copia de ficheros) va después y no alarga el corte.
+        if (self::$servingCb) {
+            try { (self::$servingCb)(); } catch (\Throwable) {}
+        }
+
         LogService::log('cluster.failover', 'promote', 'Servidor promovido a master (puertos 80/443 abiertos)' . (empty($errors) ? '' : ' (con errores: ' . implode(', ', $errors) . ')'));
 
         NotificationService::send(
@@ -2689,13 +2705,6 @@ class ClusterService
             } catch (\Throwable $e) {
                 $errors[] = 'Copia de ficheros hacia el antiguo master: ' . $e->getMessage();
             }
-        }
-
-        // Si este nodo estaba apartado (marca en disco: Caddy principal bloqueado y panel
-        // de rescate), ahora es el master: se reactiva para que sirva las webs.
-        if (is_file(FailoverSafetyService::FENCE_FLAG) || Settings::get('cluster_fenced', '0') === '1') {
-            self::progress('Este nodo estaba apartado: se reactiva (Caddy principal, sin panel de rescate)');
-            $results['unfence'] = FailoverSafetyService::unfenceSelf();
         }
 
         // Ya mandando: dueños de ficheros de las webs y carpetas de Laravel que lsyncd no copia (en segundo plano,

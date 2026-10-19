@@ -831,7 +831,13 @@ class RoleSwitchService
         };
         self::step($task, $st, 'Promoviendo este servidor a master…');
         $st['promoted'] = true;   // a partir de aquí ya no es "como antes"
+        $t0 = microtime(true);
+        ClusterService::$servingCb = static function () use ($task, &$st, $t0): void {
+            $st['serving'] = true;   // el que pasa el mando empieza a reenviarle las visitas ya
+            self::step($task, $st, 'Sirviendo con escritura (' . round(microtime(true) - $t0, 1) . ' s desde que empezó la promoción); el resto se termina en segundo plano…', true);
+        };
         $p = ClusterService::promoteToMaster(true, $oldVpn);
+        ClusterService::$servingCb = null;
         if (empty($p['ok'])) {
             $st['state'] = 'failed';
             $st['error'] = implode('; ', $p['errors'] ?? ['error']);
