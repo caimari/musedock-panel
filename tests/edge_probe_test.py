@@ -7,6 +7,8 @@ nadie quitaba el proxy de las webs bloqueadas por LaLiga. Ahora informa a todos 
 
 Uso: python3 -I tests/edge_probe_test.py
 """
+import sys
+sys.dont_write_bytecode = True   # que la prueba no deje bin/__pycache__ en el repositorio
 import importlib.util
 import io
 import os

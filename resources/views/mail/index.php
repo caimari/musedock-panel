@@ -327,6 +327,8 @@
             <a class="btn btn-sm <?= $activeTab === 'infra' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('infra')) ?>" data-mail-tab-link="infra">Infra</a>
             <a class="btn btn-sm <?= $activeTab === 'antispam' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('antispam')) ?>" data-mail-tab-link="antispam">Anti-spam</a>
             <a class="btn btn-sm <?= $activeTab === 'deliverability' ? 'btn-info' : 'btn-outline-light' ?>" href="<?= View::e($tabLink('deliverability')) ?>" data-mail-tab-link="deliverability">Entregabilidad</a>
+            <a class="btn btn-sm btn-outline-light" href="/mail/web-audit" title="Qué webs mandan correo sin autenticar y cómo pasarlas a SMTP autenticado">Correo de las webs</a>
+            <a class="btn btn-sm btn-outline-light" href="/mail/web-capture" title="Mensajes que una web intentó mandar sin autenticar y que el panel ha capturado o bloqueado">Capturado</a>
         </div>
     </div>
 </div>

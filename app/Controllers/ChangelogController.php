@@ -20,6 +20,22 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.383',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Enlaces «Correo de las webs» (auditoría) y «Capturado» en la barra de pestañas de Correo, para llegar a esas pantallas sin pasar por la ficha de un hosting.',
+                    ],
+                    'fixed' => [
+                        'El aviso de reglas de iptables repetidas contaba duplicados en cadenas que nadie usa (asterisk: «3 reglas repetidas» de ufw-before-*, que no enlaza ninguna regla de INPUT). Ahora solo avisa de los duplicados de cadenas que se usan; los demás salen como información. Además dice cuando ufw figura activo pero no está enlazado a INPUT (lo que se añada con ufw allow/deny no se aplicaría). Prueba tests/firewall_dups_test.php (7).',
+                        'En los nodos de relé o de envío (asterisk, Obelix) el aviso del correo del sistema salía siempre como «no preparado para tomar el mando», aunque el panel decide a propósito no tocarlo: el correo de cron y de root se entrega al servidor de correo de ese dominio y llega a un buzón real si hay alias o catch-all. Ahora se muestra solo como información; los demás casos siguen siendo aviso.',
+                        'El fichero compilado de Python bin/__pycache__/edge-guard-probe.cpython-310.pyc estaba dentro del repositorio: se quita del seguimiento, se ignora y la prueba de la sonda ya no lo genera.',
+                        'Historial de cambios: se añaden las versiones 1.0.364, 1.0.376 y 1.0.378, que faltaban, y cada entrada queda en la versión en la que se publicó.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.382',
                 'date' => '2026-10-19',
                 'badge' => 'info',
@@ -79,6 +95,18 @@ class ChangelogController
                 ],
             ],
             [
+                'version' => '1.0.378',
+                'date' => '2026-10-18',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'El panel crea las carpetas de trabajo que exige cada pool de PHP-FPM (tmp, sesiones): sin upload_tmp_dir, PHP solo recibe los primeros 16 KB del cuerpo de una petición (el MCP de musedock.com rechazaba todo update_post de más de 16 KB y la sonda del CMS se quedaba en 16 KB). web-permissions.php --laravel-dirs, que lanzan el relevo y la revisión diaria, crea las que falten dentro de /var/www/vhosts/<web>/ con el usuario y grupo del pool, sin tocar lo que existe.',
+                        'Avisos de nodo agrupados en un solo correo: los avisos de servicio caído, réplica, copia de ficheros, nodo, correo, testigos, preparación para el relevo, permisos y errores web se apuntan y el cron del clúster los envía juntos cuando el más antiguo lleva 60 s (asunto «N avisos del clúster: …», cuerpo con todos numerados y con hora). Un solo aviso sale igual que antes. Ajuste alerts_digest_seconds (0 = no agrupar). Los avisos de seguridad e informes salen al momento. Si no se puede apuntar, sale como siempre.',
+                        'Prueba tests/notification_digest_test.php (19 comprobaciones).',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.377',
                 'date' => '2026-10-18',
                 'badge' => 'info',
@@ -87,10 +115,19 @@ class ChangelogController
                         'La sonda de bloqueos de Cloudflare ya no depende de que la máquina tenga ruta IPv6: la comprobación de control y la IP pública van por IPv4 explícito (b250 no tiene ruta IPv6 y daba «red inalcanzable» inmediato, que no es un bloqueo).',
                         'vigila-memoria (y unidades parecidas) bloqueaba el ready: true del preflight de la réplica: una unidad que el master no tiene habilitada y a la que le falta su programa en la réplica ya no cuenta como problema (se omite y se anota); las habilitadas en el master siguen avisando.',
                     ],
+                ],
+            ],
+            [
+                'version' => '1.0.376',
+                'date' => '2026-10-18',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Una réplica sin correo local seguía en «error» por «PostgreSQL local no responde en el nodo de mail»: en una réplica la comprobación de la base de datos de correo ya no es un fallo y no pausa la cola; un principal con PostgreSQL caído sigue dando «down».',
+                        'Los alias no llegaban a la ruta de Caddy de las réplicas (img.picalias.com sin ruta ni certificado en Filemon tras el relevo): el reparador de rutas ya rehace la ruta del hosting si le faltan alias entre sus hosts.',
+                    ],
                     'added' => [
-                        'El panel crea las carpetas de trabajo que exige cada pool de PHP-FPM (tmp, sesiones): sin upload_tmp_dir, PHP solo recibe los primeros 16 KB del cuerpo de una petición (el MCP de musedock.com rechazaba todo update_post de más de 16 KB y la sonda del CMS se quedaba en 16 KB). web-permissions.php --laravel-dirs, que lanzan el relevo y la revisión diaria, crea las que falten dentro de /var/www/vhosts/<web>/ con el usuario y grupo del pool, sin tocar lo que existe.',
-                        'Avisos de nodo agrupados en un solo correo: los avisos de servicio caído, réplica, copia de ficheros, nodo, correo, testigos, preparación para el relevo, permisos y errores web se apuntan y el cron del clúster los envía juntos cuando el más antiguo lleva 60 s (asunto «N avisos del clúster: …», cuerpo con todos numerados y con hora). Un solo aviso sale igual que antes. Ajuste alerts_digest_seconds (0 = no agrupar). Los avisos de seguridad e informes salen al momento. Si no se puede apuntar, sale como siempre.',
-                        'Prueba tests/notification_digest_test.php (19 comprobaciones).',
+                        'Pruebas: tests/mail_node_standby_test.php (14 comprobaciones).',
                     ],
                 ],
             ],
@@ -101,11 +138,10 @@ class ChangelogController
                 'changes' => [
                     'fixed' => [
                         'Un nodo réplica salía en «error» en el panel principal solo porque su correo está parado a propósito: la revisión de correo exigía los puertos 25, 587 y 993 también a las réplicas (esclavo, aislado por un relevo o con PostgreSQL en recuperación). Ahora el nodo informa de su papel y, si es réplica, los puertos cerrados se muestran como «en espera» y no cuentan como fallo; si vuelve a ser principal, se exige todo otra vez.',
-                        'Una réplica sin correo local seguía en «error» por «PostgreSQL local no responde en el nodo de mail»: en una réplica la comprobación de la base de datos de correo ya no es un fallo y no pausa la cola; un principal con PostgreSQL caído sigue dando «down».',
-                        'Los alias no llegaban a la ruta de Caddy de las réplicas (img.picalias.com sin ruta ni certificado en Filemon tras el relevo): el reparador de rutas ya rehace la ruta del hosting si le faltan alias entre sus hosts.',
+                        'El informe de la sonda de bloqueos de Cloudflare se entrega en partes cuando pasa de ~15 KB (una entrega cada 21 s): el servidor del CMS cortaba el cuerpo a 16 KB y rechazaba el informe completo (la causa de fondo, una carpeta tmp que faltaba en el pool de PHP, se corrigió después, ver 1.0.378).',
                     ],
                     'added' => [
-                        'Prueba tests/mail_node_standby_test.php (14 comprobaciones).',
+                        'Pruebas: tests/mail_node_standby_test.php y tests/edge_probe_test.py (22).',
                     ],
                 ],
             ],

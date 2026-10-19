@@ -176,5 +176,10 @@ ok('lo mismo en el crontab de root no cuenta', G::duplicateCronJobs(['root' => "
 ok('una tarea distinta del usuario no cuenta', G::duplicateCronJobs(['u' => "0 * * * * php /var/www/x/artisan schedule:run\n"], $d) === []);
 ok('una línea comentada no cuenta', G::duplicateCronJobs(['u' => "# * * * * * php /opt/musedock-panel/bin/cf-guard-worker.php\n"], $d) === []);
 
+ok('origen = dominio con correo real (saltado a propósito): solo informa, no es un aviso de «no preparado»', G::systemMailSeverity('skip', true) === 'info');
+ok('algo que el panel sí puede arreglar sigue siendo aviso', G::systemMailSeverity('add', false) === 'warn');
+ok('si no se pudo comprobar, sigue siendo aviso', G::systemMailSeverity('skip', null) === 'warn');
+ok('configuración propia del administrador (no virtual): sigue siendo aviso', G::systemMailSeverity('skip', false) === 'warn');
+
 echo "\n" . ($fail === 0 ? "\033[0;32mTodo correcto: {$pass} comprobaciones\033[0m" : "\033[0;31m{$fail} fallo(s) de " . ($pass + $fail) . "\033[0m") . "\n";
 exit($fail === 0 ? 0 : 1);

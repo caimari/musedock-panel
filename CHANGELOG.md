@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.383] — 2026-10-19 — Enlaces al correo de las webs y repositorio más limpio
+
+### Añadido
+- Enlaces **«Correo de las webs»** (auditoría) y **«Capturado»** en la barra de pestañas de Correo, para llegar a esas pantallas sin pasar por la ficha de un hosting.
+
+### Corregido
+- **El aviso de reglas de iptables repetidas contaba duplicados en cadenas que nadie usa.** En asterisk salían «3 reglas repetidas» de `ufw-before-*`, pero esas cadenas no las enlaza ninguna regla de INPUT, FORWARD ni OUTPUT: no se aplican ni abren nada (resto de cargar ufw y `netfilter-persistent` a la vez). Ahora solo avisa (en amarillo) de los duplicados de cadenas que sí se usan; los de cadenas sin uso se muestran como información. Además, cuando ufw figura activo pero ninguna regla de INPUT enlaza con sus cadenas, lo dice: lo que se añada con `ufw allow/deny` no se aplica y lo que filtra son las reglas propias de INPUT. Prueba: `tests/firewall_dups_test.php` (7).
+- **En los nodos de relé o de envío (asterisk, Obelix), el aviso «el correo del sistema sale como usuario@dominio…» salía siempre como «no preparado para tomar el mando».** Ahí el origen es un dominio con correo real en otro servidor y el panel decide a propósito no tocarlo: el correo de cron y de root se entrega al servidor de correo de ese dominio (su MX) y llega a un buzón real si el dominio tiene un alias o catch-all para ese usuario. Ahora ese caso se muestra solo como información (ya no aparece en el cuadro amarillo del dashboard ni en el correo de preparación); los demás casos siguen siendo aviso. La guía `/docs/system-mail` lo explica.
+- El fichero compilado de Python `bin/__pycache__/edge-guard-probe.cpython-310.pyc` estaba dentro del repositorio (lo generaba la prueba de la sonda y cambiaba en cada ejecución). Se quita del seguimiento, se añaden `__pycache__/` y `*.pyc` a `.gitignore` y la prueba ya no lo genera.
+- Historial de cambios: se añaden las secciones de las versiones 1.0.364, 1.0.376 y 1.0.378, que faltaban, y cada entrada queda en la versión en la que de verdad se publicó (varias de la tanda del 18 de octubre estaban agrupadas en la anterior).
+
 ## [1.0.382] — 2026-10-19 — Modo «capturar» que carga, y Postfix sin contraseña detectado
 
 ### Corregido
@@ -42,28 +53,36 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
 - **El panel entrega en el propio servidor el correo del sistema (cron, root…)** (`SystemMailService`, `bin/mail-system-local.php`). Si el dominio de origen no es local para Postfix, lo añade a `mydestination` (sin nombres escritos en el código: sale del Postfix de cada nodo). Seguro: no toca nada si el dominio es de buzones virtuales, alias, relay o transporte (Postfix no admite el mismo dominio en los dos sitios), si no se pudo comprobar (p. ej. sin permiso sobre las tablas de Postfix), o si `mydestination` es una configuración propia del administrador; hace copia de `main.cf`, valida con `postfix check` y restaura si algo falla. Modo por ajuste `mail_system_local_mode`: `warn` (por defecto: solo avisa en el preflight y da el comando), `auto` (el cron del clúster lo mantiene, como mucho una vez por hora) y `off`. Manual: `php bin/mail-system-local.php` simula y `--apply` aplica; `--mode=auto|warn|off` fija el modo. El aviso del preflight dice qué haría el panel o por qué no puede hacerlo solo.
 - Pruebas: `tests/cluster_guard_test.php` pasa a 71 comprobaciones y `tests/system_mail_test.php` (14).
 
-## [1.0.377] — 2026-10-18 — Sondas y réplicas sin falsos avisos
-
-### Corregido
-- **La sonda de bloqueos de Cloudflare ya no depende de que la máquina tenga ruta IPv6.** Los objetivos ya se medían por IPv4 (IP fija con `--resolve`); la comprobación de control y la IP pública usaban el DNS y podían intentar IPv6 (b250 no tiene ruta IPv6: «red inalcanzable» inmediato, no un bloqueo). Ahora van por IPv4 explícito, y si el control falla la salida se da por «sin internet» y no se acusa a nadie de bloquear.
-- **`vigila-memoria` (y cualquier unidad parecida) bloqueaba el `ready: true` del preflight de la réplica.** La copia de configuración llevaba solo el `.service` y no su programa ni su temporizador. Una unidad que el master no tiene habilitada (la lanza un temporizador o es local del nodo) y a la que le falta su programa en la réplica ya no cuenta como problema: se omite y queda anotada. Las unidades habilitadas en el master a las que les falte el programa siguen avisando, porque tras el relevo nadie las arrancaría.
+## [1.0.378] — 2026-10-18 — Avisos de nodo agrupados y carpetas de los pools de PHP
 
 ### Añadido
 - **El panel crea las carpetas de trabajo que exige cada pool de PHP-FPM (`tmp`, sesiones).** Sin `upload_tmp_dir`, PHP solo guarda en memoria los primeros 16 KB del cuerpo de una petición y el resto se pierde: el MCP de musedock.com rechazaba con «Invalid Request» todo `update_post` de más de 16 KB, y la sonda de bloqueos del CMS se quedaba en 16 KB (faltaba `/var/www/vhosts/musedock.com/tmp`, la única de 27 webs). `web-permissions.php --laravel-dirs` (que lanzan el relevo y la revisión diaria) crea ahora las carpetas que declara cada pool y no existen, solo dentro de `/var/www/vhosts/<web>/`, con el usuario y grupo del pool, sin tocar lo que existe ni inventar la carpeta madre.
 - **Avisos de nodo agrupados en un solo correo.** Un incidente sacaba ~20 correos por nodo (servicio caído, réplica, copia de ficheros, nodo, correo…). Los avisos de esos tipos (`service_down`, `replication`, `lsyncd`, `mail_node`, `mail_queue`, `node_down`, `witness`, `ha_readiness`, `web_permissions`, `web_errors`, `config_mirror`, `monitor_gap`, `server_reboot`) se apuntan en `storage/notify-digest` y el cron del clúster (cada minuto) los envía juntos cuando el más antiguo lleva 60 s: asunto «N avisos del clúster: …» y cuerpo con todos, numerados y con su hora. Un solo aviso sale igual que antes. Ventana en el ajuste `alerts_digest_seconds` (0 = no agrupar). Los avisos de seguridad (acceso raro, cambios de ficheros/firewall/sistema, puertos expuestos…), los informes y cualquier tipo sin agrupar salen al momento. Seguro: si no se puede apuntar el aviso, sale como siempre, y si el cron no corre, el siguiente aviso vacía la carpeta pasado el doble de ventana. Agrupa por nodo; agrupar entre nodos (reenvío al master) queda para más adelante.
 - Pruebas: `tests/notification_digest_test.php` (19 comprobaciones); `tests/web_guard_test.php` sube a 52.
 
+## [1.0.377] — 2026-10-18 — Sondas y réplicas sin falsos avisos
+
+### Corregido
+- **La sonda de bloqueos de Cloudflare ya no depende de que la máquina tenga ruta IPv6.** Los objetivos ya se medían por IPv4 (IP fija con `--resolve`); la comprobación de control y la IP pública usaban el DNS y podían intentar IPv6 (b250 no tiene ruta IPv6: «red inalcanzable» inmediato, no un bloqueo). Ahora van por IPv4 explícito, y si el control falla la salida se da por «sin internet» y no se acusa a nadie de bloquear.
+- **`vigila-memoria` (y cualquier unidad parecida) bloqueaba el `ready: true` del preflight de la réplica.** La copia de configuración llevaba solo el `.service` y no su programa ni su temporizador. Una unidad que el master no tiene habilitada (la lanza un temporizador o es local del nodo) y a la que le falta su programa en la réplica ya no cuenta como problema: se omite y queda anotada. Las unidades habilitadas en el master a las que les falte el programa siguen avisando, porque tras el relevo nadie las arrancaría.
+
+## [1.0.376] — 2026-10-18 — Una réplica sin correo local ya no sale en error, y los alias llegan a Caddy
+
+### Corregido
+- **Una réplica sin correo local seguía en «error» por «PostgreSQL local no responde en el nodo de mail».** En una réplica (esclavo/aislado) la comprobación de la base de datos de correo ya no es un fallo y no pausa la cola; un principal con PostgreSQL caído sigue dando «down».
+- **Los alias no llegaban a la ruta de Caddy de las réplicas** (`img.picalias.com` sin ruta ni certificado en Filemon tras el relevo, y la sonda lo daba por caído). El reparador de rutas (cada 10 min) ya no se conforma con que exista la ruta del hosting: si le faltan alias entre sus hosts, la rehace.
+
+### Añadido
+- Pruebas: `tests/mail_node_standby_test.php` sube a 14 comprobaciones.
+
 ## [1.0.375] — 2026-10-18 — La revisión de correo entiende las réplicas
 
 ### Corregido
 - **Un nodo réplica salía en «error» en el panel principal solo porque su correo está parado a propósito.** La revisión de correo (`MailService::checkMailNodeHealth`) exigía los puertos 25, 587 y 993 también a las réplicas (esclavo del clúster, nodo aislado por un relevo o con PostgreSQL en recuperación); en asterisk, Dovecot 993 rechazado ponía el nodo en «error» cada minuto. Ahora el propio nodo informa de su papel (`cluster_role`, aislado, `pg_is_in_recovery`); si es una réplica, los puertos cerrados se muestran como «en espera» y no cuentan como fallo, y el estado no pasa a «error». Se conserva el papel de correo del nodo: si vuelve a ser principal, se vuelve a exigir todo. Si el nodo no responde por la API no se sabe su papel y sigue contando como fallo.
-
-- **Una réplica sin correo local seguía en «error» por «PostgreSQL local no responde en el nodo de mail».** En una réplica (esclavo/aislado) la comprobación de la base de datos de correo ya no es un fallo y no pausa la cola; un principal con PostgreSQL caído sigue dando «down».
-- **Los alias no llegaban a la ruta de Caddy de las réplicas** (`img.picalias.com` sin ruta ni certificado en Filemon tras el relevo, y la sonda lo daba por caído). El reparador de rutas (cada 10 min) ya no se conforma con que exista la ruta del hosting: si le faltan alias entre sus hosts, la rehace.
-
+- **El informe de la sonda de bloqueos de Cloudflare se entrega en partes** cuando pasa de ~15 KB (una entrega cada 21 s, con un máximo por parte): el servidor del CMS cortaba el cuerpo a 16 KB y rechazaba el informe completo («JSON no válido»; la causa de fondo, una carpeta `tmp` que faltaba en el pool de PHP, se corrigió después, ver 1.0.378). Si se acepta la primera parte, lo ya entregado vale y no es un fallo.
 
 ### Añadido
-- Pruebas: `tests/mail_node_standby_test.php` (14 comprobaciones).
+- Pruebas: `tests/mail_node_standby_test.php`; `tests/edge_probe_test.py` sube a 22.
 
 ## [1.0.374] — 2026-10-18 — La copia de ficheros no pierde sus valores por defecto
 
@@ -157,6 +176,13 @@ Nace del primer relevo real (2026-10-18, dos pares de servidores). Los relevos f
 - **Las sondas resuelven el DNS desde su país** (Cloudflare da IPs distintas según la región) y se vigilan todas. Inicio y fin de cada bloqueo por IP y operadora, con horas de España y UTC.
 - **Configuración original editable** por dominio con la contraseña de administrador, consciente del bloqueo.
 - **API de sondas** `/api/cf-guard/{targets,report}` con token propio (solo se guarda su huella), mismo protocolo que MuseDock CMS: la misma sonda sirve para los dos (`API_PREFIX`). Proceso `bin/cf-guard-worker.php` cada minuto (cron instalado por `update.sh`), tipo de aviso «Bloqueos de Cloudflare» y guía en Docs.
+
+## [1.0.364] — 2026-10-16 — Fail2Ban para el CMS
+
+### Añadido
+- **Fail2Ban para MuseDock CMS:** jaulas `musedock-cms-login` (8 logins o códigos 2FA fallidos en 10 min → 1 h) y `musedock-cms-probe` (10 sondeos de escáner en 5 min → 24 h), con bloqueo en iptables y en Caddy.
+- El CMS anota los eventos en `storage/logs/security-events.log` con la IP real ya validada (nunca IPs de Cloudflare, privadas ni de loopback) y sin emails ni contraseñas.
+- `update.sh` instala las jaulas solo si el CMS está en el servidor (`MUSEDOCK_CMS_SECURITY_LOG` para otra ruta), crea el fichero de registro con el dueño del CMS y añade su rotación semanal.
 
 ## [1.0.363] — 2026-10-13 — Elegir por qué canal llega cada aviso
 

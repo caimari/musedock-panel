@@ -132,10 +132,17 @@ final class FirewallAuditService
         // (ufw + netfilter-persistent con ufw ya incluido): reglas DUPLICADAS.
         if (stripos($ufw, 'active') !== false && stripos($ufw, 'inactive') === false) {
             $raw = self::lines(self::sh('iptables -S 2>/dev/null'));
-            $dups = array_filter(array_count_values(array_filter($raw, static fn($l) => str_starts_with($l, '-A '))), static fn($c) => $c > 1);
-            $findings[] = $dups
-                ? ['level' => 'warning', 'text' => 'Hay ' . count($dups) . ' regla(s) de iptables REPETIDA(S) (p. ej. «' . array_key_first($dups) . '»). No es un agujero: suele pasar al añadir la misma regla dos veces o al cargarlas dos veces al arrancar (ufw y netfilter-persistent). Conviene quitar la copia sobrante.']
-                : ['level' => 'info', 'text' => 'ufw está activo junto a reglas iptables propias; no hay reglas duplicadas y el resultado ya está simulado arriba.'];
+            $d = self::duplicateRules($raw);
+            if ($d['live']) {
+                $findings[] = ['level' => 'warning', 'text' => 'Hay ' . count($d['live']) . ' regla(s) de iptables REPETIDA(S) (p. ej. «' . array_key_first($d['live']) . '»). No es un agujero: suele pasar al añadir la misma regla dos veces o al cargarlas dos veces al arrancar (ufw y netfilter-persistent). Conviene quitar la copia sobrante.'];
+            } elseif ($d['orphan']) {
+                $findings[] = ['level' => 'info', 'text' => 'Hay ' . count($d['orphan']) . ' regla(s) repetida(s) (p. ej. «' . array_key_first($d['orphan']) . '») en cadenas que ninguna regla de INPUT, FORWARD u OUTPUT usa: no se aplican ni abren nada. Es un resto de cargar ufw y netfilter-persistent a la vez.'];
+            } else {
+                $findings[] = ['level' => 'info', 'text' => 'ufw está activo junto a reglas iptables propias; no hay reglas duplicadas y el resultado ya está simulado arriba.'];
+            }
+            if (!$d['ufw_wired']) {
+                $findings[] = ['level' => 'info', 'text' => 'ufw figura activo, pero ninguna regla de INPUT enlaza con sus cadenas: lo que añadas con «ufw allow/deny» NO se aplica. Lo que filtra son las reglas propias de INPUT (la simulación de arriba ya las usa).'];
+            }
         }
 
         $crit = count(array_filter($findings, static fn($f) => $f['level'] === 'critical'));
@@ -174,6 +181,48 @@ final class FirewallAuditService
     private static function sh(string $cmd): string
     {
         return trim((string)shell_exec('timeout 8 sh -c ' . escapeshellarg($cmd) . ' 2>/dev/null'));
+    }
+
+    /**
+     * Reglas repetidas de «iptables -S», separando las de cadenas que se usan (alcanzables desde INPUT, FORWARD y OUTPUT
+     * por sus saltos -j/-g) de las de cadenas que nadie usa (resto de cargar ufw dos veces: no se aplican). Pura.
+     * @param list<string> $raw
+     * @return array{live:array<string,int>,orphan:array<string,int>,ufw_wired:bool}
+     */
+    public static function duplicateRules(array $raw): array
+    {
+        $byChain = [];
+        $jumps = [];
+        foreach ($raw as $l) {
+            if (preg_match('/^-A (\S+) (.*)$/', $l, $m)) {
+                $byChain[$m[1]][] = $l;
+                if (preg_match('/(?:^| )-[jg] (\S+)/', $m[2], $t)) {
+                    $jumps[$m[1]][] = $t[1];
+                }
+            }
+        }
+        $reach = ['INPUT' => true, 'FORWARD' => true, 'OUTPUT' => true];
+        $queue = array_keys($reach);
+        while ($queue) {
+            $c = array_shift($queue);
+            foreach ($jumps[$c] ?? [] as $to) {
+                if (!isset($reach[$to])) {
+                    $reach[$to] = true;
+                    $queue[] = $to;
+                }
+            }
+        }
+        $live = [];
+        $orphan = [];
+        foreach ($byChain as $chain => $lines) {
+            $cnt = array_filter(array_count_values($lines), static fn($c) => $c > 1);
+            if (isset($reach[$chain])) {
+                $live += $cnt;
+            } else {
+                $orphan += $cnt;
+            }
+        }
+        return ['live' => $live, 'orphan' => $orphan, 'ufw_wired' => isset($reach['ufw-before-input'])];
     }
 
     private static function lines(string $s): array

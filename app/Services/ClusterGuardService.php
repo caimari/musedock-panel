@@ -622,6 +622,17 @@ class ClusterGuardService
         return 0;
     }
 
+    /**
+     * Gravedad del aviso de correo del sistema. «warn» = hay algo que arreglar (el panel puede hacerlo o no se pudo comprobar);
+     * «info» = el origen es un dominio con correo real (virtual, relé, MX público o de correo del panel): el panel decidió
+     * a propósito no tocarlo y el correo se entrega en el servidor de ese dominio, así que no es un fallo ni algo que
+     * impida tomar el mando. Pura.
+     */
+    public static function systemMailSeverity(string $planAction, ?bool $originVirtual): string
+    {
+        return $planAction === 'skip' && $originVirtual === true ? 'info' : 'warn';
+    }
+
     /** Fallos de configuración del correo del sistema para readiness(). Solo lectura. */
     public static function systemMailIssues(): array
     {
@@ -642,16 +653,23 @@ class ClusterGuardService
         ]);
         if ($problem !== null) {
             // Qué haría el panel con ello (solo lectura): da el comando o explica por qué no se puede solo.
+            $severity = 'warn';
             try {
-                $plan = SystemMailService::plan(SystemMailService::inspect());
+                $pf = SystemMailService::inspect();
+                $plan = SystemMailService::plan($pf);
                 if ($plan['action'] === 'add') {
                     $problem .= ' El panel puede arreglarlo solo: «php bin/mail-system-local.php --apply» en este nodo (con copia de main.cf y marcha atrás), o ajuste mail_system_local_mode = auto.';
                 } elseif ($plan['action'] === 'skip') {
                     $problem .= ' El panel no lo toca solo: ' . $plan['reason'];
                 }
+                $severity = self::systemMailSeverity($plan['action'], $pf['origin_virtual'] ?? null);
+                if ($severity === 'info') {
+                    $problem = "El correo del propio servidor (cron, root…) sale como usuario@{$pf['origin']}, un dominio con correo real: se entrega al servidor de correo de ese dominio (su MX), no a este nodo. "
+                        . 'Está bien si ese dominio tiene un buzón o alias para esos usuarios (root, un catch-all…); si no, rebota. No hace falta cambiar nada en este nodo. Si la cola de Postfix crece, el panel avisa aparte.';
+                }
             } catch (\Throwable) {
             }
-            $issues[] = ['severity' => 'warn', 'key' => 'system-mail-origin', 'text' => $problem, 'doc' => '/docs/system-mail'];
+            $issues[] = ['severity' => $severity, 'key' => 'system-mail-origin', 'text' => $problem, 'doc' => '/docs/system-mail'];
         }
         // Postfix con un mapa de consultas sin contraseña: rechaza TODO envío autenticado («Temporary lookup failure»)
         try {

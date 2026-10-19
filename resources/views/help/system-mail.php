@@ -87,7 +87,7 @@ php /opt/musedock-panel/bin/mail-system-local.php --mode=auto|warn|off</pre>
         <ul class="mb-0">
             <li><strong>Arregla la causa, no solo el síntoma.</strong> Si un cron falla cada minuto, corrígelo; o, si es ruido conocido, pon <code>MAILTO=""</code> en ese crontab.</li>
             <li><strong>Un buzón local puede crecer.</strong> Una tarea que falla cada minuto añade unos 1.100 mensajes al día a <code>/var/mail/&lt;usuario&gt;</code>. Pequeños, pero se acumulan.</li>
-            <li><strong>Nodos de relé o de envío:</strong> su origen suele ser el dominio principal del servicio. El aviso seguirá ahí hasta que decidas qué hacer con <code>myorigin</code>; mientras tanto, la forma segura es que sus tareas no fallen.</li>
+            <li><strong>Nodos de relé o de envío:</strong> su origen suele ser el dominio principal del servicio (con correo real en otro servidor). El correo del sistema sale como <code>usuario@dominio</code> y <strong>se entrega al servidor de correo de ese dominio</strong>: llega a un buzón real si ese dominio tiene un alias o un catch-all para ese usuario (por ejemplo, un alias de <code>root</code> o un catch-all), y rebota si no. Por eso el panel lo muestra solo como <em>información</em> (no como «no preparado para tomar el mando») y no lo toca. Comprueba que existe ese alias o catch-all en el servidor de correo del dominio; si la cola de Postfix del nodo crece, el panel avisa aparte.</li>
             <li><strong>Los crontabs de usuario se copian</strong> del master a los nodos con la copia de configuración: una línea duplicada puede viajar de un nodo a otro.</li>
         </ul>
     </div>

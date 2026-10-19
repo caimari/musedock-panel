@@ -18,3 +18,7 @@ storage/chatgpt/
 storage/chatgpt-client/
 
 /storage/direct-mcp/
+
+# Bytecode de Python (lo genera la prueba de la sonda)
+__pycache__/
+*.pyc
