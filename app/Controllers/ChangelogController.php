@@ -20,6 +20,25 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.381',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'La sonda de bloqueos de Cloudflare ya no pide la portada de 28 webs cada minuto: cada comprobación era un GET / completo que Cloudflare reenviaba al servidor (~120 portadas de WordPress por minuto, CPU media de Filemon del 2 % al 37-55 %). Ahora solo se hace el saludo TLS con certificado válido (CHECK=tls por defecto; CHECK=http vuelve al modo antiguo): ninguna petición llega a PHP. Los fallos se distinguen (timeout, unreach = fallo local, reset, cert, tlserr). Panel y CMS comparten el resultado 45 s. Hay que copiar el script nuevo a b250.',
+                        'El aviso de correo del sistema decía «usuario@$mydomain» en vez del dominio real en los nodos con myorigin = $mydomain (Obelix): ahora se lee el valor expandido.',
+                        'Texto y botones ilegibles sobre los avisos de color del dashboard: el texto secundario y los botones outline-light del tema oscuro eran grises sobre amarillo y rojo. Ahora, sobre amarillo/cian el texto secundario es oscuro y sobre rojo/verde/azul es blanco (botón «Cluster» blanco); regla global del tema. La fecha de «revisado» sale como 2026-10-19 07:58 UTC.',
+                    ],
+                    'added' => [
+                        'SMTP autenticado para las webs (bin/web-smtp.php): que la aplicación mande identificándose en el servidor de correo del panel (DKIM y SPF del dominio) y no por el sendmail local sin autenticar. Crea la cuenta web-<usuario> en el dominio de la web o en el de correo por defecto (web_smtp_default_domain), guarda las credenciales en .musedock-smtp.php (0600, fuera de la carpeta pública) y configura la app: mu-plugin en WordPress (reescribe el origen a la cuenta y deja el original en Reply-To para que el DKIM alinee) o claves MAIL_* del .env en Laravel (con copia previa). Después el envío local sin autenticar de esa web pasa a «capturar» o «bloquear».',
+                        'Informe «Correo de las webs: auditoría» (/mail/web-audit y bin/web-smtp.php --report): por hosting, mensajes, enviados/rebotados, motivos de rechazo (5.7.26…), si ya tiene SMTP autenticado, modo del envío local, SPF/DMARC/DKIM y una propuesta; el correo del sistema se separa del de las webs. Botón por fila para configurar su SMTP. Pruebas: tests/web_smtp_test.php (23).',
+                        'Correo de las webs (PHP): permitir, capturar o bloquear, por hosting. Una web PHP/WordPress manda con mail()/wp_mail() por el sendmail local sin autenticar (Gmail lo rechaza; una web hackeada puede mandar spam desde la IP del servidor). Cada hosting tiene un modo en su pool de PHP-FPM (sendmail_path): permitir (como siempre), capturar (no sale: se guarda con web, usuario, hora y destinatarios) o bloquear (no sale y PHP recibe error). No afecta a webs con SMTP autenticado, ni al cron ni a los avisos del sistema. Se cambia en Cuentas → editar → «Correo de la web (PHP)» o por MCP (hosting_php_settings, mail_mode); pantalla «Correo de las webs capturado» (/mail/web-capture); límites por usuario; php-fpm -t y marcha atrás; un sendmail_path propio no se pisa. Modo por defecto de hostings nuevos: hosting_mail_default_mode (sin fijar: instalación sin hostings → capturar, con hostings → permitir).',
+                        'Auditoría de solo lectura del correo por sendmail (php bin/mail-audit.php): por usuario local, mensajes, destinatarios, enviados/rebotados, remitentes y destinos.',
+                        'Guía del panel /docs/web-mail y pruebas tests/mail_capture_test.php (26).',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.380',
                 'date' => '2026-10-19',
                 'badge' => 'info',

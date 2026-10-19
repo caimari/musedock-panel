@@ -155,6 +155,16 @@ try {
     logMsg('Correo del sistema error: ' . $e->getMessage());
 }
 
+// ─── Step 0-webmail: programa de captura del correo de las webs, instalado donde lo usen los pools ──
+try {
+    $wm = \MuseDockPanel\Services\MailCaptureService::periodic();
+    if ($wm !== '') {
+        logMsg($wm);
+    }
+} catch (\Throwable $e) {
+    logMsg('Captura de correo de webs error: ' . $e->getMessage());
+}
+
 // ─── Step 0a: Vigilancia del nodo tras relevos (ClusterGuardService) ──
 // Nace del relevo del 2026-10-18: un slave vigilándose a sí mismo, Dovecot fallido horas sin
 // aviso, PostgreSQL sin arrancar, lsyncd sin instalar en el nodo que pasó a mandar.

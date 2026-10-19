@@ -116,6 +116,35 @@
             </div>
         </div>
 
+        <!-- Correo que manda PHP (mail(), wp_mail()) por el sendmail local -->
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-envelope-exclamation me-2"></i>Correo de la web (PHP)</div>
+            <div class="card-body">
+                <?php $mm = (string)($mailMode ?? 'allow'); ?>
+                <form method="POST" action="/accounts/<?= $account['id'] ?>/mail-mode">
+                    <?= \MuseDockPanel\View::csrf() ?>
+                    <fieldset <?= ($isSlave ?? false) ? 'disabled' : '' ?>>
+                    <p class="text-muted small mb-3">Qué pasa con el correo que esta web manda con <code>mail()</code> o <code>wp_mail()</code> por el servidor, <strong>sin autenticar</strong>. Una web que envía por SMTP autenticado (plugin de WordPress, configuración de la app) no se ve afectada.</p>
+                    <?php if ($mm === 'custom'): ?>
+                        <div class="small mb-2" style="color:#fbbf24;"><i class="bi bi-exclamation-triangle me-1"></i>Este hosting tiene un <code>sendmail_path</code> propio (no del panel): el panel no lo toca.</div>
+                    <?php else: ?>
+                    <div class="row g-3 align-items-end">
+                        <div class="col-md-8">
+                            <select name="mail_mode" class="form-select">
+                                <option value="allow" <?= $mm === 'allow' ? 'selected' : '' ?>>Permitir: sale por el Postfix local, sin autenticar (como siempre)</option>
+                                <option value="capture" <?= $mm === 'capture' ? 'selected' : '' ?>>Capturar: se guarda en el servidor con la web y el destinatario; no sale</option>
+                                <option value="block" <?= $mm === 'block' ? 'selected' : '' ?>>Bloquear: no sale y PHP recibe un error</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4"><button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i> Guardar</button></div>
+                    </div>
+                    <div class="small mt-2"><a href="/mail/web-capture"><i class="bi bi-inbox me-1"></i>Ver lo capturado</a> · <a href="/docs/web-mail"><i class="bi bi-journal-text me-1"></i>Guía</a></div>
+                    <?php endif; ?>
+                    </fieldset>
+                </form>
+            </div>
+        </div>
+
         <!-- Ajustes PHP por cuenta -->
         <div class="card mb-3">
             <div class="card-header"><i class="bi bi-filetype-php me-2"></i>Ajustes PHP</div>

@@ -143,6 +143,7 @@ final class McpClusterTools
                     'post_max_size' => ['type' => 'string', 'description' => 'p. ej. 55M (algo más que upload_max_filesize)'],
                     'max_execution_time' => ['type' => 'string', 'description' => 'segundos, p. ej. 300'],
                     'max_input_vars' => ['type' => 'string', 'description' => 'p. ej. 3000'],
+                    'mail_mode' => ['type' => 'string', 'enum' => ['allow', 'capture', 'block'], 'description' => 'Correo que manda PHP (mail(), wp_mail()) por el sendmail local sin autenticar: allow = sale como siempre; capture = se guarda en el servidor y no sale (se ve en Correo de las webs capturado); block = no sale y PHP recibe error. No afecta a webs que envían por SMTP autenticado.'],
                     'apply' => $apply,
                 ], ['domain']),
             ],
@@ -2296,6 +2297,12 @@ final class McpClusterTools
         $wanted = array_intersect_key($args, $svc::ALLOWED);
         [$changes, $errors] = $svc::validate($wanted);
         $info = ['domain' => $acc['domain'], 'php_version' => $acc['php_version'], 'pool' => $svc::poolFile($acc), 'current' => $current];
+        $mailSvc = \MuseDockPanel\Services\MailCaptureService::class;
+        $info['mail_mode'] = $mailSvc::modeOf($acc);
+        $wantMail = trim((string)($args['mail_mode'] ?? '')) !== '' ? strtolower(trim((string)$args['mail_mode'])) : null;
+        if ($wantMail !== null && !in_array($wantMail, $mailSvc::MODES, true)) {
+            throw new \InvalidArgumentException('mail_mode debe ser allow, capture o block.');
+        }
         if (!is_file($svc::poolFile($acc))) {
             throw new \RuntimeException("La cuenta {$acc['domain']} no tiene pool propio de PHP-FPM (usuario {$acc['username']}, PHP {$acc['php_version']}): "
                 . 'probablemente la sirve el pool general (www.conf) u otro servicio. Sus límites no se pueden cambiar desde aquí.');
@@ -2303,7 +2310,7 @@ final class McpClusterTools
         if ($errors) {
             throw new \InvalidArgumentException(implode('; ', $errors));
         }
-        if (!$changes) {
+        if (!$changes && $wantMail === null) {
             return $info + ['note' => 'Sin cambios pedidos: estos son los valores actuales.'];
         }
         if (self::role() === 'slave') {
@@ -2311,6 +2318,9 @@ final class McpClusterTools
         }
         $plan = $info + ['change' => array_map(static fn($k) => ['from' => $current[$k] ?? null, 'to' => $changes[$k]], array_combine(array_keys($changes), array_keys($changes))),
             'then' => 'se comprueba la configuración de PHP-FPM y se recarga (sin cortar las visitas); si falla, se deja como estaba'];
+        if ($wantMail !== null) {
+            $plan['change']['mail_mode'] = ['from' => $info['mail_mode'], 'to' => $wantMail];
+        }
         if (!empty($changes['upload_max_filesize']) && empty($changes['post_max_size']) && !empty($current['post_max_size'])) {
             $plan['warning'] = 'post_max_size debería ser algo mayor que upload_max_filesize (ahora es ' . $current['post_max_size'] . ').';
         }
@@ -2320,11 +2330,22 @@ final class McpClusterTools
         if (\MuseDockPanel\Settings::get('mcp_allow_write', '0') !== '1') {
             throw new \RuntimeException('Las acciones que modifican están desactivadas en este servidor.');
         }
-        $r = $svc::apply($acc, $changes);
-        if (!$r['ok']) {
-            throw new \RuntimeException($r['error']);
+        $r = ['before' => $current, 'after' => $current];
+        if ($changes) {
+            $r = $svc::apply($acc, $changes);
+            if (!$r['ok']) {
+                throw new \RuntimeException($r['error']);
+            }
         }
-        return ['applied' => true, 'before' => $r['before'], 'after' => $r['after']];
+        $out = ['applied' => true, 'before' => $r['before'], 'after' => $r['after']];
+        if ($wantMail !== null) {
+            $m = $mailSvc::setMode($acc, $wantMail);
+            if (!$m['ok']) {
+                throw new \RuntimeException($m['error'] ?? 'No se pudo cambiar mail_mode.');
+            }
+            $out['mail_mode'] = ['before' => $info['mail_mode'], 'after' => $wantMail];
+        }
+        return $out;
     }
 
     // ── Diferencias master ↔ nodos ───────────────────────────────────────

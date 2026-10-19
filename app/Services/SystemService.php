@@ -552,6 +552,19 @@ php_value[upload_max_filesize] = 64M
 security.limit_extensions = .php
 CONF;
 
+        // Correo que manda PHP por el sendmail local: modo por defecto de los hostings nuevos (MailCaptureService).
+        // Instalación sin hostings: «capturar»; con hostings: «permitir» (nada cambia solo). Se ajusta con hosting_mail_default_mode.
+        try {
+            $mailDefault = MailCaptureService::defaultMode();
+            if ($mailDefault !== 'allow' && MailCaptureService::ensureInstalled() === '') {
+                [$withMail] = MailCaptureService::poolWithMode($poolConfig, $username, $mailDefault);
+                if ($withMail !== null) {
+                    $poolConfig = $withMail;
+                }
+            }
+        } catch (\Throwable) {
+        }
+
         $poolDir = "/etc/php/{$phpVersion}/fpm/pool.d";
         file_put_contents("{$poolDir}/{$username}.conf", $poolConfig);
 

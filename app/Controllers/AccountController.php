@@ -833,6 +833,7 @@ class AccountController
             'pageTitle' => 'Editar: ' . $account['domain'],
             'account' => $account,
             'phpSettings' => $phpSettings,
+            'mailMode' => \MuseDockPanel\Services\MailCaptureService::modeOf($account),
             'fpmSettings' => $fpmSettings,
             'poolFileExists' => file_exists($poolFile),
             'isSlave' => $isSlave,
@@ -2553,6 +2554,31 @@ class AccountController
             Flash::set('error', $result['error']);
         } else {
             Flash::set('success', 'Ajustes PHP actualizados y FPM recargado.');
+        }
+        Router::redirect('/accounts/' . $params['id'] . '/edit');
+    }
+
+    /** Correo que manda PHP por el sendmail local: allow / capture / block (pool del hosting). */
+    public function updateMailMode(array $params): void
+    {
+        if ($this->slaveGuard('Cambiar el correo de las webs')) return;
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) {
+            Flash::set('error', 'Cuenta no encontrada.');
+            Router::redirect('/accounts');
+            return;
+        }
+        $mode = trim((string)($_POST['mail_mode'] ?? ''));
+        $result = \MuseDockPanel\Services\MailCaptureService::setMode($account, $mode);
+        if (!$result['ok']) {
+            Flash::set('error', $result['error'] ?? 'No se pudo cambiar.');
+        } else {
+            Flash::set('success', match ($mode) {
+                'capture' => 'El correo que manda PHP desde esta web se guardará en el servidor (no sale).',
+                'block' => 'El correo que manda PHP desde esta web se bloquea (PHP recibe un error).',
+                default => 'El correo que manda PHP desde esta web vuelve a salir por el Postfix local.',
+            });
         }
         Router::redirect('/accounts/' . $params['id'] . '/edit');
     }

@@ -630,7 +630,8 @@ class ClusterGuardService
             return $issues;
         }
         $pc = static fn(string $k): string => trim((string)@shell_exec('postconf -h ' . escapeshellarg($k) . ' 2>/dev/null'));
-        $origin = $pc('myorigin');
+        // -x: el valor ya expandido (myorigin = $mydomain salía literal en el aviso: «usuario@$mydomain»)
+        $origin = trim((string)@shell_exec('postconf -h -x myorigin 2>/dev/null'));
         if ($origin !== '' && $origin[0] === '/') {
             $origin = trim((string)strtok((string)@file_get_contents($origin), "\n"));
         }

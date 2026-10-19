@@ -17,14 +17,19 @@ Configuración / configuration: /etc/musedock-edge-probe.conf (CLAVE=valor)
     API_PREFIX=/api/v1/edge-guard            # MuseDock CMS (por defecto); MuseDock Panel: /api/cf-guard
     INSECURE=1                               # opcional: no comprobar el certificado (paneles con certificado propio)
     CONTROL=https://www.google.com/generate_204   # opcional: web de control
+    CHECK=tls                                # tls (por defecto): solo el saludo TLS, no pide ninguna página; http: GET de la portada (modo antiguo)
 
 Prueba a mano / manual test:   python3 -I /usr/local/bin/musedock-edge-probe.py -v
 Otra configuración (p. ej. para el panel) / another config:   EDGE_PROBE_CONF=/etc/otra.conf python3 -I …
 Cron (root, para poder elegir la interfaz de salida / root, to pick the outgoing interface):
     * * * * * root flock -n /run/musedock-edge-probe.lock python3 -I /usr/local/bin/musedock-edge-probe.py
 """
+import errno
+import hashlib
 import json
+import random
 import socket
+import ssl
 import os
 import subprocess
 import sys
@@ -37,7 +42,7 @@ CONF = os.environ.get('EDGE_PROBE_CONF', '/etc/musedock-edge-probe.conf')
 
 
 def load_conf():
-    conf = {'PATHS': '', 'CONTROL': 'https://www.google.com/generate_204', 'RESOLVE': '', 'API_PREFIX': '/api/v1/edge-guard', 'INSECURE': ''}
+    conf = {'CHECK': 'tls', 'PATHS': '', 'CONTROL': 'https://www.google.com/generate_204', 'RESOLVE': '', 'API_PREFIX': '/api/v1/edge-guard', 'INSECURE': ''}
     with open(CONF) as fh:
         for line in fh:
             line = line.strip()
@@ -83,8 +88,79 @@ def api(conf, method, path, body=None):
     return code.strip(), text
 
 
+CACHE_DIR = os.environ.get('EDGE_PROBE_CACHE', '/run/musedock-edge-probe-cache')
+CACHE_TTL = 45        # varias sondas (panel + CMS) miden las mismas IPs: una medición vale para todas durante 45 s
+CHECK_MODE = 'tls'    # tls (por defecto): solo el saludo TLS, sin pedir ninguna página; http: GET de la portada (modo antiguo)
+CA_FILE = None        # solo para pruebas
+
+
+def tls_check(iface, target):
+    """¿Se llega por esta salida? Solo el saludo TLS (con certificado válido para ese nombre): NO pide ninguna página,
+    así ninguna petición llega a PHP ni pasa por la web (antes cada comprobación de una IP de Cloudflare era un GET /
+    que Cloudflare reenviaba al servidor: ~120 portadas de WordPress por minuto).
+    code: tls (saludo completo) · timeout · unreach (sin ruta/red inalcanzable: fallo LOCAL, no bloqueo) · reset · cert · tlserr."""
+    tid, ip, host = target
+    t0 = time.time()
+    sock = None
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(8)
+        if iface:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BINDTODEVICE, iface.encode())
+        sock.settimeout(5)
+        sock.connect((ip, 443))
+        sock.settimeout(8)
+        ctx = ssl.create_default_context(cafile=CA_FILE)
+        with ctx.wrap_socket(sock, server_hostname=host):
+            pass
+        return {'t': tid, 'ok': True, 'code': 'tls', 'ms': int((time.time() - t0) * 1000)}
+    except ssl.SSLCertVerificationError:
+        code = 'cert'
+    except ssl.SSLError:
+        code = 'tlserr'
+    except socket.timeout:
+        code = 'timeout'
+    except ConnectionResetError:
+        code = 'reset'
+    except OSError as e:
+        code = 'unreach' if e.errno in (errno.ENETUNREACH, errno.EHOSTUNREACH, errno.ENODEV, errno.EPERM) else 'reset'
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
+    return {'t': tid, 'ok': False, 'code': code, 'ms': int((time.time() - t0) * 1000)}
+
+
 def check(iface, target):
-    """¿Se llega por esta salida?
+    """Medición de un objetivo: del caché si otra sonda lo midió hace < 45 s (mismo operador, IP y nombre); si no, se mide."""
+    tid, ip, host = target
+    key = hashlib.sha1(('%s|%s|%s|%s' % (iface or '', tid, ip, host)).encode()).hexdigest()
+    path = os.path.join(CACHE_DIR, key + '.json')
+    try:
+        if time.time() - os.path.getmtime(path) < CACHE_TTL:
+            with open(path) as fh:
+                res = json.load(fh)
+            if isinstance(res, dict) and res.get('t') == tid:
+                return res
+    except Exception:
+        pass
+    time.sleep(random.uniform(0, 0.25))     # no todas a la vez
+    res = http_check(iface, target) if CHECK_MODE == 'http' else tls_check(iface, target)
+    try:
+        os.makedirs(CACHE_DIR, mode=0o755, exist_ok=True)
+        tmp = path + '.%d.tmp' % os.getpid()
+        with open(tmp, 'w') as fh:
+            json.dump(res, fh)
+        os.replace(tmp, path)
+    except Exception:
+        pass
+    return res
+
+
+def http_check(iface, target):
+    """(Modo antiguo, CHECK=http) ¿Se llega por esta salida?
     cf: la IP de Cloudflare responde si se completa la conexión cifrada (TLS), aunque la web tarde o dé error:
         un bloqueo de la operadora impide conectar; una web lenta o caída conecta y luego no contesta.
     origin: certificado válido y respuesta sin error 5xx."""
@@ -159,6 +235,8 @@ def main():
     NINGUNO acepta el informe: un nodo en reserva o apartado no debe llenar el correo de avisos cada minuto.
     Así la sonda no depende de qué servidor manda en cada momento (tras un relevo seguía informando solo al anterior)."""
     conf = load_conf()
+    global CHECK_MODE
+    CHECK_MODE = 'http' if conf.get('CHECK', 'tls').lower() == 'http' else 'tls'
     urls = [u.strip() for u in conf['URL'].split(',') if u.strip()]
     resolves = [r.strip() for r in conf.get('RESOLVE', '').split(',')]
     oks, errs = [], []
@@ -215,7 +293,7 @@ def run_once(conf):
         control_ok = ctl.isdigit() and 200 <= int(ctl) < 400
         results = []
         if control_ok and targets:
-            with ThreadPoolExecutor(max_workers=8) as pool:
+            with ThreadPoolExecutor(max_workers=6) as pool:
                 results = list(pool.map(lambda t: check(iface, t), targets))
         paths.append({'path': label.strip(), 'public_ip': public_ip, 'control_ok': control_ok, 'results': results})
         if VERBOSE:

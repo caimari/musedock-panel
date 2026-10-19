@@ -134,7 +134,7 @@
         <div class="card border-warning">
             <div class="card-header bg-warning text-dark py-2">
                 <i class="bi bi-exclamation-triangle me-2"></i>Este servidor podría tomar el mando, pero no está completamente preparado
-                <small class="ms-2 fw-normal">(revisado <?= View::e((string)($haReadiness['at'] ?? '')) ?>)</small>
+                <small class="ms-2 fw-normal">(revisado <?= View::e((($__t = strtotime((string)($haReadiness['at'] ?? ''))) ? gmdate('Y-m-d H:i', $__t) . ' UTC' : (string)($haReadiness['at'] ?? ''))) ?>)</small>
             </div>
             <div class="card-body py-2">
                 <ul class="mb-1 small">

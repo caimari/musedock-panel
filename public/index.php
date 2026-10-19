@@ -348,6 +348,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/renew-ssl', 'AccountController@renewSsl');
 \MuseDockPanel\Router::post('/accounts/{id}/rename-user', 'AccountController@renameUser');
 \MuseDockPanel\Router::post('/accounts/{id}/php', 'AccountController@updatePhp');
+\MuseDockPanel\Router::post('/accounts/{id}/mail-mode', 'AccountController@updateMailMode');
 \MuseDockPanel\Router::post('/accounts/{id}/fpm-pool', 'AccountController@updateFpmPool');
 \MuseDockPanel\Router::post('/accounts/{id}/hosting-type', 'AccountController@updateHostingType');
 
@@ -618,6 +619,13 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/docs/dns-guard', 'DocsController@dnsGuard');
 \MuseDockPanel\Router::get('/docs/node-guard', 'DocsController@nodeGuard');
 \MuseDockPanel\Router::get('/docs/system-mail', 'DocsController@systemMail');
+\MuseDockPanel\Router::get('/docs/web-mail', 'DocsController@webMail');
+\MuseDockPanel\Router::get('/mail/web-audit', 'WebMailAuditController@index');
+\MuseDockPanel\Router::post('/mail/web-audit/smtp', 'WebMailAuditController@smtp');
+\MuseDockPanel\Router::get('/mail/web-capture', 'WebMailCaptureController@index');
+\MuseDockPanel\Router::get('/mail/web-capture/view', 'WebMailCaptureController@show');
+\MuseDockPanel\Router::post('/mail/web-capture/delete', 'WebMailCaptureController@delete');
+\MuseDockPanel\Router::post('/mail/web-capture/purge', 'WebMailCaptureController@purge');
 \MuseDockPanel\Router::get('/docs/mcp-nodes', 'DocsController@mcpNodes');
 \MuseDockPanel\Router::get('/docs/wordpress-security', 'DocsController@wordpressSecurity');
 \MuseDockPanel\Router::get('/docs/alerts', 'DocsController@alerts');

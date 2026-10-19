@@ -477,6 +477,14 @@ class DocsController
                 'keywords' => 'correo sistema cron root mydestination myorigin postfix cola mailq rebote relay access denied crontab duplicado mail_system_local_mode mail_queue_warn mail-system-local relé satélite nodo MAILTO',
             ],
             [
+                'title' => 'Correo de las webs (PHP): permitir, capturar o bloquear',
+                'description' => 'Qué pasa con el correo que una web manda con mail() o wp_mail() por el servidor sin autenticar (Gmail lo rechaza y una web hackeada puede mandar spam), los tres modos por hosting, cómo se cambian (panel y MCP), límites de seguridad y la auditoría previa.',
+                'url' => '/docs/web-mail',
+                'category' => 'Guia especial',
+                'icon' => 'bi-envelope-slash',
+                'keywords' => 'correo webs php mail wp_mail wordpress sendmail sendmail_path capturar bloquear permitir smtp autenticado gmail spf dkim spam captura mail_mode hosting_mail_default_mode mail-audit',
+            ],
+            [
                 'title' => 'Fail2ban en el cluster',
                 'description' => 'Que bloquea cada servidor y cuanto tiempo (jaulas normales y lentas, bloqueos crecientes), que se copia entre el que manda y sus copias (lista blanca si, bloqueos no), informe diario y consultas por MCP.',
                 'url' => '/docs/fail2ban-cluster',
@@ -609,6 +617,10 @@ class DocsController
 
         if ($url === '/docs/dns-guard') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'dns-guard.php');
+        }
+
+        if ($url === '/docs/web-mail') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'web-mail.php');
         }
 
         if ($url === '/docs/system-mail') {
@@ -1627,6 +1639,14 @@ class DocsController
         View::render('help/node-guard', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Vigilancia de nodos y relevos',
+        ]);
+    }
+
+    public function webMail(): void
+    {
+        View::render('help/web-mail', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Correo de las webs (PHP)',
         ]);
     }
 

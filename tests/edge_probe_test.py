@@ -177,5 +177,75 @@ rc, e = run_with(['200', '429', '429'])
 ok('si se rechaza una parte POSTERIOR, lo ya entregado vale y no es un fallo', rc[0] == 0 and e == '', '%s %r' % (rc, e))
 _socket.getaddrinfo = orig_gai
 
+print('\n\033[1m5. Comprobación ligera: solo el saludo TLS, sin pedir ninguna página (la sonda hacía ~120 portadas de WordPress por minuto)\033[0m')
+import ssl, socket, subprocess, threading, shutil
+m = load('URL=%s\nTOKEN_FILE=@TOKEN@\nAPI_PREFIX=/api/v1/edge-guard\n' % A)
+d = tempfile.mkdtemp()
+crt, key = os.path.join(d, 'c.pem'), os.path.join(d, 'k.pem')
+have_openssl = shutil.which('openssl') is not None
+if have_openssl:
+    subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', crt, '-days', '2', '-subj', '/CN=web.example',
+                    '-addext', 'subjectAltName=DNS:web.example'], capture_output=True, check=True)
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(crt, key)
+    srv = socket.socket(); srv.bind(('127.0.0.1', 0)); srv.listen(5)
+    port = srv.getsockname()[1]
+    requests_seen = []
+
+    def serve():
+        while True:
+            try:
+                c, _ = srv.accept()
+            except OSError:
+                return
+            try:
+                t = ctx.wrap_socket(c, server_side=True)
+                c.settimeout(0.3)
+                try:
+                    data = t.recv(1024)
+                    if data:
+                        requests_seen.append(data)
+                except Exception:
+                    pass
+                t.close()
+            except Exception:
+                try: c.close()
+                except Exception: pass
+    threading.Thread(target=serve, daemon=True).start()
+
+    # el programa conecta al 443: se redirige al puerto de prueba cambiando la tupla de connect
+    real_connect = socket.socket.connect
+    socket.socket.connect = lambda self, addr: real_connect(self, ('127.0.0.1', port) if addr[1] == 443 else addr)
+    m.CA_FILE = crt
+    r = m.tls_check('', ('origin:abc', '127.0.0.1', 'web.example'))
+    ok('saludo TLS correcto con certificado válido: ok, código «tls»', r['ok'] is True and r['code'] == 'tls', str(r))
+    ok('NO manda ninguna petición HTTP (nada llega a PHP ni a la web)', requests_seen == [], str(requests_seen))
+    r = m.tls_check('', ('origin:abc', '127.0.0.1', 'otro.example'))
+    ok('certificado que no es de ese nombre: fallo «cert» (no se confunde con un bloqueo)', r['ok'] is False and r['code'] == 'cert', str(r))
+    socket.socket.connect = real_connect
+    srv.close()
+else:
+    print('  (sin openssl: se omiten las pruebas con servidor TLS local)')
+
+calls = []
+m.tls_check = lambda iface, t: calls.append((iface, t)) or {'t': t[0], 'ok': True, 'code': 'tls', 'ms': 3}
+m.CACHE_DIR = os.path.join(d, 'cache')
+m.time.sleep = lambda s: None
+t1 = ('cf:1.2.3.4', '1.2.3.4', 'a.example')
+m.check('ONO', t1); m.check('ONO', t1)
+ok('dos sondas (panel y CMS) midiendo lo mismo en 45 s: se mide UNA vez', len(calls) == 1, str(len(calls)))
+m.check('Orange', t1)
+ok('otro operador no comparte la medición (cada línea se mide por separado)', len(calls) == 2)
+m.check('ONO', ('cf:1.2.3.5', '1.2.3.5', 'a.example'))
+ok('otra IP se mide aparte', len(calls) == 3)
+os.utime(os.path.join(m.CACHE_DIR, os.listdir(m.CACHE_DIR)[0]), (0, 0))
+for f in os.listdir(m.CACHE_DIR):
+    os.utime(os.path.join(m.CACHE_DIR, f), (0, 0))
+m.check('ONO', t1)
+ok('pasados 45 s se vuelve a medir', len(calls) == 4)
+src = open(os.path.join(ROOT, 'bin', 'edge-guard-probe.py')).read()
+ok('el modo por defecto es TLS y se puede volver al antiguo con CHECK=http', "CHECK_MODE = 'tls'" in src and "CHECK=http" in src)
+shutil.rmtree(d, ignore_errors=True)
+
 print('\n' + ('\033[0;32mTodo correcto: %d comprobaciones\033[0m' % passed if failed == 0 else '\033[0;31m%d fallo(s) de %d\033[0m' % (failed, passed + failed)))
 sys.exit(0 if failed == 0 else 1)

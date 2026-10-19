@@ -81,6 +81,15 @@
         p, span, div, td, th, li, a { color: inherit; }
         .text-muted { color: #64748b !important; }
         small { color: #94a3b8; }
+        /* Cabeceras y avisos de color sólido (amarillo, rojo, verde…): el texto secundario y los botones del tema oscuro
+           (gris sobre fondo oscuro) se perdían sobre el color. Amarillo/cian: texto oscuro; rojo/verde/azul: blanco. */
+        .bg-warning small, .bg-warning .text-muted, .bg-info small, .bg-info .text-muted { color: rgba(0,0,0,.72) !important; }
+        .bg-danger small, .bg-danger .text-muted, .bg-success small, .bg-success .text-muted,
+        .bg-primary small, .bg-primary .text-muted { color: rgba(255,255,255,.9) !important; }
+        .bg-danger .btn-outline-light, .bg-success .btn-outline-light, .bg-primary .btn-outline-light { color: #fff; border-color: rgba(255,255,255,.8); }
+        .bg-danger .btn-outline-light:hover, .bg-success .btn-outline-light:hover, .bg-primary .btn-outline-light:hover { background: rgba(255,255,255,.2); border-color: #fff; color: #fff; }
+        .bg-warning .btn-outline-light, .bg-info .btn-outline-light { color: #1f2937; border-color: rgba(31,41,55,.7); }
+        .bg-warning .btn-outline-light:hover, .bg-info .btn-outline-light:hover { background: rgba(0,0,0,.1); border-color: #1f2937; color: #111827; }
         code { color: #38bdf8; }
         .alert { color: #e2e8f0; }
         .alert-danger { background: rgba(127,29,29,0.34) !important; border-color: rgba(248,113,113,0.35) !important; color: #fecaca !important; }
