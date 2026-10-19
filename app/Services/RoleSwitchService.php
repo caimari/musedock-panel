@@ -71,9 +71,12 @@ class RoleSwitchService
                 'wal_log_hints' => ($hints[0][0] ?? '') === 'on',
             ];
         }
-        $my = ['configured' => Settings::get('repl_mysql_role', 'standalone') !== 'standalone'];
+        $my = ['configured' => FailoverSafetyService::mysqlReplicationConfigured()];
         try {
             $pdo = ReplicationService::getMysqlPdo();
+            if (!$pdo) {
+                $my['error'] = 'sin acceso como root (socket/debian.cnf) o MariaDB parado (' . trim((string)shell_exec('systemctl is-active mariadb mysql 2>/dev/null | head -1')) . ')';
+            }
             if ($pdo) {
                 $ss = $pdo->query('SHOW SLAVE STATUS')->fetch(\PDO::FETCH_ASSOC) ?: [];
                 $my += [
@@ -300,6 +303,12 @@ class RoleSwitchService
                 'aquí ' . (!empty($me['mysql']['log_slave_updates']) ? 'on' : 'OFF') . ', allí ' . (!empty($tm['log_slave_updates']) ? 'on' : 'OFF')
                 . ' (sin esto la vuelta copia MariaDB entera)', false);
         }
+        // Simula el paso de MariaDB de la promoción: si el destino lo lleva en replicación
+        // y no responde, la promoción fallaría DESPUÉS de apartar al master actual.
+        if (!empty($t['mysql']['configured'])) {
+            $add("MariaDB: {$node['name']} responde para poder promoverse", array_key_exists('is_slave', (array)$t['mysql']),
+                array_key_exists('is_slave', (array)$t['mysql']) ? 'responde' : 'no se puede conectar a MariaDB en ese nodo' . (!empty($t['mysql']['error']) ? ' (' . $t['mysql']['error'] . ')' : ''));
+        }
         if (!empty($me['redis']['installed']) && !empty($t['redis']['installed'])) {
             $add("Redis: {$node['name']} es réplica conectada", ($t['redis']['role'] ?? '') === 'slave' && ($t['redis']['link'] ?? '') === 'up',
                 ($t['redis']['role'] ?? '?') . ', enlace ' . ($t['redis']['link'] ?? '?'), false);
@@ -428,12 +437,17 @@ class RoleSwitchService
         $st = self::status($task);
         $st['state'] = 'running';
         $fail = static function (string $msg) use ($task, &$st, $nodeId): void {
+            $gethost = gethostname();
             $st['state'] = 'failed';
             $st['error'] = $msg;
             self::step($task, $st, 'PARADO: ' . $msg, false);
             LogService::log('cluster.role-switch', 'failed', $msg);
-            self::alert('Cambio de rol PARADO', $msg . "\n\nRevisa los dos paneles (Dashboard).\n\n── Pasos ──\n"
-                . implode("\n", array_map(static fn($s) => "{$s['at']} {$s['msg']}", $st['steps'])), $nodeId);
+            // Un solo aviso corto (los pasos están en el Dashboard, no en el mensaje) y sin copia
+            // reenviada: el otro nodo está apartado y no tiene nada que decir.
+            $target = (string)($st['node'] ?? 'el destino');
+            $short = mb_strlen($msg) > 300 ? mb_substr($msg, 0, 300) . '…' : $msg;
+            self::alert("❌ Cambio de mando a {$target} FALLÓ", $short
+                . "\n\nEste servidor ({$gethost}) sigue sirviendo. Detalle paso a paso: Dashboard → «Cambio de rol».", 0);
         };
         ClusterService::$progressCb = static function (string $m) use ($task, &$st): void {
             self::step($task, $st, $m);
@@ -565,12 +579,12 @@ class RoleSwitchService
                 // y nadie ha escrito allí. Lo seguro para no dejarlas caídas: apartar al otro
                 // (sus bases en solo lectura) y reactivar éste. Luego hay que rehacer su copia.
                 self::step($task, $st, "{$pre['node']} se promovió a medias y el DNS no se movió: se aparta y este servidor vuelve a servir las webs…", false);
-                $fr = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'fence-self', 'payload' => ['reason' => 'cambio de rol revertido']]);
+                $fr = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'fence-self', 'payload' => ['reason' => 'cambio de rol revertido', 'rejoin_host' => $ips['my_vpn'], 'rejoin_name' => gethostname()]]);
                 TrafficForwardService::stop();
                 FailoverSafetyService::unfenceSelf();
                 $fail("{$pre['node']} se promovió a medias (" . ($remote['error'] ?? '?') . '). Revertido: este servidor sirve las webs de nuevo'
                     . (!empty($fr['ok']) ? " y {$pre['node']} está apartado" : " (OJO: no se pudo apartar {$pre['node']}: " . ($fr['error'] ?? '?') . ')')
-                    . ". Para rehacer su copia, en {$pre['node']} como root: php bin/cluster-switch.php demote {$ips['my_vpn']}");
+                    . ". {$pre['node']} se reincorporará solo como copia (en pocos minutos; si no, botón «Reincorporar» en su panel).");
             } else {
                 $fail("{$pre['node']} se promovió y movió el DNS, pero terminó con errores (" . ($remote['error'] ?? '?') . "). Las webs van a {$pre['node']}; este servidor sigue apartado. Para que sea su copia: php bin/cluster-switch.php demote {$ips['their_vpn']}");
             }
@@ -822,7 +836,8 @@ class RoleSwitchService
             $st['state'] = 'failed';
             $st['error'] = implode('; ', $p['errors'] ?? ['error']);
             self::step($task, $st, 'La promoción terminó con errores: ' . $st['error'], false);
-            self::alert('Cambio de rol: la promoción de ' . gethostname() . ' falló', $st['error'] . "\n\nEl nodo que pasaba el mando decidirá: si el DNS no se movió, vuelve a servir las webs él.");
+            // Sin aviso aquí: lo da el nodo que dirige el cambio (un solo mensaje, no dos).
+            ClusterService::$progressCb = null;
             return;
         }
         $st['serving'] = true;   // el que pasa el mando empieza a reenviarle las visitas

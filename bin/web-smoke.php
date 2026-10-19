@@ -26,7 +26,8 @@ foreach ($rep['results'] as $r) {
     printf("%-30s %s %s%s%s\n", $r['domain'], $r['error'] ? 'ERROR' : 'ok   ', $r['final'] === 0 ? 'sin respuesta' : $r['final'], $r['note'] !== '' ? ' ' . $r['note'] : '', $r['reason'] !== '' ? "\n    {$r['reason']}" : '');
 }
 echo "\n{$rep['ok']} bien, {$rep['errors']} con error\n";
-if (isset($opts['notify'])) {
+$fenced = is_file(\MuseDockPanel\Services\FailoverSafetyService::FENCE_FLAG) || \MuseDockPanel\Settings::get('cluster_fenced', '0') === '1';
+if (isset($opts['notify']) && !$fenced) {   // un nodo apartado no sirve webs: avisar sería ruido
     S::notify($rep, is_string($opts['reason'] ?? null) ? $opts['reason'] : '');
 }
 exit($rep['errors'] > 0 ? 2 : 0);

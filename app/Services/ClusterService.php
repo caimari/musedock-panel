@@ -2701,6 +2701,10 @@ class ClusterService
         // Ya mandando: dueños de ficheros de las webs y carpetas de Laravel que lsyncd no copia (en segundo plano,
         // un relevo no puede esperar a recorrer todas las webs) y, pasados unos segundos, una prueba de cada web
         // contra este mismo servidor con aviso si alguna da 5xx. Nada de esto toca el relevo si falla.
+        // Si la promoción tuvo errores se va a deshacer: ni permisos ni prueba de webs (solo meten ruido).
+        if ($errors) {
+            $results['web_permissions'] = $results['web_smoke'] = 'omitido: la promoción tuvo errores';
+        } else {
         try {
             $results['web_permissions'] = WebPermissionService::onPromote();
         } catch (\Throwable $e) {
@@ -2710,6 +2714,7 @@ class ClusterService
             $results['web_smoke'] = WebSmokeService::scheduleAfterPromote();
         } catch (\Throwable $e) {
             $results['web_smoke'] = 'error: ' . $e->getMessage();
+        }
         }
 
         return [
@@ -2779,7 +2784,7 @@ class ClusterService
         // Reconfigure MySQL as slave — solo si MySQL forma parte de la réplica. Si
         // nunca se configuró (repl_mysql_role = standalone), el "rebuild" con seed
         // haría un dump+import contra un master sin réplica y fallaría (o peor).
-        if (Settings::get('repl_mysql_role', 'standalone') === 'standalone') {
+        if (!FailoverSafetyService::mysqlReplicationConfigured()) {
             $results['mysql_demote'] = ['ok' => true, 'skipped' => 'MySQL no está en réplica'];
         } else {
             try {

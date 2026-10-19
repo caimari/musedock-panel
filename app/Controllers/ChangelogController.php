@@ -20,6 +20,19 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.389',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Un cambio de mando se deshacía por un paso de MariaDB en un nodo donde MariaDB no está en replicación: ahora se omite, y solo falla si está en replicación y no responde.',
+                        'Tras un cambio revertido, el nodo apartado se reincorpora solo como copia (con su botón y reintento automático), sin ejecutar demote a mano.',
+                        '«Comprobar» detecta ese caso antes de apartar al master.',
+                        'Avisos del cambio fallido: un solo mensaje corto, sin volcado de pasos ni copia reenviada; sin avisos de permisos ni de webs caídas si la promoción se deshace.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.388',
                 'date' => '2026-10-19',
                 'badge' => 'info',

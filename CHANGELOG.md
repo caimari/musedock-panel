@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.389] — 2026-10-19 — El cambio de mando ya no se deshace por un MariaDB que no se usa
+
+### Corregido
+- **Un cambio de mando se deshacía («se promovió a medias: MySQL promote: No se pudo conectar a MySQL/MariaDB») en un nodo donde MariaDB no está en replicación.** Ahora ese paso se omite (no hay nada que promover) y solo falla si MariaDB sí está en replicación y no responde.
+- **«Comprobar» no lo detectaba antes de apartar al master.** Ahora comprueba que MariaDB del destino responde cuando está en replicación.
+- **Tras un cambio revertido, el nodo apartado se reincorpora solo como copia** (antes había que ir a ejecutar `demote` a mano y su panel no mostraba botón): queda marcado como pendiente de reincorporar, con el botón de siempre y el reintento automático.
+- **Avisos del cambio fallido, más claros:** un solo mensaje corto («❌ Cambio de mando a X FALLÓ»), sin volcado de pasos ni copia reenviada desde el otro nodo. Si la promoción tiene errores, no se lanzan la prueba de webs ni el arreglo de permisos (antes llegaban avisos sin sentido de un nodo ya apartado), y un nodo apartado no avisa de webs caídas.
+
 ## [1.0.388] — 2026-10-19 — Lo que se crea o cambia en el master llega a las réplicas al momento
 
 ### Corregido

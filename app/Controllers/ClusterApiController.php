@@ -478,6 +478,12 @@ class ClusterApiController
                 'fence-self'       => (function () use ($payload) {
                     $reason = mb_substr(trim((string)preg_replace('/[^\p{L}\p{N} ._:()\-]/u', '', (string)($payload['reason'] ?? 'remote request'))), 0, 120) ?: 'remote request';
                     $script = dirname(__DIR__, 2) . '/bin/cluster-switch.php';
+                    // Quien aparta puede pedir que este nodo se reincorpore solo como copia (y deje el botón en su panel).
+                    $rj = (string)($payload['rejoin_host'] ?? '');
+                    if (filter_var($rj, FILTER_VALIDATE_IP)) {
+                        \MuseDockPanel\Services\FailoverSafetyService::markRejoinPending(
+                            mb_substr(trim((string)preg_replace('/[^\p{L}\p{N} ._()\-]/u', '', (string)($payload['rejoin_name'] ?? $rj))), 0, 60) ?: $rj, $rj, $reason);
+                    }
                     shell_exec('nohup sh -c ' . escapeshellarg('sleep 2; php ' . escapeshellarg($script) . ' fence ' . escapeshellarg($reason)) . ' >/dev/null 2>&1 &');
                     return ['ok' => true, 'deferred' => true, 'note' => 'el aislamiento se hace en 2 s; comprueba con query-local-state (cluster_fenced)'];
                 })(),

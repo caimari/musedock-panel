@@ -560,6 +560,8 @@ systemctl restart caddy</pre>
         const running = t.state === 'running', failed = t.state === 'failed', done = t.state === 'done';
         let key = 'rs-dismiss-' + t.task;
         try { if (!running && localStorage.getItem(key)) { box.style.display = 'none'; return; } } catch (e) {}
+        // Un cambio fallido ya resuelto no se queda para siempre: pasada una hora se oculta solo.
+        if (failed && t.started_at && Date.now() - Date.parse(t.started_at) > 3600000) { box.style.display = 'none'; return; }
         let pct = 0;
         t.steps.forEach(s => marks.forEach(([m, p]) => { if ((s.msg || '').includes(m)) pct = Math.max(pct, p); }));
         if (done) pct = 100;

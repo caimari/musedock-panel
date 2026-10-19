@@ -1066,6 +1066,12 @@ class FailoverSafetyService
      * SET GLOBAL read_only=0, leaving read_only=1 in my.cnf — so the next restart
      * silently turned the new master read-only again.
      */
+    public static function mysqlReplicationConfigured(): bool
+    {
+        return (string)Settings::get('repl_mysql_role', 'standalone') !== 'standalone'
+            && (string)Settings::get('repl_mysql_enabled', '1') !== '0';
+    }
+
     public static function promoteMysqlPersistent(bool $dryRun = false): array
     {
         $steps = [];
@@ -1080,9 +1086,17 @@ class FailoverSafetyService
             ]];
         }
 
+        if (!self::mysqlReplicationConfigured()) {
+            return ['ok' => true, 'skipped' => true, 'steps' => $steps, 'message' => 'MySQL/MariaDB no está en replicación: nada que promover'];
+        }
         try {
             $pdo = ReplicationService::getMysqlPdo();
             if (!$pdo) {
+                // Sin replicación de MySQL/MariaDB configurada no hay nada que promover:
+                // no es un fallo (el cambio de rol de 2026-10-19 se deshizo por esto).
+                if (!self::mysqlReplicationConfigured()) {
+                    return ['ok' => true, 'skipped' => true, 'steps' => $steps, 'message' => 'MySQL/MariaDB no está en replicación: nada que promover'];
+                }
                 return ['ok' => false, 'steps' => $steps, 'error' => 'No se pudo conectar a MySQL/MariaDB'];
             }
             // Vendor-correct stop.
