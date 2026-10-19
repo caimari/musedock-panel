@@ -613,7 +613,7 @@ systemctl restart caddy</pre>
                 + '<button type="button" class="nov-head collapsed" data-bs-toggle="collapse" data-bs-target="#' + id + '" aria-expanded="false">'
                 + '<i class="bi ' + k.icon + ' text-' + k.color + '"></i>'
                 + '<span class="nov-name">' + esc(n.name) + '</span>'
-                + '<span class="badge rounded-pill bg-' + k.color + '-subtle text-' + k.color + ' border border-' + k.color + '-subtle">' + esc(k.short) + '</span>'
+                + '<span class="badge bg-' + k.color + '-subtle text-' + k.color + ' border border-' + k.color + '-subtle">' + esc(k.short) + '</span>'
                 + (n.can_take_over ? '<span class="small text-success d-none d-sm-inline"><i class="bi bi-arrow-left-right me-1"></i>puede tomar el mando</span>' : '')
                 + '<span class="ms-auto small text-muted">' + ok + '/' + items.length + '</span>'
                 + '<i class="bi bi-chevron-down nov-chev"></i>'

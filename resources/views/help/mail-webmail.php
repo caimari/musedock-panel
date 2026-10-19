@@ -158,6 +158,19 @@
 </div>
 
 <div class="card mt-4">
+    <div class="card-header"><i class="bi bi-send-check me-2"></i>Por dónde sale el correo que se envía desde el webmail</div>
+    <div class="card-body small text-muted">
+        <ol class="mb-2">
+            <li>Roundcube se conecta al Postfix del propio nodo (<code>127.0.0.1:587</code>, STARTTLS) con el <strong>usuario y la contraseña del buzón</strong>: es envío <strong>autenticado</strong>.</li>
+            <li>El servidor <strong>firma con el DKIM</strong> del dominio del remitente.</li>
+            <li>Si el nodo no sale a internet por su cuenta (o su IP no tiene buen nombre inverso), lo pasa a un <strong>nodo de salida</strong> por la red privada (<code>relayhost</code>); es ese nodo el que lo entrega al destino con su IP pública.</li>
+            <li>El destino comprueba el <strong>SPF</strong> con la IP del nodo de salida, el <strong>DKIM</strong> de la firma y el <strong>DMARC</strong> del dominio.</li>
+        </ol>
+        <p class="mb-0"><strong>Para que llegue bien:</strong> la IP pública del nodo de salida debe figurar en el SPF de cada dominio de correo (<code>ip4:…</code>) y el dominio debe tener publicada su clave DKIM. Prueba siempre con un envío a una cuenta externa y revisa «Mostrar original»: SPF, DKIM y DMARC en «PASS». Las identidades que creas en el webmail se guardan en la base de datos de Roundcube y se replican entre los nodos (ver <a href="/docs/mail/ha">Correo HA</a>).</p>
+    </div>
+</div>
+
+<div class="card mt-4">
     <div class="card-header"><i class="bi bi-person-check me-2"></i>Autenticacion de usuarios webmail</div>
     <div class="card-body">
         <p class="small text-muted mb-0">

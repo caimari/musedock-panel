@@ -127,3 +127,36 @@
         </ul></div>
     </div></div>
 </div>
+
+<div class="card mt-4">
+    <div class="card-header"><i class="bi bi-arrow-left-right me-2"></i>Qué se replica y qué no</div>
+    <div class="card-body small text-muted">
+        <table class="table table-dark table-sm small mb-3">
+            <thead><tr><th style="width:30%">Qué</th><th>Cómo viaja entre los dos nodos</th></tr></thead>
+            <tbody>
+                <tr><td><strong>Dominios, buzones, alias, contraseñas</strong></td><td>Cada cambio hecho en el nodo que manda se envía a la réplica (cola del clúster, en cuestión de segundos) y cada nodo autentica contra su propia copia. Se ve en la cola del clúster; si algo no llega, queda como pendiente o fallido con su motivo.</td></tr>
+                <tr><td><strong>Los mensajes de cada buzón</strong></td><td>Con <strong>Dovecot dsync</strong>, en <strong>los dos sentidos</strong>: lo que llega, se lee, se mueve o se <strong>borra</strong> en un nodo se copia al otro a los pocos segundos.</td></tr>
+                <tr><td><strong>Identidades y ajustes del webmail</strong> (Roundcube)</td><td>Viven en la base de datos de Roundcube, dentro del PostgreSQL que ya se replica por streaming entre los nodos. Lo que se crea en el nodo que manda llega al otro con el resto de la base, sin hacer nada.</td></tr>
+                <tr><td><strong>Sesiones del webmail</strong></td><td>No se replican: tras un cambio de nodo hay que volver a entrar. No se pierde ningún dato.</td></tr>
+            </tbody>
+        </table>
+        <ul class="mb-0">
+            <li><strong>La réplica no es una copia de seguridad.</strong> Como se copia en los dos sentidos, un correo borrado por error desaparece de los dos nodos. Para poder recuperarlo hace falta una copia aparte.</li>
+            <li><strong>El desfase de un cambio de mando:</strong> un correo que llegue o se cambie en los segundos anteriores puede no haberse copiado todavía. No se pierde, pero conviene comprobar el estado de la réplica antes (ver abajo).</li>
+        </ul>
+    </div>
+</div>
+
+<div class="card mt-4">
+    <div class="card-header"><i class="bi bi-check2-all me-2"></i>Antes de pasar el mando: comprobaciones del correo</div>
+    <div class="card-body small text-muted">
+        <ol class="mb-2">
+            <li><strong>Réplica de mensajes:</strong> en los dos nodos, <code>mail_replication_status</code> (MCP) o <code>Mail → General</code>: sin buzones fallidos, <code>dovecot_up</code> y «tiene los mismos dominios, buzones y alias».</li>
+            <li><strong>Cola de operaciones:</strong> en el nodo que manda, la cola del clúster sin operaciones de correo pendientes o fallidas.</li>
+            <li><strong>Identidades del webmail:</strong> la misma lista en los dos nodos (consulta de la tabla <code>identities</code> de la base de Roundcube).</li>
+            <li><strong>Réplica de PostgreSQL</strong> sin retraso (<code>failover_preflight</code> en los dos nodos).</li>
+            <li><strong>Envío de prueba</strong> desde el webmail a una cuenta externa: en «Mostrar original», SPF, DKIM y DMARC en «PASS».</li>
+        </ol>
+        <p class="mb-0">Con esto la probabilidad de perder un correo o una identidad es muy baja. Si quieres un margen total, activa el modo mantenimiento y haz el cambio con el correo entrante parado unos segundos.</p>
+    </div>
+</div>

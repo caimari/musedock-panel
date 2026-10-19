@@ -2,6 +2,18 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.386] — 2026-10-19 — Retoques estéticos y la documentación del panel por MCP
+
+### Corregido
+- **Etiquetas del dashboard como píldora blanca con letra verde** (por ejemplo «Réplica completa» en la tarjeta de nodos): las clases «subtle» de Bootstrap 5.3 son claras por defecto y rompían el tema oscuro. Ahora usan los colores del tema (fondo tintado, letra y borde del mismo color) y **todas las etiquetas del panel pasan a ser rectangulares con las esquinas casi rectas**, también las que antes iban redondeadas (`rounded-pill`).
+
+### Añadido
+- **Caddy sin el puerto 80 tras tomar el mando** (Obelix, 2026-10-19). Caddy arrancó con la configuración guardada (`--resume`), que solo tenía `:443`, `:8443` y `:8444`: `http://dominio` daba «conexión rechazada» en vez de redirigir a https y un certificado renovado por HTTP-01 podía caducar. El panel (el cron del clúster cada minuto y el reparador de rutas, también al actualizar) crea ahora un servidor **:80 con la redirección http → https** (308, conservando host y ruta, dejando pasar `/.well-known/acme-challenge/` de los certificados) **solo si nadie más escucha en el :80** (ni el http de Caddy ni caddy-l4). Solo **crea** su propia clave: nunca sustituye ni toca lo existente, y si otro programa ocupa el puerto Caddy rechaza la carga entera y no cambia nada. El preflight (`failover_preflight` y el cuadro del dashboard) avisa si Caddy está activo y nada escucha en el :80. Pruebas: `tests/caddy_http_test.php` (16).
+- **Toda la documentación del panel por MCP, solo lectura** (`McpDocsTools`): `docs_catalog` lista y clasifica las 64 guías de `/docs` por grupo (ajustes, correo, errores conocidos, guías especiales) y categoría, con descripción, palabras clave y tamaño; `docs_search` busca en el contenido completo (título, descripción, palabras clave y texto) y devuelve las guías más relevantes con un fragmento; `docs_read` lee una guía entera por su URL (por partes si es larga). Son solo texto de ayuda, sin datos del servidor ni secretos, y solo admiten URLs de `/docs/`. Un asistente puede así responder «cómo se hace» con la documentación real. Las instrucciones del servidor MCP lo indican.
+- **Documentación del correo ampliada** (`/docs/mail/ha`, `/docs/mail/webmail`): qué se replica entre los dos nodos y qué no (configuración, mensajes en los dos sentidos —un borrado en un nodo se copia al otro—, identidades del webmail por la réplica de PostgreSQL, sesiones no), la lista de comprobaciones del correo antes de pasar el mando, y por dónde sale el correo del webmail (SMTP autenticado, DKIM, nodo de salida, SPF).
+- Las guías **«Cluster: guía base»** y **«Federation»** existían pero no aparecían en el índice ni en el buscador de `/docs`; ahora sí.
+- Pruebas: `tests/mcp_docs_test.php` (18), que además comprueba que ninguna vista de ayuda queda fuera del catálogo.
+
 ## [1.0.385] — 2026-10-19 — Los avisos del dashboard se recalculan solos tras actualizar
 
 ### Corregido

@@ -20,6 +20,22 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.386',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Caddy sin el puerto 80 tras tomar el mando (Obelix): arrancó con la configuración guardada, sin :80, y http://dominio daba «conexión rechazada». El panel crea ahora un servidor :80 con la redirección http → https (deja pasar el desafío HTTP-01 de los certificados) solo si nadie más escucha en el :80, solo creando su propia clave. El preflight y el dashboard avisan si Caddy está activo y nada escucha en el :80. Prueba tests/caddy_http_test.php (16).',
+                        'Etiquetas del dashboard como píldora blanca con letra verde («Réplica completa» en la tarjeta de nodos): las clases «subtle» de Bootstrap 5.3 son claras por defecto y rompían el tema oscuro. Ahora usan los colores del tema y todas las etiquetas del panel pasan a ser rectangulares con las esquinas casi rectas.',
+                    ],
+                    'added' => [
+                        'Toda la documentación del panel por MCP, solo lectura: docs_catalog lista y clasifica las guías de /docs por grupo y categoría, docs_search busca en su contenido completo y docs_read lee una guía entera por su URL (por partes si es larga). Solo texto de ayuda, sin datos del servidor, y solo URLs de /docs/.',
+                        'Documentación del correo ampliada (/docs/mail/ha y /docs/mail/webmail): qué se replica entre los dos nodos y qué no (un borrado en un nodo se copia al otro; las identidades del webmail viajan con la réplica de PostgreSQL), comprobaciones del correo antes de pasar el mando y por dónde sale el correo del webmail.',
+                        'Las guías «Cluster: guía base» y «Federation» existían pero no salían en el índice ni en el buscador de /docs; ahora sí. Prueba tests/mcp_docs_test.php (18).',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.385',
                 'date' => '2026-10-19',
                 'badge' => 'info',

@@ -485,6 +485,22 @@ class DocsController
                 'keywords' => 'correo webs php mail wp_mail wordpress sendmail sendmail_path capturar bloquear permitir smtp autenticado gmail spf dkim spam captura mail_mode hosting_mail_default_mode mail-audit',
             ],
             [
+                'title' => 'Cluster: guía base',
+                'description' => 'Conceptos básicos del cluster de paneles para la operación diaria: master y slave, nodos, qué se sincroniza y dónde mirar el estado.',
+                'url' => '/docs/cluster-basics',
+                'category' => 'Guia especial',
+                'icon' => 'bi-diagram-3',
+                'keywords' => 'cluster guia base master slave nodos sincronizacion operacion diaria paneles',
+            ],
+            [
+                'title' => 'Federation: qué es y cómo se configura',
+                'description' => 'Conectar paneles remotos y habilitar migraciones de hostings entre servidores (federación).',
+                'url' => '/docs/federation-basics',
+                'category' => 'Guia especial',
+                'icon' => 'bi-link-45deg',
+                'keywords' => 'federation federacion paneles remotos migracion hostings servidores conectar',
+            ],
+            [
                 'title' => 'Fail2ban en el cluster',
                 'description' => 'Que bloquea cada servidor y cuanto tiempo (jaulas normales y lentas, bloqueos crecientes), que se copia entre el que manda y sus copias (lista blanca si, bloqueos no), informe diario y consultas por MCP.',
                 'url' => '/docs/fail2ban-cluster',
@@ -621,6 +637,14 @@ class DocsController
 
         if ($url === '/docs/web-mail') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'web-mail.php');
+        }
+
+        if ($url === '/docs/cluster-basics') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'cluster-basics.php');
+        }
+
+        if ($url === '/docs/federation-basics') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'federation-basics.php');
         }
 
         if ($url === '/docs/system-mail') {
@@ -1378,6 +1402,29 @@ class DocsController
                 ],
             ],
         ];
+    }
+
+    /**
+     * Para la herramienta MCP de documentación: TODOS los temas de la doc del panel (sin duplicados) y las guías de
+     * ajustes necesarias para leer su contenido. @return array{0:array<int,array>,1:array}
+     */
+    public function mcpCatalog(): array
+    {
+        $guides = $this->settingGuides();
+        $topics = $this->dedupeTopics(array_merge(
+            $this->parentTopics($guides),
+            $this->childTopics($guides),
+            $this->mailChildTopics(),
+            $this->bugChildTopics(),
+            $this->specialTopics()
+        ));
+        return [$topics, $guides];
+    }
+
+    /** Texto plano de un tema de la doc (el mismo que usa el buscador de /docs). */
+    public function mcpContent(string $url, array $guides): string
+    {
+        return $this->topicContentByUrl($url, $guides);
     }
 
     public function index(): void

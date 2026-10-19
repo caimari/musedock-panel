@@ -199,6 +199,14 @@ if (!is_array($listen) || !array_is_list($listen) || !is_array($routes) || !arra
 
 echo "[repair-caddy] OK: srv0/listeners activos.\n";
 
+// :80 con la redirección http → https si ningún otro servidor lo atiende (solo crea; ver SystemService::ensureCaddyHttpRedirectServer)
+try {
+    $httpRedirect = \MuseDockPanel\Services\SystemService::ensureCaddyHttpRedirectServer($caddyApi);
+    echo '[repair-caddy] ' . ($httpRedirect['ok'] ? 'OK' : 'AVISO') . ': :80 — ' . $httpRedirect['message'] . "\n";
+} catch (\Throwable $e) {
+    echo '[repair-caddy] AVISO: :80 — ' . $e->getMessage() . "\n";
+}
+
 $panelOwner = \MuseDockPanel\Services\SystemService::panelPortOwner($caddyApi);
 $panelManaged = \MuseDockPanel\Services\SystemService::panelRuntimeManagedByPanel($caddyApi);
 if (!$panelManaged) {

@@ -2559,6 +2559,79 @@ CONF;
         return ['ok' => true, 'applied' => true];
     }
 
+    public const HTTP_REDIRECT_SERVER = 'srv_http_redirect';
+
+    /** ¿Alguna dirección de escucha de esos servidores de Caddy es el puerto dado (":80", "0.0.0.0:80", "tcp/:80")? Pura. */
+    public static function serversListenOnPort(array $servers, int $port): bool
+    {
+        foreach ($servers as $srv) {
+            foreach ((array)(is_array($srv) ? ($srv['listen'] ?? []) : []) as $l) {
+                if (is_string($l) && preg_match('/:' . $port . '(?:-\d+)?$/', $l)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** ¿Algún proceso escucha en ese puerto TCP? (salida de «ss -ltnH»). Pura. */
+    public static function ssListensOn(string $ssOutput, int $port): bool
+    {
+        return (bool)preg_match('/\S+:' . $port . '\s/', $ssOutput . ' ');
+    }
+
+    /**
+     * Servidor :80 de Caddy con la redirección http → https, si NO hay ningún otro que escuche en el :80 (ni en el
+     * http de Caddy ni en layer4). Caso Obelix 2026-10-19: Caddy arrancó con la configuración guardada (--resume), que
+     * solo tenía :443/:8443/:8444, y http://dominio daba «conexión rechazada» en vez de redirigir.
+     *
+     * Seguridad: solo CREA un servidor nuevo por POST de su propia clave (nunca sustituye ni toca los existentes) y
+     * Caddy aplica la carga completa o la rechaza entera (p. ej. si otro proceso ya ocupa el :80), así que en el peor
+     * caso no cambia nada. Los desafíos HTTP-01 de los certificados los atiende el propio Caddy antes de las rutas.
+     * @return array{ok:bool,changed:bool,message:string}
+     */
+    public static function ensureCaddyHttpRedirectServer(string $caddyApi): array
+    {
+        $raw = @file_get_contents("{$caddyApi}/config/apps/http/servers", false, stream_context_create(['http' => ['timeout' => 5]]));
+        $servers = json_decode((string)$raw, true);
+        if (!is_array($servers) || !$servers) {
+            return ['ok' => false, 'changed' => false, 'message' => 'Caddy no tiene servidores http cargados (o la API no responde): no se toca nada'];
+        }
+        if (self::serversListenOnPort($servers, 80)) {
+            return ['ok' => true, 'changed' => false, 'message' => 'ya hay un servidor de Caddy en el :80'];
+        }
+        $l4raw = @file_get_contents("{$caddyApi}/config/apps/layer4/servers", false, stream_context_create(['http' => ['timeout' => 5]]));
+        $l4 = json_decode((string)$l4raw, true);
+        if (is_array($l4) && self::serversListenOnPort($l4, 80)) {
+            return ['ok' => true, 'changed' => false, 'message' => 'el :80 lo atiende caddy-l4'];
+        }
+        if (self::caddyPathExists($caddyApi, 'apps/http/servers/' . self::HTTP_REDIRECT_SERVER)) {
+            return ['ok' => true, 'changed' => false, 'message' => 'el servidor de redirección ya existe'];
+        }
+        $server = [
+            'listen' => [':80'],
+            'routes' => [[
+                'match' => [['not' => [['path' => ['/.well-known/acme-challenge/*']]]]],
+                'handle' => [[
+                    'handler' => 'static_response',
+                    'status_code' => 308,
+                    'headers' => ['Location' => ['https://{http.request.host}{http.request.uri}']],
+                ]],
+                'terminal' => true,
+            ]],
+            'automatic_https' => ['disable' => true],
+        ];
+        [$created, $resp] = self::caddyCreatePath($caddyApi, 'apps/http/servers/' . self::HTTP_REDIRECT_SERVER, $server);
+        if (!$created) {
+            return ['ok' => false, 'changed' => false, 'message' => 'Caddy rechazó el servidor :80 (¿otro programa ocupa el puerto?): ' . substr((string)$resp, 0, 160)];
+        }
+        try {
+            LogService::log('caddy.http-redirect', 'srv_http_redirect', 'Servidor :80 con redirección http → https creado en Caddy');
+        } catch (\Throwable) {
+        }
+        return ['ok' => true, 'changed' => true, 'message' => 'servidor :80 con redirección http → https creado'];
+    }
+
     /**
      * Ensure Caddy has srv0 and required listeners.
      * By default only enforces :443 on srv0 (hosting path).

@@ -666,6 +666,29 @@ class ClusterGuardService
         return [];
     }
 
+    /**
+     * Caddy activo pero nada escucha en el puerto 80: http://dominio da «conexión rechazada» en vez de redirigir a https y,
+     * si un certificado se renueva por HTTP-01, podría caducar (Obelix 2026-10-19). Solo lectura.
+     */
+    public static function caddyHttpIssues(): array
+    {
+        if (trim((string)@shell_exec('systemctl is-active caddy 2>/dev/null')) !== 'active') {
+            return [];
+        }
+        $ss = (string)@shell_exec('ss -ltnH 2>/dev/null');
+        if ($ss === '' || SystemService::ssListensOn($ss, 80)) {
+            return [];
+        }
+        try {
+            if ((int)(\MuseDockPanel\Database::fetchOne("SELECT COUNT(*) AS n FROM hosting_accounts WHERE status = 'active'")['n'] ?? 0) === 0) {
+                return [];
+            }
+        } catch (\Throwable) {
+        }
+        return [['severity' => 'warn', 'key' => 'caddy-no-http', 'doc' => '/docs/node-guard',
+            'text' => 'Caddy está activo pero nada escucha en el puerto 80: http://tu-dominio dará «conexión rechazada» en vez de redirigir a https, y un certificado que se renueve por HTTP-01 podría caducar. El panel crea el servidor :80 con la redirección en su próxima revisión de Caddy (≤ 1 minuto); si este aviso sigue, algo más ocupa o bloquea el puerto 80.']];
+    }
+
     /** Fallos de configuración del correo del sistema para readiness(). Solo lectura. */
     public static function systemMailIssues(): array
     {
@@ -766,6 +789,12 @@ class ClusterGuardService
 
         try {
             foreach (self::systemMailIssues() as $i) {
+                $issues[] = $i;
+            }
+        } catch (\Throwable) {
+        }
+        try {
+            foreach (self::caddyHttpIssues() as $i) {
                 $issues[] = $i;
             }
         } catch (\Throwable) {

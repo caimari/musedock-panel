@@ -1473,6 +1473,15 @@ try {
     if (!\MuseDockPanel\Services\SystemService::ensureCaddyHttpServerReady($caddyApi, true)) {
         logMsg("WARNING: Caddy srv0/listeners not ready — skipping TLS policy check.");
     } else {
+        // El :80 con la redirección http → https (Obelix 2026-10-19: Caddy arrancó sin él). Solo crea; nunca toca lo existente.
+        try {
+            $httpRedirect = \MuseDockPanel\Services\SystemService::ensureCaddyHttpRedirectServer($caddyApi);
+            if (!empty($httpRedirect['changed']) || !$httpRedirect['ok']) {
+                logMsg('Caddy :80: ' . $httpRedirect['message']);
+            }
+        } catch (\Throwable $e) {
+            logMsg('Caddy :80 error: ' . $e->getMessage());
+        }
         $panelRouteResult = \MuseDockPanel\Services\SystemService::ensurePanelDomainRouteFromSettings();
         if (!($panelRouteResult['ok'] ?? false)) {
             logMsg("WARNING: panel-domain route not ready — " . ($panelRouteResult['error'] ?? 'unknown error'));

@@ -51,7 +51,7 @@ final class McpServer
                             . 'y a qué nombre apuntan los dominios nuevos (dns_default_target' . (($t = McpClusterTools::dnsDefaultTarget()) !== '' ? ", aquí {$t}" : '') . '): '
                             . 'un dominio nuevo se configura con CNAME de la raíz y www a ese nombre (dns_records → dns_record_set), con el proxy naranja de Cloudflare como opción a preguntar. '
                             . 'Estado general: monitor_status, notify_status, failover_preflight, domains_status, caddy_domains. '
-                            . 'Herramientas de lectura para consultar el estado del servidor, del cluster, servicios, correo, certificados y failover. '
+                            . 'Documentación del panel (solo texto de ayuda, sin datos del servidor): docs_catalog lista y clasifica TODAS las guías, docs_search busca en su contenido y docs_read lee una guía entera; consúltalas antes de explicar cómo funciona algo del panel. Herramientas de lectura para consultar el estado del servidor, del cluster, servicios, correo, certificados y failover. '
                             . 'Usa list_nodes y el argumento `node` para consultar otros nodos del cluster desde el master. '
                             . 'clone_inventory detecta lo que habría que clonar para crear un slave exacto, incluido lo que el panel no gestiona. '
                             . 'Herramientas de correo que MODIFICAN (mail_domain_create, mail_dns_publish, mail_mailbox_create, mail_alias_create, mail_sender_map_apply):'

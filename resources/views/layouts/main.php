@@ -107,6 +107,15 @@
         .table > :not(caption) > * > * { background: transparent; color: #e2e8f0; }
         .badge.bg-dark { background: #334155 !important; }
         .badge.bg-info { background: rgba(56,189,248,0.15) !important; color: #38bdf8 !important; }
+        /* Etiquetas rectangulares con esquinas casi rectas (también las que llevan rounded-pill) y colores del tema.
+           Las «subtle» de Bootstrap 5.3 son claras por defecto: salían como píldora blanca con letra verde en el tema oscuro. */
+        .badge, .badge.rounded-pill { border-radius: 3px !important; }
+        .badge.bg-success-subtle { background: rgba(34,197,94,.14) !important; color: #4ade80 !important; border-color: rgba(34,197,94,.35) !important; }
+        .badge.bg-warning-subtle { background: rgba(245,158,11,.14) !important; color: #fbbf24 !important; border-color: rgba(245,158,11,.35) !important; }
+        .badge.bg-danger-subtle { background: rgba(239,68,68,.14) !important; color: #f87171 !important; border-color: rgba(239,68,68,.35) !important; }
+        .badge.bg-info-subtle { background: rgba(56,189,248,.14) !important; color: #38bdf8 !important; border-color: rgba(56,189,248,.35) !important; }
+        .badge.bg-primary-subtle { background: rgba(96,165,250,.14) !important; color: #60a5fa !important; border-color: rgba(96,165,250,.35) !important; }
+        .badge.bg-secondary-subtle { background: rgba(148,163,184,.14) !important; color: #94a3b8 !important; border-color: rgba(148,163,184,.3) !important; }
         .btn-outline-warning { border-color: #fbbf24; color: #fbbf24; }
         .btn-outline-warning:hover { background: rgba(251,191,36,0.15); color: #fbbf24; }
         .btn-outline-success { border-color: #22c55e; color: #22c55e; }

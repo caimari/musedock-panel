@@ -123,7 +123,7 @@ final class McpTools
     /** Todas las herramientas: las de lectura de arriba + correo + cluster/failover. */
     public static function all(): array
     {
-        return self::definitions() + McpMailTools::definitions() + McpClusterTools::definitions() + McpHostingTools::definitions();
+        return self::definitions() + McpMailTools::definitions() + McpClusterTools::definitions() + McpHostingTools::definitions() + McpDocsTools::definitions();
     }
 
     /** Formato tools/list de MCP. */
@@ -256,6 +256,7 @@ final class McpTools
                 McpMailTools::has($name)    => McpMailTools::run($name, $args),
                 McpClusterTools::has($name) => McpClusterTools::run($name, $args),
                 McpHostingTools::has($name) => McpHostingTools::run($name, $args),
+                McpDocsTools::has($name)    => McpDocsTools::run($name, $args),
                 default                     => throw new \InvalidArgumentException("Herramienta desconocida: {$name}"),
             },
         };
