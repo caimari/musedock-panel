@@ -359,8 +359,99 @@ class WebPermissionService
     }
 
     /**
+     * Usuarios «de trabajo» (VS Code, agentes) cuyos ficheros nuevos dentro de una web se pasan al usuario de la web
+     * al momento. Ajuste perm_guard_instant_users (lista separada por comas); por defecto musedockcomcalamar.
+     */
+    public static function instantUsers(): array
+    {
+        $out = [];
+        foreach (preg_split('/[\s,;]+/', (string)Settings::get('perm_guard_instant_users', 'musedockcomcalamar')) ?: [] as $u) {
+            if ($u !== '' && preg_match('/^[a-z_][a-z0-9_-]*$/i', $u) && (!function_exists('posix_getpwnam') || posix_getpwnam($u))) {
+                $out[$u] = true;
+            }
+        }
+        return array_keys($out);
+    }
+
+    /**
+     * Cada minuto (worker): lo que ha creado o cambiado un usuario de trabajo dentro de /var/www/vhosts/<web>/httpdocs
+     * pasa al usuario de la web (dueño y grupo de su carpeta; nunca los permisos), para que la web lo lea y escriba.
+     * Solo avisa si algo no se pudo corregir. Se apaga con perm_guard_instant=0. Respeta PRUNE (.git, vendor…).
+     */
+    public static function instantFix(): string
+    {
+        if (Settings::get('perm_guard_mode', 'fix') !== 'fix' || Settings::get('perm_guard_instant', '1') === '0') {
+            return '';
+        }
+        if (function_exists('posix_geteuid') && posix_geteuid() !== 0) {
+            return '';
+        }
+        $agents = self::instantUsers();
+        if (!$agents) {
+            return '';
+        }
+        $stamp = dirname(__DIR__, 2) . '/storage/perm-instant.stamp';
+        $since = is_file($stamp) ? (int)@filemtime($stamp) : time() - 120;
+        @touch($stamp);   // antes de recorrer: lo que cambie durante el recorrido se coge en la pasada siguiente
+        $userExpr = '\( ' . implode(' -o ', array_map(static fn($u) => '-user ' . escapeshellarg($u), $agents)) . ' \)';
+        $fixed = 0;
+        $failed = [];
+        foreach (self::accounts() as $acc) {
+            if (isset(array_flip($agents)[$acc['user']]) || !preg_match('/^[a-z_][a-z0-9_-]*$/i', $acc['user'])
+                || (function_exists('posix_getpwnam') && !posix_getpwnam($acc['user']))) {
+                continue;   // su propia web: ya es suya
+            }
+            $cmd = 'nice -n 19 ionice -c3 timeout 30 find ' . escapeshellarg($acc['root']) . ' -xdev ' . self::pruneExpression()
+                . ' ' . $userExpr . ' -cnewer ' . escapeshellarg($stamp . '.prev') . ' -printf ' . escapeshellarg('%u\t%g\t%m\t%p\0') . ' 2>/dev/null';
+            // -cnewer necesita una referencia con la hora de la pasada anterior
+            @touch($stamp . '.prev', $since);
+            $items = self::parseFind((string)shell_exec($cmd));
+            foreach (self::plan($items, $acc['user'], [self::class, 'groupOfDir']) as $it) {
+                if (self::chown($it['path'], $it['new_owner'], $it['new_group'])) {
+                    $fixed++;
+                } else {
+                    $failed[] = $it['path'];
+                }
+            }
+        }
+        if ($failed) {
+            try {
+                $h = (string)gethostname();
+                NotificationService::send("No se pudieron corregir ficheros de una web en {$h}",
+                    count($failed) . " ficheros creados por un usuario de trabajo no se pudieron pasar al usuario de la web. Ej.: "
+                    . implode(', ', array_slice($failed, 0, 3)) . "\n\nCorregir: php bin/web-permissions.php --fix (como root).", 'web_permissions');
+            } catch (\Throwable) {
+            }
+        }
+        return $fixed > 0 || $failed ? "corregidos al momento: {$fixed}" . ($failed ? ', sin poder: ' . count($failed) : '') : '';
+    }
+
+    /**
+     * ACL por defecto en cada web: lo que cree un usuario de trabajo queda legible para el usuario de la web
+     * (y escribible si el umask del que crea lo permite). Idempotente. Solo carpetas (los ficheros heredan).
+     * @return array<string,string> dominio => resultado
+     */
+    public static function ensureDefaultAcl(?string $onlyDomain = null): array
+    {
+        $out = [];
+        if (!trim((string)shell_exec('command -v setfacl 2>/dev/null'))) {
+            return ['_' => 'setfacl no está instalado (apt install acl)'];
+        }
+        foreach (self::accounts($onlyDomain) as $acc) {
+            if (!preg_match('/^[a-z_][a-z0-9_-]*$/i', $acc['user'])) {
+                continue;
+            }
+            $cmd = 'nice -n 19 ionice -c3 timeout 120 find ' . escapeshellarg($acc['root']) . ' -xdev ' . self::pruneExpression()
+                . ' -type d -exec setfacl -m ' . escapeshellarg('d:u:' . $acc['user'] . ':rwX') . ' -m ' . escapeshellarg('u:' . $acc['user'] . ':rwX') . ' {} + 2>&1';
+            $o = trim((string)shell_exec($cmd));
+            $out[$acc['domain']] = $o === '' ? 'ok' : mb_substr($o, 0, 120);
+        }
+        return $out;
+    }
+
+    /**
      * Cada pasada del worker, como mucho una vez al día (perm_guard_interval_h): revisa los dueños en TODOS los
-     * nodos. Por defecto solo avisa (perm_guard_mode=warn); con perm_guard_mode=fix también corrige.
+     * nodos. Por defecto corrige (perm_guard_mode=fix); con perm_guard_mode=warn solo avisa.
      */
     public static function periodic(): string
     {
@@ -369,8 +460,8 @@ class WebPermissionService
             return '';
         }
         Settings::set('perm_guard_run_at', (string)time());
-        $fix = Settings::get('perm_guard_mode', 'warn') === 'fix';
-        self::spawn(($fix ? '--fix ' : '') . '--laravel-dirs --notify --reason=diario');
+        $fix = Settings::get('perm_guard_mode', 'fix') === 'fix';   // por defecto corrige (perm_guard_mode=warn: solo avisa)
+        self::spawn(($fix ? '--fix ' : '') . '--laravel-dirs --acl --notify --reason=diario');
         return 'revisión diaria lanzada en segundo plano (' . ($fix ? 'corrige' : 'solo avisa') . ')';
     }
 
@@ -391,7 +482,7 @@ class WebPermissionService
         Settings::set('perm_guard_alert_hash', $hash);
         $host = (string)gethostname();
         if (!$left) {
-            if ($report['fixed'] > 0) {
+            if ($report['fixed'] > 0 && ($report['reason'] ?? '') !== 'diario') {   // la pasada diaria corrige sin molestar
                 NotificationService::send("Dueños de ficheros corregidos en {$host}", "Se han corregido {$report['fixed']} ficheros/carpetas con dueño ajeno. Lista anterior: " . ($report['backup'] ?? '-'), 'web_permissions');
             }
             return;

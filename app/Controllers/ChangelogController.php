@@ -20,6 +20,20 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.395',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Lo que crea un usuario de trabajo (VS Code, agentes) dentro de una web pasa al usuario de la web al momento (cada minuto), y solo avisa si no pudo corregirlo (perm_guard_instant=0 lo apaga; perm_guard_instant_users).',
+                        'Al añadir un alias a un hosting se quita la ruta de redirección suelta que el mismo dominio tuviera en Caddy (quedaba huérfana y podía tapar al alias).',
+                        'Ayuda del cambio de rol: durante el reenvío de visitas el nuevo master ve la IP de la VPN del nodo antiguo, no la del visitante; qué hacer (fail2ban, límites por IP) y por qué no se usa el protocolo PROXY.',
+                        'perm_guard_mode pasa a fix por defecto: la revisión diaria corrige y no manda el aviso de corregidos.',
+                        'ACL por defecto en las carpetas de cada web (web-permissions.php --acl y la revisión diaria): lo que cree un usuario de trabajo queda legible por la web.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.394',
                 'date' => '2026-10-19',
                 'badge' => 'info',

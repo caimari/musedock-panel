@@ -86,6 +86,21 @@
     </div>
 </div>
 
+<div class="card mb-4" style="border-color:rgba(245,158,11,.3);">
+    <div class="card-header"><i class="bi bi-signpost-split me-2"></i>Reenvío de visitas tras el cambio y la IP del visitante</div>
+    <div class="card-body small text-muted">
+        <p>Tras «Pasar el mando», durante unos minutos el nodo antiguo reenvía por la VPN (iptables, sin descifrar) a quien llega con la caché de DNS vieja.
+            Para que las respuestas vuelvan por el mismo camino, el reenvío cambia la IP de origen: <strong>el nuevo master ve esas visitas como venidas de la IP de la VPN del nodo antiguo</strong>,
+            no de la del visitante. Dura lo que dure el reenvío: entre 5 y 30 minutos, según el tiempo de vida (TTL) de los registros de DNS que se mueven.</p>
+        <ul class="mb-2">
+            <li><strong>Fail2ban:</strong> la lista blanca <code>ignoreip</code> debe incluir la red de la VPN y las IPs de los nodos (la guía de <a href="/docs/fail2ban-cluster" class="text-info">fail2ban en cluster</a> lo explica); así nadie queda bloqueado por esas visitas.</li>
+            <li><strong>Límites por IP de una aplicación</strong> (frenos de login, API): conviene que no cuenten las IPs de la VPN ni del cluster. Si la aplicación no lo hace, durante el reenvío todas las visitas reenviadas cuentan como una sola IP.</li>
+            <li><strong>Lo mismo ocurre con caddy-l4</strong> (el modo de emergencia del failover por DNS): reenvía por SNI sin el protocolo PROXY.</li>
+        </ul>
+        <p class="mb-0">El protocolo PROXY (que conserva la IP real) exigiría que el Caddy de destino lo aceptara en TODOS sus puertos 443, con riesgo para todas las webs si falla; por eso no se usa.</p>
+    </div>
+</div>
+
 <!-- Preparar un slave completo -->
 <div class="card mb-4" style="border-color:rgba(34,197,94,.3);">
     <div class="card-header"><i class="bi bi-hdd-stack me-2"></i>Cómo preparar un slave completo</div>

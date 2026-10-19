@@ -11,6 +11,7 @@
  *   php bin/web-permissions.php --domain=ejemplo.com informa de una web
  *   php bin/web-permissions.php --fix                corrige los dueños (guardando antes lo anterior)
  *   php bin/web-permissions.php --laravel-dirs       crea las carpetas de Laravel que falten (storage/framework/…)
+ *   php bin/web-permissions.php --acl                ACL por defecto: lo que cree un usuario de trabajo queda legible por la web
  *   php bin/web-permissions.php --restore /var/lib/musedock/permisos-20261018_130000.txt   deshace una corrección
  * Extras que usa el panel: --notify (avisa por el canal de avisos) y --reason=<texto>.
  */
@@ -28,7 +29,7 @@ foreach (array_slice($argv ?? [], 1) as $a) {
     }
 }
 $isRoot = !function_exists('posix_geteuid') || posix_geteuid() === 0;
-$mutates = isset($opts['fix']) || isset($opts['restore']) || isset($opts['laravel-dirs']);
+$mutates = isset($opts['fix']) || isset($opts['restore']) || isset($opts['laravel-dirs']) || isset($opts['acl']);
 if ($mutates && !$isRoot) {
     fwrite(STDERR, "Para cambiar algo hay que ejecutarlo como root (sin --fix, --laravel-dirs ni --restore solo informa).\n");
     exit(1);
@@ -41,6 +42,12 @@ if (isset($opts['restore'])) {
 }
 
 $domain = is_string($opts['domain'] ?? null) ? $opts['domain'] : null;
+if (isset($opts['acl'])) {
+    foreach (W::ensureDefaultAcl(is_string($opts['domain'] ?? null) ? $opts['domain'] : null) as $d => $r) {
+        echo sprintf("ACL por defecto %-28s %s\n", $d, $r);
+    }
+}
+
 $reason = is_string($opts['reason'] ?? null) ? $opts['reason'] : 'manual';
 $fix = isset($opts['fix']);
 

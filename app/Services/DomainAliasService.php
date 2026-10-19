@@ -122,6 +122,13 @@ class DomainAliasService
         // Rebuild Caddy route with all aliases
         $rebuildOk = self::rebuildCaddyRoute($account);
 
+        // Si este dominio tuvo antes una ruta de redirección suelta (redirect-<dominio>) en Caddy, queda huérfana
+        // y, si algún día el orden de rutas cambia, taparía al alias en silencio (img.picalias.com, 2026-10-19).
+        try {
+            SystemService::removeCaddyRedirectRoute($domain);
+        } catch (\Throwable) {
+        }
+
         return [
             'ok'    => true,
             'id'    => $id,

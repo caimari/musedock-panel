@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.395] — 2026-10-19 — Lo que crea VS Code en una web ya no molesta
+
+### Corregido
+- **Los ficheros que crea un usuario de trabajo (VS Code, agentes: `musedockcomcalamar`) dentro de una web ya no disparan el aviso de «dueño ajeno»:** el worker los pasa al usuario de la web **al momento** (cada minuto; dueño y grupo, nunca los permisos), y solo avisa si no pudo corregirlos. Respeta `.git`, `vendor`, `node_modules`… Se apaga con `perm_guard_instant=0`; los usuarios se ajustan en `perm_guard_instant_users`.
+- **Al añadir un alias a un hosting se quita la ruta de redirección suelta que el mismo dominio pudiera tener en Caddy** (`redirect-<dominio>`): quedaba huérfana y, si el orden de rutas cambiaba, habría tapado al alias en silencio (caso `img.picalias.com`).
+- **Ayuda del cambio de rol: se explica que, durante el reenvío de visitas tras el cambio, el nuevo master ve la IP de la VPN del nodo antiguo y no la del visitante**, y qué hacer (lista blanca de fail2ban, límites por IP de las apps). Se explica también por qué no se usa el protocolo PROXY.
+- **`perm_guard_mode` pasa a `fix` por defecto en todos los nodos** (antes `warn`): la revisión diaria corrige y ya no manda el aviso «corregidos» cada día; sigue avisando si algo no se pudo corregir. `warn` mantiene el comportamiento antiguo.
+- **ACL por defecto en cada web:** `php bin/web-permissions.php --acl` (y la revisión diaria) da al usuario de la web ACL por defecto en las carpetas, para que lo que cree un usuario de trabajo quede legible por la web (escribible si el umask del que crea lo permite).
+
 ## [1.0.394] — 2026-10-19 — El promote quita read_only de todos los ficheros de MariaDB
 
 ### Corregido
