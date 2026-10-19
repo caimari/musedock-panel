@@ -834,6 +834,8 @@ class AccountController
             'account' => $account,
             'phpSettings' => $phpSettings,
             'mailMode' => \MuseDockPanel\Services\MailCaptureService::modeOf($account),
+            'sensitiveOn' => \MuseDockPanel\Services\SensitiveFilesService::enabledFor((string)($account['document_root'] ?: rtrim((string)$account['home_dir'], '/') . '/httpdocs')),
+            'sensitiveExposed' => \MuseDockPanel\Services\SensitiveFilesService::exposed((string)($account['document_root'] ?: rtrim((string)$account['home_dir'], '/') . '/httpdocs')),
             'fpmSettings' => $fpmSettings,
             'poolFileExists' => file_exists($poolFile),
             'isSlave' => $isSlave,
@@ -2579,6 +2581,37 @@ class AccountController
                 'block' => 'El correo que manda PHP desde esta web se bloquea (PHP recibe un error).',
                 default => 'El correo que manda PHP desde esta web vuelve a salir por el Postfix local.',
             });
+        }
+        Router::redirect('/accounts/' . $params['id'] . '/edit');
+    }
+
+    /** Activa o quita el bloqueo (404) de ficheros sensibles de esta web (volcados, logs, .env, vendor…) y rehace su ruta de Caddy. */
+    public function updateSensitiveFiles(array $params): void
+    {
+        if ($this->slaveGuard('Cambiar el bloqueo de ficheros sensibles')) return;
+
+        $account = Database::fetchOne("SELECT * FROM hosting_accounts WHERE id = :id", ['id' => $params['id']]);
+        if (!$account) {
+            Flash::set('error', 'Cuenta no encontrada.');
+            Router::redirect('/accounts');
+            return;
+        }
+        $docRoot = rtrim((string)($account['document_root'] ?: rtrim((string)$account['home_dir'], '/') . '/httpdocs'), '/');
+        $on = ($_POST['sensitive_files'] ?? '') === '1';
+        \MuseDockPanel\Services\SensitiveFilesService::setEnabled($docRoot, $on);
+        $ok = \MuseDockPanel\Services\DomainAliasService::rebuildCaddyRoute($account);
+        \MuseDockPanel\Services\LogService::log('hosting.sensitive-files', $on ? 'on' : 'off', $account['domain']);
+        $pushed = \MuseDockPanel\Services\SensitiveFilesService::pushToNodes($docRoot, $on);
+        $bad = array_filter($pushed, static fn($v) => $v !== 'ok');
+        if ($ok) {
+            Flash::set('success', $on
+                ? 'Bloqueo activado: los volcados, logs, .env, vendor… de esta web responden 404. Comprueba la web.'
+                : 'Bloqueo desactivado: esta web vuelve a servir todo lo de su carpeta.');
+            if ($bad) {
+                Flash::set('error', 'Aplicado aquí, pero algún nodo no confirmó: ' . implode('; ', array_map(static fn($k, $v) => "{$k}: {$v}", array_keys($bad), $bad)) . '. Se aplicará cuando ese nodo repone sus rutas.');
+            }
+        } else {
+            Flash::set('error', 'Se guardó el ajuste pero no se pudo rehacer la ruta de Caddy de esta web. Reintenta o mira el log.');
         }
         Router::redirect('/accounts/' . $params['id'] . '/edit');
     }

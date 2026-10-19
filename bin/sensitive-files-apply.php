@@ -77,6 +77,12 @@ if (isset($opts['apply']) || isset($opts['revert'])) {
         exit(1);
     }
     SensitiveFilesService::setEnabled($docRoot, isset($opts['apply']));
+    // En el master, avisa ya a los demás nodos (cada uno guarda el ajuste y rehace la ruta de esa web)
+    if (\MuseDockPanel\Settings::get('cluster_role', 'standalone') === 'master') {
+        foreach (SensitiveFilesService::pushToNodes($docRoot, isset($opts['apply'])) as $n => $r) {
+            echo "Nodo {$n}: {$r}\n";
+        }
+    }
 }
 if (isset($opts['revert'])) {
     $ok = DomainAliasService::rebuildCaddyRoute($acc);

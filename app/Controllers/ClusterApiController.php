@@ -487,6 +487,27 @@ class ClusterApiController
                     shell_exec('nohup sh -c ' . escapeshellarg('sleep 2; php ' . escapeshellarg($script) . ' fence ' . escapeshellarg($reason)) . ' >/dev/null 2>&1 &');
                     return ['ok' => true, 'deferred' => true, 'note' => 'el aislamiento se hace en 2 s; comprueba con query-local-state (cluster_fenced)'];
                 })(),
+                // Bloqueo de ficheros sensibles de una web: el master avisa al momento (docroot + on/off) y este nodo
+                // guarda el ajuste y rehace la ruta de Caddy de esa web, sin esperar a la reposición de rutas.
+                'sensitive-files-set' => (function () use ($payload) {
+                    $root = rtrim((string)($payload['docroot'] ?? ''), '/');
+                    if ($root === '' || !str_starts_with($root, '/var/www/vhosts/')) {
+                        return ['ok' => false, 'error' => 'docroot no válido'];
+                    }
+                    \MuseDockPanel\Services\SensitiveFilesService::setEnabled($root, !empty($payload['on']));
+                    $acc = null;
+                    foreach (\MuseDockPanel\Database::fetchAll("SELECT * FROM hosting_accounts WHERE status = 'active'") as $a) {
+                        $r = rtrim((string)($a['document_root'] ?: rtrim((string)$a['home_dir'], '/') . '/httpdocs'), '/');
+                        if ($r === $root) {
+                            $acc = $a;
+                            break;
+                        }
+                    }
+                    if (!$acc) {
+                        return ['ok' => true, 'note' => 'ajuste guardado; este nodo no tiene ese hosting'];
+                    }
+                    return ['ok' => \MuseDockPanel\Services\DomainAliasService::rebuildCaddyRoute($acc), 'domain' => $acc['domain']];
+                })(),
                 'unfence-self'     => (function () {
                     $script = dirname(__DIR__, 2) . '/bin/cluster-switch.php';
                     shell_exec('nohup sh -c ' . escapeshellarg('sleep 2; php ' . escapeshellarg($script) . ' unfence') . ' >/dev/null 2>&1 &');

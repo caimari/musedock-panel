@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.398',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'El bloqueo de ficheros sensibles llega al momento a los demás nodos: el master avisa a cada nodo, que rehace la ruta de Caddy de esa web sin esperar a la reposición de rutas.',
+                        'Interruptor «Ficheros sensibles de la web» en Editar hosting: activa o quita el bloqueo (404) de volcados, logs, .env, vendor… de esa web, enseña lo que ahora se puede descargar y la lista viaja al otro nodo con la configuración de relevo.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.397',
                 'date' => '2026-10-19',
                 'badge' => 'info',

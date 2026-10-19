@@ -349,6 +349,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::post('/accounts/{id}/rename-user', 'AccountController@renameUser');
 \MuseDockPanel\Router::post('/accounts/{id}/php', 'AccountController@updatePhp');
 \MuseDockPanel\Router::post('/accounts/{id}/mail-mode', 'AccountController@updateMailMode');
+\MuseDockPanel\Router::post('/accounts/{id}/sensitive-files', 'AccountController@updateSensitiveFiles');
 \MuseDockPanel\Router::post('/accounts/{id}/fpm-pool', 'AccountController@updateFpmPool');
 \MuseDockPanel\Router::post('/accounts/{id}/hosting-type', 'AccountController@updateHostingType');
 

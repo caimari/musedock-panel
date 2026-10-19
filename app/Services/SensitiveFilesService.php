@@ -55,7 +55,55 @@ final class SensitiveFilesService
             $r[] = $docRoot;
         }
         sort($r);
-        Settings::set('hosting_sensitive_roots', implode("\n", $r));
+        // «#» cuando la lista queda vacía: un valor vacío no viaja en la copia de ajustes al otro nodo y no se vaciaría allí
+        Settings::set('hosting_sensitive_roots', $r ? implode("\n", $r) : '#');
+    }
+
+    /**
+     * Avisa al momento a los demás nodos del cluster (cada uno guarda el ajuste y rehace la ruta de esa web).
+     * @return array<string,string> nodo => resultado
+     */
+    public static function pushToNodes(string $docRoot, bool $on): array
+    {
+        $out = [];
+        try {
+            foreach (ClusterService::getActiveNodes() as $n) {
+                try {
+                    $r = ClusterService::callNode((int)$n['id'], 'POST', 'api/cluster/action', ['action' => 'sensitive-files-set',
+                        'payload' => ['docroot' => rtrim($docRoot, '/'), 'on' => $on]]);
+                    $res = $r['data']['result'] ?? $r['data'] ?? [];
+                    $out[(string)$n['name']] = !empty($r['ok']) && !empty($res['ok']) ? 'ok' : 'sin confirmar (' . ($res['error'] ?? $r['error'] ?? 'nodo con versión antigua') . ')';
+                } catch (\Throwable $e) {
+                    $out[(string)$n['name']] = 'error: ' . $e->getMessage();
+                }
+            }
+        } catch (\Throwable) {
+        }
+        return $out;
+    }
+
+    /** Qué hay AHORA en el docroot que esta regla tapa (carpetas, ficheros de proyecto y algún volcado/log), para decidir con datos. */
+    public static function exposed(string $docRoot): array
+    {
+        $docRoot = rtrim($docRoot, '/');
+        $found = [];
+        foreach (self::DIRS as $d) {
+            if (is_dir($docRoot . '/' . $d)) {
+                $found[] = $d . '/';
+            }
+        }
+        foreach (self::ROOT_FILES as $f) {
+            if (!str_contains($f, '*') && is_file($docRoot . $f)) {
+                $found[] = ltrim($f, '/');
+            }
+        }
+        if (is_dir($docRoot)) {
+            $cmd = 'nice -n 19 timeout 20 find ' . escapeshellarg($docRoot) . ' -xdev \( -path "*/vendor" -o -path "*/node_modules" -o -path "*/.git" \) -prune -o -type f \( -name "*.sql" -o -name "*.sql.gz" -o -name "*.log" -o -name "*.sqlite" \) -print 2>/dev/null | head -n 5';
+            foreach (array_filter(explode("\n", (string)shell_exec($cmd))) as $p) {
+                $found[] = ltrim(str_replace($docRoot . '/', '', $p), '/');
+            }
+        }
+        return $found;
     }
 
     /** Rutas de Caddy (para el subroute del hosting). Pura salvo la comprobación de carpetas del docroot. */

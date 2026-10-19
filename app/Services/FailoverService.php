@@ -1439,6 +1439,8 @@ class FailoverService
             'filesync_snapshot',
             // Bloqueos de Cloudflare: la configuración sigue al que manda (solo ajustes y huellas de sondas)
             'cf_guard_mode', 'cf_guard_restore_minutes', 'cf_guard_excluded', 'cf_guard_display_tz', 'cf_guard_probes', 'cf_guard_extra_hosts',
+            // Bloqueo de ficheros sensibles por hosting: la lista de docroots sigue al que manda (mismas rutas en todos los nodos)
+            'hosting_sensitive_roots', 'hosting_sensitive_deny',
         ];
     }
 

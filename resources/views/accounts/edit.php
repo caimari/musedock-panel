@@ -145,6 +145,31 @@
             </div>
         </div>
 
+        <!-- Ficheros sensibles que no deben salir por web (volcados, logs, .env, vendor…) -->
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-shield-lock me-2"></i>Ficheros sensibles de la web</div>
+            <div class="card-body">
+                <?php $so = !empty($sensitiveOn); $sx = (array)($sensitiveExposed ?? []); ?>
+                <form method="POST" action="/accounts/<?= $account['id'] ?>/sensitive-files">
+                    <?= \MuseDockPanel\View::csrf() ?>
+                    <fieldset <?= ($isSlave ?? false) ? 'disabled' : '' ?>>
+                    <p class="text-muted small mb-2">El servidor entrega todo lo que haya en la carpeta pública de la web. Activado, responde <strong>404</strong> a copias de la base de datos (<code>.sql</code>, <code>.sql.gz</code>), logs (<code>.log</code>), <code>.env</code>, <code>.git</code>, <code>vendor/</code>, <code>database/</code>, <code>storage/logs</code>, <code>composer.json</code>… No toca nada más. Lo ideal es que esos ficheros no estén en la carpeta pública: esto es una red de seguridad.</p>
+                    <?php if ($sx): ?>
+                        <div class="small mb-2" style="color:<?= $so ? '#86efac' : '#fbbf24' ?>;"><i class="bi bi-<?= $so ? 'shield-check' : 'exclamation-triangle' ?> me-1"></i><?= $so ? 'Tapados ahora' : 'Ahora se pueden descargar' ?>: <code><?= View::e(implode(', ', array_slice($sx, 0, 8))) ?></code></div>
+                    <?php else: ?>
+                        <div class="small mb-2 text-muted"><i class="bi bi-check-circle me-1"></i>No hay nada de esto en la carpeta pública ahora.</div>
+                    <?php endif; ?>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" role="switch" id="sensitiveFiles" name="sensitive_files" value="1" <?= $so ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="sensitiveFiles">Bloquear estos ficheros (404)</label>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-check-lg me-1"></i> Guardar</button>
+                    <span class="small text-muted ms-2">Después de guardar, mira que la web sigue bien. Se aplica en este servidor y viaja al otro nodo con la configuración.</span>
+                    </fieldset>
+                </form>
+            </div>
+        </div>
+
         <!-- Ajustes PHP por cuenta -->
         <div class="card mb-3">
             <div class="card-header"><i class="bi bi-filetype-php me-2"></i>Ajustes PHP</div>

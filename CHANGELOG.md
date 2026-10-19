@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.398] — 2026-10-19 — El bloqueo de ficheros sensibles, con interruptor en cada hosting
+
+### Añadido
+- **El bloqueo llega AL MOMENTO a los demás nodos:** al guardar el interruptor (o con `bin/sensitive-files-apply.php` en el master), el master avisa a cada nodo, que guarda el ajuste y rehace la ruta de Caddy de esa web, sin esperar a que el panel del otro nodo reponga sus rutas. Si un nodo no responde o es de una versión antigua, se avisa y se aplica cuando reponga sus rutas.
+- **Interruptor «Ficheros sensibles de la web» en Editar hosting:** activa o quita el bloqueo (404) de volcados, logs, `.env`, `.git`, `vendor/`, `database/`, `storage/logs`, `composer.json`… sin usar la consola; enseña lo que ahora se puede descargar y rehace la ruta de Caddy de esa web. La lista de webs con el bloqueo (`hosting_sensitive_roots`) viaja al otro nodo con la configuración de relevo.
+
 ## [1.0.397] — 2026-10-19 — Bloqueo de ficheros sensibles en los hostings con docroot en httpdocs
 
 ### Añadido
