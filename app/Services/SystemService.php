@@ -1515,6 +1515,9 @@ CONF;
             array_push($routes, ...WordPressHardenService::caddyRoutes($documentRoot, $username));
         }
 
+        // 1c. Ficheros que no deben salir por web (volcados, logs, .env, .git, vendor…): 404 antes de servir nada
+        array_push($routes, ...SensitiveFilesService::caddyRoutes($documentRoot));
+
         // 2. Static file cache headers (all types)
         $routes[] = [
             'match' => [['path' => ['*.jpg', '*.jpeg', '*.png', '*.gif', '*.webp', '*.svg', '*.ico', '*.css', '*.js', '*.woff', '*.woff2']]],

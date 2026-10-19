@@ -2,6 +2,11 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.397] — 2026-10-19 — Bloqueo de ficheros sensibles en los hostings con docroot en httpdocs
+
+### Añadido
+- **Seguridad: bloqueo opcional de ficheros sensibles en los hostings con docroot en `httpdocs`** (Caddy servía la carpeta entera): volcados `.sql*`, logs, `.env`, `.git`, `vendor`, `database`, `storage/logs`, `storage/framework`, `storage/app/backups`, `composer.*`… responden 404. Es opt-in por hosting y por nodo (`hosting_sensitive_roots`): `php bin/sensitive-files-apply.php --all` lista qué hay expuesto, `--domain=X` enseña las reglas, `--domain=X --apply` lo activa y reconstruye la ruta de ese hosting, `--revert` lo quita. Caso real: picalias servía 16 volcados de su base de datos con 200.
+
 ## [1.0.395] — 2026-10-19 — Lo que crea VS Code en una web ya no molesta
 
 ### Corregido

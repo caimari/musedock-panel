@@ -20,6 +20,16 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.397',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        'Seguridad: bloqueo opcional (404) de ficheros sensibles (volcados .sql, logs, .env, .git, vendor, database, storage/logs…) en los hostings con docroot en httpdocs, activable por hosting con bin/sensitive-files-apply.php (--all lista lo expuesto, --apply activa, --revert quita).',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.395',
                 'date' => '2026-10-19',
                 'badge' => 'info',
