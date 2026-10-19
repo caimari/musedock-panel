@@ -653,6 +653,14 @@ class ClusterGuardService
             }
             $issues[] = ['severity' => 'warn', 'key' => 'system-mail-origin', 'text' => $problem, 'doc' => '/docs/system-mail'];
         }
+        // Postfix con un mapa de consultas sin contraseña: rechaza TODO envío autenticado («Temporary lookup failure»)
+        try {
+            foreach (MailPolicyService::cfFilesWithEmptyPassword() as $f) {
+                $issues[] = ['severity' => 'warn', 'key' => 'postfix-cf-empty-' . md5($f), 'doc' => '/docs/system-mail',
+                    'text' => "Postfix: {$f} tiene la contraseña de la base de datos vacía. Mientras siga así, Postfix no puede consultar la base y rechaza el envío autenticado de TODO el servidor (programas de correo, webmail, apps) con «451 4.3.0 Temporary lookup failure». Copia la contraseña de otro fichero pgsql-*.cf del mismo usuario (o restablécela desde Correo), comprueba con «postmap -q» y recarga Postfix."];
+            }
+        } catch (\Throwable) {
+        }
         $limit = max(10, (int)Settings::get('mail_queue_warn', '100'));
         $q = self::mailQueueSize();
         if ($q > $limit) {

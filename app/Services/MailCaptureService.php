@@ -39,7 +39,7 @@ final class MailCaptureService
         if (!preg_match('/^\s*php_(?:admin_)?value\[sendmail_path\]\s*=\s*(.+)$/m', $poolContent, $m)) {
             return 'allow';
         }
-        $val = trim($m[1]);
+        $val = trim(trim($m[1]), '"');
         if (!str_contains($val, 'musedock-mail-capture')) {
             return 'custom';
         }
@@ -62,7 +62,9 @@ final class MailCaptureService
         if ($line === null) {
             return [$pool, ''];
         }
-        $new = "php_admin_value[sendmail_path] = {$line}";
+        // Entre comillas dobles: el «=» de «--site=» rompe el fichero de configuración de PHP-FPM si va sin ellas
+        // (comprobado en filemon 2026-10-19: php-fpm -t lo rechazaba)
+        $new = "php_admin_value[sendmail_path] = \"{$line}\"";
         if (strpos($pool, 'security.limit_extensions') !== false) {
             $pool = preg_replace('/^(security\.limit_extensions\s*=)/m', $new . "\n\n$1", $pool, 1);
         } else {
@@ -187,11 +189,15 @@ final class MailCaptureService
             }
             [, $proc, $id, $rest] = $m;
             if ($proc === 'pickup' && preg_match('/uid=(\d+) from=<([^>]*)>/', $rest, $u)) {
-                $byId[$id] = ['uid' => (int)$u[1], 'from' => $u[2], 'to' => [], 'st' => [], 'why' => []];
+                $byId[$id] = ['uid' => (int)$u[1], 'from' => $u[2], 'to' => [], 'st' => [], 'why' => [], 'relayed' => []];
             } elseif (isset($byId[$id]) && in_array($proc, ['smtp', 'error', 'local', 'virtual', 'lmtp', 'relay'], true)
                 && preg_match('/to=<([^>]*)>.*status=(\w+)/', $rest, $t)) {
                 $byId[$id]['to'][$t[1]] = true;
                 $byId[$id]['st'][] = $t[2];
+                // «enviado» a un servidor interno (otro nodo que entrega fuera) no es la entrega final: el rechazo de Gmail ocurre allí
+                if ($t[2] === 'sent' && preg_match('/relay=[^,\[]*\[((?:10|127)\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+)\]/', $rest)) {
+                    $byId[$id]['relayed'][] = $t[1];
+                }
                 // motivo del rechazo (p. ej. 5.7.26 de Gmail: remitente sin autenticar), tras «status=…» como
                 // «550-5.7.26» o «550 5.1.1», para no confundirlo con una IP
                 if ($t[2] !== 'sent' && preg_match('/status=\w+ \((.*)$/', $rest, $sm) && preg_match('/\b\d{3}[ -]([245]\.\d\.\d{1,3})\b/', $sm[1], $r)) {
@@ -199,12 +205,12 @@ final class MailCaptureService
                 }
             }
         }
-        $zero = ['messages' => 0, 'recipients' => 0, 'sent' => 0, 'bounced' => 0, 'deferred' => 0, 'reasons' => []];
+        $zero = ['messages' => 0, 'recipients' => 0, 'sent' => 0, 'bounced' => 0, 'deferred' => 0, 'relayed' => 0, 'reasons' => []];
         $out = [];
         foreach ($byId as $q) {
             $uid = $q['uid'];
             $out[$uid] ??= ['uid' => $uid, 'froms' => [], 'domains' => [], 'sys_messages' => 0] + $zero
-                + ['web_messages' => 0, 'web_recipients' => 0, 'web_sent' => 0, 'web_bounced' => 0, 'web_deferred' => 0, 'web_reasons' => []];
+                + ['web_messages' => 0, 'web_recipients' => 0, 'web_sent' => 0, 'web_bounced' => 0, 'web_deferred' => 0, 'web_relayed' => 0, 'web_reasons' => []];
             // Correo del sistema (cron, root…): todos sus destinatarios son de este servidor
             $domains = [];
             foreach (array_keys($q['to']) as $to) {
@@ -222,6 +228,12 @@ final class MailCaptureService
             } else {
                 $out[$uid]['web_messages']++;
                 $out[$uid]['web_recipients'] += count($domains);
+            }
+            foreach ($q['relayed'] as $_) {
+                $out[$uid]['relayed']++;
+                if (!$sys) {
+                    $out[$uid]['web_relayed']++;
+                }
             }
             foreach ($q['st'] as $st) {
                 if (isset($out[$uid][$st])) {

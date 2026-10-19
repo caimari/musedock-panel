@@ -289,8 +289,37 @@ class MailPolicyService
         return ['ok' => $p['ok'], 'probe' => $p['probe'], 'rolled_back' => false, 'output' => $p['ok'] ? 'Mapa instalado y ' . $p['output'] : 'Mapa instalado pero la comprobación falló: ' . $p['output']];
     }
 
+    /**
+     * ¿Un fichero pgsql-*.cf de Postfix tiene la contraseña vacía? (con una base por red, Postfix no puede consultar
+     * y rechaza TODO con «Temporary lookup failure»; caso filemon 2026-10-19: 43 envíos autenticados rechazados). Puro.
+     */
+    public static function cfHasEmptyPassword(string $text): bool
+    {
+        $hasPw = (bool)preg_match('/^\s*password\s*=\s*$/m', $text);
+        $host = preg_match('/^\s*hosts\s*=\s*(\S+)/m', $text, $m) ? $m[1] : '';
+        return $hasPw && ($host === '' || $host[0] !== '/' && !str_starts_with($host, 'unix:'));
+    }
+
+    /** Ficheros pgsql-*.cf de Postfix con la contraseña vacía en este nodo (hay que poder leerlos: root o grupo postfix). */
+    public static function cfFilesWithEmptyPassword(): array
+    {
+        $bad = [];
+        foreach (glob('/etc/postfix/pgsql-*.cf') ?: [] as $f) {
+            $t = @file_get_contents($f);
+            if (is_string($t) && self::cfHasEmptyPassword($t)) {
+                $bad[] = $f;
+            }
+        }
+        return $bad;
+    }
+
     public static function installSenderPolicy(array $dbCfg): array
     {
+        // Nunca escribir un mapa sin contraseña: rompería el envío autenticado de todo el servidor.
+        $probe = "password = " . ($dbCfg['password'] ?? '') . "\nhosts = " . ($dbCfg['host'] ?? '127.0.0.1') . "\n";
+        if (self::cfHasEmptyPassword($probe)) {
+            return ['ok' => false, 'error' => 'La contraseña de la base de datos del correo no está disponible (mail_db_password_enc vacío): no se escribe un mapa de remitentes que rompería el envío autenticado. Rota o restablece esa contraseña desde Correo y vuelve a aplicarlo.'];
+        }
         $whitelist = self::whitelistEnabled();
         $query = self::senderQuery();
 

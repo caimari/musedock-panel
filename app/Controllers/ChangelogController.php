@@ -20,6 +20,21 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.382',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'El modo «capturar»/«bloquear» no se podía aplicar: el panel escribía el sendmail_path sin comillas y el «=» de --site= rompía la configuración de PHP-FPM (php-fpm -t lo rechazaba). Ahora va entre comillas dobles; los pools antiguos sin comillas se siguen leyendo.',
+                        'Postfix rechazaba todo envío autenticado porque pgsql-sender-login.cf tenía la contraseña vacía (451 4.3.0 Temporary lookup failure). El panel ya no escribe nunca ese mapa sin contraseña y el preflight avisa si algún pgsql-*.cf tiene la contraseña vacía con la base por red.',
+                        'La auditoría de correo de las webs contaba como «enviado» lo entregado a otro nodo para salir fuera: ahora lo cuenta aparte y explica que el resultado final (por ejemplo un rechazo de Gmail) está en el registro de ese nodo.',
+                    ],
+                    'added' => [
+                        'Pruebas: tests/mail_capture_test.php (31) y tests/system_mail_test.php (24).',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.381',
                 'date' => '2026-10-19',
                 'badge' => 'info',

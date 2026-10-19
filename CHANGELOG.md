@@ -2,6 +2,16 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.382] — 2026-10-19 — Modo «capturar» que carga, y Postfix sin contraseña detectado
+
+### Corregido
+- **El modo «capturar»/«bloquear» no se podía aplicar: PHP-FPM rechazaba el pool.** El panel escribía `php_admin_value[sendmail_path] = /usr/local/sbin/musedock-mail-capture --site=… --mode=…` sin comillas y el «=» de `--site=` rompe el fichero de configuración de PHP-FPM (`php-fpm -t` lo rechazaba y la marcha atrás dejaba la web en «permitir»). Ahora el valor va entre comillas dobles; se siguen leyendo los pools antiguos sin comillas. Visto en Filemon con filmsinfest.com.
+- **Postfix rechazaba TODO envío autenticado** porque `pgsql-sender-login.cf` tenía `password =` vacío («451 4.3.0 Temporary lookup failure»; 43 envíos de programas de correo, webmail y apps rechazados desde el 18-10). El panel ya **no escribe nunca** ese mapa sin contraseña (error claro: «mail_db_password_enc vacío») y el preflight de cada nodo avisa si algún `pgsql-*.cf` de Postfix tiene la contraseña vacía con la base por red.
+- **La auditoría contaba como «enviado» lo que se entregaba a otro nodo para salir fuera** (en Filemon, a asterisk, donde Gmail lo rechazaba). Ahora esos mensajes se cuentan aparte («entregados a otro nodo») y la propuesta explica que el resultado final está en el registro de ese nodo.
+
+### Añadido
+- Pruebas: `tests/mail_capture_test.php` pasa a 31 y `tests/system_mail_test.php` a 24.
+
 ## [1.0.381] — 2026-10-19 — El correo de las webs se puede capturar o bloquear
 
 ### Corregido

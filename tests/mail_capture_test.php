@@ -90,5 +90,24 @@ ok('mensajes, destinatarios, enviados y rebotados del usuario', $a[1006]['messag
 ok('dominios de destino y remitente', ($a[1006]['domains']['gmail.com'] ?? 0) === 2 && ($a[1006]['froms']['wp@mail.example'] ?? 0) === 2);
 ok('el de más mensajes sale primero', array_key_first($a) === 1006);
 
+echo "\n\033[1mEl valor va entre comillas (filemon, 2026-10-19: sin ellas PHP-FPM rechazaba el pool)\033[0m\n";
+ok('la línea escrita lleva el valor entre comillas dobles', str_contains((string)$cap, 'php_admin_value[sendmail_path] = "/usr/local/sbin/musedock-mail-capture --site=ejemplo.com --mode=capture"'), (string)$cap);
+$ini = parse_ini_string("[web]\n" . trim(substr((string)$cap, strpos((string)$cap, 'php_admin_value[sendmail_path]'), 140)), true, INI_SCANNER_RAW);
+$ini2 = @parse_ini_string("[web]\nphp_admin_value[sendmail_path] = \"/usr/local/sbin/musedock-mail-capture --site=ejemplo.com --mode=capture\"\n", true);
+ok('el analizador de ficheros .ini lee el valor completo, con el «=» de --site=', is_array($ini2) && ($ini2['web']['php_admin_value']['sendmail_path'] ?? '') === '/usr/local/sbin/musedock-mail-capture --site=ejemplo.com --mode=capture', json_encode($ini2));
+ok('el modo se sigue leyendo con comillas (y sin ellas, de pools antiguos)', C::modeFromPool($cap) === 'capture' && C::modeFromPool("php_admin_value[sendmail_path] = /usr/local/sbin/musedock-mail-capture --site=a.com --mode=block\n") === 'block');
+[$again] = C::poolWithMode($cap, 'ejemplo.com', 'block');
+ok('cambiar de modo con comillas sustituye la línea sin duplicarla', substr_count($again, 'sendmail_path') === 1 && C::modeFromPool($again) === 'block');
+
+echo "\n\033[1mAuditoría: entregado a otro nodo no es entrega final\033[0m\n";
+$logR = [
+    'Oct 19 08:00:00 h postfix/pickup[1]: DDDDDD11: uid=1006 from=<filmsinfestcom>',
+    'Oct 19 08:00:01 h postfix/smtp[2]: DDDDDD11: to=<x@gmail.com>, relay=10.10.70.2[10.10.70.2]:25, delay=1, status=sent (250 2.0.0 Ok: queued as ABC)',
+    'Oct 19 08:01:00 h postfix/pickup[1]: EEEEEE22: uid=1006 from=<filmsinfestcom>',
+    'Oct 19 08:01:01 h postfix/smtp[2]: EEEEEE22: to=<y@gmail.com>, relay=gmail-smtp-in.l.google.com[142.250.1.27]:25, status=sent (250 ok)',
+];
+$rr = C::auditParse($logR);
+ok('un envío a una IP interna cuenta como «entregado al relé»; a Gmail directo, no', $rr[1006]['web_relayed'] === 1 && $rr[1006]['web_sent'] === 2, json_encode($rr[1006]));
+
 echo "\n" . ($fail === 0 ? "\033[0;32mTodo correcto: {$pass} comprobaciones\033[0m" : "\033[0;31m{$fail} fallo(s) de " . ($pass + $fail) . "\033[0m") . "\n";
 exit($fail === 0 ? 0 : 1);

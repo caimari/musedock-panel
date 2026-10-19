@@ -56,5 +56,14 @@ ok('se hace copia de main.cf antes de cambiar', str_contains($src, "copy(\$mainC
 ok('se valida con postfix check y se restaura si falla', str_contains($src, 'postfix check') && str_contains($src, '@copy($backup, $mainCf)'));
 ok('un error de lectura de postmap se trata como «no se sabe» (no como «no está»)', str_contains($src, 'postmap: (fatal|error|warning)'));
 
+echo "\n\033[1mMapas de Postfix sin contraseña (filemon, 2026-10-19: 43 envíos autenticados rechazados)\033[0m\n";
+use MuseDockPanel\Services\MailPolicyService as MP;
+ok('password vacío con la base por red: se detecta', MP::cfHasEmptyPassword("hosts = 127.0.0.1:5433\nuser = musedock_mail\npassword = \ndbname = x\n"));
+ok('con contraseña: bien', !MP::cfHasEmptyPassword("hosts = 127.0.0.1:5433\nuser = u\npassword = s3cr3t\ndbname = x\n"));
+ok('base por socket Unix sin contraseña (válido): no se avisa', !MP::cfHasEmptyPassword("hosts = /var/run/postgresql\nuser = u\npassword =\ndbname = x\n"));
+ok('fichero sin línea password: no se avisa', !MP::cfHasEmptyPassword("hosts = 127.0.0.1\nuser = u\ndbname = x\n"));
+$r = MP::installSenderPolicy(['host' => '127.0.0.1', 'port' => 5433, 'dbname' => 'x', 'user' => 'u', 'password' => '']);
+ok('instalar el mapa de remitentes con contraseña vacía se RECHAZA (no se escribe nada)', $r['ok'] === false && str_contains((string)$r['error'], 'contraseña'), json_encode($r));
+
 echo "\n" . ($fail === 0 ? "\033[0;32mTodo correcto: {$pass} comprobaciones\033[0m" : "\033[0;31m{$fail} fallo(s) de " . ($pass + $fail) . "\033[0m") . "\n";
 exit($fail === 0 ? 0 : 1);

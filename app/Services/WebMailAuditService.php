@@ -84,6 +84,9 @@ final class WebMailAuditService
         $managed = !empty($r['smtp']['managed']);
         $mode = (string)($r['mode'] ?? 'allow');
         $out = [];
+        if ((int)($r['relayed'] ?? 0) > 0 && (int)($r['bounced'] ?? 0) === 0) {
+            $out[] = "{$r['relayed']} se han entregado a otro nodo para que los mande fuera: el resultado final (p. ej. un rechazo de Gmail) está en el registro de ese nodo, no aquí.";
+        }
         if ($managed) {
             $out[] = 'Ya envía por SMTP autenticado (gestionado por el panel).';
             if ($mode === 'allow') {
@@ -136,6 +139,7 @@ final class WebMailAuditService
                 'sent' => (int)($a['web_sent'] ?? 0),
                 'bounced' => (int)($a['web_bounced'] ?? 0),
                 'deferred' => (int)($a['web_deferred'] ?? 0),
+                'relayed' => (int)($a['web_relayed'] ?? 0),
                 'system_messages' => (int)($a['sys_messages'] ?? 0),
                 'froms' => array_slice(array_keys($a['froms'] ?? []), 0, 3),
                 'domains' => array_slice(array_keys($a['domains'] ?? []), 0, 4),
