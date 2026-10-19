@@ -20,6 +20,19 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.384',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'La página «Changelog» salía con los títulos pero sin ningún texto: la vista solo leía entradas en formato bilingüe (es/en) y la mayoría de las versiones recientes son una lista simple. Ahora acepta los dos formatos y recupera el contenido de más de cien versiones.',
+                    ],
+                    'added' => [
+                        'php bin/recheck-now.php: hace que el cron del clúster repita en ≤ 1 minuto la revisión de preparación para tomar el mando y la auditoría del firewall, para que un aviso ya corregido desaparezca sin esperar.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.383',
                 'date' => '2026-10-19',
                 'badge' => 'info',

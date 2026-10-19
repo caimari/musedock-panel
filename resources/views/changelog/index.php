@@ -37,10 +37,15 @@
             <span class="lang-en" style="display:none"><?= $meta['en'] ?></span>
         </h6>
         <ul class="mb-3">
-            <?php foreach ($v['changes'][$key]['es'] as $i => $item): ?>
+            <?php
+            // Dos formatos: bilingüe ['es' => [...], 'en' => [...]] o una lista simple de textos (sin traducción: se ve el mismo texto en inglés)
+            $chg = $v['changes'][$key];
+            $itemsEs = isset($chg['es']) && is_array($chg['es']) ? $chg['es'] : array_values(array_filter($chg, 'is_string'));
+            $itemsEn = isset($chg['en']) && is_array($chg['en']) ? $chg['en'] : [];
+            foreach ($itemsEs as $i => $item): ?>
             <li>
                 <span class="lang-es"><?= View::e($item) ?></span>
-                <span class="lang-en" style="display:none"><?= View::e($v['changes'][$key]['en'][$i] ?? $item) ?></span>
+                <span class="lang-en" style="display:none"><?= View::e($itemsEn[$i] ?? $item) ?></span>
             </li>
             <?php endforeach; ?>
         </ul>

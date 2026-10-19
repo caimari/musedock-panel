@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.384] — 2026-10-19 — El historial de cambios vuelve a mostrar su contenido
+
+### Corregido
+- **La página «Changelog» del panel salía con los títulos («Añadido», «Corregido») pero sin ningún texto.** La vista solo leía las entradas en formato bilingüe (`es` / `en`) y la mayoría de las versiones recientes están escritas como lista simple. Ahora acepta los dos formatos (una lista simple se ve igual en español y en inglés) y recupera de golpe el contenido de más de cien versiones.
+
+### Añadido
+- `php bin/recheck-now.php`: hace que el cron del clúster repita en su próxima vuelta (≤ 1 minuto) la revisión de preparación para tomar el mando y la auditoría del firewall, para que un aviso ya corregido desaparezca del dashboard sin esperar a la siguiente revisión (cada 30 y 15 minutos).
+
 ## [1.0.383] — 2026-10-19 — Enlaces al correo de las webs y repositorio más limpio
 
 ### Añadido
