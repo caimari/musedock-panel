@@ -139,7 +139,7 @@
             <div class="card-body py-2">
                 <ul class="mb-1 small">
                     <?php foreach ($haReadiness['issues'] as $hrItem): ?>
-                        <li><?= View::e((string)($hrItem['text'] ?? '')) ?></li>
+                        <li><?= View::e((string)($hrItem['text'] ?? '')) ?><?php if (!empty($hrItem['doc']) && preg_match('#^/docs/[a-z0-9-]+$#', (string)$hrItem['doc'])): ?> <a href="<?= View::e((string)$hrItem['doc']) ?>" class="ms-1"><i class="bi bi-journal-text"></i> Ver guía</a><?php endif; ?></li>
                     <?php endforeach; ?>
                 </ul>
                 <div class="small" style="color:#cbd5e1">Se revisa cada 30 minutos y se avisa una vez por cada cosa nueva. Conviene arreglarlo ahora y no durante un relevo.</div>

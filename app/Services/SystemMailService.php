@@ -56,6 +56,15 @@ class SystemMailService
             || (in_array('$myhostname', $tokens, true) && $origin === strtolower((string)($pf['myhostname'] ?? '')))) {
             return $none('el dominio de origen ya es local');
         }
+        // Solo el NOMBRE DEL SERVIDOR (myhostname) es seguro para entregar en local. Un dominio con correo real
+        // (p. ej. el origen muserelay.com de un nodo relé) NO: todo el correo que ese nodo mande hacia ese dominio
+        // se entregaría aquí y se perdería, en vez de ir al servidor de correo del dominio.
+        $host = strtolower(trim((string)($pf['myhostname'] ?? '')));
+        if ($host === '' || $origin !== $host) {
+            return $skip("el origen del correo del sistema ({$origin}) es un dominio y no el nombre de este servidor"
+                . ($host !== '' ? " ({$host})" : '') . ': entregarlo en local capturaría el correo que este nodo mande a ese dominio. '
+                . 'El cron seguiría rebotando; lo seguro es poner myorigin = $myhostname a mano (cambia el remitente del correo del sistema).');
+        }
         if (($pf['origin_virtual'] ?? null) === null) {
             return $skip('no se pudo comprobar si el dominio es de buzones virtuales (¿base de datos de correo sin respuesta?): no se toca nada');
         }
@@ -85,8 +94,33 @@ class SystemMailService
             'myhostname' => strtolower($pc('myhostname')),
             'mydestination' => $pc('mydestination'),
             'relayhost' => $pc('relayhost'),
-            'origin_virtual' => self::domainIsHandledElsewhere($origin, $pc),
+            'origin_virtual' => (self::panelHasMailDomain($origin) || self::hasPublicMx($origin)) ? true : self::domainIsHandledElsewhere($origin, $pc),
         ];
+    }
+
+    /**
+     * ¿El nombre tiene registro MX público? Un nombre de servidor no lo tiene; un dominio con correo sí, y entonces su
+     * correo se entrega en otro sitio (el servidor al que apunta el MX), no aquí. Si el DNS no responde, se considera
+     * que no tiene (la decisión de arriba ya exige que sea el nombre del propio servidor).
+     */
+    private static function hasPublicMx(string $domain): bool
+    {
+        if ($domain === '' || !function_exists('dns_get_record')) {
+            return false;
+        }
+        $mx = @dns_get_record($domain, DNS_MX);
+        return is_array($mx) && count($mx) > 0;
+    }
+
+    /** ¿El dominio es un dominio de correo dado de alta en el panel (en cualquier nodo del clúster)? */
+    private static function panelHasMailDomain(string $domain): bool
+    {
+        try {
+            $r = \MuseDockPanel\Database::fetchOne('SELECT 1 AS x FROM mail_domains WHERE lower(domain) = :d', ['d' => $domain]);
+            return !empty($r);
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     /** ¿El dominio lo gestiona otra cosa de Postfix (virtual, relay, transporte)? null = no se pudo saber. */

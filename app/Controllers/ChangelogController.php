@@ -20,6 +20,19 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.380',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'El correo del sistema solo se entrega en local si el origen es el nombre del propio servidor (myhostname). En un nodo relé el origen es un dominio con correo real (muserelay.com en asterisk) y añadirlo a mydestination habría capturado todo lo que ese nodo manda hacia ese dominio: ahora se salta y se explica. Un dominio de correo dado de alta en el panel, o un nombre con MX público, tampoco se toca. Pruebas: tests/system_mail_test.php (19).',
+                    ],
+                    'added' => [
+                        'Guía del panel «Correo del sistema (cron, root)» (/docs/system-mail): qué es, por qué rebota, qué comprueba el panel, cuándo lo arregla solo y cuándo no, cómo probarlo en un nodo y deshacerlo. Los avisos de correo del sistema, cola grande y tareas duplicadas llevan «Ver guía» en el dashboard y la referencia en el correo.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.379',
                 'date' => '2026-10-19',
                 'badge' => 'info',

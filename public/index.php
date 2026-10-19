@@ -617,6 +617,7 @@ if (\MuseDockPanel\Controllers\SetupController::needsSetup()) {
 \MuseDockPanel\Router::get('/docs/config-mirror', 'DocsController@configMirror');
 \MuseDockPanel\Router::get('/docs/dns-guard', 'DocsController@dnsGuard');
 \MuseDockPanel\Router::get('/docs/node-guard', 'DocsController@nodeGuard');
+\MuseDockPanel\Router::get('/docs/system-mail', 'DocsController@systemMail');
 \MuseDockPanel\Router::get('/docs/mcp-nodes', 'DocsController@mcpNodes');
 \MuseDockPanel\Router::get('/docs/wordpress-security', 'DocsController@wordpressSecurity');
 \MuseDockPanel\Router::get('/docs/alerts', 'DocsController@alerts');

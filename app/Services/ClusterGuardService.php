@@ -650,12 +650,12 @@ class ClusterGuardService
                 }
             } catch (\Throwable) {
             }
-            $issues[] = ['severity' => 'warn', 'key' => 'system-mail-origin', 'text' => $problem];
+            $issues[] = ['severity' => 'warn', 'key' => 'system-mail-origin', 'text' => $problem, 'doc' => '/docs/system-mail'];
         }
         $limit = max(10, (int)Settings::get('mail_queue_warn', '100'));
         $q = self::mailQueueSize();
         if ($q > $limit) {
-            $issues[] = ['severity' => 'warn', 'key' => 'mail-queue-big', 'text' => "La cola de correo de Postfix tiene {$q} mensajes (aviso a partir de {$limit}). Mira «mailq | head»: si son avisos internos que rebotan, se reintentan sin parar y llenan el tráfico saliente."];
+            $issues[] = ['severity' => 'warn', 'key' => 'mail-queue-big', 'text' => "La cola de correo de Postfix tiene {$q} mensajes (aviso a partir de {$limit}). Mira «mailq | head»: si son avisos internos que rebotan, se reintentan sin parar y llenan el tráfico saliente.", 'doc' => '/docs/system-mail'];
         }
         if (function_exists('posix_geteuid') && posix_geteuid() === 0) {
             $tabs = [];
@@ -667,7 +667,7 @@ class ClusterGuardService
                 $d[basename($f)] = (string)@file_get_contents($f);
             }
             foreach (self::duplicateCronJobs($tabs, $d) as $i => $text) {
-                $issues[] = ['severity' => 'warn', 'key' => 'cron-dup-' . substr(md5($text), 0, 8), 'text' => $text];
+                $issues[] = ['severity' => 'warn', 'key' => 'cron-dup-' . substr(md5($text), 0, 8), 'text' => $text, 'doc' => '/docs/system-mail'];
             }
         }
         return $issues;
@@ -784,7 +784,7 @@ class ClusterGuardService
             Settings::set('ha_readiness_hash', $hash);
             $host = (string)gethostname();
             if ($hash !== '') {
-                $lines = array_map(static fn($i) => '• ' . $i['text'], $warn);
+                $lines = array_map(static fn($i) => '• ' . $i['text'] . (!empty($i['doc']) ? ' [Guía en el panel: ' . $i['doc'] . ']' : ''), $warn);
                 NotificationService::send("Nodo no preparado para tomar el mando: {$host}",
                     "Este servidor podría tomar el mando, pero no está completamente preparado:\n\n" . implode("\n", $lines)
                     . "\n\nSe avisa ahora, no durante un relevo. Detalle y estado: Dashboard.", 'ha_readiness');

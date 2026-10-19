@@ -469,6 +469,14 @@ class DocsController
                 'keywords' => 'vigilancia nodos relevo failover guardian arranque split-brain dovecot servicio caido reintento postgresql max_wal_senders parametros replica lsyncd instalar cluster_master_ip wireguard orden arranque preparado tomar el mando demote master caducado apartado nodo duplicado promover fence-self aislar reactivar mariadb permisos dueño ficheros acl laravel storage framework 500 prueba humo webs microcortes bucle reinicios web-permissions web-smoke filesync_options',
             ],
             [
+                'title' => 'Correo del sistema (cron, root)',
+                'description' => 'Qué es el correo que genera el propio servidor, por qué puede rebotar y llenar la cola de Postfix, qué comprueba el panel (origen local, cola, tareas duplicadas), cuándo lo arregla solo y cuándo no, y cómo probarlo en un nodo y deshacerlo.',
+                'url' => '/docs/system-mail',
+                'category' => 'Guia especial',
+                'icon' => 'bi-envelope-exclamation',
+                'keywords' => 'correo sistema cron root mydestination myorigin postfix cola mailq rebote relay access denied crontab duplicado mail_system_local_mode mail_queue_warn mail-system-local relé satélite nodo MAILTO',
+            ],
+            [
                 'title' => 'Fail2ban en el cluster',
                 'description' => 'Que bloquea cada servidor y cuanto tiempo (jaulas normales y lentas, bloqueos crecientes), que se copia entre el que manda y sus copias (lista blanca si, bloqueos no), informe diario y consultas por MCP.',
                 'url' => '/docs/fail2ban-cluster',
@@ -601,6 +609,10 @@ class DocsController
 
         if ($url === '/docs/dns-guard') {
             return $this->extractViewText(self::DOCS_VIEW_BASE . 'dns-guard.php');
+        }
+
+        if ($url === '/docs/system-mail') {
+            return $this->extractViewText(self::DOCS_VIEW_BASE . 'system-mail.php');
         }
 
         if ($url === '/docs/node-guard') {
@@ -1615,6 +1627,14 @@ class DocsController
         View::render('help/node-guard', [
             'layout' => 'main',
             'pageTitle' => 'Docs - Vigilancia de nodos y relevos',
+        ]);
+    }
+
+    public function systemMail(): void
+    {
+        View::render('help/system-mail', [
+            'layout' => 'main',
+            'pageTitle' => 'Docs - Correo del sistema (cron, root)',
         ]);
     }
 

@@ -39,6 +39,16 @@ ok('origen con caracteres raros: nada (no se mete en main.cf)', S::plan(['origin
 ok('el valor por defecto de Postfix sí se amplía', S::plan(['mydestination' => 'localhost.localdomain, localhost'] + $real)['action'] === 'add');
 ok('mydestination vacío (modo relay del instalador) se amplía sin coma sobrante', S::plan(['mydestination' => ''] + $real)['mydestination'] === 'mail.musedock.com');
 
+echo "\n\033[1mDominio con correo real (asterisk: origen muserelay.com, 2026-10-19)\033[0m\n";
+$relay = ['origin' => 'muserelay.com', 'myhostname' => 'asterisk.muserelay.com', 'mydestination' => '', 'origin_virtual' => false];
+$r = S::plan($relay);
+ok('origen = un dominio y no el nombre del servidor: NO se añade (capturaría el correo hacia ese dominio)', $r['action'] === 'skip' && str_contains($r['reason'], 'capturaría'), json_encode($r));
+ok('sin saber el nombre del servidor tampoco se añade', S::plan(['myhostname' => ''] + $real)['action'] === 'skip');
+ok('con origen = nombre del servidor (mortadelo, caso seguro) sí', S::plan($real)['action'] === 'add');
+
+ok('si el nombre tiene MX público se trata como dominio de correo y no se toca', str_contains(file_get_contents(PANEL_ROOT . '/app/Services/SystemMailService.php'), 'self::hasPublicMx($origin)'));
+ok('un dominio de correo dado de alta en el panel tampoco', str_contains(file_get_contents(PANEL_ROOT . '/app/Services/SystemMailService.php'), 'self::panelHasMailDomain($origin)'));
+
 echo "\n\033[1mModo y seguridad\033[0m\n";
 ok('el modo por defecto es avisar, no cambiar solo', S::mode() === 'warn');
 $src = file_get_contents(PANEL_ROOT . '/app/Services/SystemMailService.php');

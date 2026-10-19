@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.380] — 2026-10-19 — El correo del sistema solo se entrega en local con el nombre del servidor
+
+### Corregido
+- **`SystemMailService` (1.0.379) habría capturado el correo de un dominio real en un nodo relé.** En asterisk el origen del correo del sistema es `muserelay.com` (un dominio con correo de verdad), y añadirlo a `mydestination` habría entregado en local todo lo que ese nodo manda hacia `@muserelay.com`, perdiéndolo en vez de enviarlo a su servidor de correo. Ahora solo se actúa si el origen es **el nombre del propio servidor** (`myhostname`, como `mail.musedock.com` en mortadelo); si es un dominio, se salta y se explica (y el preflight dice cómo hacerlo a mano con `myorigin = $myhostname`). Además, un dominio dado de alta como dominio de correo en el panel cuenta como «gestionado por otro» y tampoco se toca. También cuenta como «gestionado por otro» un nombre con registro MX público. Detectado en las simulaciones de asterisk y obelix antes de aplicar nada (el modo por defecto es `warn`).
+- Pruebas: `tests/system_mail_test.php` pasa a 19 comprobaciones.
+
+### Añadido
+- **Guía del panel «Correo del sistema (cron, root)»** (`/docs/system-mail`): qué es ese correo, por qué rebota y llena la cola, qué comprueba el panel, en qué casos lo arregla solo y en cuáles no (tabla por situación del nodo), cómo probarlo en un solo nodo y deshacerlo, y consejos para quien administra el cluster. Los avisos de correo del sistema, de cola grande y de tareas duplicadas llevan ahora un enlace «Ver guía» en el dashboard y la referencia en el correo.
+
 ## [1.0.379] — 2026-10-19 — El correo del sistema que rebota se detecta antes
 
 ### Añadido
