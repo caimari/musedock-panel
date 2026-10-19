@@ -313,6 +313,11 @@ class RoleSwitchService
             $add("Redis: {$node['name']} es réplica conectada", ($t['redis']['role'] ?? '') === 'slave' && ($t['redis']['link'] ?? '') === 'up',
                 ($t['redis']['role'] ?? '?') . ', enlace ' . ($t['redis']['link'] ?? '?'), false);
         }
+        // El mismo paso que fallaría DESPUÉS de apartar este servidor (19-10: 39 de 39 buzones fallaron con las webs ya caídas).
+        $mp = self::mailSyncProbe();
+        if ($mp !== null) {
+            $add('Correo: sincronizar un buzón con la copia (prueba)', !empty($mp['ok']), $mp['detail']);
+        }
         $myPub = self::publicIpFor($me['local_ips']);
         $theirPub = self::publicIpFor($t['local_ips'] ?? []);
         $add('IPs públicas para mover el DNS', $myPub !== '' && $theirPub !== '' && $myPub !== $theirPub,
@@ -436,18 +441,27 @@ class RoleSwitchService
     {
         $st = self::status($task);
         $st['state'] = 'running';
-        $fail = static function (string $msg) use ($task, &$st, $nodeId): void {
-            $gethost = gethostname();
+        $fail = static function (string $msg, bool $reverted = true) use ($task, &$st, $nodeId): void {
             $st['state'] = 'failed';
             $st['error'] = $msg;
             self::step($task, $st, 'PARADO: ' . $msg, false);
             LogService::log('cluster.role-switch', 'failed', $msg);
-            // Un solo aviso corto (los pasos están en el Dashboard, no en el mensaje) y sin copia
+            // Un solo aviso, explícito y corto (los pasos están en el Dashboard, no en el mensaje) y sin copia
             // reenviada: el otro nodo está apartado y no tiene nada que decir.
-            $target = (string)($st['node'] ?? 'el destino');
-            $short = mb_strlen($msg) > 300 ? mb_substr($msg, 0, 300) . '…' : $msg;
-            self::alert("❌ Cambio de mando a {$target} FALLÓ", $short
-                . "\n\nEste servidor ({$gethost}) sigue sirviendo. Detalle paso a paso: Dashboard → «Cambio de rol».", 0);
+            $host = (string)gethostname();
+            $target = (string)($st['node'] ?? 'el servidor de destino');
+            $short = mb_strlen($msg) > 400 ? mb_substr($msg, 0, 400) . '…' : $msg;
+            if ($reverted) {
+                self::alert("❌ PROMOCIÓN A MASTER DE {$target} ABORTADA POR FALLO",
+                    "El cambio de mando ha fallado y se ha deshecho.\n\nMotivo: {$short}\n\n"
+                    . "✅ Todo sigue funcionando en {$host} (sigue siendo el MASTER).\n"
+                    . "{$target} sigue como SLAVE (si quedó apartado, se reincorpora solo como copia).\n\n"
+                    . "Detalle paso a paso: Dashboard → «Cambio de rol».\nAviso enviado desde: {$host}", 0);
+            } else {
+                self::alert("⚠️ CAMBIO DE MANDO A MEDIAS: REVISAR {$host} Y {$target}",
+                    "El cambio de mando a {$target} NO terminó bien y NO se pudo deshacer solo.\n\nMotivo: {$short}\n\n"
+                    . "Revisa los dos paneles (Dashboard → «Cambio de rol»).\nAviso enviado desde: {$host}", 0);
+            }
         };
         ClusterService::$progressCb = static function (string $m) use ($task, &$st): void {
             self::step($task, $st, $m);
@@ -462,6 +476,15 @@ class RoleSwitchService
         }
         $ips = $pre['ips'];
         self::step($task, $st, "Comprobaciones OK. Pasando el mando a {$pre['node']} ({$ips['their_vpn']}).", true);
+        $st['node'] = $st['node'] ?? $pre['node'];
+        try {
+            $hostNow = (string)gethostname();
+            NotificationService::send("🔁 CAMBIO DE MANDO EN MARCHA: {$pre['node']} se promueve a MASTER y {$hostNow} pasa a SLAVE",
+                "{$hostNow} (master ahora) se aparta y {$pre['node']} se promueve a MASTER.\n\n"
+                . "Habrá un corte de unos segundos en las webs y los avisos de «entrada cortada» de las sondas son esperables durante el cambio.\n"
+                . "Al terminar llegará un aviso: ✅ hecho o ❌ abortado (si se aborta, todo sigue en {$hostNow}).\n\nAviso enviado desde: {$hostNow}");
+        } catch (\Throwable) {
+        }
 
         // Qué dominios se moverán y cuáles no (para el correo final). Antes de apartarse:
         // si tarda, las webs siguen funcionando mientras tanto.
@@ -497,6 +520,24 @@ class RoleSwitchService
             $prevTtl = $t['lowered'] > 0 ? 60 : max(60, $t['max_ttl']);
         }
 
+        // Buzones: última sincronización con la pareja, ANTES de apartar: apartar para Dovecot y sin él no se puede
+        // sincronizar (cambio Filemon → Mortadelo del 19-10: 39 de 39 fallaron con las webs ya caídas 75 s).
+        // Se para Postfix (no entra correo nuevo; los remitentes reintentan solos), se sincroniza con Dovecot
+        // arriba y las webs siguen funcionando. Si falla, se reactiva Postfix y no se ha tocado nada más.
+        // Sin esto, lo borrado o recibido desde la última réplica no estaba en el nuevo master (2026-10-07).
+        if (self::mailSyncAvailable()) {
+            self::step($task, $st, 'Correo: dejando de aceptar correo nuevo y última sincronización de buzones con la copia (las webs siguen funcionando)…');
+            shell_exec('systemctl stop postfix@-.service 2>&1');
+            $mail = self::finalMailSync();
+            if ($mail !== null && empty($mail['ok'])) {
+                shell_exec('systemctl start postfix@-.service 2>&1');
+                $fail('los buzones no se pudieron sincronizar con la copia (' . $mail['detail'] . '). No se ha tocado nada: este servidor sigue sirviendo y el correo vuelve a entrar. '
+                    . 'Revisa la réplica de correo (MCP mail_replication_status) antes de volver a intentarlo.');
+                return;
+            }
+            self::step($task, $st, 'Buzones sincronizados: ' . ($mail['detail'] ?? 'al día'), true);
+        }
+
         // 1) Apartarse: ya no escribe nadie aquí.
         self::step($task, $st, 'Apartando este servidor (sin webs, bases en solo lectura, panel de rescate)…');
         FailoverSafetyService::fenceSelf("cambio de rol hacia {$pre['node']}");
@@ -513,21 +554,6 @@ class RoleSwitchService
             return;
         }
         self::step($task, $st, 'La copia tiene todo: ' . $wait['detail'], true);
-
-        // Buzones: última sincronización con la pareja (el correo entrante ya está parado).
-        // Sin esto, lo borrado o recibido desde la última réplica no estaba en el nuevo
-        // master (2026-10-07: la bandeja borrada en Filemon reapareció en mortadelo).
-        $mail = self::finalMailSync();
-        if ($mail !== null) {
-            self::step($task, $st, 'Buzones: última sincronización con la copia…');
-            if (empty($mail['ok'])) {
-                FailoverSafetyService::unfenceSelf();
-                $fail('los buzones no se pudieron sincronizar con la copia (' . $mail['detail'] . '). Este servidor se ha reactivado: todo sigue como antes. '
-                    . 'Revisa la réplica de correo (MCP mail_replication_status) antes de volver a intentarlo.');
-                return;
-            }
-            self::step($task, $st, 'Buzones sincronizados: ' . $mail['detail'], true);
-        }
 
         // 2) Que el otro se promueva (en segundo plano allí) y esperarle.
         $r = ClusterService::callNode($nodeId, 'POST', 'api/cluster/action', ['action' => 'role-switch-promote', 'payload' => [
@@ -586,16 +612,18 @@ class RoleSwitchService
                     . (!empty($fr['ok']) ? " y {$pre['node']} está apartado" : " (OJO: no se pudo apartar {$pre['node']}: " . ($fr['error'] ?? '?') . ')')
                     . ". {$pre['node']} se reincorporará solo como copia (en pocos minutos; si no, botón «Reincorporar» en su panel).");
             } else {
-                $fail("{$pre['node']} se promovió y movió el DNS, pero terminó con errores (" . ($remote['error'] ?? '?') . "). Las webs van a {$pre['node']}; este servidor sigue apartado. Para que sea su copia: php bin/cluster-switch.php demote {$ips['their_vpn']}");
+                $fail("{$pre['node']} se promovió y movió el DNS, pero terminó con errores (" . ($remote['error'] ?? '?') . "). Las webs van a {$pre['node']}; este servidor sigue apartado. Para que sea su copia: php bin/cluster-switch.php demote {$ips['their_vpn']}", false);
             }
             return;
         }
 
         // 3) Convertirse en copia del nuevo master.
         self::step($task, $st, "Convirtiendo este servidor en copia de {$pre['node']}…");
+        ClusterService::$quietNotices = true;
         $d = ClusterService::demoteToSlave($ips['their_vpn']);
+        ClusterService::$quietNotices = false;
         if (empty($d['ok'])) {
-            $fail('el nuevo master funciona, pero este servidor no quedó bien como copia: ' . implode('; ', $d['errors'] ?? []));
+            $fail('el nuevo master funciona, pero este servidor no quedó bien como copia: ' . implode('; ', $d['errors'] ?? []), false);
             return;
         }
         self::step($task, $st, "Este servidor es ahora copia de {$pre['node']}.", true);
@@ -609,10 +637,12 @@ class RoleSwitchService
         self::step($task, $st, "Cambio de rol terminado: {$pre['node']} es el master.", true);
         LogService::log('cluster.role-switch', 'done', "{$pre['node']} es el master; este servidor es su copia");
         try {
-            NotificationService::send("Cambio de rol hecho: {$pre['node']} es el master ({$ips['their_public']})",
-                "{$pre['node']} ha sido promovido a master. Este servidor es ahora su copia en vivo.\n\n"
+            $host = (string)gethostname();
+            NotificationService::send("✅ CAMBIO DE MANDO HECHO: {$pre['node']} es ahora MASTER y {$host} pasa a SLAVE",
+                "{$pre['node']} ({$ips['their_public']}) ha sido promovido a MASTER y sirve las webs.\n"
+                . "{$host} es ahora SLAVE: su copia en vivo.\n\n"
                 . ($plan ? "── DNS ──\n" . DnsPlanService::reportText($plan, (array)($remote['dns_moved'] ?? []), (array)($remote['dns_failed'] ?? [])) . "\n\n" : '')
-                . "── Pasos ──\n" . implode("\n", array_map(static fn($s) => "{$s['at']} {$s['msg']}", $st['steps'])));
+                . "Detalle paso a paso: Dashboard → «Cambio de rol».\nAviso enviado desde: {$host}");
         } catch (\Throwable) {
         }
     }
@@ -667,6 +697,39 @@ class RoleSwitchService
      * Sincroniza cada buzón del panel con la pareja de réplica (doveadm sync -d, con
      * mail_replica). null si este nodo no replica buzones.
      */
+    /** ¿Este nodo replica el contenido de los buzones con la copia (y hay buzones)? */
+    public static function mailSyncAvailable(): bool
+    {
+        if (!is_file(MailReplicationService::DROPIN) && !is_file(MailReplicationService::LEGACY_DROPIN)) {
+            return false;
+        }
+        try {
+            return (int)(Database::fetchOne("SELECT count(*) AS n FROM mail_accounts")['n'] ?? 0) > 0;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /** Prueba con UN buzón (antes de apartar nada) de que la sincronización con la copia funciona. */
+    public static function mailSyncProbe(): ?array
+    {
+        if (!is_file(MailReplicationService::DROPIN) && !is_file(MailReplicationService::LEGACY_DROPIN)) {
+            return null;
+        }
+        try {
+            $email = (string)Database::fetchOne("SELECT lower(email) AS email FROM mail_accounts ORDER BY email LIMIT 1")['email'];
+        } catch (\Throwable) {
+            return null;
+        }
+        if ($email === '') {
+            return null;
+        }
+        $o = [];
+        exec('timeout 60 doveadm sync -d -u ' . escapeshellarg($email) . ' 2>&1', $o, $rc);
+        return ['ok' => $rc === 0, 'detail' => $rc === 0 ? "{$email} sincroniza bien con la copia"
+            : "{$email}: " . mb_substr(trim(preg_replace('/\s+/', ' ', implode(' ', array_slice($o, -3)))), 0, 200)];
+    }
+
     public static function finalMailSync(int $timeoutPerBox = 120): ?array
     {
         if (!is_file(MailReplicationService::DROPIN) && !is_file(MailReplicationService::LEGACY_DROPIN)) {
@@ -681,15 +744,20 @@ class RoleSwitchService
             return null;
         }
         $failed = [];
+        $why = '';
         foreach ($boxes as $email) {
             $o = [];
             exec('timeout ' . (int)$timeoutPerBox . ' doveadm sync -d -u ' . escapeshellarg($email) . ' 2>&1', $o, $rc);
             if ($rc !== 0) {
                 $failed[] = $email;
+                if ($why === '') {
+                    $why = mb_substr(trim(preg_replace('/\s+/', ' ', implode(' ', array_slice($o, -3)))), 0, 200);
+                }
             }
         }
         return ['ok' => !$failed, 'detail' => $failed
-            ? count($failed) . ' de ' . count($boxes) . ' fallaron: ' . implode(', ', array_slice($failed, 0, 6)) . (count($failed) > 6 ? '…' : '')
+            ? count($failed) . ' de ' . count($boxes) . ' fallaron: ' . implode(', ', array_slice($failed, 0, 3)) . (count($failed) > 3 ? '…' : '')
+                . ($why !== '' ? ' — motivo del primero: ' . $why : '')
             : count($boxes) . ' buzones al día'];
     }
 
@@ -836,8 +904,10 @@ class RoleSwitchService
             $st['serving'] = true;   // el que pasa el mando empieza a reenviarle las visitas ya
             self::step($task, $st, 'Sirviendo con escritura (' . round(microtime(true) - $t0, 1) . ' s desde que empezó la promoción); el resto se termina en segundo plano…', true);
         };
+        ClusterService::$quietNotices = true;
         $p = ClusterService::promoteToMaster(true, $oldVpn);
         ClusterService::$servingCb = null;
+        ClusterService::$quietNotices = false;
         if (empty($p['ok'])) {
             $st['state'] = 'failed';
             $st['error'] = implode('; ', $p['errors'] ?? ['error']);

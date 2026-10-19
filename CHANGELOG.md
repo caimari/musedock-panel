@@ -2,6 +2,17 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.392] — 2026-10-19 — «Comprobar» prueba el correo antes de apartar
+
+### Añadido
+- **Avisos del cambio de mando explícitos y para cualquier servidor:** «🔁 CAMBIO DE MANDO EN MARCHA: X se promueve a MASTER y H pasa a SLAVE», «✅ CAMBIO DE MANDO HECHO: X es ahora MASTER y H pasa a SLAVE», «❌ PROMOCIÓN A MASTER DE X ABORTADA POR FALLO … Todo sigue funcionando en H», y «⚠️ CAMBIO A MEDIAS» si no se pudo deshacer. Cada uno acaba con «Aviso enviado desde: H». Durante un cambio planificado ya no salen los avisos genéricos «Slave promovido a Master» / «Master degradado a Slave».
+
+### Corregido
+- **Caddy se recargaba entero ~3 veces por minuto** porque la comparación de las políticas TLS era literal (Caddy devuelve las claves en otro orden) y se reescribían siempre; cada recarga podía tirar alguna conexión (525 de Cloudflare). Ahora se comparan en forma canónica y, además, no se reescribe lo ya aplicado hace menos de una hora.
+- **Causa y arreglo del fallo Filemon → Mortadelo del 19-10:** apartar el servidor para Postfix y Dovecot, y la última sincronización de buzones se hacía DESPUÉS, sin Dovecot. Ahora se hace ANTES de apartar, con Postfix parado (los remitentes reintentan solos) y las webs funcionando; si falla, se reactiva Postfix y no se ha tocado nada más.
+- **Un cambio de mando fallaba tras apartar el servidor porque los buzones no se sincronizaban con la copia (39 de 39), dejando las webs caídas ~75 s para nada.** «Comprobar» sincroniza ahora un buzón de prueba con la copia ANTES de apartar nada, y el aviso de fallo incluye el motivo del primer buzón.
+- **El panel de rescate carga también los certificados de Let's Encrypt de los demás nombres con los que se entra al panel** (hosts extra de la guarda de Cloudflare, el nombre por defecto del DNS y la lista `panel_rescue_extra_names`), además de los del nombre del panel y de la máquina; Chrome exige certificado válido en todos los subdominios de un dominio con HSTS.
+
 ## [1.0.391] — 2026-10-19 — Menos avisos falsos tras un cambio de rol
 
 ### Corregido

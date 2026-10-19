@@ -64,7 +64,16 @@ foreach (preg_split('/\s+/', trim((string)shell_exec('hostname -I 2>/dev/null'))
 }
 // Y el nombre del panel y del servidor: quien entra por nombre (MCP, otros nodos,
 // navegador) necesita un certificado para ese nombre, o el TLS ni siquiera arranca.
-foreach ([(string)\MuseDockPanel\Settings::get('panel_hostname', ''), (string)gethostname()] as $h) {
+$extraNames = [];
+foreach ([(string)\MuseDockPanel\Settings::get('cf_guard_extra_hosts', ''), (string)\MuseDockPanel\Settings::get('panel_rescue_extra_names', ''),
+          (string)\MuseDockPanel\Settings::get('dns_default_target', '')] as $list) {
+    foreach (preg_split('/[\s,;]+/', $list) ?: [] as $n) {
+        $extraNames[] = $n;
+    }
+}
+// Otros nombres con los que se entra al panel (alias, nombres de máquina de los servidores del relevo): Chrome
+// exige certificado válido en todos los subdominios de un dominio con HSTS includeSubDomains.
+foreach (array_merge([(string)\MuseDockPanel\Settings::get('panel_hostname', ''), (string)gethostname()], $extraNames) as $h) {
     if ($h !== '' && preg_match('/^[a-z0-9.-]+$/i', $h)) {
         $names[] = strtolower($h);
     }

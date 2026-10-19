@@ -2412,6 +2412,9 @@ class ClusterService
     /** Para mostrar el avance en la terminal (bin/cluster-switch.php); en web no hace nada. */
     public static $progressCb = null;
 
+    /** true durante un cambio de mando planificado: el aviso explícito lo da RoleSwitchService, no los genéricos. */
+    public static bool $quietNotices = false;
+
     /** Se llama en cuanto el nodo promovido ya sirve con escritura (antes de lo lento). */
     public static $servingCb = null;
 
@@ -2653,10 +2656,12 @@ class ClusterService
 
         LogService::log('cluster.failover', 'promote', 'Servidor promovido a master (puertos 80/443 abiertos)' . (empty($errors) ? '' : ' (con errores: ' . implode(', ', $errors) . ')'));
 
-        NotificationService::send(
-            'Failover: Slave promovido a Master',
-            'El servidor ha sido promovido a Master. Puertos HTTP/HTTPS abiertos al publico.'
-        );
+        if (!self::$quietNotices) {
+            NotificationService::send(
+                'Failover: Slave promovido a Master',
+                'El servidor ha sido promovido a Master. Puertos HTTP/HTTPS abiertos al publico.'
+            );
+        }
 
         // Tell all other nodes to reconfigure replication to point to this (new) master
         $myIp = trim((string)shell_exec("hostname -I | awk '{print \$1}'"));
@@ -2902,10 +2907,12 @@ class ClusterService
 
         LogService::log('cluster.failover', 'demote', "Servidor degradado a slave, nuevo master: {$newMasterIp} (puertos 80/443 cerrados)" . (empty($errors) ? '' : ' (con errores: ' . implode(', ', $errors) . ')'));
 
-        NotificationService::send(
-            'Failover: Master degradado a Slave',
-            "El servidor ha sido degradado a Slave. Nuevo master: {$newMasterIp}. Puertos HTTP/HTTPS cerrados."
-        );
+        if (!self::$quietNotices) {
+            NotificationService::send(
+                'Failover: Master degradado a Slave',
+                "El servidor ha sido degradado a Slave. Nuevo master: {$newMasterIp}. Puertos HTTP/HTTPS cerrados."
+            );
+        }
 
         // Si este nodo estaba aislado como master caducado (fenceStaleMaster), ya es
         // legítimamente slave: se quita la marca y el solo-lectura forzado (el de la

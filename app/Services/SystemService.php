@@ -1200,13 +1200,31 @@ CONF;
      * escribe. Si existe, PATCH de la hoja; si no, la crea (caddyCreatePath).
      * @return array{0:bool,1:string} [ok, cuerpo de la respuesta]
      */
+    /** JSON con las claves de los objetos ordenadas (las listas conservan su orden): para comparar configuraciones. */
+    public static function canonicalJson(mixed $v): string
+    {
+        $norm = static function ($x) use (&$norm) {
+            if (!is_array($x)) {
+                return $x;
+            }
+            $x = array_map($norm, $x);
+            if (!array_is_list($x)) {
+                ksort($x);
+            }
+            return $x;
+        };
+        return (string)json_encode($norm($v), JSON_UNESCAPED_SLASHES);
+    }
+
     private static function caddySetLeaf(string $caddyApi, string $path, mixed $value): array
     {
         $path = trim($path, '/');
         [$code, $body] = self::caddyRequest('GET', "{$caddyApi}/config/{$path}");
         $b = trim($body);
         if ($code >= 200 && $code < 300 && $b !== '' && $b !== 'null') {
-            if (json_encode(json_decode($b, true)) === json_encode($value)) {
+            // Comparación canónica: Caddy devuelve las claves en su orden, no en el nuestro; con una comparación
+            // literal parecía distinto SIEMPRE y recargaba la config entera en cada vuelta (≈3 recargas/min en Filemon).
+            if (self::canonicalJson(json_decode($b, true)) === self::canonicalJson($value)) {
                 return [true, 'unchanged'];
             }
             [$code, $resp] = self::caddyRequest('PATCH', "{$caddyApi}/config/{$path}", $value);
@@ -1246,8 +1264,21 @@ CONF;
         // sobre /apps (¡borraba todas las apps, http incluida!).
         // caddySetLeaf no escribe si ya coinciden (idempotencia del incidente
         // TLS 2026-09-14) y el reemplazo de la hoja es atómico (sin ventana vacía).
+        // Si ya aplicamos EXACTAMENTE estas políticas hace menos de una hora y Caddy sigue con el mismo número,
+        // no se toca (cada escritura recarga todo Caddy y puede tirar alguna conexión TLS → 525 en Cloudflare).
+        $hashFile = dirname(__DIR__, 2) . '/storage/caddy-tls-policies.hash';
+        $want = md5(self::canonicalJson($policies));
+        $last = json_decode((string)@file_get_contents($hashFile), true) ?: [];
+        if (($last['hash'] ?? '') === $want && time() - (int)($last['at'] ?? 0) < 3600) {
+            [$gc, $gb] = self::caddyRequest('GET', "{$caddyApi}/config/apps/tls/automation/policies");
+            $cur = json_decode(trim($gb), true);
+            if ($gc >= 200 && $gc < 300 && is_array($cur) && count($cur) === count($policies)) {
+                return;
+            }
+        }
         [$ok, $resp] = self::caddySetLeaf($caddyApi, 'apps/tls/automation/policies', $policies);
         if ($ok) {
+            @file_put_contents($hashFile, json_encode(['hash' => $want, 'at' => time()]), LOCK_EX);
             return;
         }
 

@@ -20,6 +20,20 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.392',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Caddy se recargaba entero ~3 veces por minuto (comparación literal de las políticas TLS): ahora se comparan en forma canónica y no se reescribe lo ya aplicado hace menos de una hora (menos 525 sueltos de Cloudflare).',
+                        'Avisos del cambio de mando explícitos y con el servidor que avisa: en marcha, hecho (X es MASTER y H pasa a SLAVE), abortado (todo sigue en H) o a medias. Sin los avisos genéricos de promoción/degradación durante un cambio planificado.',
+                        'La última sincronización de buzones se hace ANTES de apartar el servidor (con Postfix parado y Dovecot arriba): apartar para Dovecot y la sincronización posterior fallaba en los 39 buzones (cambio Filemon → Mortadelo del 19-10).',
+                        '«Comprobar» sincroniza un buzón de prueba con la copia antes de apartar el servidor, y el aviso de fallo incluye el motivo; antes fallaba tras apartar y dejaba las webs caídas ~75 s.',
+                        'El panel de rescate carga también los certificados de Let\'s Encrypt de los demás nombres con los que se entra al panel (hosts extra de la guarda de Cloudflare, nombre por defecto del DNS, lista panel_rescue_extra_names).',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.391',
                 'date' => '2026-10-19',
                 'badge' => 'info',
