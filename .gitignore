@@ -22,3 +22,4 @@ storage/chatgpt-client/
 # Bytecode de Python (lo genera la prueba de la sonda)
 __pycache__/
 *.pyc
+storage/caddy-tls-policies.hash

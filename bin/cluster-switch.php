@@ -16,6 +16,7 @@
  *                                              MariaDB, Redis, correo, Caddy, hooks). --force
  *                                              solo si el master antiguo YA está apartado (fence).
  *   php bin/cluster-switch.php demote <ip-vpn-del-nuevo-master>
+ *   php bin/cluster-switch.php mysql-rejoin <ip-vpn-del-master>   (solo MariaDB: la deja como réplica del master actual)
  *                                              reconstruye ESTE nodo como slave del nuevo master
  *                                              (pg_rewind, MariaDB desde cero, Redis)
  *   php bin/cluster-switch.php switch-check <id-nodo>   (master) comprobaciones de un cambio de rol
@@ -117,6 +118,24 @@ switch ($cmd) {
         $r = ClusterService::demoteToSlave($ip);
         $out($r);
         $ok = !empty($r['ok']);
+        break;
+
+    case 'mysql-rejoin':
+        // Solo el paso de MariaDB del demote: deja la MariaDB de ESTE nodo como réplica del master <ip-vpn>
+        // (GTID si no hay nada divergente; si no, copia completa). Para un nodo que ya es copia del resto
+        // (PostgreSQL, Redis…) pero se quedó sin réplica de MariaDB. No toca nada más.
+        $ip = (string)($argv[2] ?? '');
+        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            fwrite(STDERR, "Falta la IP (de la VPN) del master actual: mysql-rejoin 10.10.70.X\n");
+            exit(1);
+        }
+        if (Settings::get('cluster_role', '') === 'master') {
+            fwrite(STDERR, "Este nodo es el MASTER: no se convierte en réplica de nadie. Ejecútalo en la copia.\n");
+            exit(1);
+        }
+        $r = ClusterService::rejoinMysqlAsSlave($ip);
+        $out($r);
+        $ok = empty($r['errors']);
         break;
 
     case 'switch-check':

@@ -343,10 +343,40 @@ class FailoverSafetyService
             }
         }
         if ($stopped) {
-            @mkdir(dirname(self::MAIL_STOPPED), 0755, true);
-            file_put_contents(self::MAIL_STOPPED, implode("\n", $stopped) . "\n");
+            self::rememberMailStopped($stopped);
         }
         return $stopped;
+    }
+
+    /** Anota unidades de correo paradas (suma a las ya anotadas: no pisa lo que paró otro paso). */
+    private static function rememberMailStopped(array $units): void
+    {
+        $prev = array_filter(array_map('trim', (array)@file(self::MAIL_STOPPED)));
+        @mkdir(dirname(self::MAIL_STOPPED), 0755, true);
+        file_put_contents(self::MAIL_STOPPED, implode("\n", array_values(array_unique(array_merge($prev, $units)))) . "\n");
+    }
+
+    /**
+     * Cambio de mando: para SOLO Postfix (no entra correo nuevo) para la última sincronización de buzones, con
+     * Dovecot y las webs aún funcionando. Queda anotado para que reactivar el nodo (o el demote) lo vuelva a arrancar:
+     * sin esa nota, el cambio Filemon → Mortadelo del 19-10 dejó Postfix parado en el nodo viejo.
+     */
+    public static function stopPostfixForSync(): bool
+    {
+        $u = 'postfix@-.service';
+        if (!in_array($u, self::mailUnits(), true)
+            || trim((string)shell_exec('systemctl is-active ' . escapeshellarg($u) . ' 2>/dev/null')) !== 'active') {
+            return false;
+        }
+        shell_exec('systemctl stop ' . escapeshellarg($u) . ' 2>&1');
+        self::rememberMailStopped([$u]);
+        return true;
+    }
+
+    /** Si la sincronización falla y no se aparta nada: Postfix vuelve a arrancar. */
+    public static function resumePostfixAfterSync(): void
+    {
+        self::resumeMailIntake();
     }
 
     /** Vuelve a arrancar lo que paró stopMailIntake (solo eso). */
@@ -745,6 +775,49 @@ class FailoverSafetyService
     }
 
     /**
+     * Tras promover: ¿las bases de este nodo ACEPTAN ESCRITURAS? (PostgreSQL fuera de recuperación y MariaDB sin
+     * read_only). Devuelve los problemas; vacío = todo bien. Si hay alguno, la promoción cuenta como fallida y el
+     * cambio de mando se deshace ANTES de mover el DNS (19-10: la MariaDB de Mortadelo se quedó en solo lectura y
+     * dos webs dieron 500 con el cambio dado por bueno).
+     */
+    public static function verifyDatabasesWritable(): array
+    {
+        $problems = [];
+        $panelPort = (int)\MuseDockPanel\Env::int('DB_PORT', 5432);
+        try {
+            foreach (PgClusterService::listClusters() as $c) {
+                if ($c['cluster'] === 'panel' || (int)$c['port'] === $panelPort) {
+                    continue;
+                }
+                // Recién promovido puede tardar unos segundos en salir de recuperación: se reintenta.
+                $inRecovery = true;
+                for ($try = 0; $try < 6 && $inRecovery; $try++) {
+                    $r = ReplicationService::queryCluster($c, 'select pg_is_in_recovery()');
+                    $v = $r[0][0] ?? null;
+                    $inRecovery = $v === null ? false : ($v === 't' || $v === true || $v === '1');   // sin dato = no se bloquea
+                    if ($inRecovery) {
+                        sleep(2);
+                    }
+                }
+                if ($inRecovery) {
+                    $problems[] = "PostgreSQL {$c['key']} sigue en recuperación (no acepta escrituras)";
+                }
+            }
+        } catch (\Throwable $e) {
+            $problems[] = 'no se pudo comprobar PostgreSQL: ' . $e->getMessage();
+        }
+        try {
+            $pdo = ReplicationService::getMysqlPdo();
+            if ($pdo && (string)$pdo->query('SELECT @@read_only')->fetchColumn() === '1') {
+                $problems[] = 'MariaDB/MySQL sigue en solo lectura (read_only=1)';
+            }
+        } catch (\Throwable $e) {
+            $problems[] = 'no se pudo comprobar MariaDB: ' . $e->getMessage();
+        }
+        return $problems;
+    }
+
+    /**
      * Promueve Redis si es réplica (REPLICAOF NO ONE) y lo persiste con CONFIG
      * REWRITE, que quita la línea replicaof de redis.conf: si no, el siguiente
      * reinicio lo volvería a convertir en réplica del master caído. Si Redis no
@@ -1068,8 +1141,17 @@ class FailoverSafetyService
      */
     public static function mysqlReplicationConfigured(): bool
     {
-        return (string)Settings::get('repl_mysql_role', 'standalone') !== 'standalone'
-            && (string)Settings::get('repl_mysql_enabled', '1') !== '0';
+        // Por lo que HAY, no solo por los ajustes: en Mortadelo repl_mysql_enabled=0 pero su MariaDB era una réplica
+        // real, y al omitirla tras un cambio de mando se quedó en solo lectura (19-10: musescript.com y telehub.tv, 500).
+        if ((string)Settings::get('repl_mysql_role', 'standalone') !== 'standalone') {
+            return true;
+        }
+        try {
+            $pdo = ReplicationService::getMysqlPdo();
+            return $pdo !== null && !empty($pdo->query('SHOW SLAVE STATUS')->fetch(\PDO::FETCH_ASSOC));
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     public static function promoteMysqlPersistent(bool $dryRun = false): array

@@ -527,10 +527,10 @@ class RoleSwitchService
         // Sin esto, lo borrado o recibido desde la última réplica no estaba en el nuevo master (2026-10-07).
         if (self::mailSyncAvailable()) {
             self::step($task, $st, 'Correo: dejando de aceptar correo nuevo y última sincronización de buzones con la copia (las webs siguen funcionando)…');
-            shell_exec('systemctl stop postfix@-.service 2>&1');
+            FailoverSafetyService::stopPostfixForSync();
             $mail = self::finalMailSync();
             if ($mail !== null && empty($mail['ok'])) {
-                shell_exec('systemctl start postfix@-.service 2>&1');
+                FailoverSafetyService::resumePostfixAfterSync();
                 $fail('los buzones no se pudieron sincronizar con la copia (' . $mail['detail'] . '). No se ha tocado nada: este servidor sigue sirviendo y el correo vuelve a entrar. '
                     . 'Revisa la réplica de correo (MCP mail_replication_status) antes de volver a intentarlo.');
                 return;

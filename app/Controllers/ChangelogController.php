@@ -20,6 +20,19 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.393',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Tras promover, el panel verifica que PostgreSQL no está en recuperación y MariaDB no está en solo lectura; si no, el cambio se deshace antes de mover el DNS.',
+                        'Nuevo cluster-switch mysql-rejoin <ip-vpn-del-master>: rehace solo la MariaDB de un nodo como réplica del master actual.',
+                        'Postfix se quedaba parado en el nodo que pasaba a copia: ahora el cambio anota que lo paró para sincronizar los buzones y lo arranca al reincorporarse.',
+                        'Tras un cambio de mando, la MariaDB del nodo promovido podía quedarse en solo lectura (webs con 500): el criterio de «MariaDB no está en replicación» miraba solo los ajustes; ahora mira también si de verdad es una réplica (SHOW SLAVE STATUS).',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.392',
                 'date' => '2026-10-19',
                 'badge' => 'info',

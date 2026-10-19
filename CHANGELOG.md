@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.393] — 2026-10-19 — Un cambio de mando ya no deja MariaDB en solo lectura
+
+### Corregido
+- **Tras el cambio Filemon → Mortadelo, la MariaDB de Mortadelo se quedó en solo lectura y dos webs dieron 500 (musescript.com, telehub.tv).** El criterio de la 1.0.389 («MariaDB no está en replicación») miraba solo los ajustes (`repl_mysql_enabled=0`) y omitió promover una réplica real. Ahora decide por lo que hay: ajustes con rol de replicación O un `SHOW SLAVE STATUS` no vacío.
+- **Comprobación final tras promover:** el panel verifica que PostgreSQL ya no está en recuperación y que MariaDB no está en solo lectura; si no, la promoción cuenta como fallida y el cambio se deshace ANTES de mover el DNS.
+- **Nuevo `php bin/cluster-switch.php mysql-rejoin <ip-vpn-del-master>`:** rehace solo la MariaDB de un nodo como réplica del master actual (GTID o copia completa), sin repetir la reincorporación de PostgreSQL.
+- **Postfix se quedaba parado en el nodo que pasaba a copia** (Filemon, 19-10): el cambio lo paraba antes de apartar para sincronizar los buzones y el apartado no lo anotaba como parado por él, así que al reincorporarse nadie lo arrancaba. Ahora queda anotado, y las anotaciones se suman en vez de pisarse.
+- **Los ficheros generados por el panel (`storage/caddy-tls-policies.hash`) no se versionan.**
+
 ## [1.0.392] — 2026-10-19 — «Comprobar» prueba el correo antes de apartar
 
 ### Añadido

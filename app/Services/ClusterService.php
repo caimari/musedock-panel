@@ -2426,6 +2426,76 @@ class ClusterService
     }
 
     /**
+     * Deja la MariaDB de ESTE nodo como réplica de $newMasterIp (por GTID si no hay nada divergente; si no, copia
+     * completa). Es el paso «MariaDB» del demote, aparte para poder repetirlo solo (cluster-switch mysql-rejoin).
+     * @return array{results:array,errors:array}
+     */
+    public static function rejoinMysqlAsSlave(string $newMasterIp): array
+    {
+        $results = [];
+        $errors = [];
+            try {
+                $mysqlUser = Settings::get('repl_mysql_user', 'repl_user');
+                $mysqlPass = ReplicationService::decryptPassword(Settings::get('repl_mysql_pass', ''));
+                $mysqlPort = (int)Settings::get('repl_mysql_port', '3306');
+
+                // MySQL/MariaDB has no pg_rewind: a former master that took writes
+                // during the outage has diverged from the new master. Doing a plain
+                // CHANGE MASTER over its existing datadir would apply the new
+                // master's binlog on top of divergent rows → silent corruption.
+                // seed=true forces a FULL rebuild from the new master (dump+import),
+                // discarding the divergent local data — the MySQL equivalent of the
+                // PG rewind/basebackup path. This is the only safe way to demote.
+                // Si este nodo no tiene nada que el nuevo master no tenga (cambio de roles
+                // limpio: se puso en solo lectura antes de promover al otro), basta con
+                // seguirle por GTID: solo llega lo nuevo, en segundos. Si no cuadra, copia
+                // completa (lo único seguro tras escrituras divergentes).
+                // ¿Ya replica de ese master y funciona? Entonces no hay nada que hacer: antes
+                // se volvía a comparar GTID y podía acabar en otra copia completa.
+                $already = [];
+                try {
+                    $already = ReplicationService::getMysqlPdo()?->query('SHOW SLAVE STATUS')->fetch(\PDO::FETCH_ASSOC) ?: [];
+                } catch (\Throwable) {
+                }
+                if (($already['Master_Host'] ?? '') === $newMasterIp && ($already['Slave_IO_Running'] ?? '') === 'Yes' && ($already['Slave_SQL_Running'] ?? '') === 'Yes') {
+                    $results['mysql_mode'] = 'ya replicaba de ' . $newMasterIp . ': no se toca';
+                    self::progress('MariaDB: ya es réplica de ' . $newMasterIp . ' y funciona: no se toca');
+                    $result = ['ok' => true, 'skipped' => 'ya replicando'];
+                } else {
+                $gtid = FailoverSafetyService::mysqlCanFollowByGtid($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass);
+                $results['mysql_mode'] = $gtid['ok'] ? 'solo lo nuevo (GTID)' : 'copia completa: ' . ($gtid['reason'] ?? '?');
+                self::progress('MariaDB: ' . $results['mysql_mode']);
+                $result = ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass, !$gtid['ok']);
+                if (!empty($result['ok']) && $gtid['ok']) {
+                    // Que de verdad replique: unos segundos y mirar los dos hilos.
+                    sleep(4);
+                    try {
+                        $st = ReplicationService::getMysqlPdo()?->query('SHOW SLAVE STATUS')->fetch(\PDO::FETCH_ASSOC) ?: [];
+                        if (($st['Slave_IO_Running'] ?? '') !== 'Yes' || ($st['Slave_SQL_Running'] ?? '') !== 'Yes') {
+                            $result = ['ok' => false, 'error' => 'réplica GTID no arrancó: ' . trim(($st['Last_IO_Error'] ?? '') . ' ' . ($st['Last_SQL_Error'] ?? ''))];
+                        }
+                    } catch (\Throwable $e) {
+                        $result = ['ok' => false, 'error' => $e->getMessage()];
+                    }
+                }
+                if (empty($result['ok']) && $gtid['ok']) {
+                    self::progress('MariaDB: el seguimiento por GTID falló; se hace la copia completa');
+                    $result = ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass, true);
+                    $results['mysql_mode'] = 'copia completa (falló el GTID)';
+                }
+                }
+                $results['mysql_demote'] = $result;
+                self::progress('MariaDB: ' . (!empty($result['ok']) ? 'OK, replicando' : 'ERROR ' . ($result['error'] ?? '')));
+                if (!$result['ok']) {
+                    $errors[] = 'MySQL demote: ' . ($result['error'] ?? 'Unknown error');
+                }
+            } catch (\Throwable $e) {
+                $errors[] = 'MySQL demote: ' . $e->getMessage();
+            }
+        return ['results' => $results, 'errors' => $errors];
+    }
+
+    /**
      * Promote this node to master.
      *
      * @param bool   $force       skip the fencing gate (DANGEROUS: only when you
@@ -2534,6 +2604,13 @@ class ClusterService
             }
         } catch (\Throwable $e) {
             $errors[] = 'Redis promote: ' . $e->getMessage();
+        }
+
+        // Comprobación final de las bases: si algo no acepta escrituras, la promoción falla (y el cambio se deshace
+        // antes de mover el DNS) en vez de dejar webs dando 500.
+        foreach (FailoverSafetyService::verifyDatabasesWritable() as $wp) {
+            self::progress('ATENCIÓN: ' . $wp);
+            $errors[] = 'Bases de datos: ' . $wp;
         }
 
         // This node is now the source of truth: it must NOT keep receiving files
@@ -2802,63 +2879,12 @@ class ClusterService
         if (!FailoverSafetyService::mysqlReplicationConfigured()) {
             $results['mysql_demote'] = ['ok' => true, 'skipped' => 'MySQL no está en réplica'];
         } else {
-            try {
-                $mysqlUser = Settings::get('repl_mysql_user', 'repl_user');
-                $mysqlPass = ReplicationService::decryptPassword(Settings::get('repl_mysql_pass', ''));
-                $mysqlPort = (int)Settings::get('repl_mysql_port', '3306');
-
-                // MySQL/MariaDB has no pg_rewind: a former master that took writes
-                // during the outage has diverged from the new master. Doing a plain
-                // CHANGE MASTER over its existing datadir would apply the new
-                // master's binlog on top of divergent rows → silent corruption.
-                // seed=true forces a FULL rebuild from the new master (dump+import),
-                // discarding the divergent local data — the MySQL equivalent of the
-                // PG rewind/basebackup path. This is the only safe way to demote.
-                // Si este nodo no tiene nada que el nuevo master no tenga (cambio de roles
-                // limpio: se puso en solo lectura antes de promover al otro), basta con
-                // seguirle por GTID: solo llega lo nuevo, en segundos. Si no cuadra, copia
-                // completa (lo único seguro tras escrituras divergentes).
-                // ¿Ya replica de ese master y funciona? Entonces no hay nada que hacer: antes
-                // se volvía a comparar GTID y podía acabar en otra copia completa.
-                $already = [];
-                try {
-                    $already = ReplicationService::getMysqlPdo()?->query('SHOW SLAVE STATUS')->fetch(\PDO::FETCH_ASSOC) ?: [];
-                } catch (\Throwable) {
-                }
-                if (($already['Master_Host'] ?? '') === $newMasterIp && ($already['Slave_IO_Running'] ?? '') === 'Yes' && ($already['Slave_SQL_Running'] ?? '') === 'Yes') {
-                    $results['mysql_mode'] = 'ya replicaba de ' . $newMasterIp . ': no se toca';
-                    self::progress('MariaDB: ya es réplica de ' . $newMasterIp . ' y funciona: no se toca');
-                    $result = ['ok' => true, 'skipped' => 'ya replicando'];
-                } else {
-                $gtid = FailoverSafetyService::mysqlCanFollowByGtid($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass);
-                $results['mysql_mode'] = $gtid['ok'] ? 'solo lo nuevo (GTID)' : 'copia completa: ' . ($gtid['reason'] ?? '?');
-                self::progress('MariaDB: ' . $results['mysql_mode']);
-                $result = ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass, !$gtid['ok']);
-                if (!empty($result['ok']) && $gtid['ok']) {
-                    // Que de verdad replique: unos segundos y mirar los dos hilos.
-                    sleep(4);
-                    try {
-                        $st = ReplicationService::getMysqlPdo()?->query('SHOW SLAVE STATUS')->fetch(\PDO::FETCH_ASSOC) ?: [];
-                        if (($st['Slave_IO_Running'] ?? '') !== 'Yes' || ($st['Slave_SQL_Running'] ?? '') !== 'Yes') {
-                            $result = ['ok' => false, 'error' => 'réplica GTID no arrancó: ' . trim(($st['Last_IO_Error'] ?? '') . ' ' . ($st['Last_SQL_Error'] ?? ''))];
-                        }
-                    } catch (\Throwable $e) {
-                        $result = ['ok' => false, 'error' => $e->getMessage()];
-                    }
-                }
-                if (empty($result['ok']) && $gtid['ok']) {
-                    self::progress('MariaDB: el seguimiento por GTID falló; se hace la copia completa');
-                    $result = ReplicationService::setupMysqlSlave($newMasterIp, $mysqlPort, $mysqlUser, $mysqlPass, true);
-                    $results['mysql_mode'] = 'copia completa (falló el GTID)';
-                }
-                }
-                $results['mysql_demote'] = $result;
-                self::progress('MariaDB: ' . (!empty($result['ok']) ? 'OK, replicando' : 'ERROR ' . ($result['error'] ?? '')));
-                if (!$result['ok']) {
-                    $errors[] = 'MySQL demote: ' . ($result['error'] ?? 'Unknown error');
-                }
-            } catch (\Throwable $e) {
-                $errors[] = 'MySQL demote: ' . $e->getMessage();
+            $my = self::rejoinMysqlAsSlave($newMasterIp);
+            foreach ($my['results'] as $k => $v) {
+                $results[$k] = $v;
+            }
+            foreach ($my['errors'] as $e) {
+                $errors[] = $e;
             }
         }
 
