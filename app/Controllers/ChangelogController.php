@@ -20,6 +20,19 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.388',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Lo que se creaba o cambiaba en el master (hostings, usuarios del sistema, buzones y alias de correo, la configuración del relevo y de la guarda de Cloudflare) esperaba a la siguiente vuelta del cron del clúster para llegar a las réplicas (hasta un minuto; la configuración del relevo, hasta 30). Ahora, al encolar cualquier operación hacia las réplicas, el master pide procesar la cola en el momento, en segundo plano y una sola vez por petición, con el mismo cerrojo que el cron y solo en el master sin apartar; el cron sigue de respaldo. Al guardar los ajustes de la guarda de Cloudflare o cambiar sus nombres extra, además, se envía la configuración al instante.',
+                    ],
+                    'added' => [
+                        'Prueba tests/cluster_kick_test.php (14).',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.387',
                 'date' => '2026-10-19',
                 'badge' => 'info',

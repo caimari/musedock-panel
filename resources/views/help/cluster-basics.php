@@ -171,3 +171,17 @@
         </p>
     </div>
 </div>
+
+<div class="card mt-4">
+    <div class="card-header"><i class="bi bi-lightning-charge me-2"></i>Qué llega a las réplicas al momento</div>
+    <div class="card-body small text-muted">
+        <p>Todo lo que se crea o cambia en el master y tiene que estar también en las réplicas viaja por una <strong>cola de operaciones</strong>: hostings y sus usuarios del sistema,
+            buzones, alias y dominios de correo, y la configuración del relevo y de la guarda de bloqueos de Cloudflare. <strong>Al encolar algo, el master pide procesar la cola
+            en el momento</strong> (en segundo plano, una vez por petición): llega en segundos. El cron del clúster (cada minuto) queda de respaldo y reintenta lo que falle.</p>
+        <ul class="mb-0">
+            <li>Si una réplica no responde en ese momento, la operación queda pendiente y se reintenta sola; se ve en <em>Cluster</em> y por MCP con <code>cluster_queue</code>.</li>
+            <li>Solo procesa el master, y nunca a la vez que el cron (mismo cerrojo). Un master apartado no empuja nada.</li>
+            <li>Los <strong>ficheros</strong> de las webs van aparte, por la copia de ficheros (lsyncd, unos segundos); los <strong>mensajes</strong> de los buzones, por Dovecot dsync.</li>
+        </ul>
+    </div>
+</div>

@@ -15,6 +15,7 @@
  */
 
 define('PANEL_ROOT', dirname(__DIR__));
+define('MUSEDOCK_QUEUE_WORKER', true);   // lo que el cron encola no lanza un procesado inmediato aparte
 define('PANEL_VERSION', '1.0.4');
 
 // Autoloader

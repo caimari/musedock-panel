@@ -84,5 +84,7 @@ ok('los nombres extra se exportan con la configuración', array_key_exists('extr
 $cfsrc = file_get_contents(PANEL_ROOT . '/app/Services/CfGuardService.php');
 ok('el inventario vigila los nombres extra (solo el nombre exacto, sin su www)', str_contains($cfsrc, 'foreach (self::extraHosts() as $x)') && str_contains($cfsrc, '$add($x, false)'));
 
+ok('al guardar los ajustes o cambiar los nombres extra el master los envía ya a las réplicas (sin esperar los 30 min)', str_contains(file_get_contents(PANEL_ROOT . '/app/Controllers/CfGuardController.php'), 'G::pushToPeers()') && str_contains(file_get_contents(PANEL_ROOT . '/bin/cf-guard-worker.php'), 'G::pushToPeers()'));
+
 echo "\n" . ($fail === 0 ? "\033[0;32mTodo correcto: {$pass} comprobaciones\033[0m" : "\033[0;31m{$fail} fallo(s) de " . ($pass + $fail) . "\033[0m") . "\n";
 exit($fail === 0 ? 0 : 1);

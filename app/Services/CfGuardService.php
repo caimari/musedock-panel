@@ -127,6 +127,20 @@ class CfGuardService
         return self::normalizeHostList(self::setting('extra_hosts', ''));
     }
 
+    /**
+     * Si manda este panel, envía ya su configuración de relevo (incluida la de esta guarda) a las réplicas, sin esperar a la repetición
+     * de cada 30 minutos del cron del clúster. Mejor esfuerzo: si falla, la repetición periódica lo envía.
+     */
+    public static function pushToPeers(): void
+    {
+        try {
+            if (Settings::get('cluster_role', '') === 'master' && Settings::get('cluster_fenced', '0') !== '1') {
+                FailoverService::pushConfigToSlaves();
+            }
+        } catch (\Throwable) {
+        }
+    }
+
     public static function addExtraHost(string $name): bool
     {
         $n = self::normalizeHostList($name);

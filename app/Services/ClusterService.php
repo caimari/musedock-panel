@@ -526,8 +526,27 @@ class ClusterService
     // ─── Queue Management ────────────────────────────────────
     // ═══════════════════════════════════════════════════════════
 
+    private static bool $kickRegistered = false;
+
+    /**
+     * Pide que la cola se procese YA (una vez por petición, al terminar): una configuración del relevo, un hosting, un usuario o un buzón nuevos
+     * llegan a las réplicas en segundos y no en la siguiente vuelta del cron. Segundo plano, sin esperar; solo en el master sin apartar.
+     */
+    private static function kickQueue(): void
+    {
+        if (self::$kickRegistered || defined('MUSEDOCK_QUEUE_WORKER') || Settings::get('cluster_role', '') !== 'master' || Settings::get('cluster_fenced', '0') === '1') {
+            return;
+        }
+        self::$kickRegistered = true;
+        register_shutdown_function(static function (): void {
+            $root = defined('PANEL_ROOT') ? PANEL_ROOT : dirname(__DIR__, 2);
+            @shell_exec('nohup /usr/bin/php ' . escapeshellarg($root . '/bin/cluster-queue-kick.php') . ' >/dev/null 2>&1 &');
+        });
+    }
+
     public static function enqueue(int $nodeId, string $action, array $payload, int $priority = 5, int $maxAttempts = 3): int
     {
+        self::kickQueue();   // procesar ya (una vez por petición), sin esperar a la vuelta del cron
         $idempotencyKey = self::buildQueueIdempotencyKey($nodeId, $action, $payload);
         if ($idempotencyKey !== null) {
             $existing = Database::fetchOne(

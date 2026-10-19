@@ -41,6 +41,7 @@ if (isset($opts['add-host']) || isset($opts['remove-host']) || isset($opts['host
         G::removeExtraHost((string) $opts['remove-host']);
         echo "Quitado: " . strtolower(trim((string) $opts['remove-host'])) . "\n";
     }
+    G::pushToPeers();
     $h = G::extraHosts();
     echo $h ? "Nombres extra vigilados (" . count($h) . "):\n  " . implode("\n  ", $h) . "\nSe leen de Cloudflare en la próxima lectura (cada 30 min) o con --inventory.\n" : "No hay nombres extra.\n";
     exit(0);

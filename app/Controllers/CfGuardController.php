@@ -120,6 +120,7 @@ class CfGuardController
         $ex = implode("\n", array_slice(array_filter(array_map(fn ($l) => strtolower(trim($l, " \t.")), preg_split('/[\r\n,]+/', (string) ($_POST['excluded'] ?? '')))), 0, 500));
         G::setSetting('excluded', $ex);
         G::setSetting('extra_hosts', implode("\n", G::normalizeHostList((string) ($_POST['extra_hosts'] ?? ''))));
+        G::pushToPeers();
         Flash::set('success', 'Ajustes guardados.');
         Router::redirect(self::BACK);
     }

@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.388] — 2026-10-19 — Lo que se crea o cambia en el master llega a las réplicas al momento
+
+### Corregido
+- **Lo que se creaba o cambiaba en el master (hostings, usuarios del sistema, buzones y alias de correo, la configuración del relevo y de la guarda de bloqueos de Cloudflare) esperaba a la siguiente vuelta del cron del clúster para llegar a las réplicas** (hasta un minuto) y, en el caso de la configuración del relevo, hasta la repetición de cada 30 minutos. Era un hueco real: si el master caía o se pasaba el mando justo después de un cambio crítico (los «Nombres extra a vigilar» de la guarda de Cloudflare, un hosting nuevo, un buzón), la réplica no lo tenía. Ahora, al encolar cualquier operación hacia las réplicas, el master pide procesar la cola **en el momento**, en segundo plano y una sola vez por petición (`bin/cluster-queue-kick.php`): llega en segundos. Es el mismo paso que hace el cron, con **el mismo cerrojo** (nunca dos a la vez), solo en el master y sin apartar; el cron sigue como respaldo. Al guardar los ajustes de la guarda de Cloudflare o cambiar sus nombres extra, el master envía además su configuración al instante (`CfGuardService::pushToPeers`).
+
+### Añadido
+- Pruebas: `tests/cluster_kick_test.php` (14); `tests/cf_guard_sync_test.php` sube a 25.
+
 ## [1.0.387] — 2026-10-19 — El relevo automático también cubre la cadena de caídas
 
 ### Corregido
