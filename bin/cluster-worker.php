@@ -189,7 +189,10 @@ foreach ([
     }
 }
 // Qué le falta a este nodo para tomar el mando de verdad (cada 30 min; avisa una vez por cosa nueva)
-if (time() - (int)Settings::get('ha_readiness_run_at', '0') >= 1800) {
+// Tras actualizar el panel, el resultado guardado es de la versión anterior (puede mostrar un aviso ya corregido): se repite enseguida.
+$hrStored = json_decode((string)Settings::get('ha_readiness_last', 'null'), true);
+$hrStale = ($hrStored['version'] ?? '') !== \MuseDockPanel\Services\UpdateService::currentVersion();
+if (time() - (int)Settings::get('ha_readiness_run_at', '0') >= 1800 || $hrStale) {
     Settings::set('ha_readiness_run_at', (string)time());
     try {
         $hr = \MuseDockPanel\Services\ClusterGuardService::checkAndNotify();
@@ -219,7 +222,9 @@ if (Settings::get('cluster_role', 'standalone') === 'slave' && Settings::get('cl
 
 // ─── Step 0c: Auditoría del firewall (cada 15 min, en cualquier rol) ──
 // Para el aviso del dashboard si algo sensible queda expuesto a internet.
-if (time() - (int)Settings::get('firewall_audit_run_at', '0') >= 900) {
+$fwStored = json_decode((string)Settings::get('firewall_audit_last', 'null'), true);
+$fwStale = is_array($fwStored) && ($fwStored['version'] ?? '') !== \MuseDockPanel\Services\UpdateService::currentVersion();
+if (time() - (int)Settings::get('firewall_audit_run_at', '0') >= 900 || $fwStale) {
     Settings::set('firewall_audit_run_at', (string)time());
     try {
         $fwAudit = \MuseDockPanel\Services\FirewallAuditService::refreshStored();

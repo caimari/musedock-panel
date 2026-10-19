@@ -633,6 +633,39 @@ class ClusterGuardService
         return $planAction === 'skip' && $originVirtual === true ? 'info' : 'warn';
     }
 
+    /**
+     * Qué ha pasado con el correo del propio sistema (cron, root…) en un registro de Postfix: los mensajes cuyo
+     * destinatario se escribió SIN dominio («orig_to=<root>», que Postfix completa con el dominio de origen).
+     * Sirve para comprobar con hechos que llega (o rebota), en vez de suponerlo. Puro.
+     * @param iterable<string> $lines
+     * @return array{sent:int,bounced:int,deferred:int}
+     */
+    public static function systemMailDeliveryEvidence(iterable $lines): array
+    {
+        $out = ['sent' => 0, 'bounced' => 0, 'deferred' => 0];
+        foreach ($lines as $l) {
+            if (preg_match('/postfix\/(?:smtp|local|virtual|lmtp|error)\[\d+\]: [0-9A-Za-z]{6,}: to=<[^>]*>, orig_to=<([^>@]*)>.*?status=(\w+)/', (string)$l, $m)) {
+                if (isset($out[$m[2]])) {
+                    $out[$m[2]]++;
+                }
+            }
+        }
+        return $out;
+    }
+
+    /** Las últimas líneas del registro de Postfix (unos cientos de KB; vacío si no se puede leer). @return list<string> */
+    public static function recentMailLog(int $bytes = 600000): array
+    {
+        foreach (['/var/log/mail.log', '/var/log/maillog'] as $f) {
+            if (is_readable($f)) {
+                $size = (int)@filesize($f);
+                $t = (string)@file_get_contents($f, false, null, max(0, $size - $bytes));
+                return $t === '' ? [] : explode("\n", $t);
+            }
+        }
+        return [];
+    }
+
     /** Fallos de configuración del correo del sistema para readiness(). Solo lectura. */
     public static function systemMailIssues(): array
     {
@@ -669,7 +702,20 @@ class ClusterGuardService
                 }
             } catch (\Throwable) {
             }
-            $issues[] = ['severity' => $severity, 'key' => 'system-mail-origin', 'text' => $problem, 'doc' => '/docs/system-mail'];
+            // Con el origen en un dominio con correo real, se comprueba con el registro si el correo del sistema llega o rebota
+            if ($severity === 'info') {
+                $ev = self::systemMailDeliveryEvidence(self::recentMailLog());
+                if ($ev['bounced'] > 0) {
+                    $severity = 'warn';
+                    $problem = "El correo del propio servidor (cron, root…) está REBOTANDO: {$ev['bounced']} rebotados y {$ev['sent']} entregados en el registro reciente. "
+                        . 'Sale como usuario@' . ($pf['origin'] ?? 'su dominio') . ' hacia el servidor de correo de ese dominio, que no tiene buzón ni alias para esos usuarios: crea allí un alias de root (o un catch-all) a un buzón real, o pon myorigin = $myhostname.';
+                } elseif ($ev['sent'] > 0) {
+                    $problem = '';   // comprobado con hechos: llega a un buzón real; no hay nada que avisar
+                }
+            }
+            if ($problem !== '') {
+                $issues[] = ['severity' => $severity, 'key' => 'system-mail-origin', 'text' => $problem, 'doc' => '/docs/system-mail'];
+            }
         }
         // Postfix con un mapa de consultas sin contraseña: rechaza TODO envío autenticado («Temporary lookup failure»)
         try {
@@ -801,6 +847,7 @@ class ClusterGuardService
     public static function checkAndNotify(): array
     {
         $r = self::readiness();
+        $r['version'] = UpdateService::currentVersion();   // un resultado guardado por una versión anterior se recalcula tras actualizar
         Settings::set('ha_readiness_last', json_encode($r));
         $warn = array_values(array_filter($r['issues'], static fn($i) => $i['severity'] === 'warn'));
         $keys = array_map(static fn($i) => $i['key'], $warn);

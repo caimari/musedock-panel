@@ -181,5 +181,18 @@ ok('algo que el panel sí puede arreglar sigue siendo aviso', G::systemMailSever
 ok('si no se pudo comprobar, sigue siendo aviso', G::systemMailSeverity('skip', null) === 'warn');
 ok('configuración propia del administrador (no virtual): sigue siendo aviso', G::systemMailSeverity('skip', false) === 'warn');
 
+section('10. Correo del sistema de un nodo relé: se comprueba con el registro si llega o rebota');
+$okLines = [
+    'Oct 18 18:22:48 asterisk postfix/smtp[48240]: 79F13110071C: to=<root@muserelay.com>, orig_to=<root>, relay=mail.musedock.com[213.201.21.154]:25, delay=0.71, dsn=2.0.0, status=sent (250 2.0.0 Ok: queued as D58551825ECD)',
+    'Oct 18 18:31:04 asterisk postfix/smtp[48240]: 54AB41100731: to=<root@muserelay.com>, orig_to=<root>, relay=mail.musedock.com[213.201.21.154]:25, dsn=2.0.0, status=sent (250 2.0.0 Ok)',
+];
+$ev = G::systemMailDeliveryEvidence($okLines);
+ok('el caso real de asterisk (root → alias, status=sent) cuenta como entregado', $ev === ['sent' => 2, 'bounced' => 0, 'deferred' => 0], json_encode($ev));
+$bad = ['Oct 18 18:00:00 h postfix/smtp[1]: AAAAAA11: to=<root@dominio.example>, orig_to=<root>, relay=mx.dominio.example[1.2.3.4]:25, dsn=5.1.1, status=bounced (host said: 550 5.1.1 User unknown)'];
+ok('un rebote del correo del sistema se cuenta', G::systemMailDeliveryEvidence($bad)['bounced'] === 1);
+$web = ['Oct 18 18:00:00 h postfix/smtp[1]: AAAAAA22: to=<cliente@gmail.com>, orig_to=<cliente@gmail.com>, relay=x[1.2.3.4]:25, dsn=2.0.0, status=sent (250 ok)'];
+ok('un correo normal (destinatario con dominio) NO cuenta como correo del sistema', G::systemMailDeliveryEvidence($web) === ['sent' => 0, 'bounced' => 0, 'deferred' => 0]);
+ok('sin registro no hay evidencia (se queda en información)', G::systemMailDeliveryEvidence([]) === ['sent' => 0, 'bounced' => 0, 'deferred' => 0]);
+
 echo "\n" . ($fail === 0 ? "\033[0;32mTodo correcto: {$pass} comprobaciones\033[0m" : "\033[0;31m{$fail} fallo(s) de " . ($pass + $fail) . "\033[0m") . "\n";
 exit($fail === 0 ? 0 : 1);

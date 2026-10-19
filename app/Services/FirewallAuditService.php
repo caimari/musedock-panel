@@ -168,6 +168,7 @@ final class FirewallAuditService
         $a = self::audit();
         if (!empty($a['ok'])) {
             Settings::set('firewall_audit_last', json_encode([
+                'version' => UpdateService::currentVersion(),
                 'at' => $a['checked_at'], 'critical' => $a['critical'], 'warnings' => $a['warnings'],
                 'summary' => $a['summary'],
                 'top' => array_slice(array_map(static fn($f) => $f['text'], array_filter($a['findings'], static fn($f) => $f['level'] !== 'info')), 0, 5),

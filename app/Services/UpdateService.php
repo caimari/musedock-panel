@@ -350,7 +350,7 @@ class UpdateService
         return $rc === 0;
     }
 
-    private static function currentVersion(): string
+    public static function currentVersion(): string
     {
         if (defined('PANEL_VERSION')) {
             return (string) constant('PANEL_VERSION');

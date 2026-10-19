@@ -2,6 +2,13 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.385] — 2026-10-19 — Los avisos del dashboard se recalculan solos tras actualizar
+
+### Corregido
+- **El correo de `cron` de la copia horaria de la base del panel mandaba un correo a root cada hora.** `/etc/cron.d/musedock-backup` lanza `pg_dump` con `runuser`, que entra en el directorio actual (`/root`), y `pg_dump` se quejaba cada vez («Could not change directory to /root: Permission denied»): 24 correos al día a root sin motivo. La tarea empieza ahora en `/tmp` (`cd /tmp && …`); el actualizador reescribe el fichero si no lo lleva ya.
+- **El aviso del correo del sistema en nodos relé o de envío (asterisk, Obelix) se comprueba ahora con hechos.** Si el origen es un dominio con correo real en otro servidor, el panel mira el registro de Postfix reciente: si el correo del sistema (destinatarios escritos sin dominio, como `root`) **se entrega** (`status=sent`), no muestra nada; si **rebota**, avisa en amarillo con el motivo y qué hacer (un alias de root o un catch-all en el servidor de ese dominio, o `myorigin = $myhostname`); si no hay correo reciente que comprobar, queda como información. Antes avisaba siempre, aunque el correo llegara bien.
+- **Tras actualizar el panel, el dashboard seguía mostrando avisos que la versión nueva ya no da** (el del correo del sistema y el de reglas de iptables repetidas en asterisk, aun con la corrección instalada), porque cada aviso es un resultado guardado que solo se recalcula cada 30 minutos (preparación para tomar el mando) o 15 (firewall). Ahora cada resultado guardado lleva la versión del panel que lo calculó: si no coincide con la instalada, el dashboard **no lo muestra** y el cron del clúster lo recalcula en su próxima vuelta (≤ 1 minuto). Así cada actualización deja los avisos al día sin esperar ni ejecutar nada a mano.
+
 ## [1.0.384] — 2026-10-19 — El historial de cambios vuelve a mostrar su contenido
 
 ### Corregido

@@ -116,7 +116,8 @@ class DashboardController
             // Qué le falta a este nodo para tomar el mando (ClusterGuardService, cada 30 min en el worker).
             'haReadiness' => (static function () {
                 $r = json_decode(Settings::get('ha_readiness_last', 'null'), true);
-                if (!is_array($r)) {
+                // Guardado por una versión anterior: puede mostrar un aviso ya corregido; el cron lo recalcula en ≤1 min tras actualizar
+                if (!is_array($r) || ($r['version'] ?? '') !== \MuseDockPanel\Services\UpdateService::currentVersion()) {
                     return null;
                 }
                 $warn = array_values(array_filter((array)($r['issues'] ?? []), static fn($i) => ($i['severity'] ?? '') === 'warn'));
@@ -125,8 +126,8 @@ class DashboardController
             // Última auditoría del firewall (la refresca el cluster-worker cada 15 min).
             'firewallAudit' => (static function () {
                 $fw = json_decode(Settings::get('firewall_audit_last', 'null'), true);
-                if (!is_array($fw)) {
-                    return null;
+                if (!is_array($fw) || ($fw['version'] ?? '') !== \MuseDockPanel\Services\UpdateService::currentVersion()) {
+                    return null;   // sin resultado o guardado por una versión anterior: se recalcula en ≤1 min
                 }
                 // Avisos (no críticos) ya vistos con "Entendido" y sin cambios: no se muestran.
                 if ((int)($fw['critical'] ?? 0) === 0

@@ -20,6 +20,18 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.385',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'La copia horaria de la base del panel mandaba un correo a root cada hora: pg_dump, lanzado con runuser desde /root, se quejaba de no poder entrar en ese directorio (24 correos al día). La tarea empieza ahora en /tmp; el actualizador reescribe el fichero.',
+                        'El aviso del correo del sistema en nodos relé o de envío (asterisk, Obelix) se comprueba ahora con hechos: si en el registro de Postfix ese correo (destinatarios sin dominio, como root) se entrega, no muestra nada; si rebota, avisa en amarillo con el motivo y qué hacer; si no hay correo reciente, queda como información.',
+                        'Tras actualizar el panel, el dashboard seguía mostrando avisos que la versión nueva ya no da (correo del sistema y reglas de iptables repetidas), porque cada aviso es un resultado guardado que solo se recalcula cada 30 o 15 minutos. Ahora cada resultado guardado lleva la versión del panel que lo calculó: si no coincide con la instalada, el dashboard no lo muestra y el cron del clúster lo recalcula en ≤ 1 minuto.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.384',
                 'date' => '2026-10-19',
                 'badge' => 'info',
