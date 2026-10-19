@@ -20,6 +20,17 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.394',
+                'date' => '2026-10-19',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Los avisos de «ya está bien» (nodo preparado, servicio recuperado) ya no se contradicen con la explicación del pie: sirve para el aviso y para su recuperación.',
+                        'El promote quita read_only de todos los ficheros de configuración de MariaDB, no solo del primero que exista.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.393',
                 'date' => '2026-10-19',
                 'badge' => 'info',

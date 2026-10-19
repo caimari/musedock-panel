@@ -2,6 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.394] — 2026-10-19 — El promote quita read_only de todos los ficheros de MariaDB
+
+### Corregido
+- **Avisos de «ya está bien» que se contradecían con su explicación** («Nodo preparado para tomar el mando» decía debajo «no está del todo preparado»; «Recuperado: servicio» decía «está parado»): la explicación de «Nodo preparado» y de «Servicio caído» sirve ahora para el aviso y para su recuperación.
+- **El promote quita `read_only` de TODOS los ficheros de configuración de MariaDB, no solo del primero que exista** (en Mortadelo estaba en `50-server.cnf` y volvería a solo lectura en el siguiente reinicio).
+
 ## [1.0.393] — 2026-10-19 — Un cambio de mando ya no deja MariaDB en solo lectura
 
 ### Corregido

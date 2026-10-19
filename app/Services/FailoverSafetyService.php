@@ -1204,8 +1204,23 @@ class FailoverSafetyService
         }
 
         // Persist: strip read_only so a restart does not re-apply it.
-        $persisted = self::stripReadOnlyFromConfig($configPath);
-        $steps[] = ['name' => 'Persistir en my.cnf', 'ok' => $persisted['ok'], 'output' => $persisted['message']];
+        // En TODOS los ficheros de configuración (no solo el primero que exista): en Mortadelo el read_only = 1 estaba
+        // en 50-server.cnf y se miraba otro fichero (19-10).
+        $files = array_unique(array_merge([$configPath], ['/etc/mysql/my.cnf', '/etc/mysql/mariadb.cnf'],
+            glob('/etc/mysql/{conf.d,mariadb.conf.d,mysql.conf.d}/*.cnf', GLOB_BRACE) ?: []));
+        $okAll = true;
+        $msgs = [];
+        foreach ($files as $f) {
+            if (!is_file($f)) {
+                continue;
+            }
+            $one = self::stripReadOnlyFromConfig($f);
+            $okAll = $okAll && $one['ok'];
+            if (!str_contains($one['message'], 'no estaba fijado')) {
+                $msgs[] = basename($f) . ': ' . $one['message'];
+            }
+        }
+        $steps[] = ['name' => 'Persistir en my.cnf', 'ok' => $okAll, 'output' => $msgs ? implode('; ', $msgs) : 'read_only no estaba fijado en ningún fichero'];
 
         return ['ok' => true, 'steps' => $steps];
     }
