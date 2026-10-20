@@ -443,9 +443,16 @@ final class McpTools
         if (!$d) {
             throw new \RuntimeException("El dominio de correo {$domain} no existe en este panel.");
         }
-        $accounts = Database::fetchAll(
-            "SELECT email, display_name, status, quota_mb, used_mb, send_mode, can_send, rate_limit_per_hour, last_login_at
-             FROM mail_accounts WHERE mail_domain_id = :i ORDER BY email", ['i' => $d['id']]);
+        try {
+            // copy_to: «Enviar copia a…» (columna nueva; en un nodo sin migrar se omite)
+            $accounts = Database::fetchAll(
+                "SELECT email, display_name, status, quota_mb, used_mb, send_mode, can_send, rate_limit_per_hour, last_login_at, copy_to
+                 FROM mail_accounts WHERE mail_domain_id = :i ORDER BY email", ['i' => $d['id']]);
+        } catch (\Throwable) {
+            $accounts = Database::fetchAll(
+                "SELECT email, display_name, status, quota_mb, used_mb, send_mode, can_send, rate_limit_per_hour, last_login_at
+                 FROM mail_accounts WHERE mail_domain_id = :i ORDER BY email", ['i' => $d['id']]);
+        }
         $aliases = Database::fetchAll(
             "SELECT source, destination, is_catchall FROM mail_aliases WHERE mail_domain_id = :i ORDER BY source", ['i' => $d['id']]);
         return ['domain' => $d, 'mailboxes' => $accounts, 'aliases' => $aliases];

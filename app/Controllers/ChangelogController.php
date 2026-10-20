@@ -20,6 +20,18 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.399',
+                'date' => '2026-10-20',
+                'badge' => 'info',
+                'changes' => [
+                    'added' => [
+                        '«Enviar copia a…» por buzón (Correo → editar buzón): cada mensaje se queda en el buzón y además se manda una copia a otra dirección, con recipient_bcc_maps de Postfix (un alias sustituye la entrega al buzón, no la copia). Viaja a las réplicas de correo; el mapa se instala solo al configurar la primera copia, con vuelta atrás si falla.',
+                        'Buzones y alias ordenables: clic en la cabecera de una columna ordena la tabla (email, destino, cuota, correos…); otro clic invierte.',
+                        'MCP mail_domain muestra la copia de cada buzón.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.398',
                 'date' => '2026-10-19',
                 'badge' => 'info',

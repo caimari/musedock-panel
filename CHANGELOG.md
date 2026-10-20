@@ -2,6 +2,14 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.399] — 2026-10-20 — «Enviar copia a…» en los buzones y tablas de correo ordenables
+
+### Añadido
+- **«Enviar copia a…» por buzón (Correo → editar buzón):** cada mensaje que llega al buzón se queda en él y además se manda una copia a otra dirección (también lo que llega por alias de ese buzón). Hecho con `recipient_bcc_maps` de Postfix, no con un alias: un alias hacia otra dirección **sustituye** la entrega al buzón (se comprobó el 20-10 con `support@`/`webmaster@`). Una sola dirección por buzón; no se admite una dirección inválida ni la del propio buzón. El mapa de Postfix (`/etc/postfix/pgsql-recipient-bcc.cf`, con las credenciales del mapa de remitentes) se instala solo la primera vez que alguien configura una copia, con copia de seguridad de `main.cf`, comprobación con `postfix check`/`postmap` y vuelta atrás si falla. El ajuste viaja a las réplicas de correo con el resto de datos del buzón (columna nueva `mail_accounts.copy_to`, migración incluida).
+- **Buzones y alias ordenables:** clic en la cabecera de una columna (email, destino, cuota, correos…) ordena la tabla; otro clic invierte el orden y se recuerda por tabla. Sirve para agrupar los alias por destino.
+- La herramienta MCP `mail_domain` muestra la copia de cada buzón.
+- Prueba: `tests/mail_copy_test.php` (14).
+
 ## [1.0.398] — 2026-10-19 — El bloqueo de ficheros sensibles, con interruptor en cada hosting
 
 ### Añadido

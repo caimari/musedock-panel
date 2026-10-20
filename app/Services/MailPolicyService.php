@@ -30,6 +30,7 @@ use MuseDockPanel\Database;
 class MailPolicyService
 {
     private const SENDER_LOGIN_CF = '/etc/postfix/pgsql-sender-login.cf';
+    public const COPY_MAP_CF = '/etc/postfix/pgsql-recipient-bcc.cf';
     private const RSPAMD_RATELIMIT = '/etc/rspamd/local.d/ratelimit.conf';
     private const FAIL2BAN_JAIL = '/etc/fail2ban/jail.d/musedock-mail.conf';
 
@@ -287,6 +288,96 @@ class MailPolicyService
         }
         $p = self::probeSenderMap();
         return ['ok' => $p['ok'], 'probe' => $p['probe'], 'rolled_back' => false, 'output' => $p['ok'] ? 'Mapa instalado y ' . $p['output'] : 'Mapa instalado pero la comprobación falló: ' . $p['output']];
+    }
+
+    // ─────────────────────────────────────────────────────
+    // «Enviar copia a…»: recipient_bcc_maps (copia real, el buzón conserva el original)
+    // ─────────────────────────────────────────────────────
+
+    /** Consulta del mapa: la dirección de copia de un buzón activo, o nada. Pura. */
+    public static function copyMapQuery(): string
+    {
+        return "SELECT copy_to FROM mail_accounts WHERE email = '%s' AND status = 'active' AND COALESCE(copy_to, '') <> '' LIMIT 1";
+    }
+
+    /** Contenido del .cf: las líneas de conexión del mapa de remitentes + la consulta de copia. Pura. */
+    public static function copyMapConf(string $senderCf): ?string
+    {
+        $keep = [];
+        foreach (preg_split('/\R/', $senderCf) ?: [] as $l) {
+            if (preg_match('/^\s*(hosts|user|password|dbname)\s*=\s*\S/', $l)) {
+                $keep[] = trim($l);
+            }
+        }
+        $keys = array_map(static fn($l) => strtolower(trim(explode('=', $l, 2)[0])), $keep);
+        if (array_diff(['hosts', 'user', 'password', 'dbname'], $keys)) {
+            return null;   // sin contraseña o sin base: no se escribe un mapa que rompería la entrega
+        }
+        return implode("\n", $keep) . "\nquery = " . self::copyMapQuery() . "\n";
+    }
+
+    /** Valor nuevo de recipient_bcc_maps con nuestro mapa añadido sin pisar lo que ya hubiera. Pura. */
+    public static function withCopyMap(string $current): string
+    {
+        $ours = 'pgsql:' . self::COPY_MAP_CF;
+        $current = trim($current);
+        if ($current === '') {
+            return $ours;
+        }
+        return str_contains($current, $ours) ? $current : $current . ', ' . $ours;
+    }
+
+    /** Dirección de copia válida: un correo, distinto del propio buzón. '' si no. Pura. */
+    public static function normalizeCopyTo(string $copyTo, string $mailbox): string
+    {
+        $c = strtolower(trim($copyTo));
+        if ($c === '' || !filter_var($c, FILTER_VALIDATE_EMAIL) || $c === strtolower($mailbox)) {
+            return '';
+        }
+        return $c;
+    }
+
+    /**
+     * Instala (si falta) el mapa de copias de ESTE servidor y lo conecta a Postfix. Idempotente. Con las mismas
+     * credenciales que el mapa de remitentes, copia de seguridad de main.cf, comprobación con postfix check y vuelta
+     * atrás si falla. No hace nada mientras ningún buzón tenga copia (se llama solo cuando se configura una).
+     */
+    public static function ensureCopyMap(): array
+    {
+        $current = trim((string)shell_exec('postconf -h recipient_bcc_maps 2>/dev/null'));
+        $ours = 'pgsql:' . self::COPY_MAP_CF;
+        if (is_file(self::COPY_MAP_CF) && str_contains($current, $ours)) {
+            return ['ok' => true, 'changed' => false];
+        }
+        if (!is_file(self::SENDER_LOGIN_CF)) {
+            return ['ok' => false, 'changed' => false, 'error' => 'No hay mapa de remitentes del que copiar las credenciales (Correo → política de envío).'];
+        }
+        $conf = self::copyMapConf((string)@file_get_contents(self::SENDER_LOGIN_CF));
+        if ($conf === null) {
+            return ['ok' => false, 'changed' => false, 'error' => 'El mapa de remitentes no tiene credenciales completas: no se instala el de copias.'];
+        }
+        if (@file_put_contents(self::COPY_MAP_CF, $conf) === false) {
+            return ['ok' => false, 'changed' => false, 'error' => 'No se pudo escribir ' . self::COPY_MAP_CF];
+        }
+        @chmod(self::COPY_MAP_CF, 0640);
+        @chgrp(self::COPY_MAP_CF, 'postfix');
+        $mainBak = '/etc/postfix/main.cf.bak.copymap.' . date('Ymd_His');
+        @copy('/etc/postfix/main.cf', $mainBak);
+        static::runCmd('postconf -e ' . escapeshellarg('recipient_bcc_maps = ' . self::withCopyMap($current)));
+        $chk = static::runCmd('postfix check');
+        $probe = static::runCmd('postmap -q probe@invalid.test ' . escapeshellarg($ours));
+        if (!$chk['ok'] || !$probe['ok']) {
+            if (is_file($mainBak)) {
+                @copy($mainBak, '/etc/postfix/main.cf');
+            }
+            @unlink(self::COPY_MAP_CF);
+            static::runCmd('postfix reload');
+            LogService::log('mail.policy', 'copy-map-failed', 'Mapa de copias: ' . ($chk['ok'] ? $probe['output'] : $chk['output']));
+            return ['ok' => false, 'changed' => false, 'rolled_back' => true, 'error' => 'La comprobación de Postfix falló; se ha dejado como estaba.'];
+        }
+        static::runCmd('postfix reload');
+        LogService::log('mail.policy', 'copy-map', 'recipient_bcc_maps instalado (copias por buzón)');
+        return ['ok' => true, 'changed' => true];
     }
 
     /**

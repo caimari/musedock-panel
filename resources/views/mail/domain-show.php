@@ -204,7 +204,7 @@
                 <?php endif; ?>
             </div>
         <?php else: ?>
-            <table class="table table-hover mb-0">
+            <table class="table table-hover mb-0 js-sortable" data-sort-key="mailboxes">
                 <thead>
                     <tr>
                         <?php if (!$ro): ?><th class="ps-3" style="width:28px;"><input type="checkbox" class="form-check-input bulk-all" data-group="accounts" title="Seleccionar todos"></th><?php endif; ?>
@@ -285,7 +285,7 @@
     </div>
     <div class="card-body">
         <?php if (!empty($aliases)): ?>
-            <table class="table table-sm mb-3">
+            <table class="table table-sm mb-3 js-sortable" data-sort-key="aliases">
                 <thead>
                     <tr><?php if (!$ro): ?><th style="width:28px;"><input type="checkbox" class="form-check-input bulk-all" data-group="aliases" title="Seleccionar todos"></th><?php endif; ?><th>Source</th><th>Destination</th><th>Catchall</th><?php if (!$ro): ?><th></th><?php endif; ?></tr>
                 </thead>
@@ -562,6 +562,45 @@ document.addEventListener('click', function (e) {
             document.body.appendChild(f);
             f.submit();
         });
+    });
+})();
+</script>
+
+<script>
+// Tablas ordenables (buzones y alias): clic en una cabecera ordena por esa columna; otro clic invierte. Se recuerda por tabla.
+(function () {
+    const num = (t) => { if (/ilimitado/i.test(t)) return 0; const m = t.replace(',', '.').match(/-?\d+(\.\d+)?/); return m ? parseFloat(m[0]) : NaN; };
+    document.querySelectorAll('table.js-sortable').forEach((tbl) => {
+        const heads = tbl.tHead ? Array.from(tbl.tHead.rows[0].cells) : [];
+        const body = tbl.tBodies[0];
+        const key = 'sort-' + (tbl.dataset.sortKey || 'tabla');
+        const sortBy = (col, dir) => {
+            const rows = Array.from(body.rows);
+            rows.sort((a, b) => {
+                const ta = (a.cells[col]?.textContent || '').trim().toLowerCase();
+                const tb = (b.cells[col]?.textContent || '').trim().toLowerCase();
+                const isN = (t) => /^(ilimitado|\d+([.,]\d+)?\s*(mb|gb)?(\s*\(.*\))?)$/i.test(t);
+                const c = (isN(ta) && isN(tb)) ? num(ta) - num(tb) : ta.localeCompare(tb, 'es', { numeric: true });
+                return dir * c;
+            });
+            rows.forEach((r) => body.appendChild(r));
+            heads.forEach((h, i) => { const ic = h.querySelector('.sort-ic'); if (ic) ic.textContent = i === col ? (dir > 0 ? ' ▲' : ' ▼') : ''; });
+        };
+        heads.forEach((h, i) => {
+            if (!h.textContent.trim() || h.querySelector('input')) return;   // sin título (acciones) o con casilla: no ordena
+            h.style.cursor = 'pointer';
+            h.title = 'Ordenar por esta columna';
+            const ic = document.createElement('span');
+            ic.className = 'sort-ic text-muted';
+            h.appendChild(ic);
+            h.addEventListener('click', () => {
+                let dir = 1;
+                try { const s = JSON.parse(localStorage.getItem(key) || 'null'); if (s && s.col === i) dir = -s.dir; } catch (e) {}
+                sortBy(i, dir);
+                try { localStorage.setItem(key, JSON.stringify({ col: i, dir })); } catch (e) {}
+            });
+        });
+        try { const s = JSON.parse(localStorage.getItem(key) || 'null'); if (s && heads[s.col]) sortBy(s.col, s.dir); } catch (e) {}
     });
 })();
 </script>

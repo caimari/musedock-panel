@@ -385,7 +385,11 @@ class MailService
         if (!$account) return;
 
         $allowed = ['display_name', 'quota_mb', 'status', 'account_id', 'customer_id',
-                     'autoresponder_enabled', 'autoresponder_subject', 'autoresponder_body'];
+                     'autoresponder_enabled', 'autoresponder_subject', 'autoresponder_body', 'copy_to'];
+        if (array_key_exists('copy_to', $data)) {
+            // «Enviar copia a…»: una dirección válida distinta del propio buzón, o vacío (sin copia)
+            $data['copy_to'] = MailPolicyService::normalizeCopyTo((string)$data['copy_to'], (string)$account['email']);
+        }
         $update = array_intersect_key($data, array_flip($allowed));
 
         // Password change
@@ -411,6 +415,33 @@ class MailService
                 'display_name'  => $data['display_name'] ?? ($account['display_name'] ?? ''),
                 'send_mode'     => $account['send_mode'] ?? 'normal',
                 'rate_limit_per_hour' => (int)($account['rate_limit_per_hour'] ?? 0),
+            ]);
+        }
+
+        // «Enviar copia a…»: se instala el mapa de Postfix de ESTE servidor (si falta) y el cambio viaja a las réplicas
+        // de correo, que lo guardan en su copia de la cuenta y hacen lo mismo. Mismo mecanismo que la contraseña.
+        if (array_key_exists('copy_to', $data) && (string)$data['copy_to'] !== (string)($account['copy_to'] ?? '')) {
+            if ((string)$data['copy_to'] !== '') {
+                try {
+                    $cm = MailPolicyService::ensureCopyMap();
+                    if (empty($cm['ok'])) {
+                        LogService::log('mail.copy', 'map', 'No se pudo instalar el mapa de copias: ' . ($cm['error'] ?? '?'));
+                    }
+                } catch (\Throwable $e) {
+                    LogService::log('mail.copy', 'map', 'Error instalando el mapa de copias: ' . $e->getMessage());
+                }
+            }
+            self::replicateMailOp('mail_create_mailbox', [
+                'email'         => $account['email'],
+                'home_dir'      => $account['home_dir'],
+                'quota_mb'      => (int)($data['quota_mb'] ?? $account['quota_mb']),
+                'domain'        => substr(strrchr((string)$account['email'], '@'), 1),
+                'local_part'    => $account['local_part'] ?? strstr((string)$account['email'], '@', true),
+                'password_hash' => (string)($account['password_hash'] ?? ''),
+                'display_name'  => $data['display_name'] ?? ($account['display_name'] ?? ''),
+                'send_mode'     => $account['send_mode'] ?? 'normal',
+                'rate_limit_per_hour' => (int)($account['rate_limit_per_hour'] ?? 0),
+                'copy_to'       => (string)$data['copy_to'],
             ]);
         }
 
@@ -4190,6 +4221,12 @@ class MailService
                 'can_send'       => 'true',
                 'updated_at'     => date('Y-m-d H:i:s'),
             ];
+            // «Enviar copia a…»: solo si el payload lo trae (un master antiguo no lo manda y no se toca lo que haya)
+            $copyTo = null;
+            if (array_key_exists('copy_to', $payload)) {
+                $copyTo = MailPolicyService::normalizeCopyTo((string)$payload['copy_to'], $email);
+                $fields['copy_to'] = $copyTo;
+            }
             if ($existing) {
                 // Don't overwrite a locally-changed password with an empty one.
                 if ($fields['password_hash'] === '') unset($fields['password_hash']);
@@ -4204,6 +4241,9 @@ class MailService
                 }
                 $fields['created_at'] = date('Y-m-d H:i:s');
                 Database::insert('mail_accounts', $fields);
+            }
+            if ($copyTo !== null && $copyTo !== '') {
+                try { MailPolicyService::ensureCopyMap(); } catch (\Throwable) {}
             }
         } catch (\Throwable $e) {
             LogService::log('mail.replica', 'upsert_account', "Fallo upsert cuenta {$email}: " . $e->getMessage());
@@ -4305,7 +4345,7 @@ class MailService
                     'display_name'  => $a['display_name'] ?? '',
                     'send_mode'     => $a['send_mode'] ?? 'normal',
                     'rate_limit_per_hour' => (int)($a['rate_limit_per_hour'] ?? 0),
-                ]);
+                ] + (!empty($a['copy_to']) ? ['copy_to' => (string)$a['copy_to']] : []));   // «Enviar copia a…»
                 $mc++;
                 if (in_array($a['autoresponder_enabled'] ?? null, [true, 't', 'true', 1, '1'], true)) {
                     ClusterService::enqueue($nodeId, 'mail_update_autoresponder', [

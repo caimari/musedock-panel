@@ -306,6 +306,7 @@ CREATE TABLE IF NOT EXISTS mail_accounts (
     autoresponder_enabled BOOLEAN NOT NULL DEFAULT false,
     autoresponder_subject VARCHAR(255),
     autoresponder_body TEXT,
+    copy_to VARCHAR(255) NOT NULL DEFAULT '',
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );

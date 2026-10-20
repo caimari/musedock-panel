@@ -85,6 +85,14 @@
                         </div>
                     </div>
 
+                    <div class="row g-3 mt-1 p-2 rounded" style="background:rgba(34,197,94,.05);border:1px solid rgba(34,197,94,.2);">
+                        <div class="col-12"><span class="small fw-semibold"><i class="bi bi-files me-1"></i>Enviar copia a…</span></div>
+                        <div class="col-md-7">
+                            <input type="email" name="copy_to" class="form-control" value="<?= View::e($account['copy_to'] ?? '') ?>" placeholder="otra@direccion.com (vacío = sin copia)">
+                            <div class="form-text">Cada mensaje que llegue a este buzón <strong>se queda aquí</strong> y además se manda <strong>una copia</strong> a esta dirección (también lo que llega por alias de este buzón). Una sola dirección. Se aplica en todos los nodos de correo.</div>
+                        </div>
+                    </div>
+
                     <div class="row g-3 mt-1 p-2 rounded" style="background:rgba(59,130,246,.05);border:1px solid rgba(59,130,246,.18);">
                         <div class="col-12"><span class="small fw-semibold"><i class="bi bi-shield-lock me-1"></i>Política de envío (anti-abuso)</span></div>
                         <div class="col-md-4">

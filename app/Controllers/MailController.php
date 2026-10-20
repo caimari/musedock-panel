@@ -658,6 +658,17 @@ class MailController
             'autoresponder_body' => trim((string)($_POST['autoresponder_body'] ?? '')),
         ];
 
+        // «Enviar copia a…»: vacío o un correo válido y distinto del propio buzón
+        if (array_key_exists('copy_to', $_POST)) {
+            $raw = trim((string)$_POST['copy_to']);
+            if ($raw !== '' && \MuseDockPanel\Services\MailPolicyService::normalizeCopyTo($raw, (string)$account['email']) === '') {
+                Flash::set('error', 'La dirección de copia no es válida (o es la del propio buzón). No se ha cambiado nada.');
+                Router::redirect("/mail/accounts/{$accountId}/edit");
+                return;
+            }
+            $data['copy_to'] = $raw;
+        }
+
         if (!empty($_POST['password']) || !empty($_POST['password_confirm'])) {
             if (strlen((string)($_POST['password'] ?? '')) < 8) {
                 Flash::set('error', 'La contraseña debe tener al menos 8 caracteres.');
