@@ -20,13 +20,12 @@ class ChangelogController
     {
         return [
             [
-                'version' => '1.0.401',
+                'version' => '1.0.402',
                 'date' => '2026-10-20',
                 'badge' => 'info',
                 'changes' => [
                     'fixed' => [
-                        'Bloqueos de Cloudflare: dominio, www.dominio y los nombres que redirigen entre sí conservando la ruta son un solo sitio. Si uno tiene la IP bloqueada se quita el proxy a todos a la vez, y no vuelve a ninguno hasta que todas sus IPs están estables (antes www.nycinfest.com iba directo pero redirigía a nycinfest.com, que seguía con la IP bloqueada).',
-                        'Las redirecciones entre nombres se detectan solas en cada lectura del inventario; no se agrupa por CNAME y los nombres de «Nunca tocar» van solos.',
+                        '«Enviar copia a…» no copiaba lo que llegaba por un alias (info@ → support@): Postfix busca la copia con la dirección original, antes de expandir el alias. Ahora el mapa mira también los alias activos que apuntan directamente a un buzón con copia (catch-all excluidos); el worker reescribe el mapa de cada nodo al actualizar, con vuelta atrás si falla.',
                     ],
                 ],
             ],
@@ -36,6 +35,8 @@ class ChangelogController
                 'badge' => 'info',
                 'changes' => [
                     'fixed' => [
+                        'Bloqueos de Cloudflare: dominio, www.dominio y los nombres que redirigen entre sí conservando la ruta son un solo sitio. Si uno tiene la IP bloqueada se quita el proxy a todos a la vez, y no vuelve a ninguno hasta que todas sus IPs están estables (antes www.nycinfest.com iba directo pero redirigía a nycinfest.com, que seguía con la IP bloqueada).',
+                        'Las redirecciones entre nombres se detectan solas en cada lectura del inventario; no se agrupa por CNAME y los nombres de «Nunca tocar» van solos.',
                         '«Enviar copia a…»: guardar un buzón sin cambiar la copia no instalaba el mapa de Postfix. Ahora lo reintenta siempre y hay autocuración: el worker de cada nodo lo instala si algún buzón activo tiene copia y Postfix no lo lleva (cubre también las réplicas).',
                     ],
                 ],

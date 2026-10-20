@@ -19,6 +19,10 @@ check('consulta por el correo exacto y solo buzones activos', str_contains($q, "
 check('ignora los vacíos (sin copia)', str_contains($q, "COALESCE(copy_to, '') <> ''"));
 check('devuelve una sola fila', str_contains($q, 'LIMIT 1'));
 
+check('mira también los alias que apuntan al buzón', str_contains($q, 'mail_aliases') && str_contains($q, "lower(a.source) = lower('%s')"));
+check('excluye los catch-all (copiarían todo el dominio)', str_contains($q, 'a.is_catchall = false'));
+check('solo alias activos y buzones activos', str_contains($q, 'COALESCE(a.is_active, true)') && str_contains($q, "m.status = 'active'"));
+
 echo "Fichero .cf (credenciales del mapa de remitentes)\n";
 $sender = "hosts = 127.0.0.1:5433\nuser = musedock_mail\npassword = secreto\ndbname = musedock_panel\nquery = SELECT 1\n";
 $conf = P::copyMapConf($sender);

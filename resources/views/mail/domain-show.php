@@ -619,7 +619,7 @@ document.querySelectorAll('.mail-copy-info').forEach((b) => b.addEventListener('
         title: 'Copia automática',
         html: '<div class="text-start small">Cada mensaje que llega a <code>' + esc(b.dataset.email) + '</code> <strong>se queda en el buzón</strong> y además se manda una copia a:'
             + '<div class="mt-2 mb-2 fs-6"><code>' + esc(b.dataset.copy) + '</code></div>'
-            + '<span class="text-muted">También vale para lo que llega por los alias de este buzón.</span></div>',
+            + '<span class="text-muted">También vale para lo que llega por los alias que apuntan directamente a este buzón.</span></div>',
         showCancelButton: true, confirmButtonText: 'Cambiar', cancelButtonText: 'Cerrar',
     }).then((r) => { if (r.isConfirmed) location.href = '/mail/accounts/' + b.dataset.id + '/edit'; });
 }));

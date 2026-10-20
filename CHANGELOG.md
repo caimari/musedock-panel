@@ -2,7 +2,12 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
-## [1.0.401] — 2026-10-20 — Bloqueos de Cloudflare: cada sitio como una unidad
+## [1.0.402] — 2026-10-20 — La copia de correo también vale para los alias
+
+### Corregido
+- **«Enviar copia a…» no copiaba lo que llegaba por un alias** (probado con `info@` → `support@`: llegaba a `support@` pero no a la copia). Postfix busca la copia con la dirección ORIGINAL del destinatario, antes de expandir el alias. Ahora el mapa mira también los alias activos que apuntan directamente a un buzón con copia (los catch-all se excluyen: copiarían todo el dominio). Al actualizar, el worker reescribe el mapa de cada nodo (con copia del anterior y vuelta atrás si falla). Un alias que da un rodeo por otro alias no se copia (solo un nivel).
+
+## [1.0.401] — 2026-10-20 — Bloqueos de Cloudflare: cada sitio como una unidad; el mapa de copias de correo se instala solo
 
 ### Corregido
 - **Bloqueos de Cloudflare dejaba el escudo a medias cuando un nombre redirige a otro:** se quitaba el proxy solo al nombre con la IP bloqueada. Con nycinfest.com (20-10) `www.nycinfest.com` pasó a directo, pero redirige con un 301 a `nycinfest.com`, que seguía con Cloudflare: el visitante acababa otra vez en la IP bloqueada. Ahora `dominio`, `www.dominio` y cualquier pareja de nombres en la que uno redirige al otro **conservando la ruta** (www → raíz, dominio antiguo → nuevo, p. ej. cineautor.org → cineautor.tv) son **un solo sitio**:
@@ -10,10 +15,6 @@ Todas las versiones notables de MuseDock Panel se documentan aquí.
   - el proxy no vuelve a ninguno hasta que **todas** las IPs del sitio llevan el tiempo de estabilidad configurado (antes podía volver uno mientras el otro seguía bloqueado: el mismo problema al revés).
 - Las redirecciones se detectan solas en cada lectura del inventario siguiendo de verdad `https://nombre/<ruta>` (en paralelo, sin seguir la redirección): una portada que solo lleva a otra web no cuenta. No se agrupa por CNAME (juntaría `webmail.` o `mail.` con la web) y los nombres de «Nunca tocar» van solos.
 - El registro dice cuándo un nombre se pasa a directo «junto con» otro del mismo sitio.
-
-## [1.0.401] — 2026-10-20 — El mapa de copias de correo se instala solo
-
-### Corregido
 - **«Enviar copia a…»: guardar un buzón sin cambiar la copia no instalaba el mapa de Postfix** (solo se intentaba al cambiarla), así que tras el fallo de la 1.0.399 no había forma de reintentarlo desde el panel. Ahora guardar con una copia puesta lo reintenta siempre y además hay una **autocuración**: el worker de cada nodo (cada minuto) instala el mapa si algún buzón activo tiene copia y Postfix no lo lleva (tras un fallo espera 10 min). Cubre también las réplicas de correo.
 
 ## [1.0.400] — 2026-10-20 — Buscar y filtrar la lista de dominios de correo
