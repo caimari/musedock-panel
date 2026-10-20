@@ -316,6 +316,42 @@ class MailPolicyService
         return implode("\n", $keep) . "\nquery = " . self::copyMapQuery() . "\n";
     }
 
+    /** ¿El mapa de copias ya está conectado a Postfix? Pura. */
+    public static function copyMapInstalled(string $recipientBccMaps, bool $fileExists): bool
+    {
+        return $fileExists && str_contains($recipientBccMaps, 'pgsql:' . self::COPY_MAP_CF);
+    }
+
+    /**
+     * Autocuración (cada minuto, worker de cada nodo): si algún buzón activo tiene copia y el mapa no está conectado
+     * a Postfix, lo instala. Cubre el caso de guardar sin cambiar nada, un fallo anterior, y las réplicas de correo.
+     * Tras un intento fallido espera 10 min. Devuelve lo hecho o ''.
+     */
+    public static function ensureCopyMapIfNeeded(): string
+    {
+        if (trim((string)shell_exec('command -v postconf 2>/dev/null')) === '') {
+            return '';
+        }
+        try {
+            $n = (int)(\MuseDockPanel\Database::fetchOne("SELECT COUNT(*) AS n FROM mail_accounts WHERE COALESCE(copy_to, '') <> '' AND status = 'active'")['n'] ?? 0);
+        } catch (\Throwable) {
+            return '';   // columna aún sin migrar
+        }
+        if ($n === 0) {
+            return '';
+        }
+        $cur = trim((string)shell_exec('postconf -h recipient_bcc_maps 2>/dev/null'));
+        if (self::copyMapInstalled($cur, is_file(self::COPY_MAP_CF))) {
+            return '';
+        }
+        if (time() - (int)Settings::get('mail_copy_map_try_at', '0') < 600) {
+            return '';
+        }
+        Settings::set('mail_copy_map_try_at', (string)time());
+        $r = self::ensureCopyMap();
+        return !empty($r['ok']) ? 'mapa de copias instalado (' . $n . ' buzón/es con copia)' : 'mapa de copias NO instalado: ' . ($r['error'] ?? '?');
+    }
+
     /**
      * ¿La prueba `postmap -q` del mapa de copias es buena? postmap devuelve 1 cuando la clave NO está (lo normal con una
      * dirección de prueba), así que 1 sin salida vale; un error de conexión o de consulta sale con otro código o con texto.

@@ -2,6 +2,20 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.401] — 2026-10-20 — Bloqueos de Cloudflare: cada sitio como una unidad
+
+### Corregido
+- **Bloqueos de Cloudflare dejaba el escudo a medias cuando un nombre redirige a otro:** se quitaba el proxy solo al nombre con la IP bloqueada. Con nycinfest.com (20-10) `www.nycinfest.com` pasó a directo, pero redirige con un 301 a `nycinfest.com`, que seguía con Cloudflare: el visitante acababa otra vez en la IP bloqueada. Ahora `dominio`, `www.dominio` y cualquier pareja de nombres en la que uno redirige al otro **conservando la ruta** (www → raíz, dominio antiguo → nuevo, p. ej. cineautor.org → cineautor.tv) son **un solo sitio**:
+  - si cualquiera de sus nombres tiene una IP bloqueada (o ya está sin proxy por el escudo), se quita el proxy a todos a la vez;
+  - el proxy no vuelve a ninguno hasta que **todas** las IPs del sitio llevan el tiempo de estabilidad configurado (antes podía volver uno mientras el otro seguía bloqueado: el mismo problema al revés).
+- Las redirecciones se detectan solas en cada lectura del inventario siguiendo de verdad `https://nombre/<ruta>` (en paralelo, sin seguir la redirección): una portada que solo lleva a otra web no cuenta. No se agrupa por CNAME (juntaría `webmail.` o `mail.` con la web) y los nombres de «Nunca tocar» van solos.
+- El registro dice cuándo un nombre se pasa a directo «junto con» otro del mismo sitio.
+
+## [1.0.401] — 2026-10-20 — El mapa de copias de correo se instala solo
+
+### Corregido
+- **«Enviar copia a…»: guardar un buzón sin cambiar la copia no instalaba el mapa de Postfix** (solo se intentaba al cambiarla), así que tras el fallo de la 1.0.399 no había forma de reintentarlo desde el panel. Ahora guardar con una copia puesta lo reintenta siempre y además hay una **autocuración**: el worker de cada nodo (cada minuto) instala el mapa si algún buzón activo tiene copia y Postfix no lo lleva (tras un fallo espera 10 min). Cubre también las réplicas de correo.
+
 ## [1.0.400] — 2026-10-20 — Buscar y filtrar la lista de dominios de correo
 
 ### Corregido

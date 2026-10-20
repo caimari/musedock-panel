@@ -39,5 +39,10 @@ check('código 1 sin salida = clave no encontrada = bien', P::copyProbeOk(1, '')
 check('código 1 con texto de error = mal', !P::copyProbeOk(1, 'postmap: fatal: pgsql: connection failed'));
 check('código 2 (error) = mal', !P::copyProbeOk(2, ''));
 
+echo "Mapa conectado\n";
+check('conectado cuando el fichero existe y Postfix lo lleva', P::copyMapInstalled('hash:/x, pgsql:' . P::COPY_MAP_CF, true));
+check('no conectado si falta el fichero', !P::copyMapInstalled('pgsql:' . P::COPY_MAP_CF, false));
+check('no conectado si Postfix no lo lleva', !P::copyMapInstalled('hash:/x', true));
+
 echo "\n" . ($bad ? "$bad fallo(s) de " . ($ok + $bad) : "Todo correcto: $ok comprobaciones") . "\n";
 exit($bad ? 1 : 0);

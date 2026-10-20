@@ -30,6 +30,8 @@ class CfGuardService
     private const FAILS_TO_BLOCK = 2;
     private const ORIGIN_FRESH = 420;
     private const INVENTORY_EVERY = 1800;
+    /** Ruta con la que se comprueba si un nombre redirige a otro conservando la ruta (mismo sitio) */
+    private const SITE_PROBE_PATH = '/musedock-cf-guard-same-site';
 
     // ------------------------------------------------------------------ ajustes
 
@@ -380,10 +382,105 @@ class CfGuardService
                 Database::execute('UPDATE cf_guard_records SET origin_ip = :o WHERE record_id = :r', ['o' => $cur['origin_ip'], 'r' => $rec['record_id']]);
             }
         }
+        // Nombres que son el mismo sitio porque uno redirige al otro (www → raíz u otro): se siguen de verdad
+        self::setSetting('site_links', json_encode(self::redirectLinks(array_keys($byName))));
         self::setSetting('inventory_at', (string) time());
         self::setSetting('inventory_errors', $errors ? implode("\n", $errors) : '');
 
         return ['records' => $count, 'proxied' => $proxied, 'errors' => $errors];
+    }
+
+    /**
+     * Parejas [origen, destino] de la lista en las que https://origen/<ruta> redirige (301/302/307/308) a
+     * destino conservando la ruta: es el mismo sitio con otro nombre (www → raíz, dominio antiguo → nuevo).
+     * Una portada que solo lleva a otra web (img.picalias.com → picalias.com) no forma pareja.
+     * Peticiones en paralelo, sin seguir la redirección; un nombre que no responde no forma pareja.
+     * @param string[] $names
+     * @return array<int, array{0:string, 1:string}>
+     */
+    private static function redirectLinks(array $names): array
+    {
+        if (!$names || !function_exists('curl_multi_init')) {
+            return [];
+        }
+        $set = array_flip($names);
+        $mh = curl_multi_init();
+        $handles = [];
+        foreach ($names as $n) {
+            $ch = curl_init('https://' . $n . self::SITE_PROBE_PATH);
+            curl_setopt_array($ch, [CURLOPT_NOBODY => true, CURLOPT_RETURNTRANSFER => true, CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_TIMEOUT => 8, CURLOPT_CONNECTTIMEOUT => 4, CURLOPT_USERAGENT => 'MuseDock-CfGuard/1.0']);
+            curl_multi_add_handle($mh, $ch);
+            $handles[$n] = $ch;
+        }
+        do {
+            $status = curl_multi_exec($mh, $running);
+            if ($running) {
+                curl_multi_select($mh, 1.0);
+            }
+        } while ($running && $status === CURLM_OK);
+        $links = [];
+        foreach ($handles as $n => $ch) {
+            $code = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            $location = (string) curl_getinfo($ch, CURLINFO_REDIRECT_URL);
+            $to = strtolower((string) parse_url($location, PHP_URL_HOST));
+            $samePath = rtrim((string) parse_url($location, PHP_URL_PATH), '/') === self::SITE_PROBE_PATH;
+            if (in_array($code, [301, 302, 307, 308], true) && $samePath && $to !== '' && $to !== $n && isset($set[$to])) {
+                $links[] = [$n, $to];
+            }
+            curl_multi_remove_handle($mh, $ch);
+            curl_close($ch);
+        }
+        curl_multi_close($mh);
+
+        return $links;
+    }
+
+    /**
+     * Sitio al que pertenece cada nombre: dominio ⇄ www.dominio y las parejas con redirección (site_links), unidas
+     * en cadena. No se agrupa por CNAME: juntaría servicios distintos (webmail., mail.…) con la web.
+     * @return array<string, string> nombre => clave del sitio
+     */
+    public static function siteGroups(array $records): array
+    {
+        $parent = [];
+        foreach ($records as $r) {
+            $parent[$r['name']] = $r['name'];
+        }
+        // Los nombres de «Nunca tocar» van solos: no arrastran ni son arrastrados
+        $loose = array_filter(array_keys($parent), fn ($n) => !self::isExcluded($n));
+        $find = function (string $x) use (&$parent): string {
+            while ($parent[$x] !== $x) {
+                $x = $parent[$x];
+            }
+            return $x;
+        };
+        $union = function (string $a, string $b) use (&$parent, $find): void {
+            if (isset($parent[$a], $parent[$b])) {
+                $ra = $find($a);
+                $rb = $find($b);
+                if ($ra !== $rb) {
+                    $parent[$ra] = $rb;
+                }
+            }
+        };
+        $joinable = array_flip($loose);
+        foreach ($loose as $n) {
+            if (str_starts_with($n, 'www.') && isset($joinable[substr($n, 4)])) {
+                $union($n, substr($n, 4));
+            }
+        }
+        foreach (json_decode(self::setting('site_links', '[]'), true) ?: [] as $pair) {
+            if (is_array($pair) && count($pair) === 2 && isset($joinable[(string) $pair[0]], $joinable[(string) $pair[1]])) {
+                $union((string) $pair[0], (string) $pair[1]);
+            }
+        }
+        $out = [];
+        foreach (array_keys($parent) as $n) {
+            $out[$n] = $find($n);
+        }
+
+        return $out;
     }
 
     private static function upsertRecord(string $account, array $zone, array $r): void
@@ -719,17 +816,42 @@ class CfGuardService
         $states = self::edgeStates();
         self::trackEpisodes($states, $report);
 
+        // Cada sitio (dominio, www.dominio y los nombres que redirigen entre sí) es una unidad: si uno pasa a
+        // directo y el otro sigue con Cloudflare, la redirección vuelve a llevar al visitante a la IP bloqueada.
+        $records = self::records();
+        $groupOf = self::siteGroups($records);
+        $groupIps = [];
+        $groupNames = [];
+        foreach ($records as $r) {
+            $g = $groupOf[$r['name']];
+            $groupNames[$g][$r['name']] = true;
+            foreach (array_filter(explode(',', (string) $r['edge_ips'])) as $ip) {
+                $groupIps[$g][$ip] = true;
+            }
+        }
         foreach (self::activeChanges() as $c) {
-            $ips = array_filter(explode(',', (string) $c['edge_ips']));
-            if ($ips && !array_filter($ips, fn ($ip) => ($states[$ip]['state'] ?? 'unknown') !== 'clear')) {
+            $g = $groupOf[$c['name']] ?? $c['name'];
+            foreach (array_filter(explode(',', (string) $c['edge_ips'])) as $ip) {
+                $groupIps[$g][$ip] = true;
+            }
+        }
+        $notClear = fn (string $g) => array_values(array_filter(array_keys($groupIps[$g] ?? []), fn ($ip) => ($states[$ip]['state'] ?? 'unknown') !== 'clear'));
+
+        // 1. Volver a poner el proxy solo cuando TODAS las IPs del sitio llevan el tiempo de estabilidad
+        foreach (self::activeChanges() as $c) {
+            $g = $groupOf[$c['name']] ?? $c['name'];
+            if (!empty($groupIps[$g]) && !$notClear($g)) {
                 $report['restored'][] = self::restore($c);
             }
         }
         if ($mode === 'off') {
             return $report;
         }
+
+        // 2. Sitios que pasan (o siguen) en directo: con alguna IP bloqueada y origen bien, o con algún nombre ya sin proxy
         $active = array_flip(array_column(self::activeChanges(), 'record_id'));
-        foreach (self::records() as $r) {
+        $trigger = [];
+        foreach ($records as $r) {
             if (!(int) $r['proxied'] || isset($active[$r['record_id']]) || self::isExcluded($r['name'])) {
                 continue;
             }
@@ -745,7 +867,34 @@ class CfGuardService
                 self::noteOnce('origin:' . $r['record_id'], "{$r['name']}: Cloudflare bloqueado, pero el servidor de origen no responde directo con un certificado válido; se deja como está.", $report);
                 continue;
             }
-            $report['applied'][] = self::unproxy($r, $blockedIps, $mode === 'simulate');
+            $g = $groupOf[$r['name']];
+            $trigger[$g] = array_values(array_unique(array_merge($trigger[$g] ?? [], $blockedIps)));
+        }
+        foreach (self::activeChanges() as $c) {
+            $g = $groupOf[$c['name']] ?? $c['name'];
+            if (!isset($trigger[$g]) && ($bad = $notClear($g))) {
+                $trigger[$g] = $bad;
+            }
+        }
+
+        // 3. Quitar el proxy a todos los nombres de esos sitios que aún lo tengan
+        foreach ($records as $r) {
+            $g = $groupOf[$r['name']];
+            if (!isset($trigger[$g]) || !(int) $r['proxied'] || isset($active[$r['record_id']]) || self::isExcluded($r['name'])) {
+                continue;
+            }
+            $own = array_values(array_filter(array_filter(explode(',', (string) $r['edge_ips'])), fn ($ip) => ($states[$ip]['state'] ?? '') === 'blocked'));
+            $origin = self::originOk($r['record_id']);
+            if ($origin === false) {
+                self::noteOnce('origin:' . $r['record_id'], "{$r['name']}: su sitio pasa a conexión directa, pero el servidor de origen no responde directo con un certificado válido; se deja como está.", $report);
+                continue;
+            }
+            if ($origin === null && $own) {
+                continue; // la sonda aún no ha probado su origen: se le pide en la lista de objetivos
+            }
+            $peers = array_values(array_diff(array_keys($groupNames[$g] ?? []), [$r['name']]));
+            $report['applied'][] = self::unproxy($r, $own ?: $trigger[$g], $mode === 'simulate', $own ? null : implode(', ', $peers));
+            $active[$r['record_id']] = true;
         }
 
         return $report;
@@ -807,7 +956,7 @@ class CfGuardService
         }
     }
 
-    private static function unproxy(array $r, array $blockedIps, bool $simulated): string
+    private static function unproxy(array $r, array $blockedIps, bool $simulated, ?string $sameSiteAs = null): string
     {
         $cause = self::cause($blockedIps, $r['name']);
         $why = $cause === 'bloqueo' ? 'IP de Cloudflare bloqueada por operadoras; desde fuera responde' : 'Cloudflare no responde, tampoco desde fuera';
@@ -837,7 +986,9 @@ class CfGuardService
         $ipList = implode(', ', $blockedIps);
         $msg = match (true) {
             $status === 'failed' => "{$r['name']}: no se pudo quitar el proxy ({$note}).",
+            $simulated && $sameSiteAs => "{$r['name']}: se habría quitado el proxy junto con {$sameSiteAs} (mismo sitio; IPs {$ipList}).",
             $simulated => "{$r['name']}: se habría quitado el proxy ({$why}; IPs {$ipList}).",
+            $sameSiteAs !== null => "{$r['name']}: proxy quitado junto con {$sameSiteAs} (mismo sitio: si no, la redirección llevaría a la IP bloqueada; IPs {$ipList}).",
             default => "{$r['name']}: proxy quitado ({$why}; IPs {$ipList}).",
         };
         self::event($status === 'failed' ? 'error' : 'info', $msg);

@@ -210,6 +210,7 @@ foreach ([
     'Solo-lectura de arranque' => static fn() => \MuseDockPanel\Services\ClusterGuardService::ensureFencedConfConsistent(),
     'Dueños de ficheros' => static fn() => \MuseDockPanel\Services\WebPermissionService::periodic(),
     'Dueños al momento' => static fn() => \MuseDockPanel\Services\WebPermissionService::instantFix(),
+    'Mapa de copias de correo' => static fn() => \MuseDockPanel\Services\MailPolicyService::ensureCopyMapIfNeeded(),
     'Bloqueos Cloudflare' => static fn() => \MuseDockPanel\Services\FailoverService::pullCfGuardFromPeers(),
     'Servicios' => static fn() => implode(' | ', \MuseDockPanel\Services\ClusterGuardService::ensureServices()),
     'lsyncd' => static fn() => \MuseDockPanel\Services\FileSyncService::ensureLsyncdInstalled(),

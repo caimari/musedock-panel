@@ -420,7 +420,8 @@ class MailService
 
         // «Enviar copia a…»: se instala el mapa de Postfix de ESTE servidor (si falta) y el cambio viaja a las réplicas
         // de correo, que lo guardan en su copia de la cuenta y hacen lo mismo. Mismo mecanismo que la contraseña.
-        if (array_key_exists('copy_to', $data) && (string)$data['copy_to'] !== (string)($account['copy_to'] ?? '')) {
+        if (array_key_exists('copy_to', $data) && ((string)$data['copy_to'] !== (string)($account['copy_to'] ?? '') || (string)$data['copy_to'] !== '')) {
+            // (también al guardar SIN cambiar la copia: reintenta instalar el mapa y reenvía a las réplicas; todo idempotente)
             if ((string)$data['copy_to'] !== '') {
                 try {
                     $cm = MailPolicyService::ensureCopyMap();
