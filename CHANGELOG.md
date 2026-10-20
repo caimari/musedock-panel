@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.400] — 2026-10-20 — Buscar y filtrar la lista de dominios de correo
+
+### Corregido
+- **«Enviar copia a…» no llegaba a instalar el mapa de Postfix:** la prueba `postmap -q` devuelve el código 1 cuando la clave de prueba no existe (lo normal) y el panel lo tomaba por un fallo, así que deshacía el mapa cada vez (el panel lo dejó como estaba, sin dañar nada). Ahora el código 1 sin salida vale como «bien» y solo un error real deshace el cambio.
+
+### Añadido
+- **Icono de copia automática junto al buzón** (Correo → dominio → Buzones): se ve a simple vista cuáles tienen una copia; al pulsarlo, un modal con la dirección a la que se copia y un botón para cambiarla.
+- **Lista de dominios de correo (Correo → Dominios):** cuadro de búsqueda (dominio, cliente, nodo), filtro por tipo (solo webs del panel, sin web, con o sin buzones, DKIM sin OK, no activos) con contador, y ordenación por cualquier columna con clic en la cabecera.
+
 ## [1.0.399] — 2026-10-20 — «Enviar copia a…» en los buzones y tablas de correo ordenables
 
 ### Añadido

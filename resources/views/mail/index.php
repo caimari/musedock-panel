@@ -2509,7 +2509,20 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                 <?php endif; ?>
             </div>
         <?php else: ?>
-            <table class="table table-hover mb-0">
+            <div class="d-flex flex-wrap align-items-center gap-2 p-3 pb-2" id="dom-filter-bar">
+                <input type="search" id="dom-filter-q" class="form-control form-control-sm" style="max-width:260px;" placeholder="Buscar dominio, cliente, nodo…" autocomplete="off">
+                <select id="dom-filter-kind" class="form-select form-select-sm" style="max-width:220px;">
+                    <option value="">Todos los dominios</option>
+                    <option value="hosting">Solo webs del panel (Hosting)</option>
+                    <option value="nohosting">Sin web (solo correo)</option>
+                    <option value="nombox">Sin buzones</option>
+                    <option value="withbox">Con buzones</option>
+                    <option value="dkim">DKIM sin OK</option>
+                    <option value="inactive">No activos</option>
+                </select>
+                <span class="small text-muted" id="dom-filter-count"></span>
+            </div>
+            <table class="table table-hover mb-0" id="mail-domains-table">
                 <thead>
                     <tr>
                         <th class="ps-3">Domain</th>
@@ -2524,7 +2537,7 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                 </thead>
                 <tbody>
                     <?php foreach ($domains as $d): ?>
-                    <tr>
+                    <tr data-hosting="<?= !empty($d['hosting_id']) ? '1' : '0' ?>" data-accounts="<?= (int)$d['account_count'] ?>">
                         <td class="ps-3">
                             <a href="/mail/domains/<?= $d['id'] ?>" class="text-info text-decoration-none fw-semibold">
                                 <?= View::e($d['domain']) ?>
@@ -3479,4 +3492,55 @@ document.addEventListener('click', function (e) {
             + '<div class="d-flex justify-content-between small"><span class="text-muted">Correos y espacio: actualizados cada 30 min (botón en la ficha del dominio)</span><a class="text-info" href="/mail/domains/' + encodeURIComponent(b.dataset.id) + '">Abrir el dominio</a></div>'});
     }).catch(() => Swal.update({html: '<div class="text-danger small">No se pudo cargar.</div>'}));
 });
+</script>
+
+<script>
+// Dominios de correo: buscar, filtrar por tipo y ordenar por columna (clic en la cabecera; otro clic invierte).
+(function () {
+    const tbl = document.getElementById('mail-domains-table');
+    if (!tbl) return;
+    const body = tbl.tBodies[0], heads = Array.from(tbl.tHead.rows[0].cells);
+    const q = document.getElementById('dom-filter-q'), kind = document.getElementById('dom-filter-kind'), cnt = document.getElementById('dom-filter-count');
+    const apply = () => {
+        const t = (q.value || '').trim().toLowerCase(), k = kind.value;
+        let shown = 0;
+        Array.from(body.rows).forEach((r) => {
+            const txt = r.textContent.toLowerCase();
+            const cells = r.cells;
+            const dkim = (cells[5]?.textContent || '').trim().toLowerCase();
+            const status = (cells[6]?.textContent || '').trim().toLowerCase();
+            let ok = !t || txt.includes(t);
+            if (ok && k === 'hosting') ok = r.dataset.hosting === '1';
+            if (ok && k === 'nohosting') ok = r.dataset.hosting !== '1';
+            if (ok && k === 'nombox') ok = parseInt(r.dataset.accounts || '0', 10) === 0;
+            if (ok && k === 'withbox') ok = parseInt(r.dataset.accounts || '0', 10) > 0;
+            if (ok && k === 'dkim') ok = dkim !== 'ok';
+            if (ok && k === 'inactive') ok = status !== 'active';
+            r.style.display = ok ? '' : 'none';
+            if (ok) shown++;
+        });
+        cnt.textContent = shown + ' de ' + body.rows.length + ' dominios';
+    };
+    q.addEventListener('input', apply);
+    kind.addEventListener('change', apply);
+    const num = (t) => { const m = t.match(/-?\d+/); return m ? parseInt(m[0], 10) : NaN; };
+    heads.forEach((h, i) => {
+        if (!h.textContent.trim()) return;
+        h.style.cursor = 'pointer';
+        h.title = 'Ordenar por esta columna';
+        const ic = document.createElement('span'); ic.className = 'text-muted'; h.appendChild(ic);
+        h.addEventListener('click', () => {
+            const dir = h.dataset.dir === '1' ? -1 : 1;
+            heads.forEach((x) => { x.dataset.dir = ''; const s = x.querySelector('span.text-muted'); if (s) s.textContent = ''; });
+            h.dataset.dir = String(dir); ic.textContent = dir > 0 ? ' ▲' : ' ▼';
+            const rows = Array.from(body.rows).sort((a, b) => {
+                const ta = (a.cells[i]?.textContent || '').trim().toLowerCase(), tb = (b.cells[i]?.textContent || '').trim().toLowerCase();
+                const numeric = /^\d+$/.test(ta) && /^\d+$/.test(tb);
+                return dir * (numeric ? num(ta) - num(tb) : ta.localeCompare(tb, 'es', { numeric: true }));
+            });
+            rows.forEach((r) => body.appendChild(r));
+        });
+    });
+    apply();
+})();
 </script>

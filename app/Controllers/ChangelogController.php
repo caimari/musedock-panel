@@ -20,6 +20,20 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.400',
+                'date' => '2026-10-20',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        '«Enviar copia a…» no llegaba a instalar el mapa de Postfix: la prueba postmap devuelve 1 cuando la clave no existe y se tomaba por un fallo, deshaciendo el mapa cada vez. Ahora solo un error real lo deshace.',
+                    ],
+                    'added' => [
+                        'Icono de copia automática junto al buzón: se ve a simple vista cuáles tienen una copia y, al pulsarlo, un modal muestra la dirección a la que se copia.',
+                        'Lista de dominios de correo: búsqueda (dominio, cliente, nodo), filtro por tipo (solo webs del panel, sin web, con/sin buzones, DKIM sin OK, no activos) con contador, y ordenación por columna.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.399',
                 'date' => '2026-10-20',
                 'badge' => 'info',

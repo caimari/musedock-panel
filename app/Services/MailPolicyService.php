@@ -316,6 +316,19 @@ class MailPolicyService
         return implode("\n", $keep) . "\nquery = " . self::copyMapQuery() . "\n";
     }
 
+    /**
+     * ¿La prueba `postmap -q` del mapa de copias es buena? postmap devuelve 1 cuando la clave NO está (lo normal con una
+     * dirección de prueba), así que 1 sin salida vale; un error de conexión o de consulta sale con otro código o con texto.
+     * (20-10: la prueba daba por fallido el mapa y lo deshacía siempre.) Pura.
+     */
+    public static function copyProbeOk(int $code, string $output): bool
+    {
+        if ($code === 0) {
+            return true;
+        }
+        return $code === 1 && trim($output) === '';
+    }
+
     /** Valor nuevo de recipient_bcc_maps con nuestro mapa añadido sin pisar lo que ya hubiera. Pura. */
     public static function withCopyMap(string $current): string
     {
@@ -366,7 +379,7 @@ class MailPolicyService
         static::runCmd('postconf -e ' . escapeshellarg('recipient_bcc_maps = ' . self::withCopyMap($current)));
         $chk = static::runCmd('postfix check');
         $probe = static::runCmd('postmap -q probe@invalid.test ' . escapeshellarg($ours));
-        if (!$chk['ok'] || !$probe['ok']) {
+        if (!$chk['ok'] || !self::copyProbeOk($probe['code'], $probe['output'])) {
             if (is_file($mainBak)) {
                 @copy($mainBak, '/etc/postfix/main.cf');
             }

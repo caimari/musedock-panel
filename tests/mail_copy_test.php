@@ -33,5 +33,11 @@ check('vacío → solo el nuestro', P::withCopyMap('') === $ours);
 check('con otro mapa → se añade sin pisarlo', P::withCopyMap('hash:/etc/postfix/bcc') === 'hash:/etc/postfix/bcc, ' . $ours);
 check('idempotente: si ya está no se repite', P::withCopyMap(P::withCopyMap('hash:/etc/postfix/bcc')) === P::withCopyMap('hash:/etc/postfix/bcc'));
 
+echo "Prueba postmap del mapa\n";
+check('código 0 = bien', P::copyProbeOk(0, 'algo'));
+check('código 1 sin salida = clave no encontrada = bien', P::copyProbeOk(1, ''));
+check('código 1 con texto de error = mal', !P::copyProbeOk(1, 'postmap: fatal: pgsql: connection failed'));
+check('código 2 (error) = mal', !P::copyProbeOk(2, ''));
+
 echo "\n" . ($bad ? "$bad fallo(s) de " . ($ok + $bad) : "Todo correcto: $ok comprobaciones") . "\n";
 exit($bad ? 1 : 0);

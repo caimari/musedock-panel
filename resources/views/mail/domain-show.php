@@ -222,7 +222,12 @@
                     <?php foreach ($accounts as $a): ?>
                     <tr>
                         <?php if (!$ro): ?><td class="ps-3"><input type="checkbox" class="form-check-input bulk-item" data-group="accounts" value="<?= (int)$a['id'] ?>" data-name="<?= View::e($a['email']) ?>"></td><?php endif; ?>
-                        <td class="<?= $ro ? 'ps-3 ' : '' ?>fw-semibold"><?= View::e($a['email']) ?></td>
+                        <td class="<?= $ro ? 'ps-3 ' : '' ?>fw-semibold"><?= View::e($a['email']) ?>
+                            <?php if (!empty($a['copy_to'])): ?>
+                                <button type="button" class="btn btn-sm p-0 ms-1 align-baseline mail-copy-info" style="color:#4ade80;" title="Envía una copia a <?= View::e($a['copy_to']) ?>"
+                                        data-email="<?= View::e($a['email']) ?>" data-copy="<?= View::e($a['copy_to']) ?>" data-id="<?= (int)$a['id'] ?>"><i class="bi bi-files"></i></button>
+                            <?php endif; ?>
+                        </td>
                         <td><?= View::e($a['display_name'] ?: '-') ?></td>
                         <td><?= (int)$a['quota_mb'] === 0 ? '<span class="badge bg-secondary">Ilimitado</span>' : ((int)$a['quota_mb'] . ' MB') ?></td>
                         <td>
@@ -603,4 +608,19 @@ document.addEventListener('click', function (e) {
         try { const s = JSON.parse(localStorage.getItem(key) || 'null'); if (s && heads[s.col]) sortBy(s.col, s.dir); } catch (e) {}
     });
 })();
+</script>
+
+<script>
+// Icono de «copia automática» junto al buzón: al pulsarlo, un modal con la dirección a la que se copia.
+document.querySelectorAll('.mail-copy-info').forEach((b) => b.addEventListener('click', () => {
+    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    Swal.fire({
+        icon: 'info',
+        title: 'Copia automática',
+        html: '<div class="text-start small">Cada mensaje que llega a <code>' + esc(b.dataset.email) + '</code> <strong>se queda en el buzón</strong> y además se manda una copia a:'
+            + '<div class="mt-2 mb-2 fs-6"><code>' + esc(b.dataset.copy) + '</code></div>'
+            + '<span class="text-muted">También vale para lo que llega por los alias de este buzón.</span></div>',
+        showCancelButton: true, confirmButtonText: 'Cambiar', cancelButtonText: 'Cerrar',
+    }).then((r) => { if (r.isConfirmed) location.href = '/mail/accounts/' + b.dataset.id + '/edit'; });
+}));
 </script>
