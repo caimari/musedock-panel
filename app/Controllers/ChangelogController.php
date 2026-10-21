@@ -20,6 +20,20 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.407',
+                'date' => '2026-10-21',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'En las réplicas de correo los dominios tenían la clave pública DKIM vacía (el master solo mandaba la privada): ahora la réplica la calcula a partir de la privada al recibir el dominio y el worker rellena las que faltan; así el panel de la réplica puede compararla con el DNS.',
+                        'opendkim-testkey del panel (mail_domain_verify) ahora usa -k con la clave privada y marca fallo con «keys do not match»; sin -k daba «key OK» aunque el DNS tuviera otra clave.',
+                    ],
+                    'added' => [
+                        'La columna DKIM de la lista de dominios de correo compara de verdad con el DNS (OK / DNS distinto / Sin DNS / Missing); el worker lo comprueba cada 10 minutos y el filtro «DKIM sin OK» agrupa los casos malos.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.403',
                 'date' => '2026-10-20',
                 'badge' => 'info',

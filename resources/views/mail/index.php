@@ -2567,10 +2567,15 @@ MAIL_FROM_ADDRESS=noreply@example.com</pre>
                             </button>
                         </td>
                         <td>
-                            <?php if ($d['dkim_public_key']): ?>
-                                <span class="badge bg-success">OK</span>
+                            <?php $dkSt = \MuseDockPanel\Services\MailService::dkimDnsStatusFor((string)$d['domain']); ?>
+                            <?php if (empty($d['dkim_public_key']) || $dkSt === 'nokey'): ?>
+                                <span class="badge bg-warning text-dark" title="El panel no tiene la clave pública de este dominio">Missing</span>
+                            <?php elseif ($dkSt === 'mismatch'): ?>
+                                <span class="badge bg-danger" title="El DNS publica una clave DKIM distinta de la del panel: el correo sale con dkim=fail. Republica el DKIM (Correo → dominio).">DNS distinto</span>
+                            <?php elseif ($dkSt === 'nodns'): ?>
+                                <span class="badge bg-warning text-dark" title="El DNS no publica ninguna clave DKIM para este dominio">Sin DNS</span>
                             <?php else: ?>
-                                <span class="badge bg-warning text-dark">Missing</span>
+                                <span class="badge bg-success" title="<?= $dkSt === 'ok' ? 'La clave del DNS coincide con la del panel' : 'Aún sin comprobar contra el DNS' ?>">OK</span>
                             <?php endif; ?>
                         </td>
                         <td>

@@ -952,10 +952,17 @@ final class McpMailTools
             $checks['dkim'] = ['ok' => $pubFound !== '' && $pubFound === (string)$row['dkim_public_key'],
                 'name' => $exp['dkim']['name'], 'found' => $pubFound ? substr($pubFound, 0, 24) . '…' : null,
                 'note' => $pubFound && $pubFound !== (string)$row['dkim_public_key'] ? 'La clave publicada NO coincide con la del panel.' : null];
-            $tk = (string)shell_exec('timeout 10 opendkim-testkey -d ' . escapeshellarg($domain) . ' -s ' . escapeshellarg((string)($row['dkim_selector'] ?: 'default')) . ' -vvv 2>&1');
-            $checks['opendkim_testkey'] = ['ok' => str_contains($tk, 'key OK'),
+            $selTk = (string)($row['dkim_selector'] ?: 'default');
+            $keyFile = \MuseDockPanel\Services\MailService::dkimKeyFile($domain, $selTk);
+            // Con -k se compara la clave PRIVADA de este servidor con el DNS; sin -k solo se comprueba que el registro está bien escrito
+            $tk = (string)shell_exec('timeout 10 opendkim-testkey -d ' . escapeshellarg($domain) . ' -s ' . escapeshellarg($selTk)
+                . (is_file($keyFile) ? ' -k ' . escapeshellarg($keyFile) : '') . ' -vvv 2>&1');
+            $verdict = \MuseDockPanel\Services\MailService::testkeyVerdict($tk);
+            $checks['opendkim_testkey'] = ['ok' => $verdict === 'ok' && is_file($keyFile),
                 'output' => trim(implode(' | ', array_slice(array_filter(explode("\n", $tk)), -2))) ?: 'sin salida (¿opendkim-tools instalado? ¿permisos?)',
-                'note' => str_contains($tk, 'key not secure') ? '"key not secure" = sin DNSSEC; es normal y no afecta.' : null];
+                'note' => $verdict === 'mismatch' ? 'La clave PRIVADA de este servidor NO es la del DNS (keys do not match): el correo sale con dkim=fail.'
+                    : (!is_file($keyFile) ? 'No se encuentra la clave privada en ' . $keyFile . ': solo se ha comprobado el registro del DNS.'
+                    : (str_contains($tk, 'key not secure') ? '"key not secure" = sin DNSSEC; es normal y no afecta.' : null))];
         } else {
             $checks['dkim'] = ['ok' => false, 'note' => 'El dominio no tiene clave DKIM en el panel.'];
         }

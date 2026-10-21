@@ -2,6 +2,15 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.407] — 2026-10-21 — Las réplicas calculan la clave pública DKIM
+
+### Corregido
+- **En las réplicas de correo (filemon) los 26 dominios tenían la clave pública DKIM vacía:** el master solo mandaba el selector y la clave privada, así que el panel de la réplica no podía compararla con el DNS (y si pasaba a mandar, el filtro «DKIM sin OK» no le serviría). Ahora la réplica **calcula la pública a partir de la privada** al recibir el dominio (`MailService::dkimPublicFromPrivate`) y el worker **rellena las que faltan** (`repairMissingDkimPublic`, idempotente, cada minuto). No afecta a la firma, que usa la privada. Comprobado con los 26 dominios de mortadelo: la pública calculada coincide con la guardada en los 26. Prueba: `tests/dkim_public_test.php` (6).
+- **La comprobación `opendkim-testkey` del panel (`mail_domain_verify`) comparaba solo el registro del DNS, no la clave privada:** sin `-k` da «key OK» aunque la clave del servidor no sea la del DNS (screenart.es, 21-10: daba OK con el DNS desparejado). Ahora usa `-k <clave privada>` (ruta leída de `key.table`) y marca fallo con «keys do not match».
+
+### Añadido
+- **La columna DKIM de la lista de dominios de correo compara de verdad con el DNS:** `OK` solo si la clave del DNS es la del panel; `DNS distinto` (rojo) si el DNS publica otra, `Sin DNS` si no hay clave publicada y `Missing` si el panel no tiene la pública. El worker de cada nodo lo comprueba cada 10 minutos (1.1.1.1) y lo guarda. El filtro «DKIM sin OK» de la lista ya agrupa todos esos casos. Prueba: `tests/dkim_dns_status_test.php` (13).
+
 ## [1.0.403] — 2026-10-20 — Bloqueos de Cloudflare: redirecciones entre dominios en un solo sentido
 
 ### Cambiado

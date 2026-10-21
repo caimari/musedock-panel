@@ -4369,6 +4369,144 @@ class MailService
      * keyed by domain name. Only touches DB rows, never the master's. Used so a
      * replica node has its own copy of the domain (local auth + UI + failover).
      */
+    /** Extrae la parte p= de un TXT DKIM (o de la propia clave pelada) sin espacios ni comillas. Pura. */
+    public static function dkimP(string $txt): string
+    {
+        $t = str_replace(['"', "\n", "\r", "\t", ' '], '', trim($txt));
+        if (preg_match('/p=([A-Za-z0-9+\/=]+)/', $t, $m)) {
+            return $m[1];
+        }
+        return preg_match('/^[A-Za-z0-9+\/=]{100,}$/', $t) ? $t : '';
+    }
+
+    /**
+     * Estado de la clave DKIM de un dominio según el DNS: 'ok' (la del DNS es la del panel), 'mismatch' (el DNS publica
+     * otra distinta), 'nodns' (el DNS no tiene clave), 'nokey' (el panel no tiene clave pública). Pura.
+     */
+    public static function dkimDnsState(string $panelPublic, string $dnsTxt): string
+    {
+        $panel = self::dkimP($panelPublic);
+        if ($panel === '') {
+            return 'nokey';
+        }
+        $dns = self::dkimP($dnsTxt);
+        if ($dns === '') {
+            return 'nodns';
+        }
+        return $dns === $panel ? 'ok' : 'mismatch';
+    }
+
+    /**
+     * Veredicto de `opendkim-testkey -k <clave privada>`: 'ok' solo si termina en «key OK» y NO dice «keys do not match».
+     * Sin -k, opendkim-testkey solo comprueba que el registro del DNS está bien escrito y da «key OK» aunque la clave
+     * privada sea otra (screenart.es, 21-10: daba OK con el DNS desparejado). Pura.
+     */
+    public static function testkeyVerdict(string $output): string
+    {
+        if (preg_match('/keys do not match|key not found|no key|unable to|error/i', $output)) {
+            return str_contains($output, 'do not match') ? 'mismatch' : 'error';
+        }
+        return str_contains($output, 'key OK') ? 'ok' : 'unknown';
+    }
+
+    /** Fichero de la clave privada de un dominio/selector según key.table de OpenDKIM, o la ruta habitual. Pura salvo is_file. */
+    public static function dkimKeyFile(string $domain, string $selector, ?string $keyTable = null): string
+    {
+        $kt = $keyTable ?? (is_file('/etc/opendkim/key.table') ? (string)file_get_contents('/etc/opendkim/key.table') : '');
+        foreach (preg_split('/\R/', $kt) ?: [] as $l) {
+            if (preg_match('/^' . preg_quote("{$selector}._domainkey.{$domain}", '/') . '\s+\S+:\S+:(\/\S+)\s*$/', $l, $m)) {
+                return $m[1];
+            }
+        }
+        return "/etc/opendkim/keys/{$domain}/{$selector}.private";
+    }
+
+    /**
+     * Refresca (como mucho cada $maxAge s) el estado DKIM-contra-DNS de cada dominio de correo y lo guarda para la lista
+     * de dominios (mail_dkim_dns_status). Consultas a 1.1.1.1 con tiempo máximo corto. Devuelve cuántos dominios miró.
+     */
+    public static function refreshDkimDnsStatus(int $maxAge = 600): int
+    {
+        if (time() - (int)Settings::get('mail_dkim_dns_checked_at', '0') < $maxAge) {
+            return 0;
+        }
+        Settings::set('mail_dkim_dns_checked_at', (string)time());
+        $out = [];
+        try {
+            foreach (Database::fetchAll("SELECT domain, dkim_selector, dkim_public_key FROM mail_domains WHERE status <> 'deleted' ORDER BY domain") as $r) {
+                $sel = (string)($r['dkim_selector'] ?: 'default');
+                $raw = (string)shell_exec('timeout 4 dig +short +time=2 +tries=1 TXT ' . escapeshellarg("{$sel}._domainkey.{$r['domain']}") . ' @1.1.1.1 2>/dev/null');
+                $out[$r['domain']] = self::dkimDnsState((string)($r['dkim_public_key'] ?? ''), $raw);
+            }
+        } catch (\Throwable) {
+            return 0;
+        }
+        Settings::set('mail_dkim_dns_status', json_encode($out));
+        return count($out);
+    }
+
+    /** Estado guardado de un dominio ('' si aún no se ha comprobado). */
+    public static function dkimDnsStatusFor(string $domain): string
+    {
+        static $cache = null;
+        if ($cache === null) {
+            $cache = json_decode((string)Settings::get('mail_dkim_dns_status', '{}'), true) ?: [];
+        }
+        return (string)($cache[$domain] ?? '');
+    }
+
+    /**
+     * Clave pública DKIM (la parte p= del TXT: base64 de SubjectPublicKeyInfo) calculada a partir de la privada PEM, o ''.
+     * Tolera la privada guardada cifrada (si empieza por «-----BEGIN» se usa tal cual; si no, se intenta descifrar). Pura salvo el descifrado.
+     */
+    public static function dkimPublicFromPrivate(string $stored): string
+    {
+        $pem = trim($stored);
+        if ($pem === '') {
+            return '';
+        }
+        if (!str_starts_with($pem, '-----BEGIN')) {
+            try {
+                $pem = trim((string)ReplicationService::decryptPassword($pem));
+            } catch (\Throwable) {
+                return '';
+            }
+            if (!str_starts_with($pem, '-----BEGIN')) {
+                return '';
+            }
+        }
+        $key = @openssl_pkey_get_private($pem);
+        if ($key === false) {
+            return '';
+        }
+        $det = @openssl_pkey_get_details($key);
+        if (!is_array($det) || empty($det['key'])) {
+            return '';
+        }
+        return (string)preg_replace('/\s+|-----[A-Z ]+-----/', '', (string)$det['key']);
+    }
+
+    /**
+     * Rellena la clave pública DKIM de los dominios que tienen privada y la pública vacía (caso de las réplicas: el master
+     * mandaba solo selector + privada y los 26 dominios de filemon tenían la pública vacía, así que el panel no podía
+     * compararla con el DNS). Idempotente; devuelve cuántos rellenó.
+     */
+    public static function repairMissingDkimPublic(): int
+    {
+        $n = 0;
+        try {
+            foreach (Database::fetchAll("SELECT id, dkim_private_key FROM mail_domains WHERE COALESCE(dkim_public_key, '') = '' AND COALESCE(dkim_private_key, '') <> '' AND status <> 'deleted'") as $r) {
+                $pub = self::dkimPublicFromPrivate((string)$r['dkim_private_key']);
+                if ($pub !== '') {
+                    Database::update('mail_domains', ['dkim_public_key' => $pub, 'updated_at' => date('Y-m-d H:i:s')], 'id = :id', ['id' => (int)$r['id']]);
+                    $n++;
+                }
+            }
+        } catch (\Throwable) {
+        }
+        return $n;
+    }
+
     public static function upsertLocalMailDomain(array $payload): void
     {
         $domain = strtolower(trim((string)($payload['domain'] ?? '')));
@@ -4382,6 +4520,14 @@ class MailService
                 'dkim_private_key' => $payload['dkim_private_key'] ?? '',
                 'updated_at'       => date('Y-m-d H:i:s'),
             ];
+            // La pública: la que llegue o, si no llega (el master solo manda la privada), la calculada de la privada
+            $pubKey = (string)($payload['dkim_public_key'] ?? '');
+            if ($pubKey === '') {
+                $pubKey = self::dkimPublicFromPrivate((string)($payload['dkim_private_key'] ?? ''));
+            }
+            if ($pubKey !== '') {
+                $fields['dkim_public_key'] = $pubKey;
+            }
             if ($existing) {
                 Database::update('mail_domains', $fields, 'id = :id', ['id' => (int)$existing['id']]);
             } else {

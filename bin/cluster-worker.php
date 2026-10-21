@@ -211,6 +211,8 @@ foreach ([
     'Dueños de ficheros' => static fn() => \MuseDockPanel\Services\WebPermissionService::periodic(),
     'Dueños al momento' => static fn() => \MuseDockPanel\Services\WebPermissionService::instantFix(),
     'Mapa de copias de correo' => static fn() => \MuseDockPanel\Services\MailPolicyService::ensureCopyMapIfNeeded(),
+    'DKIM contra el DNS' => static function () { $n = \MuseDockPanel\Services\MailService::refreshDkimDnsStatus(); return $n > 0 ? "comprobadas {$n} claves DKIM contra el DNS" : ''; },
+    'Claves DKIM públicas' => static function () { $n = \MuseDockPanel\Services\MailService::repairMissingDkimPublic(); return $n > 0 ? "rellenadas {$n} claves públicas DKIM que faltaban" : ''; },
     'Bloqueos Cloudflare' => static fn() => \MuseDockPanel\Services\FailoverService::pullCfGuardFromPeers(),
     'Servicios' => static fn() => implode(' | ', \MuseDockPanel\Services\ClusterGuardService::ensureServices()),
     'lsyncd' => static fn() => \MuseDockPanel\Services\FileSyncService::ensureLsyncdInstalled(),
