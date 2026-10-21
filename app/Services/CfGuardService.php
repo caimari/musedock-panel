@@ -437,8 +437,9 @@ class CfGuardService
     }
 
     /**
-     * Sitio al que pertenece cada nombre: dominio ⇄ www.dominio y las parejas con redirección (site_links), unidas
-     * en cadena. No se agrupa por CNAME: juntaría servicios distintos (webmail., mail.…) con la web.
+     * Sitio al que pertenece cada nombre: dominio ⇄ www.dominio (en los dos sentidos). Las demás redirecciones
+     * (dominio antiguo → nuevo) no unen sitios: son dependencias de un solo sentido, ver siteDependencies().
+     * No se agrupa por CNAME: juntaría servicios distintos (webmail., mail.…) con la web.
      * @return array<string, string> nombre => clave del sitio
      */
     public static function siteGroups(array $records): array
@@ -470,17 +471,39 @@ class CfGuardService
                 $union($n, substr($n, 4));
             }
         }
-        foreach (json_decode(self::setting('site_links', '[]'), true) ?: [] as $pair) {
-            if (is_array($pair) && count($pair) === 2 && isset($joinable[(string) $pair[0]], $joinable[(string) $pair[1]])) {
-                $union((string) $pair[0], (string) $pair[1]);
-            }
-        }
         $out = [];
         foreach (array_keys($parent) as $n) {
             $out[$n] = $find($n);
         }
 
         return $out;
+    }
+
+    /**
+     * Dependencias de un solo sentido entre sitios: un nombre que redirige a otro sitio (cineautor.org → cineautor.tv)
+     * depende de él. Si el destino se bloquea, el origen también pasa a directo (si no, la redirección llevaría a la IP
+     * bloqueada) y no vuelve al proxy hasta que el destino esté estable; si solo se bloquea el origen, el destino
+     * no se toca (no se deja a la vista la IP del sitio principal por un dominio antiguo).
+     * @param array<string, string> $groupOf nombre => sitio
+     * @return array<string, string[]> sitio origen => sitios destino
+     */
+    public static function siteDependencies(array $groupOf): array
+    {
+        $deps = [];
+        foreach (json_decode(self::setting('site_links', '[]'), true) ?: [] as $pair) {
+            if (!is_array($pair) || count($pair) !== 2) {
+                continue;
+            }
+            [$from, $to] = [(string) $pair[0], (string) $pair[1]];
+            if (!isset($groupOf[$from], $groupOf[$to]) || self::isExcluded($from) || self::isExcluded($to)) {
+                continue;
+            }
+            if ($groupOf[$from] !== $groupOf[$to]) {
+                $deps[$groupOf[$from]][$groupOf[$to]] = true;
+            }
+        }
+
+        return array_map('array_keys', $deps);
     }
 
     private static function upsertRecord(string $account, array $zone, array $r): void
@@ -836,11 +859,24 @@ class CfGuardService
             }
         }
         $notClear = fn (string $g) => array_values(array_filter(array_keys($groupIps[$g] ?? []), fn ($ip) => ($states[$ip]['state'] ?? 'unknown') !== 'clear'));
+        $deps = self::siteDependencies($groupOf);
+        // IPs sin estabilizar del sitio y de los sitios a los que redirige (en cadena)
+        $siteBad = function (string $g, array $seen = []) use (&$siteBad, $notClear, $deps): array {
+            if (isset($seen[$g])) {
+                return [];
+            }
+            $seen[$g] = true;
+            $bad = $notClear($g);
+            foreach ($deps[$g] ?? [] as $to) {
+                $bad = array_merge($bad, $siteBad($to, $seen));
+            }
+            return array_values(array_unique($bad));
+        };
 
         // 1. Volver a poner el proxy solo cuando TODAS las IPs del sitio llevan el tiempo de estabilidad
         foreach (self::activeChanges() as $c) {
             $g = $groupOf[$c['name']] ?? $c['name'];
-            if (!empty($groupIps[$g]) && !$notClear($g)) {
+            if (!empty($groupIps[$g]) && !$siteBad($g)) {
                 $report['restored'][] = self::restore($c);
             }
         }
@@ -872,10 +908,24 @@ class CfGuardService
         }
         foreach (self::activeChanges() as $c) {
             $g = $groupOf[$c['name']] ?? $c['name'];
-            if (!isset($trigger[$g]) && ($bad = $notClear($g))) {
+            if (!isset($trigger[$g]) && ($bad = $siteBad($g))) {
                 $trigger[$g] = $bad;
             }
         }
+        // Un solo sentido: si el destino de una redirección pasa a directo, también el origen (nunca al revés)
+        $dragged = [];
+        do {
+            $changed = false;
+            foreach ($deps as $from => $tos) {
+                foreach ($tos as $to) {
+                    if (!isset($trigger[$from]) && isset($trigger[$to])) {
+                        $trigger[$from] = $trigger[$to];
+                        $dragged[$from] = $to;
+                        $changed = true;
+                    }
+                }
+            }
+        } while ($changed);
 
         // 3. Quitar el proxy a todos los nombres de esos sitios que aún lo tengan
         foreach ($records as $r) {
@@ -893,7 +943,8 @@ class CfGuardService
                 continue; // la sonda aún no ha probado su origen: se le pide en la lista de objetivos
             }
             $peers = array_values(array_diff(array_keys($groupNames[$g] ?? []), [$r['name']]));
-            $report['applied'][] = self::unproxy($r, $own ?: $trigger[$g], $mode === 'simulate', $own ? null : implode(', ', $peers));
+            $with = $own ? null : (isset($dragged[$g]) ? $dragged[$g] . ' (redirige a él)' : implode(', ', $peers));
+            $report['applied'][] = self::unproxy($r, $own ?: $trigger[$g], $mode === 'simulate', $with);
             $active[$r['record_id']] = true;
         }
 

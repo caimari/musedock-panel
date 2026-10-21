@@ -20,6 +20,19 @@ class ChangelogController
     {
         return [
             [
+                'version' => '1.0.403',
+                'date' => '2026-10-20',
+                'badge' => 'info',
+                'changes' => [
+                    'fixed' => [
+                        'Bloqueos de Cloudflare: las redirecciones que no son www (dominio antiguo → nuevo) van en un solo sentido. Si el destino se bloquea, el origen también pasa a directo; si solo se bloquea el origen, el destino no se toca (antes cineautor.org dejaba en directo a cineautor.tv). dominio ⇄ www sigue siendo un solo sitio.',
+                        'El envío autenticado de la aplicación por 127.0.0.1:587 y <IP VPN>:587 salía sin firma DKIM: el panel creaba esos bloques de master.cf sin smtpd_milters (el milter general apunta a un socket que no existe). Ahora el bloque nuevo lo lleva y se reparan los que ya existen (idempotente, con postfix check y marcha atrás si falla).',
+                        'La ruta del socket de OpenDKIM no va fija: se lee de cada servidor (asterisk y obelix la tienen distinta) y se usa en main.cf (si apunta a un socket que no existe) y en los bloques 587 (si no la heredan).',
+                        'La copia del relay de reserva ya no deshace un selector DKIM arreglado a mano (obelix con la clave satelite): si el dominio ya firma con otro selector cuya clave existe, no reescribe key.table ni signing.table.',
+                    ],
+                ],
+            ],
+            [
                 'version' => '1.0.402',
                 'date' => '2026-10-20',
                 'badge' => 'info',

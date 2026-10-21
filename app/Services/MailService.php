@@ -2696,6 +2696,174 @@ class MailService
     }
 
     /**
+     * Ruta REAL del socket de OpenDKIM de este servidor: la ruta no es la misma en todos (asterisk: /etc/default/opendkim
+     * lo pone en el chroot de Postfix, /var/spool/postfix/run/opendkim/; obelix: /run/opendkim/). Manda SOCKET de
+     * /etc/default/opendkim; si no, la línea Socket de opendkim.conf. Solo sockets locales (local:/unix:). Pura.
+     */
+    public static function parseOpendkimSocket(string $defaultText, string $confText): ?string
+    {
+        $rundir = '';
+        if (preg_match('/^\s*RUNDIR\s*=\s*"?([^"\s]+)"?/m', $defaultText, $m)) {
+            $rundir = $m[1];
+        }
+        $val = null;
+        if (preg_match('/^\s*SOCKET\s*=\s*"?([^"\n#]+?)"?\s*(?:#.*)?$/m', $defaultText, $m)) {
+            $val = trim($m[1]);
+        } elseif (preg_match('/^\s*Socket\s+(\S+)/mi', $confText, $m)) {
+            $val = trim($m[1]);
+        }
+        if ($val === null || !preg_match('#^(?:local|unix):(.+)$#', $val, $m)) {
+            return null;
+        }
+        $path = str_replace(['${RUNDIR}', '$RUNDIR'], $rundir !== '' ? $rundir : '/run/opendkim', $m[1]);
+        return str_starts_with($path, '/') ? $path : null;
+    }
+
+    public static function opendkimSocketPath(): ?string
+    {
+        return self::parseOpendkimSocket(
+            is_file('/etc/default/opendkim') ? (string)file_get_contents('/etc/default/opendkim') : '',
+            is_file('/etc/opendkim.conf') ? (string)file_get_contents('/etc/opendkim.conf') : ''
+        );
+    }
+
+    /** ¿Los bloques 587 necesitan su propio smtpd_milters? Solo si el de main.cf NO apunta al socket real. Pura. */
+    public static function blocksNeedMilterOverride(string $mainSmtpdMilters, string $realSocket): bool
+    {
+        return !str_contains($mainSmtpdMilters, $realSocket);
+    }
+
+    /** Línea smtpd_milters para un bloque 587 NUEVO: solo si el socket real existe y main.cf no lo lleva ya. */
+    private static function newBlockMilterLine(): string
+    {
+        $sock = self::opendkimSocketPath();
+        if ($sock === null || !file_exists($sock)) {
+            return '';
+        }
+        $main = trim((string)shell_exec('postconf -h smtpd_milters 2>/dev/null'));
+        return self::blocksNeedMilterOverride($main, $sock) ? "  -o smtpd_milters=unix:{$sock}\n" : '';
+    }
+
+    /**
+     * Añade `-o smtpd_milters=…` a los servicios de master.cf cuya dirección de escucha esté en $hosts con puerto 587
+     * y no lo tengan. Pura (texto en, texto fuera). Devuelve [master nuevo, servicios cambiados].
+     * Caso real: el bloque 127.0.0.1:587 se creaba sin milter y el correo de la app salía SIN firma DKIM (el milter
+     * de main.cf apunta a un socket que no existe; con milter_default_action=accept el aviso pasaba inadvertido).
+     */
+    public static function withRelayMilter(string $master, array $hosts, string $milter): array
+    {
+        $lines = preg_split('/\R/', $master) ?: [];
+        $out = [];
+        $changed = [];
+        $n = count($lines);
+        for ($i = 0; $i < $n; $i++) {
+            $line = $lines[$i];
+            $block = [$line];
+            $isSvc = false;
+            foreach ($hosts as $h) {
+                if ($h !== '' && preg_match('/^' . preg_quote($h, '/') . ':587\s+inet\s/', $line)) {
+                    $isSvc = $h;
+                    break;
+                }
+            }
+            if ($isSvc === false) {
+                $out[] = $line;
+                continue;
+            }
+            // el bloque son las líneas siguientes que empiezan por espacio
+            while ($i + 1 < $n && preg_match('/^[ \t]+\S/', $lines[$i + 1])) {
+                $block[] = $lines[++$i];
+            }
+            $has = false;
+            foreach ($block as $b) {
+                if (preg_match('/-o\s+smtpd_milters\s*=/', $b)) {
+                    $has = true;
+                }
+            }
+            if (!$has) {
+                $block[] = '  -o smtpd_milters=' . $milter;
+                $changed[] = $isSvc . ':587';
+            }
+            foreach ($block as $b) {
+                $out[] = $b;
+            }
+        }
+        return [implode("\n", $out), $changed];
+    }
+
+    /**
+     * Repara (idempotente) los bloques de envío 127.0.0.1:587 y <IP VPN>:587 de master.cf para que lleven el milter de
+     * OpenDKIM. Solo si existe el socket de OpenDKIM en el chroot de Postfix. Copia de master.cf, `postfix check` antes
+     * de recargar y marcha atrás si falla. Devuelve lo hecho ('' si nada).
+     */
+    public static function ensureRelayDkimMilter(string $wgIp = ''): string
+    {
+        $masterCf = '/etc/postfix/master.cf';
+        $sock = self::opendkimSocketPath();
+        if (!is_file($masterCf) || $sock === null || !file_exists($sock)) {
+            return '';
+        }
+        // main.cf primero: si su milter ya apunta mal pero el socket real existe, se corrige (con copia y vuelta atrás)
+        $fixedMain = self::ensureMainDkimMilter($sock);
+        $mainMilters = trim((string)shell_exec('postconf -h smtpd_milters 2>/dev/null'));
+        if (!self::blocksNeedMilterOverride($mainMilters, $sock)) {
+            return $fixedMain;   // los bloques 587 heredan el de main.cf, que ya es el bueno (obelix)
+        }
+        $master = (string)file_get_contents($masterCf);
+        [$new, $changed] = self::withRelayMilter($master, ['127.0.0.1', trim($wgIp)], 'unix:' . $sock);
+        if (!$changed) {
+            return $fixedMain;
+        }
+        $bak = $masterCf . '.bak-dkim-' . date('Ymd-His');
+        @copy($masterCf, $bak);
+        if (file_put_contents($masterCf, $new) === false) {
+            return 'no se pudo escribir master.cf (milter DKIM)';
+        }
+        $chk = trim((string)shell_exec('postfix check 2>&1'));
+        if ($chk !== '') {   // postfix check no dice nada si está bien
+            @copy($bak, $masterCf);
+            LogService::log('mail.relay', 'dkim-milter-failed', 'postfix check falló, master.cf restaurado: ' . mb_substr($chk, 0, 200));
+            return 'milter DKIM NO añadido (postfix check falló; master.cf restaurado)';
+        }
+        if (trim((string)shell_exec('systemctl is-active postfix 2>/dev/null')) === 'active') {
+            shell_exec('postfix reload 2>&1');
+        }
+        LogService::log('mail.relay', 'dkim-milter', 'Milter de OpenDKIM (' . $sock . ') añadido a: ' . implode(', ', $changed));
+        return trim($fixedMain . ' milter DKIM añadido a ' . implode(', ', $changed));
+    }
+
+    /**
+     * Si el smtpd_milters de main.cf apunta a un socket local que NO existe y el real de OpenDKIM sí, lo corrige (y
+     * non_smtpd_milters si era el mismo). Con copia de main.cf, `postfix check` y marcha atrás. Devuelve lo hecho ('' si nada).
+     */
+    public static function ensureMainDkimMilter(string $realSocket): string
+    {
+        $cur = trim((string)shell_exec('postconf -h smtpd_milters 2>/dev/null'));
+        if (!preg_match('#^unix:(/\S+)$#', $cur, $m) || $m[1] === $realSocket || file_exists($m[1])) {
+            return '';   // vacío, ya bueno, o apunta a un socket que sí existe: no se toca
+        }
+        $old = $cur;
+        $nonSmtp = trim((string)shell_exec('postconf -h non_smtpd_milters 2>/dev/null'));
+        $bak = '/etc/postfix/main.cf.bak-dkim-' . date('Ymd-His');
+        @copy('/etc/postfix/main.cf', $bak);
+        shell_exec('postconf -e ' . escapeshellarg('smtpd_milters = unix:' . $realSocket) . ' 2>&1');
+        if ($nonSmtp === $old) {
+            shell_exec('postconf -e ' . escapeshellarg('non_smtpd_milters = unix:' . $realSocket) . ' 2>&1');
+        }
+        $chk = trim((string)shell_exec('postfix check 2>&1'));
+        if ($chk !== '') {
+            @copy($bak, '/etc/postfix/main.cf');
+            LogService::log('mail.relay', 'dkim-main-failed', 'postfix check falló, main.cf restaurado: ' . mb_substr($chk, 0, 200));
+            return 'milter DKIM de main.cf NO corregido (postfix check falló)';
+        }
+        if (trim((string)shell_exec('systemctl is-active postfix 2>/dev/null')) === 'active') {
+            shell_exec('postfix reload 2>&1');
+        }
+        LogService::log('mail.relay', 'dkim-main', "smtpd_milters de main.cf: {$old} → unix:{$realSocket} (el anterior no existe)");
+        return 'main.cf: smtpd_milters corregido al socket real de OpenDKIM';
+    }
+
+    /**
      * Relay privado: además de la IP de la VPN, envío autenticado (587, TLS obligatorio y
      * usuario SMTP) en 127.0.0.1. Así una aplicación que vive en el mismo servidor que el
      * relay envía a 127.0.0.1:587 y funciona igual en el nodo que manda y en su relevo, sin
@@ -2709,16 +2877,20 @@ class MailService
         if ($wgIp === '' || !is_file($masterCf)) {
             return '';
         }
+        // Los bloques de envío (127.0.0.1:587 y <IP VPN>:587) deben llevar el milter de OpenDKIM; se repara aunque ya existan.
+        $dkim = self::ensureRelayDkimMilter($wgIp);
         $master = (string)file_get_contents($masterCf);
+        $master = (string)file_get_contents($masterCf);   // (releído: la reparación del milter pudo cambiarlo)
         if (!str_contains($master, "{$wgIp}:587 inet") || preg_match('/^127\.0\.0\.1:587\s+inet/m', $master)) {
-            return '';
+            return $dkim;
         }
         $block = "\n127.0.0.1:587 inet n - n - - smtpd\n" .
             "  -o syslog_name=postfix/submission-local\n" .
             "  -o smtpd_tls_security_level=encrypt\n" .
             "  -o smtpd_sasl_auth_enable=yes\n" .
             "  -o smtpd_recipient_restrictions=permit_sasl_authenticated,reject\n" .
-            "  -o milter_macro_daemon_name=ORIGINATING\n";
+            "  -o milter_macro_daemon_name=ORIGINATING\n" .
+            self::newBlockMilterLine();
         @copy($masterCf, $masterCf . '.bak-' . date('Ymd-His'));
         if (file_put_contents($masterCf, rtrim($master, "\n") . "\n" . $block) === false) {
             return 'no se pudo escribir master.cf';
@@ -2727,7 +2899,7 @@ class MailService
             shell_exec('postfix reload 2>&1');
         }
         LogService::log('mail.relay', 'local-submission', 'Relay privado: envío autenticado también en 127.0.0.1:587');
-        return 'envío local en 127.0.0.1:587 añadido';
+        return trim('envío local en 127.0.0.1:587 añadido ' . $dkim);
     }
 
     /** Puerto de entrada SMTP para un proxy con PROXY protocol (entrada alternativa). */
@@ -3264,6 +3436,12 @@ class MailService
         shell_exec('chown -R opendkim:opendkim ' . escapeshellarg($dkimDir) . ' 2>&1');
 
         self::ensureRelayOpenDkimFiles(Settings::get('mail_relay_wireguard_cidr', WireGuardService::vpnCidr('10.10.70.0/24')));
+        // Respeta un selector distinto que ya firma este dominio en este nodo (arreglo manual): no se reescriben las tablas
+        $existingSel = self::existingSigningSelector(is_file('/etc/opendkim/signing.table') ? (string)file_get_contents('/etc/opendkim/signing.table') : '', $domain);
+        if (self::keepManualDkimSelector($existingSel, $selector, $existingSel !== null && is_file("{$dkimDir}/{$existingSel}.private"))) {
+            LogService::log('mail.relay', 'dkim-selector-kept', "{$domain}: se conserva el selector «{$existingSel}» de este nodo (llegaba «{$selector}»); signing.table/key.table no se tocan");
+            return ['ok' => true, 'domain' => $domain, 'selector' => $existingSel, 'kept_manual_selector' => true];
+        }
         self::upsertLine('/etc/opendkim/signing.table', "*@{$domain} {$selector}._domainkey.{$domain}", "*@{$domain}");
         self::upsertLine('/etc/opendkim/key.table', "{$selector}._domainkey.{$domain} {$domain}:{$selector}:{$dkimDir}/{$selector}.private", "{$selector}._domainkey.{$domain}");
         if (self::relayServicesShouldRun()) {
@@ -3376,6 +3554,27 @@ class MailService
             if (!is_file($file)) @touch($file);
         }
         file_put_contents('/etc/opendkim/trusted.hosts', "127.0.0.1\n::1\nlocalhost\n{$wgCidr}\n");
+    }
+
+    /** Selector con el que signing.table firma hoy un dominio (línea «*@dominio selector._domainkey.dominio»), o null. Pura. */
+    public static function existingSigningSelector(string $signingTable, string $domain): ?string
+    {
+        foreach (preg_split('/\R/', $signingTable) ?: [] as $l) {
+            if (preg_match('/^\s*\*@' . preg_quote($domain, '/') . '\s+([A-Za-z0-9_-]+)\._domainkey\.' . preg_quote($domain, '/') . '\s*$/', $l, $m)) {
+                return $m[1];
+            }
+        }
+        return null;
+    }
+
+    /**
+     * ¿Hay que respetar el selector que ya firma este dominio en el nodo? Sí cuando es DISTINTO del que llega y su
+     * clave existe: es un arreglo manual (obelix firmando con la clave «satelite» que sí está en el DNS) y la copia
+     * del relay de reserva volvía a escribir key.table/signing.table con «default», deshaciéndolo sin avisar. Pura.
+     */
+    public static function keepManualDkimSelector(?string $existing, string $incoming, bool $existingKeyExists): bool
+    {
+        return $existing !== null && $existing !== '' && $existing !== $incoming && $existingKeyExists;
     }
 
     private static function upsertLine(string $file, string $line, string $needle): void

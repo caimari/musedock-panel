@@ -2,6 +2,19 @@
 
 Todas las versiones notables de MuseDock Panel se documentan aquí.
 
+## [1.0.403] — 2026-10-20 — Bloqueos de Cloudflare: redirecciones entre dominios en un solo sentido
+
+### Cambiado
+- **Las redirecciones que no son www ya no unen sitios en los dos sentidos:** con 1.0.401, el bloqueo del dominio antiguo `cineautor.org` (que redirige a `cineautor.tv`) dejaba en directo también `cineautor.tv`, con la IP de su servidor a la vista. Ahora el origen **depende** del destino:
+  - si el destino se bloquea, el origen también pasa a directo («junto con cineautor.tv (redirige a él)»), en cadena si hay varias redirecciones;
+  - si solo se bloquea el origen, el destino no se toca;
+  - el origen no vuelve al proxy hasta que también estén estables las IPs del destino.
+- `dominio` ⇄ `www.dominio` sigue siendo un solo sitio en los dos sentidos (el caso de nycinfest.com).
+
+### Corregido
+- **El envío autenticado de la aplicación por `127.0.0.1:587` (y por `<IP VPN>:587`) salía SIN firma DKIM:** el panel creaba esos bloques de `master.cf` sin `-o smtpd_milters=…`, y el milter general de `main.cf` apunta a un socket que no existe (OpenDKIM lo crea dentro del chroot de Postfix, `/var/spool/postfix/run/opendkim/`); con `milter_default_action = accept` el aviso pasaba inadvertido y el correo se entregaba gracias al SPF. Ahora el bloque nuevo ya lo lleva y `MailService::ensureRelayDkimMilter()` **repara los bloques que ya existen** (idempotente, solo si existe el socket de OpenDKIM, copia de `master.cf`, `postfix check` antes de recargar y marcha atrás si falla). Se ejecuta con el relay privado, cada minuto en el worker. La ruta del socket **no va fija**: se lee de cada servidor (`/etc/default/opendkim` manda sobre `opendkim.conf`; asterisk `/var/spool/postfix/run/opendkim/`, obelix `/run/opendkim/`). Si el `smtpd_milters` de `main.cf` ya apunta al socket real, los bloques 587 lo heredan y no se tocan; si apunta a un socket que no existe y el real sí, se corrige `main.cf` (con copia y `postfix check`). Prueba: `tests/relay_milter_test.php` (23).
+- **La copia del relay de reserva ya no deshace un selector DKIM arreglado a mano:** si un dominio ya firma en el nodo con un selector DISTINTO del que llega y su clave existe (obelix firmando con la clave `satelite` que sí está en el DNS), `signing.table` y `key.table` no se reescriben con `default` y se anota en el registro.
+
 ## [1.0.402] — 2026-10-20 — La copia de correo también vale para los alias
 
 ### Corregido
